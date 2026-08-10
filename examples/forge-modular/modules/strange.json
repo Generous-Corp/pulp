@@ -1,0 +1,173 @@
+{
+  "modules": [
+    {
+      "slug": "STRANGE",
+      "name": "STRANGE",
+      "description": "Twin chaotic CV from a logistic map, with rate, character, glide and a link that fades the two decorrelated outputs together.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Dual"
+      ],
+      "hp": 10,
+      "params": [
+        {
+          "id": 0,
+          "ident": "RATE_PARAM",
+          "name": "Rate",
+          "label": "RATE",
+          "unit": " Hz",
+          "min_value": -4.0,
+          "max_value": 5.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 12.7,
+          "y_mm": 30.0,
+          "display_base": 2.0,
+          "display_multiplier": 2.0
+        },
+        {
+          "id": 1,
+          "ident": "CHAR_PARAM",
+          "name": "Character",
+          "label": "CHAR",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "Knob",
+          "x_mm": 38.1,
+          "y_mm": 30.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 2,
+          "ident": "GLIDE_PARAM",
+          "name": "Glide",
+          "label": "GLIDE",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.4,
+          "kind": "Knob",
+          "x_mm": 12.7,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 3,
+          "ident": "LINK_PARAM",
+          "name": "Link",
+          "label": "LINK",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.25,
+          "kind": "Knob",
+          "x_mm": 38.1,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "RATE_INPUT",
+          "name": "Rate CV (1V/oct)",
+          "label": "RATE",
+          "role": "Cv",
+          "x_mm": 8.0,
+          "y_mm": 88.0
+        },
+        {
+          "id": 1,
+          "ident": "CHAR_INPUT",
+          "name": "Character CV",
+          "label": "CHR",
+          "role": "Cv",
+          "x_mm": 19.6,
+          "y_mm": 88.0
+        },
+        {
+          "id": 2,
+          "ident": "GLIDE_INPUT",
+          "name": "Glide CV",
+          "label": "GLD",
+          "role": "Cv",
+          "x_mm": 31.2,
+          "y_mm": 88.0
+        },
+        {
+          "id": 3,
+          "ident": "LINK_INPUT",
+          "name": "Link CV",
+          "label": "LNK",
+          "role": "Cv",
+          "x_mm": 42.8,
+          "y_mm": 88.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "A_OUTPUT",
+          "name": "Chaos A",
+          "label": "A",
+          "role": "Cv",
+          "x_mm": 10.0,
+          "y_mm": 110.0
+        },
+        {
+          "id": 1,
+          "ident": "STEP_OUTPUT",
+          "name": "Step",
+          "label": "TRIG",
+          "role": "Trigger",
+          "x_mm": 25.4,
+          "y_mm": 110.0
+        },
+        {
+          "id": 2,
+          "ident": "B_OUTPUT",
+          "name": "Chaos B",
+          "label": "B",
+          "role": "Cv",
+          "x_mm": 40.8,
+          "y_mm": 110.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "A_LIGHT",
+          "name": "A level",
+          "label": "",
+          "x_mm": 10.0,
+          "y_mm": 70.0,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 1,
+          "ident": "STEP_LIGHT",
+          "name": "Step",
+          "label": "",
+          "x_mm": 25.4,
+          "y_mm": 70.0,
+          "color": "yellow",
+          "size": "small"
+        },
+        {
+          "id": 2,
+          "ident": "B_LIGHT",
+          "name": "B level",
+          "label": "",
+          "x_mm": 40.8,
+          "y_mm": 70.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

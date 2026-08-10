@@ -36,6 +36,16 @@ struct DropData;         // pulp/view/drag_drop.hpp
 class ComboBox;          // pulp/view/ui_components.hpp — held (as View*) in RootInteractionState
 class View;
 
+/// Internal concrete-type hint for the two whole-tree hot paths.
+///
+/// Stored in View's padding after `AccessRole`, so it adds neither a heap
+/// allocation nor a vtable slot. Only the named constructors set a non-generic
+/// value; readers may then use a checked static_cast without asking RTTI the
+/// same question for every node at every vsync.
+enum class RuntimeViewKind : std::uint8_t {
+    generic, knob, fader, toggle, scroll, eq_curve, design_frame
+};
+
 /// Identity-safe reference to a View captured across native event boundaries.
 /// Capturing records the root and current structure generation while the View
 /// is known-live. `live_in()` is therefore O(1) until a detach invalidates that
@@ -260,13 +270,31 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
+    /// Show or hide this view.
+    ///
+    /// A visibility change is a change to what is on screen, so it dirties the
+    /// surface. `invalidate_subtree_caches_up()` alone does NOT: it clears scene
+    /// caches up the parent chain, returns immediately when nothing anywhere
+    /// caches, and never reaches the host. Anything that shows a view
+    /// programmatically — restoring window state, a startup flag, a deep link, a
+    /// screenshot harness, switching a TabPanel tab — would otherwise render
+    /// nothing until some unrelated event happened to dirty the window.
     void set_visible(bool v) {
         if (visibility_quarantine_count_ > 0) {
             visible_after_quarantine_ = v;
             return;
         }
+        const bool changed = visible_ != v;
         visible_ = v;
         invalidate_subtree_caches_up();
+        if (changed) {
+            // Parent layout decides whether this child occupies space. Dirty
+            // the whole path so showing a child assigns fresh bounds and
+            // hiding it lets siblings close the gap before the repaint.
+            for (View* node = this; node; node = node->parent_)
+                node->invalidate_layout();
+            request_repaint();
+        }
     }
 
     // ── Layout ───────────────────────────────────────────────────────────
@@ -1086,6 +1114,10 @@ public:
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
+    /// Bridge wheel delivery. `is_dom_origin` selects the one full DOM dispatch;
+    /// registered ancestors receive only their low-level `on(id, "wheel", fn)`
+    /// callback so Element bubbling is not duplicated.
+    std::function<void(const MouseEvent&, bool is_dom_origin)> on_dom_wheel_event;
     std::function<void(Point)> on_drag;   ///< JS pointermove during drag callback
     /// JS pointermove carrying full pointer identity (id + type + pressure).
     /// Distinct from `on_drag`, which collapses every move to
@@ -1779,6 +1811,12 @@ public:
     void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
     bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
 
+    RuntimeViewKind runtime_view_kind() const noexcept { return runtime_view_kind_; }
+
+protected:
+    void mark_runtime_view_kind(RuntimeViewKind kind) { runtime_view_kind_ = kind; }
+
+public:
     /// RN textShadow per-attribute storage. Storage-only; SkPaint shadow
     /// integration is not wired here. Each slot is round-trippable so a
     /// commitUpdate that touches only one of the three preserves the others
@@ -2159,7 +2197,7 @@ private:
     void refresh_visibility_quarantine() noexcept {
         set_visible_from_quarantine(false);
     }
-    void end_visibility_quarantine() noexcept {
+    void end_visibility_quarantine() {
         if (visibility_quarantine_count_ == 0)
             return;
         --visibility_quarantine_count_;
@@ -2305,6 +2343,7 @@ private:
     std::uint32_t last_paint_self_ns_ = 0;
     std::uint32_t last_paint_with_children_ns_ = 0;
     AccessRole access_role_ = AccessRole::none;
+    RuntimeViewKind runtime_view_kind_ = RuntimeViewKind::generic;
     std::string access_label_;          // author-set (aria-label) — wins
     std::string derived_access_label_;  // content-derived (visible text)
     std::string access_value_;

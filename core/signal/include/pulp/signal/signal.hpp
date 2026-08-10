@@ -12,7 +12,9 @@
 #include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/waveguide_junction.hpp>
 #include <pulp/signal/waveguide_line.hpp>
+#include <pulp/signal/waveguide_reed_exciter.hpp>
 #include <pulp/signal/waveguide_reflection_filter.hpp>
+#include <pulp/signal/reed_waveguide_loop.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -60,6 +62,7 @@
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
+#include <pulp/signal/spectral_mask_processor.hpp>
 #include <pulp/signal/spectral_delay_matrix.hpp>
 #include <pulp/signal/spectral_gate_blur.hpp>
 #include <pulp/signal/spectral_morph.hpp>

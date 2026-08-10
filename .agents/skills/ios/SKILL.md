@@ -1096,4 +1096,3 @@ If you need to change the mapping, change it in `window_host.hpp` beside the
 forward transform it inverts, and let `pulp-test-design-viewport-inverse`
 (round-trip: the point paint places at X is the point input recovers from a
 touch at X) tell you whether the pair still agree.
-

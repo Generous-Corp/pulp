@@ -24,6 +24,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -696,7 +697,7 @@ TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a 
     REQUIRE(engine.evaluate("errs").getWithDefault<int>(0) == 2);
 }
 
-TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}",
+TEST_CASE("Event contract: wheel dispatch carries coordinates and modifiers",
           "[view][bridge][events][contract]") {
     // Pre-fix wheel sent raw positional args (deltaX, deltaY). The
     // @pulp/react synthetic-event shim only lifts fields when
@@ -721,7 +722,11 @@ TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,cl
     ev.scroll_delta_x = 1.5f;
     ev.scroll_delta_y = -3.0f;
     ev.window_position = {200.0f, 250.0f};
-    w->on_mouse_event(ev);
+    // kModMeta is the Windows-key representation; it must map to the same W3C
+    // metaKey field as macOS kModCmd.
+    ev.modifiers = kModCtrl | kModShift | kModAlt | kModMeta;
+    REQUIRE(w->on_dom_wheel_event);
+    w->on_dom_wheel_event(ev, true);
 
     // The shape pinned by .agents/skills/view-bridge/SKILL.md.
     REQUIRE(engine.evaluate("typeof got").toString() == "object");
@@ -729,6 +734,10 @@ TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,cl
     REQUIRE_THAT(engine.evaluate("got.deltaY").getWithDefault<double>(0.0), WithinAbs(-3.0, 0.001));
     REQUIRE_THAT(engine.evaluate("got.clientX").getWithDefault<double>(0.0), WithinAbs(200.0, 0.001));
     REQUIRE_THAT(engine.evaluate("got.clientY").getWithDefault<double>(0.0), WithinAbs(250.0, 0.001));
+    CHECK(engine.evaluate("got.ctrlKey").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("got.shiftKey").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("got.altKey").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("got.metaKey").getWithDefault<bool>(false));
 }
 
 TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)",
@@ -761,12 +770,63 @@ TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lamb
     MouseEvent wheel{};
     wheel.is_wheel = true;
     wheel.scroll_delta_y = 1.0f;
-    s->on_mouse_event(wheel);
+    REQUIRE(s->on_dom_wheel_event);
+    s->on_dom_wheel_event(wheel, true);
 
     // Each event should fire its handler exactly once even though we
     // called registerPointer / registerWheel three times.
     REQUIRE(engine.evaluate("pointer_fires").getWithDefault<int>(0) == 1);
     REQUIRE(engine.evaluate("wheel_fires").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("Event contract: nested raw wheel ancestors fire without duplicating DOM bubbling",
+          "[view][bridge][events][contract]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var raw_outer_fires = 0;
+        var middle_dom_fires = 0;
+        var inner_dom_fires = 0;
+        var outer = document.createElement('div');
+        var middle = document.createElement('div');
+        var inner = document.createElement('div');
+        document.body.appendChild(outer);
+        outer.appendChild(middle);
+        middle.appendChild(inner);
+        on(outer._id, 'wheel', function() { raw_outer_fires++; });
+        registerWheel(outer._id);
+        middle.addEventListener('wheel', function() { middle_dom_fires++; });
+        inner.addEventListener('wheel', function() { inner_dom_fires++; });
+        globalThis.__wheel_outer_id = outer._id;
+        globalThis.__wheel_middle_id = middle._id;
+        globalThis.__wheel_inner_id = inner._id;
+    )");
+
+    const auto id = [&](const char* name) {
+        return std::string(engine.evaluate(name).getWithDefault<std::string_view>(""));
+    };
+    auto* outer = bridge.widget(id("globalThis.__wheel_outer_id"));
+    auto* middle = bridge.widget(id("globalThis.__wheel_middle_id"));
+    auto* inner = bridge.widget(id("globalThis.__wheel_inner_id"));
+    REQUIRE(outer != nullptr);
+    REQUIRE(middle != nullptr);
+    REQUIRE(inner != nullptr);
+    outer->set_bounds({0, 0, 300, 200});
+    middle->set_bounds({0, 0, 200, 150});
+    inner->set_bounds({0, 0, 100, 100});
+
+    WheelHost host;
+    host.request_repaint = [] {};
+    deliver_mouse_wheel(root, {20, 20}, 1.5f, -3.0f,
+                        static_cast<std::uint16_t>(kModCtrl | kModShift), host);
+
+    CHECK(engine.evaluate("raw_outer_fires").getWithDefault<int>(0) == 1);
+    CHECK(engine.evaluate("middle_dom_fires").getWithDefault<int>(0) == 1);
+    CHECK(engine.evaluate("inner_dom_fires").getWithDefault<int>(0) == 1);
 }
 
 

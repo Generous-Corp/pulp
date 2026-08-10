@@ -1,0 +1,26 @@
+/* ============================================================
+   PULP · ELEVATION  (warm shadows + focus ring)
+   Shadow tint comes from --shadow-color (theme-set in semantic.css).
+   Dark mode leans on layered surfaces; light mode on soft warm shadows.
+   ============================================================ */
+:root {
+  --shadow-xs: 0 1px 2px var(--shadow-color-2);
+  --shadow-sm: 0 2px 6px var(--shadow-color-2), 0 1px 2px var(--shadow-color-2);
+  --shadow-md: 0 6px 18px var(--shadow-color), 0 2px 5px var(--shadow-color-2);
+  --shadow-lg: 0 16px 40px var(--shadow-color), 0 4px 12px var(--shadow-color-2);
+  --shadow-xl: 0 30px 70px var(--shadow-color), 0 10px 24px var(--shadow-color);
+
+  /* Raised control: top inner highlight + soft drop */
+  --elev-control: inset 0 1px 0 var(--highlight-top), 0 1px 2px var(--shadow-color-2);
+  /* Sunken well: inner shadow for tracks / inputs */
+  --elev-inset: inset 0 1px 3px var(--shadow-color), inset 0 0 0 1px var(--line-soft);
+
+  /* Focus — springy double ring, accent-tinted */
+  --focus-ring: 0 0 0 3px var(--accent-ring);
+  --focus-ring-offset: 0 0 0 2px var(--surface-app), 0 0 0 4px var(--accent-ring);
+
+  /* Borders */
+  --border-hair:  1px solid var(--line);
+  --border-soft:  1px solid var(--line-soft);
+  --border-strong:1px solid var(--line-strong);
+}

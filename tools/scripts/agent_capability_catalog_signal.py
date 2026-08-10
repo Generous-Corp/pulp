@@ -363,7 +363,7 @@ EXPORTS = [
                 include="pulp/signal/waveguide_reflection_filter.hpp",
                 qualified_name="pulp::signal::WaveguideReflectionFilterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:ebb6beafb7b315ce54115de61e54cd2f603fa147919e8e11ce5b8038b935ab44",
+                header_fingerprint="sha256:13cde0afa486a160cdfc055160ac97230a191569261c7b7e9f04a5f7396141f6",
             ),
             binding(
                 role="junction", kind="cpp_type",
@@ -382,6 +382,60 @@ EXPORTS = [
              "operation": "member_call", "member": "reset", "arguments": ""},
             {"role": "junction", "binding": "pulp::signal::WaveguideJunctionT<float, 4>",
              "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.reed-waveguide-loop", domain="signal",
+        summary=(
+            "Bounded explicit single-reed excitation and a fixed-topology bore owner with "
+            "whole-loop 1x/2x/4x oversampling."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates bounded line and oversampler storage",
+                   "process": "audio", "reset": "control; clears prepared line history",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Memoryless normalized reed valve plus owned linear-phase oversampler, "
+            "bidirectional bore histories, retuning glide, and passive bell boundary state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "normalized finite mouth pressure, physical one-way seconds, bounded reed "
+            "controls, base-rate bell controls, and oversampling factor 1, 2, or 4"
+        ),
+        output_domain="finite pressure wave arriving at the bell before reflection",
+        units=["samples", "seconds", "normalized pressure", "oversampling factor"],
+        latency="linear-phase oversampler base-rate delay; bore length is resonator state",
+        tail="unbounded while the driven feedback loop sustains; reported as -1",
+        scheduling=(
+            "sample-synchronous; every reed boundary, bell boundary, and bidirectional "
+            "line advance executes once per oversampled callback"
+        ),
+        bindings=[
+            binding(
+                role="reed_exciter", kind="cpp_type",
+                include="pulp/signal/waveguide_reed_exciter.hpp",
+                qualified_name="pulp::signal::ReedExciterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:9d9e07b11901eaf9a1e6682797e5da56b4ddd8851c158932f12b771bf35fd9d9",
+            ),
+            binding(
+                role="whole_loop", kind="cpp_type",
+                include="pulp/signal/reed_waveguide_loop.hpp",
+                qualified_name="pulp::signal::ReedWaveguideLoopT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:b397431656231ddc94fbd0618f39582ac4ed1f018573479bfbf44fc2281546a7",
+            ),
+        ],
+        _link_probes=[
+            {"role": "reed_exciter", "binding": "pulp::signal::ReedExciterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "whole_loop", "binding": "pulp::signal::ReedWaveguideLoopT<float>",
+             "operation": "member_call", "member": "prepare",
+             "arguments": "48000.0, 0.05, 2"},
         ],
     ),
     capability(
@@ -628,7 +682,7 @@ EXPORTS = [
         tail="measurement history until reset", scheduling="block accumulation and snapshot",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                          qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:a9437e126faff12dfc60d80e59381fe0f5f005b3638d445d06daf4b8cb2fd695")],
+                         header_fingerprint="sha256:cfe3d3d562c903e1c7c64f404a264e7445aed4d6f14ab4fa3544b5ccd8346aee")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -755,6 +809,75 @@ EXPORTS = [
              "operation": "function_call", "arguments": (
                  "nullptr, 0, 0, pulp::signal::SpectralMaskTableT<float>{}"
              )},
+        ],
+    ),
+    capability(
+        key="signal.spectral-mask-processor", domain="signal",
+        summary=(
+            "Streaming WOLA spectral masking with race-free frame-boundary publication, "
+            "mask interpolation, and latency-aligned dry/wet mixing."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control; allocates bounded STFT and dry-delay storage",
+            "process": "audio; control publishes through latest-value SPSC handoff",
+            "reset": "audio",
+            "release": "destruction off audio",
+        },
+        state_model=(
+            "Prepared spectral frame engine, three-slot immutable mask-table handoff, "
+            "fixed current/target interpolation curves, and latency-aligned dry delay."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite planar audio or coherent complex frame groups plus compiled "
+            "spectral band layouts or mask tables"
+        ),
+        output_domain=(
+            "phase- and channel-coherent masked audio or frames with categorical exact mute"
+        ),
+        units=["samples", "frames", "bins", "channels", "hertz", "decibels",
+               "linear gain", "mix ratio"],
+        latency="exact fixed spectral-frame engine latency",
+        tail="conservative fixed engine latency plus one frame length",
+        scheduling=(
+            "streaming overlap-add with latest-table adoption and interpolation only "
+            "at frame boundaries"
+        ),
+        bindings=[
+            binding(
+                role="entrypoint", kind="cpp_type",
+                include="pulp/signal/spectral_mask_processor.hpp",
+                qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                ),
+            ),
+            binding(
+                role="config", kind="cpp_type",
+                include="pulp/signal/spectral_mask_processor.hpp",
+                qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::signal::SpectralMaskProcessorT<float>",
+                "operation": "member_call", "member": "reset", "arguments": "",
+            },
+            {
+                "role": "config",
+                "binding": "pulp::signal::SpectralMaskProcessorConfigT<float>",
+                "operation": "construct", "arguments": "",
+            },
         ],
     ),
     capability(

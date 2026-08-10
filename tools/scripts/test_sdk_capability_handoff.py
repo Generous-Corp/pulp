@@ -13,6 +13,10 @@ import sdk_capability_handoff as handoff
 
 SOURCE_SHA = "a" * 40
 PLATFORM = "linux-x64"
+RUNTIME_PATHS = (
+    handoff.IMPORTER_RUNTIME_ROOT / "capture.mjs",
+    handoff.IMPORTER_RUNTIME_ROOT / "health.mjs",
+)
 
 
 class SdkCapabilityHandoffTests(unittest.TestCase):
@@ -24,6 +28,9 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
         shared.mkdir(parents=True)
         binary.mkdir()
         (binary / "pulp-import-design").write_bytes(b"installed importer\0bytes")
+        for path in RUNTIME_PATHS:
+            (self.prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.prefix / path).write_bytes(f"fixture {path.name}".encode())
         self.capabilities = {
             "schema": "fixture.agent-capabilities.v1",
             "capabilities": [],
@@ -56,7 +63,10 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
 
     def stamp(self) -> dict[str, object]:
         document = handoff.build_handoff(
-            self.prefix, sdk_source_sha=SOURCE_SHA, platform=PLATFORM
+            self.prefix,
+            sdk_source_sha=SOURCE_SHA,
+            platform=PLATFORM,
+            expected_importer_runtime_paths={path.as_posix() for path in RUNTIME_PATHS},
         )
         handoff.write_atomically(self.prefix / handoff.HANDOFF_PATH, document)
         return document
@@ -65,6 +75,9 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
         arguments = {
             "expected_sdk_source_sha": SOURCE_SHA,
             "expected_platform": PLATFORM,
+            "expected_importer_runtime_paths": {
+                path.as_posix() for path in RUNTIME_PATHS
+            },
         }
         arguments.update(overrides)
         return handoff.verify_handoff(self.prefix, **arguments)
@@ -90,6 +103,27 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
         (self.prefix / handoff.importer_path(PLATFORM)).write_bytes(b"different")
         with self.assertRaisesRegex(handoff.HandoffError, "importer sha256"):
             self.verify()
+
+    def test_changed_importer_runtime_bytes_are_rejected(self) -> None:
+        self.stamp()
+        path = RUNTIME_PATHS[0]
+        (self.prefix / path).write_bytes(b"different")
+        with self.assertRaisesRegex(handoff.HandoffError, "runtime sha256"):
+            self.verify()
+
+    def test_duplicate_importer_runtime_path_is_rejected(self) -> None:
+        document = self.stamp()
+        duplicate = dict(document["importer"]["runtime"][0])
+        duplicate["sha256"] = "0" * 64
+        document["importer"]["runtime"].insert(0, duplicate)
+        handoff.write_atomically(self.prefix / handoff.HANDOFF_PATH, document)
+        with self.assertRaisesRegex(handoff.HandoffError, "duplicated"):
+            self.verify()
+
+    def test_incomplete_importer_runtime_is_rejected_before_stamping(self) -> None:
+        (self.prefix / RUNTIME_PATHS[0]).unlink()
+        with self.assertRaisesRegex(handoff.HandoffError, "selected contract"):
+            self.stamp()
 
     def test_changed_capability_bytes_are_rejected(self) -> None:
         self.stamp()

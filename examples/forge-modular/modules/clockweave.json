@@ -1,0 +1,89 @@
+{
+  "forge_generated": true,
+  "modules": [
+    {
+      "slug": "CLOCKWEAVE",
+      "name": "CLKWEAVE",
+      "description": "Resettable musical clock with variable pulse width and phase ramp output.",
+      "tags": [
+        "Clock generator",
+        "Low-frequency oscillator"
+      ],
+      "hp": 6,
+      "params": [
+        {
+          "id": 0,
+          "ident": "RATE_PARAM",
+          "name": "Rate",
+          "label": "RATE",
+          "unit": " Hz",
+          "min_value": -3.0,
+          "max_value": 3.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 31.0,
+          "display_base": 2.0,
+          "display_multiplier": 2.0
+        },
+        {
+          "id": 1,
+          "ident": "WIDTH_PARAM",
+          "name": "Pulse width",
+          "label": "WIDTH",
+          "unit": "%",
+          "min_value": 0.05,
+          "max_value": 0.95,
+          "default_value": 0.5,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 54.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "RATE_CV_INPUT",
+          "name": "Rate CV",
+          "label": "RATE CV",
+          "role": "Pitch",
+          "x_mm": 8.8,
+          "y_mm": 80.0,
+          "normal_volts": 0.0
+        },
+        {
+          "id": 1,
+          "ident": "RESET_INPUT",
+          "name": "Reset",
+          "label": "RESET",
+          "role": "Trigger",
+          "x_mm": 21.7,
+          "y_mm": 80.0,
+          "normal_volts": 0.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "CLOCK_OUTPUT",
+          "name": "Clock",
+          "label": "CLOCK",
+          "role": "Clock",
+          "x_mm": 8.8,
+          "y_mm": 108.0
+        },
+        {
+          "id": 1,
+          "ident": "PHASE_OUTPUT",
+          "name": "Phase",
+          "label": "PHASE",
+          "role": "Cv",
+          "x_mm": 21.7,
+          "y_mm": 108.0
+        }
+      ],
+      "lights": []
+    }
+  ]
+}

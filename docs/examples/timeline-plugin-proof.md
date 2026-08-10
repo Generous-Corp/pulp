@@ -1,8 +1,8 @@
 # Timeline Plugin Proof
 
-**Category**: validation  
-**Type**: silent instrument  
-**Path**: `examples/timeline-plugin-proof/`  
+**Category**: validation
+**Type**: silent instrument
+**Path**: `examples/timeline-plugin-proof/`
 **Format**: CLAP
 
 ## Summary

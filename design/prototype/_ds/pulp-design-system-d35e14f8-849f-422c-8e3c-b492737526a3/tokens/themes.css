@@ -1,0 +1,29 @@
+/* ============================================================
+   PULP · ACCENT THEMES
+   Set data-accent="<name>" on <html> (or ANY subtree) to re-skin the
+   accent ramp. Works over BOTH data-theme="dark" and "light":
+   only the accent ramp is redefined here, and the glow / focus-ring
+   tokens reference var(--accent*) at use-time, so they recompute for
+   free. Surfaces, text and status colours stay theme-driven.
+
+   To add a theme: add one line with its base hue + on-accent text colour.
+   ============================================================ */
+[data-accent="signal"] { --accent-base:#16DAC2; --accent-text:#04211E; }  /* default — teal   */
+[data-accent="violet"] { --accent-base:#8B6CF5; --accent-text:#0E0A24; }  /* electric violet  */
+[data-accent="indigo"] { --accent-base:#5E78FF; --accent-text:#070C28; }  /* indigo           */
+[data-accent="amber"]  { --accent-base:#F6B847; --accent-text:#2A1C04; }  /* amber            */
+[data-accent="coral"]  { --accent-base:#FF5C4D; --accent-text:#2A0A06; }  /* coral            */
+[data-accent="leaf"]   { --accent-base:#3FCF77; --accent-text:#06210F; }  /* leaf green       */
+[data-accent="pink"]   { --accent-base:#FF7AA8; --accent-text:#2A0A16; }  /* hot pink         */
+
+/* Derive the whole accent ramp from a single base hue. */
+[data-accent] {
+  --accent:        var(--accent-base);
+  --accent-press:  color-mix(in oklab, var(--accent) 80%, #000);
+  --accent-soft:   color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-soft-2: color-mix(in oklab, var(--accent) 28%, transparent);
+  --accent-line:   color-mix(in oklab, var(--accent) 48%, transparent);
+  --accent-ring:   color-mix(in oklab, var(--accent) 52%, transparent);
+}
+/* On paper, deepen the accent ~18% so fills and accent text stay legible on white. */
+[data-theme="light"][data-accent] { --accent: color-mix(in oklab, var(--accent-base) 82%, #000); }

@@ -1,0 +1,78 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 0,
+   "plugin": "Fundamental",
+   "model": "SEQ3",
+   "pos": [
+    0,
+    0
+   ],
+   "params": [
+    {
+     "id": 3,
+     "value": 4.0
+    },
+    {
+     "id": 4,
+     "value": 0.0
+    },
+    {
+     "id": 5,
+     "value": 0.25
+    },
+    {
+     "id": 6,
+     "value": 0.5
+    },
+    {
+     "id": 7,
+     "value": 0.75
+    }
+   ]
+  },
+  {
+   "id": 1,
+   "plugin": "Fundamental",
+   "model": "VCO",
+   "pos": [
+    22,
+    0
+   ],
+   "params": [
+    {
+     "id": 2,
+     "value": 0.0
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "plugin": "Core",
+   "model": "AudioInterface2",
+   "pos": [
+    32,
+    0
+   ]
+  }
+ ],
+ "cables": [
+  {
+   "id": 0,
+   "outputModuleId": 0,
+   "outputId": 1,
+   "inputModuleId": 1,
+   "inputId": 0,
+   "color": "#c9b70e"
+  },
+  {
+   "id": 1,
+   "outputModuleId": 1,
+   "outputId": 2,
+   "inputModuleId": 2,
+   "inputId": 0,
+   "color": "#0c8e15"
+  }
+ ]
+}

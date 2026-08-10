@@ -43,6 +43,13 @@ int main() {
         return 12;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
-    return pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask)
-        ? 0 : 13;
+    if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
+        return 13;
+    pulp::signal::SpectralMaskProcessor processor;
+    pulp::signal::SpectralMaskProcessorConfig processor_config;
+    processor_config.frame.fft_size = 256;
+    processor_config.frame.analysis_hop = 64;
+    processor_config.frame.channels = 1;
+    processor_config.frame.max_block = 64;
+    return processor.prepare(processor_config) ? 0 : 14;
 }

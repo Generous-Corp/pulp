@@ -229,3 +229,11 @@ change, focus, blur, wheel, drop), `dispatchEvent`, `setPointerCapture` /
    a full `dataTransfer` object.
 8. **Keyboard events** — `keydown` / `keyup` / `keypress` are forwarded
    globally via `__dispatch__` rather than bound per-element.
+
+## DOM dispatch ownership
+
+`__dispatch__` is the sole native-to-DOM element fan-out. In particular, wheel
+registration no longer emits a second event: legacy positional deltas are
+normalized to `deltaX` / `deltaY` at the shared dispatch boundary, then the
+normal element bubbling path runs once. Callback exceptions remain contained
+inside that JS boundary so they cannot stop the frame loop.

@@ -329,7 +329,7 @@ TEST_CASE("MultiMeter update and channel count", "[view][widgets]") {
         data.channels[ch].rms = 0.1f * (ch + 1);
     }
 
-    meter.update(data, 1.0f / 60.0f);
+    (void) meter.update(data, 1.0f / 60.0f);
 
     // Ballistics should have moved toward target
     REQUIRE(meter.ballistics().channels[0].display_peak > 0);
@@ -354,14 +354,14 @@ TEST_CASE("CorrelationMeter smoothing", "[view][widgets]") {
 
     // Feed positive correlation
     for (int i = 0; i < 60; ++i)
-        meter.update(1.0f, 1.0f / 60.0f);
+        (void) meter.update(1.0f, 1.0f / 60.0f);
 
     // Should have moved toward +1
     REQUIRE(meter.display_correlation() > 0.9f);
 
     // Feed negative correlation
     for (int i = 0; i < 120; ++i)
-        meter.update(-1.0f, 1.0f / 60.0f);
+        (void) meter.update(-1.0f, 1.0f / 60.0f);
 
     // Should have moved toward -1
     REQUIRE(meter.display_correlation() < -0.9f);
@@ -372,8 +372,39 @@ TEST_CASE("CorrelationMeter clamps input range", "[view][widgets]") {
 
     // Even with extreme inputs, should stay in [-1, +1]
     for (int i = 0; i < 120; ++i)
-        meter.update(5.0f, 1.0f / 60.0f);
+        (void) meter.update(5.0f, 1.0f / 60.0f);
 
     REQUIRE(meter.display_correlation() <= 1.0f);
     REQUIRE(meter.display_correlation() >= -1.0f);
+}
+
+// ── The family rule, stated by a case that breaks the naive version ──────────
+// CorrelationMeter smooths exponentially like the level meters, so it needs the
+// same snap or it never reports a still frame. But it settles wherever the
+// signal is, NOT at zero: a steady mono source rests at +1. The meters' floor
+// test (`if (v < 1e-6f) v = 0`) would never fire here, so copying it would
+// silently do nothing — which is exactly the mistake the next person will make.
+// The general form snaps toward the TARGET.
+TEST_CASE("CorrelationMeter settles at a non-zero target and then goes quiet",
+          "[view][widgets][idle-gate]") {
+    CorrelationMeter meter;
+    constexpr float dt = 1.0f / 60.0f;
+
+    // Control: the report can say yes.
+    REQUIRE(meter.update(1.0f, dt));
+
+    // A steady mono source. Two seconds is far past the 50 ms smoothing.
+    for (int i = 0; i < 120; ++i) (void) meter.update(1.0f, dt);
+
+    // It arrived exactly, at a value a floor-to-zero snap could never produce.
+    CHECK(meter.display_correlation() == 1.0f);
+    for (int i = 0; i < 120; ++i)
+        CHECK_FALSE(meter.update(1.0f, dt));
+
+    // The same holds for the other pole, and real motion still gets through.
+    CHECK(meter.update(-1.0f, dt));
+    for (int i = 0; i < 240; ++i) (void) meter.update(-1.0f, dt);
+    CHECK(meter.display_correlation() == -1.0f);
+    for (int i = 0; i < 120; ++i)
+        CHECK_FALSE(meter.update(-1.0f, dt));
 }

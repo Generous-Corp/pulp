@@ -1,0 +1,127 @@
+{
+  "modules": [
+    {
+      "slug": "SLEWRF",
+      "name": "SLEW",
+      "description": "Slew limiter with independent rise and fall times, CV over each, three slope laws, and an end-of-rise gate.",
+      "tags": [
+        "Slew limiter",
+        "Function generator",
+        "Utility"
+      ],
+      "hp": 8,
+      "params": [
+        {
+          "id": 0,
+          "ident": "RISE_PARAM",
+          "name": "Rise time",
+          "label": "RISE",
+          "unit": " ms",
+          "min_value": -1.0,
+          "max_value": 13.0,
+          "default_value": 5.0,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 32.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 1,
+          "ident": "FALL_PARAM",
+          "name": "Fall time",
+          "label": "FALL",
+          "unit": " ms",
+          "min_value": -1.0,
+          "max_value": 13.0,
+          "default_value": 5.0,
+          "kind": "Knob",
+          "x_mm": 28.8,
+          "y_mm": 32.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 2,
+          "ident": "SHAPE_PARAM",
+          "name": "Slope law",
+          "label": "SHAPE",
+          "min_value": 0.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "SwitchThree",
+          "x_mm": 20.32,
+          "y_mm": 74.0,
+          "labels": [
+            "Linear",
+            "Expo",
+            "Const"
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Signal in",
+          "label": "IN",
+          "role": "Cv",
+          "x_mm": 8.5,
+          "y_mm": 96.0
+        },
+        {
+          "id": 1,
+          "ident": "RCV_INPUT",
+          "name": "Rise time CV (1 V doubles the time)",
+          "label": "RCV",
+          "role": "Cv",
+          "x_mm": 11.8,
+          "y_mm": 54.0,
+          "normal_volts": 0.0
+        },
+        {
+          "id": 2,
+          "ident": "FCV_INPUT",
+          "name": "Fall time CV (normalled from RCV)",
+          "label": "FCV",
+          "role": "Cv",
+          "x_mm": 28.8,
+          "y_mm": 54.0,
+          "normal_to": "RCV_INPUT"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Slewed out",
+          "label": "OUT",
+          "role": "Cv",
+          "x_mm": 20.0,
+          "y_mm": 96.0
+        },
+        {
+          "id": 1,
+          "ident": "EOR_OUTPUT",
+          "name": "End of rise gate",
+          "label": "EOR",
+          "role": "Gate",
+          "x_mm": 31.5,
+          "y_mm": 96.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "EOR_LIGHT",
+          "name": "End of rise",
+          "label": "",
+          "x_mm": 20.0,
+          "y_mm": 112.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

@@ -781,6 +781,15 @@ jobs:
           # 2nd+ run of any PR (cache + build dir stay warm).
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
 
+      # Shipyard PR validation arrives through workflow_dispatch, whose event
+      # payload has no pull_request.base.sha. Keep the capability-history gate
+      # fail-closed while giving it the protected base that its default
+      # PULP_AGENT_CAPABILITY_BASE_REF=origin/main contract requires.
+      - name: Fetch protected capability base
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       - name: Set up Namespace macOS cache
         if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache

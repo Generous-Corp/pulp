@@ -1,0 +1,23 @@
+{
+  "artifact": "dsp-600-v3",
+  "source_sha256_prefix": "4b9f0aa3",
+  "window_seconds": 6.0,
+  "checkpoints": [
+    {"start_seconds": 0, "report": {"schema": 1, "cables": [
+      {"finite": true, "mean_abs_v": 0.360970, "peak_abs_v": 0.91, "dynamics": {"mean_rms": 0.405}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 0.0}, "spectrum": {"centroid_mean_hz": 1160.0, "centroid_range_octaves": 0.104}},
+      {"finite": true, "mean_abs_v": 0.000611, "peak_abs_v": 0.003, "dynamics": {"mean_rms": 0.00072}, "pitch": {"distinct_pitches": 0, "pitch_changes": 0}, "onsets": {"per_second": 0.0}, "spectrum": {"centroid_mean_hz": 410.0, "centroid_range_octaves": 0.09}}
+    ]}},
+    {"start_seconds": 60, "report": {"schema": 1, "cables": [
+      {"finite": true, "mean_abs_v": 0.368, "peak_abs_v": 0.92, "dynamics": {"mean_rms": 0.412}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 0.0}, "spectrum": {"centroid_mean_hz": 1166.0, "centroid_range_octaves": 0.105}},
+      {"finite": true, "mean_abs_v": 0.058, "peak_abs_v": 0.31, "dynamics": {"mean_rms": 0.071}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 9.8}, "spectrum": {"centroid_mean_hz": 1280.0, "centroid_range_octaves": 0.12}}
+    ]}},
+    {"start_seconds": 300, "report": {"schema": 1, "cables": [
+      {"finite": true, "mean_abs_v": 0.368, "peak_abs_v": 0.92, "dynamics": {"mean_rms": 0.412}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 0.0}, "spectrum": {"centroid_mean_hz": 1165.0, "centroid_range_octaves": 0.106}},
+      {"finite": true, "mean_abs_v": 0.065, "peak_abs_v": 0.34, "dynamics": {"mean_rms": 0.079}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 10.7}, "spectrum": {"centroid_mean_hz": 1320.0, "centroid_range_octaves": 0.13}}
+    ]}},
+    {"start_seconds": 594, "report": {"schema": 1, "cables": [
+      {"finite": true, "mean_abs_v": 0.368, "peak_abs_v": 0.92, "dynamics": {"mean_rms": 0.412}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 0.0}, "spectrum": {"centroid_mean_hz": 1167.0, "centroid_range_octaves": 0.107}},
+      {"finite": true, "mean_abs_v": 0.070, "peak_abs_v": 0.36, "dynamics": {"mean_rms": 0.084}, "pitch": {"distinct_pitches": 1, "pitch_changes": 0}, "onsets": {"per_second": 10.2}, "spectrum": {"centroid_mean_hz": 1300.0, "centroid_range_octaves": 0.12}}
+    ]}}
+  ]
+}

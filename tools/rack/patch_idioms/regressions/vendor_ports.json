@@ -1,0 +1,661 @@
+{
+ "$comment": [
+  "Vendor port metadata, captured from a real Rack install so the checks that",
+  "matter to every user can run on a machine that has none. These describe",
+  "SOMEBODY ELSE'S plugins -- Fundamental and Rack's built-in Core -- so this",
+  "is a recording, not a second authoring of anything we own.",
+  "",
+  "Regenerate with:  python3 tools/rack/test_idioms.py --capture-vendor",
+  "test_idioms.py checks it against the live inventory whenever there is one,",
+  "so a stale recording is reported rather than quietly trusted."
+ ],
+ "captured_from": {
+  "Fundamental": "2.6.4",
+  "Core": "",
+  "AS": "2.0.6"
+ },
+ "plugins": {
+  "Fundamental": {
+   "modules": {
+    "8vert": {
+     "name": "8vert",
+     "tags": [
+      "Attenuator",
+      "Polyphonic"
+     ]
+    },
+    "ADSR": {
+     "name": "ADSR EG",
+     "tags": [
+      "Envelope Generator",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Attack",
+      "Decay",
+      "Sustain",
+      "Release",
+      "Gate",
+      "Retrigger"
+     ],
+     "outputs": [
+      "Envelope"
+     ]
+    },
+    "CVMix": {
+     "name": "CV Mix",
+     "tags": [
+      "Mixer",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Compare": {
+     "name": "Compare",
+     "tags": [
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Delay": {
+     "name": "Delay",
+     "tags": [
+      "Delay"
+     ],
+     "inputs": [
+      "Time",
+      "Feedback",
+      "Tone",
+      "Mix",
+      "Audio",
+      "Clock"
+     ],
+     "outputs": [
+      "Mix",
+      "Wet"
+     ]
+    },
+    "Fade": {
+     "name": "Fade",
+     "tags": [
+      "Panning",
+      "Voltage-controlled amplifier",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Gates": {
+     "name": "Gates",
+     "tags": [
+      "Polyphonic"
+     ]
+    },
+    "LFO": {
+     "name": "LFO",
+     "tags": [
+      "LFO",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Frequency modulation",
+      null,
+      "Reset",
+      "Pulse width modulation",
+      "Clock"
+     ],
+     "outputs": [
+      "Sine",
+      "Triangle",
+      "Sawtooth",
+      "Square"
+     ]
+    },
+    "LFO2": {
+     "name": "Wavetable LFO",
+     "tags": [
+      "LFO",
+      "Polyphonic"
+     ]
+    },
+    "Logic": {
+     "name": "Logic",
+     "tags": [
+      "Logic",
+      "Polyphonic"
+     ]
+    },
+    "Merge": {
+     "name": "Merge",
+     "tags": [
+      "Polyphonic",
+      "Utility"
+     ],
+     "inputs": [
+      "Channel 1",
+      "Channel 2",
+      "Channel 3",
+      "Channel 4",
+      "Channel 5",
+      "Channel 6",
+      "Channel 7",
+      "Channel 8",
+      "Channel 9",
+      "Channel 10",
+      "Channel 11",
+      "Channel 12",
+      "Channel 13",
+      "Channel 14",
+      "Channel 15",
+      "Channel 16"
+     ],
+     "outputs": [
+      "Polyphonic"
+     ]
+    },
+    "MidSide": {
+     "name": "Mid/Side",
+     "tags": [
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Mixer": {
+     "name": "Mix",
+     "tags": [
+      "Mixer",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Channel 1",
+      "Channel 2",
+      "Channel 3",
+      "Channel 4",
+      "Channel 5",
+      "Channel 6"
+     ],
+     "outputs": [
+      "Mix"
+     ]
+    },
+    "Mult": {
+     "name": "Mult",
+     "tags": [
+      "Multiple",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Mutes": {
+     "name": "Mutes",
+     "tags": [
+      "Switch",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Row 1",
+      "Row 2",
+      "Row 3",
+      "Row 4",
+      "Row 5",
+      "Row 6",
+      "Row 7",
+      "Row 8",
+      "Row 9",
+      "Row 10"
+     ],
+     "outputs": [
+      "Row 1",
+      "Row 2",
+      "Row 3",
+      "Row 4",
+      "Row 5",
+      "Row 6",
+      "Row 7",
+      "Row 8",
+      "Row 9",
+      "Row 10"
+     ]
+    },
+    "Noise": {
+     "name": "Noise",
+     "tags": [
+      "Noise"
+     ],
+     "outputs": [
+      "White noise",
+      "Pink noise",
+      "Red noise",
+      "Violet noise",
+      "Blue noise",
+      "Gray noise",
+      "Black noise"
+     ]
+    },
+    "Octave": {
+     "name": "Octave",
+     "tags": [
+      "Utility",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "1V/octave pitch",
+      "Octave shift CV"
+     ],
+     "outputs": [
+      "Pitch"
+     ]
+    },
+    "Process": {
+     "name": "Process",
+     "tags": [
+      "Sample and hold",
+      "Slew limiter",
+      "Polyphonic"
+     ]
+    },
+    "Pulses": {
+     "name": "Pulses",
+     "tags": [
+      "Switch"
+     ]
+    },
+    "Push": {
+     "name": "Push",
+     "tags": [
+      "Utility"
+     ]
+    },
+    "Quantizer": {
+     "name": "Quantizer",
+     "tags": [
+      "Quantizer",
+      "Polyphonic"
+     ]
+    },
+    "Random": {
+     "name": "Random",
+     "tags": [
+      "Random",
+      "Sample and hold",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Internal trigger rate",
+      "Shape",
+      "Trigger",
+      "External",
+      "Trigger probability",
+      "Random spread"
+     ],
+     "outputs": [
+      "Stepped",
+      "Linear",
+      "Smooth",
+      "Exponential",
+      "Trigger"
+     ]
+    },
+    "RandomValues": {
+     "name": "Random Values",
+     "tags": [
+      "Random",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Rescale": {
+     "name": "Rescale",
+     "tags": [
+      "Attenuator",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "SEQ3": {
+     "name": "SEQ 3",
+     "tags": [
+      "Sequencer"
+     ],
+     "inputs": [
+      "Tempo",
+      "Clock",
+      "Reset",
+      "Steps",
+      "Run"
+     ],
+     "outputs": [
+      "Trigger",
+      "CV 1",
+      "CV 2",
+      "CV 3",
+      "Step 1",
+      "Step 2",
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6",
+      "Step 7",
+      "Step 8",
+      "Steps",
+      "Clock",
+      "Run",
+      "Reset"
+     ]
+    },
+    "SHASR": {
+     "name": "Sample & Hold Analog Shift Register",
+     "tags": [
+      "Sample and hold"
+     ]
+    },
+    "Scope": {
+     "name": "Scope",
+     "tags": [
+      "Visual",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Ch 1",
+      "Ch 2",
+      "External trigger"
+     ],
+     "outputs": [
+      "Ch 1",
+      "Ch 2"
+     ]
+    },
+    "SequentialSwitch1": {
+     "name": "Sequential Switch 1 to 4",
+     "tags": [
+      "Switch",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "SequentialSwitch2": {
+     "name": "Sequential Switch 4 to 1",
+     "tags": [
+      "Switch",
+      "Utility",
+      "Polyphonic"
+     ]
+    },
+    "Split": {
+     "name": "Split",
+     "tags": [
+      "Polyphonic",
+      "Utility"
+     ],
+     "inputs": [
+      "Polyphonic"
+     ],
+     "outputs": [
+      "Channel 1",
+      "Channel 2",
+      "Channel 3",
+      "Channel 4",
+      "Channel 5",
+      "Channel 6",
+      "Channel 7",
+      "Channel 8",
+      "Channel 9",
+      "Channel 10",
+      "Channel 11",
+      "Channel 12",
+      "Channel 13",
+      "Channel 14",
+      "Channel 15",
+      "Channel 16"
+     ]
+    },
+    "Sum": {
+     "name": "Sum",
+     "tags": [
+      "Polyphonic",
+      "Utility"
+     ]
+    },
+    "Unity": {
+     "name": "Unity",
+     "tags": [
+      "Mixer",
+      "Utility",
+      "Dual"
+     ]
+    },
+    "VCA": {
+     "name": "VCA-2",
+     "tags": [
+      "VCA",
+      "Dual",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Channel 1 exponential CV",
+      "Channel 1 linear CV",
+      "Channel 1",
+      "Channel 2 exponential CV",
+      "Channel 2 linear CV",
+      "Channel 2"
+     ],
+     "outputs": [
+      "Channel 1",
+      "Channel 2"
+     ]
+    },
+    "VCA-1": {
+     "name": "VCA",
+     "tags": [
+      "VCA",
+      "Polyphonic"
+     ]
+    },
+    "VCF": {
+     "name": "VCF",
+     "tags": [
+      "VCF",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "Frequency",
+      "Resonance",
+      "Drive",
+      "Audio"
+     ],
+     "outputs": [
+      "Lowpass filter",
+      "Highpass filter"
+     ]
+    },
+    "VCMixer": {
+     "name": "VCA Mix",
+     "tags": [
+      "Mixer",
+      "VCA",
+      "Polyphonic"
+     ]
+    },
+    "VCO": {
+     "name": "VCO",
+     "tags": [
+      "VCO",
+      "Polyphonic"
+     ],
+     "inputs": [
+      "1V/octave pitch",
+      "Frequency modulation",
+      "Sync",
+      "Pulse width modulation"
+     ],
+     "outputs": [
+      "Sine",
+      "Triangle",
+      "Sawtooth",
+      "Square"
+     ]
+    },
+    "VCO2": {
+     "name": "Wavetable VCO",
+     "tags": [
+      "VCO",
+      "Polyphonic"
+     ]
+    },
+    "Viz": {
+     "name": "Viz",
+     "tags": [
+      "Polyphonic",
+      "Visual"
+     ]
+    }
+   }
+  },
+  "Core": {
+   "modules": {
+    "AudioInterface": {
+     "name": "Audio 8",
+     "tags": [
+      "External"
+     ]
+    },
+    "AudioInterface16": {
+     "name": "Audio 16",
+     "tags": [
+      "External"
+     ]
+    },
+    "AudioInterface2": {
+     "name": "Audio 2",
+     "tags": [
+      "External"
+     ],
+     "inputs": [
+      "To \"device output 1\"",
+      "To \"device output 2\""
+     ],
+     "outputs": [
+      "From \"device input 1\"",
+      "From \"device input 2\""
+     ]
+    },
+    "Blank": {
+     "name": "Blank",
+     "tags": [
+      "Blank"
+     ]
+    },
+    "CV-CC": {
+     "name": "CV to MIDI CC",
+     "tags": [
+      "External",
+      "MIDI"
+     ]
+    },
+    "CV-Gate": {
+     "name": "Gate to MIDI",
+     "tags": [
+      "External",
+      "MIDI"
+     ],
+     "inputs": [
+      "Cell 1",
+      "Cell 2",
+      "Cell 3",
+      "Cell 4",
+      "Cell 5",
+      "Cell 6",
+      "Cell 7",
+      "Cell 8",
+      "Cell 9",
+      "Cell 10",
+      "Cell 11",
+      "Cell 12",
+      "Cell 13",
+      "Cell 14",
+      "Cell 15",
+      "Cell 16"
+     ]
+    },
+    "CV-MIDI": {
+     "name": "CV to MIDI",
+     "tags": [
+      "External",
+      "MIDI",
+      "Polyphonic"
+     ]
+    },
+    "MIDI-Map": {
+     "name": "MIDI Map",
+     "tags": [
+      "External",
+      "MIDI"
+     ]
+    },
+    "MIDICCToCVInterface": {
+     "name": "MIDI CC to CV",
+     "tags": [
+      "External",
+      "MIDI"
+     ]
+    },
+    "MIDIToCVInterface": {
+     "name": "MIDI to CV",
+     "tags": [
+      "External",
+      "MIDI",
+      "Polyphonic"
+     ],
+     "outputs": [
+      "1V/octave pitch",
+      "Gate",
+      "Velocity",
+      "Aftertouch",
+      "Pitch wheel",
+      "Mod wheel",
+      "Retrigger",
+      "Clock",
+      "Clock divider",
+      "Start trigger",
+      "Stop trigger",
+      "Continue trigger"
+     ]
+    },
+    "MIDITriggerToCVInterface": {
+     "name": "MIDI to Gate",
+     "tags": [
+      "External",
+      "MIDI"
+     ]
+    },
+    "Notes": {
+     "name": "Notes",
+     "tags": [
+      "Blank"
+     ]
+    }
+   }
+  },
+  "AS": {
+   "modules": {
+    "BPMClock": {
+     "name": "BPM Clock",
+     "tags": [
+      "Clock"
+     ],
+     "inputs": [
+      "Run CV",
+      "Reset CV"
+     ],
+     "outputs": [
+      "Beat",
+      "Eights",
+      "Sixteenths",
+      "Bar",
+      "Reset",
+      "Run"
+     ]
+    }
+   }
+  }
+ }
+}

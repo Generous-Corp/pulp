@@ -263,6 +263,13 @@ if(PULP_BUILD_MOONBASE_EXAMPLE)
     add_subdirectory(moonbase-activation)
 endif()
 
+# Forge Modular — Eurorack modules and patches for VCV Rack, plus the app and
+# plugins that generate them. Opt-in: needs -DPULP_ENABLE_RACK=ON and a
+# developer-supplied Rack SDK, which is GPLv3 and never vendored here.
+if(PULP_HAS_RACK)
+    add_subdirectory(forge-modular)
+endif()
+
 # A named aggregate lets CI compile every example-owned artifact without also
 # building the unrelated core-test tree or custom install/utility targets.
 include("${PULP_ROOT_DIR}/tools/cmake/PulpCollectTargets.cmake")

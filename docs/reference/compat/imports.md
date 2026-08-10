@@ -110,3 +110,11 @@ changes:
   script tag inserted by the export.
 - `stitch/2025.04`: existing entry. Material 3 token vocab + Tailwind
   CDN with forms/container-queries plugins is the strongest signal.
+
+## Imported-tree bridge lifecycle
+
+Materialized imports inherit the shared WidgetBridge event and realm lifecycle:
+native wheel input reaches an imported DOM element through one dispatch path,
+and ending realm quarantine restores root visibility before repaint scheduling.
+This does not change format detection, parser versions, or object-coverage
+classifications.

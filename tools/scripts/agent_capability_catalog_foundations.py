@@ -320,7 +320,7 @@ EXPORTS = [
     ),
     capability(
         key="midi.mpe-voice-tracker",
-        contract_version={"major": 1, "minor": 1},
+        contract_version={"major": 2, "minor": 0},
         domain="midi",
         summary=(
             "Fixed-capacity MIDI 1.0 and UMP MPE note ownership and expression "
@@ -336,8 +336,9 @@ EXPORTS = [
         },
         state_model=(
             "Fixed 128-slot note table with nonzero uint64 generations, "
-            "fail-closed generation exhaustion, FIFO deferred note-offs, and "
-            "transactional lifecycle rejection."
+            "explicit monotonic note identities, fail-closed generation "
+            "exhaustion, FIFO deferred note-offs, and transactional lifecycle "
+            "rejection."
         ),
         seed_model="none",
         determinism={

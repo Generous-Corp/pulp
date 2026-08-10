@@ -1,0 +1,829 @@
+{
+  "family": "texture",
+  "$comment": [
+    "Patches whose subject is the sound itself rather than the notes: what it",
+    "is made of, what space it sits in, how dense it is. The failure mode here",
+    "is a patch that is merely quiet or merely wet and calls itself ambient."
+  ],
+  "idioms": [
+    {
+      "slug": "distorted-texture",
+      "names": [
+        "distortion",
+        "overdriven texture"
+      ],
+      "implies": [
+        "gritty",
+        "dirty",
+        "saturated",
+        "crunchy"
+      ],
+      "is": "A signal driven past a stage's limit so its peaks are reshaped, adding harmonics that were never in the source.",
+      "sounds_right_when": "the character changes with level rather than only the loudness.",
+      "source": "Standard practice",
+      "at_least": {
+        "waveshaper": 1
+      },
+      "topology": [
+        {
+          "id": "into-stage",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "waveshaper",
+          "to_port": "audio_in",
+          "describe": "a signal has to reach the distortion stage"
+        },
+        {
+          "id": "out-of-stage",
+          "from_module": "waveshaper",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the distorted signal has to reach the output"
+        }
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {
+          "id": "bypassed",
+          "do": "cut",
+          "requirement": "out-of-stage",
+          "message": "the distorted signal goes nowhere"
+        },
+        {
+          "id": "no-input",
+          "do": "cut",
+          "requirement": "into-stage",
+          "message": "nothing reaches the distortion"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "drone-cluster",
+      "names": [
+        "drone cluster",
+        "cluster"
+      ],
+      "implies": [
+        "detuned oscillators",
+        "thick drone",
+        "beating tones",
+        "stacked drone"
+      ],
+      "is": "Several oscillators tuned close together and summed, so their slight differences beat against each other.",
+      "sounds_right_when": "you hear slow beating that nobody is modulating.",
+      "source": "Standard practice; the basis of most thick analogue sounds",
+      "at_least": {
+        "audio_oscillator": 2,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "summed",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the oscillators have to be summed for their differences to beat"
+        },
+        {
+          "id": "reaches-out",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the mix has to reach the output"
+        }
+      ],
+      "behaviour": {
+        "sustained": true
+      },
+      "common_mistakes": [
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the oscillators are never summed, so nothing beats"
+        },
+        {
+          "id": "unheard",
+          "do": "cut",
+          "requirement": "reaches-out",
+          "message": "the mix never reaches the output"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "feedback-delay-texture",
+      "names": [
+        "feedback delay",
+        "delay feedback"
+      ],
+      "implies": [
+        "repeats that build",
+        "self oscillating delay",
+        "delay that feeds itself"
+      ],
+      "is": "A delay whose output returns to its own input, so repeats accumulate rather than simply decaying.",
+      "sounds_right_when": "repeats build and smear instead of fading identically.",
+      "source": "Standard practice; the tape-loop lineage",
+      "at_least": {
+        "delay": 1,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "into-delay",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "something has to feed the mixer"
+        },
+        {
+          "id": "feedback-return",
+          "from_module": "delay",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the delay's output has to return to the mixer, or the repeats never build"
+        },
+        {
+          "id": "feedback-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "delay",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
+      ],
+      "behaviour": {
+        "sustained": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-delay",
+          "message": "nothing feeds the delay"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "feedback-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "fixed-modulator-am",
+      "family": "texture",
+      "names": [
+        "fixed modulator am",
+        "enharmonic amplitude modulation"
+      ],
+      "implies": [
+        "timbre that changes as you play up the keyboard",
+        "clangorous across the range",
+        "unmusical bell tones"
+      ],
+      "is": "Amplitude modulation with the modulator held at one frequency while the carrier is played, so the sum and difference tones land at different intervals for every note and the timbre changes across the keyboard.",
+      "sounds_right_when": "low notes sound almost consonant and higher ones progressively more clangorous — the same patch, a different sound at every pitch.",
+      "source": "Synth Secrets, Part 11: Amplitude Modulation — the fixed-modulator cases",
+      "provenance": "read",
+      "anchor": {
+        "doc": "part-11.md",
+        "quote": "fixed-Modulator AM is most useful for creating aggressive and conventionally 'unmusical' sounds that change dramatically as you play up and down the keyboard"
+      },
+      "axis": {
+        "family": "am-modulator-tracking",
+        "position": "the modulator stands still while the carrier is played",
+        "set_by": "whether the playing voltage is split to the modulator as well — the one thing on this axis that IS a cable, which is why both positions can be checked",
+        "neighbours": {
+          "more": "tracking-modulator-am"
+        },
+        "$comment": "Two ways to patch one technique, with opposite musical consequences. Held still, the modulator makes the interval between the sum and difference tones a fixed number of hertz, so their RATIO to the carrier changes with every note and the timbre travels. Tracked, the ratio is constant and the timbre is not."
+      },
+      "at_least": {
+        "audio_oscillator": 2,
+        "amplifier": 1
+      },
+      "topology": [
+        {
+          "id": "carrier-through",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "the carrier has to pass through the amplifier"
+        },
+        {
+          "id": "modulates-gain",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "a second oscillator has to modulate that amplifier's gain at audio rate — below hearing this is tremolo, and the sidebands never appear"
+        },
+        {
+          "id": "carrier-is-played",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the carrier has to be played, or there is no range across which the timbre can change"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a metallic tone whose character will not hold still as you move up the keyboard: consonant in one register, harsh and bell-like a fifth higher, with no knob having moved",
+        "confusable_with": "the tracking version, which produces the same kind of tone but keeps it constant across the range. NOTHING HERE RULES THAT OUT: the difference is whether one playing voltage reaches both oscillators, and a requirement names the roles at the two ends of one cable — it cannot say 'and no OTHER cable carries this same voltage somewhere else'. So a tracking patch satisfies this idiom too, and only a listener can separate them: play an octave and hear whether the character survives the move.",
+        "expect": [
+          {
+            "field": "pitch.voiced_fraction",
+            "op": "<=",
+            "value": 0.7,
+            "why": "the sum and difference tones are enharmonic for most carrier pitches, so a pitch tracker should lose its grip for part of the run"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "no-modulator",
+          "do": "cut",
+          "requirement": "modulates-gain",
+          "message": "nothing modulates the amplifier at audio rate, so there are no sum and difference tones"
+        },
+        {
+          "id": "no-carrier",
+          "do": "cut",
+          "requirement": "carrier-through",
+          "message": "no carrier passes through the amplifier"
+        },
+        {
+          "id": "unplayed",
+          "do": "cut",
+          "requirement": "carrier-is-played",
+          "message": "nothing plays the carrier, so the changing-across-the-keyboard effect never happens"
+        }
+      ],
+      "realises": [
+        "modulation-rate-boundary"
+      ]
+    },
+    {
+      "slug": "granular-cloud",
+      "names": [
+        "granular",
+        "grain cloud"
+      ],
+      "implies": [
+        "cloud of grains",
+        "shimmering texture",
+        "granulated"
+      ],
+      "is": "A source repeatedly re-triggered into short windows, so the ear hears a cloud of fragments rather than a continuous signal.",
+      "sounds_right_when": "the texture is made of audible particles whose density can change.",
+      "source": "Roads' granular synthesis, as approximated in modular",
+      "at_least": {
+        "amplifier": 1,
+        "clock": 1
+      },
+      "topology": [
+        {
+          "id": "windowing",
+          "from_module": "envelope",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "a fast envelope has to window the source into grains"
+        },
+        {
+          "id": "grain-rate",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "something has to fire the grains repeatedly"
+        },
+        {
+          "id": "source",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "there has to be a source to granulate"
+        }
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {
+          "id": "no-windowing",
+          "do": "cut",
+          "requirement": "windowing",
+          "message": "nothing windows the source, so this is a continuous signal"
+        },
+        {
+          "id": "no-rate",
+          "do": "cut",
+          "requirement": "grain-rate",
+          "message": "nothing fires the grains"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "source",
+          "message": "there is nothing to granulate"
+        }
+      ],
+      "provenance": "canon",
+      "realises": [
+        "event-fusion-density"
+      ]
+    },
+    {
+      "slug": "karplus-strong",
+      "names": [
+        "karplus strong",
+        "plucked string"
+      ],
+      "implies": [
+        "plucked string",
+        "string sound",
+        "physical string"
+      ],
+      "is": "A burst of noise into a short filtered delay whose feedback sustains it — the delay's length becomes the pitch and the filter becomes the decay.",
+      "sounds_right_when": "you hear a pluck with a pitch, not a filtered noise burst.",
+      "source": "Karplus and Strong's plucked-string algorithm, patched",
+      "at_least": {
+        "noise": 1,
+        "delay": 1,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "excite",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "a noise burst has to enter the loop through the mixer — the delay's input takes one cable, and that one carries the sum of the burst and what is already ringing"
+        },
+        {
+          "id": "sustain-return",
+          "from_module": "delay",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the delay's output has to return, or the string does not ring"
+        },
+        {
+          "id": "sustain-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "delay",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {
+          "id": "no-excitation",
+          "do": "cut",
+          "requirement": "excite",
+          "message": "nothing excites the string"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "sustain-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "noise-texture",
+      "names": [
+        "noise texture",
+        "filtered noise"
+      ],
+      "implies": [
+        "wind",
+        "rain",
+        "hiss",
+        "atmosphere",
+        "static"
+      ],
+      "is": "Noise shaped by a moving filter, so the texture reads as weather rather than as hiss.",
+      "sounds_right_when": "the noise has a moving centre of gravity, not a fixed one.",
+      "source": "Strange's treatment of noise as a sound source",
+      "listen_for": {
+        "sounds_like": "weather rather than an instrument: broadband, continuous, with the sense of a moving band inside it and no pitch to hold onto",
+        "confusable_with": "a very bright oscillator, which has a pitch even when it is harsh",
+        "expect": [
+          {
+            "field": "pitch.voiced_fraction",
+            "op": "<=",
+            "value": 0.3,
+            "why": "noise should defeat a pitch tracker; a confidently tracked pitch means an oscillator is in the path"
+          }
+        ]
+      },
+      "at_least": {
+        "noise": 1,
+        "filter": 1
+      },
+      "topology": [
+        {
+          "id": "noise-in",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "noise has to reach the filter"
+        },
+        {
+          "id": "filter-moves",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "the filter has to move, or this is static hiss"
+        }
+      ],
+      "behaviour": {
+        "sustained": true,
+        "spectrally_varying": true
+      },
+      "common_mistakes": [
+        {
+          "id": "static-filter",
+          "do": "cut",
+          "requirement": "filter-moves",
+          "message": "the filter never moves, so this is fixed hiss"
+        },
+        {
+          "id": "no-noise",
+          "do": "cut",
+          "requirement": "noise-in",
+          "message": "no noise reaches the filter"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "reverb-wash",
+      "names": [
+        "reverb wash",
+        "wash"
+      ],
+      "implies": [
+        "big space",
+        "huge reverb",
+        "washed out",
+        "cavernous"
+      ],
+      "is": "A sustained source into a long reverb, with the dry signal well back, so the space is the subject rather than the source.",
+      "sounds_right_when": "you hear the room more than the thing in it.",
+      "source": "Standard ambient practice",
+      "at_least": {
+        "reverb": 1
+      },
+      "topology": [
+        {
+          "id": "into-reverb",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "reverb",
+          "to_port": "audio_in",
+          "describe": "something has to feed the reverb"
+        },
+        {
+          "id": "reverb-out",
+          "from_module": "reverb",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the reverb has to reach the output"
+        }
+      ],
+      "behaviour": {
+        "sustained": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-reverb",
+          "message": "nothing feeds the reverb"
+        },
+        {
+          "id": "unheard",
+          "do": "cut",
+          "requirement": "reverb-out",
+          "message": "the reverb never reaches the output"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "ring-modulated-texture",
+      "names": [
+        "ring modulation",
+        "ring mod"
+      ],
+      "implies": [
+        "clangorous",
+        "inharmonic",
+        "bell like",
+        "metallic texture"
+      ],
+      "is": "Two audio signals multiplied, producing sums and differences that rarely belong to either — inharmonic by construction.",
+      "sounds_right_when": "the result is bell-like or clangorous rather than a chord.",
+      "source": "Patch & Tweak (Bjørn & Meyer), on ring modulation as a source of metallic timbre",
+      "listen_for": {
+        "sounds_like": "clangorous and unresolved, the two source pitches replaced by tones that belong to neither — move either source and the result moves in a direction that feels wrong",
+        "confusable_with": "amplitude modulation, where the original note survives underneath; if you can still hear the carrier, the multiplier is not balanced"
+      },
+      "axis": {
+        "family": "amplitude-modulation-rate",
+        "position": "at audio rate, heard as sum and difference tones",
+        "set_by": "the modulator's rate — a knob; both positions on this axis patch a source into an amplifier's control input",
+        "neighbours": {
+          "less": "tremolo"
+        },
+        "$comment": "Two things this axis deliberately does NOT split. Below hearing the same patch is tremolo, which is the neighbour above. And amplitude modulation proper -- where the carrier survives -- differs from ring modulation, where it is cancelled, only in whether the multiplier removes the DC offset from its inputs first: an AC-coupled multiplier outputs the sum and difference tones and neither input, a DC-coupled one lets the inputs through as well. That is a property of the module's internals, not of any cable, so no checker reading a patch can tell them apart and there is no second record pretending otherwise. A listener can: if you can still hear the original note underneath, the multiplier is passing it."
+      },
+      "at_least": {
+        "audio_oscillator": 2
+      },
+      "topology": [
+        {
+          "id": "carrier",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "one signal has to be the carrier"
+        },
+        {
+          "id": "modulator",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "the other has to modulate it at audio rate"
+        }
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {
+          "id": "no-modulator",
+          "do": "cut",
+          "requirement": "modulator",
+          "message": "nothing modulates at audio rate, so there are no sidebands"
+        },
+        {
+          "id": "no-carrier",
+          "do": "cut",
+          "requirement": "carrier",
+          "message": "no carrier passes through"
+        }
+      ],
+      "provenance": "read",
+      "anchor": {
+        "doc": "patch-tweak-reading-order.txt",
+        "quote": "through a ring modulator, as shown here, messes with the shell tone, turning wooden con- gas into metal timbales"
+      },
+      "realises": [
+        "modulation-rate-boundary"
+      ]
+    },
+    {
+      "slug": "shimmer",
+      "names": [
+        "shimmer"
+      ],
+      "implies": [
+        "pitch shifted reverb",
+        "rising sparkle",
+        "octave up reverb"
+      ],
+      "is": "A reverb whose feedback path is pitch-shifted upward, so the tail rises as it decays.",
+      "sounds_right_when": "the tail climbs in pitch instead of merely fading.",
+      "source": "Standard practice, after the Eno/Lanois studio technique",
+      "at_least": {
+        "reverb": 1,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "into-reverb",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "something has to feed the mixer"
+        },
+        {
+          "id": "feedback-return",
+          "from_module": "reverb",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the reverb tail has to return, or the shift never accumulates"
+        },
+        {
+          "id": "feedback-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "reverb",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
+      ],
+      "behaviour": {
+        "sustained": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-reverb",
+          "message": "nothing feeds the reverb"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "feedback-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "tracking-modulator-am",
+      "family": "texture",
+      "names": [
+        "tracking modulator am",
+        "keyboard tracked ring tone"
+      ],
+      "implies": [
+        "inharmonic timbre that plays in tune",
+        "metallic but playable",
+        "clangorous voice that transposes"
+      ],
+      "is": "Amplitude modulation with the playing voltage split so that carrier and modulator move together, so the sum and difference tones keep a constant ratio to the carrier and one inharmonic timbre transposes across the keyboard.",
+      "sounds_right_when": "the sound is clangorous and yet plays like an instrument — the same character at every pitch.",
+      "source": "Synth Secrets, Part 11: Amplitude Modulation — the tracking-modulator case",
+      "provenance": "read",
+      "anchor": {
+        "doc": "part-11.md",
+        "quote": "the relationships between the Difference, Carrier and Sum remain constant if both the Carrier and the Modulator track the keyboard equally"
+      },
+      "axis": {
+        "family": "am-modulator-tracking",
+        "position": "the modulator is played alongside the carrier",
+        "set_by": "whether the playing voltage is split to the modulator as well — the one thing on this axis that IS a cable, which is why both positions can be checked",
+        "neighbours": {
+          "less": "fixed-modulator-am"
+        },
+        "$comment": "The split is the whole difference. Tracked, the sidebands sit at fixed percentages of the carrier and the timbre transposes; held still, they do not and it does not."
+      },
+      "at_least": {
+        "audio_oscillator": 2,
+        "amplifier": 1,
+        "multiple": 1
+      },
+      "topology": [
+        {
+          "id": "split-the-pitch",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "multiple",
+          "to_port": "any_in",
+          "describe": "the playing voltage has to be split, because it has to reach two oscillators"
+        },
+        {
+          "id": "plays-the-carrier",
+          "from_module": "multiple",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "one copy plays the carrier"
+        },
+        {
+          "id": "plays-the-modulator",
+          "from_module": "multiple",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "the modulator has to be played by the SAME voltage — that is what keeps the sidebands at a constant ratio to the carrier"
+        },
+        {
+          "id": "carrier-through",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "the carrier has to pass through the amplifier"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a bell or gong that can be played as an instrument: unmistakably inharmonic, and identical in character whether you play it low or high",
+        "confusable_with": "the fixed-modulator version, which changes character across the range; the test is to play an octave and hear whether the timbre survives the move"
+      },
+      "common_mistakes": [
+        {
+          "id": "modulator-not-played",
+          "do": "cut",
+          "requirement": "plays-the-modulator",
+          "message": "the modulator is not played, so the timbre changes with every note instead of transposing"
+        },
+        {
+          "id": "carrier-not-played",
+          "do": "cut",
+          "requirement": "plays-the-carrier",
+          "message": "the carrier is not played"
+        },
+        {
+          "id": "unsplit",
+          "do": "cut",
+          "requirement": "split-the-pitch",
+          "message": "the playing voltage is never split, so it cannot reach both oscillators"
+        },
+        {
+          "id": "no-carrier",
+          "do": "cut",
+          "requirement": "carrier-through",
+          "message": "no carrier passes through the amplifier"
+        }
+      ],
+      "realises": [
+        "modulation-rate-boundary"
+      ]
+    },
+    {
+      "slug": "wavefolded-texture",
+      "names": [
+        "wavefolding",
+        "wavefolder texture"
+      ],
+      "implies": [
+        "fold the wave",
+        "harmonically rich",
+        "add harmonics by folding"
+      ],
+      "is": "A simple waveform driven into a folder, where increasing level adds harmonics rather than volume.",
+      "sounds_right_when": "pushing the drive makes it brighter and busier rather than louder.",
+      "source": "West-coast practice; the folder as a harmonic generator",
+      "at_least": {
+        "waveshaper": 1
+      },
+      "topology": [
+        {
+          "id": "into-folder",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "waveshaper",
+          "to_port": "audio_in",
+          "describe": "a waveform has to reach the folder"
+        },
+        {
+          "id": "drive-moves",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "waveshaper",
+          "to_port": "cv_in",
+          "describe": "the fold amount has to move, or the texture is fixed"
+        }
+      ],
+      "behaviour": {
+        "spectrally_varying": true
+      },
+      "common_mistakes": [
+        {
+          "id": "static-fold",
+          "do": "cut",
+          "requirement": "drive-moves",
+          "message": "the fold amount never moves, so the texture is fixed"
+        },
+        {
+          "id": "nothing-folded",
+          "do": "cut",
+          "requirement": "into-folder",
+          "message": "nothing reaches the folder"
+        }
+      ],
+      "provenance": "canon"
+    }
+  ]
+}

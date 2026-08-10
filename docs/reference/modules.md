@@ -850,7 +850,8 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
-| Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions. Reed excitation and whole-loop oversampling are separate composition work. |
+| Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions; these are composable building blocks, not a complete instrument loop. |
+| Reed exciter | `waveguide_reed_exciter.hpp` | Bounded, allocation-free single-reed valve primitive for waveguide compositions; it does not own oversampling or the recursive loop. |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
@@ -890,6 +891,7 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Modal Bank | `modal_bank.hpp` | SIMD-friendly bank of coupled-form modes with contact-pulse excitation, independent strike/pickup weights, amplitude-preserving retuning, and up to eight pickup outputs |
+| Reed waveguide loop | `reed_waveguide_loop.hpp` | Public fixed-topology single-reed instrument owner: composes the reed, waveguide, bell reflection, and whole-loop 1x/2x/4x oversampling with physical one-way-time tuning |
 | Particle percussion | `particle_collision_exciter.hpp`, `particle_percussion_voice.hpp` | Deterministic, depletion-aware collision excitation with selectable shaker, maraca, rattle, and tambourine models; zero-latency prepared voice rendering |
 | Modal Specification | `modal_spec.hpp` | Versioned JSON interchange for modal frequencies, T60 values, amplitudes, and optional shapes, with bounded validation before allocation |
 | Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
@@ -946,6 +948,7 @@ hidden graph ownership or Forge integration claim.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Spectral Frame Engine | `spectral_frame_engine.hpp` | Streaming STFT analysis + overlap-add synthesis with coherent multichannel frame groups and variable synthesis hop |
+| Spectral Mask Processor | `spectral_mask_processor.hpp` | Zoomable 1–64-band streaming isolation with exact categorical mute, race-free frame-boundary publication, gain interpolation, exact latency reporting, and a latency-aligned dry path |
 | Realtime Pitch/Time | `realtime_pitch_time_processor.hpp` | Phase-vocoder pitch shifting (fixed duration, exact reported latency) and independent time stretching, with transient preservation, formant follow/preserve, and freeze |
 | Phase Coordinator | `multichannel_phase_coordinator.hpp` | Laroche-Dolson phase propagation with identity peak locking, applied as one rotation per bin across a channel group — preserves inter-channel phase exactly |
 | Source-filter Analysis | `source_filter_analysis.hpp` | Prepared cepstral and true-envelope analysis plus safely scaled autocorrelation LPC, reflection coefficients, Schur stability, and all-pole response; formant extraction remains explicitly unsupported |
@@ -955,6 +958,44 @@ hidden graph ownership or Forge integration claim.
 | Pitched Feedback Delay | `pitched_feedback_delay.hpp` | Delay with a latency-bearing processor inside the feedback loop, tempo sync, freeze-aware feedback gating, and a computed minimum delay |
 | Control Smoother | `latency_aware_control_smoother.hpp` | Closed-form one-pole smoothing with attack/release asymmetry, semitone/ratio domains, block-size-independent trajectories |
 | Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Blackman-Harris, Blackman-Nuttall, flat-top, and Kaiser windows for FFT analysis |
+
+`SpectralMaskProcessor` is the ready-to-compose streaming owner for
+`SpectralBandLayout`. `prepare()` fixes FFT, hop, channel, block, and latency
+capacities off the audio thread. Control code publishes complete layouts or
+precompiled tables; the single chronological audio owner adopts only the latest
+complete table at a frame boundary. The default is fully wet. Any dry signal is
+delayed by the exact WOLA latency before mixing, so a partial mix cannot leak an
+early copy around the isolation mask.
+
+```cpp
+#include <pulp/signal/spectral_mask_processor.hpp>
+
+pulp::signal::SpectralMaskProcessor processor;
+pulp::signal::SpectralMaskProcessorConfig config;
+config.frame = {.fft_size = 2048, .analysis_hop = 512,
+                .channels = 2, .max_block = 1024};
+config.sample_rate = 48000.0f;
+if (!processor.prepare(config))
+    return;
+
+pulp::signal::SpectralBandLayout islands;
+islands.active_bands = 32;
+islands.min_hz = 250.0f;
+islands.max_hz = 4000.0f;
+for (auto& band : islands.bands) band.muted = true;
+islands.bands[2].muted = false;
+islands.bands[15].muted = false;
+islands.bands[27].muted = false;
+if (!processor.publish_layout(islands))
+    return;
+
+if (!processor.process(input, output, num_samples))
+    return;
+```
+
+The installed-SDK compile/link/run example at
+`tools/validation/sdk-smoke/spectral_mask_processor_probe.cpp` exercises stereo
+nonadjacent islands followed by exact total mute through `find_package(Pulp)`.
 
 #### Math and utilities
 

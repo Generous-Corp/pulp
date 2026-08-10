@@ -1,0 +1,16 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "ForgeModular",
+   "model": "PULSEARC",
+   "pos": [
+    0,
+    0
+   ],
+   "params": []
+  }
+ ],
+ "cables": []
+}

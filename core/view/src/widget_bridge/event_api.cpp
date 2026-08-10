@@ -36,6 +36,20 @@ std::string point_payload(const View* owner, Point local) {
            "offsetY:" + std::to_string(local.y);
 }
 
+std::string wheel_payload(const MouseEvent& event) {
+    return std::string{"{"} +
+           "deltaX:" + std::to_string(event.scroll_delta_x) + "," +
+           "deltaY:" + std::to_string(event.scroll_delta_y) + "," +
+           "clientX:" + std::to_string(event.window_position.x) + "," +
+           "clientY:" + std::to_string(event.window_position.y) + "," +
+           "ctrlKey:" + (event.isCtrlDown() ? "true" : "false") + "," +
+           "shiftKey:" + (event.isShiftDown() ? "true" : "false") + "," +
+           "altKey:" + (event.isAltDown() ? "true" : "false") + "," +
+           "metaKey:" + ((event.isCmdDown() || event.isMetaDown())
+                              ? "true" : "false") +
+           "}";
+}
+
 void dispatch_gesture_js(const std::shared_ptr<BridgeCallbackState>& alive,
                          ScriptEngine* engine,
                          const std::string& id,
@@ -536,23 +550,17 @@ void BridgeRegistrars::register_wheel_event_api(WidgetBridge& self) {
             auto* w = it->second.view;
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
-            auto previous_pointer = w->on_pointer_event;
-            w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
-                BridgeCallbackScope scope(alive);
-                if (previous_pointer) {
-                    previous_pointer(me);
-                }
-                if (!me.is_wheel) {
-                    return;
-                }
-                std::string data = "{"
-                    "deltaX:" + std::to_string(me.scroll_delta_x) + ","
-                    "deltaY:" + std::to_string(me.scroll_delta_y) + ","
-                    "clientX:" + std::to_string(me.window_position.x) + ","
-                    "clientY:" + std::to_string(me.window_position.y) +
-                    "}";
-                dispatch_event(alive, engine, id, "wheel", data);
-            };
+            w->on_dom_wheel_event =
+                [alive, engine, id](const MouseEvent& me, bool is_dom_origin) {
+                    BridgeCallbackScope scope(alive);
+                    if (is_dom_origin) {
+                        dispatch_event(alive, engine, id, "wheel",
+                                       wheel_payload(me));
+                    } else {
+                        dispatch_callback_only(alive, engine, id, "wheel",
+                                               wheel_payload(me));
+                    }
+                };
         }
         return choc::value::Value();
     });

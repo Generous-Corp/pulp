@@ -1,0 +1,176 @@
+{
+  "modules": [
+    {
+      "slug": "SEQ",
+      "name": "SEQ",
+      "description": "8-step CV and gate sequencer",
+      "tags": [
+        "Sequencer"
+      ],
+      "hp": 12,
+      "params": [
+        {
+          "id": 0,
+          "ident": "STEP1_PARAM",
+          "name": "Step 1",
+          "label": "1",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 17.068800000000003,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 1,
+          "ident": "STEP2_PARAM",
+          "name": "Step 2",
+          "label": "2",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 17.068800000000003,
+          "y_mm": 46,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 2,
+          "ident": "STEP3_PARAM",
+          "name": "Step 3",
+          "label": "3",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 17.068800000000003,
+          "y_mm": 64,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 3,
+          "ident": "STEP4_PARAM",
+          "name": "Step 4",
+          "label": "4",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 17.068800000000003,
+          "y_mm": 82,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 4,
+          "ident": "STEP5_PARAM",
+          "name": "Step 5",
+          "label": "5",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 43.8912,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 5,
+          "ident": "STEP6_PARAM",
+          "name": "Step 6",
+          "label": "6",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 43.8912,
+          "y_mm": 46,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 6,
+          "ident": "STEP7_PARAM",
+          "name": "Step 7",
+          "label": "7",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 43.8912,
+          "y_mm": 64,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 7,
+          "ident": "STEP8_PARAM",
+          "name": "Step 8",
+          "label": "8",
+          "unit": " V",
+          "min_value": -2.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 43.8912,
+          "y_mm": 82,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CLOCK_INPUT",
+          "name": "Clock",
+          "label": "CLK",
+          "role": "Clock",
+          "x_mm": 10.9728,
+          "y_mm": 108
+        },
+        {
+          "id": 1,
+          "ident": "RESET_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 23.7744,
+          "y_mm": 108
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "CV_OUTPUT",
+          "name": "Pitch CV (1V/oct)",
+          "label": "CV",
+          "role": "Pitch",
+          "x_mm": 37.1856,
+          "y_mm": 108
+        },
+        {
+          "id": 1,
+          "ident": "GATE_OUTPUT",
+          "name": "Gate",
+          "label": "GATE",
+          "role": "Gate",
+          "x_mm": 49.987199999999994,
+          "y_mm": 108
+        }
+      ],
+      "lights": []
+    }
+  ]
+}

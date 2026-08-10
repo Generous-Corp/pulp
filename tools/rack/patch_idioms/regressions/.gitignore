@@ -1,0 +1,13 @@
+# Output of `prove_idioms.sh` — a fresh run per machine, not a fixture.
+#
+# Scoped to exactly the two paths that script writes, NOT a glob, because the
+# checked-in regression fixtures beside them are `.vcv` and `.txt` too
+# (`krell-through-a-mult.vcv`, `dozen-prompt-run.txt`, `vendor_ports.json`).
+# A pattern like `*.txt` here would ignore a fixture somebody meant to add.
+#
+# These are ignored rather than deleted because a run's transcripts are worth
+# reading while you are working on the idioms; they are just not worth
+# committing, and 85 untracked files in a repo whose standing rule is "never
+# `git add -A` here" is one absent-minded command away from being committed.
+idiom-proof.txt
+idiom-proof-logs/

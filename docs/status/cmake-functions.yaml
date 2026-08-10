@@ -226,4 +226,3 @@ functions:
     summary: POST_BUILD check that a target's runtime sidecars actually landed beside the built binary.
     required:
       - target
-

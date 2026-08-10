@@ -483,6 +483,7 @@ private:
 /// Scroll bars animate: fade in and widen on hover, fade out when idle.
 class ScrollView : public View {
 public:
+    ScrollView() { mark_runtime_view_kind(RuntimeViewKind::scroll); }
     enum class Direction { vertical, horizontal, both };
 
     void set_direction(Direction d) { direction_ = d; }

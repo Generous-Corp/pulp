@@ -579,6 +579,13 @@ re-registrations across `WidgetBridge` (function, host-object, and
 promise-function names) and is the cheapest tripwire if a split-up
 registration module forgets the contract.
 
+### Native events must have one DOM fan-out owner
+
+When an element event is delivered through the shared `__dispatch__` path, its
+per-event registration callback should only keep the native channel alive. Do
+not dispatch the same DOM event there too: one wheel tick will otherwise reach
+every listener twice even though engine-specific tests may still look healthy.
+
 ## ESM support per engine
 
 | Engine | Public ESM API | Status |

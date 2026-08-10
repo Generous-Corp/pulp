@@ -27,6 +27,8 @@ class CombinedInstallerTest(unittest.TestCase):
         apps: list[tuple[str, str]] | None = None,
         grouped_apps: list[tuple[str, str, str]] | None = None,
         product_titles: list[tuple[str, str]] | None = None,
+        scripted_apps: set[str] | None = None,
+        architectures: str | None = None,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -34,6 +36,7 @@ class CombinedInstallerTest(unittest.TestCase):
             fake_bin.mkdir()
             capture = tmp / "distribution.xml"
             relocation_capture = tmp / "app-relocation.txt"
+            pkg_argv_capture = tmp / "pkgbuild-argv.txt"
             output = tmp / "out"
 
             self._write_tool(fake_bin, "codesign", "exit 0\n")
@@ -47,6 +50,8 @@ class CombinedInstallerTest(unittest.TestCase):
             self._write_tool(
                 fake_bin,
                 "pkgbuild",
+                'printf "BEGIN\\n" >> "$CAPTURE_PKG_ARGV"\n'
+                'printf "%s\\n" "$@" >> "$CAPTURE_PKG_ARGV"\n'
                 'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\n'
                 'for arg in "$@"; do\n'
                 '  if [[ "$want_component_plist" == 1 ]]; then component_plist="$arg"; want_component_plist=0; fi\n'
@@ -106,6 +111,8 @@ class CombinedInstallerTest(unittest.TestCase):
                 str(output),
                 "--no-notarize",
             ]
+            if architectures:
+                args.extend(("--architectures", architectures))
             for plugin_name, kind in plugins:
                 suffix = {"au": "component", "vst3": "vst3", "clap": "clap"}[kind]
                 bundle = tmp / f"{plugin_name}.{suffix}"
@@ -115,11 +122,25 @@ class CombinedInstallerTest(unittest.TestCase):
                 bundle = tmp / f"{app_name}.app"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--app", title, str(bundle)))
+                if title in (scripted_apps or set()):
+                    scripts = tmp / f"{title}-scripts"
+                    scripts.mkdir()
+                    hook = scripts / "postinstall"
+                    hook.write_text("#!/bin/bash\nexit 0\n")
+                    hook.chmod(0o755)
+                    args.extend(("--app-scripts", title, str(scripts)))
             # Apps nested under a product group, which are also forced on.
             for group, title, app_name in grouped_apps or []:
                 bundle = tmp / f"{app_name}.app"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--app-for", group, title, str(bundle)))
+                if title in (scripted_apps or set()):
+                    scripts = tmp / f"{title}-scripts"
+                    scripts.mkdir()
+                    hook = scripts / "postinstall"
+                    hook.write_text("#!/bin/bash\nexit 0\n")
+                    hook.chmod(0o755)
+                    args.extend(("--app-scripts", title, str(scripts)))
             for bundle_name, title in product_titles or []:
                 args.extend(("--product-title", bundle_name, title))
 
@@ -129,6 +150,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "TMPDIR": str(tmp),
                 "CAPTURE_XML": str(capture),
                 "CAPTURE_APP_RELOCATION": str(relocation_capture),
+                "CAPTURE_PKG_ARGV": str(pkg_argv_capture),
                 "PULP_SKIP_SIGNING_PREFLIGHT": "1",
             }
             completed = subprocess.run(
@@ -153,6 +175,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 relocation_capture.read_text()
                 if relocation_capture.is_file()
                 else ""
+            )
+            self._last_pkgbuild_argv = (
+                pkg_argv_capture.read_text() if pkg_argv_capture.is_file() else ""
             )
             return capture.read_text(), relocation
 
@@ -222,6 +247,33 @@ class CombinedInstallerTest(unittest.TestCase):
 
         self.assertIn("Fixture.app.pkg", xml)
         self.assertEqual(relocation.splitlines(), ["false", "false"])
+
+    def test_an_app_component_passes_scripts_without_distribution_javascript(self) -> None:
+        xml, relocation = self._run_installer(
+            [],
+            [("Forge Modular", "Forge Modular")],
+            scripted_apps={"Forge Modular"},
+        )
+
+        argv = self._last_pkgbuild_argv.splitlines()
+        self.assertIn("--scripts", argv)
+        scripts_dir = argv[argv.index("--scripts") + 1]
+        self.assertTrue(scripts_dir.endswith("/Forge Modular-scripts"), scripts_dir)
+        self.assertNotIn("Modular-scripts", argv)
+        self.assertIn('require-scripts="false"', xml)
+        self.assertEqual(relocation.splitlines(), ["false", "false"])
+
+    def test_an_app_without_scripts_keeps_scripts_disabled(self) -> None:
+        xml, _ = self._run_installer([], [("Fixture", "Fixture")])
+
+        self.assertNotIn("--scripts", self._last_pkgbuild_argv.splitlines())
+        self.assertIn('require-scripts="false"', xml)
+
+    def test_intel_installer_declares_x86_64_host_support(self) -> None:
+        xml, _ = self._run_installer([], [("Fixture", "Fixture")],
+                                     architectures="x86_64")
+
+        self.assertIn('hostArchitectures="x86_64"', xml)
 
 
 if __name__ == "__main__":

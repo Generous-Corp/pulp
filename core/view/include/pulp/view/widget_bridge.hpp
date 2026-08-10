@@ -657,7 +657,7 @@ private:
     void unregister_global_dispatch(const DeadlineCheck& deadline_check);
     std::vector<BridgeWidgetState> foreign_owned_widget_states() const;
     void begin_root_quarantine() noexcept;
-    void end_root_quarantine() noexcept;
+    void end_root_quarantine();
     void invalidate_cached_subtrees_everywhere(
         const std::vector<View*>& nodes,
         const DeadlineCheck& deadline_check = {});

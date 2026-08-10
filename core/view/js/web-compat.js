@@ -786,9 +786,9 @@ Element.prototype._registerNativeEvent = function(type) {
         });
     } else if (type === "wheel") {
         if (typeof registerWheel === "function") registerWheel(id);
-        on(id, "wheel", function(dx, dy) {
-            self.dispatchEvent(_makeEvent("wheel", self, { deltaX: dx || 0, deltaY: dy || 0 }));
-        });
+        // The generic __dispatch__ element fan-out owns DOM delivery. This
+        // callback only keeps the native wheel channel registered.
+        on(id, "wheel", function() {});
     } else if (type === "scroll") {
         on(id, "scroll", function() {
             self.dispatchEvent(_makeEvent("scroll", self));

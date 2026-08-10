@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/audio_bridge.hpp>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::view;
@@ -134,13 +135,13 @@ TEST_CASE("MeterBallistics smooth response", "[view][bridge]") {
     REQUIRE_THAT(ballistics.display_peak, WithinAbs(0.0, 0.001));
 
     // Feed a sudden peak
-    ballistics.update(0.8f, 0.3f, 1.0f / 60.0f); // 60fps frame time
+    (void) ballistics.update(0.8f, 0.3f, 1.0f / 60.0f); // 60fps frame time
     REQUIRE(ballistics.display_peak > 0); // Should have moved toward 0.8
 
     // Feed silence — should decay slowly
     float prev = ballistics.display_peak;
     for (int i = 0; i < 10; ++i) {
-        ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
+        (void) ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
     }
     REQUIRE(ballistics.display_peak < prev);
     REQUIRE(ballistics.display_peak > 0); // Should not have reached zero yet
@@ -150,18 +151,18 @@ TEST_CASE("MeterBallistics peak hold", "[view][bridge]") {
     MeterBallistics ballistics;
 
     // Hit a peak
-    ballistics.update(0.9f, 0.5f, 1.0f / 60.0f);
+    (void) ballistics.update(0.9f, 0.5f, 1.0f / 60.0f);
     REQUIRE_THAT(ballistics.held_peak, WithinAbs(0.9, 0.001));
 
     // Feed silence for less than hold time — peak should stay held
     for (int i = 0; i < 30; ++i) { // 0.5 seconds at 60fps
-        ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
+        (void) ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
     }
     REQUIRE_THAT(ballistics.held_peak, WithinAbs(0.9, 0.001)); // Still held
 
     // Feed silence past hold time — peak should start decaying
     for (int i = 0; i < 120; ++i) { // 2 more seconds
-        ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
+        (void) ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
     }
     REQUIRE(ballistics.held_peak < 0.9f); // Should have decayed
 }
@@ -172,8 +173,69 @@ TEST_CASE("MeterBallistics releases tiny values to exact zero",
 
     ballistics.display_peak = 5e-7f;
     ballistics.display_rms = 4e-7f;
-    ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
+    (void) ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
 
     REQUIRE(ballistics.display_peak == 0.0f);
     REQUIRE(ballistics.display_rms == 0.0f);
+}
+
+// ── The idle-gate contract on MeterBallistics ────────────────────────────────
+// The ballistics own the "did anything the user can see move" question, so a
+// widget cannot get it subtly wrong by snapshotting the wrong set of fields.
+// A meter is polled every frame for as long as it is bound, so anything that
+// keeps this returning true through silence pins a host's render loop at the
+// display refresh rate for the life of the process.
+
+TEST_CASE("MeterBallistics reports movement and then goes quiet",
+          "[view][bridge][idle-gate]") {
+    pulp::view::MeterBallistics b;
+    constexpr float dt = 1.0f / 60.0f;
+
+    // Control: the report must be capable of saying yes, or "no movement"
+    // below would prove nothing.
+    REQUIRE(b.update(0.9f, 0.6f, dt));
+
+    // Ten seconds of silence — far past the 1.5 s hold and the 0.3 s release.
+    for (int i = 0; i < 600; ++i) (void) b.update(0.0f, 0.0f, dt);
+
+    // Everything the meter draws has arrived at rest, exactly.
+    CHECK(b.display_peak == 0.0f);
+    CHECK(b.display_rms == 0.0f);
+    CHECK(b.held_peak == 0.0f);
+    // The hold counter is floored rather than counting down without bound.
+    CHECK(b.hold_counter >= 0.0f);
+
+    // And now it reports nothing, for as long as you care to ask.
+    for (int i = 0; i < 600; ++i)
+        CHECK_FALSE(b.update(0.0f, 0.0f, dt));
+
+    // A real level still gets through on the very next frame.
+    CHECK(b.update(0.5f, 0.4f, dt));
+}
+
+// ONE NaN MUST NOT DISABLE THE GATE FOREVER. A non-finite sample poisons the
+// display value, survives the noise-floor snaps (every comparison against NaN
+// is false), and then compares unequal to itself on every subsequent frame — so
+// an unguarded gate reports movement for the rest of the process from a single
+// bad sample. That is the infinite-repaint bug, made permanent.
+TEST_CASE("MeterBallistics survives a non-finite sample",
+          "[view][bridge][idle-gate]") {
+    pulp::view::MeterBallistics b;
+    constexpr float dt = 1.0f / 60.0f;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    (void) b.update(nan, nan, dt);
+    CHECK(std::isfinite(b.display_peak));
+    CHECK(std::isfinite(b.display_rms));
+
+    (void) b.update(inf, inf, dt);
+    CHECK(std::isfinite(b.display_peak));
+
+    // Back to silence: it must settle like any other meter rather than
+    // reporting movement forever.
+    for (int i = 0; i < 600; ++i) (void) b.update(0.0f, 0.0f, dt);
+    CHECK(b.display_peak == 0.0f);
+    for (int i = 0; i < 120; ++i)
+        CHECK_FALSE(b.update(0.0f, 0.0f, dt));
 }

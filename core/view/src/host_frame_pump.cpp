@@ -79,7 +79,14 @@ HostFrameTick begin_host_frame(View* root, FrameClock& clock, HostFramePump& pum
     // is reflected in this tick's decision.
     clock.pump_activity(tick.dt);
 
-    tick.continuous = needs_continuous_frames(root) || clock.has_active_subscribers();
+    // The O(1) question first. `has_active_subscribers` is a scan of one small
+    // vector; `needs_continuous_frames` walks the ENTIRE view tree, asking every
+    // node. Both are pure, so the order is free to choose — and this is the one
+    // place every host render loop passes through, on every dispatched vsync,
+    // including the idle ones that go on to render nothing. Asking the expensive
+    // question first walked the whole tree on every frame of every animation,
+    // when a live subscriber had already settled the answer.
+    tick.continuous = clock.has_active_subscribers() || needs_continuous_frames(root);
     tick.should_render = needs_repaint || tick.continuous;
     return tick;
 }

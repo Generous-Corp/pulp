@@ -1,0 +1,67 @@
+{
+  "modules": [
+    {
+      "slug": "ATTEN",
+      "name": "AT",
+      "description": "Attenuator: scales a CV or audio signal from silence to unity, normalled to 10 V as a manual voltage source.",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Polyphonic"
+      ],
+      "hp": 2,
+      "poly_follows": "IN_INPUT",
+      "params": [
+        {
+          "id": 0,
+          "ident": "ATT_PARAM",
+          "name": "Amount",
+          "label": "AMT",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "KnobSmall",
+          "x_mm": 5.08,
+          "y_mm": 30.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Signal in",
+          "label": "IN",
+          "role": "Cv",
+          "x_mm": 5.08,
+          "y_mm": 60.0,
+          "normal_volts": 10.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Attenuated out",
+          "label": "OUT",
+          "role": "Cv",
+          "x_mm": 5.08,
+          "y_mm": 90.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "LVL_LIGHT",
+          "name": "Level",
+          "label": "",
+          "x_mm": 5.08,
+          "y_mm": 108.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

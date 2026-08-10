@@ -910,3 +910,10 @@ effect until raster `background-image: url(...)` paint is wired.
    to plain `baseline`; `last baseline` is intentionally unsupported
    because
    it requires baseline-set tracking that Yoga does not implement.
+
+## Shared WidgetBridge lifecycle note
+
+The bridge now has one owner for DOM wheel-event fan-out and restores root
+visibility before scheduling the repaint that ends realm quarantine. These are
+event/reload lifecycle fixes for CSS-backed widget trees; they do not add or
+reclassify any CSS property in the compatibility matrix.
