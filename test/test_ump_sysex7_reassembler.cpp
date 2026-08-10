@@ -342,6 +342,61 @@ TEST_CASE("UmpSysex7Reassembler: reserve() does not change state",
     REQUIRE(r.partial_size() == 0);
 }
 
+TEST_CASE("UmpSysex7Reassembler: interleaved instances keep streams isolated",
+          "[midi][ump][sysex7][stream-isolation]") {
+    UmpSysex7Reassembler first;
+    UmpSysex7Reassembler second;
+    EmitSink first_sink;
+    EmitSink second_sink;
+
+    REQUIRE(first.feed_packet(make_word0(0x1, 2, 0x11, 0x12), 0,
+                              capture, &first_sink) == Status::start);
+    REQUIRE(first.in_progress());
+    REQUIRE(first.partial_size() == 2);
+
+    REQUIRE(second.feed_packet(make_word0(0x1, 2, 0x21, 0x22), 0,
+                               capture, &second_sink) == Status::start);
+    REQUIRE(second.in_progress());
+    REQUIRE(second.partial_size() == 2);
+    REQUIRE(first.partial_size() == 2);
+
+    REQUIRE(first.feed_packet(make_word0(0x2, 1, 0x13), 0,
+                              capture, &first_sink) == Status::continued);
+    REQUIRE(second.feed_packet(make_word0(0x2, 2, 0x23, 0x24), 0,
+                               capture, &second_sink) == Status::continued);
+    REQUIRE(first.partial_size() == 3);
+    REQUIRE(second.partial_size() == 4);
+
+    REQUIRE(second.feed_packet(make_word0(0x3, 1, 0x25), 0,
+                               capture, &second_sink) == Status::ended);
+    REQUIRE_FALSE(second.in_progress());
+    REQUIRE(second.partial_size() == 0);
+    REQUIRE(first.in_progress());
+    REQUIRE(first.partial_size() == 3);
+    REQUIRE((second_sink.sysex == std::vector<std::vector<std::uint8_t>>{
+        {0x21, 0x22, 0x23, 0x24, 0x25},
+    }));
+
+    REQUIRE(first.feed_packet(make_word0(0x3, 1, 0x14), 0,
+                              capture, &first_sink) == Status::ended);
+    REQUIRE_FALSE(first.in_progress());
+    REQUIRE(first.partial_size() == 0);
+    REQUIRE((first_sink.sysex == std::vector<std::vector<std::uint8_t>>{
+        {0x11, 0x12, 0x13, 0x14},
+    }));
+
+    REQUIRE(first.feed_packet(make_word0(0x1, 1, 0x31), 0,
+                              capture, &first_sink) == Status::start);
+    REQUIRE(second.feed_packet(make_word0(0x1, 1, 0x41), 0,
+                               capture, &second_sink) == Status::start);
+    REQUIRE(first.feed_packet(make_word0(0x3, 1, 0x32), 0,
+                              capture, &first_sink) == Status::ended);
+    REQUIRE(second.feed_packet(make_word0(0x3, 1, 0x42), 0,
+                               capture, &second_sink) == Status::ended);
+    REQUIRE((first_sink.sysex[1] == std::vector<std::uint8_t>{0x31, 0x32}));
+    REQUIRE((second_sink.sysex[1] == std::vector<std::uint8_t>{0x41, 0x42}));
+}
+
 TEST_CASE("UmpSysex7Reassembler: reserved hot path is allocation-free",
           "[midi][ump][sysex7][rt-safety]") {
     UmpSysex7Reassembler r;
