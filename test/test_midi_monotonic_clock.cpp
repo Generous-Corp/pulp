@@ -73,3 +73,30 @@ TEST_CASE("MonotonicMidiClock re-reset rebases to a new origin",
     REQUIRE(c.seconds_since_open(t0 + std::chrono::seconds(5)) ==
             Catch::Approx(2.0).epsilon(1e-9));
 }
+
+TEST_CASE("MonotonicMidiClock keeps independent origins for multiple ports",
+          "[midi][timestamp][port-isolation]") {
+    MonotonicMidiClock first;
+    MonotonicMidiClock second;
+    const auto first_open = Clock::time_point{} + std::chrono::seconds(100);
+    const auto second_open = Clock::time_point{} + std::chrono::seconds(1000);
+
+    first.reset(first_open);
+    second.reset(second_open);
+    REQUIRE(first.has_base());
+    REQUIRE(second.has_base());
+    REQUIRE(first.seconds_since_open(first_open + std::chrono::seconds(2)) == 2.0);
+    REQUIRE(second.seconds_since_open(second_open + std::chrono::seconds(3)) == 3.0);
+
+    // Reopening the second port must not move the first port's origin.
+    const auto second_reopen = Clock::time_point{} + std::chrono::seconds(2000);
+    second.reset(second_reopen);
+    REQUIRE(first.seconds_since_open(first_open + std::chrono::seconds(3)) == 3.0);
+    REQUIRE(second.seconds_since_open(second_reopen + std::chrono::seconds(4)) == 4.0);
+
+    // And the inverse direction must be equally isolated.
+    const auto first_reopen = Clock::time_point{} + std::chrono::seconds(3000);
+    first.reset(first_reopen);
+    REQUIRE(second.seconds_since_open(second_reopen + std::chrono::seconds(5)) == 5.0);
+    REQUIRE(first.seconds_since_open(first_reopen + std::chrono::seconds(6)) == 6.0);
+}
