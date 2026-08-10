@@ -317,6 +317,74 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.waveguide-primitives", domain="signal",
+        summary=(
+            "Prepared bidirectional waveguide rails, passive reflection boundaries, and "
+            "fixed-capacity pressure-wave scattering junctions."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; line preparation allocates bounded retained history",
+                   "process": "audio", "reset": "audio",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Two prepared double-precision traveling-wave histories and a smoothed length, "
+            "one-pole boundary state, and fixed-capacity impedance plus prior-output state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite traveling pressure waves, bounded fractional line lengths, passive "
+            "reflection controls, and two to four positive impedance ratios"
+        ),
+        output_domain="delayed, reflected, or losslessly scattered traveling pressure waves",
+        units=["samples", "seconds", "linear reflection gain", "dimensionless impedance"],
+        latency=(
+            "current smoothed one-way line length (target reported separately); reflection "
+            "and junction operations add zero samples, and two-phase boundary composition "
+            "adds no hidden sample"
+        ),
+        tail="prepared line history plus passive one-pole boundary decay until reset",
+        scheduling=(
+            "sample-synchronous; feedback networks read every line output, compute all "
+            "boundaries, then push every line input in the same frame"
+        ),
+        bindings=[
+            binding(
+                role="line", kind="cpp_type",
+                include="pulp/signal/waveguide_line.hpp",
+                qualified_name="pulp::signal::WaveguideLineT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:fbedd57acbc69cf0b827c3a17dcc93a90f43bb14af20bd57ce6d10bb4910d995",
+            ),
+            binding(
+                role="reflection", kind="cpp_type",
+                include="pulp/signal/waveguide_reflection_filter.hpp",
+                qualified_name="pulp::signal::WaveguideReflectionFilterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:ebb6beafb7b315ce54115de61e54cd2f603fa147919e8e11ce5b8038b935ab44",
+            ),
+            binding(
+                role="junction", kind="cpp_type",
+                include="pulp/signal/waveguide_junction.hpp",
+                qualified_name="pulp::signal::WaveguideJunctionT<float, 4>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d",
+            ),
+        ],
+        _link_probes=[
+            {"role": "line", "binding": "pulp::signal::WaveguideLineT<float>",
+             "operation": "member_call", "member": "prepare",
+             "arguments": "48000.0, 0.05"},
+            {"role": "reflection",
+             "binding": "pulp::signal::WaveguideReflectionFilterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "junction", "binding": "pulp::signal::WaveguideJunctionT<float, 4>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.nonlinear-shaping", domain="signal",
         summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
         rt_class="mixed",

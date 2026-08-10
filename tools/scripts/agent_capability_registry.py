@@ -74,6 +74,9 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/wavetable.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_junction.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_line.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_reflection_filter.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
     "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
@@ -475,7 +478,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:d48c327673c568f6cd056dd4947d9eba31f3e6767cd60491ecd8af04dc531b18",
+        "fingerprint": "sha256:4c1b620bf6a1ba6a3c78317e18e7500e46dcdc4ac7d312a22d4f4ca8b9ee61e5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

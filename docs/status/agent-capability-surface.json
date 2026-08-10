@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 24,
+  "inventory_version": 25,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 416,
-    "reviewed_headers": 116,
+    "public_headers": 419,
+    "reviewed_headers": 119,
     "legacy_unreviewed_headers": 300,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 73,
+      "capability_entrypoint": 76,
       "capability_support": 37,
       "infrastructure": 5,
       "legacy_unreviewed": 300,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 238,
-        "reviewed_headers": 77,
+        "public_headers": 241,
+        "reviewed_headers": 80,
         "legacy_unreviewed_headers": 161,
         "unsupported_headers": 1
       },
@@ -3457,7 +3457,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:d48c327673c568f6cd056dd4947d9eba31f3e6767cd60491ecd8af04dc531b18",
+      "fingerprint": "sha256:4c1b620bf6a1ba6a3c78317e18e7500e46dcdc4ac7d312a22d4f4ca8b9ee61e5",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3894,6 +3894,39 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/waveguide_junction.hpp",
+      "fingerprint": "sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d",
+      "include": "pulp/signal/waveguide_junction.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.waveguide-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/waveguide_line.hpp",
+      "fingerprint": "sha256:fbedd57acbc69cf0b827c3a17dcc93a90f43bb14af20bd57ce6d10bb4910d995",
+      "include": "pulp/signal/waveguide_line.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.waveguide-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/waveguide_reflection_filter.hpp",
+      "fingerprint": "sha256:ebb6beafb7b315ce54115de61e54cd2f603fa147919e8e11ce5b8038b935ab44",
+      "include": "pulp/signal/waveguide_reflection_filter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.waveguide-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

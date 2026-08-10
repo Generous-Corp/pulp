@@ -850,6 +850,7 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
+| Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions. Reed excitation and whole-loop oversampling are separate composition work. |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |

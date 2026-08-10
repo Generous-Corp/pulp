@@ -125,7 +125,9 @@ def recover_transaction(
             "capability write transaction targets do not match generated outputs"
         )
     transaction_ids: set[str] = set()
-    for entry, target in zip(entries, actual, strict=True):
+    # Length equality is checked above; avoid zip(strict=...) so the recovery
+    # path also works with Pulp's supported Python 3.9 tooling runtime.
+    for entry, target in zip(entries, actual):
         staged = pathlib.Path(entry["staged"])
         prefix = f".{target.name}."
         suffix = ".staged"

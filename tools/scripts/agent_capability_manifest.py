@@ -49,8 +49,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 14
-SURFACE_INVENTORY_VERSION = 24
+MANIFEST_REVISION = 15
+SURFACE_INVENTORY_VERSION = 25
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -689,6 +689,12 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
         "by_domain": actual_by_domain,
     }:
         problems.append("counts must exactly match capabilities by domain")
+
+    # Negative-fixture validation is already conclusive. Avoid rescanning the
+    # repository's complete public surface and compatibility vocabulary for
+    # every intentionally invalid document in the selftest corpus.
+    if problems:
+        return _deduplicate(problems)
 
     try:
         current_surface, surface_problems = build_surface(root)
