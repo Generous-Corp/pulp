@@ -85,6 +85,38 @@ TEST_CASE("PulpCompressor reduces loud signals", "[compressor]") {
     REQUIRE(out_rms < in_rms * 0.8f);
 }
 
+TEST_CASE("PulpCompressor prepare clears detector history before quiet audio",
+          "[compressor][lifecycle]") {
+    constexpr std::size_t kFrames = 64;
+
+    format::HeadlessHost host(create_pulp_compressor);
+    host.prepare(48000.0, static_cast<int>(kFrames));
+    host.state().set_value(kThreshold, -20.0f);
+    host.state().set_value(kRatio, 20.0f);
+    host.state().set_value(kAttack, 0.1f);
+    host.state().set_value(kRelease, 1000.0f);
+    host.state().set_value(kMakeupGain, 0.0f);
+
+    audio::Buffer<float> loud(2, kFrames), warm_output(2, kFrames);
+    for (std::size_t ch = 0; ch < loud.num_channels(); ++ch)
+        for (std::size_t i = 0; i < kFrames; ++i)
+            loud.channel(ch)[i] = 1.0f;
+    process_headless(host, loud, warm_output);
+    REQUIRE(warm_output.channel(0)[kFrames - 1] < 0.5f);
+
+    host.prepare(48000.0, static_cast<int>(kFrames));
+
+    audio::Buffer<float> quiet(2, kFrames), after_prepare(2, kFrames);
+    for (std::size_t ch = 0; ch < quiet.num_channels(); ++ch)
+        for (std::size_t i = 0; i < kFrames; ++i)
+            quiet.channel(ch)[i] = 0.01f;
+    process_headless(host, quiet, after_prepare);
+
+    for (std::size_t ch = 0; ch < quiet.num_channels(); ++ch)
+        for (std::size_t i = 0; i < kFrames; ++i)
+            REQUIRE(after_prepare.channel(ch)[i] == quiet.channel(ch)[i]);
+}
+
 TEST_CASE("PulpCompressor bypass passes through", "[compressor]") {
     format::HeadlessHost host(create_pulp_compressor);
     host.prepare(48000.0, 512);
