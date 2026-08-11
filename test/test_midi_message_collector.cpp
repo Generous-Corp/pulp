@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <thread>
+#include <vector>
 
 using namespace pulp::midi;
 
@@ -84,6 +85,114 @@ TEST_CASE("MidiMessageCollector defers future events to subsequent block",
                                           /*sample_rate=*/48000.0);
     REQUIRE(drained2 == 1);
     REQUIRE(block2.size() == 1);
+}
+
+TEST_CASE("MidiMessageCollector gives exact boundary events to the next callback",
+          "[midi][collector][boundary][partition]") {
+    struct AbsoluteEvent {
+        int sample;
+        bool attack;
+        std::uint8_t channel;
+        std::uint8_t note;
+        std::uint8_t velocity;
+
+        bool operator==(const AbsoluteEvent&) const = default;
+    };
+
+    constexpr double sample_rate = 48000.0;
+    constexpr int boundary_sample = 256;
+    constexpr int release_sample = boundary_sample + 128;
+    const double boundary_time = boundary_sample / sample_rate;
+    const double release_time = release_sample / sample_rate;
+
+    const auto collect = [](const MidiBuffer& buffer, int block_start) {
+        std::vector<AbsoluteEvent> events;
+        for (const auto& event : buffer) {
+            REQUIRE((event.is_note_on() || event.is_note_off()));
+            events.push_back({block_start + event.sample_offset, event.is_note_on(),
+                              event.channel(), event.note(), event.velocity()});
+        }
+        return events;
+    };
+
+    MidiMessageCollector<32> partitioned;
+    REQUIRE(partitioned.push_now(note_on(2, 60, 100), boundary_time));
+    REQUIRE(partitioned.push_now(MidiEvent::note_off(2, 60), release_time));
+    constexpr int pending_boundary_sample = 768;
+    const double third_block_start = boundary_time + 256.0 / sample_rate;
+    const double pending_boundary_time = third_block_start + 256.0 / sample_rate;
+    REQUIRE(pending_boundary_time == pending_boundary_sample / sample_rate);
+    REQUIRE(partitioned.push_now(MidiEvent::cc(2, 1, 99), pending_boundary_time));
+
+    MidiBuffer first;
+    REQUIRE(partitioned.drain_into(first, 0.0, 256, sample_rate) == 0);
+    REQUIRE(first.empty());
+    const auto deferred = partitioned.telemetry();
+    REQUIRE(deferred.queue_size_approx == 0);
+    REQUIRE(deferred.pending_size_approx == 3);
+    REQUIRE(deferred.queue_overflow_count == 0);
+    REQUIRE(deferred.dropped_future == 0);
+
+    MidiBuffer second;
+    REQUIRE(partitioned.drain_into(second, boundary_time, 256, sample_rate) == 2);
+    REQUIRE(second.size() == 2);
+    REQUIRE(second[0].sample_offset == 0);
+    REQUIRE(second[1].sample_offset == 128);
+    REQUIRE(second[0].timestamp == boundary_time);
+    REQUIRE(second[1].timestamp == release_time);
+    const auto partitioned_events = collect(second, boundary_sample);
+
+    MidiBuffer third;
+    REQUIRE(partitioned.drain_into(third, third_block_start, 256, sample_rate) == 0);
+    REQUIRE(third.empty());
+    const auto still_deferred = partitioned.telemetry();
+    REQUIRE(still_deferred.queue_size_approx == 0);
+    REQUIRE(still_deferred.pending_size_approx == 1);
+    REQUIRE(still_deferred.dropped_future == 0);
+
+    MidiBuffer fourth;
+    REQUIRE(partitioned.drain_into(fourth, pending_boundary_time, 256, sample_rate) == 1);
+    REQUIRE(fourth.size() == 1);
+    REQUIRE(fourth[0].is_cc());
+    REQUIRE(fourth[0].channel() == 2);
+    REQUIRE(fourth[0].cc_number() == 1);
+    REQUIRE(fourth[0].cc_value() == 99);
+    REQUIRE(fourth[0].sample_offset == 0);
+    REQUIRE(fourth[0].timestamp == pending_boundary_time);
+
+    MidiBuffer fifth;
+    REQUIRE(partitioned.drain_into(
+                fifth, pending_boundary_time + 256.0 / sample_rate, 256, sample_rate) == 0);
+    REQUIRE(fifth.empty());
+    const auto completed = partitioned.telemetry();
+    REQUIRE(completed.queue_size_approx == 0);
+    REQUIRE(completed.pending_size_approx == 0);
+    REQUIRE(completed.queue_overflow_count == 0);
+    REQUIRE(completed.dropped_future == 0);
+
+    MidiMessageCollector<32> single_block;
+    REQUIRE(single_block.push_now(note_on(2, 60, 100), boundary_time));
+    REQUIRE(single_block.push_now(MidiEvent::note_off(2, 60), release_time));
+    MidiBuffer whole;
+    REQUIRE(single_block.drain_into(whole, 0.0, 512, sample_rate) == 2);
+    REQUIRE(whole.size() == 2);
+    REQUIRE(whole[0].sample_offset == boundary_sample);
+    REQUIRE(whole[1].sample_offset == release_sample);
+    const auto single_events = collect(whole, 0);
+
+    const std::vector<AbsoluteEvent> expected{
+        {boundary_sample, true, 2, 60, 100},
+        {release_sample, false, 2, 60, 0},
+    };
+    REQUIRE(partitioned_events == expected);
+    REQUIRE(single_events == expected);
+    REQUIRE(partitioned_events == single_events);
+    int note_balance = 0;
+    for (const auto& event : partitioned_events) {
+        note_balance += event.attack ? 1 : -1;
+        REQUIRE(note_balance >= 0);
+    }
+    REQUIRE(note_balance == 0);
 }
 
 TEST_CASE("MidiMessageCollector drain is allocation-free with prepared output",
