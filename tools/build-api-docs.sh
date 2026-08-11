@@ -12,7 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DOXYFILE="$ROOT/docs/doxygen/Doxyfile"
 TIMELINE_STRICT_DOXYFILE="$ROOT/docs/doxygen/Doxyfile.timeline-strict"
+SEQUENCER_API_BASELINE="$ROOT/docs/doxygen/sequencer-api-contract-legacy-baseline.json"
 OUTPUT="$ROOT/build/api-docs"
+PUBLISH_LOCK="${OUTPUT}.publish.lock"
 
 if ! command -v doxygen &>/dev/null; then
     echo "Error: doxygen not found. Install with: brew install doxygen"
@@ -25,6 +27,10 @@ if [ ! -f "$DOXYFILE" ]; then
 fi
 if [ ! -f "$TIMELINE_STRICT_DOXYFILE" ]; then
     echo "Error: strict Timeline Doxyfile not found at $TIMELINE_STRICT_DOXYFILE"
+    exit 1
+fi
+if [ ! -f "$SEQUENCER_API_BASELINE" ]; then
+    echo "Error: sequencer API contract baseline not found at $SEQUENCER_API_BASELINE"
     exit 1
 fi
 
@@ -50,7 +56,70 @@ cd "$ROOT/docs/doxygen"
 DOXYGEN_LOG="$(mktemp "${TMPDIR:-/tmp}/pulp-doxygen.XXXXXX")"
 STAGING_OUTPUT="$(mktemp -d "$ROOT/build/api-docs-stage.XXXXXX")"
 STRICT_OUTPUT="$(mktemp -d "$ROOT/build/api-docs-timeline-check.XXXXXX")"
-trap 'rm -f "$DOXYGEN_LOG"; rm -rf "$STAGING_OUTPUT" "$STRICT_OUTPUT"' EXIT
+TRUSTED_BASELINE="$(mktemp "${TMPDIR:-/tmp}/pulp-sequencer-api-baseline.XXXXXX")"
+
+cleanup() {
+    status=$?
+    trap - EXIT
+    rm -f "$DOXYGEN_LOG" "$TRUSTED_BASELINE"
+    rm -rf "$STAGING_OUTPUT" "$STRICT_OUTPUT"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+TRUSTED_REF="${PULP_API_DOCS_TRUSTED_REF:-origin/main}"
+TRUSTED_PATH="docs/doxygen/sequencer-api-contract-legacy-baseline.json"
+TRUSTED_BASELINE_ARGS=()
+if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ "${PULP_API_DOCS_SOURCE_ARCHIVE:-0}" = "1" ]; then
+        echo "Error: PULP_API_DOCS_SOURCE_ARCHIVE=1 is valid only outside a Git worktree"
+        exit 1
+    fi
+    if [ -z "${PULP_API_DOCS_TRUSTED_REF:-}" ]; then
+        if ! git -C "$ROOT" fetch --quiet origin \
+            +refs/heads/main:refs/remotes/origin/main; then
+            echo "Error: default trusted API-doc baseline ref origin/main could not be refreshed"
+            exit 1
+        fi
+        if ! FETCHED_COMMIT="$(git -C "$ROOT" rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null)" ||
+            ! REFRESHED_COMMIT="$(git -C "$ROOT" rev-parse --verify 'refs/remotes/origin/main^{commit}' 2>/dev/null)" ||
+            [ "$FETCHED_COMMIT" != "$REFRESHED_COMMIT" ]; then
+            echo "Error: default trusted API-doc baseline ref origin/main did not match the fetched main commit"
+            exit 1
+        fi
+    fi
+    if ! TRUSTED_COMMIT="$(git -C "$ROOT" rev-parse --verify "${TRUSTED_REF}^{commit}" 2>/dev/null)"; then
+        echo "Error: configured trusted API-doc baseline ref cannot be resolved: $TRUSTED_REF"
+        exit 1
+    fi
+    if ! TRUSTED_ENTRY="$(git -C "$ROOT" ls-tree --name-only "$TRUSTED_COMMIT" -- "$TRUSTED_PATH")"; then
+        echo "Error: configured trusted API-doc baseline ref cannot be read: $TRUSTED_REF"
+        exit 1
+    fi
+    if [ "$TRUSTED_ENTRY" = "$TRUSTED_PATH" ]; then
+        if ! git -C "$ROOT" show "$TRUSTED_COMMIT:$TRUSTED_PATH" >"$TRUSTED_BASELINE"; then
+            echo "Error: configured trusted API-doc baseline cannot be read from $TRUSTED_REF"
+            exit 1
+        fi
+        TRUSTED_BASELINE_ARGS=(--trusted-baseline "$TRUSTED_BASELINE")
+    elif [ -z "$TRUSTED_ENTRY" ]; then
+        echo "Trusted ref $TRUSTED_REF has no sequencer API baseline; verified bootstrap mode enabled"
+        TRUSTED_BASELINE_ARGS=(--allow-missing-trusted-baseline)
+    else
+        echo "Error: trusted API-doc baseline lookup returned an unexpected path: $TRUSTED_ENTRY"
+        exit 1
+    fi
+else
+    if [ "${PULP_API_DOCS_SOURCE_ARCHIVE:-0}" != "1" ]; then
+        echo "Error: no Git worktree; set PULP_API_DOCS_SOURCE_ARCHIVE=1 for an explicit source archive"
+        exit 1
+    fi
+    echo "Explicit source-archive mode: trusted sequencer API baseline is unavailable"
+    TRUSTED_BASELINE_ARGS=(--allow-missing-trusted-baseline)
+fi
 
 # CI installs whatever Doxygen ubuntu ships (1.9.8 at time of writing) while a
 # dev machine usually has a much newer Homebrew build. They do not agree on
@@ -68,7 +137,12 @@ if ! {
     echo "Error: strict Timeline API documentation check failed"
     exit 1
 fi
-if ! python3 "$ROOT/tools/scripts/timeline_api_docs_check.py" "$STRICT_OUTPUT/xml"; then
+if ! python3 "$ROOT/tools/scripts/timeline_api_docs_check.py" \
+    "$STRICT_OUTPUT/xml" \
+    --baseline "$SEQUENCER_API_BASELINE" \
+    --strict-config "$TIMELINE_STRICT_DOXYFILE" \
+    --html-config "$DOXYFILE" \
+    ${TRUSTED_BASELINE_ARGS[@]+"${TRUSTED_BASELINE_ARGS[@]}"}; then
     exit 1
 fi
 
@@ -124,7 +198,8 @@ if [ -d "$STAGING_OUTPUT/html" ]; then
         exit 1
     fi
     for expected_symbol in DocumentSession Project MasterTransport PlaybackProgramCompiler \
-                           SequenceProcessor ExportPlan; do
+                           SequenceProcessor ExportPlan Scale SequencerUiHost ArrangerView \
+                           PianoRollView; do
         if ! grep -R -q "$expected_symbol" "$STAGING_OUTPUT/html"; then
             echo "Error: generated API reference is missing $expected_symbol"
             exit 1
@@ -135,22 +210,11 @@ else
     exit 1
 fi
 
-PREVIOUS_OUTPUT="${OUTPUT}.previous.$$"
-if [ -e "$PREVIOUS_OUTPUT" ]; then
-    echo "Error: temporary API-doc backup already exists at $PREVIOUS_OUTPUT"
-    exit 1
-fi
-if [ -e "$OUTPUT" ]; then
-    mv "$OUTPUT" "$PREVIOUS_OUTPUT"
-fi
-if ! mv "$STAGING_OUTPUT" "$OUTPUT"; then
-    if [ -e "$PREVIOUS_OUTPUT" ]; then
-        mv "$PREVIOUS_OUTPUT" "$OUTPUT"
-    fi
-    echo "Error: could not publish staged API documentation"
-    exit 1
-fi
-if [ -e "$PREVIOUS_OUTPUT" ]; then
-    rm -rf "$PREVIOUS_OUTPUT"
-fi
+# A deterministic backup makes a process killed between the two renames
+# recoverable by the next publisher. The checker owns the cross-platform lock,
+# path-type validation, recovery, and atomic directory replacement.
+python3 "$ROOT/tools/scripts/timeline_api_docs_check.py" \
+    --publish-staging "$STAGING_OUTPUT" \
+    --publish-output "$OUTPUT" \
+    --publish-lock "$PUBLISH_LOCK"
 echo "Generated $page_count HTML pages in $OUTPUT/html/"

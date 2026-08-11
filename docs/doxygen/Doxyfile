@@ -14,6 +14,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/host/include \
                          ../../core/interchange/include \
                          ../../core/midi/include \
+                         ../../core/music/include \
                          ../../core/osc/include \
                          ../../core/host/include \
                          ../../core/platform/include \
@@ -25,6 +26,8 @@ INPUT                  = ../../core/audio/include \
                          ../../core/state/include \
                          ../../core/timebase/include \
                          ../../core/timeline/include \
+                         ../../core/timeline_editor/include \
+                         ../../core/timeline_view/include \
                          ../../core/view/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h
