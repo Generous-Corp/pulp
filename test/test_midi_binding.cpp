@@ -41,6 +41,52 @@ TEST_CASE("MidiControlBus publishes UI events to the audio thread", "[midi][cont
     REQUIRE(again.size() == 0);
 }
 
+TEST_CASE("MidiControlBus rebases direct UI notes to the next block start",
+          "[midi][control-bus][timing][lifecycle]") {
+    midi::MidiControlBus bus;
+    auto attack = midi::MidiEvent::note_on(3, 67, 91);
+    attack.sample_offset = 137;
+    auto release = midi::MidiEvent::note_off(3, 67, 42);
+    release.sample_offset = 251;
+
+    REQUIRE(bus.send(attack));
+    REQUIRE(bus.send(release));
+
+    midi::MidiBuffer out;
+    out.reserve(2);
+    out.set_realtime_capacity_limit(true);
+    bus.drain_into(out);
+
+    REQUIRE(out.size() == 2);
+    REQUIRE(out.dropped_event_count() == 0);
+
+    REQUIRE(out[0].is_note_on());
+    REQUIRE(out[0].channel() == 3);
+    REQUIRE(out[0].note() == 67);
+    REQUIRE(out[0].velocity() == 91);
+    REQUIRE(out[0].sample_offset == 0);
+
+    REQUIRE(out[1].is_note_off());
+    REQUIRE(out[1].channel() == 3);
+    REQUIRE(out[1].note() == 67);
+    REQUIRE(out[1].velocity() == 42);
+    REQUIRE(out[1].sample_offset == 0);
+
+    int note_depth = 0;
+    for (const auto& event : out) {
+        if (event.is_note_on())
+            ++note_depth;
+        else if (event.is_note_off())
+            --note_depth;
+        REQUIRE(note_depth >= 0);
+    }
+    REQUIRE(note_depth == 0);
+
+    midi::MidiBuffer again;
+    bus.drain_into(again);
+    REQUIRE(again.empty());
+}
+
 TEST_CASE("bind_midi_cc makes a knob emit Control Change", "[midi][bind]") {
     midi::MidiControlBus bus;
     view::Knob knob;
