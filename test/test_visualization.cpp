@@ -295,6 +295,36 @@ TEST_CASE("VisualizationBridge resets continuity across a topology mismatch",
     REQUIRE(peak_bin(spectrum) == 73);
 }
 
+TEST_CASE("VisualizationBridge resets continuity across a missing-channel block",
+          "[view][vizbridge][spectrum][channels][discontinuity]") {
+    constexpr int kFftSize = 256;
+    auto tone_a = bin_sine(9, kFftSize, 0.75f);
+    auto tone_b = bin_sine(61, kFftSize, 0.75f);
+
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = kFftSize;
+    cfg.hop_size = kFftSize;
+    cfg.num_channels = 1;
+    cfg.capture_waveform = false;
+    bridge.configure(cfg);
+
+    const float* valid_a[] = {tone_a.data()};
+    bridge.process(valid_a, 1, kFftSize / 2);
+    bridge.process(nullptr, 0, kFftSize); // positive-length host-time gap
+
+    const float* valid_b[] = {tone_b.data()};
+    bridge.process(valid_b, 1, kFftSize); // suspended pending poll acknowledgement
+    REQUIRE_FALSE(bridge.poll());
+    REQUIRE(bridge.peek_spectrum().num_bins == 0);
+
+    bridge.process(valid_b, 1, kFftSize);
+    REQUIRE(bridge.poll());
+    const auto spectrum = bridge.peek_spectrum();
+    REQUIRE(spectrum.epoch == 2);
+    REQUIRE(peak_bin(spectrum) == 61);
+}
+
 TEST_CASE("VisualizationBridge publishes only finite spectrum values",
           "[view][vizbridge][spectrum]") {
     VisualizationBridge bridge;
@@ -542,6 +572,36 @@ TEST_CASE("VisualizationBridge poll handles a multiframe producer push",
         REQUIRE(spectrum.sequence_number == sequence);
         REQUIRE(std::abs(peak_bin(spectrum) - 19) <= 1);
     }
+    REQUIRE_FALSE(bridge.poll());
+}
+
+TEST_CASE("VisualizationBridge one poll publishes the latest completed FFT frame",
+          "[view][vizbridge][poll][multiframe][latest]") {
+    constexpr int kFftSize = 256;
+    auto tone_a = bin_sine(13, kFftSize, 0.75f);
+    auto tone_b = bin_sine(71, kFftSize, 0.75f);
+    std::vector<float> captured;
+    captured.reserve(2 * kFftSize);
+    captured.insert(captured.end(), tone_a.begin(), tone_a.end());
+    captured.insert(captured.end(), tone_b.begin(), tone_b.end());
+
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = kFftSize;
+    cfg.hop_size = kFftSize;
+    cfg.num_channels = 1;
+    cfg.capture_waveform = false;
+    cfg.capture_buffer_frames = static_cast<int>(captured.size());
+    bridge.configure(cfg);
+
+    // One producer push and one consumer chunk complete two FFT frames. The
+    // single publication must expose B, the latest completed frame, not A.
+    const float* channels[] = {captured.data()};
+    bridge.process(channels, 1, static_cast<int>(captured.size()));
+    REQUIRE(bridge.poll());
+    const auto spectrum = bridge.peek_spectrum();
+    REQUIRE(spectrum.sequence_number == 1);
+    REQUIRE(peak_bin(spectrum) == 71);
     REQUIRE_FALSE(bridge.poll());
 }
 

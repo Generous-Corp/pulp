@@ -35,8 +35,18 @@ void VisualizationBridge::process(const float* const* channels,
 #endif
     };
 
-    if (channels == nullptr || num_channels <= 0 || num_samples <= 0) {
+    if (num_samples <= 0) {
         publish_meter(signal::MultiChannelMeterData{});
+        return;
+    }
+    if (channels == nullptr || num_channels <= 0) {
+        publish_meter(signal::MultiChannelMeterData{});
+        // A positive-length callback advances host time even when it carries no
+        // readable channels. Mark the missing interval as a discontinuity;
+        // zero-length callbacks above do not advance analysis time.
+        if (capture_ready_ && !channel_stfts_.empty()) {
+            discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        }
         return;
     }
 

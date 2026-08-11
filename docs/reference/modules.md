@@ -2419,6 +2419,10 @@ is invariant: mismatched blocks are metered but not captured. Stop the audio
 producer and UI consumer before `configure()` or `reset()`.
 Set `max_frames_per_poll` when a UI needs a stricter per-tick analysis budget;
 zero still consumes no more than the frames visible when `poll()` begins.
+The legacy `read_spectrum()` and `read_waveform()` names remain available, but
+their former implicit-poll behavior was intentionally removed: they are now
+snapshot-only aliases. Existing callers must migrate to an explicit UI-owned
+`poll()` before either read; this is a behavioral compatibility break.
 
 | Widget | Description |
 |--------|-------------|

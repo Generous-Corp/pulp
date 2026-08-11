@@ -208,7 +208,9 @@ public:
     /// Cheap snapshot-only read. Never drains audio or performs FFT work.
     const SpectrumData& peek_spectrum() { return spectrum_buf_.read(); }
 
-    /// Source-compatible alias for peek_spectrum(). Call poll() explicitly.
+    /// Legacy method name retained for compile compatibility only. This is now
+    /// a snapshot-only read: callers migrating from the former auto-poll
+    /// behavior must call poll() explicitly on the sole UI owner first.
     const SpectrumData& read_spectrum() { return peek_spectrum(); }
 
     /// Read the latest multi-channel meter data.
@@ -217,7 +219,9 @@ public:
     /// Cheap snapshot-only waveform read. Never calls poll().
     const WaveformData& peek_waveform() { return waveform_buf_.read(); }
 
-    /// Source-compatible alias for peek_waveform(). Call poll() explicitly.
+    /// Legacy method name retained for compile compatibility only. This is now
+    /// a snapshot-only read: callers migrating from the former auto-poll
+    /// behavior must call poll() explicitly on the sole UI owner first.
     const WaveformData& read_waveform() { return peek_waveform(); }
 
     // ── Accessors ───────────────────────────────────────────────────────────
