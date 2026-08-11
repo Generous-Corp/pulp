@@ -183,26 +183,26 @@ jobs:
         run: |
           set -euo pipefail
           prefix="${RUNNER_TEMP}/pulp-control-shipping-sdk"
-          platform_args=()
-          aax_args=()
           required_formats='${{ matrix.sdk_formats }}'
+          configure_args=(
+            -S tools/validation/sdk-smoke
+            -B smoke/build
+            -DCMAKE_BUILD_TYPE=Release
+            "-DCMAKE_PREFIX_PATH=${prefix}"
+          )
           if [ "${RUNNER_OS}" = "macOS" ]; then
-            platform_args+=("-DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_architectures }}")
-            platform_args+=(-DPULP_SDK_SMOKE_INCLUDE_AUV3=ON)
+            configure_args+=("-DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_architectures }}")
+            configure_args+=(-DPULP_SDK_SMOKE_INCLUDE_AUV3=ON)
             if [ "${AAX_AVAILABLE:-}" = 'true' ]; then
-              aax_args+=(-DPULP_ENABLE_AAX=ON)
-              aax_args+=("-DPULP_AAX_SDK_DIR=${AAX_SDK_ROOT}")
+              configure_args+=(-DPULP_ENABLE_AAX=ON)
+              configure_args+=("-DPULP_AAX_SDK_DIR=${AAX_SDK_ROOT}")
               required_formats="${required_formats};AAX"
             fi
           elif [ "${RUNNER_OS}" = "Windows" ]; then
-            platform_args+=(-A x64)
+            configure_args+=(-A x64)
           fi
-          cmake -S tools/validation/sdk-smoke -B smoke/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$prefix" \
-            "-DPULP_SDK_SMOKE_REQUIRE_FORMATS=${required_formats}" \
-            "${platform_args[@]}" \
-            "${aax_args[@]}"
+          configure_args+=("-DPULP_SDK_SMOKE_REQUIRE_FORMATS=${required_formats}")
+          cmake "${configure_args[@]}"
 
       - name: Build and scan real plug-in artifacts
         shell: bash
