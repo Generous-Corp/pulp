@@ -25,8 +25,9 @@ with the [Timeline SDK guide](timeline-sdk.md) and the standalone
 For the loadable-plugin boundary, see
 [`examples/timeline-plugin-proof/`](../examples/timeline-plugin-proof.md). It
 owns a `DocumentSession`, submits editor intents through `SequencerUiHost`, and
-persists canonical Timeline JSON as plugin-owned state. Its native view is a
-ruler/playhead proof shell rather than a piano roll.
+persists canonical Timeline JSON as plugin-owned state. Its native editor embeds
+`PianoRollView`, lowers insert/move/resize gestures through `NoteEditIntentHost`,
+and rebinds every open view after submissions, undo, and state restore.
 
 ## PulpGain
 
