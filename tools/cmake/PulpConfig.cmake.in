@@ -34,6 +34,16 @@ set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 # Platform detection → PULP_APPLE / PULP_LINUX / PULP_WINDOWS / etc.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 
+# Pulp's installed Windows archives are built with the static MSVC runtime.
+# Apply the matching default before the consumer creates targets; otherwise
+# CMake's /MD default produces LNK2038 when those objects link Pulp's /MT
+# archives. An explicit consumer toolchain choice still wins.
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded"
+        CACHE STRING "MSVC runtime library variant for Pulp SDK consumers")
+endif()
+
 # Propagate Pulp's minimum-OS floor to the consumer. Without this, a plugin
 # built against the installed SDK inherits the BUILD HOST's OS floor (e.g. a
 # macOS-26 machine ships a macOS-26-only plugin) instead of the floor Pulp's own
