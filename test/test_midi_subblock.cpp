@@ -169,6 +169,28 @@ TEST_CASE("for_each_midi_subblock groups negative offsets onto the first block",
     REQUIRE(obs[0].notes == std::vector<int>{50, 60});
 }
 
+TEST_CASE("for_each_midi_subblock coalesces every stale event at callback entry",
+          "[format][midi][subblock][stale]") {
+    MidiBuffer midi;
+    midi.add(note_on_at(48, -9));
+    midi.add(note_on_at(50, -4));
+    midi.add(note_on_at(60, 0));
+    midi.add(note_on_at(62, 7));
+    midi.add(note_on_at(64, 32));
+    midi.sort();
+
+    std::vector<float> storage;
+    const auto obs = run(midi, 32, storage);
+
+    REQUIRE(obs.size() == 2);
+    REQUIRE(obs[0].start == 0);
+    REQUIRE(obs[0].length == 7);
+    REQUIRE(obs[0].notes == std::vector<int>{48, 50, 60});
+    REQUIRE(obs[1].start == 7);
+    REQUIRE(obs[1].length == 25);
+    REQUIRE(obs[1].notes == std::vector<int>{62});
+}
+
 TEST_CASE("for_each_midi_subblock ignores events at or past block end",
           "[format][midi][subblock]") {
     MidiBuffer midi;

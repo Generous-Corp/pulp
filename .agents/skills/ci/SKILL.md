@@ -5058,14 +5058,22 @@ bounded() {
   python3 - "$@" <<'PY'
 import subprocess
 import sys
+import os
+import signal
 
 seconds = float(sys.argv[1])
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
 try:
-    result = subprocess.run(sys.argv[2:], timeout=seconds)
+    raise SystemExit(process.wait(timeout=seconds))
 except subprocess.TimeoutExpired:
     print(f"timed out after {seconds:g}s: {' '.join(sys.argv[2:])}", file=sys.stderr)
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
     raise SystemExit(124)
-raise SystemExit(result.returncode)
 PY
 }
 ```
@@ -5089,6 +5097,19 @@ PY
    Try REST through `ghapp api` when GraphQL-backed `ghapp pr view` or `gh pr
    view` times out. A personal `gh` token failure does not invalidate the App
    token.
+
+   On a host where Go-based `ghapp` or Shipyard hangs during DNS/TLS while
+   `curl` succeeds, compare the bounded default call with Go's pure resolver:
+
+   ```bash
+   bounded 20 env GODEBUG=netdns=go ghapp api repos/Generous-Corp/pulp --jq .default_branch
+   ```
+
+   If only the pure-Go resolver succeeds, report a host cgo resolver failure,
+   not a GitHub outage. It is safe to wrap that host's `ghapp` and Shipyard
+   launchers with `GODEBUG="${GODEBUG:-netdns=go}"`; preserve an explicit caller
+   override and keep the bounded probes. This exact failure has occurred on the
+   M3 coordinator.
 3. Probe the unauthenticated public REST or web path to separate GitHub reachability
    from local authentication:
 
@@ -5112,6 +5133,17 @@ PY
    never disable host-key verification. Fetch/`ls-remote` success with a hanging
    push usually points to a local pre-push gate or write/auth path, not GitHub
    read availability.
+
+   If the configured SSH agent itself stalls, retry the bounded 443 probe with
+   the host's explicit approved key and `IdentitiesOnly=yes`, for example:
+
+   ```bash
+   GIT_SSH_COMMAND='ssh -p 443 -o HostName=ssh.github.com -o ConnectTimeout=10 -o IdentitiesOnly=yes -i /Users/danielraffel/.ssh/id_rsa' \
+     bounded 20 git ls-remote git@github.com:Generous-Corp/pulp.git refs/heads/main
+   ```
+
+   This separates an agent integration failure from GitHub SSH availability;
+   never copy a host-specific key path into another machine's configuration.
 5. Use Shipyard's durable state before inventing a manual publication path:
 
    ```bash
@@ -5125,7 +5157,8 @@ PY
    pinned Shipyard CLI has no `--resume` flag.
 
    `shipyard pr` remains the normal create/validate/merge path, and `ghapp pr
-   merge PR --auto --merge` is the server-side merge-on-green backstop. Do not
+   merge PR --auto` is the server-side merge-on-green backstop. Pulp's merge
+   queue rejects strategy flags such as `--merge` and `--squash`. Do not
    open a duplicate PR merely because a local watcher or CLI process died.
 6. Inspect local processes when commands "hang." Stale `git fetch`, `git push`,
    `ssh git-upload-pack`, or `git-receive-pack` children from earlier retries can
