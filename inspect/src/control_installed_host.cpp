@@ -125,6 +125,13 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     bool active = false;
     bool stopping = false;
 
+    ~State() {
+        heartbeat_stop.store(true, std::memory_order_release);
+        heartbeat_changed.notify_all();
+        if (heartbeat_worker.joinable())
+            heartbeat_worker.join();
+    }
+
     std::shared_ptr<ProjectedAuthority> authority(std::string_view id, bool create) {
         std::lock_guard lock(mutex);
         const auto found = authorities.find(std::string(id));
