@@ -2457,11 +2457,19 @@ TEST_CASE("MCP canonical trace lifecycle is default denied", "[mcp][tools][trace
     auto start =
         handle_request(tool_call(std::to_string(id++), "pulp_trace_start",
                                  R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
+#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
     require_contains(start, "control_session_unavailable");
+#else
+    require_contains(start, "component_unavailable");
+#endif
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
     auto stop = handle_request(tool_call(std::to_string(id++), "pulp_trace_stop"));
+#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
     require_contains(stop, "control_session_unavailable");
+#else
+    require_contains(stop, "component_unavailable");
+#endif
     REQUIRE(stop.find("Unknown tool") == std::string::npos);
 
     const auto tools =

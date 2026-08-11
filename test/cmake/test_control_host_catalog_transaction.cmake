@@ -7,12 +7,19 @@ set(_catalog "${_root}/catalog")
 set(_source "${_root}/source-host")
 set(_manifest "${_root}/source-manifest.json")
 set(_runtime "${_root}/runtime")
+if(WIN32)
+    set(_runtime_fixture "fixture.dll")
+elseif(APPLE)
+    set(_runtime_fixture "fixture.dylib")
+else()
+    set(_runtime_fixture "fixture.so")
+endif()
 file(REMOVE_RECURSE "${_root}")
 file(MAKE_DIRECTORY "${_root}" "${_runtime}")
 file(COPY_FILE "/usr/bin/true" "${_source}")
 file(SHA256 "${_source}" _host_v1_digest)
 file(WRITE "${_manifest}" "manifest-v1")
-file(WRITE "${_runtime}/fixture.dylib" "runtime-v1")
+file(WRITE "${_runtime}/${_runtime_fixture}" "runtime-v1")
 execute_process(COMMAND "${CMAKE_COMMAND}"
     -DPULP_CONTROL_HOST_ID=author-host
     -DPULP_CONTROL_HOST_SOURCE=${_source}
@@ -27,7 +34,7 @@ endif()
 file(COPY_FILE "/usr/bin/false" "${_source}")
 file(SHA256 "${_source}" _host_v2_digest)
 file(WRITE "${_manifest}" "manifest-v2")
-file(WRITE "${_runtime}/fixture.dylib" "runtime-v2")
+file(WRITE "${_runtime}/${_runtime_fixture}" "runtime-v2")
 execute_process(COMMAND "${CMAKE_COMMAND}"
     -DPULP_CONTROL_HOST_ID=author-host
     -DPULP_CONTROL_HOST_SOURCE=${_source}
@@ -50,7 +57,7 @@ if(NOT _retained_host_digest STREQUAL _host_v1_digest OR
    NOT _retained_manifest STREQUAL "manifest-v1")
     message(FATAL_ERROR "failed catalog update did not restore the exact prior pair")
 endif()
-file(READ "${_catalog}/author-host/${_retained_version}/fixture.dylib" _retained_runtime)
+file(READ "${_catalog}/author-host/${_retained_version}/${_runtime_fixture}" _retained_runtime)
 if(NOT _retained_runtime STREQUAL "runtime-v1")
     message(FATAL_ERROR "failed catalog update did not retain the prior runtime closure")
 endif()
@@ -72,7 +79,7 @@ if(_updated_version STREQUAL _retained_version OR
     message(FATAL_ERROR "catalog update was not an atomic immutable version switch")
 endif()
 file(SHA256 "${_catalog}/author-host/${_updated_version}/host" _updated_host_digest)
-file(READ "${_catalog}/author-host/${_updated_version}/fixture.dylib" _updated_runtime)
+file(READ "${_catalog}/author-host/${_updated_version}/${_runtime_fixture}" _updated_runtime)
 if(NOT _updated_host_digest STREQUAL _host_v2_digest OR
    NOT _updated_runtime STREQUAL "runtime-v2")
     message(FATAL_ERROR "catalog update did not publish the exact host/runtime closure")
@@ -80,7 +87,7 @@ endif()
 file(APPEND "${_catalog}/author-host/${_retained_version}/host" "corrupt")
 file(COPY_FILE "/usr/bin/true" "${_source}")
 file(WRITE "${_manifest}" "manifest-v1")
-file(WRITE "${_runtime}/fixture.dylib" "runtime-v1")
+file(WRITE "${_runtime}/${_runtime_fixture}" "runtime-v1")
 execute_process(COMMAND "${CMAKE_COMMAND}"
     -DPULP_CONTROL_HOST_ID=author-host
     -DPULP_CONTROL_HOST_SOURCE=${_source}
