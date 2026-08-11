@@ -119,6 +119,11 @@ For removal:
 
 ## Interpret support honestly
 
+The published capability table now includes bounded, versioned registered clip
+content and trusted note-renderer hooks. Keep that row aligned with the compile
+contract: note output/reset state only, a 4096-note fragment cap, and explicit
+refusal of trimmed nesting and nondefault-production wire serialization.
+
 - A live capability row's `status` is the explicit support claim. Use only
   `stable`, `usable`, `experimental`, `partial`, `unsupported`, or `deprecated`;
   never publish planned work.

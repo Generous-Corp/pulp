@@ -30,10 +30,14 @@ constexpr std::uint32_t section_id(ProgramWireSection section) noexcept {
 /// The known sections, in the ascending id order a canonical payload lays them
 /// out in. Indexing this array is also how the decoder decides an id is known.
 constexpr std::array<ProgramWireSection, 9> kSections{
-    ProgramWireSection::Program,           ProgramWireSection::TempoPoints,
-    ProgramWireSection::Tracks,            ProgramWireSection::ClipIds,
-    ProgramWireSection::NoteEvents,        ProgramWireSection::NoteModifiers,
-    ProgramWireSection::DevicePlacementIds, ProgramWireSection::AutomationLanes,
+    ProgramWireSection::Program,
+    ProgramWireSection::TempoPoints,
+    ProgramWireSection::Tracks,
+    ProgramWireSection::ClipIds,
+    ProgramWireSection::NoteEvents,
+    ProgramWireSection::NoteModifiers,
+    ProgramWireSection::DevicePlacementIds,
+    ProgramWireSection::AutomationLanes,
     ProgramWireSection::AutomationSegments,
 };
 
@@ -121,9 +125,16 @@ measure(const PlaybackProgram& program,
     for (const auto& owner : program.tracks()) {
         const auto& track = *owner;
         if (track.audio_program() != nullptr)
-            return Measured(runtime::Err(
-                Error{Code::AudioProgramUnsupported, section_id(ProgramWireSection::Tracks),
-                      track.id().value}));
+            return Measured(
+                runtime::Err(Error{Code::AudioProgramUnsupported,
+                                   section_id(ProgramWireSection::Tracks), track.id().value}));
+        const auto& production = track.arrangement_production();
+        if (production.mode != timeline::ProductionMode::Synchronous ||
+            production.reproducibility != timeline::ReproducibilityClass::Deterministic ||
+            production.lookahead_ms != 0)
+            return Measured(
+                runtime::Err(Error{Code::ProductionDeclarationUnsupported,
+                                   section_id(ProgramWireSection::Tracks), track.id().value}));
 
         counts[ProgramWireSection::ClipIds] += track.ordered_clip_ids().size();
         counts[ProgramWireSection::NoteEvents] += track.arrangement_note_events().size();
@@ -141,8 +152,8 @@ measure(const PlaybackProgram& program,
 
     for (std::size_t i = 0; i < kSectionCount; ++i)
         if (!fits_u32(counts.records[i]))
-            return Measured(runtime::Err(Error{Code::CountOverflow,
-                                               section_id(kSections[i]), counts.records[i]}));
+            return Measured(runtime::Err(
+                Error{Code::CountOverflow, section_id(kSections[i]), counts.records[i]}));
     return Measured(runtime::Ok(counts));
 }
 
@@ -151,9 +162,8 @@ measure(const PlaybackProgram& program,
 /// owning track holds alive, so identity is the correct lookup here — and a
 /// pointer that is not one of them is a program the wire must refuse rather
 /// than silently re-point.
-std::uint32_t
-lane_index(std::span<const std::shared_ptr<const AutomationProgram>> lanes,
-           const AutomationProgram* target) noexcept {
+std::uint32_t lane_index(std::span<const std::shared_ptr<const AutomationProgram>> lanes,
+                         const AutomationProgram* target) noexcept {
     if (!target)
         return kProgramWireNoLane;
     for (std::size_t i = 0; i < lanes.size(); ++i)
@@ -259,10 +269,10 @@ std::uint64_t program_wire_process_epoch() noexcept {
     // than trusting the clock alone; forced nonzero because zero is the
     // format's "absent" value.
     static const std::uint64_t epoch = [] {
-        const auto now = static_cast<std::uint64_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count());
-        const auto wall = static_cast<std::uint64_t>(
-            std::chrono::system_clock::now().time_since_epoch().count());
+        const auto now =
+            static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+        const auto wall =
+            static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
         std::uint64_t mixed = now ^ (wall * 0x9E37'79B9'7F4A'7C15ull);
         static int anchor = 0;
         mixed ^= reinterpret_cast<std::uintptr_t>(&anchor) * 0xBF58'476D'1CE4'E5B9ull;
@@ -296,8 +306,7 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
     const auto layout = lay_out(std::move(measured).value());
 
     if (out.size() < layout.total_bytes)
-        return SizeResult(
-            runtime::Err(Error{Code::InsufficientCapacity, 0, layout.total_bytes}));
+        return SizeResult(runtime::Err(Error{Code::InsufficientCapacity, 0, layout.total_bytes}));
     if (reinterpret_cast<std::uintptr_t>(out.data()) % kProgramWireAlignment != 0)
         return SizeResult(runtime::Err(
             Error{Code::MisalignedBuffer, 0,
@@ -351,9 +360,9 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
         const auto pan_lane = lane_index(lanes, mixer.pan_automation);
         if ((mixer.gain_automation && gain_lane == kProgramWireNoLane) ||
             (mixer.pan_automation && pan_lane == kProgramWireNoLane))
-            return SizeResult(runtime::Err(Error{Code::MixerAutomationUnresolved,
-                                                 section_id(ProgramWireSection::Tracks),
-                                                 track.id().value}));
+            return SizeResult(
+                runtime::Err(Error{Code::MixerAutomationUnresolved,
+                                   section_id(ProgramWireSection::Tracks), track.id().value}));
 
         ProgramWireTrackRecord record;
         record.id = track.id().value;
@@ -481,8 +490,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     if (declared < bytes.size())
         return ViewResult(runtime::Err(Error{Code::TrailingData, 0, declared}));
 
-    const auto body = bytes.subspan(sizeof(ProgramWireHeader),
-                                    static_cast<std::size_t>(directory_bytes + header.payload_bytes));
+    const auto body =
+        bytes.subspan(sizeof(ProgramWireHeader),
+                      static_cast<std::size_t>(directory_bytes + header.payload_bytes));
     if (program_wire_checksum(body) != header.body_checksum)
         return ViewResult(runtime::Err(Error{Code::ChecksumMismatch, 0, header.body_checksum}));
 
@@ -495,18 +505,16 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
 
     for (std::uint32_t i = 0; i < header.section_count; ++i) {
         ProgramWireSectionEntry entry;
-        std::memcpy(&entry, bytes.data() + sizeof(ProgramWireHeader) +
-                                i * sizeof(ProgramWireSectionEntry),
+        std::memcpy(&entry,
+                    bytes.data() + sizeof(ProgramWireHeader) + i * sizeof(ProgramWireSectionEntry),
                     sizeof(entry));
-        if (entry.bytes > header.payload_bytes ||
-            entry.offset > header.payload_bytes - entry.bytes)
+        if (entry.bytes > header.payload_bytes || entry.offset > header.payload_bytes - entry.bytes)
             return ViewResult(
                 runtime::Err(Error{Code::SectionOutOfBounds, entry.id, entry.offset}));
         if (entry.offset != tiled)
             return ViewResult(runtime::Err(Error{Code::SectionsNotTiled, entry.id, entry.offset}));
         if (entry.offset % kProgramWireAlignment != 0)
-            return ViewResult(
-                runtime::Err(Error{Code::SectionMisaligned, entry.id, entry.offset}));
+            return ViewResult(runtime::Err(Error{Code::SectionMisaligned, entry.id, entry.offset}));
         tiled = entry.offset + entry.bytes;
 
         std::size_t known = kSectionCount;
@@ -537,9 +545,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         return lengths[index] / kRecordSizes[index];
     };
     if (count_of(ProgramWireSection::Program) != 1)
-        return ViewResult(runtime::Err(Error{Code::BadSectionCardinality,
-                                             section_id(ProgramWireSection::Program),
-                                             count_of(ProgramWireSection::Program)}));
+        return ViewResult(
+            runtime::Err(Error{Code::BadSectionCardinality, section_id(ProgramWireSection::Program),
+                               count_of(ProgramWireSection::Program)}));
     if (count_of(ProgramWireSection::TempoPoints) == 0)
         return ViewResult(runtime::Err(
             Error{Code::BadSectionCardinality, section_id(ProgramWireSection::TempoPoints), 0}));
@@ -594,18 +602,18 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         return ViewResult(runtime::Err(
             Error{Code::InvalidProducerEpoch, section_id(ProgramWireSection::Program)}));
     if (scalars.sample_rate_numerator == 0 || scalars.sample_rate_denominator == 0)
-        return ViewResult(runtime::Err(Error{Code::InvalidSampleRate,
-                                             section_id(ProgramWireSection::Program),
-                                             scalars.sample_rate_denominator}));
+        return ViewResult(
+            runtime::Err(Error{Code::InvalidSampleRate, section_id(ProgramWireSection::Program),
+                               scalars.sample_rate_denominator}));
     if (!view.automation_limits().valid())
-        return ViewResult(runtime::Err(
-            Error{Code::InvalidLimits, section_id(ProgramWireSection::Program)}));
+        return ViewResult(
+            runtime::Err(Error{Code::InvalidLimits, section_id(ProgramWireSection::Program)}));
 
     for (const auto& point : view.tempo_points_)
         if (point.curve_to_next > static_cast<std::uint8_t>(timebase::TempoCurve::LinearInTicks))
-            return ViewResult(runtime::Err(Error{Code::InvalidEnum,
-                                                 section_id(ProgramWireSection::TempoPoints),
-                                                 point.curve_to_next}));
+            return ViewResult(
+                runtime::Err(Error{Code::InvalidEnum, section_id(ProgramWireSection::TempoPoints),
+                                   point.curve_to_next}));
 
     // Every span a caller can reach is bounds-checked here, so the accessors
     // that return subspans can be unconditional.
@@ -627,8 +635,8 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (track.provider_selected > static_cast<std::uint8_t>(ProviderKind::ExternalInput) ||
             track.state_policy > static_cast<std::uint8_t>(RendererStatePolicy::CarryByItemId) ||
             (track.flags & ~kProgramWireTrackHasAutomationProgram) != 0)
-            return ViewResult(runtime::Err(
-                Error{Code::InvalidEnum, section_id(ProgramWireSection::Tracks), t}));
+            return ViewResult(
+                runtime::Err(Error{Code::InvalidEnum, section_id(ProgramWireSection::Tracks), t}));
         if ((track.mixer_gain_lane != kProgramWireNoLane &&
              track.mixer_gain_lane >= track.automation_lane_count) ||
             (track.mixer_pan_lane != kProgramWireNoLane &&
@@ -651,8 +659,7 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                 Code::InvalidInstanceToken, section_id(ProgramWireSection::AutomationLanes), l}));
         if (lane.target_kind > static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) ||
             lane.evaluation_rate > static_cast<std::uint8_t>(AutomationEvaluationRate::BlockRate) ||
-            lane.mixer_parameter >
-                static_cast<std::uint8_t>(timeline::TrackMixerParameter::Pan))
+            lane.mixer_parameter > static_cast<std::uint8_t>(timeline::TrackMixerParameter::Pan))
             return ViewResult(runtime::Err(
                 Error{Code::InvalidEnum, section_id(ProgramWireSection::AutomationLanes), l}));
     }
@@ -661,8 +668,8 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         const auto& segment = view.automation_segments_[s];
         if (segment.interpolation >
             static_cast<std::uint8_t>(timeline::AutomationInterpolation::Continuous))
-            return ViewResult(runtime::Err(Error{
-                Code::InvalidEnum, section_id(ProgramWireSection::AutomationSegments), s}));
+            return ViewResult(runtime::Err(
+                Error{Code::InvalidEnum, section_id(ProgramWireSection::AutomationSegments), s}));
         // A segment is interpolated over, so a reversed span or a non-finite
         // endpoint does not stay local: it reaches every sample the lane feeds.
         if (segment.end_tick < segment.start_tick || segment.end_sample < segment.start_sample ||
@@ -746,6 +753,11 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
         const auto& record = view.tracks()[t];
         if (track.audio_program() != nullptr)
             return false;
+        const auto& production = track.arrangement_production();
+        if (production.mode != timeline::ProductionMode::Synchronous ||
+            production.reproducibility != timeline::ReproducibilityClass::Deterministic ||
+            production.lookahead_ms != 0)
+            return false;
         if (record.id != track.id().value || record.generation != track.generation() ||
             record.provider_selected != static_cast<std::uint8_t>(track.provider().selected) ||
             record.provider_available_mask != track.provider().available_mask ||
@@ -791,8 +803,7 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
         for (std::size_t i = 0; i < modifiers.size(); ++i) {
             const auto& source = modifiers[i];
             const auto& copy = wire_modifiers[i];
-            if (copy.draw_key != source.draw_key ||
-                copy.note_id != source.modifier.note_id.value ||
+            if (copy.draw_key != source.draw_key || copy.note_id != source.modifier.note_id.value ||
                 copy.probability != source.modifier.probability ||
                 copy.condition_period != source.modifier.condition_period ||
                 copy.condition_offset != source.modifier.condition_offset ||
@@ -809,9 +820,8 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
             if (wire_placements[i].value != placements[i].value)
                 return false;
 
-        const auto lanes = automation
-                               ? automation->programs()
-                               : std::span<const std::shared_ptr<const AutomationProgram>>{};
+        const auto lanes = automation ? automation->programs()
+                                      : std::span<const std::shared_ptr<const AutomationProgram>>{};
         const auto wire_lanes = view.automation_lanes_for(record);
         if (wire_lanes.size() != lanes.size())
             return false;

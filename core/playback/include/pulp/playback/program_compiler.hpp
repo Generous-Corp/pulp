@@ -50,6 +50,15 @@ struct CompileInvalidationInput {
     const void* captured_registry_generation() const noexcept {
         return registry_generation_.get();
     }
+    const CompileContextRegistry* registry_snapshot() const noexcept {
+        return registry_snapshot_.get();
+    }
+    const std::shared_ptr<const CompileContextRegistry>& registry_snapshot_owner() const noexcept {
+        return registry_snapshot_;
+    }
+    std::shared_ptr<const void> captured_registry_generation_owner() const noexcept {
+        return registry_generation_;
+    }
 
   private:
     CompileInvalidationInput(std::shared_ptr<const CompileContextRegistry> registry,
@@ -90,6 +99,12 @@ struct ProgramCompileRequest {
     // Appended to preserve positional aggregate initialization of the original
     // request fields. Snapshot and revision must match this request.
     std::optional<CompileInvalidationInput> invalidation;
+    // Registry used by manual/full compilation callers that do not provide a
+    // transaction-backed invalidation input. submit() captures a private
+    // immutable copy plus the original generation/revision watermark before it
+    // queues work. When invalidation is present its earlier captured snapshot
+    // is authoritative instead.
+    std::shared_ptr<const CompileContextRegistry> content_compilers;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -124,6 +139,14 @@ enum class CompileErrorCode : std::uint8_t {
     // decide whether displaced events outside the retained source window should
     // chase, clip, or disappear, so it refuses rather than leaking events.
     TrimmedGrooveUnsupported,
+    // A nested SequenceRef exposes only a window of registered content. The
+    // current hook input has no authored source-window offset, so compiling the
+    // shortened leaf would restart any stateful pattern phase at the retained
+    // boundary. Refuse until that provenance is part of the renderer contract.
+    TrimmedRegisteredContentUnsupported,
+    UnresolvedRegisteredContent,
+    RegisteredContentCompileFailed,
+    RegisteredContentFragmentQuotaExceeded,
 };
 
 struct CompileError {
@@ -132,6 +155,9 @@ struct CompileError {
     std::uint64_t revision = 0;
     AudioRendererErrorCode audio_detail = AudioRendererErrorCode::InvalidAsset;
     OfflineStretchErrorCode offline_stretch_detail = OfflineStretchErrorCode::None;
+    ContentFragmentErrorCode content_fragment_detail = ContentFragmentErrorCode::RendererFailed;
+    std::uint64_t actual = 0;
+    std::uint64_t limit = 0;
 };
 
 struct CompileTicket {

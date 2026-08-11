@@ -338,6 +338,12 @@ class RegisteredContent {
     std::size_t retained_bytes() const noexcept {
         return retained_bytes_;
     }
+    /// Opaque identity of the immutable schema registry whose codec created
+    /// this erased value. Equal type/version text from another registry is not
+    /// sufficient to make value_as<T>() safe.
+    const std::shared_ptr<const void>& schema_registry_identity() const noexcept {
+        return schema_registry_identity_;
+    }
 
     /// Views the registered value as `T`.
     ///
@@ -350,14 +356,17 @@ class RegisteredContent {
   private:
     friend class SchemaRegistry;
     RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value,
-                      std::string canonical_payload_json, std::size_t retained_bytes)
+                      std::string canonical_payload_json, std::size_t retained_bytes,
+                      std::shared_ptr<const void> schema_registry_identity)
         : schema_(std::move(schema)), value_(std::move(value)),
           canonical_payload_json_(std::move(canonical_payload_json)),
-          retained_bytes_(retained_bytes) {}
+          retained_bytes_(retained_bytes),
+          schema_registry_identity_(std::move(schema_registry_identity)) {}
     SchemaIdentity schema_;
     std::shared_ptr<const void> value_;
     std::string canonical_payload_json_;
     std::size_t retained_bytes_ = 0;
+    std::shared_ptr<const void> schema_registry_identity_;
 };
 
 /// Parser bounds retained with an opaque extension envelope.
@@ -405,9 +414,8 @@ class OpaqueContent {
 };
 
 /// Exhaustive set of immutable payloads a Clip can own or reference.
-using ClipContent =
-    std::variant<EmptyContent, MediaRef, MidiContent, RegisteredContent, OpaqueContent,
-                 SequenceRef>;
+using ClipContent = std::variant<EmptyContent, MediaRef, MidiContent, RegisteredContent,
+                                 OpaqueContent, SequenceRef>;
 
 /// Overload set for visiting a ClipContent with **no generic fallback**.
 ///
