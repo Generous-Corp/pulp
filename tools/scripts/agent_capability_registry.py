@@ -108,6 +108,16 @@ EXPORTS = [
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/audio/audio_probe.hpp",
+        "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Optional prepared output-boundary diagnostics and capture plumbing; "
+            "it is a reusable observability surface rather than a generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/signal/freeze_loop_sampler.hpp",
         "fingerprint": "sha256:fa2406081bd7e78a0097eab797da14d2e1854cd0a6972cf6971728050b19348a",
         "disposition": "capability_support",
@@ -437,7 +447,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/stft.hpp",
-        "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
+        "fingerprint": "sha256:9b1520fdb50618960b0ee63e78edb41f7649cfe07b9ad01e7227e4c91cc0204e",
         "disposition": "capability_support",
         "capability_keys": [
             "signal.bounded-sample-history",

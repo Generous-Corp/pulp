@@ -46,39 +46,99 @@ void VisualizationBridge::process(const float* const* channels,
 
     if (!capture_ready_) return;
 
-    const int captured_channels = std::min<int>(
-        num_channels, static_cast<int>(channel_stfts_.size()));
+    // Analyzer topology is invariant between quiescent configure() calls.
+    // Meter mismatched host blocks above, but never splice them into one STFT
+    // history and then label the result as a different channel layout. Capture
+    // stays suspended until poll() acknowledges the discontinuity, preventing
+    // later valid audio from being joined to pre-mismatch history.
+    const int captured_channels = static_cast<int>(channel_stfts_.size());
     if (captured_channels <= 0) return;
-    for (int ch = 0; ch < captured_channels; ++ch) {
-        if (channels[ch] == nullptr) return;
+    if (num_channels != captured_channels) {
+        discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        return;
     }
+    for (int ch = 0; ch < num_channels; ++ch) {
+        if (channels[ch] == nullptr) {
+            discontinuity_generation_.fetch_add(1, std::memory_order_release);
+            return;
+        }
+    }
+    if (discontinuity_generation_.load(std::memory_order_acquire)
+        != acknowledged_discontinuity_.load(std::memory_order_acquire)) return;
 
     const audio::BufferView<const float> block(
         channels, static_cast<std::size_t>(captured_channels),
         static_cast<std::size_t>(num_samples));
-    const auto written = capture_.write(
-        block, static_cast<std::uint64_t>(num_samples));
-    if (written > 0) {
-        latest_source_channels_.store(captured_channels,
-                                      std::memory_order_relaxed);
-        source_sequence_.fetch_add(1, std::memory_order_release);
+#ifdef PULP_BENCHMARK
+    const double copy_start = render::bench::now_us();
+#endif
+    (void)capture_.write(block, static_cast<std::uint64_t>(num_samples));
+#ifdef PULP_BENCHMARK
+    if (bench_counters_) {
+        bench_counters_->audio_copy_total_us.fetch_add(
+            render::bench::now_us() - copy_start, std::memory_order_relaxed);
     }
+#endif
+}
+
+void VisualizationBridge::reset_analysis_continuity() {
+    for (auto& stft : channel_stfts_) stft.reset();
+    waveform_pos_ = 0;
+    std::fill(waveform_ring_.begin(), waveform_ring_.end(), 0.0f);
+    if (++epoch_ == 0) ++epoch_;
 }
 
 bool VisualizationBridge::poll() {
-    if (!capture_ready_ || consumer_chunk_frames_ <= 0 ||
-        channel_stfts_.empty()) return false;
+    if (!capture_ready_ || consumer_chunk_frames_ <= 0 || channel_stfts_.empty())
+        return false;
+
+    // Rejected/missing-layout blocks are analysis discontinuities. The audio
+    // producer suspends capture after signaling one, so this entry-bounded
+    // flush cannot discard valid post-gap audio. Acknowledge only the observed
+    // generation; a concurrent later discontinuity remains pending.
+    const auto discontinuity =
+        discontinuity_generation_.load(std::memory_order_acquire);
+    if (discontinuity != observed_discontinuity_) {
+        const auto available_at_entry = capture_.available_frames();
+        (void)capture_.drain(available_at_entry);
+        observed_discontinuity_ = discontinuity;
+        acknowledged_discontinuity_.store(discontinuity,
+                                           std::memory_order_release);
+        reset_analysis_continuity();
+        return false;
+    }
+
+    // A capture overrun is an analysis discontinuity. Discard only the frames
+    // visible at entry (bounded even under continuous production), reset the
+    // STFT/waveform histories, and leave frames accepted during this flush for
+    // the next poll's fresh continuity epoch.
+    const auto dropped = capture_.stats().dropped_write_frames;
+    const auto available_at_entry = capture_.available_frames();
+    if (dropped != observed_dropped_frames_) {
+        (void)capture_.drain(available_at_entry);
+        observed_dropped_frames_ = dropped;
+        reset_analysis_continuity();
+        return false;
+    }
+
+    const auto entry_frames = config_.max_frames_per_poll > 0
+        ? std::min<std::uint64_t>(
+              available_at_entry,
+              static_cast<std::uint64_t>(config_.max_frames_per_poll))
+        : available_at_entry;
 
     bool spectrum_changed = false;
     bool waveform_changed = false;
-    while (capture_.available_frames() > 0) {
+    std::uint64_t remaining_frames = entry_frames;
+    while (remaining_frames > 0) {
         const auto chunk = static_cast<int>(std::min<std::uint64_t>(
-            capture_.available_frames(),
+            remaining_frames,
             static_cast<std::uint64_t>(consumer_chunk_frames_)));
         audio::BufferView<float> destination(
             consumer_channels_.data(), consumer_channels_.size(),
             static_cast<std::size_t>(chunk));
         (void)capture_.read(destination, static_cast<std::uint64_t>(chunk));
+        remaining_frames -= static_cast<std::uint64_t>(chunk);
 
         for (std::size_t ch = 0; ch < channel_stfts_.size(); ++ch) {
             float* samples = consumer_channels_[ch];
@@ -100,8 +160,7 @@ bool VisualizationBridge::poll() {
         }
     }
 
-    const auto source_sequence = source_sequence_.load(std::memory_order_acquire);
-    const int source_channels = latest_source_channels_.load(std::memory_order_relaxed);
+    const int source_channels = config_.num_channels;
 
     if (spectrum_changed) {
         const int analysis_channels = std::clamp(
@@ -110,8 +169,7 @@ bool VisualizationBridge::poll() {
         spec.num_bins = std::min(num_bins(), SpectrumData::kMaxBins);
         spec.epoch = epoch_;
         spec.sequence_number = ++spectrum_sequence_;
-        spec.source_sequence = source_sequence;
-        spec.dropped_frames = capture_.stats().dropped_write_frames;
+        spec.dropped_frames = dropped;
         spec.source_channels = source_channels;
         spec.fft_size = config_.fft_size;
         spec.sample_rate = std::isfinite(config_.sample_rate)
@@ -136,7 +194,16 @@ bool VisualizationBridge::poll() {
             spec.magnitude_db[bin] = std::isfinite(db)
                 ? static_cast<float>(db) : config_.spectrum_floor_db;
         }
+#ifdef PULP_BENCHMARK
+        const double publish_start = render::bench::now_us();
+#endif
         spectrum_buf_.write(spec);
+#ifdef PULP_BENCHMARK
+        if (bench_counters_) {
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(
+                render::bench::now_us() - publish_start, std::memory_order_relaxed);
+        }
+#endif
     }
 
     if (waveform_changed) {
@@ -144,11 +211,19 @@ bool VisualizationBridge::poll() {
         wd.num_samples = waveform_length_;
         wd.num_channels = source_channels;
         wd.sequence_number = ++waveform_sequence_;
-        wd.source_sequence = source_sequence;
         for (int i = 0; i < waveform_length_; ++i) {
             wd.samples[i] = waveform_ring_[(waveform_pos_ + i) % waveform_length_];
         }
+#ifdef PULP_BENCHMARK
+        const double publish_start = render::bench::now_us();
+#endif
         waveform_buf_.write(wd);
+#ifdef PULP_BENCHMARK
+        if (bench_counters_) {
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(
+                render::bench::now_us() - publish_start, std::memory_order_relaxed);
+        }
+#endif
     }
 
     return spectrum_changed || waveform_changed;

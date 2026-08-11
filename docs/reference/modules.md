@@ -2410,13 +2410,15 @@ grapheme boundaries.
 `VisualizationBridge` is the reusable audio-to-UI pipeline for custom native or
 WebView visualizations. Call `configure()` off the audio thread, then
 `process()` from the callback; the callback only performs fixed-capacity SPSC
-capture and metering. A UI or worker thread calls `poll()` (the spectrum and
-waveform read methods also poll) to perform FFT analysis. Spectrum snapshots
-are finite, sequence-stamped, and power-averaged across channels, so swapping
-left/right or reversing one channel's polarity does not change the display.
-The configured channel count is capture capacity; a stable source with fewer
-channels is averaged across only those active channels. Reconfigure at a
-quiescent boundary when the host's channel layout changes.
+capture and metering. Exactly one UI thread calls bounded `poll()` to perform
+FFT analysis, then uses the cheap snapshot-only `peek_spectrum()` and
+`peek_waveform()` reads. Spectrum snapshots are finite, sequence-stamped, and
+power-averaged across channels, so swapping left/right or reversing one
+channel's polarity does not change the display. The configured channel layout
+is invariant: mismatched blocks are metered but not captured. Stop the audio
+producer and UI consumer before `configure()` or `reset()`.
+Set `max_frames_per_poll` when a UI needs a stricter per-tick analysis budget;
+zero still consumes no more than the frames visible when `poll()` begins.
 
 | Widget | Description |
 |--------|-------------|
