@@ -93,6 +93,52 @@ TEST_CASE("FaustTremolo modulates signal", "[faust][tremolo]") {
     REQUIRE(max_val > 0.95f);
 }
 
+TEST_CASE("FaustTremolo preserves oscillator phase across callback partitions",
+          "[faust][tremolo][partition]") {
+    FaustTremoloFixture continuous;
+    FaustTremoloFixture partitioned;
+    continuous.store.set_value(1, 7.0f);
+    continuous.store.set_value(2, 1.0f);
+    partitioned.store.set_value(1, 7.0f);
+    partitioned.store.set_value(2, 1.0f);
+
+    constexpr std::size_t total_frames = 512;
+    constexpr std::size_t block_frames = 64;
+    audio::Buffer<float> continuous_in(2, total_frames);
+    audio::Buffer<float> continuous_out(2, total_frames);
+    for (std::size_t i = 0; i < total_frames; ++i) {
+        continuous_in.channel(0)[i] = 0.75f;
+        continuous_in.channel(1)[i] = -0.25f;
+    }
+    continuous.process(continuous_in, continuous_out);
+
+    audio::Buffer<float> partitioned_out(2, total_frames);
+    for (std::size_t block_start = 0; block_start < total_frames;
+         block_start += block_frames) {
+        audio::Buffer<float> block_in(2, block_frames);
+        audio::Buffer<float> block_out(2, block_frames);
+        for (std::size_t i = 0; i < block_frames; ++i) {
+            block_in.channel(0)[i] = 0.75f;
+            block_in.channel(1)[i] = -0.25f;
+        }
+
+        partitioned.process(block_in, block_out);
+        for (std::size_t ch = 0; ch < 2; ++ch) {
+            for (std::size_t i = 0; i < block_frames; ++i) {
+                partitioned_out.channel(ch)[block_start + i] = block_out.channel(ch)[i];
+            }
+        }
+    }
+
+    REQUIRE(std::abs(continuous_out.channel(0)[total_frames - 1] -
+                     continuous_out.channel(0)[0]) > 0.1f);
+    for (std::size_t ch = 0; ch < 2; ++ch) {
+        for (std::size_t i = 0; i < total_frames; ++i) {
+            REQUIRE(partitioned_out.channel(ch)[i] == continuous_out.channel(ch)[i]);
+        }
+    }
+}
+
 TEST_CASE("FaustTremolo state round-trip", "[faust][tremolo]") {
     FaustTremoloFixture fx;
     fx.store.set_value(1, 8.0f);
