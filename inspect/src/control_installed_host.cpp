@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <stdexcept>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -115,13 +116,21 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     ControlHostOpenResult opened;
     ControlHostObservabilityBinding observability_binding;
     std::unordered_map<std::string, std::shared_ptr<ProjectedAuthority>> authorities;
-    std::jthread heartbeat_worker;
+    std::atomic_bool heartbeat_stop = false;
+    std::thread heartbeat_worker;
     std::chrono::milliseconds heartbeat_interval{};
     std::chrono::milliseconds handshake_timeout{};
     MotionInspector* motion_inspector = nullptr;
     MotionScrubber* motion_scrubber = nullptr;
     bool active = false;
     bool stopping = false;
+
+    ~State() {
+        heartbeat_stop.store(true, std::memory_order_release);
+        heartbeat_changed.notify_all();
+        if (heartbeat_worker.joinable())
+            heartbeat_worker.join();
+    }
 
     std::shared_ptr<ProjectedAuthority> authority(std::string_view id, bool create) {
         std::lock_guard lock(mutex);
@@ -439,11 +448,15 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
         };
     }
 
-    void run_heartbeat(std::stop_token stop) {
+    void run_heartbeat() {
         std::unique_lock lock(mutex);
-        while (!stop.stop_requested() && !stopping) {
+        while (!heartbeat_stop.load(std::memory_order_acquire) && !stopping) {
             if (heartbeat_changed.wait_for(lock, heartbeat_interval,
-                                           [&] { return stop.stop_requested() || stopping; }))
+                                           [&] {
+                                               return heartbeat_stop.load(
+                                                          std::memory_order_acquire) ||
+                                                      stopping;
+                                           }))
                 break;
             lock.unlock();
             const bool broker_live = connection && connection->heartbeat(handshake_timeout);
@@ -645,8 +658,7 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
         std::lock_guard lock(state->mutex);
         state->active = true;
     }
-    state->heartbeat_worker =
-        std::jthread([raw = state.get()](std::stop_token stop) { raw->run_heartbeat(stop); });
+    state->heartbeat_worker = std::thread([raw = state.get()] { raw->run_heartbeat(); });
     return std::unique_ptr<ControlInstalledHost>(new ControlInstalledHost(std::move(state)));
 }
 
@@ -669,7 +681,7 @@ void ControlInstalledHost::stop() noexcept {
             return;
         state_->stopping = true;
     }
-    state_->heartbeat_worker.request_stop();
+    state_->heartbeat_stop.store(true, std::memory_order_release);
     state_->heartbeat_changed.notify_all();
     if (state_->heartbeat_worker.joinable())
         state_->heartbeat_worker.join();

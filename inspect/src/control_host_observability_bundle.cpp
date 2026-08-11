@@ -6,6 +6,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
@@ -102,10 +103,11 @@ struct ControlHostObservabilityBundle::State {
     std::mutex expiry_wait_mutex;
     std::condition_variable expiry_changed;
     std::uint64_t expiry_generation = 0;
-    std::jthread expiry_worker;
+    std::atomic_bool expiry_stop = false;
+    std::thread expiry_worker;
 
     ~State() {
-        expiry_worker.request_stop();
+        expiry_stop.store(true, std::memory_order_release);
         expiry_changed.notify_all();
         if (expiry_worker.joinable())
             expiry_worker.join();
@@ -120,9 +122,9 @@ struct ControlHostObservabilityBundle::State {
         trace = {};
     }
 
-    void run_expiry(std::stop_token stop) {
+    void run_expiry() {
         std::unique_lock wait_lock(expiry_wait_mutex);
-        while (!stop.stop_requested()) {
+        while (!expiry_stop.load(std::memory_order_acquire)) {
             std::chrono::steady_clock::time_point deadline;
             std::uint64_t generation = 0;
             {
@@ -135,7 +137,7 @@ struct ControlHostObservabilityBundle::State {
             const auto remaining = deadline - now();
             const bool changed = remaining > std::chrono::steady_clock::duration::zero() &&
                                  expiry_changed.wait_for(wait_lock, remaining, [&] {
-                                     if (stop.stop_requested())
+                                     if (expiry_stop.load(std::memory_order_acquire))
                                          return true;
                                      std::lock_guard lock(mutex);
                                      return !connected || expiry_generation != generation;
@@ -341,8 +343,7 @@ ControlHostObservabilityBundle::create(ControlHostObservabilityBundleConfig conf
     state->ttl = config.heartbeat_ttl;
     state->clock = std::move(config.clock);
     state->expires_at = state->now() + state->ttl;
-    state->expiry_worker =
-        std::jthread([raw = state.get()](std::stop_token stop) { raw->run_expiry(stop); });
+    state->expiry_worker = std::thread([raw = state.get()] { raw->run_expiry(); });
     return std::unique_ptr<ControlHostObservabilityBundle>(
         new ControlHostObservabilityBundle(std::move(state)));
 }
