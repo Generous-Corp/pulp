@@ -65,3 +65,23 @@ TEST_CASE("grid lines reject invalid spacing and bounded output", "[timeline-edi
     CHECK(bounded.error == timeline_editor::GridLineError::OutputTooSmall);
     CHECK(bounded.count == 1);
 }
+
+TEST_CASE("grid lines omit the containing bar before a partial viewport",
+          "[timeline-editor][grid-lines]") {
+    const auto meter = meter_map({{{0}, {4, 4}}});
+    const auto projection = timeline_editor::TickProjection::create(
+        {timebase::kTicksPerQuarter}, {4 * timebase::kTicksPerQuarter}, {0.0f, 400.0f});
+    REQUIRE(projection);
+
+    std::array<timeline_editor::GridLine, 8> lines{};
+    const auto result = timeline_editor::generate_grid_lines(*projection, meter, 1.0f, lines);
+
+    REQUIRE(result);
+    REQUIRE(result.count == 5);
+    CHECK(lines[0].tick == timebase::TickPosition{timebase::kTicksPerQuarter});
+    CHECK(lines[0].level == timeline_editor::GridLineLevel::Beat);
+    CHECK(lines[3].tick == timebase::TickPosition{4 * timebase::kTicksPerQuarter});
+    CHECK(lines[3].level == timeline_editor::GridLineLevel::Bar);
+    CHECK(lines[4].tick == timebase::TickPosition{5 * timebase::kTicksPerQuarter});
+    CHECK(lines[4].level == timeline_editor::GridLineLevel::Beat);
+}

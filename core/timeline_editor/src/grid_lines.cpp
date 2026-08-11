@@ -48,7 +48,8 @@ GridLineResult generate_grid_lines(const TickProjection& projection,
         const auto bar_start = meter.bar_to_tick(bar);
         if (bar_start.value > end)
             break;
-        if (!append(bar_start.value, GridLineLevel::Bar))
+        if (bar_start.value >= start &&
+            !append(bar_start.value, GridLineLevel::Bar))
             return {GridLineError::OutputTooSmall, count};
 
         const auto signature = meter.meter_at_tick(bar_start);
