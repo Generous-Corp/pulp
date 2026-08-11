@@ -36,6 +36,18 @@ timebase::CompiledTempoMap constant_tempo_map(double bpm = 120.0) {
     return std::move(compiled).value();
 }
 
+timebase::CompiledTempoMap tempo_knot_map() {
+    constexpr auto knot = timebase::kTicksPerQuarter;
+    const std::array points{
+        timebase::TempoPoint{{0}, 120.0, timebase::TempoCurve::Constant},
+        timebase::TempoPoint{{knot}, 60.0, timebase::TempoCurve::Constant},
+    };
+    auto compiled =
+        timebase::CompiledTempoMap::compile(points, timebase::RationalRate{kSampleRate, 1});
+    REQUIRE(compiled);
+    return std::move(compiled).value();
+}
+
 struct AbsoluteMidiEvent {
     std::int64_t sample = 0;
     midi::MidiEvent event;
@@ -222,6 +234,57 @@ TEST_CASE("Arpeggiator random order is seeded and block-partition invariant",
     REQUIRE(a.size() == b.size());
     for (std::size_t index = 0; index < a.size(); ++index)
         CHECK(a[index].identity() == b[index].identity());
+}
+
+TEST_CASE("Arpeggiator is exact across callback partitions through a tempo-map knot",
+          "[midi][arpeggiator][tempo][partition]") {
+    const auto map = tempo_knot_map();
+    constexpr auto step_ticks = timebase::kTicksPerQuarter / 4;
+    constexpr auto knot_tick = timebase::kTicksPerQuarter;
+    constexpr auto release_tick = knot_tick + 2 * step_ticks;
+    constexpr auto end_tick = knot_tick + 3 * step_ticks;
+    const auto release_sample = map.ticks_to_samples({release_tick}).value;
+    const auto total_samples = map.ticks_to_samples({end_tick}).value + 1;
+
+    auto input = chord_at_zero({60, 64, 67});
+    for (const auto note : {60, 64, 67})
+        input.push_back({release_sample,
+                         midi::MidiEvent::note_off(0, static_cast<std::uint8_t>(note))});
+
+    midi::ArpeggiatorSpec spec;
+    spec.order = midi::ArpeggiatorOrder::Up;
+    spec.gate = {1, 2};
+    midi::Arpeggiator<> fixed_arp(spec);
+    midi::Arpeggiator<> irregular_arp(spec);
+    constexpr std::array fixed{128};
+    constexpr std::array irregular{1, 7, 31, 64, 127, 509};
+    const auto fixed_output = render(fixed_arp, map, total_samples, fixed, input);
+    const auto irregular_output =
+        render(irregular_arp, map, total_samples, irregular, input);
+
+    REQUIRE(fixed_output.size() == irregular_output.size());
+    for (std::size_t index = 0; index < fixed_output.size(); ++index)
+        REQUIRE(fixed_output[index].identity() == irregular_output[index].identity());
+
+    std::vector<std::int64_t> attack_samples;
+    for (const auto& event : fixed_output) {
+        if (event.event.is_note_on() && event.event.velocity() != 0)
+            attack_samples.push_back(event.sample);
+    }
+    const std::vector<std::uint8_t> expected_notes{60, 64, 67, 60, 64, 67};
+    std::vector<std::int64_t> expected_samples;
+    expected_samples.reserve(expected_notes.size());
+    for (std::int64_t step = 0; step < static_cast<std::int64_t>(expected_notes.size()); ++step)
+        expected_samples.push_back(map.ticks_to_samples({step * step_ticks}).value);
+    REQUIRE(attacks(fixed_output) == expected_notes);
+    REQUIRE(attack_samples == expected_samples);
+    REQUIRE(expected_samples[4] == map.ticks_to_samples({knot_tick}).value);
+    REQUIRE(expected_samples[5] == map.ticks_to_samples({knot_tick + step_ticks}).value);
+
+    EventLedger ledger;
+    for (const auto& event : fixed_output)
+        ledger.feed(event);
+    REQUIRE(ledger.balanced());
 }
 
 TEST_CASE("Arpeggiator gate and repeated-note policy define ties and retriggers",
