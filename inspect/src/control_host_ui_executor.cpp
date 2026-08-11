@@ -559,10 +559,11 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
         auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
         timeout = std::max(timeout, std::chrono::milliseconds{1});
 
-        std::jthread watchdog([&](std::stop_token stop) {
-            while (!stop.stop_requested()) {
+        std::atomic<bool> stop_watchdog{false};
+        std::thread watchdog([&] {
+            while (!stop_watchdog.load(std::memory_order_relaxed)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{5});
-                if (stop.stop_requested())
+                if (stop_watchdog.load(std::memory_order_relaxed))
                     return;
                 const auto checkpoint = context.checkpoint();
                 if (checkpoint != ControlExecutionCheckpoint::Continue) {
@@ -571,9 +572,20 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
                 }
             }
         });
+        struct WatchdogJoiner {
+            std::atomic<bool>& stop;
+            std::thread& worker;
+
+            void stop_and_join() noexcept {
+                stop.store(true, std::memory_order_relaxed);
+                if (worker.joinable())
+                    worker.join();
+            }
+
+            ~WatchdogJoiner() { stop_and_join(); }
+        } watchdog_joiner{stop_watchdog, watchdog};
         auto evaluated = acquired_evaluator->evaluate(source, timeout, maximum_eval_result_bytes);
-        watchdog.request_stop();
-        watchdog.join();
+        watchdog_joiner.stop_and_join();
         const auto after_eval = context.checkpoint();
         if (after_eval != ControlExecutionCheckpoint::Continue)
             return checkpoint_failure(after_eval);
