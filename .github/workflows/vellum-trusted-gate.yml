@@ -187,6 +187,21 @@ jobs:
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
+          if [ -f "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" ]; then
+            run_validator python3 \
+              "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
+              --repo "$proposed_tree" \
+              --base "$PR_BASE" \
+              --head "$proposed_head" \
+              --output "$RUNNER_TEMP/vellum-trusted-expansion-watch.json"
+          else
+            # The checker-introduction PR has no trusted-base copy yet. It may
+            # land only as inert infrastructure; the separate acceptance PR is
+            # evaluated by the checker after this bootstrap reaches main.
+            test ! -e "$proposed_tree/.github/vellum-expansion-watch"
+            test ! -e "$proposed_tree/.github/vellum-expansion-watch-events"
+            echo "Vellum expansion watch bootstrap is inert"
+          fi
           run_validator python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
             --root "$proposed_tree" \
             --map "$proposed_tree/docs/status/pulp-tooling-disposition.json"
@@ -259,6 +274,17 @@ jobs:
             --source-head "$MERGE_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-merge-outbox.json"
+          if [ -f "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" ]; then
+            python3 "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
+              --repo "$proposed_tree" \
+              --base "$MERGE_BASE" \
+              --head "$MERGE_HEAD" \
+              --output "$RUNNER_TEMP/vellum-merge-expansion-watch.json"
+          else
+            test ! -e "$proposed_tree/.github/vellum-expansion-watch"
+            test ! -e "$proposed_tree/.github/vellum-expansion-watch-events"
+            echo "Vellum expansion watch bootstrap is inert"
+          fi
           python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
             --repo "$proposed_tree" \
             --source-commit 2ccff748f0d59da34b01ce1fbceabcf19f452731 \

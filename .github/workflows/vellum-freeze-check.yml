@@ -84,6 +84,10 @@ jobs:
             --head '${{ steps.comparison.outputs.head }}' \
             --source-head '${{ steps.comparison.outputs.source_head }}' \
             --output "$RUNNER_TEMP/vellum-outbox.json"
+          python3 tools/scripts/vellum_expansion_watch_check.py \
+            --base '${{ steps.comparison.outputs.base }}' \
+            --head '${{ steps.comparison.outputs.head }}' \
+            --output "$RUNNER_TEMP/vellum-expansion-watch.json"
 
       - name: Install inventory parser dependency
         run: python3 -m pip install --quiet 'pyyaml==6.0.2'
@@ -91,6 +95,7 @@ jobs:
       - name: Run freeze-check negative controls
         run: |
           python3 tools/scripts/test_vellum_freeze_check.py
+          python3 tools/scripts/test_vellum_expansion_watch_check.py
           python3 tools/scripts/test_github_app_jwt.py
           python3 tools/scripts/test_vellum_authority_workflows.py
 
