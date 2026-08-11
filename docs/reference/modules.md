@@ -2407,6 +2407,17 @@ grapheme boundaries.
 
 #### Audio visualization
 
+`VisualizationBridge` is the reusable audio-to-UI pipeline for custom native or
+WebView visualizations. Call `configure()` off the audio thread, then
+`process()` from the callback; the callback only performs fixed-capacity SPSC
+capture and metering. A UI or worker thread calls `poll()` (the spectrum and
+waveform read methods also poll) to perform FFT analysis. Spectrum snapshots
+are finite, sequence-stamped, and power-averaged across channels, so swapping
+left/right or reversing one channel's polarity does not change the display.
+The configured channel count is capture capacity; a stable source with fewer
+channels is averaged across only those active channels. Reconfigure at a
+quiescent boundary when the host's channel layout changes.
+
 | Widget | Description |
 |--------|-------------|
 | CorrelationMeter | Displays stereo phase correlation from -1 (out of phase) to +1 (mono) |

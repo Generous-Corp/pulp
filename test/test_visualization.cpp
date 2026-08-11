@@ -2,18 +2,57 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/visualization_bridge.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
 #include "support/thread_progress.hpp"
 #include <cmath>
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <limits>
 
 using namespace pulp::view;
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
 static constexpr float kPi = 3.14159265358979323846f;
+
+namespace {
+
+int peak_bin(const SpectrumData& spectrum) {
+    int result = 0;
+    for (int bin = 1; bin < spectrum.num_bins; ++bin) {
+        if (spectrum.magnitude_db[bin] > spectrum.magnitude_db[result]) result = bin;
+    }
+    return result;
+}
+
+std::vector<float> bin_sine(int bin, int fft_size, float amplitude = 1.0f) {
+    std::vector<float> samples(static_cast<std::size_t>(fft_size));
+    for (int i = 0; i < fft_size; ++i) {
+        samples[static_cast<std::size_t>(i)] = amplitude * std::sin(
+            2.0f * kPi * static_cast<float>(bin * i) / static_cast<float>(fft_size));
+    }
+    return samples;
+}
+
+SpectrumData analyze_stereo(const std::vector<float>& left,
+                            const std::vector<float>& right) {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = static_cast<int>(left.size());
+    cfg.hop_size = cfg.fft_size;
+    cfg.num_channels = 2;
+    cfg.sample_rate = 48000.0f;
+    cfg.capture_waveform = false;
+    bridge.configure(cfg);
+    const float* channels[] = {left.data(), right.data()};
+    bridge.process(channels, 2, cfg.fft_size);
+    return bridge.read_spectrum();
+}
+
+}  // namespace
 
 // ── VisualizationBridge Tests ───────────────────────────────────────────────
 
@@ -59,6 +98,13 @@ TEST_CASE("VisualizationBridge publishes spectrum", "[view][vizbridge]") {
     const auto& spec = bridge.read_spectrum();
     REQUIRE(spec.num_bins > 0);
     REQUIRE(spec.num_bins == 129); // 256/2 + 1
+    REQUIRE(spec.epoch == 1);
+    REQUIRE(spec.sequence_number == 1);
+    REQUIRE(spec.source_sequence == 1);
+    REQUIRE(spec.source_channels == 1);
+    REQUIRE(spec.fft_size == 256);
+    REQUIRE(spec.sample_rate == 44100.0f);
+    REQUIRE(spec.floor_db == -120.0f);
 
     // Should have non-trivial spectrum values (not all -120 dB)
     float max_db = -200.0f;
@@ -66,6 +112,161 @@ TEST_CASE("VisualizationBridge publishes spectrum", "[view][vizbridge]") {
         if (spec.magnitude_db[i] > max_db) max_db = spec.magnitude_db[i];
     }
     REQUIRE(max_db > -60.0f); // The sine should produce significant energy
+}
+
+TEST_CASE("VisualizationBridge audio producer stays allocation-free when tap fills",
+          "[view][vizbridge][rt-safety]") {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 128;
+    cfg.num_channels = 2;
+    cfg.sample_rate = 48000.0f;
+    cfg.capture_waveform = true;
+    cfg.waveform_length = 128;
+    cfg.capture_buffer_frames = 256;
+    bridge.configure(cfg);
+
+    std::array<float, 64> left{};
+    std::array<float, 64> right{};
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        left[i] = std::sin(2.0f * kPi * static_cast<float>(i) / 16.0f);
+        right[i] = -left[i];
+    }
+    const float* channels[] = {left.data(), right.data()};
+
+    std::size_t allocations = 0;
+    std::size_t bytes = 0;
+    {
+        pulp::test::RtAllocationProbe allocation_probe;
+        pulp::runtime::ScopedNoAlloc no_alloc;
+        // This deliberately overruns the fixed tap. A mutation that restores
+        // FFT/vector work to process(), or grows storage on overflow, is caught.
+        for (int block = 0; block < 1000; ++block)
+            bridge.process(channels, 2, static_cast<int>(left.size()));
+        allocations = allocation_probe.allocation_count();
+        bytes = allocation_probe.allocated_bytes();
+    }
+
+    REQUIRE(allocations == 0);
+    REQUIRE(bytes == 0);
+    const auto spectrum = bridge.read_spectrum();
+    REQUIRE(spectrum.dropped_frames > 0);
+}
+
+TEST_CASE("VisualizationBridge spectrum follows the input tone and silence",
+          "[view][vizbridge][spectrum]") {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = 1024;
+    cfg.hop_size = 1024;
+    cfg.num_channels = 2;
+    cfg.sample_rate = 48000.0f;
+    cfg.capture_waveform = false;
+    bridge.configure(cfg);
+
+    auto low = bin_sine(10, cfg.fft_size);
+    const float* low_channels[] = {low.data(), low.data()};
+    bridge.process(low_channels, 2, cfg.fft_size);
+    const auto low_spectrum = bridge.read_spectrum();
+    REQUIRE(std::abs(peak_bin(low_spectrum) - 10) <= 1);
+
+    auto high = bin_sine(40, cfg.fft_size);
+    const float* high_channels[] = {high.data(), high.data()};
+    bridge.process(high_channels, 2, cfg.fft_size);
+    const auto high_spectrum = bridge.read_spectrum();
+    REQUIRE(std::abs(peak_bin(high_spectrum) - 40) <= 1);
+    REQUIRE(peak_bin(high_spectrum) > peak_bin(low_spectrum));
+    REQUIRE(high_spectrum.sequence_number > low_spectrum.sequence_number);
+
+    std::vector<float> silence(static_cast<std::size_t>(cfg.fft_size), 0.0f);
+    const float* silent_channels[] = {silence.data(), silence.data()};
+    bridge.process(silent_channels, 2, cfg.fft_size);
+    const auto silent_spectrum = bridge.read_spectrum();
+    for (int bin = 0; bin < silent_spectrum.num_bins; ++bin) {
+        REQUIRE(std::isfinite(silent_spectrum.magnitude_db[bin]));
+        REQUIRE(silent_spectrum.magnitude_db[bin] == silent_spectrum.floor_db);
+    }
+}
+
+TEST_CASE("VisualizationBridge stereo spectrum is power-averaged",
+          "[view][vizbridge][spectrum][stereo]") {
+    constexpr int kFftSize = 1024;
+    auto tone = bin_sine(21, kFftSize, 0.75f);
+    std::vector<float> silence(kFftSize, 0.0f);
+    std::vector<float> inverted = tone;
+    for (float& sample : inverted) sample = -sample;
+
+    const auto left_only = analyze_stereo(tone, silence);
+    const auto right_only = analyze_stereo(silence, tone);
+    const auto in_phase = analyze_stereo(tone, tone);
+    const auto anti_phase = analyze_stereo(tone, inverted);
+
+    REQUIRE(peak_bin(left_only) == peak_bin(right_only));
+    REQUIRE(peak_bin(in_phase) == peak_bin(anti_phase));
+    REQUIRE_THAT(left_only.magnitude_db[21],
+                 WithinAbs(right_only.magnitude_db[21], 1.0e-5f));
+    REQUIRE_THAT(in_phase.magnitude_db[21],
+                 WithinAbs(anti_phase.magnitude_db[21], 1.0e-5f));
+    // One active side contributes half the stereo power: -3.0103 dB.
+    REQUIRE_THAT(in_phase.magnitude_db[21] - left_only.magnitude_db[21],
+                 WithinAbs(3.0103f, 1.0e-3f));
+}
+
+TEST_CASE("VisualizationBridge averages active rather than configured channels",
+          "[view][vizbridge][spectrum][channels]") {
+    constexpr int kFftSize = 1024;
+    auto tone = bin_sine(17, kFftSize, 0.5f);
+
+    VisualizationBridge stereo_capacity;
+    VisualizationConfig stereo_cfg;
+    stereo_cfg.fft_size = kFftSize;
+    stereo_cfg.hop_size = kFftSize;
+    stereo_cfg.num_channels = 2;
+    stereo_cfg.sample_rate = 48000.0f;
+    stereo_cfg.capture_waveform = false;
+    stereo_capacity.configure(stereo_cfg);
+    const float* mono_input[] = {tone.data()};
+    stereo_capacity.process(mono_input, 1, kFftSize);
+    const auto mono_through_stereo = stereo_capacity.read_spectrum();
+
+    VisualizationBridge mono_capacity;
+    auto mono_cfg = stereo_cfg;
+    mono_cfg.num_channels = 1;
+    mono_capacity.configure(mono_cfg);
+    const float* stereo_input[] = {tone.data(), tone.data()};
+    mono_capacity.process(stereo_input, 2, kFftSize);
+    const auto stereo_through_mono = mono_capacity.read_spectrum();
+
+    REQUIRE(mono_through_stereo.source_channels == 1);
+    REQUIRE(stereo_through_mono.source_channels == 1);
+    REQUIRE_THAT(mono_through_stereo.magnitude_db[17],
+                 WithinAbs(stereo_through_mono.magnitude_db[17], 1.0e-5f));
+}
+
+TEST_CASE("VisualizationBridge publishes only finite spectrum values",
+          "[view][vizbridge][spectrum]") {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 256;
+    cfg.num_channels = 2;
+    cfg.sample_rate = 48000.0f;
+    cfg.capture_waveform = false;
+    cfg.spectrum_floor_db = std::numeric_limits<float>::quiet_NaN();
+    bridge.configure(cfg);
+
+    std::vector<float> left(256, std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> right(256, std::numeric_limits<float>::infinity());
+    const float* channels[] = {left.data(), right.data()};
+    bridge.process(channels, 2, 256);
+    const auto spectrum = bridge.read_spectrum();
+
+    REQUIRE(spectrum.floor_db == -120.0f);
+    for (int bin = 0; bin < spectrum.num_bins; ++bin) {
+        REQUIRE(std::isfinite(spectrum.magnitude_db[bin]));
+        REQUIRE(spectrum.magnitude_db[bin] == spectrum.floor_db);
+    }
 }
 
 TEST_CASE("VisualizationBridge publishes meter data", "[view][vizbridge]") {
@@ -212,8 +413,12 @@ TEST_CASE("VisualizationBridge reset clears state", "[view][vizbridge]") {
     std::vector<float> buf(256, 0.5f);
     const float* channels[] = {buf.data()};
     bridge.process(channels, 1, 256);
+    const auto before_reset = bridge.read_spectrum();
+    REQUIRE(before_reset.epoch == 1);
+    REQUIRE(before_reset.sequence_number == 1);
 
     bridge.reset();
+    REQUIRE(bridge.read_spectrum().num_bins == 0);
 
     // After reset, process silence
     std::vector<float> silence(256, 0.0f);
@@ -221,7 +426,10 @@ TEST_CASE("VisualizationBridge reset clears state", "[view][vizbridge]") {
     bridge.process(sil_channels, 1, 256);
 
     const auto& meter = bridge.read_meter();
+    const auto after_reset = bridge.read_spectrum();
     REQUIRE(meter.channels[0].peak < 0.01f);
+    REQUIRE(after_reset.epoch == 2);
+    REQUIRE(after_reset.sequence_number == 1);
 }
 
 TEST_CASE("VisualizationBridge lock-free stress test", "[view][vizbridge]") {
