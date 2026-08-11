@@ -122,30 +122,35 @@ class TrustedGateResolve(unittest.TestCase):
     def script(self) -> str:
         return _step_script("vellum-trusted-gate.yml", "trusted-gate", "pr")
 
-    def test_event_path_uses_the_payload_and_no_api(self):
+    def test_event_path_refreshes_live_pr_state(self):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request_target",
-            "EVENT_BASE": "B", "EVENT_HEAD": "H", "EVENT_NUMBER": "7",
+            "EVENT_BASE": "STALE_B", "EVENT_HEAD": "STALE_H",
+            "EVENT_NUMBER": "111",
             "EVENT_STATE": "open",
         })
         self.assertEqual(rc, 0)
-        self.assertEqual(out, {"base_sha": "B", "head_sha": "H", "number": "7"})
+        self.assertEqual(out, {
+            "active": "true", "base_sha": "BASE_OPEN",
+            "head_sha": "HEAD_OPEN", "number": "111",
+        })
 
-    def test_event_path_refuses_a_closed_pr_before_emitting_outputs(self):
+    def test_delayed_event_for_closed_pr_is_an_inert_success(self):
         rc, out, err = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request_target",
-            "EVENT_BASE": "B", "EVENT_HEAD": "H", "EVENT_NUMBER": "7",
-            "EVENT_STATE": "closed",
+            "EVENT_BASE": "B", "EVENT_HEAD": "H", "EVENT_NUMBER": "222",
+            "EVENT_STATE": "open",
         })
-        self.assertEqual(rc, 1)
-        self.assertEqual(out, {})
-        self.assertIn("closed", err)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, {"active": "false"})
+        self.assertIn("stale pull_request_target event", err)
 
     def test_dispatch_path_resolves_from_the_api(self):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "workflow_dispatch", "DISPATCH_PR": "111",
         })
         self.assertEqual(rc, 0)
+        self.assertEqual(out["active"], "true")
         self.assertEqual(out["base_sha"], "BASE_OPEN")
         self.assertEqual(out["head_sha"], "HEAD_OPEN")
         self.assertEqual(out["number"], "111")
@@ -241,6 +246,41 @@ class TrustedGateScheduling(unittest.TestCase):
         condition = self.workflow["jobs"]["trusted-gate"]["if"]
         self.assertIn("github.event.pull_request.state == 'open'", condition)
         self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+
+    def test_only_live_open_prs_reach_status_publishing_steps(self):
+        steps = self.workflow["jobs"]["trusted-gate"]["steps"]
+        resolve_index = next(i for i, step in enumerate(steps) if step.get("id") == "pr")
+        for step in steps[resolve_index + 1:]:
+            self.assertEqual(step.get("if"), "steps.pr.outputs.active == 'true'")
+
+    def test_pending_status_is_published_only_after_merge_ref_exists(self):
+        steps = self.workflow["jobs"]["trusted-gate"]["steps"]
+        script = next(
+            step["run"]
+            for step in steps
+            if step.get("name") == "Validate proposed data and publish head status"
+        )
+        fetch = script.index('"refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge"')
+        live_state = script.index('live_state=$(gh api', fetch)
+        pending = script.index("post_status pending")
+        self.assertLess(fetch, live_state)
+        self.assertLess(live_state, pending)
+        self.assertIn('if [ "$live_state" != "open" ]', script)
+        self.assertIn("trap - EXIT", script[live_state:pending])
+
+    def test_each_status_write_rechecks_live_pr_state(self):
+        steps = self.workflow["jobs"]["trusted-gate"]["steps"]
+        script = next(
+            step["run"]
+            for step in steps
+            if step.get("name") == "Validate proposed data and publish head status"
+        )
+        function = script[script.index("post_status() {"):script.index("# A permanently")]
+        state_check = function.index('pulls/$PR_NUMBER" --jq .state')
+        status_write = function.index('statuses/$PR_HEAD"')
+        self.assertLess(state_check, status_write)
+        self.assertIn('if [ "$live_state" != "open" ]', function)
+        self.assertIn("suppressing stale $1 status", function)
 
     def test_merge_group_job_remains_independent(self):
         merge_job = self.workflow["jobs"]["trusted-merge-group"]

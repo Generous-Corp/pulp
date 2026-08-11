@@ -35,39 +35,37 @@ jobs:
       (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
     runs-on: ubuntu-latest
     steps:
-      # Resolve before checkout: the checkout below needs the base sha, and on a
-      # dispatch there is no event payload to read it from. For
-      # pull_request_target this just echoes what the event already carries, so
-      # both paths converge on one set of values.
+      # Resolve before checkout: queued pull_request_target payloads can outlive
+      # the PR they describe, so live API state is authoritative for both event
+      # and dispatch paths.
       - name: Resolve pull request
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
-          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           EVENT_NUMBER: ${{ github.event.pull_request.number }}
-          EVENT_STATE: ${{ github.event.pull_request.state }}
           DISPATCH_PR: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR")"
-            state="$(printf '%s' "$pr_json" | jq -r .state)"
-            if [ "$state" != "open" ]; then
-              echo "PR #$DISPATCH_PR is $state — refusing to post a status to a closed PR" >&2
-              exit 1
-            fi
-            base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
-            head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
             number="$DISPATCH_PR"
           else
-            if [ "$EVENT_STATE" != "open" ]; then
-              echo "PR #$EVENT_NUMBER is $EVENT_STATE — refusing to post a status to a closed PR" >&2
+            number="$EVENT_NUMBER"
+          fi
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number")"
+          state="$(printf '%s' "$pr_json" | jq -r .state)"
+          if [ "$state" != "open" ]; then
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "PR #$number is $state — refusing to post a status to a closed PR" >&2
               exit 1
             fi
-            base="$EVENT_BASE"; head="$EVENT_HEAD"; number="$EVENT_NUMBER"
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            echo "PR #$number is now $state — ignoring stale pull_request_target event" >&2
+            exit 0
           fi
+          base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+          head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
           {
+            echo "active=true"
             echo "base_sha=$base"
             echo "head_sha=$head"
             echo "number=$number"
@@ -75,6 +73,7 @@ jobs:
           echo "evaluating PR #$number: base=$base head=$head" >&2
 
       - name: Check out trusted base controls
+        if: steps.pr.outputs.active == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ steps.pr.outputs.base_sha }}
@@ -82,9 +81,11 @@ jobs:
           persist-credentials: false
 
       - name: Install inventory parser dependency without secrets
+        if: steps.pr.outputs.active == 'true'
         run: python3 -m pip install --quiet 'pyyaml==6.0.2'
 
       - name: Mint one-repository Vellum reader token
+        if: steps.pr.outputs.active == 'true'
         id: vellum-reader-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -96,6 +97,7 @@ jobs:
           permission-contents: read
 
       - name: Mint short-lived Vellum reader App identity proof
+        if: steps.pr.outputs.active == 'true'
         id: vellum-reader-jwt
         env:
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.VELLUM_READER_APP_PRIVATE_KEY }}
@@ -105,6 +107,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Validate proposed data and publish head status
+        if: steps.pr.outputs.active == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
@@ -116,6 +119,12 @@ jobs:
           STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           post_status() {
+            live_state=$(gh api \
+              "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER" --jq .state)
+            if [ "$live_state" != "open" ]; then
+              echo "PR #$PR_NUMBER is now $live_state — suppressing stale $1 status" >&2
+              return 0
+            fi
             gh api --method POST \
               "repos/$STATUS_REPOSITORY/statuses/$PR_HEAD" \
               -f state="$1" \
@@ -139,7 +148,6 @@ jobs:
             fi
           }
           trap failed EXIT
-          post_status pending 'Validating with base-branch controls'
 
           trusted_root=$PWD
           proposed_tree="$RUNNER_TEMP/vellum-proposed-$PR_NUMBER"
@@ -165,12 +173,19 @@ jobs:
                "refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge" 2>/dev/null; then
             proposed_head=$(git rev-parse refs/vellum/pr-merge)
           else
+            live_state=$(gh api "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER" --jq .state)
+            if [ "$live_state" != "open" ]; then
+              trap - EXIT
+              echo "PR #$PR_NUMBER is now $live_state — ignoring stale validation run" >&2
+              exit 0
+            fi
             # GitHub publishes the merge ref only for a mergeable PR. Absent it,
             # say so: a conflicted PR must not be reported as a freeze violation.
             echo "vellum-trusted-gate: refs/pull/$PR_NUMBER/merge is unavailable;" \
                  "the PR likely has merge conflicts. Resolve them and re-run." >&2
             exit 1
           fi
+          post_status pending 'Validating with base-branch controls'
           git worktree add --detach "$proposed_tree" "$proposed_head"
 
           # `set -e` (the default shell) plus PIPESTATUS keeps a validator's
