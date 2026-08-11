@@ -1,11 +1,11 @@
 # Creative Timeline Engine session examples
 
-Two examples covering the non-linear half of the Creative Timeline Engine: a
-clip-launching session, and a project that carries every document concept at
-once. Both build a real immutable `Project`, edit it through typed commands in a
-`DocumentSession`, and assert against the model rather than a mock. Unlike the
-[Phase 1 examples](example-timeline-phase1.html) they take no `pulp::host`
-dependency, so they build wherever the document model does.
+These examples cover a clip-launching session, a project that carries every
+document concept at once, and a durable package/session shell. Each builds a real
+immutable `Project`, edits it through typed commands in a `DocumentSession`, and
+asserts against the model rather than a mock. They take no `pulp::host`
+dependency, so they build wherever the document model does. The durable shell
+additionally requires the project-package module.
 
 ## Clip-launching session
 
@@ -43,6 +43,61 @@ capture never inherits block granularity at either end. Captures that would
 exceed the history's reserved capacity are counted by `dropped_capture_count()`
 rather than dropped silently — the reservation is also what keeps the
 audio-thread `push_back` allocation-free.
+
+## Durable project session
+
+`pulp-timeline-project-session` is a small application-owned shell around
+`PackageWriter`, `open_package()`, `FileJournal`, and `DocumentSession`:
+
+```bash
+cmake --build build --target pulp-timeline-project-session
+./build/examples/timeline-session/pulp-timeline-project-session
+```
+
+`ProjectSessionShell::create()` publishes a revision-zero package, creates
+`journal/session.ptlj`, restores a session against that exact journal state, and
+registers a writer. Create is create-new: while holding the package writer lock,
+it refuses an existing `project.json` or shell journal rather than replacing the
+durable generation. Acquiring `PackageWriter` may still restore required
+package-owned directories or reclaim its private interrupted-write staging, so
+this is a generation-preservation guarantee rather than a promise that every
+directory entry is untouched.
+
+`submit()` allocates the writer-scoped transaction and command identities and
+uses the current revision as its optimistic gate. `DocumentSession` publishes
+the resulting immutable snapshot only after `FileJournal` acknowledges the
+complete revision. A close does not implicitly save, but it also does not throw
+away acknowledged edits: reopening validates `project.json`, opens the package's
+journal, and restores the journal's newer snapshot and revision over the older
+package generation.
+
+`save()` observes one matching snapshot/revision pair, checkpoints that revision
+in the journal, and then publishes the same snapshot as `project.json` through
+the still-held `PackageWriter`. It reports success only for
+`PublishedDurably`. If package publication fails after the checkpoint, the
+checkpointed journal remains the durable recovery source; a failed save is never
+reported as success. The worked executable proves both an identity-bearing edit
+recovered after close without save and a later identity-targeted edit recovered
+at the exact canonical bytes, revision, and allocator frontier before each saved
+generation is published.
+
+The shell is deliberately a control-thread example, not a real-time API. Its
+operations perform synchronous filesystem I/O, and all member calls belong on
+one control thread. Keep it alive to retain both exclusive locks, make every
+other writer honor the package lock, and do not rename or replace package entries
+out of band. `open()` requires a valid published package generation; because it
+acquires the open-or-create `PackageWriter` first, an absent destination may gain
+the package layout before open fails with `InvalidGeneration`. Package, journal,
+transaction, and non-durable-publication failures remain distinct in
+`ProjectSessionError`, with the underlying typed error attached when available.
+
+This worked shell covers document-only and inline MIDI edits. It intentionally
+does not expose `PackageWriter::stage_blob()`, and `submit()` rejects
+`CreateAsset` before journaling. An application that admits edits
+introducing media, state, artifact, or receipt references must add a controlled
+blob-staging path and publish the hash-verified bytes before submitting those
+references; otherwise the journal can durably hold a model revision that package
+publication correctly refuses as an invalid generation.
 
 ## Full DAW-style project
 

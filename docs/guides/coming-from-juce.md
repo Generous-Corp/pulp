@@ -270,13 +270,15 @@ pulp doctor --au-cache --dry-run
 JUCE: you ship a plugin and a user reports `vcruntime140.dll not
 found`. You go searching for the right Visual C++ Redistributable.
 
-Pulp: `CMAKE_MSVC_RUNTIME_LIBRARY = MultiThreaded$<$<CONFIG:Debug>:Debug>`
-is set in the framework's root CMakeLists.txt. The runtime is
-statically linked into your binary. End users don't need the
-redist installed.
+Pulp source builds use
+`CMAKE_MSVC_RUNTIME_LIBRARY = MultiThreaded$<$<CONFIG:Debug>:Debug>`.
+The Release-only installed SDK uses `MultiThreaded` for every consumer
+configuration, including Debug configurations whose Pulp imports map to
+Release. The runtime is statically linked into your binary. End users don't
+need the redist installed.
 
-If you want the dynamic runtime back, override with
-`-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` at configure time.
+An explicit consumer toolchain setting is preserved. It must match the runtime
+used to build the Pulp SDK archives, or MSVC will reject the mixed-runtime link.
 
 ## Different defaults from JUCE
 

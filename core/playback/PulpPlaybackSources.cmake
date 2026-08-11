@@ -10,6 +10,7 @@ function(pulp_resolve_playback_sources root output)
         automation_program_compiler.cpp
         automation_recording.cpp
         capture_engine.cpp
+        chord_pattern_renderer.cpp
         compile_context_registry.cpp
         compile_executor.cpp
         external_sync_output.cpp

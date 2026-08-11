@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::timeline;
@@ -18,6 +19,13 @@ constexpr ItemId kSequence{3};
 constexpr ItemId kFirst{4};
 constexpr ItemId kSecond{7};
 constexpr ItemId kThird{9};
+constexpr ItemId kCreated{12};
+
+template <typename Intent>
+concept HasGesturePhase = requires(Intent intent) { intent.phase; };
+
+static_assert(!std::is_default_constructible_v<TrackCreateIntent>);
+static_assert(!HasGesturePhase<TrackCreateIntent>);
 
 /// Three tracks whose authored order is deliberately NOT their identity order,
 /// so a reorder that was dropped — or an order derived from identity instead of
@@ -73,6 +81,14 @@ TrackEditIntent reorder(ItemId track, std::optional<ItemId> expected_before,
     return intent;
 }
 
+TrackCreateIntent create(Track track, std::optional<ItemId> before) {
+    return TrackCreateIntent{
+        .sequence_id = kSequence,
+        .track = std::move(track),
+        .before_track_id = before,
+    };
+}
+
 } // namespace
 
 // The whole point of the channel: an intent a front-end builds from a drop
@@ -86,8 +102,9 @@ TEST_CASE("A track reorder intent lowers and persists the authored order") {
     REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kThird, kFirst, kSecond});
 
     // Drag `second` to the front: it should precede `third`, which currently leads.
-    auto lowered = lower_track_edit_intent(reorder(kSecond, std::nullopt, kThird),
-                                           identity_for(writer, session->revision()));
+    auto lowered = lower_track_arrangement_intent(
+        TrackArrangementIntent{reorder(kSecond, std::nullopt, kThird)},
+        identity_for(writer, session->revision()));
     REQUIRE(lowered);
     REQUIRE(session->submit(writer, std::move(lowered).value()));
 
@@ -169,4 +186,68 @@ TEST_CASE("A track reorder onto itself is refused by the model rather than the l
     REQUIRE(refused.error().code == ConflictCode::ModelInvariant);
     REQUIRE(authored_order(*session->snapshot()) ==
             std::vector<ItemId>{kThird, kFirst, kSecond});
+}
+
+TEST_CASE("A track create intent inserts at its authored position and survives history") {
+    auto session = std::move(DocumentSession::create(make_ordered_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto track = Track::create(kCreated, "created", {});
+    REQUIRE(track);
+
+    auto lowered = lower_track_arrangement_intent(
+        TrackArrangementIntent{create(std::move(track).value(), kFirst)},
+        identity_for(writer, session->revision()));
+    REQUIRE(lowered);
+    REQUIRE(lowered->gesture_phase == GesturePhase::Single);
+    REQUIRE(lowered->commands.size() == 1);
+    const auto* inserted = std::get_if<InsertTrack>(&lowered->commands.front().command);
+    REQUIRE(inserted);
+    REQUIRE(inserted->sequence_id == kSequence);
+    REQUIRE(inserted->track.id() == kCreated);
+    REQUIRE(inserted->track.name() == "created");
+    REQUIRE(inserted->before_track_id == kFirst);
+    REQUIRE(session->submit(writer, std::move(lowered).value()));
+
+    const auto expected = std::vector<ItemId>{kThird, kCreated, kFirst, kSecond};
+    REQUIRE(authored_order(*session->snapshot()) == expected);
+    REQUIRE(session->snapshot()->locate(kCreated) ==
+            ItemLocation{ItemKind::Track, kSequence, kSequence, kCreated, {}, true});
+    REQUIRE(session->snapshot()->next_item_id() == 13);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(authored_order(*session->snapshot()) ==
+            std::vector<ItemId>{kThird, kFirst, kSecond});
+    REQUIRE_FALSE(session->snapshot()->find_sequence(kSequence)->find_track(kCreated));
+    REQUIRE(session->snapshot()->locate(kCreated) ==
+            ItemLocation{ItemKind::Track, kSequence, kSequence, kCreated, {}, false});
+    REQUIRE(session->snapshot()->next_item_id() == 13);
+
+    REQUIRE(session->redo(writer));
+    REQUIRE(authored_order(*session->snapshot()) == expected);
+    REQUIRE(session->snapshot()->locate(kCreated) ==
+            ItemLocation{ItemKind::Track, kSequence, kSequence, kCreated, {}, true});
+    REQUIRE(session->snapshot()->next_item_id() == 13);
+
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto written = serialize_project(*session->snapshot(), registry.value());
+    REQUIRE(written);
+    auto reopened = deserialize_project(written->json, registry.value());
+    REQUIRE(reopened);
+    REQUIRE(authored_order(reopened.value()) == expected);
+    REQUIRE(reopened->find_sequence(kSequence)->find_track(kCreated)->name() == "created");
+    REQUIRE(reopened->locate(kCreated) ==
+            ItemLocation{ItemKind::Track, kSequence, kSequence, kCreated, {}, true});
+    REQUIRE(reopened->next_item_id() == 13);
+}
+
+TEST_CASE("A track create intent rejects malformed placement") {
+    auto session = std::move(DocumentSession::create(make_ordered_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto malformed_track = Track::create(kCreated, "created", {});
+    REQUIRE(malformed_track);
+    REQUIRE_FALSE(lower_track_create_intent(
+        create(std::move(malformed_track).value(), ItemId{}),
+        identity_for(writer, session->revision())));
 }
