@@ -254,10 +254,7 @@ pattern_set(const DevelopmentPattern<MaxEvents>& lhs, const DevelopmentPattern<M
                              (operation == PatternSetOperation::intersection && other) ||
                              (operation == PatternSetOperation::difference && !other) ||
                              (operation == PatternSetOperation::symmetric_difference && !other);
-        if (other &&
-            (operation == PatternSetOperation::set_union ||
-             operation == PatternSetOperation::symmetric_difference) &&
-            *other != event) {
+        if (other && operation == PatternSetOperation::set_union && *other != event) {
             result.error = PatternDevelopmentError::conflicting_event;
             result.pattern = {};
             return result;

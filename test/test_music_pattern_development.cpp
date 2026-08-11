@@ -139,14 +139,14 @@ TEST_CASE("onset set algebra matches exhaustive eight-bit arithmetic",
     }
 }
 
-TEST_CASE("set algebra rejects payload conflicts and capacity overflow atomically",
+TEST_CASE("set algebra resolves shared onset payloads and rejects union overflow atomically",
           "[music][pattern-development]") {
     const auto a = pattern_from<2>(std::array{make_event(1, 0), make_event(2, 2)});
     const auto conflict = pattern_from<2>(std::array{make_event(9, 0)});
     CHECK(pattern_set(a, conflict, PatternSetOperation::set_union).error ==
           PatternDevelopmentError::conflicting_event);
-    CHECK(pattern_set(a, conflict, PatternSetOperation::symmetric_difference).error ==
-          PatternDevelopmentError::conflicting_event);
+    CHECK(pattern_set(a, conflict, PatternSetOperation::symmetric_difference).pattern ==
+          pattern_from<2>(std::array{make_event(2, 2)}));
     CHECK(pattern_set(a, conflict, PatternSetOperation::intersection).pattern ==
           pattern_from<2>(std::array{make_event(1, 0)}));
     const auto extra = pattern_from<2>(std::array{make_event(3, 4)});
