@@ -1260,6 +1260,96 @@ TEST_CASE("MidiKeyboard overlapping black keys win hit testing",
     REQUIRE_FALSE(kb.is_note_on(60));
 }
 
+TEST_CASE("MidiKeyboard chromatic rows paint a highest-note-first pitch ruler",
+          "[view][midi_keyboard][chromatic-rows]") {
+    MidiKeyboard kb;
+    REQUIRE(kb.orientation() == MidiKeyboard::Orientation::horizontal);
+    kb.set_range(60, 71);
+    kb.set_orientation(MidiKeyboard::Orientation::vertical_chromatic_rows);
+    kb.set_bounds({0, 0, 80, 240});
+    kb.set_show_note_names(true);
+    const auto highlight = Color::rgba8(255, 0, 0);
+    kb.set_highlight_color(highlight);
+    kb.note_on(70);
+
+    RecordingCanvas canvas;
+    kb.paint(canvas);
+
+    struct PaintedRow {
+        Rect bounds;
+        Color color;
+    };
+    std::vector<PaintedRow> rows;
+    Color current_fill{};
+    bool has_current_fill = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::set_fill_color) {
+            current_fill = command.color;
+            has_current_fill = true;
+        } else if (command.type == DrawCommand::Type::fill_rounded_rect) {
+            REQUIRE(has_current_fill);
+            rows.push_back({{command.f[0], command.f[1], command.f[2], command.f[3]},
+                            current_fill});
+        }
+    }
+
+    REQUIRE(rows.size() == 12);
+    std::sort(rows.begin(), rows.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.bounds.y < rhs.bounds.y;
+    });
+
+    const auto natural = Color::rgba8(236, 239, 243);
+    const auto sharp = Color::rgba8(22, 26, 33);
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+        const int note = 71 - static_cast<int>(row);
+        const int pitch_class = note % 12;
+        const bool is_sharp = pitch_class == 1 || pitch_class == 3 ||
+                              pitch_class == 6 || pitch_class == 8 || pitch_class == 10;
+        const Color expected = note == 70 ? highlight : (is_sharp ? sharp : natural);
+        CAPTURE(row, note);
+        REQUIRE_THAT(rows[row].bounds.x, WithinAbs(0.0f, 0.001f));
+        REQUIRE_THAT(rows[row].bounds.y,
+                     WithinAbs(static_cast<float>(row) * 20.0f, 0.001f));
+        REQUIRE_THAT(rows[row].bounds.width, WithinAbs(80.0f, 0.001f));
+        REQUIRE_THAT(rows[row].bounds.height, WithinAbs(20.0f, 0.001f));
+        REQUIRE(rows[row].color == expected);
+    }
+    REQUIRE(has_text(canvas, "C4"));
+}
+
+TEST_CASE("MidiKeyboard chromatic rows hit half-open pitches from top to bottom",
+          "[view][midi_keyboard][chromatic-rows]") {
+    MidiKeyboard kb;
+    kb.set_range(60, 71);
+    kb.set_orientation(MidiKeyboard::Orientation::vertical_chromatic_rows);
+    kb.set_bounds({0, 0, 80, 240});
+
+    std::vector<std::pair<bool, int>> callbacks;
+    std::vector<float> velocities;
+    kb.on_note_on = [&](int note, float velocity) {
+        callbacks.emplace_back(true, note);
+        velocities.push_back(velocity);
+    };
+    kb.on_note_off = [&](int note) { callbacks.emplace_back(false, note); };
+
+    kb.on_mouse_down({0, 0});       // Top and left edges are inclusive.
+    kb.on_mouse_drag({0, 20});      // The next row owns the shared boundary.
+    kb.on_mouse_drag({79.999f, 239.999f});
+    kb.on_mouse_up({80, 240});
+    kb.on_mouse_down({80, 0});      // Right and bottom edges are exclusive.
+    kb.on_mouse_down({0, 240});
+
+    const std::vector<std::pair<bool, int>> expected{
+        {true, 71}, {false, 71}, {true, 70}, {false, 70}, {true, 60}, {false, 60}};
+    REQUIRE(callbacks == expected);
+    REQUIRE(velocities.size() == 3);
+    for (float velocity : velocities)
+        REQUIRE_THAT(velocity, WithinAbs(0.8f, 0.001f));
+    REQUIRE_FALSE(kb.is_note_on(71));
+    REQUIRE_FALSE(kb.is_note_on(70));
+    REQUIRE_FALSE(kb.is_note_on(60));
+}
+
 // ── ColorPicker ─────────────────────────────────────────────────────────────
 
 TEST_CASE("ColorPicker set/get color", "[view][color_picker]") {

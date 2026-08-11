@@ -6,6 +6,7 @@
 #include <pulp/timeline_editor/edit_intent.hpp>
 
 #include <optional>
+#include <variant>
 
 namespace pulp::timeline_editor {
 
@@ -29,10 +30,10 @@ enum class TrackEditIntentKind : std::uint8_t {
 /// One track-arrangement step expressed without reference to the device that
 /// produced it.
 ///
-/// The kind field carries a single verb today because reorder is the only track
-/// gesture the arranger offers. It exists so a second verb is an added
-/// enumerator rather than a change to this type's shape, which is the same
-/// reason `EditIntentKind` carries four.
+/// The kind field remains the discriminator for the reorder vocabulary and
+/// preserves the aggregate shape existing arrangers build. Track creation uses
+/// `TrackCreateIntent` below because its complete `Track` payload must be
+/// required by construction rather than added here as an optional field.
 ///
 /// Insertion is expressed as "before this track", matching `MoveTrack`, so a
 /// front-end that resolved a drop position to a neighbour does not have to
@@ -53,12 +54,31 @@ struct TrackEditIntent {
     std::optional<timeline::ItemId> replacement_before_track_id;
 };
 
+/// One complete track insertion expressed without device coordinates.
+///
+/// `track` is a required value rather than an optional field on
+/// `TrackEditIntent`, so a caller cannot request creation without supplying the
+/// value that `InsertTrack` persists. Creation is a single document step and
+/// therefore carries no gesture phase.
+struct TrackCreateIntent {
+    timeline::ItemId sequence_id;
+    timeline::Track track;
+    /// Requested destination. Empty means last position.
+    std::optional<timeline::ItemId> before_track_id;
+};
+
+/// Reorder or create vocabulary for controls that offer both operations.
+using TrackArrangementIntent = std::variant<TrackEditIntent, TrackCreateIntent>;
+
 /// The host an arranger submits track intents to.
 ///
 /// A second binding of `SequencerUiHostT` beside `EditIntentHost`, which is what
 /// "a separate channel" means concretely: a view that only rearranges tracks
 /// names this one and never acquires the clip vocabulary.
 using TrackEditIntentHost = SequencerUiHostT<TrackEditIntent>;
+
+/// The host an arranger offering reorder and creation submits intents to.
+using TrackArrangementIntentHost = SequencerUiHostT<TrackArrangementIntent>;
 
 /// Lowers one track intent to the ordinary transaction that performs it.
 ///
@@ -78,6 +98,30 @@ using TrackEditIntentHost = SequencerUiHostT<TrackEditIntent>;
 /// @return The transaction, or the reason the intent could not be lowered.
 runtime::Result<timeline::Transaction, timeline::ModelError>
 lower_track_edit_intent(const TrackEditIntent& intent, const EditIntentIdentity& identity);
+
+/// Lowers one complete track-creation intent to `InsertTrack`.
+///
+/// Pure, and validates identity agreement plus structurally invalid sequence or
+/// destination identities. Project membership and identity availability remain
+/// reducer concerns. The resulting transaction always has `Single` phase.
+///
+/// @param intent The complete track insertion to lower.
+/// @param identity Transaction, command, revision, and optional undo group.
+/// @return The transaction, or the reason the intent could not be lowered.
+runtime::Result<timeline::Transaction, timeline::ModelError>
+lower_track_create_intent(const TrackCreateIntent& intent, const EditIntentIdentity& identity);
+
+/// Lowers either complete track-arrangement alternative.
+///
+/// Dispatch is exhaustive: adding an alternative to `TrackArrangementIntent`
+/// also requires adding its lowering arm.
+///
+/// @param intent The reorder or creation step to lower.
+/// @param identity Transaction, command, revision, and optional undo group.
+/// @return The transaction, or the reason the selected intent could not be lowered.
+runtime::Result<timeline::Transaction, timeline::ModelError>
+lower_track_arrangement_intent(const TrackArrangementIntent& intent,
+                               const EditIntentIdentity& identity);
 
 /// @}
 
