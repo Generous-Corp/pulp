@@ -568,11 +568,16 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         }
         session_finished.store(true, std::memory_order_release);
         output_drainer.join();
-        if (output_drain_failed.load(std::memory_order_acquire))
+        const bool drain_failed = output_drain_failed.load(std::memory_order_acquire);
+        if (drain_failed)
             completed = false;
         lock.lock();
         if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
             return false;
+        if (drain_failed) {
+            impl_->options.on_stdout_line = {};
+            impl_->options.on_stderr_line = {};
+        }
         if (!completed || std::chrono::steady_clock::now() >= deadline) {
             cancel();
             (void)wait();

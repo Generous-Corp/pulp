@@ -124,8 +124,10 @@ ControlHostEnrollmentResult ControlHostEnrollmentStore::create(
     std::lock_guard lock(impl_->mutex);
     const auto now = impl_->clock();
     impl_->sweep_locked(now);
-    if (expires_at <= now || expires_at > snapshot.expires_at() ||
-        expires_at - now > kControlMaximumHostEnrollmentTtl)
+    // Inventory expiry bounds when launch can consume the snapshot. Once the
+    // exact child has passed preflight, its one-use enrollment gets an
+    // independent bounded window to reach the broker endpoint.
+    if (expires_at <= now || expires_at - now > kControlMaximumHostEnrollmentTtl)
         return {};
     if (impl_->enrollments.size() >= impl_->config.maximum_enrollments)
         return {.status = ControlHostEnrollmentStatus::ResourceExhausted};
