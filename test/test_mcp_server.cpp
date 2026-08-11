@@ -2453,15 +2453,20 @@ TEST_CASE("MCP canonical trace lifecycle is default denied", "[mcp][tools][trace
     ScopedCurrentPath cwd(temp.path);
 
     int id = 90;
+#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
+    constexpr auto unavailable_code = "control_session_unavailable";
+#else
+    constexpr auto unavailable_code = "component_unavailable";
+#endif
 
     auto start =
         handle_request(tool_call(std::to_string(id++), "pulp_trace_start",
                                  R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
-    require_contains(start, "control_session_unavailable");
+    require_contains(start, unavailable_code);
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
     auto stop = handle_request(tool_call(std::to_string(id++), "pulp_trace_stop"));
-    require_contains(stop, "control_session_unavailable");
+    require_contains(stop, unavailable_code);
     REQUIRE(stop.find("Unknown tool") == std::string::npos);
 
     const auto tools =
