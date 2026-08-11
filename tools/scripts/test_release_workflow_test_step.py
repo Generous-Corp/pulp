@@ -240,8 +240,18 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             'selected["control_broker_floor"] = authoritative["control_broker_floor"]',
             self.text,
         )
+        self.assertEqual(
+            self.text.count(
+                'selected["control_standalone_host_floor"] = authoritative['
+            ),
+            2,
+        )
         self.assertIn(
             'PULP_CONTROL_BROKER_FLOOR=$control_broker_floor',
+            self.text,
+        )
+        self.assertIn(
+            'PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor',
             self.text,
         )
         for step_name in (

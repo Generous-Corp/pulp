@@ -555,6 +555,9 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected["control_standalone_host_floor"] = authoritative[
+              "control_standalone_host_floor"
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
@@ -590,6 +593,15 @@ jobs:
           PY
           )"
           echo "PULP_CONTROL_BROKER_FLOOR=$control_broker_floor" >> "$GITHUB_ENV"
+          control_standalone_host_floor="$(python3 - "$release_contract_matrix" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              print(json.load(handle)["control_standalone_host_floor"])
+          PY
+          )"
+          echo "PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor" >> "$GITHUB_ENV"
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -819,6 +831,9 @@ jobs:
           if [ "${RUNNER_OS}" = "macOS" ] \
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             release_bins+=(build/inspect/pulp-control-broker)
+          fi
+          if [ "${RUNNER_OS}" = "macOS" ] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
             release_bins+=(build/inspect/pulp-control-standalone-host)
           fi
           if [ -f build/tools/import-design/pulp-import-design ]; then
@@ -870,6 +885,7 @@ jobs:
         run: |
           import_design_args=()
           control_broker_args=()
+          control_standalone_host_args=()
           if [ -x build/tools/import-design/pulp-import-design ] \
               && [ -d build/tools/import-design/browser_capture-v1 ]; then
             import_design_args=(
@@ -881,6 +897,11 @@ jobs:
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             control_broker_args=(
               --control-broker-binary build/inspect/pulp-control-broker
+            )
+          fi
+          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
+            control_standalone_host_args=(
               --control-standalone-host-binary build/inspect/pulp-control-standalone-host
               --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
             )
@@ -890,6 +911,7 @@ jobs:
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
             "${control_broker_args[@]}" \
+            "${control_standalone_host_args[@]}" \
             "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
@@ -1754,6 +1776,9 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected["control_standalone_host_floor"] = authoritative[
+              "control_standalone_host_floor"
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
