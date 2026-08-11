@@ -27,6 +27,13 @@ target_link_libraries(pulp-timeline-cookbook-consumer PRIVATE
     Pulp::playback
 )
 
+add_executable(pulp-registered-chord-renderer-consumer registered_chord_renderer.cpp)
+target_link_libraries(pulp-registered-chord-renderer-consumer PRIVATE
+    Pulp::timebase
+    Pulp::timeline
+    Pulp::playback
+)
+
 add_executable(pulp-project-package-sdk-consumer project_package.cpp)
 target_link_libraries(pulp-project-package-sdk-consumer PRIVATE
     Pulp::project-package

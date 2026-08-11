@@ -1,11 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <type_traits>
 
 #include <pulp/timeline_editor/scripted_ui_host.hpp>
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
+#include <pulp/timeline_editor/track_header_projection.hpp>
 
 using namespace pulp;
 using namespace pulp::timeline_editor;
@@ -109,6 +111,94 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
     REQUIRE(retained.tempo_bpm == 128.0);
     REQUIRE(retained.loop.end.value == quarters(8));
     REQUIRE(retained.continuity_epoch == 3);
+}
+
+TEST_CASE("Track header projection preserves authored row identity",
+          "[timeline-editor][track-header]") {
+    const timeline::ItemId authored[] = {{9}, {3}, {7}, {5}};
+    const auto made = TrackHeaderProjection::create(authored, 100.0f, 20.0f);
+    REQUIRE(made);
+    const auto& projection = made.value();
+
+    REQUIRE(projection.track_order().size() == 4);
+    REQUIRE(projection.track_order()[0] == timeline::ItemId{9});
+    REQUIRE(projection.track_order()[1] == timeline::ItemId{3});
+    REQUIRE(projection.track_order()[2] == timeline::ItemId{7});
+    REQUIRE(projection.track_order()[3] == timeline::ItemId{5});
+    REQUIRE(projection.origin_y() == 100.0f);
+    REQUIRE(projection.row_height() == 20.0f);
+    REQUIRE(projection.bottom_y() == 180.0f);
+    REQUIRE_FALSE(projection.track_at(99.99f));
+    REQUIRE(projection.track_at(100.0f) == timeline::ItemId{9});
+    REQUIRE(projection.track_at(119.99f) == timeline::ItemId{9});
+    REQUIRE(projection.track_at(120.0f) == timeline::ItemId{3});
+    REQUIRE(projection.track_at(179.99f) == timeline::ItemId{5});
+    REQUIRE_FALSE(projection.track_at(180.0f));
+    REQUIRE_FALSE(projection.track_at(std::numeric_limits<float>::infinity()));
+}
+
+TEST_CASE("Track header drop resolves a non-self MoveTrack neighbor",
+          "[timeline-editor][track-header]") {
+    const timeline::ItemId authored[] = {{9}, {3}, {7}, {5}};
+    const auto made = TrackHeaderProjection::create(authored, 100.0f, 20.0f);
+    REQUIRE(made);
+    const auto& projection = made.value();
+
+    const auto at_top = projection.before_track_for_drop(0.0f, timeline::ItemId{3});
+    REQUIRE(at_top);
+    REQUIRE(at_top.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{9}});
+
+    const auto across_own_row = projection.before_track_for_drop(129.0f, timeline::ItemId{3});
+    REQUIRE(across_own_row);
+    REQUIRE(across_own_row.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{7}});
+
+    const auto at_bottom = projection.before_track_for_drop(1000.0f, timeline::ItemId{3});
+    REQUIRE(at_bottom);
+    REQUIRE_FALSE(at_bottom.value());
+}
+
+TEST_CASE("Track header drop uses compressed candidate-row geometry",
+          "[timeline-editor][track-header]") {
+    const timeline::ItemId authored[] = {{1}, {2}, {3}};
+    const auto made = TrackHeaderProjection::create(authored, 100.0f, 20.0f);
+    REQUIRE(made);
+    const auto& projection = made.value();
+
+    const auto before_last = projection.before_track_for_drop(129.99f, timeline::ItemId{2});
+    REQUIRE(before_last);
+    REQUIRE(before_last.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{3}});
+
+    const auto after_last = projection.before_track_for_drop(130.0f, timeline::ItemId{2});
+    REQUIRE(after_last);
+    REQUIRE_FALSE(after_last.value());
+}
+
+TEST_CASE("Track header projection rejects ambiguous inputs", "[timeline-editor][track-header]") {
+    REQUIRE(
+        TrackHeaderProjection::create(std::span<const timeline::ItemId>{}, 0.0f, 20.0f).error() ==
+        TrackHeaderProjectionError::EmptyTrackOrder);
+
+    const timeline::ItemId invalid[] = {{1}, {0}};
+    REQUIRE(TrackHeaderProjection::create(invalid, 0.0f, 20.0f).error() ==
+            TrackHeaderProjectionError::InvalidTrackId);
+
+    const timeline::ItemId duplicate[] = {{1}, {2}, {1}};
+    REQUIRE(TrackHeaderProjection::create(duplicate, 0.0f, 20.0f).error() ==
+            TrackHeaderProjectionError::DuplicateTrackId);
+
+    const timeline::ItemId valid[] = {{1}, {2}};
+    REQUIRE(TrackHeaderProjection::create(valid, 0.0f, 0.0f).error() ==
+            TrackHeaderProjectionError::NonPositiveRowHeight);
+    REQUIRE(TrackHeaderProjection::create(valid, std::numeric_limits<float>::infinity(), 20.0f)
+                .error() == TrackHeaderProjectionError::NonFiniteGeometry);
+
+    const auto made = TrackHeaderProjection::create(valid, 0.0f, 20.0f);
+    REQUIRE(made);
+    REQUIRE(made->before_track_for_drop(10.0f, timeline::ItemId{99}).error() ==
+            TrackHeaderProjectionError::MissingMovingTrack);
+    REQUIRE(
+        made->before_track_for_drop(std::numeric_limits<float>::quiet_NaN(), timeline::ItemId{1})
+            .error() == TrackHeaderProjectionError::NonFiniteCoordinate);
 }
 
 TEST_CASE("Ui playhead reports the continuity break a loop wrap makes",

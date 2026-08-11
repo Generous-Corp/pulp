@@ -44,6 +44,26 @@ find_package(Pulp REQUIRED CONFIG)
 add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
 
+# The installed Pulp archives use /MT. CMake initializes this target property
+# from CMAKE_MSVC_RUNTIME_LIBRARY when the target is created, so this checks the
+# real downstream contract rather than merely inspecting PulpConfig.cmake text.
+if(MSVC)
+    # Installed imports are Release-only (including Debug consumers mapped via
+    # CMAKE_MAP_IMPORTED_CONFIG_Debug), so every consumer configuration must
+    # use /MT rather than mixing /MTd objects with the Release archives.
+    set(_pulp_expected_msvc_runtime "MultiThreaded")
+    get_target_property(_pulp_probe_msvc_runtime
+        PulpSDKSmokeSpectralBandMaskProbe MSVC_RUNTIME_LIBRARY)
+    if(NOT _pulp_probe_msvc_runtime STREQUAL _pulp_expected_msvc_runtime)
+        message(FATAL_ERROR
+            "Pulp SDK smoke: installed consumer target inherited "
+            "MSVC_RUNTIME_LIBRARY='${_pulp_probe_msvc_runtime}', expected "
+            "'${_pulp_expected_msvc_runtime}' to match Pulp's static archives")
+    endif()
+    unset(_pulp_probe_msvc_runtime)
+    unset(_pulp_expected_msvc_runtime)
+endif()
+
 add_executable(PulpSDKSmokeSpectralMaskProcessorProbe
     spectral_mask_processor_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralMaskProcessorProbe PRIVATE Pulp::signal)
