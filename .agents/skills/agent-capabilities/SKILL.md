@@ -158,6 +158,24 @@ means the UI or profile selector must disclose the resolution limit, select a
 higher supported geometry, or use a different filter architecture; zoom alone
 cannot create additional FFT bins.
 
+## Reuse the realtime visualization bridge
+
+`pulp::view::VisualizationBridge` is the shared realtime-safe audio-to-UI tap
+for spectrum, waveform, and meter consumers. Configure it while fully
+quiescent, call `process()` from the audio callback, and give exactly one UI
+thread ownership of `poll()` plus the snapshot reads. The callback path only
+meters and copies into fixed SPSC storage; FFT and waveform assembly happen in
+the bounded, non-realtime `poll()` call.
+
+`read_spectrum()` and `read_waveform()` remain cheap snapshot reads for source
+compatibility. They do not analyze newly captured audio. A consumer that needs
+fresh data must schedule `poll()` first, then read or use the explicit
+`peek_spectrum()` / `peek_waveform()` aliases. Treat capture overflow, rejected
+channel topology, and positive-length missing-channel callbacks as continuity
+breaks: the bridge advances its epoch and never joins audio across the gap.
+Keep `configure()` and `reset()` quiescent; neither is concurrent with the
+audio producer or UI consumer.
+
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
