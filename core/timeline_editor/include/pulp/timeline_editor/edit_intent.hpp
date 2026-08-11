@@ -167,7 +167,7 @@ enum class EditGestureIdentityError : std::uint8_t {
     IdentityExhausted,
     IdentityPending,
     ForeignOrStaleIssue,
-    IssuedTransactionMismatch,
+    IntentLoweringFailed,
     SubmissionResultMismatch,
 };
 
@@ -177,6 +177,16 @@ struct EditGestureSubmitOutcome {
     runtime::Result<timeline::CommitResult, timeline::TransactionError> document_result;
     /// Confirmed allocator state after that result was applied.
     EditGestureIdentityState state = EditGestureIdentityState::AwaitingBegin;
+};
+
+/// A refusal before submission, or an inconsistent successful session result.
+struct EditGestureSubmitError {
+    /// Stable category for the failed allocator operation.
+    EditGestureIdentityError code = EditGestureIdentityError::ForeignOrStaleIssue;
+    /// Exact lowering diagnostic when code is IntentLoweringFailed.
+    std::optional<timeline::ModelError> model_error;
+    /// Exact committed result when code is SubmissionResultMismatch.
+    std::optional<timeline::CommitResult> commit_result;
 };
 
 class EditGestureIdentityAllocator;
@@ -192,14 +202,7 @@ class EditGestureIdentityIssue {
           provenance_(std::exchange(other.provenance_, {})) {}
     EditGestureIdentityIssue& operator=(EditGestureIdentityIssue&&) = delete;
 
-    /// Lowers `intent` with this issue's authoritative gesture phase and identity.
-    ///
-    /// The caller-supplied phase is ignored so the transaction submitted through
-    /// its allocator cannot diverge from the phase used for lifecycle advancement.
-    [[nodiscard]] runtime::Result<timeline::Transaction, timeline::ModelError>
-    lower(EditIntent intent) const;
-
-    /// Returns the authoritative phase used by lower().
+    /// Returns the authoritative phase used when the allocator submits this issue.
     timeline::GesturePhase phase() const noexcept {
         return phase_;
     }
@@ -209,6 +212,8 @@ class EditGestureIdentityIssue {
     EditGestureIdentityIssue(EditIntentIdentity identity, timeline::GesturePhase phase,
                              timeline::WriterToken::Provenance provenance) noexcept
         : identity_(std::move(identity)), phase_(phase), provenance_(provenance) {}
+
+    runtime::Result<timeline::Transaction, timeline::ModelError> lower(EditIntent intent) const;
 
     void invalidate() noexcept {
         identity_ = {};
@@ -225,9 +230,10 @@ class EditGestureIdentityIssue {
 ///
 /// A transaction can be rejected after its IDs are allocated, so issuing an
 /// identity never advances the confirmed lifecycle. submit() validates the
-/// issue and its lowered transaction, calls DocumentSession::submit() itself,
-/// and derives the transition from that result. A rejection keeps the last
-/// confirmed state and permits a fresh-ID retry with the same undo group.
+/// issue, lowers the supplied intent without exposing its identity, calls
+/// DocumentSession::submit() itself, and derives the transition from that
+/// result. A rejection keeps the last confirmed state and permits a fresh-ID
+/// retry with the same undo group.
 /// Every attempted session submission consumes its issue, and exactly one issue
 /// may await submission.
 ///
@@ -313,37 +319,41 @@ class EditGestureIdentityAllocator {
             runtime::Ok(EditGestureIdentityIssue(std::move(identity), phase, provenance_)));
     }
 
-    /// Validates and submits exactly one issued gesture transaction.
+    /// Lowers and submits exactly one issued gesture intent.
     ///
-    /// Protocol mismatches touch neither DocumentSession nor the pending issue.
-    /// Once DocumentSession is called, both its success and rejection consume
-    /// the issue; only success advances the confirmed lifecycle.
-    runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>
+    /// Protocol or lowering errors touch neither DocumentSession nor the pending
+    /// issue. Once DocumentSession is called, both its success and rejection
+    /// consume the issue. A success advances only when it is still the session's
+    /// current publication; a stale cached success fails closed.
+    runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     submit(timeline::DocumentSession& session, timeline::WriterToken& writer,
-           EditGestureIdentityIssue&& issue, timeline::Transaction transaction) {
+           EditGestureIdentityIssue&& issue, EditIntent intent) {
         if (!matches_pending(issue))
             return submit_error(EditGestureIdentityError::ForeignOrStaleIssue);
         if (!writer.provenance().valid())
             return submit_error(EditGestureIdentityError::InvalidWriter);
         if (writer.provenance() != provenance_)
             return submit_error(EditGestureIdentityError::WriterMismatch);
-        if (!matches_pending(transaction))
-            return submit_error(EditGestureIdentityError::IssuedTransactionMismatch);
+
+        auto transaction = issue.lower(std::move(intent));
+        if (!transaction)
+            return lowering_error(transaction.error());
 
         const auto phase = pending_phase_;
         const auto command = pending_command_;
-        auto document_result = session.submit(writer, std::move(transaction));
+        auto document_result = session.submit(writer, std::move(*transaction));
         issue.invalidate();
         clear_pending();
         if (document_result) {
+            const auto current = session.current();
             if (document_result->applied_commands.size() != 1 ||
-                document_result->applied_commands.front() != command) {
-                state_ = EditGestureIdentityState::Exhausted;
-                return submit_error(EditGestureIdentityError::SubmissionResultMismatch);
-            }
+                document_result->applied_commands.front() != command ||
+                document_result->revision != current.revision ||
+                document_result->snapshot != current.snapshot)
+                return submission_result_error(std::move(*document_result));
             state_ = committed_state_after(phase);
         }
-        return runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>(runtime::Ok(
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Ok(
             EditGestureSubmitOutcome{std::move(document_result), state_}));
     }
 
@@ -382,14 +392,6 @@ class EditGestureIdentityAllocator {
                identity.command_id == pending_command_ && identity.undo_group == undo_group_;
     }
 
-    bool matches_pending(const timeline::Transaction& transaction) const noexcept {
-        return transaction.id == pending_transaction_ &&
-               transaction.expected_revision == pending_revision_ &&
-               transaction.undo_group == undo_group_ &&
-               transaction.gesture_phase == pending_phase_ && transaction.commands.size() == 1 &&
-               transaction.commands.front().id == pending_command_;
-    }
-
     static EditGestureIdentityState committed_state_after(timeline::GesturePhase phase) noexcept {
         if (phase == timeline::GesturePhase::Begin || phase == timeline::GesturePhase::Update)
             return EditGestureIdentityState::Open;
@@ -410,10 +412,24 @@ class EditGestureIdentityAllocator {
             runtime::Err(error));
     }
 
-    static runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>
+    static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     submit_error(EditGestureIdentityError error) {
-        return runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>(
-            runtime::Err(error));
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(
+            runtime::Err(EditGestureSubmitError{error, std::nullopt, std::nullopt}));
+    }
+
+    static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
+    lowering_error(timeline::ModelError error) {
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Err(
+            EditGestureSubmitError{EditGestureIdentityError::IntentLoweringFailed, error,
+                                   std::nullopt}));
+    }
+
+    static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
+    submission_result_error(timeline::CommitResult result) {
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Err(
+            EditGestureSubmitError{EditGestureIdentityError::SubmissionResultMismatch,
+                                   std::nullopt, std::move(result)}));
     }
 
     timeline::WriterToken::Provenance provenance_;
