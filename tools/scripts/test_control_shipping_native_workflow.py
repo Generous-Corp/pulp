@@ -57,11 +57,16 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertIn("aax-sdk-secret-withheld-untrusted-event", self.workflow)
         self.assertIn('--aax-unavailable-reason "$reason"', self.workflow)
 
-    def test_aax_unavailable_configure_is_bash_32_nounset_safe(self) -> None:
+    def test_aax_unavailable_configure_uses_a_nonempty_command_vector(self) -> None:
         configure_step = self.workflow.split(
             "- name: Configure real installed-SDK plug-in artifacts", 1
         )[1].split("- name: Build and scan real plug-in artifacts", 1)[0]
         self.assertIn("configure_args=(", configure_step)
+        configure_initializer = configure_step.split("configure_args=(", 1)[1].split(
+            "\n          )", 1
+        )[0]
+        self.assertIn("-S tools/validation/sdk-smoke", configure_initializer)
+        self.assertIn("-B smoke/build", configure_initializer)
         self.assertIn("configure_args+=(-DPULP_ENABLE_AAX=ON)", configure_step)
         self.assertIn('cmake "${configure_args[@]}"', configure_step)
         self.assertNotIn("aax_args=()", configure_step)
