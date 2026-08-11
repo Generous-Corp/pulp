@@ -420,6 +420,75 @@ StepGridView* host_grid(std::unique_ptr<View>& root, TestWindowHost& host,
 }
 }  // namespace
 
+TEST_CASE("StepGridView displayed pattern rebuilds cache repaints and retargets edits",
+          "[view][sequencer][partial-render]") {
+    SequencerStateChannel ch;
+    Snapshot s;
+    s.epoch = 1;
+    s.engine_sequence = 1;
+    s.patterns[0].lanes[0][0] = on_cell(50);
+    s.patterns[3].length = 8;
+    s.patterns[3].lanes[2][7] = on_cell(100);
+    publish_snapshot(ch, s);
+
+    TestWindowHost host;
+    std::unique_ptr<View> root;
+    StepGridView* v = host_grid(root, host, ch, Rect{40, 30, 320, 96});
+    v->pump();
+    REQUIRE(v->displayed_pattern() == 0);
+    REQUIRE(v->cell_visual(0, 0).enabled);
+    REQUIRE(v->render_snapshot().patterns[0].lanes[0][0].velocity == 50);
+    REQUIRE_FALSE(v->cell_visual(2, 7).enabled);
+    host.clear_pending_dirty();
+
+    v->set_displayed_pattern(3);
+
+    REQUIRE(v->displayed_pattern() == 3);
+    REQUIRE_FALSE(v->cell_visual(0, 0).enabled);
+    REQUIRE(v->cell_visual(2, 7).enabled);
+    REQUIRE(v->render_snapshot().patterns[3].lanes[2][7].velocity == 100);
+    REQUIRE(v->cell_visual(2, 7).intensity > 0.7f);
+    REQUIRE_FALSE(v->cell_visual(2, 7).muted);
+    REQUIRE(v->cell_visual(2, 8).muted);
+    REQUIRE(host.pending_repaint_is_full());
+
+    const Rect clicked = v->cell_rect(2, 7);
+    const Point centre{clicked.x + clicked.width * 0.5f,
+                       clicked.y + clicked.height * 0.5f};
+    v->on_mouse_down(centre);
+    v->on_mouse_up(centre);
+
+    int command_count = 0;
+    while (auto cmd = ch.audio_try_pop_command()) {
+        REQUIRE(cmd->kind == StepEditKind::SetCell);
+        const auto& edit = cmd->payload.set_cell;
+        REQUIRE(edit.pattern == 3);
+        REQUIRE(edit.lane == 2);
+        REQUIRE(edit.step == 7);
+        REQUIRE_FALSE(edit.cell.enabled());
+        ++command_count;
+    }
+    REQUIRE(command_count >= 1);
+
+    const auto visible_before_no_ops = v->cell_visual(2, 7);
+    host.clear_pending_dirty();
+    v->set_displayed_pattern(3);
+    REQUIRE(v->displayed_pattern() == 3);
+    REQUIRE(v->cell_visual(2, 7).enabled == visible_before_no_ops.enabled);
+    REQUIRE(v->cell_visual(2, 7).intensity == visible_before_no_ops.intensity);
+    REQUIRE(v->cell_visual(2, 7).muted == visible_before_no_ops.muted);
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    REQUIRE_FALSE(host.has_pending_dirty_bounds());
+
+    v->set_displayed_pattern(kPatternCount);
+    REQUIRE(v->displayed_pattern() == 3);
+    REQUIRE(v->cell_visual(2, 7).enabled == visible_before_no_ops.enabled);
+    REQUIRE(v->cell_visual(2, 7).intensity == visible_before_no_ops.intensity);
+    REQUIRE(v->cell_visual(2, 7).muted == visible_before_no_ops.muted);
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    REQUIRE_FALSE(host.has_pending_dirty_bounds());
+}
+
 TEST_CASE("StepGridView cell echo invalidates only that cell's mapped rect",
           "[view][sequencer][partial-render]") {
     SequencerStateChannel ch;
