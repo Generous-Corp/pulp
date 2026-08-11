@@ -56,6 +56,16 @@ PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
 )
 CONTROL_BROKER_CLI_MEMBER = "pulp-control-broker"
 CONTROL_BROKER_SDK_MEMBER = "pulp-sdk/libexec/pulp/pulp-control-broker"
+CONTROL_STANDALONE_HOST_CLI_MEMBER = "pulp-control-standalone-host"
+CONTROL_STANDALONE_HOST_CLI_MANIFEST = (
+    "pulp-control-standalone-host.inspector-capabilities.json"
+)
+CONTROL_STANDALONE_HOST_SDK_MEMBER = (
+    "pulp-sdk/libexec/pulp/pulp-control-standalone-host"
+)
+CONTROL_STANDALONE_HOST_SDK_MANIFEST = (
+    "pulp-sdk/libexec/pulp/pulp-control-standalone-host.inspector-capabilities.json"
+)
 
 
 class ContentError(RuntimeError):
@@ -79,6 +89,18 @@ def control_broker_required(
     return version_tuple(version) >= version_tuple(matrix.control_broker_floor)
 
 
+def control_standalone_host_required(
+    platform: str, matrix: ProductMatrix, version: str | None
+) -> bool:
+    if not platform.startswith("darwin-"):
+        return False
+    if version is None:
+        return matrix.control_standalone_host_floor != "999999.0.0"
+    return version_tuple(version) >= version_tuple(
+        matrix.control_standalone_host_floor
+    )
+
+
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
@@ -86,6 +108,7 @@ class ProductMatrix:
     capability_handoff_floor: str
     inspector_sdk_floor: str
     control_broker_floor: str
+    control_standalone_host_floor: str
     platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]
@@ -124,6 +147,9 @@ class ProductMatrix:
                 control_broker_floor=str(
                     doc.get("control_broker_floor", "999999.0.0")
                 ),
+                control_standalone_host_floor=str(
+                    doc.get("control_standalone_host_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
                 cli_contract_declared=cli_contract_declared,
                 # Matrices versioned before the import-design CLI payload did
@@ -154,6 +180,7 @@ class ProductMatrix:
         version_tuple(matrix.capability_handoff_floor)
         version_tuple(matrix.inspector_sdk_floor)
         version_tuple(matrix.control_broker_floor)
+        version_tuple(matrix.control_standalone_host_floor)
         return matrix
 
 
@@ -275,6 +302,8 @@ def cli_binary_members(
     members = {f"{stem}{suffix}" for stem in stems}
     if control_broker_required(platform, matrix, version):
         members.add(CONTROL_BROKER_CLI_MEMBER)
+    if control_standalone_host_required(platform, matrix, version):
+        members.add(CONTROL_STANDALONE_HOST_CLI_MEMBER)
     return frozenset(members)
 
 
@@ -319,11 +348,14 @@ def cli_members(
     version: str | None = None,
 ) -> frozenset[str]:
     _binaries, resources = effective_cli_contract(matrix, version)
-    return (
+    members = (
         cli_binary_members(platform, matrix, version)
         | resources
         | frozenset({cli_runtime_member(platform)})
     )
+    if control_standalone_host_required(platform, matrix, version):
+        members |= {CONTROL_STANDALONE_HOST_CLI_MANIFEST}
+    return frozenset(members)
 
 
 def sdk_import_design_runtime_members(
@@ -355,6 +387,8 @@ def sdk_binary_members(
         )
         if control_broker_required(platform, matrix, version):
             names.add(CONTROL_BROKER_SDK_MEMBER)
+        if control_standalone_host_required(platform, matrix, version):
+            names.add(CONTROL_STANDALONE_HOST_SDK_MEMBER)
     return frozenset(names)
 
 
@@ -402,6 +436,8 @@ def required_sdk_members(
     )
     if platform.startswith("darwin-"):
         required.update(matrix.darwin_sdk_members)
+        if control_standalone_host_required(platform, matrix, version):
+            required.add(CONTROL_STANDALONE_HOST_SDK_MANIFEST)
     if (
         version is not None
         and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
@@ -451,6 +487,16 @@ def require_executable(archive: Archive, names: frozenset[str]) -> None:
         raise ContentError(f"{archive.path.name}: non-executable shipped binary(s): {bad}")
 
 
+def require_mode(archive: Archive, name: str, expected: int) -> None:
+    if not archive.preserves_modes:
+        return
+    actual = archive.members[name].mode & 0o777
+    if actual != expected:
+        raise ContentError(
+            f"{archive.path.name}: {name} mode is {actual:#05o}, expected {expected:#05o}"
+        )
+
+
 def verify_cli_archive(
     path: Path,
     platform: str,
@@ -471,6 +517,9 @@ def verify_cli_archive(
             require_executable(
                 archive, cli_binary_members(platform, matrix, version)
             )
+        if control_standalone_host_required(platform, matrix, version):
+            require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MEMBER, 0o700)
+            require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MANIFEST, 0o600)
 
 
 def verify_sdk_archive(
@@ -493,6 +542,17 @@ def verify_sdk_archive(
             raise ContentError(
                 f"{path.name}: stale pre-floor SDK product: "
                 f"{CONTROL_BROKER_SDK_MEMBER}"
+            )
+        stale_standalone_host = {
+            CONTROL_STANDALONE_HOST_SDK_MEMBER,
+            CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+        } & names
+        if stale_standalone_host and not control_standalone_host_required(
+            platform, matrix, version
+        ):
+            raise ContentError(
+                f"{path.name}: stale pre-floor SDK product(s): "
+                f"{sorted(stale_standalone_host)}"
             )
 
         actual_libraries = installed_pulp_libraries(names, platform)
@@ -610,6 +670,9 @@ def verify_sdk_archive(
                 ) from exc
         if not platform.startswith("windows-"):
             require_executable(archive, sdk_binary_members(platform, matrix, version))
+        if control_standalone_host_required(platform, matrix, version):
+            require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MEMBER, 0o700)
+            require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MANIFEST, 0o600)
 
         if not platform.startswith("darwin-"):
             apple_only = sorted(

@@ -266,15 +266,26 @@ def write_archive(
             data = member_payload(name, platform)
             info = tarfile.TarInfo(name)
             info.size = len(data)
-            default_mode = (
-                0o755
-                if "/bin/" in name
-                or "/libexec/" in name
-                or name in rac.cli_binary_members(
-                    platform, rac.DEFAULT_MATRIX, VERSION
-                )
-                else 0o644
-            )
+            if name in {
+                rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+            }:
+                default_mode = 0o700
+            elif name in {
+                rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+                rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+            }:
+                default_mode = 0o600
+            elif (
+                "/bin/" in name
+                or name
+                in rac.cli_binary_members(platform, rac.DEFAULT_MATRIX, VERSION)
+                or name
+                in rac.sdk_binary_members(platform, rac.DEFAULT_MATRIX, VERSION)
+            ):
+                default_mode = 0o755
+            else:
+                default_mode = 0o644
             info.mode = mode_overrides.get(name, default_mode)
             archive.addfile(info, io.BytesIO(data))
 
@@ -346,6 +357,51 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "pulp-sdk/libexec/pulp/pulp-control-broker",
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "9.8.7"),
         )
+
+    def test_control_standalone_host_contract_is_darwin_only_and_version_floored(self) -> None:
+        for platform in ("darwin-arm64", "darwin-x64"):
+            with self.subTest(platform=platform):
+                cli_before = rac.cli_members(platform, rac.DEFAULT_MATRIX, "0.803.0")
+                cli_at_floor = rac.cli_members(
+                    platform, rac.DEFAULT_MATRIX, "0.803.1"
+                )
+                sdk_at_floor = rac.required_sdk_members(
+                    platform, rac.DEFAULT_MATRIX, "0.803.1"
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER, cli_before
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST, cli_before
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER, cli_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST, cli_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER, sdk_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST, sdk_at_floor
+                )
+
+        for platform in (
+            "linux-arm64",
+            "linux-x64",
+            "windows-arm64",
+            "windows-x64",
+        ):
+            with self.subTest(platform=platform):
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                    rac.cli_members(platform, rac.DEFAULT_MATRIX, "9.8.7"),
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                    rac.required_sdk_members(platform, rac.DEFAULT_MATRIX, "9.8.7"),
+                )
 
     def test_cli_contract_preserves_pre_import_design_releases(self) -> None:
         members = rac.cli_members(
@@ -665,6 +721,43 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     path, "darwin-arm64", VERSION, SOURCE_SHA, matrix
                 )
 
+    def test_negative_control_rejects_pre_floor_sdk_standalone_host(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            matrix = replace(
+                rac.DEFAULT_MATRIX, control_standalone_host_floor="10.0.0"
+            )
+            sdk = set(rac.required_sdk_members("darwin-arm64", matrix, VERSION))
+            sdk.update(
+                {
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                    rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+                }
+            )
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            write_archive(path, sdk, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "stale pre-floor"):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA, matrix
+                )
+
+    def test_negative_control_rejects_executable_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            write_archive(
+                path,
+                cli,
+                as_zip=False,
+                platform="darwin-arm64",
+                mode_overrides={rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST: 0o700},
+            )
+
+            with self.assertRaisesRegex(rac.ContentError, "mode is 0o700"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
     def test_negative_control_invalid_signature_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -953,12 +1046,16 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["capability_handoff_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
+            del document["control_standalone_host_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
+            self.assertEqual(
+                historical.control_standalone_host_floor, "999999.0.0"
+            )
             self.assertNotIn(
                 "pulp-control-broker",
                 rac.cli_members("darwin-arm64", historical, "0.795.0"),
