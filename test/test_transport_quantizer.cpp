@@ -284,6 +284,39 @@ TEST_CASE("TransportQuantizer detects transport jumps across blocks",
     REQUIRE(result.transport_jumped);
 }
 
+TEST_CASE("TransportQuantizer reset establishes a fresh timeline baseline",
+          "[format][transport][quantizer]") {
+    auto first = playing_context();
+    first.position_beats = 1.0;
+    first.num_samples = 128;
+
+    auto jumped = first;
+    jumped.position_beats = 8.0;
+
+    TransportQuantizer quantizer;
+    REQUIRE_FALSE(quantizer.begin_block(first).transport_jumped);
+    REQUIRE(quantizer.begin_block(jumped).transport_jumped);
+
+    quantizer.reset();
+    auto fresh = first;
+    fresh.position_beats = 31.999;
+    const auto fresh_block = quantizer.begin_block(fresh);
+    REQUIRE_FALSE(fresh_block.transport_jumped);
+
+    const auto result = quantizer.resolve(
+        fresh, request(TransportQuantizePolicy::NextBeat), fresh_block);
+    REQUIRE(result.scheduled);
+    REQUIRE(result.status == TransportQuantizeStatus::Scheduled);
+    REQUIRE(result.block_offset == 24);
+    REQUIRE(std::abs(result.target_beats - 32.0) < 1.0e-12);
+
+    auto continuous = fresh;
+    continuous.position_beats +=
+        (static_cast<double>(fresh.num_samples) / fresh.sample_rate) *
+        (fresh.tempo_bpm / 60.0);
+    REQUIRE_FALSE(quantizer.begin_block(continuous).transport_jumped);
+}
+
 TEST_CASE("TransportQuantizer block plan carries transport jump metadata",
           "[format][transport][quantizer]") {
     auto first = playing_context();
