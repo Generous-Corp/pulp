@@ -28,7 +28,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "scripts"))
-from agent_capability_registry import LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS
+from agent_capability_registry import (
+    LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS,
+    REVIEWED_HEADERS,
+)
 
 SIGNAL = os.path.normpath(os.path.join(HERE, "..", "core", "signal",
                                        "include", "pulp", "signal"))
@@ -543,10 +546,18 @@ def scan_text(text: str) -> list[dict]:
 def scan_headers():
     """Regeneration input; consumers use scan(), which reads the manifest."""
     prefix = "pulp/signal/"
+    reviewed = {entry["include"]: entry for entry in REVIEWED_HEADERS}
     exclusions = set()
     for include in LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS:
         if not isinstance(include, str) or not include.startswith(prefix) or not include.endswith(".hpp"):
             raise RuntimeError(f"invalid legacy signal vocabulary exclusion: {include!r}")
+        review = reviewed.get(include)
+        if (review is None or review.get("disposition") != "unsupported_capability" or
+                review.get("capability_keys") != []):
+            raise RuntimeError(
+                "legacy signal vocabulary exclusion must be a reviewed unsupported_capability "
+                f"with no capability keys: {include}"
+            )
         exclusions.add(include[len(prefix):])
     found = {}
     for root, _, files in os.walk(SIGNAL):

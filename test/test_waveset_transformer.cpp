@@ -110,7 +110,7 @@ struct ScheduledResult {
     std::vector<std::size_t> backpressure_positions;
 };
 
-ScheduledResult run_constant_pull_schedule(int partition) {
+ScheduledResult run_constant_pull_schedule(int partition, std::uint32_t random_seed = 0) {
     Transformer transformer;
     REQUIRE(transformer.prepare(1000.0, {2, 8, 1.0}));
     REQUIRE(transformer.set_program(0, program(Transformer::Operation::Repeat, 16)));
@@ -123,6 +123,10 @@ ScheduledResult run_constant_pull_schedule(int partition) {
     std::size_t next_milestone = 8;
     while (accepted < input.size()) {
         const auto until_milestone = next_milestone - accepted;
+        if (random_seed != 0) {
+            random_seed = random_seed * 1664525u + 1013904223u;
+            partition = 1 + static_cast<int>(random_seed % 19u);
+        }
         const int requested = static_cast<int>(std::min<std::size_t>(
             {static_cast<std::size_t>(partition), until_milestone, input.size() - accepted}));
         const int pushed = transformer.push(input.data() + accepted, requested);
@@ -176,6 +180,39 @@ TEST_CASE("waveset transformer validates preparation and publishes owned program
     REQUIRE(transformer.push(nullptr, 1) == 0);
     transformer.reset();
     REQUIRE(transformer.set_program(0, program(Transformer::Operation::Pass)));
+}
+
+TEST_CASE("waveset CapacityLayout rejects every checked arithmetic overflow stage",
+          "[signal][waveset][bounds]") {
+    using Layout = pulp::signal::detail::CapacityLayout;
+    constexpr auto maximum = std::numeric_limits<std::size_t>::max();
+    std::size_t value{};
+    REQUIRE_FALSE(Layout::add(maximum, 1, value));
+    REQUIRE_FALSE(Layout::multiply(maximum, 2, value));
+
+    auto makes = [](double sample_rate, std::size_t n, std::size_t m,
+                    double normalize_ratio, std::size_t repeat_limit,
+                    std::size_t rotate_limit, std::size_t slot_count,
+                    std::size_t sample_bytes = sizeof(float),
+                    std::size_t held_bytes = sizeof(std::size_t) * 3,
+                    std::size_t token_bytes = 1,
+                    std::size_t program_bytes = sizeof(std::size_t) * 2,
+                    std::size_t step_bytes = 16) {
+        Layout layout{};
+        return Layout::make(sample_rate, n, m, normalize_ratio, repeat_limit,
+                            rotate_limit, slot_count, sample_bytes, held_bytes,
+                            token_bytes, program_bytes, step_bytes, layout);
+    };
+    REQUIRE(makes(1000.0, 4, 8, 2.0, 16, 256, 8));
+    REQUIRE_FALSE(makes(1000.0, 4, maximum, 1.0, 2, 256, 8)); // repeat M*16
+    REQUIRE_FALSE(makes(1000.0, 4, maximum, 2.0, 1, 256, 8)); // Normalize M*R
+    REQUIRE_FALSE(makes(std::numeric_limits<double>::max(), 4, 8, 1.0, 1, 256, 8));
+    REQUIRE_FALSE(makes(1.0, maximum, 1, 1.0, 1, 1, 1)); // N+1
+    REQUIRE_FALSE(makes(1.0, maximum / 2, 1, 1.0, 4, 1, 1)); // (N+1)*E / Q
+    REQUIRE_FALSE(makes(1.0, maximum / 2 + 1, 2, 1.0, 1, maximum, 1)); // A/G
+    REQUIRE_FALSE(makes(1.0, 2, 1, 1.0, 1, 1, maximum, 1, 1, maximum, 1));
+    REQUIRE_FALSE(makes(1.0, 2, 1, 1.0, 1, 2, maximum, 1, 1, 1, 1));
+    REQUIRE_FALSE(makes(1.0, 2, 1, 1.0, 1, 2, 1, maximum, 1, 1, 1));
 }
 
 TEST_CASE("waveset segmentation honors polarity deadband and forced boundaries",
@@ -662,6 +699,59 @@ TEST_CASE("waveset pending splice suffix expires at N omitted completions", "[si
     REQUIRE(transformer.drained());
 }
 
+TEST_CASE("waveset pending predecessor CoordinateSelect Omit expires exactly at N",
+          "[signal][waveset][splice]") {
+    Transformer transformer;
+    constexpr int n = 3;
+    constexpr int m = 2;
+    REQUIRE(transformer.prepare(1000.0, {n, m, 1.0}));
+    REQUIRE(transformer.set_program(0, program(Transformer::Operation::Pass)));
+    auto coordinate_omit = program(Transformer::Operation::CoordinateSelect);
+    coordinate_omit.steps[0].coordinate_choice_count = 1;
+    coordinate_omit.steps[0].coordinate_choices[0] = Transformer::Operation::Omit;
+    REQUIRE(transformer.set_program(1, coordinate_omit));
+    REQUIRE(transformer.set_crossfade_duration_ms(20.0f));
+    const std::array<float, 2 * m + n * m> input{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    REQUIRE(transformer.push(input.data(), m) == m);
+    REQUIRE(transformer.request_program_slot(1));
+    REQUIRE(transformer.push(input.data() + m, m) == m); // switching Pass
+    std::array<float, 8> output{};
+    REQUIRE(transformer.pull(output.data(), 8) == 2 * m - 1);
+    for (int completion = 0; completion < n - 1; ++completion) {
+        REQUIRE(transformer.push(input.data() + 2 * m + completion * m, m) == m);
+        REQUIRE(transformer.pull(output.data(), 8) == 0);
+    }
+    REQUIRE(transformer.push(input.data() + 2 * m + (n - 1) * m, m) == m);
+    REQUIRE(transformer.pull(output.data(), 8) == 1);
+    REQUIRE(output[0] == 4.0f);
+}
+
+TEST_CASE("waveset nonidentity Rotate and Normalize edited splice oracles",
+          "[signal][waveset][splice]") {
+    Transformer rotate;
+    REQUIRE(rotate.prepare(1000.0, {4, 2, 1.0}));
+    Transformer::OperationProgram rotation;
+    rotation.steps = {{Transformer::Operation::Rotate}, {Transformer::Operation::Rotate}};
+    rotation.rotate_window = 2;
+    rotation.permutation = {1, 0};
+    REQUIRE(rotate.set_program(0, rotation));
+    REQUIRE(rotate.set_crossfade_law(pulp::signal::CrossfadeGainLaw::EqualGain));
+    REQUIRE(rotate.set_crossfade_duration_ms(2.0f));
+    REQUIRE(drain(rotate, {1, 2, 3, 4}) == std::vector<float>{3, 1, 2});
+
+    Transformer normalize;
+    REQUIRE(normalize.prepare(1000.0, {2, 4, 2.0}));
+    REQUIRE(normalize.set_program(0, program(Transformer::Operation::Normalize)));
+    REQUIRE(normalize.set_normalize_ratio(2.0f));
+    REQUIRE(normalize.set_crossfade_law(pulp::signal::CrossfadeGainLaw::EqualGain));
+    REQUIRE(normalize.set_crossfade_duration_ms(2.0f));
+    const auto normalized = drain(normalize, {1, 2, 3, 4, 5, 6, 7, 8});
+    REQUIRE(normalized.size() == 14);
+    REQUIRE(normalized.front() == 1.0f);
+    REQUIRE(normalized.back() == 8.0f);
+    REQUIRE(normalized[7] == Catch::Approx(38.0f / 7.0f));
+}
+
 TEST_CASE("waveset publication validation fails closed for malformed programs",
           "[signal][waveset]") {
     Transformer transformer;
@@ -727,6 +817,9 @@ TEST_CASE("waveset fixed milestones preserve constant-pull backpressure position
         REQUIRE(candidate.output == reference.output);
         REQUIRE(candidate.backpressure_positions == reference.backpressure_positions);
     }
+    const auto random = run_constant_pull_schedule(1, 0x31415926u);
+    REQUIRE(random.output == reference.output);
+    REQUIRE(random.backpressure_positions == reference.backpressure_positions);
 }
 
 TEST_CASE("waveset slot requests latch at legal boundaries", "[signal][waveset]") {
