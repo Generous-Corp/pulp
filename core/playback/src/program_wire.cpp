@@ -1110,6 +1110,40 @@ std::uint64_t wire_selected_rank(std::uint32_t selection, std::uint32_t selected
     return static_cast<std::uint64_t>(selection) * (candidate_count - 1u) / (selected_count - 1u);
 }
 
+std::optional<ProgramWireError>
+wire_consumer_capacity_error(std::span<const std::byte> bytes, std::size_t track_capacity,
+                             std::size_t lane_capacity, std::size_t byte_capacity) noexcept {
+    constexpr std::uint32_t kMaximumDirectoryEntries = 32;
+    if (bytes.size() > byte_capacity)
+        return ProgramWireError{ProgramWireErrorCode::InvalidLimits, 0, bytes.size()};
+    if (bytes.size() < sizeof(ProgramWireHeader))
+        return std::nullopt;
+    ProgramWireHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    if (header.section_count > kMaximumDirectoryEntries)
+        return ProgramWireError{ProgramWireErrorCode::InvalidLimits, 0, header.section_count};
+    const auto directory_bytes =
+        static_cast<std::uint64_t>(header.section_count) * sizeof(ProgramWireSectionEntry);
+    if (directory_bytes > bytes.size() - sizeof(ProgramWireHeader))
+        return std::nullopt;
+    for (std::uint32_t index = 0; index < header.section_count; ++index) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry,
+                    bytes.data() + sizeof(ProgramWireHeader) +
+                        index * sizeof(ProgramWireSectionEntry),
+                    sizeof(entry));
+        if (entry.id == section_id(ProgramWireSection::Tracks) &&
+            entry.bytes / sizeof(ProgramWireTrackRecord) > track_capacity)
+            return ProgramWireError{ProgramWireErrorCode::InvalidLimits, entry.id,
+                                    entry.bytes / sizeof(ProgramWireTrackRecord)};
+        if (entry.id == section_id(ProgramWireSection::AutomationLanes) &&
+            entry.bytes / sizeof(ProgramWireAutomationLaneRecord) > lane_capacity)
+            return ProgramWireError{ProgramWireErrorCode::InvalidLimits, entry.id,
+                                    entry.bytes / sizeof(ProgramWireAutomationLaneRecord)};
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 ProgramWireAdoptionResult
@@ -1124,6 +1158,12 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
         result.wire_error = error;
         result.returned_pin = std::move(candidate);
     };
+
+    if (const auto capacity = wire_consumer_capacity_error(
+            candidate.bytes(), track_capacity_, lane_state_.size(), wire_byte_capacity_)) {
+        reject(ProgramWireConsumerCode::StateCapacityExceeded, *capacity);
+        return result;
+    }
 
     auto decoded = decode_program_wire(candidate.bytes());
     if (!decoded) {
@@ -1308,35 +1348,53 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
     const auto walk_group = [&](const ProgramWireTrackRecord& track,
                                 std::span<const ProgramWireAutomationLaneRecord> lanes,
                                 std::size_t anchor, auto&& visitor) noexcept {
+        std::size_t heap_size = 0;
         for (std::size_t index = 0; index < lanes.size(); ++index) {
-            if (same_capacity_group(lanes[anchor], lanes[index]))
-                find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id})->merge_position =
-                    0;
+            if (!same_capacity_group(lanes[anchor], lanes[index]))
+                continue;
+            auto* state = find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id});
+            state->merge_position = 0;
+            if (state->event_count != 0)
+                merge_heap_[heap_size++] = state;
         }
-        for (;;) {
-            ProgramWireLaneState* selected_state = nullptr;
-            timeline::ItemId selected_lane;
-            for (std::size_t index = 0; index < lanes.size(); ++index) {
-                if (!same_capacity_group(lanes[anchor], lanes[index]))
-                    continue;
-                auto* state = find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id});
-                if (state->merge_position >= state->event_count)
-                    continue;
-                const auto& candidate = state->scratch[state->merge_position];
-                if (selected_state == nullptr ||
-                    candidate.sample_offset <
-                        selected_state->scratch[selected_state->merge_position].sample_offset ||
-                    (candidate.sample_offset ==
-                         selected_state->scratch[selected_state->merge_position].sample_offset &&
-                     timeline::ItemId{lanes[index].lane_id} < selected_lane)) {
-                    selected_state = state;
-                    selected_lane = {lanes[index].lane_id};
-                }
+        const auto state_less = [](const ProgramWireLaneState* lhs,
+                                   const ProgramWireLaneState* rhs) noexcept {
+            const auto& left = lhs->scratch[lhs->merge_position];
+            const auto& right = rhs->scratch[rhs->merge_position];
+            return left.sample_offset < right.sample_offset ||
+                   (left.sample_offset == right.sample_offset &&
+                    lhs->identity.lane_id < rhs->identity.lane_id);
+        };
+        const auto sift_down = [&](std::size_t root) noexcept {
+            while (true) {
+                const auto left = root * 2u + 1u;
+                if (left >= heap_size)
+                    return;
+                const auto right = left + 1u;
+                auto smallest = left;
+                if (right < heap_size && state_less(merge_heap_[right], merge_heap_[left]))
+                    smallest = right;
+                if (!state_less(merge_heap_[smallest], merge_heap_[root]))
+                    return;
+                std::swap(merge_heap_[root], merge_heap_[smallest]);
+                root = smallest;
             }
-            if (selected_state == nullptr)
-                return;
+        };
+        for (auto parent = heap_size / 2u; parent > 0; --parent)
+            sift_down(parent - 1u);
+        while (heap_size != 0) {
+            auto* selected_state = merge_heap_[0];
             const auto event = selected_state->scratch[selected_state->merge_position++];
             visitor(*selected_state, event);
+            if (selected_state->merge_position < selected_state->event_count) {
+                sift_down(0);
+            } else {
+                --heap_size;
+                if (heap_size != 0) {
+                    merge_heap_[0] = merge_heap_[heap_size];
+                    sift_down(0);
+                }
+            }
         }
     };
 

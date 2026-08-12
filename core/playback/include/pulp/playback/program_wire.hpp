@@ -811,9 +811,17 @@ struct ProgramWireAutomationRenderResult {
 /// AutomationCursor algorithm used by direct PlaybackProgram consumers.
 class ProgramWireAutomationConsumer {
   public:
+    static constexpr std::size_t kDefaultWireByteCapacity = 16u * 1'024u * 1'024u;
+
+    explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state,
+                                           std::size_t track_capacity,
+                                           std::size_t wire_byte_capacity) noexcept
+        : lane_state_(lane_state), track_capacity_(track_capacity),
+          wire_byte_capacity_(wire_byte_capacity) {}
     explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state,
                                            std::size_t track_capacity) noexcept
-        : lane_state_(lane_state), track_capacity_(track_capacity) {}
+        : ProgramWireAutomationConsumer(lane_state, track_capacity,
+                                        kDefaultWireByteCapacity) {}
     explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state) noexcept
         : ProgramWireAutomationConsumer(lane_state, lane_state.size()) {}
     ProgramWireAutomationConsumer(const ProgramWireAutomationConsumer&) = delete;
@@ -840,6 +848,9 @@ class ProgramWireAutomationConsumer {
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;
     std::size_t lane_count_ = 0;
     std::size_t track_capacity_ = 0;
+    std::size_t wire_byte_capacity_ = 0;
+    std::array<ProgramWireLaneState*, AutomationPlaybackLimits::kMaximumLanesPerTrack>
+        merge_heap_{};
 };
 
 } // namespace pulp::playback
