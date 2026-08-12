@@ -27,6 +27,9 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "scripts"))
+from agent_capability_registry import LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS
+
 SIGNAL = os.path.normpath(os.path.join(HERE, "..", "core", "signal",
                                        "include", "pulp", "signal"))
 
@@ -539,6 +542,12 @@ def scan_text(text: str) -> list[dict]:
 
 def scan_headers():
     """Regeneration input; consumers use scan(), which reads the manifest."""
+    prefix = "pulp/signal/"
+    exclusions = set()
+    for include in LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS:
+        if not isinstance(include, str) or not include.startswith(prefix) or not include.endswith(".hpp"):
+            raise RuntimeError(f"invalid legacy signal vocabulary exclusion: {include!r}")
+        exclusions.add(include[len(prefix):])
     found = {}
     for root, _, files in os.walk(SIGNAL):
         for fn in sorted(files):
@@ -546,6 +555,8 @@ def scan_headers():
                 continue
             path = os.path.join(root, fn)
             rel = os.path.relpath(path, SIGNAL)
+            if rel in exclusions:
+                continue
             with open(path, encoding="utf-8", errors="ignore") as source:
                 text = source.read()
             classes = scan_text(text)
@@ -555,6 +566,13 @@ def scan_headers():
     # differs between filesystems (for example APFS and ext4).  This mapping is
     # serialized into the checked agent-capability manifest, so make its order
     # source-derived rather than environment-derived.
+    missing = exclusions - set(
+        os.path.relpath(os.path.join(root, fn), SIGNAL)
+        for root, _, files in os.walk(SIGNAL)
+        for fn in files if fn.endswith(".hpp")
+    )
+    if missing:
+        raise RuntimeError(f"legacy signal vocabulary exclusions are missing: {sorted(missing)}")
     return {relative: found[relative] for relative in sorted(found)}
 
 
