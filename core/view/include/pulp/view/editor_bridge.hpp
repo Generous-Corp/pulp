@@ -55,6 +55,7 @@ namespace pulp::view {
 
 class WebViewPanel;
 class ScriptEngine;
+class ScriptedUiSession;
 
 // Forward-declared so EditorBridge can expose attach_native_runtime()
 // before the JS engine surface is fully available in this header. The
@@ -165,6 +166,14 @@ public:
     /// JSON envelope string and returns the bridge's JSON response string.
     /// The EditorBridge must outlive calls through the registered symbol.
     void attach_native_runtime(ScriptEngine& engine, std::string_view handler_name);
+
+    /// Attach to a ScriptedUiSession without borrowing its replaceable engine.
+    /// The endpoint is preserved across scripted-UI reloads. This bridge must
+    /// outlive the attachment; call detach_native_runtime() before teardown.
+    void attach_native_runtime(ScriptedUiSession& session,
+                               std::string_view handler_name);
+    void detach_native_runtime(ScriptedUiSession& session,
+                               std::string_view handler_name);
 
     // ── Static value-coercion helpers for handler authors ────────────
     //

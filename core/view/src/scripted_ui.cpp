@@ -8,6 +8,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 
 namespace pulp::view {
@@ -423,6 +424,66 @@ void ScriptedUiSession::set_post_evaluation_reset_callback(
     post_evaluation_reset_callback_ = std::move(cb);
 }
 
+void ScriptedUiSession::attach_native_message_handler(
+    std::string handler_name, NativeMessageHandler handler) {
+    if (handler_name.empty() || !handler)
+        throw std::invalid_argument(
+            "native message attachment requires a name and handler");
+
+    auto [it, inserted] = native_message_handlers_.try_emplace(
+        handler_name, std::make_shared<NativeMessageAttachment>());
+    it->second->handler = std::move(handler);
+    if (inserted && engine_ && !runtime_realm_quarantined_)
+        install_native_message_handler(*engine_, it->first, it->second, false);
+}
+
+void ScriptedUiSession::detach_native_message_handler(
+    std::string_view handler_name) {
+    if (handler_name.empty())
+        return;
+    const auto it = native_message_handlers_.find(std::string(handler_name));
+    if (it == native_message_handlers_.end())
+        return;
+    it->second->handler = {};
+    native_message_handlers_.erase(it);
+}
+
+void ScriptedUiSession::install_native_message_handlers(
+    ScriptEngine& engine, bool validation_realm) const {
+    for (const auto& [name, attachment] : native_message_handlers_)
+        install_native_message_handler(engine, name, attachment, validation_realm);
+}
+
+void ScriptedUiSession::install_native_message_handler(
+    ScriptEngine& engine, const std::string& name,
+    std::shared_ptr<NativeMessageAttachment> attachment,
+    bool validation_realm) {
+    engine.register_function(
+        name,
+        [attachment = std::move(attachment), validation_realm](
+            const choc::value::Value* args, std::size_t num_args) {
+                if (num_args != 1 || args == nullptr || !args[0].isString()) {
+                    return choc::value::Value(
+                        R"({"ok":false,"error":"native message handler expects one JSON string"})");
+                }
+                if (validation_realm) {
+                    return choc::value::Value(
+                        R"({"ok":false,"error":"native message handler unavailable during validation"})");
+                }
+                if (!attachment->handler) {
+                    return choc::value::Value(
+                        R"({"ok":false,"error":"native message handler detached"})");
+                }
+                try {
+                    return choc::value::Value(
+                        attachment->handler(std::string_view(args[0].getString())));
+                } catch (...) {
+                    return choc::value::Value(
+                        R"({"ok":false,"error":"native message handler failed"})");
+                }
+            });
+}
+
 bool ScriptedUiSession::rebuild_from_code(
     const std::string& code, const std::filesystem::path& source_path,
     bool preserve_state, std::string* error,
@@ -496,6 +557,7 @@ bool ScriptedUiSession::rebuild_from_code(
             : (preserve_state ? base_theme_ : root_.theme());
         check_deadline();
         auto probe_engine = make_engine();
+        install_native_message_handlers(*probe_engine, true);
         check_deadline();
         View probe_root;
         probe_root.set_theme(theme_for_reload);
@@ -570,6 +632,7 @@ bool ScriptedUiSession::rebuild_from_code(
         root_.set_theme(theme_for_reload);
         check_deadline();
         next_engine = make_engine(engine_log_callback());
+        install_native_message_handlers(*next_engine, false);
         check_deadline();
         next_bridge = std::make_unique<WidgetBridge>(
             *next_engine, root_, store_, gpu_surface_, granted_capabilities_);

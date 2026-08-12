@@ -842,9 +842,23 @@ Key invariants:
 - **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
   `attach_native_runtime(JsRuntime&, "<handler_name>")` for the low-level
   native runtime, or `attach_native_runtime(ScriptEngine&, "<handler_name>")`
-  when a product owns Pulp's public engine wrapper. Both native overloads
-  register one global function that accepts a JSON envelope string and returns
-  the JSON response string; same handler registrations and error vocabulary.
+  when a product owns Pulp's public engine wrapper. A product built on
+  `ScriptedUiSession` must use
+  `attach_native_runtime(session, "<handler_name>")`: the session owns the
+  attachment, installs it before the live script runs, and reinstalls it after
+  every realm replacement without exposing or borrowing the replaceable
+  `ScriptEngine`. Native overloads register one global function that accepts a
+  JSON envelope string and returns the JSON response string; they share the
+  same handler registrations and error vocabulary.
+- **Session attachment has explicit teardown.** An `EditorBridge` attached to
+  a `ScriptedUiSession` must outlive the attachment. Call
+  `detach_native_runtime(session, "<handler_name>")` before either the bridge
+  or a handler capture expires. The live realm's symbol then fails closed, and
+  future realm replacements omit it.
+- **Reload validation does not replay product effects.** A scripted reload
+  first executes code in a probe realm. That realm receives fail-closed native
+  message stubs so script validation can resolve the globals without calling
+  processor handlers twice; only the committed live realm dispatches messages.
 - **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
@@ -1440,6 +1454,8 @@ this boundary. Parameter text and custom state have matching containment in
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
 - `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
+- `core/view/include/pulp/view/scripted_ui.hpp` — session-owned native message
+  attachment and realm-replacement persistence
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference

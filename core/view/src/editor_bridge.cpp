@@ -1,6 +1,7 @@
 #include "pulp/view/editor_bridge.hpp"
 
 #include "pulp/view/script_engine.hpp"
+#include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
 
 #include <choc/text/choc_JSON.h>
@@ -135,6 +136,23 @@ void EditorBridge::attach_native_runtime(ScriptEngine& engine,
             }
             return choc::value::Value(dispatch_json(args[0].getString()));
         });
+}
+
+void EditorBridge::attach_native_runtime(ScriptedUiSession& session,
+                                         std::string_view handler_name) {
+    if (handler_name.empty())
+        throw std::invalid_argument("native editor bridge handler name must not be empty");
+
+    session.attach_native_message_handler(
+        std::string(handler_name),
+        [this](std::string_view envelope_json) {
+            return dispatch_json(envelope_json);
+        });
+}
+
+void EditorBridge::detach_native_runtime(ScriptedUiSession& session,
+                                         std::string_view handler_name) {
+    session.detach_native_message_handler(handler_name);
 }
 
 // ── Static helpers ──────────────────────────────────────────────────────
