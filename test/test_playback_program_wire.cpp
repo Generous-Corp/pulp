@@ -3,6 +3,7 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/program_wire.hpp>
 #include <pulp/playback/track_automation_program.hpp>
+#include <pulp/playback/track_automation_renderer.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
@@ -1349,6 +1350,71 @@ TEST_CASE("wire automation consumer matches every direct production cursor lane"
         REQUIRE(std::equal(wire_events[index].begin(),
                            wire_events[index].begin() + output[index].result.emitted_events,
                            direct_events[index].begin()));
+    }
+}
+
+TEST_CASE("wire automation uses the production per-device event ceiling",
+          "[playback][wire][consumer][capacity]") {
+    const auto map = wire_tempo_map();
+    CompiledProgram direct{wire_project(), nullptr, map};
+    const auto direct_program = direct.store.read();
+    const auto* direct_track = direct_program->find_track({10});
+    REQUIRE(direct_track != nullptr);
+    auto limits = direct_program->automation_limits();
+    limits.max_events_per_device_per_block = 2;
+    auto native =
+        take(TrackAutomationRenderer::create(direct_track->automation_program_owner(), limits));
+
+    auto bytes = encode_project_bytes(wire_project(), map);
+    const auto max_events_at =
+        kPayloadAt + offsetof(ProgramWireProgramRecord, max_events_per_device_per_block);
+    std::memcpy(bytes->span().data() + max_events_at, &limits.max_events_per_device_per_block,
+                sizeof(limits.max_events_per_device_per_block));
+    reseal(bytes->span());
+    REQUIRE(decode_program_wire(bytes->span()));
+
+    MasterTransport clock;
+    MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    config.initially_playing = true;
+    REQUIRE(clock.prepare(*map, config) == TransportError::None);
+    TransportSnapshot snapshot;
+    REQUIRE(clock.begin_block(64, snapshot) == TransportError::None);
+    const auto native_result = native.process(snapshot);
+    REQUIRE(native_result.code == TrackAutomationRendererCode::Coalesced);
+
+    std::array<ProgramWireLaneState, 3> state;
+    ProgramWireAutomationConsumer consumer{state};
+    REQUIRE(consumer.adopt(ProgramWireBytePin{bytes->span(), 71}, *map, kTempoPoints).adoption ==
+            ProgramWireAdoption::Adopted);
+    std::array<std::array<AutomationBlockEvent, 64>, 3> event_storage;
+    std::array<ProgramWireAutomationLaneOutput, 3> output;
+    for (std::size_t index = 0; index < output.size(); ++index)
+        output[index].events = event_storage[index];
+    REQUIRE(consumer.render(snapshot, output).code == ProgramWireConsumerCode::Ok);
+    REQUIRE(output[0].result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(output[1].result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(output[0].result.emitted_events == 2);
+    REQUIRE(output[1].result.emitted_events == 2);
+
+    for (const auto& batch : native.batches()) {
+        REQUIRE(batch.coalesced);
+        REQUIRE(batch.events.size() == 2);
+        for (std::size_t event = 0; event < batch.events.size(); ++event) {
+            const auto found = std::find_if(output.begin(), output.end(), [&](const auto& lane) {
+                return lane.lane_id == batch.events[event].lane_id;
+            });
+            REQUIRE(found != output.end());
+            const auto lane_index = static_cast<std::size_t>(found - output.begin());
+            const auto expected_block_offset =
+                batch.events[event].sample_offset + batch.events[event].ramp_duration_sample_frames;
+            REQUIRE(event_storage[lane_index][event].sample_offset == expected_block_offset);
+            REQUIRE(event_storage[lane_index][event].value == batch.events[event].value);
+            REQUIRE(event_storage[lane_index][event].transition ==
+                    (batch.events[event].ramp_duration_sample_frames == 0
+                         ? AutomationTransition::Seed
+                         : AutomationTransition::LinearRamp));
+        }
     }
 }
 
