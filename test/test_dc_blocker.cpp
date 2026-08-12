@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <numeric>
 #include <vector>
 
@@ -61,4 +63,49 @@ TEST_CASE("DcBlocker reset clears state", "[signal][dc-blocker]") {
     // First sample after reset of a constant input is the input itself.
     const float first = blocker.process(0.5f);
     REQUIRE(first == 0.5f);
+}
+
+TEST_CASE("DcBlocker preserves state across irregular callback partitions",
+          "[signal][dc-blocker][partition][lifecycle]") {
+    constexpr std::array<double, 24> input{{
+        0.75, -0.25, 0.5, 0.5, -0.125, 0.0, 1.0, -0.75,
+        0.25, 0.25, -0.5, 0.875, -0.375, 0.0, 0.625, -1.0,
+        0.125, 0.5, -0.25, 0.75, -0.625, 0.375, 0.0, 0.5,
+    }};
+    constexpr double pole = 0.83;
+
+    DcBlocker<double> scalar;
+    scalar.set_pole(pole);
+    std::array<double, input.size()> scalar_output{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        scalar_output[i] = scalar.process(input[i]);
+
+    DcBlocker<double> monolithic;
+    monolithic.set_pole(pole);
+    auto monolithic_output = input;
+    monolithic.process(monolithic_output.data(),
+                       static_cast<int>(monolithic_output.size()));
+    REQUIRE(monolithic_output == scalar_output);
+
+    constexpr std::array<int, 9> callback_sizes{{3, 0, 5, 1, 0, 7, 4, 0, 4}};
+    auto process_partitioned = [&](DcBlocker<double>& blocker) {
+        auto output = input;
+        std::size_t offset = 0;
+        for (const int callback_size : callback_sizes) {
+            blocker.process(output.data() + offset, callback_size);
+            offset += static_cast<std::size_t>(callback_size);
+        }
+        REQUIRE(offset == output.size());
+        return output;
+    };
+
+    DcBlocker<double> partitioned;
+    partitioned.set_pole(pole);
+    const auto partitioned_output = process_partitioned(partitioned);
+    REQUIRE(partitioned_output == scalar_output);
+
+    partitioned.reset();
+    const auto replayed_output = process_partitioned(partitioned);
+    REQUIRE(replayed_output == scalar_output);
+    REQUIRE(replayed_output == partitioned_output);
 }

@@ -46,7 +46,7 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 # the document model, and never pulp::playback. A member of the interface that
 # grew into an engine type would fail to build here.
 pulp_add_test_suite(pulp-test-sequencer-ui-host
-    SOURCES test_sequencer_ui_host.cpp test_timeline_snap_grid.cpp
+    SOURCES test_sequencer_ui_host.cpp test_timeline_grid_lines.cpp test_timeline_snap_grid.cpp
             test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
 # Names both rungs at once, which neither rung may do for itself. The link list

@@ -1,6 +1,7 @@
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/canvas/recording_canvas.hpp>
+#include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline_editor/scripted_ui_host.hpp>
@@ -10,6 +11,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
+#include <vector>
 
 using namespace pulp::timeline;
 using namespace pulp::timeline_editor;
@@ -156,6 +159,50 @@ std::vector<NoteEvent> notes_after_round_trip(const Project& project) {
     return std::vector<NoteEvent>(restored.begin(), restored.end());
 }
 
+std::string canonical_project(const Project& project) {
+    const auto registry = builtin_registry();
+    auto encoded = serialize_project(project, registry);
+    REQUIRE(encoded);
+    return std::move(encoded).value().json;
+}
+
+struct CanonicalHistory {
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+    std::vector<ValidatedNoteEditIntent> intents;
+};
+
+CanonicalHistory exercise_device_drag(PointerType pointer_type) {
+    auto session = Session::create(make_note_project());
+    const auto baseline = canonical_project(session.project());
+    std::vector<ValidatedNoteEditIntent> intents;
+    {
+        ScriptedUiHost<ValidatedNoteEditIntent> host;
+        PianoRollView view;
+        configure(view, session.project(), host);
+        view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+        pulp::view::View::SimulatedPointer pointer;
+        pointer.type = pointer_type;
+        view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4, pointer);
+
+        REQUIRE(host.intents().size() == 1);
+        intents.assign(host.intents().begin(), host.intents().end());
+    }
+
+    REQUIRE(intents.front().value().kind == NoteEditIntentKind::Move);
+    REQUIRE(session.apply(intents.front()));
+    const auto edited = canonical_project(session.project());
+
+    REQUIRE(session.session->undo(session.writer));
+    const auto undone = canonical_project(session.project());
+    REQUIRE(session.session->redo(session.writer));
+    const auto redone = canonical_project(session.project());
+    return {baseline, edited, undone, redone, std::move(intents)};
+}
+
 const NoteEvent* find_note(std::span<const NoteEvent> notes, ItemId id) {
     const auto found =
         std::find_if(notes.begin(), notes.end(), [&](const NoteEvent& n) { return n.id == id; });
@@ -174,6 +221,44 @@ PianoRollView::NoteFactory factory_for(ItemId id, std::int64_t duration) {
 }
 
 } // namespace
+
+TEST_CASE("Piano roll mouse and touch drags share one exact undoable document edit",
+          "[timeline][piano-roll][parity]") {
+    const auto mouse = exercise_device_drag(PointerType::mouse);
+    const auto touch = exercise_device_drag(PointerType::touch);
+
+    REQUIRE(mouse.edited != mouse.baseline);
+    CHECK(mouse.intents == touch.intents);
+    CHECK(mouse.edited == touch.edited);
+    CHECK(mouse.undone == mouse.baseline);
+    CHECK(touch.undone == touch.baseline);
+    CHECK(mouse.redone == mouse.edited);
+    CHECK(touch.redone == touch.edited);
+}
+
+TEST_CASE("Piano roll touch metrics distinguish an edge resize from a mouse body move",
+          "[timeline][piano-roll][pointer]") {
+    const auto project = make_note_project();
+    const auto exercise = [&](PointerType pointer_type) {
+        ScriptedUiHost<ValidatedNoteEditIntent> host;
+        PianoRollView view;
+        configure(view, project, host);
+        view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+        pulp::view::View::SimulatedPointer pointer;
+        pointer.type = pointer_type;
+        view.simulate_drag({350.0f, y_of(62)}, {470.0f, y_of(62)}, 4, pointer);
+        return std::vector<ValidatedNoteEditIntent>(host.intents().begin(),
+                                                    host.intents().end());
+    };
+
+    const auto mouse = exercise(PointerType::mouse);
+    const auto touch = exercise(PointerType::touch);
+    REQUIRE(mouse.size() == 1);
+    REQUIRE(touch.size() == 1);
+    CHECK(mouse.front().value().kind == NoteEditIntentKind::Move);
+    CHECK(touch.front().value().kind == NoteEditIntentKind::Resize);
+}
 
 TEST_CASE("Piano roll click inserts a note that survives a serialize round trip",
           "[timeline][piano-roll]") {
