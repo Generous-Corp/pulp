@@ -256,7 +256,9 @@ test("real browser capture preserves the executable pre-mount document",
       type: 'text/javascript'
     }));
     const html = '<!doctype html><html><body style="margin:0;background:#123">' +
-      '<main style="width:320px;height:240px">READY</main>' +
+      '<main style="width:320px;height:240px">' +
+      '<button style="width:120px;height:40px" onclick="void 0">READY</button>' +
+      '</main>' +
       '<script src="' + url + '"><\\/script></body></html>';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     document.documentElement.replaceWith(doc.documentElement);
@@ -282,7 +284,7 @@ test("real browser capture preserves the executable pre-mount document",
 
       const materialized = JSON.parse(await readFile(
         path.join(output, "materialized-document.json"), "utf8"));
-      assert.match(materialized.html, /<main[^>]*>READY<\/main>/);
+      assert.match(materialized.html, /<button[^>]*>READY<\/button>/);
       assert.doesNotMatch(materialized.html, /blob:/);
       assert.equal(materialized.assets.length, 1);
       assert.match(materialized.assets[0].id,
@@ -293,6 +295,18 @@ test("real browser capture preserves the executable pre-mount document",
       assert.equal(
         Buffer.from(materialized.assets[0].data_base64, "base64").toString(),
         "window.__materializedAssetRan = true;");
+      assert.equal(materialized.semantic_bindings.length, 1);
+      for (const binding of materialized.semantic_bindings) {
+        assert.equal(binding.anchor,
+          `chromium:backend-node:${binding.backend_node_id}`);
+        assert.ok(binding.backend_node_id > 0);
+        assert.ok(binding.bounds.width > 0);
+        assert.ok(binding.bounds.height > 0);
+      }
+      assert.equal(materialized.semantic_bindings[0].tag, "button");
+      assert.equal(materialized.semantic_bindings[0].name, "READY");
+      assert.equal(materialized.semantic_bindings[0].bounds.width, 120);
+      assert.equal(materialized.semantic_bindings[0].bounds.height, 40);
       const envelope = JSON.parse(await readFile(
         path.join(output, "capture.json"), "utf8"));
       assert.equal(

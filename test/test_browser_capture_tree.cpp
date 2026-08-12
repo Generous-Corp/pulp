@@ -440,6 +440,7 @@ TEST_CASE("native lowering places nodes at Chrome's solved boxes verbatim",
     CHECK(body->top == 0.0);
     CHECK(*panel->style.width == 576.0f);
     CHECK(*panel->style.height == 179.0f);
+    CHECK(attribute(*panel, "backend_node_id") == "3");
 
     // Blink lays out on a 1/64px fixed-point grid, so a real design produces
     // fractional boxes. They are DATA: consumed exactly, never rounded to look

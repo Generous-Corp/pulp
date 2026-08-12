@@ -1178,6 +1178,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             std::string(to_string(paint_class));
         lowered.attributes["paint_order"] = std::to_string(node.paint_order);
         lowered.attributes["source_tag"] = node.tag_name;
+        // Preserve the same Chromium identity used by semantic-report.json.
+        // Geometry/style lowering and interaction discovery are independent
+        // passes over one frozen DOMSnapshot; carrying this key into DesignIR
+        // lets a native behavior layer bind to the exact painted node instead
+        // of guessing from duplicate text, approximate bounds, or tree order.
+        if (node.backend_node_id > 0)
+            lowered.attributes["backend_node_id"] =
+                std::to_string(node.backend_node_id);
         lowered.stable_anchor_id = anchor_path(index, ordinal, node.node_index);
         if (generated_text) {
             // The pseudo's box already claims the path that names the pseudo,

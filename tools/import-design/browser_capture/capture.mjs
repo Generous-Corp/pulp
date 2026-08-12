@@ -1076,6 +1076,31 @@ async function runCapture(options) {
         height: captureHeight,
         device_scale_factor: dpr,
       });
+    if (materializedDocument) {
+      // Semantics and painted geometry were resolved from the same frozen
+      // DOMSnapshot. Keep a bounded, renderer-neutral binding manifest beside
+      // the executable document so the live native behavior tree can be joined
+      // to DesignIR by Chromium identity rather than by text/bounds heuristics.
+      materializedDocument.semantic_bindings = semanticReport.candidates
+        .filter((candidate) =>
+          candidate.resolved === true &&
+          Number.isSafeInteger(candidate.backend_node_id) &&
+          candidate.backend_node_id > 0)
+        .map((candidate, index) => ({
+          index,
+          backend_node_id: candidate.backend_node_id,
+          anchor: `chromium:backend-node:${candidate.backend_node_id}`,
+          kind: String(candidate.kind ?? "unknown"),
+          tag: String(candidate.tag ?? ""),
+          name: String(candidate.name ?? ""),
+          bounds: {
+            left: Number(candidate.bounds?.left ?? 0),
+            top: Number(candidate.bounds?.top ?? 0),
+            width: Number(candidate.bounds?.width ?? 0),
+            height: Number(candidate.bounds?.height ?? 0),
+          },
+        }));
+    }
     const tokenReport = await evaluateDesignTokens(cdp);
     // Read before time resumes, like every other DOM-derived sidecar: the
     // faces reported have to be the ones the frozen frame was shaped with.
