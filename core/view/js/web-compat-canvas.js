@@ -137,6 +137,26 @@ function CanvasRenderingContext2D(canvasEl) {
     this._currentTransform = [1, 0, 0, 1, 0, 0];
     // Stack of [_currentTransform, _pathSubpaths] snapshots for save/restore.
     this._stateStack = [];
+    // Number of active clip intersections in the current save/restore state.
+    // A full-canvas clear can replace the retained native command stream only
+    // when no persistent clip is active; otherwise clearRect is intentionally
+    // restricted and older pixels may still contribute outside the clip.
+    this._clipDepth = 0;
+    // Canvas2D normally preserves every command until the backing store is
+    // resized. Materialized browser applications opt into a retained-frame
+    // subset where a provable full-backing-store clear begins a replacement
+    // frame. Keeping this opt-in avoids changing ordinary Canvas semantics.
+    this._pulpRetainedCanvasFrames = globalThis.__pulpRetainedCanvasFrames__ === true;
+    // A browser canvas records in backing-store pixels, while CanvasWidget
+    // replays into Pulp's logical coordinate space and the renderer applies
+    // the backing scale later. Materialized browser applications therefore
+    // divide absolute Canvas2D transforms by devicePixelRatio at the bridge
+    // boundary. The JS-side transform remains browser-accurate for clear
+    // coverage, getTransform(), and hit testing.
+    this._pulpLogicalCanvasScale = globalThis.__pulpLogicalCanvasScale__ === true
+        ? Number((globalThis.window && globalThis.window.devicePixelRatio)
+                 || globalThis.devicePixelRatio || 1)
+        : 1;
     // JS-side mirror of the current path so isPointInPath / isPointInStroke
     // can answer synchronously via a JS hit test. Each subpath is an array
     // of [x, y] points appended by moveTo / lineTo; cubic and quadratic
@@ -146,6 +166,13 @@ function CanvasRenderingContext2D(canvasEl) {
     // fill / stroke / clip; this JS mirror exists only for query methods.
     this._pathSubpaths = [];
 }
+
+CanvasRenderingContext2D.prototype._setBridgeTransform = function(a, b, c, d, e, f) {
+    if (typeof canvasSetTransform !== "function") return;
+    var s = this._pulpLogicalCanvasScale;
+    if (!(s > 0) || !isFinite(s)) s = 1;
+    canvasSetTransform(this._id, a / s, b / s, c / s, d / s, e / s, f / s);
+};
 
 // DOMMatrix-like return value for getTransform(). The HTML5 spec returns a
 // `DOMMatrix` instance with `a, b, c, d, e, f` and the `is2D` / `isIdentity`
@@ -603,6 +630,44 @@ CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
 };
 
 CanvasRenderingContext2D.prototype.clearRect = function(x, y, w, h) {
+    // A conventional animation frame starts with a full-backing-store clear.
+    // Pulp retains Canvas2D commands for native replay, so blindly appending
+    // that frame forever makes an RAF canvas grow without bound. Compact only
+    // when the clear provably covers the whole backing store and no clip is
+    // active. Partial/transformed/clipped clears retain normal Canvas2D
+    // semantics and remain explicit clear_rect commands.
+    var t = this._currentTransform || [1, 0, 0, 1, 0, 0];
+    var axisAligned = t[1] === 0 && t[2] === 0 && t[0] > 0 && t[3] > 0;
+    var nx = +x, ny = +y, nw = +w, nh = +h;
+    var left = t[0] * nx + t[4];
+    var top = t[3] * ny + t[5];
+    var right = t[0] * (nx + nw) + t[4];
+    var bottom = t[3] * (ny + nh) + t[5];
+    var full = this._pulpRetainedCanvasFrames
+        && axisAligned && this._clipDepth === 0
+        && isFinite(left) && isFinite(top) && isFinite(right) && isFinite(bottom)
+        && left <= 0 && top <= 0
+        && right >= Number(this.canvas.width || 0)
+        && bottom >= Number(this.canvas.height || 0);
+    if (full && typeof canvasClear === "function") {
+        canvasClear(this._id);
+        // Native replay starts from default state after command replacement.
+        // Re-seed the current transform and invalidate lazy state caches so
+        // subsequent draws faithfully reconstruct the live Canvas2D state.
+        this._setBridgeTransform(t[0], t[1], t[2], t[3], t[4], t[5]);
+        this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
+        this._sentLineCap = this._sentLineJoin = this._sentMiterLimit = null;
+        this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
+        this._sentShadowColor = this._sentShadowBlur = null;
+        this._sentShadowOffsetX = this._sentShadowOffsetY = null;
+        this._sentDirection = this._sentFilter = null;
+        this._sentImageSmoothingEnabled = this._sentImageSmoothingQuality = null;
+        if (typeof canvasSetLineDash === "function") {
+            canvasSetLineDash(this._id, this._lineDash || [], this.lineDashOffset || 0);
+        }
+        this._pathSubpaths = [];
+        return;
+    }
     if (typeof canvasClearRect === "function") canvasClearRect(this._id, x, y, w, h);
 };
 
@@ -685,7 +750,8 @@ CanvasRenderingContext2D.prototype.save = function() {
     }
     this._stateStack.push({
         transform: this._currentTransform.slice(),
-        subpaths: clonedSubpaths
+        subpaths: clonedSubpaths,
+        clipDepth: this._clipDepth
     });
     // Locally invalidate the bridge-state caches that save()/restore()
     // snapshots on the C++ side and that the JS shim cannot observe across
@@ -709,6 +775,7 @@ CanvasRenderingContext2D.prototype.restore = function() {
         var snap = this._stateStack.pop();
         this._currentTransform = snap.transform;
         this._pathSubpaths = snap.subpaths;
+        this._clipDepth = snap.clipDepth || 0;
     }
     this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
     this._sentLineCap = this._sentLineJoin = null;
@@ -763,11 +830,11 @@ CanvasRenderingContext2D.prototype.setTransform = function(a, b, c, d, e, f) {
         f = m.f == null ? 0 : m.f;
         a = m.a == null ? 1 : m.a;
     }
-    if (typeof canvasSetTransform === "function") canvasSetTransform(this._id, a, b, c, d, e, f);
+    this._setBridgeTransform(a, b, c, d, e, f);
     this._currentTransform = [a, b, c, d, e, f];
 };
 CanvasRenderingContext2D.prototype.resetTransform = function() {
-    if (typeof canvasSetTransform === "function") canvasSetTransform(this._id, 1, 0, 0, 1, 0, 0);
+    this._setBridgeTransform(1, 0, 0, 1, 0, 0);
     this._currentTransform = [1, 0, 0, 1, 0, 0];
 };
 // getTransform() returns a DOMMatrix-shaped object reflecting the current
@@ -793,9 +860,7 @@ CanvasRenderingContext2D.prototype.transform = function(a, b, c, d, e, f) {
     var nd = t[1] * c + t[3] * d;
     var ne = t[0] * e + t[2] * f + t[4];
     var nf = t[1] * e + t[3] * f + t[5];
-    if (typeof canvasSetTransform === "function") {
-        canvasSetTransform(this._id, na, nb, nc, nd, ne, nf);
-    }
+    this._setBridgeTransform(na, nb, nc, nd, ne, nf);
     this._currentTransform = [na, nb, nc, nd, ne, nf];
 };
 
@@ -961,6 +1026,7 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
     // older rect-only path.
     var rule = (fillRule === "evenodd") ? 1 : 0;
     if (typeof canvasClip === "function") canvasClip(this._id, rule);
+    this._clipDepth += 1;
 };
 
 // ── isPointInPath / isPointInStroke ──────────────────────────────────────

@@ -96,6 +96,114 @@ struct ScriptedBridge {
     }
 };
 
+TEST_CASE("Canvas2D full-frame clear replaces retained RAF commands",
+          "[view][canvas2d][frame-replacement]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 200; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx._pulpRetainedCanvasFrames = true;
+        for (var frame = 0; frame < 300; ++frame) {
+            ctx.clearRect(0, 0, 200, 100);
+            ctx.fillStyle = frame % 2 ? '#ff0000' : '#00ff00';
+            ctx.fillRect(0, 0, 200, 100);
+        }
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() < 16);
+}
+
+TEST_CASE("Canvas2D partial and clipped clears preserve retained history",
+          "[view][canvas2d][frame-replacement]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 200; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx._pulpRetainedCanvasFrames = true;
+        ctx.fillRect(0, 0, 200, 100);
+        var beforePartial = 0;
+        ctx.clearRect(0, 0, 100, 100);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(0, 0, 50, 50); ctx.clip();
+        ctx.clearRect(0, 0, 200, 100);
+        ctx.restore();
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    using T = CanvasDrawCmd::Type;
+    std::size_t clearRects = 0;
+    for (const auto& command : canvas->commands())
+        if (command.type == T::clear_rect) ++clearRects;
+    REQUIRE(clearRects == 2);
+}
+
+TEST_CASE("Canvas2D retained-frame replacement is explicitly opt-in",
+          "[view][canvas2d][frame-replacement]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 200; c.height = 100;
+        var ctx = c.getContext('2d');
+        for (var frame = 0; frame < 3; ++frame) {
+            ctx.clearRect(0, 0, 200, 100);
+            ctx.fillRect(0, 0, 200, 100);
+        }
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    using T = CanvasDrawCmd::Type;
+    std::size_t clearRects = 0;
+    for (const auto& command : canvas->commands())
+        if (command.type == T::clear_rect) ++clearRects;
+    REQUIRE(clearRects == 3);
+}
+
+TEST_CASE("Canvas2D materialized DPR transforms replay in logical pixels",
+          "[view][canvas2d][materialized-dpr]") {
+    ScriptedBridge env;
+    env.load(R"(
+        globalThis.__pulpLogicalCanvasScale__ = true;
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 400; c.height = 200;
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 2, 40, 20);
+        globalThis.__logical_transform__ = ctx.getTransform();
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    const auto it = std::find_if(canvas->commands().begin(), canvas->commands().end(),
+                                 [](const auto& command) {
+                                     return command.type == CanvasDrawCmd::Type::set_transform;
+                                 });
+    REQUIRE(it != canvas->commands().end());
+    REQUIRE(it->x == Catch::Approx(1.0f));
+    REQUIRE(it->h == Catch::Approx(1.0f));
+    REQUIRE(it->x2 == Catch::Approx(20.0f));
+    REQUIRE(it->y2 == Catch::Approx(10.0f));
+
+    const auto logical = env.engine.evaluate("globalThis.__logical_transform__");
+    REQUIRE(logical.isObject());
+    REQUIRE(logical["a"].getFloat64() == Catch::Approx(2.0));
+    REQUIRE(logical["d"].getFloat64() == Catch::Approx(2.0));
+    REQUIRE(logical["e"].getFloat64() == Catch::Approx(40.0));
+    REQUIRE(logical["f"].getFloat64() == Catch::Approx(20.0));
+}
+
 }  // namespace
 
 // ── Existence of state-management methods ────────────────────────────────

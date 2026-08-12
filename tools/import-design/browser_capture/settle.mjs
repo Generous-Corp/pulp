@@ -116,6 +116,10 @@ const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
     window.requestAnimationFrame.bind(window);
   const nativeCancelAnimationFrame =
     window.cancelAnimationFrame.bind(window);
+  // The accepted pixels are a particular animation frame, not just a stable
+  // DOM layout. Preserve its presentation timestamp so native replay can
+  // render the same canonical frame before switching to its live clock.
+  globalThis.__pulpLastAnimationFrameTimestamp = 0;
   window.setTimeout = (callback, ...args) => {
     let handle;
     const trackedCallback = (...callbackArgs) => {
@@ -145,6 +149,8 @@ const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
     let handle;
     handle = nativeRequestAnimationFrame((timestamp) => {
       frames.delete(handle);
+      if (Number.isFinite(timestamp))
+        globalThis.__pulpLastAnimationFrameTimestamp = timestamp;
       callback(timestamp);
     });
     frames.add(handle);

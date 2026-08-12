@@ -55,6 +55,9 @@ void print_usage() {
     std::cout << "  --browser-interactions <json>\n";
     std::cout << "                    Apply a versioned bounded click/type/wait plan before capture\n";
     std::cout << "                    Typed text may appear in capture evidence; never type secrets\n";
+    std::cout << "  --materialized-canvas-composition\n";
+    std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";
+    std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";

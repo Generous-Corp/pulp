@@ -316,6 +316,7 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
 
     bridge.load_script(R"js(
         createCanvas('captured', 'root');
+        setOpacity('captured', 0);
         setAnchor('captured', 'chromium:backend-node:42');
         createCol('behavior-root', 'root');
         createCanvas('behavior', 'behavior-root');
@@ -328,6 +329,12 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
     REQUIRE(captured != nullptr);
     REQUIRE(behavior != nullptr);
     REQUIRE(captured->command_count() == 0);
+    captured->set_bounds({20, 30, 100, 80});
+    REQUIRE(captured->opacity() == 0.0f);
+    // The accepted Chromium pixels are painted by the sibling ImageView. The
+    // transparent canvas above them must still own native hit testing or the
+    // materialized app would look exact while being inert.
+    REQUIRE(root.hit_test({50, 60}) == captured);
 
     int edges = 0;
     behavior->on_dom_pointer_event = [&edges](const MouseEvent&, bool) {

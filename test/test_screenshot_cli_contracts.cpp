@@ -145,6 +145,7 @@ TEST_CASE("pulp-screenshot runtime trace script records live native bounds",
     REQUIRE(script.find("getLayoutAncestorRects") != std::string::npos);
     REQUIRE(script.find("reference_frame") != std::string::npos);
     REQUIRE(script.find("root-view-css-points") != std::string::npos);
+    REQUIRE(script.find("canvas_programs") != std::string::npos);
 }
 
 TEST_CASE("pulp-screenshot option parser preserves documented defaults",
@@ -157,6 +158,7 @@ TEST_CASE("pulp-screenshot option parser preserves documented defaults",
     REQUIRE(options.width == 400);
     REQUIRE(options.height == 300);
     REQUIRE(options.backend_was_defaulted);
+    REQUIRE(options.settle_frames == 64);
     REQUIRE_FALSE(options.output_base64);
     REQUIRE_FALSE(options.demo);
     REQUIRE_FALSE(options.help);
@@ -167,6 +169,20 @@ TEST_CASE("pulp-screenshot option parser preserves documented defaults",
 #endif
     REQUIRE(normalize_backend(options));
     REQUIRE_FALSE(options.backend_name.empty());
+}
+
+TEST_CASE("pulp-screenshot parses an explicit runtime settle frame budget",
+          "[tools][screenshot]") {
+    auto options = parse_args({"--settle-frames", "300"});
+    REQUIRE(options.settle_frames == 300);
+}
+
+TEST_CASE("pulp-screenshot parses a live canvas-only capture target",
+          "[tools][screenshot]") {
+    auto options = parse_args({"--canvas-id", "live-spectrum",
+                               "--canvas-occurrence", "2"});
+    REQUIRE(options.canvas_id == "live-spectrum");
+    REQUIRE(options.canvas_occurrence == 2);
 }
 
 TEST_CASE("pulp-screenshot option parser accepts explicit render settings",

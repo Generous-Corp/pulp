@@ -338,7 +338,16 @@ async function captureCanvasAssets(cdp, snapshot) {
         functionDeclaration: `function() {
           if (!(this instanceof HTMLCanvasElement))
             throw new Error('resolved node is not a canvas');
-          return { width: this.width, height: this.height };
+          const r = this.getBoundingClientRect();
+          return {
+            width: this.width, height: this.height,
+            bounds: {
+              left: r.left + window.scrollX,
+              top: r.top + window.scrollY,
+              width: r.width,
+              height: r.height
+            }
+          };
         }`,
         returnByValue: true,
       });
@@ -388,6 +397,12 @@ async function captureCanvasAssets(cdp, snapshot) {
         width_px: width,
         height_px: height,
         backend_node_id: backendNodeId,
+        bounds: {
+          left: Number(measured.result?.value?.bounds?.left ?? 0),
+          top: Number(measured.result?.value?.bounds?.top ?? 0),
+          width: Number(measured.result?.value?.bounds?.width ?? 0),
+          height: Number(measured.result?.value?.bounds?.height ?? 0),
+        },
         bytes,
       });
     } finally {
@@ -961,6 +976,16 @@ async function runCapture(options) {
     // the settle-time measurement; every consumer below must describe the
     // frozen frame.
     finalExtent = await freezeAndMeasureDocumentExtent(cdp);
+    if (materializedDocument) {
+      const frameTime = await cdp.call("Runtime.evaluate", {
+        expression:
+          "Number(globalThis.__pulpLastAnimationFrameTimestamp || 0)",
+        returnByValue: true,
+      });
+      const value = Number(frameTime.result?.value ?? 0);
+      if (Number.isFinite(value) && value >= 0)
+        materializedDocument.presentation_time_ms = value;
+    }
     if (finalExtent.left < 0 || finalExtent.top < 0) {
       const error = new Error(
         `frozen content begins outside the corrected viewport at ` +
@@ -1068,6 +1093,12 @@ async function runCapture(options) {
         (asset, index) => ({
           index,
           anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          bounds: {
+            left: asset.bounds.left - finalExtent.left,
+            top: asset.bounds.top - finalExtent.top,
+            width: asset.bounds.width,
+            height: asset.bounds.height,
+          },
         }));
     }
     const semanticReport = await evaluateSemantics(
@@ -1126,50 +1157,43 @@ async function runCapture(options) {
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
-    // Capture the exact authored body beneath declared moving indicators.
-    // Pixel inpainting cannot reconstruct arbitrary dither, tick rings, or
-    // gradients once a pointer/thumb has covered them; the defect is merely
-    // hidden at the declared value and becomes visible as soon as the control
-    // moves. `visibility` removes only the marked paint without changing its
-    // layout, so this second frame is a faithful source for static control
-    // bodies while browser.png remains the untouched comparison oracle.
-    const hiddenIndicators = await cdp.call("Runtime.evaluate", {
+    // Capture the exact static chrome with imperative canvases removed. This
+    // is the native-composition plate: typography, SVGs, spacing, modal chrome,
+    // and every non-canvas pixel remain Chromium-authoritative, while live
+    // CanvasWidget programs can occupy the holes without double-painting the
+    // frozen analyzer/minimap frame underneath them.
+    await cdp.call("Runtime.evaluate", {
       expression: `(() => {
-        window.__pulpCaptureIndicatorStyles =
-          Array.from(document.querySelectorAll('[data-pulp-indicator]')).map(el => ({
-            el,
-            value: el.style.getPropertyValue('visibility'),
-            priority: el.style.getPropertyPriority('visibility')
-          }));
-        for (const entry of window.__pulpCaptureIndicatorStyles)
-          entry.el.style.setProperty('visibility', 'hidden', 'important');
-        return window.__pulpCaptureIndicatorStyles.length;
+        globalThis.__pulpCanvasVisibilityRestore = [];
+        for (const canvas of document.querySelectorAll('canvas')) {
+          globalThis.__pulpCanvasVisibilityRestore.push({
+            canvas,
+            value: canvas.style.getPropertyValue('visibility'),
+            priority: canvas.style.getPropertyPriority('visibility')
+          });
+          canvas.style.setProperty('visibility', 'hidden', 'important');
+        }
+        return globalThis.__pulpCanvasVisibilityRestore.length;
       })()`,
       returnByValue: true,
     });
-    const hiddenIndicatorCount = hiddenIndicators.result?.value ?? 0;
-    let staticScreenshotBytes = screenshotBytes;
-    if (hiddenIndicatorCount > 0) {
-      staticScreenshotBytes =
-        await captureStableScreenshot(cdp, screenshotOptions);
-      await cdp.call("Runtime.evaluate", {
-        expression: `(() => {
-          for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
-            if (entry.value)
-              entry.el.style.setProperty('visibility', entry.value, entry.priority);
-            else
-              entry.el.style.removeProperty('visibility');
-          }
-          delete window.__pulpCaptureIndicatorStyles;
-          return true;
-        })()`,
-        returnByValue: true,
-      });
-    }
-    if (!staticScreenshotBytes) {
+    const chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
+          if (item.value) item.canvas.style.setProperty(
+            'visibility', item.value, item.priority || '');
+          else item.canvas.style.removeProperty('visibility');
+        }
+        delete globalThis.__pulpCanvasVisibilityRestore;
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    if (!chromeBytes) {
       const error = new Error(
-        "the indicator-free visual frame did not stabilize");
-      error.code = "capture-static-frame-not-deterministic";
+        "the canvas-free chrome frame did not stabilize");
+      error.code = "capture-chrome-not-deterministic";
       throw error;
     }
     await interactionNavigationGuard?.assertUnchanged();
@@ -1193,8 +1217,7 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
-      writeFile(
-        path.join(outputDir, "browser-static.png"), staticScreenshotBytes),
+      writeFile(path.join(outputDir, "browser-chrome.png"), chromeBytes),
       ...canvasAssets.map((asset) =>
         writeFile(path.join(outputDir, asset.path), asset.bytes)),
       // `layout.styles` rows are positional: entry N is the Nth property of
@@ -1322,11 +1345,11 @@ async function runCapture(options) {
         width_px: pixels.width,
         height_px: pixels.height,
       }, {
-        id: "reference:browser-static",
-        kind: "screenshot",
+        id: "reference:browser-chrome",
+        kind: "chrome-screenshot",
         mime_type: "image/png",
-        path: "browser-static.png",
-        sha256: sha256(staticScreenshotBytes),
+        path: "browser-chrome.png",
+        sha256: sha256(chromeBytes),
         width_px: pixels.width,
         height_px: pixels.height,
       }, ...canvasAssets.map(({ bytes: _bytes, ...asset }) => asset)],

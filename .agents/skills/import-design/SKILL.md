@@ -6343,8 +6343,12 @@ For an executable React/Claude panel, keep those accepted DesignIR pixels and
 materialize behavior separately. Browser capture emits
 `materialized-document.json`: the exact adapter-patched HTML handed to
 `DOMParser` before React mounts, with every Blob URL rewritten to a
-content-addressed, hash-verified asset. Compile it into a hidden native behavior
-tree, mount DesignIR as the only visible tree, and gate against the browser
+content-addressed, hash-verified asset. Import with
+`--materialized-canvas-composition`: the accepted full Chromium frame becomes
+the initial visible native ImageView authority, while transparent CanvasWidget
+targets retain the captured canvas anchors and stay hit-testable. Compile the
+document into a hidden native behavior tree, bind its closures to those visible
+targets, mount DesignIR as the only visible tree, and gate against the browser
 frame from that SAME import transaction:
 
 ```bash
@@ -6363,15 +6367,20 @@ pulp-screenshot --compare spectr.ir-browser-capture/browser.png native.png \
   --threshold 0.99 --diff native-diff.png
 ```
 
-The optional prelude is product-owned and runs after captured helper scripts
-load but before the captured App mounts. Use it for real analyzer, state, and
-host-bridge services. Never put a product fallback in the generic transformer.
-The visible DesignIR owns geometry/style/captured canvas paint; the hidden tree
-owns closures and event logic. Bindings forward input without substituting its
-pixels. A previous fixed reference may differ in animated analyzer regions, so
-it is evidence history, not the native parity oracle. Do not show or accept a
-native result until this same-transaction gate passes, runtime diagnostics are
-empty, and a planted missing-service or broken-binding control fails.
+The optional prelude is product-owned and runs in the captured document before
+its application scripts load. Use it for real analyzer, state, and host-bridge
+services that application modules may snapshot during declaration. Never put a
+product fallback in the generic transformer.
+The visible DesignIR owns geometry/style/captured paint; the hidden tree owns
+closures and event logic. Bindings forward input without substituting pixels.
+Opacity zero is intentional for those CanvasWidget targets and must remain
+hit-testable. A previous fixed reference may differ in animated analyzer
+regions, so it is evidence history, not the native parity oracle. Do not show or
+accept a native result until this same-transaction gate passes, runtime
+diagnostics are empty, and a planted missing-service or broken-binding control
+fails. Do not promote executable canvas paint merely because it runs: first
+prove that replacement independently matches its same-transaction canvas
+snapshot, including fonts, SVG/image assets, clipping, and compositing order.
 
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not

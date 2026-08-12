@@ -7,13 +7,16 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/design_codegen.hpp>
+#include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/viewport_reconcile.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <cstdlib>
 
@@ -60,6 +63,9 @@ static void print_usage() {
     std::cerr << "  --backend <name>     Render backend: auto, skia, coregraphics, gpu (default: auto — smart: native-overlay refuse / GPU view / raster)\n";
     std::cerr << "  --runtime-trace <file.json>\n";
     std::cerr << "                       Dump JS listener/callback trace after settle\n";
+    std::cerr << "  --settle-frames <n>  Pump n runtime frames before capture (default: 64)\n";
+    std::cerr << "  --canvas-id <id>     Capture only the matching live CanvasWidget program\n";
+    std::cerr << "  --canvas-occurrence <n>  Select the nth matching CanvasWidget (default: 1)\n";
     std::cerr << "  --base64             Output base64-encoded PNG to stdout\n";
     std::cerr << "  --demo               Render a demo UI (no script needed)\n";
     std::cerr << "  --compare A.png B.png [--threshold 0.85] [--diff D.png]  Parity check: print similarity, exit 0 if >= threshold\n";
@@ -111,6 +117,9 @@ struct ScreenshotCliOptions {
     std::string backend_name = "coregraphics";
 #endif
     std::string runtime_trace_path;
+    std::string canvas_id;
+    uint32_t canvas_occurrence = 1;
+    uint32_t settle_frames = 64;
     bool backend_was_defaulted = true;
     bool output_base64 = false;
     bool demo = false;
@@ -146,10 +155,78 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
             options.backend_was_defaulted = false;
         }
         else if (arg == "--runtime-trace" && i + 1 < argc) options.runtime_trace_path = argv[++i];
+        else if (arg == "--canvas-id" && i + 1 < argc) options.canvas_id = argv[++i];
+        else if (arg == "--canvas-occurrence" && i + 1 < argc)
+            options.canvas_occurrence = static_cast<uint32_t>(std::stoul(argv[++i]));
+        else if (arg == "--settle-frames" && i + 1 < argc)
+            options.settle_frames = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (arg == "--base64") options.output_base64 = true;
         else if (arg == "--demo") options.demo = true;
     }
     return options;
+}
+
+static std::string json_string(const std::string& text) {
+    std::ostringstream out;
+    out << '"';
+    for (const unsigned char c : text) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    constexpr char hex[] = "0123456789abcdef";
+                    out << "\\u00" << hex[(c >> 4) & 0xf] << hex[c & 0xf];
+                } else {
+                    out << static_cast<char>(c);
+                }
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
+static void append_canvas_programs(const View& view, std::ostringstream& out,
+                                   bool& first) {
+    if (const auto* canvas = dynamic_cast<const CanvasWidget*>(&view)) {
+        if (!first) out << ',';
+        first = false;
+        const auto bounds = canvas->bounds();
+        out << "{\"id\":" << json_string(canvas->id())
+            << ",\"command_count\":" << canvas->command_count()
+            << ",\"bounds\":{\"x\":" << bounds.x
+            << ",\"y\":" << bounds.y
+            << ",\"width\":" << bounds.width
+            << ",\"height\":" << bounds.height << "}}";
+    }
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        append_canvas_programs(*view.child_at(i), out, first);
+}
+
+static std::string canvas_program_report(const View& root) {
+    std::ostringstream out;
+    out << '[';
+    bool first = true;
+    append_canvas_programs(root, out, first);
+    out << ']';
+    return out.str();
+}
+
+static CanvasWidget* find_canvas_by_id(View& view, const std::string& id,
+                                       uint32_t occurrence, uint32_t& seen) {
+    if (auto* canvas = dynamic_cast<CanvasWidget*>(&view); canvas && canvas->id() == id) {
+        ++seen;
+        if (seen == occurrence) return canvas;
+    }
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        if (auto* found = find_canvas_by_id(*view.child_at(i), id, occurrence, seen))
+            return found;
+    return nullptr;
 }
 
 static bool normalize_backend(ScreenshotCliOptions& options) {
@@ -398,7 +475,9 @@ static const char* runtime_trace_script() {
         dispatch_hits: globalThis.__pulpDispatchHits__ || null,
         native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0,
         native_bounds_count: nativeBounds.length,
-        native_bounds: nativeBounds
+        native_bounds: nativeBounds,
+        canvas_programs: Array.isArray(globalThis.__pulpCanvasPrograms__)
+            ? globalThis.__pulpCanvasPrograms__ : []
     }, null, 2);
 })()
 )JS";
@@ -562,6 +641,16 @@ int main(int argc, char* argv[]) {
             }
             try {
                 auto ir = parse_design_ir_json(ir_text);
+                const auto ir_base =
+                    std::filesystem::path(options.design_ir_path).parent_path();
+                // Bridge-JS generation consumes the node's resolved
+                // `asset_path`, whereas direct native materialization can
+                // resolve `asset_ref` through the manifest at runtime. Keep
+                // both DesignIR rendering lanes equivalent: a captured image
+                // must not degrade to an empty ImageView merely because the
+                // screenshot harness selected generated native JS.
+                enrich_imported_image_asset_metadata(
+                    ir, ir.asset_manifest, ir_base.string());
                 CodeGenOptions codegen;
                 codegen.mode = CodeGenMode::bridge_native_js;
                 // The executable document already owns `root`. Mount the
@@ -614,7 +703,23 @@ int main(int argc, char* argv[]) {
     // naturally, but pulp-screenshot's headless path has to pump
     // explicitly. __pulpRuntimeSettle__ is registered by WidgetBridge
     // exactly for this case (see widget_bridge.cpp:1144).
-    bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
+    for (uint32_t remaining = options.settle_frames; remaining > 0;) {
+        const auto batch = std::min<uint32_t>(remaining, 64);
+        bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') "
+                           "__pulpRuntimeSettle__(" + std::to_string(batch) + ");");
+        remaining -= batch;
+    }
+    // A React commit during settling may replace a behavior-only CanvasWidget.
+    // Rebind after the final commit so the captured DesignIR canvas owns the
+    // current retained command stream and the hidden source does not also
+    // composite it. Live hosts perform the same rebinding at their frame
+    // boundary; this headless path has no event loop after settling.
+    if (!options.script_path.empty() && !options.design_ir_path.empty()) {
+        bridge.load_script(
+            "if (typeof __pulpBindMaterializedCanvases__ !== 'function') "
+            "throw new Error('script lost materialized canvas bindings'); "
+            "__pulpBindMaterializedCanvases__();");
+    }
 
     // React component errors are reported to the generated JSX boundary after
     // the initial render returns. Refuse the otherwise indistinguishable blank
@@ -635,6 +740,8 @@ int main(int argc, char* argv[]) {
 
     if (!options.runtime_trace_path.empty()) {
         try {
+            engine.evaluate("globalThis.__pulpCanvasPrograms__ = " +
+                            canvas_program_report(root) + ";");
             auto trace = engine.evaluate(runtime_trace_script()).toString();
             if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
                 std::cerr << "Error: could not write runtime trace " << options.runtime_trace_path << "\n";
@@ -642,6 +749,17 @@ int main(int argc, char* argv[]) {
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: runtime trace failed: " << e.what() << "\n";
+            return 1;
+        }
+    }
+
+    View* capture_root = &root;
+    if (!options.canvas_id.empty()) {
+        uint32_t seen = 0;
+        capture_root = find_canvas_by_id(
+            root, options.canvas_id, options.canvas_occurrence, seen);
+        if (!capture_root) {
+            std::cerr << "Error: live CanvasWidget not found: " << options.canvas_id << "\n";
             return 1;
         }
     }
@@ -655,7 +773,7 @@ int main(int argc, char* argv[]) {
     std::string used_label = options.backend_name;
     if (smart) {
         CaptureResult cap =
-            capture_view(root, options.width, options.height, options.scale, backend);
+            capture_view(*capture_root, options.width, options.height, options.scale, backend);
         if (!cap.ok) {
             std::cerr << "Error: capture is not trustworthy — " << cap.reason << "\n";
             return 3;  // native overlay / blank / no backend
@@ -665,7 +783,7 @@ int main(int argc, char* argv[]) {
                      : (cap.used == ScreenshotBackend::coregraphics) ? "coregraphics"
                                                                      : "skia";
     } else {
-        png = render_to_png(root, options.width, options.height, options.scale, backend);
+        png = render_to_png(*capture_root, options.width, options.height, options.scale, backend);
         if (png.empty()) {
             std::cerr << "Error: rendering failed\n";
             return 1;

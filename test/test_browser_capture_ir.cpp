@@ -234,10 +234,32 @@ std::string with_canvas_asset(std::string capture,
     "sha256":")JSON" + std::string(hash) + R"JSON(",
     "width_px":)JSON" + std::to_string(width) + R"JSON(,
     "height_px":)JSON" + std::to_string(height) + R"JSON(,
-    "backend_node_id":)JSON" + std::to_string(backend_node_id) + R"JSON(
+    "backend_node_id":)JSON" + std::to_string(backend_node_id) + R"JSON(,
+    "bounds":{"left":16,"top":24,"width":4,"height":2}
   }],
   "semantics")JSON";
     capture.replace(position, anchor.size(), canvas);
+    return capture;
+}
+
+std::string with_chrome_asset(std::string capture,
+                              std::string_view hash,
+                              std::string_view path = "browser-chrome.png") {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string chrome = R"JSON(  },{
+    "id":"reference:browser-chrome",
+    "kind":"chrome-screenshot",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":1912,
+    "height_px":1272
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), chrome);
     return capture;
 }
 
@@ -422,6 +444,55 @@ TEST_CASE("browser capture accepts an integrity-bound canvas snapshot asset",
     CHECK(result.design_ir->asset_manifest.assets[1].asset_id == "canvas:42");
     CHECK(result.design_ir->asset_manifest.assets[1].width == 8);
     CHECK(result.design_ir->asset_manifest.assets[1].height == 4);
+}
+
+TEST_CASE("materialized browser import keeps accepted Chromium paint authoritative",
+          "[import-design][browser-capture][ir][materialized]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto chrome = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("browser-chrome.png", chrome);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_chrome_asset(
+        std::move(capture), pulp::runtime::sha256_hex(chrome));
+    temp.write("capture.json", capture);
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html",
+         .materialized_canvas_composition = true});
+    REQUIRE(result);
+    REQUIRE(result.design_ir->root.children.size() == 2);
+
+    const auto& authority = result.design_ir->root.children[0];
+    CHECK(authority.type == "image");
+    CHECK(authority.stable_anchor_id == "browser:paint-authority");
+    CHECK(authority.attributes.at("asset_ref") == "reference:browser");
+    CHECK(authority.attributes.at("materialized_role") ==
+          "captured-paint-authority");
+    CHECK_FALSE(authority.style.opacity.has_value());
+
+    const auto& target = result.design_ir->root.children[1];
+    CHECK(target.type == "canvas");
+    CHECK(target.stable_anchor_id == "browser:canvas:0");
+    CHECK(target.attributes.at("asset_ref") == "canvas:42");
+    CHECK(target.attributes.at("materialized_role") ==
+          "executable-canvas-target");
+    REQUIRE(target.style.opacity.has_value());
+    CHECK(*target.style.opacity == 0.0f);
+    CHECK_FALSE(target.style.pointer_events.has_value());
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_visual_authority") == "browser:paint-authority");
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_chrome_diagnostic_asset") ==
+          "reference:browser-chrome");
 }
 
 TEST_CASE("browser capture rejects a tampered canvas snapshot asset",

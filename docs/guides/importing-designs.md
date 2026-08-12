@@ -52,6 +52,33 @@ Only custom properties whose active computed value is visible on
 `documentElement` or `body` are promoted; component-scoped values remain in the
 captured source evidence rather than being misrepresented as global tokens.
 
+For an executable React/Claude import, keep the accepted Chromium frame as the
+initial visible DesignIR paint authority and materialize the captured app's
+behavior separately:
+
+```bash
+pulp import-design --from claude --file editor.html --mode baked \
+  --emit ir-json --materialized-canvas-composition \
+  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --render-size 1320x860 --output editor.ir.json --validate
+
+node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs \
+  --in editor.ir-browser-capture/materialized-document.json \
+  --design-ir editor.ir.json --out editor-behavior.js
+
+pulp-screenshot --script editor-behavior.js --design-ir editor.ir.json \
+  --width 1320 --height 860 --scale 2 --backend skia \
+  --settle-frames 64 --output editor-native.png
+```
+
+This is not a WebView or a hand-built visual approximation: native Skia draws
+the hash-verified Chromium frame, while transparent native CanvasWidget targets
+receive pointer input and retain the original materialized closures. The full
+frame and every canvas snapshot come from the same frozen Chromium transaction.
+Do not substitute executable canvas paint for the accepted pixels until that
+paint independently passes the same-frame visual gate. Keep the chrome-only and
+per-canvas captures as diagnostic evidence for that later handoff.
+
 Local relative assets load from the input folder. External requests are denied
 by default. If the health report identifies a reviewed CDN dependency, retry
 with `--allow-browser-network`. That consent is limited to public HTTPS origins

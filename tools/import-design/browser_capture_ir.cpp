@@ -1316,43 +1316,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             *reference_png, *backing.width, *backing.height, result.error))
         return result;
 
-    const std::string render_asset_id = options.runtime_asset_id.empty()
-        ? reference_id : options.runtime_asset_id;
-    if (render_asset_id != reference_id) {
-        int matches = 0;
-        if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
-            const auto assets = envelope["assets"];
-            for (uint32_t i = 0; i < assets.size(); ++i) {
-                const auto asset = assets[static_cast<int>(i)];
-                if (!asset.isObject() ||
-                    string_member(asset, "id") != render_asset_id)
-                    continue;
-                ++matches;
-                const auto runtime_path = string_member(asset, "path");
-                auto runtime_png = contained_sidecar(
-                    envelope_path, runtime_path, result.error);
-                if (!runtime_png) return result;
-                const auto hash = string_member(asset, "sha256");
-                if (hash.size() != 64 || file_sha256(*runtime_png) != hash ||
-                    number_member(asset, "width_px", -1.0) !=
-                        logical_width * dpr ||
-                    number_member(asset, "height_px", -1.0) !=
-                        logical_height * dpr ||
-                    !validate_png_header(*runtime_png, *backing.width,
-                                         *backing.height, result.error)) {
-                    result.error = "browser runtime capture asset is invalid";
-                    return result;
-                }
-                backing.asset_id = render_asset_id;
-                backing.original_uri = "pulp-capture:///" + runtime_path;
-                backing.local_path = runtime_png->string();
-                backing.content_hash = hash;
-            }
-        }
-        if (matches != 1) {
-            result.error = "browser runtime capture asset is missing or ambiguous";
-            return result;
-        }
+    if (options.native_panel_lowering &&
+        options.materialized_canvas_composition) {
+        result.error =
+            "native panel lowering and materialized canvas composition are "
+            "mutually exclusive";
+        return result;
     }
 
     DesignIR ir;
@@ -1362,6 +1331,15 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.source_adapter = "browser-capture";
     ir.source_version = "pulp-browser-capture-v1";
     ir.asset_manifest.assets.push_back(std::move(backing));
+    struct CapturedCanvasLayer {
+        std::string asset_id;
+        float left = 0.0f;
+        float top = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+    std::vector<CapturedCanvasLayer> captured_canvas_layers;
+    std::optional<std::string> chrome_asset_id;
     std::unordered_map<int, std::string> captured_element_assets;
     std::unordered_set<std::string> captured_asset_ids{
         "reference:browser"};
@@ -1374,6 +1352,52 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         const auto assets = envelope["assets"];
         for (uint32_t i = 0; i < assets.size(); ++i) {
             const auto asset = assets[static_cast<int>(i)];
+            if (asset.isObject() &&
+                string_member(asset, "kind") == "chrome-screenshot") {
+                if (chrome_asset_id) {
+                    result.error =
+                        "browser capture has duplicate chrome screenshots";
+                    return result;
+                }
+                const auto id = string_member(asset, "id");
+                const auto path = string_member(asset, "path");
+                const auto mime = string_member(asset, "mime_type");
+                const double width = number_member(asset, "width_px", -1.0);
+                const double height = number_member(asset, "height_px", -1.0);
+                if (id.empty() || path.empty() || mime != "image/png" ||
+                    !std::isfinite(width) || std::trunc(width) != width ||
+                    width != logical_width * dpr ||
+                    !std::isfinite(height) || std::trunc(height) != height ||
+                    height != logical_height * dpr) {
+                    result.error =
+                        "browser chrome screenshot metadata is invalid";
+                    return result;
+                }
+                auto local = contained_sidecar(
+                    envelope_path, path, result.error);
+                if (!local) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*local) != hash) {
+                    result.error =
+                        "browser chrome PNG hash does not match capture envelope";
+                    return result;
+                }
+                if (!validate_png_header(
+                        *local, static_cast<int>(width),
+                        static_cast<int>(height), result.error))
+                    return result;
+                IRAssetRef chrome;
+                chrome.asset_id = id;
+                chrome.original_uri = "pulp-capture:///" + path;
+                chrome.local_path = local->string();
+                chrome.content_hash = hash;
+                chrome.mime = mime;
+                chrome.width = static_cast<int>(width);
+                chrome.height = static_cast<int>(height);
+                ir.asset_manifest.assets.push_back(std::move(chrome));
+                chrome_asset_id = id;
+                continue;
+            }
             if (!asset.isObject() ||
                 string_member(asset, "kind") != "canvas-snapshot")
                 continue;
@@ -1429,6 +1453,31 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                 result.error = "browser capture has duplicate canvas backend node assets";
                 return result;
             }
+            const auto bounds = object_member(asset, "bounds");
+            const double left = number_member(bounds, "left", NAN);
+            const double top = number_member(bounds, "top", NAN);
+            const double logical_canvas_width =
+                number_member(bounds, "width", NAN);
+            const double logical_canvas_height =
+                number_member(bounds, "height", NAN);
+            if (options.materialized_canvas_composition) {
+                if (!std::isfinite(left) || !std::isfinite(top) ||
+                    !std::isfinite(logical_canvas_width) ||
+                    !std::isfinite(logical_canvas_height) ||
+                    logical_canvas_width <= 0.0 ||
+                    logical_canvas_height <= 0.0 ||
+                    left < -logical_width || top < -logical_height ||
+                    left + logical_canvas_width > logical_width * 2.0 ||
+                    top + logical_canvas_height > logical_height * 2.0) {
+                    result.error =
+                        "browser canvas composition bounds are invalid";
+                    return result;
+                }
+                captured_canvas_layers.push_back({
+                    id, static_cast<float>(left), static_cast<float>(top),
+                    static_cast<float>(logical_canvas_width),
+                    static_cast<float>(logical_canvas_height)});
+            }
             IRAssetRef canvas;
             canvas.asset_id = id;
             canvas.original_uri = "pulp-capture:///" + path;
@@ -1439,6 +1488,13 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             canvas.height = static_cast<int>(height);
             ir.asset_manifest.assets.push_back(std::move(canvas));
         }
+    }
+    if (options.materialized_canvas_composition &&
+        (!chrome_asset_id || captured_canvas_layers.empty())) {
+        result.error =
+            "materialized canvas composition requires one chrome screenshot "
+            "and at least one bounded canvas snapshot";
+        return result;
     }
     if (!load_token_report(
             *token_report, ir,
@@ -1482,6 +1538,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // nothing to draw FROM, and silently falling back to the photograph would
     // report a native panel that is a picture.
     const bool native_lowering = options.native_panel_lowering;
+    const bool materialized_composition =
+        options.materialized_canvas_composition;
     if (native_lowering && !captured_styles) {
         result.error =
             "native panel lowering requires a DOM snapshot with computed "
@@ -1491,7 +1549,68 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    if (native_lowering) {
+    if (materialized_composition) {
+        ir.root.style.width = static_cast<float>(
+            crop_to_surface ? surface_width : logical_width);
+        ir.root.style.height = static_cast<float>(
+            crop_to_surface ? surface_height : logical_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+
+        const float layer_dx =
+            static_cast<float>(crop_to_surface ? -surface_left : 0.0);
+        const float layer_dy =
+            static_cast<float>(crop_to_surface ? -surface_top : 0.0);
+        const auto append_layer = [&](const std::string& name,
+                                      const std::string& anchor,
+                                      const std::string& asset_id,
+                                      float left, float top, float width,
+                                      float height, bool paint_authority) {
+            pulp::view::IRNode layer;
+            layer.type = paint_authority ? "image" : "canvas";
+            layer.name = name;
+            layer.style.position = "absolute";
+            layer.style.left = left;
+            layer.style.top = top;
+            layer.style.width = width;
+            layer.style.height = height;
+            layer.style.object_fit = "fill";
+            // Chromium's accepted frame stays on screen until an executable
+            // canvas program has independently passed the native parity gate.
+            // The transparent CanvasWidgets above it are nevertheless real
+            // hit-test targets: the materialized behavior runtime binds the
+            // captured controls to these stable anchors immediately.
+            if (!paint_authority) layer.style.opacity = 0.0f;
+            layer.attributes["asset_ref"] = asset_id;
+            layer.attributes["materialized_role"] =
+                paint_authority ? "captured-paint-authority"
+                                : "executable-canvas-target";
+            layer.stable_anchor_id = anchor;
+            layer.anchor_strategy = "adapter";
+            layer.source_adapter = "browser-capture";
+            layer.source_version = "pulp-browser-capture-v1";
+            ir.root.children.push_back(std::move(layer));
+        };
+
+        append_layer(
+            "Accepted Chromium frame", "browser:paint-authority", reference_id,
+            layer_dx, layer_dy, static_cast<float>(logical_width),
+            static_cast<float>(logical_height), true);
+        for (std::size_t i = 0; i < captured_canvas_layers.size(); ++i) {
+            const auto& canvas = captured_canvas_layers[i];
+            append_layer(
+                "Browser canvas " + std::to_string(i + 1),
+                "browser:canvas:" + std::to_string(i), canvas.asset_id,
+                layer_dx + canvas.left, layer_dy + canvas.top, canvas.width,
+                canvas.height, false);
+        }
+        ir.root.attributes["materialized_canvas_layers"] =
+            std::to_string(captured_canvas_layers.size());
+        ir.root.attributes["materialized_visual_authority"] =
+            "browser:paint-authority";
+        ir.root.attributes["materialized_chrome_diagnostic_asset"] =
+            *chrome_asset_id;
+    } else if (native_lowering) {
         // No backdrop at all. The panel is its nodes.
         ir.root.style.width = static_cast<float>(
             crop_to_surface ? surface_width : logical_width);
@@ -1538,11 +1657,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
     ir.root.source_version = "pulp-browser-capture-v1";
-    if (native_lowering) {
-        // The reference PNG stays in the asset manifest as the A/B oracle, but
-        // it is no longer what the root renders. Naming it `asset_ref` here
-        // would hand the manifest pass a root that reads as an image and put
-        // the photograph back on screen through the side door.
+    if (native_lowering || materialized_composition) {
+        // The reference stays a diagnostic-only root attribute. Native
+        // lowering draws the whole panel; materialized composition gives the
+        // reference its own explicitly ordered authority child. In neither
+        // case should the root itself become an implicit image.
         ir.root.attributes["browser_reference_asset"] = reference_id;
     } else {
         // The typed capture_asset_id is the render contract. asset_ref keeps
@@ -1703,11 +1822,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     }
 
     int styled_controls = 0;
-    const int lowered = lower_semantic_controls(
-        *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
-        captured_styles ? &*captured_styles : nullptr, native_lowering,
-        styled_controls, undeclared_paint_boxes, result.error);
-    if (lowered < 0) return result;
+    int lowered = 0;
+    if (!materialized_composition) {
+        lowered = lower_semantic_controls(
+            *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
+            captured_styles ? &*captured_styles : nullptr, native_lowering,
+            styled_controls, undeclared_paint_boxes, result.error);
+        if (lowered < 0) return result;
+    }
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
     // Recorded so a capture that silently lost its solved appearance is
     // visible as a number rather than as a flat-looking panel nobody can

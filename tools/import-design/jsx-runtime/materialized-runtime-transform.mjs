@@ -18,8 +18,8 @@ if (args.includes('--help') || args.includes('-h')) {
 
 Compiles Chromium's captured executable document into a hidden @pulp/react
 behavior tree. The DesignIR remains the visible pixel authority. A product
-prelude may install analyzer/state/host services after captured scripts load
-and before the captured App mounts.`);
+prelude may install analyzer/state/host services in the captured document
+before its application scripts load.`);
   process.exit(0);
 }
 const value = (name) => {
@@ -29,42 +29,73 @@ const value = (name) => {
 };
 const input = resolve(value('--in'));
 const output = resolve(value('--out'));
-const designIrArg = args.includes('--design-ir') ? resolve(value('--design-ir')) : '';
+const designIrArg = resolve(value('--design-ir'));
 const preludeArg = args.includes('--prelude') ? resolve(value('--prelude')) : '';
 const productPrelude = preludeArg ? readFileSync(preludeArg, 'utf8') : '';
-const sidecar = readFileSync(input, 'utf8');
-const parsed = JSON.parse(sidecar);
+const parsed = JSON.parse(readFileSync(input, 'utf8'));
 if (parsed.schema !== 'pulp-materialized-browser-document-v1' || parsed.version !== 1) {
   throw new Error('input is not a materialized browser document v1');
 }
+const presentationTime = Number(parsed.presentation_time_ms ?? 0);
+if (!Number.isFinite(presentationTime) || presentationTime < 0) {
+  throw new Error('materialized browser presentation time is invalid');
+}
+if (productPrelude.includes('</script')) {
+  throw new Error('product runtime prelude must not contain a closing script tag');
+}
+// Put explicitly supplied product services in the same captured-document
+// execution realm as the application. Injecting around __pulpRuntimeImport__
+// is subtly wrong: browser-compatible globals such as `window` may be lexical
+// bindings owned by that document, and application modules may snapshot them
+// while their top-level declarations run.
+const injectPrelude = (html) => {
+  if (!productPrelude) return html;
+  if (!/<head(?:\s[^>]*)?>/i.test(html)) {
+    throw new Error('materialized browser document is missing a head element');
+  }
+  return html.replace(
+    /<head([^>]*)>/i,
+    `<head$1><script>(() => {\n${productPrelude}\n})();</script>`);
+};
+const runtimeDocument = { ...parsed, html: injectPrelude(parsed.html) };
+const sidecar = JSON.stringify(runtimeDocument);
 
 const canvasBindings = Array.isArray(parsed.canvas_bindings)
   ? parsed.canvas_bindings : [];
 let behaviorCanvasAnchors = Array.isArray(parsed.behavior_canvas_anchors)
   ? parsed.behavior_canvas_anchors : [];
-if (designIrArg) {
-  const ir = JSON.parse(readFileSync(designIrArg, 'utf8'));
-  const byAsset = new Map();
-  const visit = (node) => {
-    if (!node || typeof node !== 'object') return;
-    const asset = node.attributes?.asset_ref;
-    const anchor = node.stable_anchor_id;
-    if (typeof asset === 'string' && asset.startsWith('canvas:') &&
-        typeof anchor === 'string' && anchor.length > 0) {
-      byAsset.set(asset, anchor);
-    }
-    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
-  };
-  visit(ir.root);
-  behaviorCanvasAnchors = canvasBindings.map((binding) => {
-    const backendId = String(binding.anchor || '').split(':').pop();
-    const visualAnchor = byAsset.get(`canvas:${backendId}`);
-    if (!visualAnchor) {
-      throw new Error(`DesignIR is missing captured canvas:${backendId}`);
-    }
-    return visualAnchor;
-  });
+const ir = JSON.parse(readFileSync(designIrArg, 'utf8'));
+const finitePositive = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+};
+const authoredWidth = finitePositive(ir.root?.style?.width) ||
+  finitePositive(ir.root?.attributes?.browser_authored_frame_width);
+const authoredHeight = finitePositive(ir.root?.style?.height) ||
+  finitePositive(ir.root?.attributes?.browser_authored_frame_height);
+if (authoredWidth === 0 || authoredHeight === 0) {
+  throw new Error('DesignIR root is missing a finite positive authored frame');
 }
+const byAsset = new Map();
+const visit = (node) => {
+  if (!node || typeof node !== 'object') return;
+  const asset = node.attributes?.asset_ref;
+  const anchor = node.stable_anchor_id;
+  if (typeof asset === 'string' && asset.startsWith('canvas:') &&
+      typeof anchor === 'string' && anchor.length > 0) {
+    byAsset.set(asset, anchor);
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+};
+visit(ir.root);
+behaviorCanvasAnchors = canvasBindings.map((binding) => {
+  const backendId = String(binding.anchor || '').split(':').pop();
+  const visualAnchor = byAsset.get(`canvas:${backendId}`);
+  if (!visualAnchor) {
+    throw new Error(`DesignIR is missing captured canvas:${backendId}`);
+  }
+  return visualAnchor;
+});
 const entry = `
 import * as React from 'react';
 import { createRoot as createPulpRoot, render as renderPulp, unmount as unmountPulp } from '@pulp/react';
@@ -91,16 +122,24 @@ g.ReactDOM = {
   },
   flushSync: (fn) => typeof fn === 'function' ? fn() : undefined
 };
+// Imported browser applications conventionally repaint a canvas by clearing
+// its full backing store at the start of every RAF. Opt this isolated runtime
+// into retained-frame replacement before any application canvas is created;
+// ordinary Pulp Canvas2D users keep browser command-history semantics.
+g.__pulpRetainedCanvasFrames__ = true;
+g.__pulpLogicalCanvasScale__ = true;
+// Bootstrap at the exact Chromium frame timestamp recorded beside the
+// accepted pixels. Starting an analyzer at an unrelated wall-clock phase
+// would make a correct executable canvas look different on its first frame.
+g.__pulpCapturedPresentationTime__ = ${JSON.stringify(presentationTime)};
+g.performance = {
+  now: function () { return g.__pulpCapturedPresentationTime__; }
+};
 if (typeof g.__pulpRuntimeImport__ !== 'function') {
   throw new Error('materialized runtime import capability is unavailable');
 }
 g.__pulpRuntimeImport__(${JSON.stringify(sidecar)}, 'materialized-browser');
 if (g.__pulpRuntimeImportErr__) throw new Error(String(g.__pulpRuntimeImportErr__));
-// Product-owned runtime services (analyzer/state/host bridge) are injected
-// explicitly. They are not inferred from or hard-coded into generic import
-// tooling. The captured scripts have now installed their public helpers, while
-// the App itself has not mounted yet.
-${productPrelude}
 // Runtime import materializes the captured document, which is allowed to
 // replace document.body while bootstrapping. Create the native behavior root
 // only after that replacement so it cannot be detached by the original page.
@@ -112,9 +151,10 @@ createCol(behaviorRootId, '');
 setPosition(behaviorRootId, 'absolute');
 setLeft(behaviorRootId, 0);
 setTop(behaviorRootId, 0);
-setFlex(behaviorRootId, 'width', 1320);
-setFlex(behaviorRootId, 'height', 860);
-setVisible(behaviorRootId, false);
+setFlex(behaviorRootId, 'width', ${JSON.stringify(authoredWidth)});
+setFlex(behaviorRootId, 'height', ${JSON.stringify(authoredHeight)});
+setVisible(behaviorRootId, true);
+setOpacity(behaviorRootId, 0);
 setPointerEvents(behaviorRootId, 'none');
 // The materialized browser document ends with its own ReactDOM.createRoot
 // bootstrap. Browser-side Babel evaluates that as a classic script; the
