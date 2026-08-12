@@ -116,6 +116,12 @@ class ToolingDispositionTest(unittest.TestCase):
         future = next(row for row in document["entries"]["mcp_tools"] if row["name"] == "pulp_future")
         self.assertEqual("UNCLASSIFIED", future["disposition"])
 
+    def test_vellum_routing_skill_remains_pulp_owned(self) -> None:
+        self.assertEqual(
+            "pulp-owned",
+            tooling.initial_disposition("agent_skills", "pulp-vellum-change-routing"),
+        )
+
     def test_cli_argument_provenance_is_enforced(self) -> None:
         document = json.loads(self.map_path.read_text())
         document["cli_argument_provenance"]["limitation"] = "claims parser parity"
