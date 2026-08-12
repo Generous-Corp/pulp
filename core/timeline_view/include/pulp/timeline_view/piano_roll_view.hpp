@@ -112,6 +112,14 @@ class PianoRollView : public view::View {
     /// between a viewport that excluded a note and a renderer that drew nothing.
     std::size_t painted_note_count() const noexcept { return painted_note_count_; }
 
+    /// How many note candidates the last `paint()` examined.
+    ///
+    /// Includes the first canonical-order candidate at the viewport's trailing
+    /// boundary: examining that note is what proves every later note can be
+    /// skipped. This makes the renderer's culling budget deterministic without
+    /// using a wall-clock threshold.
+    std::size_t visited_candidate_count() const noexcept { return visited_candidate_count_; }
+
     /// Refusals recorded since the last `clear_refusals()`, in order.
     const std::vector<PianoRollRefusal>& refusals() const noexcept { return refusals_; }
     void clear_refusals() { refusals_.clear(); }
@@ -186,7 +194,11 @@ class PianoRollView : public view::View {
     NoteFactory note_factory_;
     std::optional<Drag> drag_;
     std::vector<PianoRollRefusal> refusals_;
+    /// Longest bound note, used to skip only starts that cannot overlap the
+    /// visible range. Refreshed with the borrowed content in `set_clip()`.
+    timebase::TickDuration maximum_note_duration_{};
     std::size_t painted_note_count_ = 0;
+    std::size_t visited_candidate_count_ = 0;
 };
 
 /// @}

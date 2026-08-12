@@ -54,6 +54,10 @@ void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId 
     sequence_id_ = sequence_id;
     track_id_ = track_id;
     clip_id_ = clip_id;
+    maximum_note_duration_ = {};
+    for (const auto& note : notes())
+        maximum_note_duration_.value =
+            std::max(maximum_note_duration_.value, note.duration.value);
     // A rebind invalidates anything a live gesture believed about a note.
     drag_.reset();
 }
@@ -210,6 +214,7 @@ void PianoRollView::emit(timeline_editor::NoteEditIntentKind kind,
 
 void PianoRollView::paint(canvas::Canvas& canvas) {
     painted_note_count_ = 0;
+    visited_candidate_count_ = 0;
     if (!layout_)
         return;
     const auto local = bounds();
@@ -228,15 +233,22 @@ void PianoRollView::paint(canvas::Canvas& canvas) {
 
     const auto visible_start = layout_->time.visible_start();
     const auto visible_end = layout_->time.visible_end();
+    const auto earliest_possible_overlap = timebase::TickPosition{
+        visible_start.value <= maximum_note_duration_.value
+            ? 0
+            : visible_start.value - maximum_note_duration_.value};
+    const auto all = notes();
+    const auto first = std::lower_bound(
+        all.begin(), all.end(), earliest_possible_overlap,
+        [](const NoteEvent& note, timebase::TickPosition start) { return note.start < start; });
     canvas.set_fill_color(kNoteFill);
-    for (const auto& note : notes()) {
+    for (auto candidate = first; candidate != all.end(); ++candidate) {
+        const auto& note = *candidate;
+        ++visited_candidate_count_;
         // Notes are in canonical (start, id) order, so once a note starts at or
         // after the visible end no later note can overlap the viewport and the
-        // scan is done. The leading half stays a linear skip on purpose: a long
-        // note starting arbitrarily early can still overlap, and bounding that
-        // scan needs a maximum-duration the content does not carry. Culling
-        // CORRECTNESS is what this renderer is asserted on; the early break is
-        // what keeps a dense clip from costing more than the notes near it.
+        // scan is done. The lower bound starts no later than visible_start minus
+        // the longest bound note, so an earlier note cannot reach the viewport.
         if (note.start.value >= visible_end.value)
             break;
         if (note_end(note).value <= visible_start.value)
