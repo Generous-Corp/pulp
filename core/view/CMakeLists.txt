@@ -18,13 +18,18 @@ add_library(pulp::view-script ALIAS pulp-view-script)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
+add_library(pulp-view-native src/placeholder.cpp src/web_view_backend.cpp)
+add_library(pulp::view-native ALIAS pulp-view-native)
+target_compile_definitions(pulp-view-native PUBLIC PULP_BUILD_WEBVIEW=0)
 if(PULP_ENABLE_JS)
     target_link_libraries(pulp-view PUBLIC pulp::view-script)
+    target_link_libraries(pulp-view-native PUBLIC pulp::view-script)
 else()
     # Native-only: link the JS-free core directly and keep view-script defined
     # (so its still-evaluated config blocks below never dangle) but out of the
     # default build and every binary, so no JS engine is compiled or shipped.
     target_link_libraries(pulp-view PUBLIC pulp::view-core)
+    target_link_libraries(pulp-view-native PUBLIC pulp::view-core)
     set_target_properties(pulp-view-script PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
     # Authoritative native-only guard. The binary nm-check (AssertNoJsSymbols.cmake)
@@ -58,7 +63,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # belong to the core/view targets declared above.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewJsPreludes.cmake")
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -134,20 +139,32 @@ find_package(PkgConfig QUIET)
 
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
-    target_sources(pulp-view-core PRIVATE src/web_view.cpp)
+    add_library(pulp-view-webview STATIC
+        src/web_view.cpp
+        src/web_view_backend.cpp)
+    add_library(pulp::view-webview ALIAS pulp-view-webview)
+    target_include_directories(pulp-view-webview
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+            $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+            $<INSTALL_INTERFACE:include>)
+    target_link_libraries(pulp-view-webview PUBLIC pulp::view-core)
+    target_link_libraries(pulp-view PUBLIC pulp::view-webview)
     # PUBLIC so tests and downstream callers see the same value the
     # detector TU was compiled with.
-    target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=1)
+    target_compile_definitions(pulp-view-webview PUBLIC PULP_BUILD_WEBVIEW=1)
+    target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=1)
     if(APPLE AND NOT PULP_IOS)
         # In-process WKWebView snapshot → PNG so native WebView overlays are
         # headlessly capturable (WebViewPanel::snapshot_png()).
-        target_sources(pulp-view-core PRIVATE platform/mac/web_view_snapshot_mac.mm)
-        target_link_libraries(pulp-view-core PRIVATE "-framework WebKit")
+        target_sources(pulp-view-webview PRIVATE platform/mac/web_view_snapshot_mac.mm)
+        target_link_libraries(pulp-view-webview PRIVATE "-framework WebKit")
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
         pkg_check_modules(WEBKIT2GTK REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
-        target_link_libraries(pulp-view-core PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
+        target_link_libraries(pulp-view-webview PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
     # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
 else()
@@ -155,21 +172,31 @@ else()
     # When WebView is excluded from the build,
     # detect_webview_backend() must return "none" so callers can
     # distinguish "build excluded WebView" from "OS has no WebView".
-    target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=0)
+    target_sources(pulp-view PRIVATE src/web_view_backend.cpp)
+    target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=0)
 endif()
 
-# Backend detection TUs — always compiled into pulp-view-core regardless
-# of PULP_BUILD_WEBVIEW so callers can distinguish "this build excluded
-# WebView" from "this OS has no usable WebView backend installed".
+# Backend detection TUs — compiled into each view composition so callers can
+# distinguish "this target excluded WebView" from "this OS has no usable
+# WebView backend installed".
 # `web_view_backend.cpp` owns the symbol on Apple / Android / generic
 # OSes; the Windows + Linux per-platform TUs own it on their OS so the
 # runtime probe (LoadLibrary / dlopen) can run before the answer is
 # returned.
-target_sources(pulp-view-core PRIVATE src/web_view_backend.cpp)
 if(WIN32)
-    target_sources(pulp-view-core PRIVATE platform/win/webview2_backend.cpp)
+    target_sources(pulp-view-native PRIVATE platform/win/webview2_backend.cpp)
+    if(PULP_BUILD_WEBVIEW)
+        target_sources(pulp-view-webview PRIVATE platform/win/webview2_backend.cpp)
+    else()
+        target_sources(pulp-view PRIVATE platform/win/webview2_backend.cpp)
+    endif()
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-    target_sources(pulp-view-core PRIVATE platform/linux/webkitgtk_backend.cpp)
+    target_sources(pulp-view-native PRIVATE platform/linux/webkitgtk_backend.cpp)
+    if(PULP_BUILD_WEBVIEW)
+        target_sources(pulp-view-webview PRIVATE platform/linux/webkitgtk_backend.cpp)
+    else()
+        target_sources(pulp-view PRIVATE platform/linux/webkitgtk_backend.cpp)
+    endif()
 endif()
 
 # CHOC headers (JS engine, utilities)

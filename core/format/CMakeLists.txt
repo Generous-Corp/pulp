@@ -58,11 +58,18 @@ target_link_libraries(pulp-format
         # pulp::view.
         pulp::platform
         pulp::state
-        pulp::view
+        # Public ViewBridge headers expose native View types, not WebView.
+        pulp::view-core
         pulp::runtime
         pulp::timebase
         pulp::native-components
 )
+if(PULP_ENABLE_JS)
+    # ViewBridge's implementation reaches ScriptedUiSession. Keep that static
+    # closure link-only so the final artifact chooses view-native or the legacy
+    # WebView-capable view umbrella without inheriting both compositions.
+    target_link_libraries(pulp-format PRIVATE pulp::view-script)
+endif()
 
 # Shipping invariant: the ordinary format SDK must never expose any inspector
 # component through its link interface. Static-link dead stripping can hide

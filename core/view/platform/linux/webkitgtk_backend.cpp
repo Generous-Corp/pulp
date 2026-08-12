@@ -14,7 +14,7 @@
 // Posture matches `core/events/platform/linux/avahi_backend.cpp` — we
 // use `pulp::runtime::DynamicLibrary` to dlopen the SONAMEs at process
 // start. The build never links WebKitGTK directly here (the link
-// happens inside `pulp-view-core` when `PULP_BUILD_WEBVIEW=ON`); this
+// happens inside `pulp-view-webview` when `PULP_BUILD_WEBVIEW=ON`); this
 // file only probes availability.
 
 #include <pulp/view/web_view.hpp>
@@ -27,6 +27,7 @@
 
 namespace pulp::view {
 
+#if !defined(PULP_BUILD_WEBVIEW) || PULP_BUILD_WEBVIEW
 namespace {
 
 // Probe-once cache. We try the modern 4.1 ABI first (current stable),
@@ -61,13 +62,22 @@ const WebKitGtkProbe& probe() {
 }
 
 } // namespace
+#endif
 
 std::string detect_webview_backend() {
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+    return "none";
+#else
     return probe().available ? "webkitgtk" : "none";
+#endif
 }
 
 bool webview_backend_available() {
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+    return false;
+#else
     return probe().available;
+#endif
 }
 
 } // namespace pulp::view

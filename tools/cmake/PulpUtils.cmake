@@ -21,9 +21,12 @@ endfunction()
 
 _pulp_pick_target(_PULP_FORMAT_TARGET Pulp::format pulp::format)
 _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
+_pulp_pick_target(_PULP_NATIVE_VIEW_TARGET Pulp::view-native pulp::view-native)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
+_pulp_pick_target(_PULP_NATIVE_STANDALONE_TARGET
+    Pulp::standalone-native pulp::standalone-native)
 _pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
     Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
 _pulp_pick_target(_PULP_CONTROL_UI_TARGET
@@ -627,7 +630,7 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -669,6 +672,17 @@ function(pulp_add_plugin target)
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")
+    if(PLUGIN_NATIVE_UI)
+        if(NOT _PULP_NATIVE_VIEW_TARGET OR NOT _PULP_NATIVE_STANDALONE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} NATIVE_UI): this Pulp SDK does not export the native-only view/standalone targets")
+        endif()
+        set(PULP_${target}_VIEW_TARGET "${_PULP_NATIVE_VIEW_TARGET}" CACHE INTERNAL "")
+        set(PULP_${target}_STANDALONE_TARGET "${_PULP_NATIVE_STANDALONE_TARGET}" CACHE INTERNAL "")
+    else()
+        set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
+        set(PULP_${target}_STANDALONE_TARGET "${_PULP_STANDALONE_TARGET}" CACHE INTERNAL "")
+    endif()
     set(PULP_${target}_CONTENT_CAPABILITIES "${PLUGIN_CONTENT_CAPABILITIES}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")

@@ -23,6 +23,19 @@ times to be worth remembering.
 | Hand the built view to an external container (TabPanel, WindowHost) | Yes — call `ViewBridge::release_view()` |
 | Ship a paint-only overlay | No — the legacy standalone inspector runtime was removed; compose canonical control separately |
 
+### Native scripted UI is not a WebView
+
+`ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` execute through Pulp's JS
+engine and native Skia/Dawn view tree; they do not require `WebViewPanel`. In an
+SDK configured with `PULP_BUILD_WEBVIEW=ON`, use `pulp::view-native` (or
+`pulp_add_plugin(... NATIVE_UI)`, which also selects
+`pulp::standalone-native`) when the shipped artifact must not link WebKit,
+WebView2, or WebKitGTK. The legacy `pulp::view` and `pulp::standalone` targets
+remain the compatibility composition for products that instantiate
+`WebViewPanel`. Do not put WebView sources or framework links back onto
+`pulp-view-core`, `pulp-view-script`, or `pulp-format`; static-library private
+links propagate to the final consumer and silently contaminate native plugins.
+
 `Processor`'s editor hooks (`create_view`, `view_size`, `on_view_*`) are
 part of the node ABI surface. When adding a new view lifecycle hook, append
 the virtual at the tail of `Processor`; never insert, remove, reorder, or

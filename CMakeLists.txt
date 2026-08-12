@@ -414,17 +414,20 @@ set(_pulp_standalone_sources
     core/format/src/settings_panel.cpp)
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-function(_pulp_configure_standalone_target target)
+add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
+add_library(pulp::standalone-native ALIAS pulp-standalone-native)
+function(_pulp_configure_standalone_target target view_target)
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
         $<INSTALL_INTERFACE:include>)
     target_link_libraries(${target} PUBLIC
-        pulp::format pulp::view
+        pulp::format ${view_target}
         $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
         $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
+    target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)
 endfunction()
-_pulp_configure_standalone_target(pulp-standalone)
-target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
+_pulp_configure_standalone_target(pulp-standalone pulp::view)
+_pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
 # The control manifest and protocol registry are CPU-only audit data and remain
 # available even when live Inspector support is disabled. inspect/CMakeLists.txt
@@ -554,6 +557,14 @@ endif()
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
+
+# This fixture exercises the public pulp_add_plugin target-selection surface,
+# so configure it only after PulpUtils and PulpLinkFloor are available. The
+# ordinary unit-test owners above intentionally load before those public helper
+# modules.
+if(PULP_BUILD_TESTS)
+    add_subdirectory(test/fixtures/native_ui_link_floor)
+endif()
 
 # ── CLI Tool (desktop only) ────────────────────────────────────────────────
 # The CLI already requires the desktop GPU stack for render/audio authoring
