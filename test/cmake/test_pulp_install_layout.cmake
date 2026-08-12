@@ -133,14 +133,36 @@ if(NOT EXISTS "${_installed_minos_json}")
 endif()
 file(GLOB _pulp_config LIST_DIRECTORIES false
     "${_pulp_cmake_dir}/PulpConfig.cmake")
-if(_pulp_config)
-    list(GET _pulp_config 0 _pulp_config)
-    file(READ "${_pulp_config}" _installed_config_text)
-    if(NOT _installed_config_text MATCHES "PulpMinOs\\.cmake")
-        message(FATAL_ERROR
-            "Installed PulpConfig.cmake does not include PulpMinOs.cmake — the "
-            "min-OS floor would not be pinned for find_package(Pulp) consumers.")
-    endif()
+if(NOT _pulp_config)
+    message(FATAL_ERROR
+        "Installed PulpConfig.cmake not found under ${_pulp_cmake_dir}.")
+endif()
+list(GET _pulp_config 0 _pulp_config)
+file(READ "${_pulp_config}" _installed_config_text)
+if(NOT _installed_config_text MATCHES "PulpMinOs\\.cmake")
+    message(FATAL_ERROR
+        "Installed PulpConfig.cmake does not include PulpMinOs.cmake — the "
+        "min-OS floor would not be pinned for find_package(Pulp) consumers.")
+endif()
+
+# Pulp's installed Windows archives are built with the static MSVC runtime.
+# find_package(Pulp) must establish the same default before a consumer creates
+# targets, or their /MD objects fail to link against Pulp's /MT archives with
+# LNK2038. Keep both the override guard and the Release archive's exact value
+# in the installed package contract.
+if(NOT _installed_config_text MATCHES
+        "MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY")
+    message(FATAL_ERROR
+        "Installed PulpConfig.cmake does not preserve a consumer-selected "
+        "MSVC runtime before applying Pulp's compatible default.")
+endif()
+if(NOT _installed_config_text MATCHES
+        "set\\(CMAKE_MSVC_RUNTIME_LIBRARY[
+ ]+\"MultiThreaded\"")
+    message(FATAL_ERROR
+        "Installed PulpConfig.cmake does not default every consumer "
+        "configuration to the Release static MSVC runtime used by Pulp's "
+        "Release-only installed archives.")
 endif()
 
 # pulp::osc export: the OSC sender/receiver is a public SDK subsystem, but was

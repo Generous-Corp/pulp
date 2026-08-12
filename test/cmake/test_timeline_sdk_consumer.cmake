@@ -107,6 +107,48 @@ if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
 endif()
 
+set(_registered_chord_executable
+    "${_consumer_build}/pulp-registered-chord-renderer-consumer${_executable_suffix}")
+if(NOT EXISTS "${_registered_chord_executable}")
+    set(_registered_chord_executable
+        "${_consumer_build}/${_producer_config}/pulp-registered-chord-renderer-consumer${_executable_suffix}")
+endif()
+execute_process(
+    COMMAND "${_registered_chord_executable}"
+    RESULT_VARIABLE _registered_chord_run_result)
+if(NOT _registered_chord_run_result EQUAL 0)
+    set(_registered_chord_steps
+        "1=register schemas"
+        "2=build project"
+        "3=open DocumentSession"
+        "4=register writer and seed baseline revision"
+        "5=compile tempo map"
+        "6=declare chord renderer"
+        "7=initial baseline compile"
+        "8=verify deterministic values and hash"
+        "9=find root sequence"
+        "10=build replacement harmony"
+        "11=commit exact chord invalidation"
+        "12=publish incremental compile"
+        "13=observe epoch completion"
+        "14=verify generated rebuild and MIDI reuse"
+        "15=verify unresolved-content diagnostic"
+        "16=resolve trusted registration"
+        "17=declare quota test renderer"
+        "18=verify quota actual and limit"
+        "19=declare tolerance renderer"
+        "20=compile tolerance program"
+        "21=verify weakest production claim")
+    set(_registered_chord_step "unknown step")
+    foreach(_entry IN LISTS _registered_chord_steps)
+        if(_entry MATCHES "^${_registered_chord_run_result}=(.*)$")
+            set(_registered_chord_step "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    message(FATAL_ERROR
+        "Registered chord renderer consumer exited ${_registered_chord_run_result} (${_registered_chord_step})")
+endif()
+
 set(_smf_executable
     "${_consumer_build}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
 if(NOT EXISTS "${_smf_executable}")

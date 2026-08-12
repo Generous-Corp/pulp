@@ -189,6 +189,46 @@ TEST_CASE("Reducer normalizes pattern-length 0 to full so view and playback agre
     REQUIRE(echo->payload.pattern_length.length == kStepCount);  // view sees full, not 0
 }
 
+TEST_CASE("Reducer normalizes over-capacity pattern length to full",
+          "[state][sequencer][freeze]") {
+    SequencerStateChannel ch;
+    Snapshot snap;
+    Epoch epoch = 0;
+    EngineSequence seq = 0;
+
+    auto& sentinel = snap.patterns[3].lanes[1][7];
+    sentinel.flags = StepCell::kEnabledBit;
+    sentinel.velocity = 91;
+
+    StepEditCommand cmd{};
+    cmd.client_sequence = 71;
+    cmd.transaction_id = 171;
+    cmd.kind = StepEditKind::SetPatternLength;
+    cmd.payload.set_pattern_length =
+        SetPatternLengthEdit{2, static_cast<std::uint8_t>(kStepCount + 1)};
+    REQUIRE(ch.ui_try_submit(cmd));
+    drain_and_apply(ch, snap, epoch, seq);
+
+    REQUIRE(snap.patterns[2].length == kStepCount);
+    REQUIRE(sentinel.enabled());
+    REQUIRE(sentinel.velocity == 91);
+    REQUIRE(seq == 1);
+    REQUIRE(epoch == 0);
+    REQUIRE(ch.ui_resync_required_epoch() == 0);
+    const auto echo = ch.ui_try_pop_applied();
+    REQUIRE(echo.has_value());
+    REQUIRE(echo->kind == AppliedEditKind::PatternLengthChanged);
+    REQUIRE(echo->engine_sequence == 1);
+    REQUIRE(echo->snapshot_epoch == 0);
+    REQUIRE(echo->client_sequence == 71);
+    REQUIRE(echo->transaction_id == 171);
+    REQUIRE(echo->dirty.kind == DirtyKind::Pattern);
+    REQUIRE(echo->dirty.pattern == 2);
+    REQUIRE(echo->payload.pattern_length.pattern == 2);
+    REQUIRE(echo->payload.pattern_length.length == kStepCount);
+    REQUIRE_FALSE(ch.ui_try_pop_applied().has_value());
+}
+
 TEST_CASE("A neutral non-Processor producer drives the channel and the UI converges",
           "[state][sequencer][freeze]") {
     // The whole point of Q3/Q5: the authoritative writer need NOT be a

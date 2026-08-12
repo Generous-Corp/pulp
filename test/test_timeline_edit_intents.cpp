@@ -2,12 +2,15 @@
 
 #include <pulp/timeline_editor/edit_intent.hpp>
 #include <pulp/timeline_editor/scripted_ui_host.hpp>
+#include <pulp/timeline_editor/selection.hpp>
 #include <pulp/view/hit_metrics.hpp>
 #include <pulp/view/waveform_editor_primitives.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <type_traits>
+#include <vector>
 
 using namespace pulp::timeline;
 using namespace pulp::timeline_editor;
@@ -83,6 +86,85 @@ Clip note_clip_with_lane_value(std::uint32_t value) {
 }
 
 } // namespace
+
+TEST_CASE("Selection set operations keep one canonical identity set") {
+    Selection selection;
+    const std::array initial{ItemId{7}, ItemId{5}, ItemId{5}, ItemId{3}, ItemId{}};
+    selection.replace(initial);
+
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{3}, ItemId{5}, ItemId{7}});
+    REQUIRE(selection.anchor() == ItemId{7});
+
+    selection.add({6});
+    selection.add({6});
+    selection.toggle({5});
+    selection.toggle({9});
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{3}, ItemId{6}, ItemId{7}, ItemId{9}});
+    REQUIRE(selection.anchor() == ItemId{7});
+
+    const std::array authored_order{ItemId{3}, ItemId{5}, ItemId{6}, ItemId{7}, ItemId{9}};
+    REQUIRE(selection.extend_from_anchor({5}, authored_order));
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{5}, ItemId{6}, ItemId{7}});
+    REQUIRE_FALSE(selection.extend_from_anchor({8}, authored_order));
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{5}, ItemId{6}, ItemId{7}});
+
+    const std::array non_monotonic_order{ItemId{9}, ItemId{}, ItemId{2}, ItemId{7}, ItemId{5}};
+    SECTION("Range canonicalization omits invalid authored identities") {
+        REQUIRE(selection.extend_from_anchor({9}, non_monotonic_order));
+        REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+                std::vector<ItemId>{ItemId{2}, ItemId{7}, ItemId{9}});
+        REQUIRE(selection.anchor() == ItemId{7});
+    }
+
+    SECTION("An invalid target leaves selection state unchanged") {
+        const auto before_invalid_target =
+            std::vector(selection.items().begin(), selection.items().end());
+        REQUIRE_FALSE(selection.extend_from_anchor(ItemId{}, non_monotonic_order));
+        REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+                before_invalid_target);
+        REQUIRE(selection.anchor() == ItemId{7});
+    }
+}
+
+TEST_CASE("Selection pruning follows active project identities without joining undo history") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    Selection selection;
+    const std::array selected{ItemId{5}, ItemId{6}, ItemId{999}};
+    selection.replace(selected);
+    selection.prune(*session->snapshot());
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{5}, ItemId{6}});
+
+    auto remove = session_transaction(writer, session->revision(),
+                                      {RemoveClip{ItemId{3}, ItemId{4}, ItemId{5}}});
+    REQUIRE(session->submit(writer, std::move(remove)));
+    REQUIRE_FALSE(session->snapshot()->locate({5})->active);
+    REQUIRE_FALSE(session->snapshot()->locate({6})->active);
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{5}, ItemId{6}});
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->locate({5})->active);
+    REQUIRE(session->snapshot()->locate({6})->active);
+    selection.prune(*session->snapshot());
+    REQUIRE(std::vector(selection.items().begin(), selection.items().end()) ==
+            std::vector<ItemId>{ItemId{5}, ItemId{6}});
+
+    REQUIRE(session->redo(writer));
+    selection.prune(*session->snapshot());
+    REQUIRE(selection.empty());
+    REQUIRE_FALSE(selection.anchor());
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->locate({5})->active);
+    REQUIRE(selection.empty());
+}
 
 TEST_CASE("Edit intents from a mouse and a touch pointer lower to identical transactions") {
     const auto viewport = parity_viewport();

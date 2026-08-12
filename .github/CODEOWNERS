@@ -3,8 +3,12 @@
 /.github/workflows/ @danielraffel
 /.github/vellum-ownership.json @danielraffel
 /.github/vellum-change-events/ @danielraffel
+/.github/vellum-expansion-watch/ @danielraffel
+/.github/vellum-expansion-watch-events/ @danielraffel
 /tools/scripts/vellum_freeze_check.py @danielraffel
 /tools/scripts/test_vellum_freeze_check.py @danielraffel
+/tools/scripts/vellum_expansion_watch_check.py @danielraffel
+/tools/scripts/test_vellum_expansion_watch_check.py @danielraffel
 /tools/scripts/generate_vellum_* @danielraffel
 /tools/scripts/test_generate_vellum_* @danielraffel
 /tools/scripts/pulp_tooling_disposition.py @danielraffel

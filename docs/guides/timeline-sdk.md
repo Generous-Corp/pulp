@@ -397,6 +397,54 @@ Callers that need to inspect a prospective delta may still build an index and
 call `resolve_dirty_tracks()` directly, but must not use a separately resolved
 set as a substitute for the request's generation-pinned invalidation input.
 
+### Compile registered content with a trusted renderer
+
+`RegisteredContent` is a versioned, schema-governed clip payload. Playback does
+not guess how to lower it. The application first builds one immutable
+`SchemaRegistry` containing the built-in Timeline schemas and its content
+schema, creates content against that same registry, then declares a
+`ContentRendererRegistration` in the shared `CompileContextRegistry`. A
+registration binds the exact type, schema version and codec provenance to an
+off-realtime `noexcept` compile hook, its context subscriptions, output kind,
+fragment-note ceiling, renderer state policy, and production declaration.
+The current public lane admits note output and `RegisteredRendererStatePolicy::Reset`
+only; `CarryByItemId` is deliberately refused until state carry has an exact
+identity contract. A registration may choose a lower fragment ceiling, but it
+cannot exceed the global 4096-note-per-clip cap.
+
+The hook receives a narrowed `CompileContextView`: undeclared sequence context
+reads return null, which keeps invalidation honest. It emits relative clip ticks
+as an immutable `ContentProgramFragment`; the compiler maps those notes into the
+owning arrangement. Both the registration ceiling and the request's remaining
+per-track budget are enforced. Returning too much fails with
+`RegisteredContentFragmentQuotaExceeded`, whose diagnostic reports the clip
+`item`, `actual`, and `limit`. Missing exact registration fails with
+`UnresolvedRegisteredContent` rather than producing silence.
+Likewise, a nested `SequenceRef` that trims registered content fails with
+`TrimmedRegisteredContentUnsupported`: the hook input has no source-window
+offset with which to preserve pattern phase.
+
+The installed-SDK
+[registered chord renderer](../../examples/timeline-sdk-consumer/registered_chord_renderer.cpp)
+is the complete executable example. It uses
+`register_chord_pattern_content_schema()`,
+`create_chord_pattern_content()`, and `declare_chord_pattern_renderer()`; proves
+exact initial note values and a deterministic semantic hash; passes the exact
+`CommitResult` to incremental compilation; waits on the submission epoch; and
+observes a rebuilt generated track beside pointer reuse for an unrelated MIDI
+track. Its negative cases prove unresolved-content and quota diagnostics, and
+its mixed-track case proves that `program_reproducibility()` aggregates the
+weakest production declaration rather than the first or strongest one.
+That production proof is in-memory. Nondefault renderer production declarations
+remain process-local, and `ProgramWire` refuses to serialize programs carrying
+them rather than implying that a remote process can reproduce an undeclared
+hook.
+
+Registrations are process-local declarations, not persisted document data.
+Rebuild the schema and compile registries before loading/compiling content, keep
+the shared compile registry alive with requests, and treat a changed registry
+generation as a full-compile boundary.
+
 Built-in MIDI clips render their owning sequence's `GrooveTemplate`: one timing
 displacement from the authored onset moves note-on and note-off together, and
 the authored-onset accent scales velocity with deterministic half-up rounding

@@ -202,6 +202,55 @@ TEST_CASE("trusted host launcher releases enrollment only after exact child pref
 #endif
 }
 
+TEST_CASE("trusted host launcher gives an exact preflighted child a fresh enrollment window",
+          "[inspect][control][inventory][launcher][security][expiry]") {
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+    Fixture fixture;
+    fs::copy_file(PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, fixture.executable,
+                  fs::copy_options::overwrite_existing);
+    ::chmod(fixture.executable.c_str(), 0700);
+
+    const auto prepared_at = std::chrono::steady_clock::now();
+    auto config = fixture.config();
+    config.ttl = 20s;
+    ControlTrustedHostInventory inventory(config, [prepared_at] { return prepared_at; });
+    auto intent = fixture.intent();
+    intent.arguments = {"--normal"};
+    const auto prepared = inventory.prepare(intent);
+    REQUIRE(prepared.ticket);
+
+    // Evaluate enrollment after the snapshot deadline while keeping inventory
+    // consumption at preparation time, so the lifetime boundary needs no sleep.
+    const auto enrollment_now = prepared_at + 25s;
+    pulp::inspect::ControlHostEnrollmentStore enrollments(
+        {}, [enrollment_now] { return enrollment_now; });
+    ControlTrustedHostLauncher launcher(
+        inventory, enrollments,
+        ControlTrustedHostLauncherConfig{
+            .endpoint_path = fixture.root / "broker.sock",
+            .expected_broker = {.evidence =
+                                    {
+                                        .role = pulp::inspect::ControlPeerRole::TrustedHostBridge,
+                                        .user_id = "uid:" + std::to_string(::getuid()),
+                                        .process_id = static_cast<std::int64_t>(::getpid()),
+                                        .process_start_id = "pidversion:test",
+                                        .executable_identity = "signed:test-broker",
+                                        .publisher_id = "publisher:test-broker",
+                                    }},
+            .broker_generation = 17,
+            .preflight_timeout = 30s,
+        });
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 40'000;
+    auto launched = launcher.launch(prepared.ticket->inventory_id, options);
+    INFO(launched.explanation);
+    REQUIRE(launched.launched());
+    REQUIRE(launched.process);
+    CHECK(enrollments.size() == 1);
+    CHECK(launched.process->wait().exit_code == 0);
+#endif
+}
+
 TEST_CASE("trusted host launcher revalidates staged launch material at spawn",
           "[inspect][control][inventory][launcher][security][toctou]") {
 #if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE

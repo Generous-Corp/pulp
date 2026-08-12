@@ -255,7 +255,7 @@ pulp_add_test_suite(pulp-test-waveguide-primitives
 # the focused behavioral contract suite.
 pulp_add_test_suite(pulp-test-reed-waveguide-loop
     SOURCES test_reed_waveguide_loop.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::signal)
+    LIBRARIES pulp::signal pulp::audio-analysis)
 
 # Tempo-map beat repeat: exact dry-history capture, frame-offset events, and
 # the prepared allocation contract. Pitch remains a separately gated design.

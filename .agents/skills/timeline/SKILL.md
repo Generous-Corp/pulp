@@ -865,6 +865,14 @@ exact:
   `CompileInvalidationIndex` bundles the nested dependency and context-reader
   reverse indices, and `resolve_dirty_tracks()` turns a `DirtySet` into an
   exact `DirtyTrackSet`.
+- A `RegisteredContent` value is valid only under its exact schema identity and
+  codec provenance. Build one immutable `SchemaRegistry` with built-ins plus
+  the application's content schemas, use it to create or load the payload, and
+  pass it when declaring the matching `ContentRendererRegistration` in
+  playback. The declaration and its hook are process-local capabilities, not
+  serialized Timeline state. An exact content value without an exact renderer
+  must fail compilation as `UnresolvedRegisteredContent`; it must not become
+  opaque silence.
 - A context edit emits **two** things: a `DirtyContext{sequence, kind}` (which
   names what changed) and a companion `DirtyItem` flagged `DirtyFlags::Context`
   with no owning track (so an item-scanning consumer still sees the transaction
@@ -873,6 +881,23 @@ exact:
 
 Adding a context kind is a data change here plus a reverse-index case in the
 compiler. It is never a reason to widen an invalidation.
+
+The runnable cross-module contract is
+`examples/timeline-sdk-consumer/registered_chord_renderer.cpp`. It registers the
+chord-pattern schema and renderer, establishes a baseline compile, commits a
+`SetChordScaleLane`, constructs `CompileInvalidationInput` from that exact
+`CommitResult`, waits for the submission epoch, and proves that only the
+context-reading generated track changes while an ordinary MIDI track reuses its
+compiled owner. It also pins deterministic values and hash, unresolved and
+bounded quota diagnostics, and weakest production aggregation. Update and run
+that installed consumer whenever schema identity, registered content, context
+dirty semantics, or playback hook declarations change.
+The current compiler contract is notes-only, reset-state-only, and capped at
+4096 fragment notes per clip. A nested `SequenceRef` that trims registered
+content is `TrimmedRegisteredContentUnsupported` because the hook input has no
+source-window offset. Renderer production declarations live with the process;
+`ProgramWire` refuses nondefault declarations instead of transporting a claim
+without its trusted hook.
 
 ### Adding a field to `pulp.timeline.sequence` touches two silent mirrors
 

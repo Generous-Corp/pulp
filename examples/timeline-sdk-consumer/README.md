@@ -9,6 +9,7 @@ cmake -S examples/timeline-sdk-consumer -B build/timeline-sdk-consumer \
   -DCMAKE_PREFIX_PATH=/path/to/pulp-sdk -DCMAKE_BUILD_TYPE=Release
 cmake --build build/timeline-sdk-consumer
 ./build/timeline-sdk-consumer/pulp-timeline-sdk-consumer
+./build/timeline-sdk-consumer/pulp-registered-chord-renderer-consumer
 ./build/timeline-sdk-consumer/pulp-timeline-cookbook-consumer
 ./build/timeline-sdk-consumer/pulp-dawproject-import-sdk-consumer
 ./build/timeline-sdk-consumer/pulp-dawproject-export-sdk-consumer
@@ -27,3 +28,14 @@ it is a link probe, not a representative import walkthrough. The public
 documents the supported and rejected DAWproject features, and
 `test/fixtures/timeline/dawproject/linear_subset.dawproject.xml` is the
 representative supported `project.xml`.
+
+`pulp-registered-chord-renderer-consumer` is the runnable registered-content
+example. It registers one versioned content schema and its trusted chord
+renderer, then proves exact baseline notes and a deterministic semantic hash.
+It also commits a chord-lane edit and verifies exact `CommitResult`
+invalidation, compile-epoch completion, and pointer reuse for an unrelated MIDI
+track. Finally it checks fail-closed unresolved-content and fragment-quota
+diagnostics (including `actual` and `limit`) and verifies that the program's
+production claim is the weakest claim among its compiled tracks. That final
+claim is deliberately tested in memory: nondefault renderer production
+declarations are process-local and refused by `ProgramWire`.

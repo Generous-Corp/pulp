@@ -58,6 +58,15 @@ Rect MidiKeyboard::key_rect(int note) const {
     if (note < first_note_ || note > last_note_) return {};
 
     auto b = local_bounds();
+    if (orientation_ == Orientation::vertical_chromatic_rows) {
+        const int row_index = last_note_ - note;
+        const float row_count = static_cast<float>(last_note_ - first_note_ + 1);
+        const float top = b.y + b.height * static_cast<float>(row_index) / row_count;
+        const float bottom =
+            b.y + b.height * static_cast<float>(row_index + 1) / row_count;
+        return {b.x, top, b.width, bottom - top};
+    }
+
     float wkw = white_key_width();
     bool horiz = (orientation_ == Orientation::horizontal);
 

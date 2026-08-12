@@ -121,8 +121,10 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
                         return ControlHostBootstrapBytes{};
                     }
                     const auto now = std::chrono::steady_clock::now();
-                    const auto expires_at =
-                        std::min(snapshot_for_session.expires_at(), now + bounded_timeout);
+                    const auto expires_at = now + std::min(
+                        bounded_timeout,
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            kControlMaximumHostEnrollmentTtl));
                     auto enrollment = enrollments_->create(std::move(snapshot_for_session), child,
                                                            config_.broker_generation, expires_at);
                     if (!enrollment.ticket) {

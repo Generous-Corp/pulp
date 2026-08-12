@@ -99,6 +99,26 @@ std::vector<float> render_with_midi(
     return out_l;
 }
 
+struct StereoRender {
+    std::vector<float> left;
+    std::vector<float> right;
+};
+
+StereoRender render_stereo_with_midi(
+    HeadlessHost& host, pulp::midi::MidiBuffer& midi_in, int n_samples)
+{
+    StereoRender rendered{
+        std::vector<float>(static_cast<std::size_t>(n_samples), 0.0f),
+        std::vector<float>(static_cast<std::size_t>(n_samples), 0.0f),
+    };
+    float* op[] = {rendered.left.data(), rendered.right.data()};
+    pulp::audio::BufferView<float> ov(op, 2, n_samples);
+    pulp::audio::BufferView<const float> iv(nullptr, 0, n_samples);
+    pulp::midi::MidiBuffer midi_out;
+    host.process(ov, iv, midi_in, midi_out);
+    return rendered;
+}
+
 pulp::test::audio::AliasReport analyze_saw(const std::vector<double>& signal,
                                            double f0) {
     constexpr double sample_rate = 48'000.0;
@@ -115,6 +135,50 @@ pulp::test::audio::AliasReport analyze_saw(const std::vector<double>& signal,
 }
 
 }  // namespace
+
+TEST_CASE("PulpSynth sample offsets are invariant to callback partitioning",
+          "[examples][synth][midi][timing]") {
+    constexpr int callback_size = 64;
+    constexpr int render_size = callback_size * 2;
+
+    HeadlessHost single_host(create_pulp_synth);
+    single_host.prepare(48000, render_size, 0, 2);
+    single_host.state().set_value(kMasterGain, 0.0f);
+    single_host.state().set_value(kFilterCutoff, 5000.0f);
+    pulp::midi::MidiBuffer single_midi;
+    auto delayed_note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    delayed_note.sample_offset = callback_size;
+    single_midi.add(delayed_note);
+    auto single = render_stereo_with_midi(single_host, single_midi, render_size);
+
+    HeadlessHost partitioned_host(create_pulp_synth);
+    partitioned_host.prepare(48000, render_size, 0, 2);
+    partitioned_host.state().set_value(kMasterGain, 0.0f);
+    partitioned_host.state().set_value(kFilterCutoff, 5000.0f);
+    pulp::midi::MidiBuffer empty_midi;
+    auto first = render_stereo_with_midi(
+        partitioned_host, empty_midi, callback_size);
+    pulp::midi::MidiBuffer boundary_midi;
+    boundary_midi.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    auto second = render_stereo_with_midi(
+        partitioned_host, boundary_midi, callback_size);
+
+    bool heard_note = false;
+    for (int i = 0; i < callback_size; ++i) {
+        const auto index = static_cast<std::size_t>(i);
+        REQUIRE(single.left[index] == 0.0f);
+        REQUIRE(single.right[index] == 0.0f);
+        REQUIRE(single.left[index] == first.left[index]);
+        REQUIRE(single.right[index] == first.right[index]);
+
+        const auto delayed_index = static_cast<std::size_t>(callback_size + i);
+        REQUIRE(single.left[delayed_index] == second.left[index]);
+        REQUIRE(single.right[delayed_index] == second.right[index]);
+        heard_note = heard_note || single.left[delayed_index] != 0.0f
+                                || single.right[delayed_index] != 0.0f;
+    }
+    REQUIRE(heard_note);
+}
 
 TEST_CASE("PulpSynth opt-in minBLEP saw consumes the public oscillator primitive",
           "[examples][synth][minblep]") {

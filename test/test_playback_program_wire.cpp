@@ -1,4 +1,5 @@
 #include <pulp/playback/automation_cursor.hpp>
+#include <pulp/playback/chord_pattern_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/program_wire.hpp>
 #include <pulp/playback/track_automation_program.hpp>
@@ -45,8 +46,8 @@ std::shared_ptr<const CompiledTempoMap> wire_tempo_map() {
 AutomationLane device_lane(std::uint64_t lane_id, std::uint64_t placement_id,
                            std::uint32_t param_id, float value) {
     auto curve = take(AutomationCurve::create(
-        {AutomationPoint{{lane_id * 10 + 1}, {0}, value, AutomationInterpolation::Continuous,
-                         0.25f},
+        {AutomationPoint{
+             {lane_id * 10 + 1}, {0}, value, AutomationInterpolation::Continuous, 0.25f},
          AutomationPoint{{lane_id * 10 + 2},
                          {kTicksPerQuarter},
                          value + 0.125f,
@@ -94,8 +95,8 @@ std::shared_ptr<const Project> wire_project() {
     TrackInput automated;
     automated.id = {10};
     automated.name = "automated";
-    automated.clips.push_back(take(Clip::create({20}, {0}, {kTicksPerQuarter * 4},
-                                                std::move(content))));
+    automated.clips.push_back(
+        take(Clip::create({20}, {0}, {kTicksPerQuarter * 4}, std::move(content))));
     automated.device_chain = {{{40}}, {{41}}};
     automated.automation_lanes.push_back(device_lane(50, 41, 7, 0.25f));
     automated.automation_lanes.push_back(device_lane(51, 40, 9, 0.75f));
@@ -103,10 +104,9 @@ std::shared_ptr<const Project> wire_project() {
     automated.mixer = {0.75f, -0.25f};
 
     auto plain = take(Track::create({11}, "plain", {}));
-    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
-                                          std::vector<Track>{take(Track::create(
-                                                                 std::move(automated))),
-                                                             std::move(plain)}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        std::vector<Track>{take(Track::create(std::move(automated))), std::move(plain)}));
     ProjectInput input;
     input.id = {1};
     input.name = "wire";
@@ -114,6 +114,46 @@ std::shared_ptr<const Project> wire_project() {
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+SchemaRegistry production_schemas() {
+    SchemaRegistryBuilder builder;
+    REQUIRE(register_chord_pattern_content_schema(builder));
+    return take(std::move(builder).build());
+}
+
+std::shared_ptr<const Project> nondefault_production_project(const SchemaRegistry& schemas) {
+    auto content = take(create_chord_pattern_content(
+        {.seed = 0, .step = {120}, .gate = {90}, .octave = 4, .velocity = 32000}, schemas));
+    auto clip = take(Clip::create({20}, {0}, {480}, std::move(content)));
+    auto track = take(Track::create({10}, "best effort", {std::move(clip)}));
+    SequenceInput sequence;
+    sequence.id = {2};
+    sequence.name = "production";
+    sequence.tracks = {std::move(track)};
+    sequence.chord_scale_lane =
+        take(ChordScaleLane::create({{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0}}));
+    ProjectInput project;
+    project.id = {1};
+    project.name = "nondefault production";
+    project.next_item_id = 100;
+    project.root_sequence_id = {2};
+    project.sequences = {take(Sequence::create(std::move(sequence)))};
+    return std::make_shared<const Project>(take(Project::create(std::move(project))));
+}
+
+std::shared_ptr<const CompileContextRegistry>
+nondefault_production_registry(const SchemaRegistry& schemas) {
+    CompileContextRegistry declared;
+    REQUIRE_FALSE(declare_chord_pattern_renderer(declared, schemas));
+    const auto* found =
+        declared.find({kChordPatternContentType, kChordPatternContentSchemaVersion});
+    REQUIRE(found != nullptr);
+    auto registration = *found;
+    registration.production.reproducibility = ReproducibilityClass::BestEffort;
+    auto result = std::make_shared<CompileContextRegistry>();
+    REQUIRE_FALSE(result->declare(std::move(registration), schemas));
+    return result;
 }
 
 /// Six automation lanes on one track. Six is not arbitrary: six lane records at
@@ -154,8 +194,8 @@ std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
     asset.sample_rate = {48'000, 1};
     asset.content_hash = *hash;
 
-    auto clip = take(Clip::create_absolute({21}, {0}, frames, {48'000, 1},
-                                           MediaRef{{60}, {0}, frames}));
+    auto clip =
+        take(Clip::create_absolute({21}, {0}, frames, {48'000, 1}, MediaRef{{60}, {0}, frames}));
     auto track = take(Track::create({12}, "audio", {std::move(clip)}));
     auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
                                           std::vector<Track>{std::move(track)}));
@@ -189,9 +229,11 @@ struct CompiledProgram {
     /// it: AutomationCursor refuses a program whose map is not the transport's,
     /// so a case that judges two separately-compiled programs with one cursor
     /// has to hand them one map or it never gets past TempoMapMismatch.
-    explicit CompiledProgram(std::shared_ptr<const Project> project,
-                             std::shared_ptr<const DecodedAudioAssetPool> assets = nullptr,
-                             std::shared_ptr<const CompiledTempoMap> tempo_map = nullptr) {
+    explicit CompiledProgram(
+        std::shared_ptr<const Project> project,
+        std::shared_ptr<const DecodedAudioAssetPool> assets = nullptr,
+        std::shared_ptr<const CompiledTempoMap> tempo_map = nullptr,
+        std::shared_ptr<const CompileContextRegistry> content_compilers = nullptr) {
         ProgramCompileRequest request;
         request.project = std::move(project);
         request.sequence_id = {2};
@@ -200,6 +242,7 @@ struct CompiledProgram {
         request.document_revision = 7;
         request.dirty = {.all = true};
         request.audio_assets = std::move(assets);
+        request.content_compilers = std::move(content_compilers);
         REQUIRE(compiler.submit(std::move(request)));
         while (compiler.status().busy)
             executor.run_for(std::chrono::seconds(1), 64);
@@ -271,8 +314,7 @@ struct EncodedFixture {
 };
 
 constexpr std::size_t kDirectoryAt = sizeof(ProgramWireHeader);
-constexpr std::size_t kPayloadAt =
-    kDirectoryAt + 9 * sizeof(ProgramWireSectionEntry);
+constexpr std::size_t kPayloadAt = kDirectoryAt + 9 * sizeof(ProgramWireSectionEntry);
 
 /// Rewrites the header's checksum over the current directory and payload, for
 /// tests that mean to corrupt a field rather than the checksum guarding it.
@@ -416,14 +458,12 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
 
     // The layout is derivable from the record sizes and the counts, so a size
     // that drifts is a layout change rather than a recorded accident.
-    const auto counted = kPayloadAt + sizeof(ProgramWireProgramRecord) +
-                         2 * sizeof(ProgramWireTempoPointRecord) +
-                         2 * sizeof(ProgramWireTrackRecord) + 1 * sizeof(ProgramWireIdRecord) +
-                         8 * sizeof(ProgramWireNoteEventRecord) +
-                         2 * sizeof(ProgramWireNoteModifierRecord) +
-                         2 * sizeof(ProgramWireIdRecord) +
-                         3 * sizeof(ProgramWireAutomationLaneRecord) +
-                         6 * sizeof(ProgramWireAutomationSegmentRecord);
+    const auto counted =
+        kPayloadAt + sizeof(ProgramWireProgramRecord) + 2 * sizeof(ProgramWireTempoPointRecord) +
+        2 * sizeof(ProgramWireTrackRecord) + 1 * sizeof(ProgramWireIdRecord) +
+        8 * sizeof(ProgramWireNoteEventRecord) + 2 * sizeof(ProgramWireNoteModifierRecord) +
+        2 * sizeof(ProgramWireIdRecord) + 3 * sizeof(ProgramWireAutomationLaneRecord) +
+        6 * sizeof(ProgramWireAutomationSegmentRecord);
     REQUIRE(fixture.size == counted);
 
     // The header's first bytes are asserted by hand rather than by digest, so
@@ -462,8 +502,8 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
     // exactly one encoding of one program, which is what makes the digest below
     // a guard rather than a record.
     WireBuffer again(fixture.size);
-    REQUIRE(take(encode_program_wire(*fixture.program, kTempoPoints, kEpoch,
-                                    again.span())) == fixture.size);
+    REQUIRE(take(encode_program_wire(*fixture.program, kTempoPoints, kEpoch, again.span())) ==
+            fixture.size);
     REQUIRE(std::memcmp(again.span().data(), bytes.data(), fixture.size) == 0);
 
     // A whole-payload digest for a fixed input. It moves only when the layout,
@@ -514,8 +554,7 @@ TEST_CASE("program wire rejects a malformed generation header", "[playback][wire
     fixture.corrupt(offsetof(ProgramWireHeader, body_checksum), std::uint64_t{0},
                     ProgramWireErrorCode::ChecksumMismatch);
     fixture.corrupt(offsetof(ProgramWireHeader, payload_bytes),
-                    static_cast<std::uint64_t>(fixture.size),
-                    ProgramWireErrorCode::ShortBuffer);
+                    static_cast<std::uint64_t>(fixture.size), ProgramWireErrorCode::ShortBuffer);
 
     // The writer's own version may run ahead of this reader, as long as the
     // writer states this reader can still read the bytes. That asymmetry is the
@@ -668,8 +707,8 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
     EncodedFixture fixture;
     const auto bytes = fixture.bytes();
 
-    const std::size_t track_section = kPayloadAt + sizeof(ProgramWireProgramRecord) +
-                                      2 * sizeof(ProgramWireTempoPointRecord);
+    const std::size_t track_section =
+        kPayloadAt + sizeof(ProgramWireProgramRecord) + 2 * sizeof(ProgramWireTempoPointRecord);
     const auto field = [&](std::size_t member) { return track_section + member; };
 
     const auto with_field = [&](std::size_t offset, auto replacement,
@@ -688,8 +727,8 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
 
     with_field(field(offsetof(ProgramWireTrackRecord, note_event_count)),
                std::uint32_t{0xFFFF'FFF0}, ProgramWireErrorCode::RangeOutOfBounds);
-    with_field(field(offsetof(ProgramWireTrackRecord, automation_lane_first)),
-               std::uint32_t{99}, ProgramWireErrorCode::RangeOutOfBounds);
+    with_field(field(offsetof(ProgramWireTrackRecord, automation_lane_first)), std::uint32_t{99},
+               ProgramWireErrorCode::RangeOutOfBounds);
     with_field(field(offsetof(ProgramWireTrackRecord, mixer_gain_lane)), std::uint32_t{7},
                ProgramWireErrorCode::RangeOutOfBounds);
     with_field(field(offsetof(ProgramWireTrackRecord, provider_selected)), std::uint8_t{9},
@@ -704,9 +743,9 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
     // the period the note renderer divides by, and the endpoints an automation
     // segment is interpolated between.
     const std::size_t modifier_section =
-        kPayloadAt + sizeof(ProgramWireProgramRecord) +
-        2 * sizeof(ProgramWireTempoPointRecord) + 2 * sizeof(ProgramWireTrackRecord) +
-        1 * sizeof(ProgramWireIdRecord) + 8 * sizeof(ProgramWireNoteEventRecord);
+        kPayloadAt + sizeof(ProgramWireProgramRecord) + 2 * sizeof(ProgramWireTempoPointRecord) +
+        2 * sizeof(ProgramWireTrackRecord) + 1 * sizeof(ProgramWireIdRecord) +
+        8 * sizeof(ProgramWireNoteEventRecord);
     with_field(modifier_section + offsetof(ProgramWireNoteModifierRecord, ratchet_count),
                std::uint16_t{0}, ProgramWireErrorCode::MalformedNoteModifier);
     // The second modifier is the conditional one, so zeroing its period is the
@@ -715,13 +754,11 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
                    offsetof(ProgramWireNoteModifierRecord, condition_period),
                std::uint16_t{0}, ProgramWireErrorCode::MalformedNoteModifier);
 
-    const std::size_t segment_section = modifier_section +
-                                        2 * sizeof(ProgramWireNoteModifierRecord) +
-                                        2 * sizeof(ProgramWireIdRecord) +
-                                        3 * sizeof(ProgramWireAutomationLaneRecord);
+    const std::size_t segment_section =
+        modifier_section + 2 * sizeof(ProgramWireNoteModifierRecord) +
+        2 * sizeof(ProgramWireIdRecord) + 3 * sizeof(ProgramWireAutomationLaneRecord);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, curvature),
-               std::numeric_limits<float>::quiet_NaN(),
-               ProgramWireErrorCode::MalformedSegment);
+               std::numeric_limits<float>::quiet_NaN(), ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_sample),
                std::int64_t{-1}, ProgramWireErrorCode::MalformedSegment);
 
@@ -753,6 +790,20 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == ProgramWireErrorCode::AudioProgramUnsupported);
     REQUIRE(refused.error().detail == 12);
+
+    const auto schemas = production_schemas();
+    CompiledProgram with_nondefault_production{nondefault_production_project(schemas), nullptr,
+                                               nullptr,
+                                               nondefault_production_registry(schemas)};
+    const auto nondefault = with_nondefault_production.store.read();
+    REQUIRE(nondefault->find_track({10}) != nullptr);
+    REQUIRE(nondefault->find_track({10})->arrangement_production().reproducibility ==
+            ReproducibilityClass::BestEffort);
+    auto production_refused = program_wire_encoded_size(*nondefault, kTempoPoints);
+    REQUIRE_FALSE(production_refused);
+    REQUIRE(production_refused.error().code ==
+            ProgramWireErrorCode::ProductionDeclarationUnsupported);
+    REQUIRE(production_refused.error().detail == 10);
     // And the refusal is the encoder's, not this fixture's: the same call on a
     // program without audio succeeds.
     REQUIRE(program_wire_encoded_size(*program, kTempoPoints));
@@ -774,8 +825,8 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     REQUIRE(cramped.error().detail == size);
 
     WireBuffer aligned(size + kProgramWireAlignment);
-    auto skewed = encode_program_wire(*program, kTempoPoints, kEpoch,
-                                      aligned.span().subspan(4, size));
+    auto skewed =
+        encode_program_wire(*program, kTempoPoints, kEpoch, aligned.span().subspan(4, size));
     REQUIRE_FALSE(skewed);
     REQUIRE(skewed.error().code == ProgramWireErrorCode::MisalignedBuffer);
 
@@ -790,8 +841,7 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     REQUIRE(misread.error().code == ProgramWireErrorCode::MisalignedBuffer);
 }
 
-TEST_CASE("program wire carries producer identity alongside the generation",
-          "[playback][wire]") {
+TEST_CASE("program wire carries producer identity alongside the generation", "[playback][wire]") {
     EncodedFixture fixture;
 
     // The defect this closes: `generation` is minted per store and restarts, so
@@ -837,8 +887,7 @@ TEST_CASE("program wire carries producer identity alongside the generation",
     // payload, so without re-sealing this would prove ChecksumMismatch fires
     // and never reach the epoch check at all.
     const auto bytes = fixture.bytes();
-    const std::size_t epoch_at =
-        kPayloadAt + offsetof(ProgramWireProgramRecord, producer_epoch);
+    const std::size_t epoch_at = kPayloadAt + offsetof(ProgramWireProgramRecord, producer_epoch);
     const std::uint64_t zero = 0;
     std::memcpy(bytes.data() + epoch_at, &zero, sizeof(zero));
     reseal(bytes);
@@ -904,8 +953,8 @@ TEST_CASE("program wire equality compares values rather than shared ownership",
     // And a real difference is seen: the equality walk is not vacuously true.
     WireBuffer swapped(fixture.size);
     std::memcpy(swapped.span().data(), fixture.bytes().data(), fixture.size);
-    const std::size_t track_section = kPayloadAt + sizeof(ProgramWireProgramRecord) +
-                                      2 * sizeof(ProgramWireTempoPointRecord);
+    const std::size_t track_section =
+        kPayloadAt + sizeof(ProgramWireProgramRecord) + 2 * sizeof(ProgramWireTempoPointRecord);
     const std::uint64_t renamed = 999;
     std::memcpy(swapped.span().data() + track_section + offsetof(ProgramWireTrackRecord, id),
                 &renamed, sizeof(renamed));
