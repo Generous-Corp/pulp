@@ -31,10 +31,11 @@ python3 .agents/skills/pulp-vellum-change-routing/scripts/route_change.py \
 ```
 
 The temporary private delivery repository `danielraffel/vellum` resolves to the
-permanent `Generous-Corp/vellum` owner. An exact route wins. An unlisted Pulp
-path remains Pulp-owned; an unlisted Vellum path remains Vellum-owned. A result
-with both owners is `coordinated`, not permission to copy either repository's
-product-specific code into the other.
+permanent `Generous-Corp/vellum` owner. An exact route wins. Without an exact
+route, an initial-cut path already transferred to Vellum remains Vellum-owned;
+other unlisted Pulp paths remain Pulp-owned, and unlisted Vellum paths remain
+Vellum-owned. A result with both owners is `coordinated`, not permission to copy
+either repository's product-specific code into the other.
 
 ## Fail closed
 
@@ -55,6 +56,8 @@ python3 .agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py \
   validate --projection .github/vellum-ownership.json --require-expansion
 ```
 
-The push-to-main workflow `.github/workflows/vellum-routing-contract.yml` emits
-the digest-bound `pulp-vellum-routing-contract-execution` artifact. That receipt
-is evidence for Vellum's release verifier; do not hand-author or replay it.
+Only the push-to-main path of `.github/workflows/vellum-routing-contract.yml`
+emits the digest-bound `pulp-vellum-routing-contract-execution` artifact. Pull
+requests and manual dispatches validate the contract without publishing release
+evidence. That receipt is evidence for Vellum's release verifier; do not
+hand-author or replay it.

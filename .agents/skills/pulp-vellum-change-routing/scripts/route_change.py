@@ -36,11 +36,13 @@ def _split_change(value: str) -> tuple[str, str]:
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        _projection, expansion = load_projection(args.projection, require_expansion=True)
+        projection, expansion = load_projection(args.projection, require_expansion=True)
         assert expansion is not None
         changes = [(args.repository, path) for path in args.paths]
         changes.extend(_split_change(value) for value in args.change)
-        result = route_changes(expansion, changes, claimed_owner=args.claimed_owner)
+        result = route_changes(
+            projection, expansion, changes, claimed_owner=args.claimed_owner
+        )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
         else:

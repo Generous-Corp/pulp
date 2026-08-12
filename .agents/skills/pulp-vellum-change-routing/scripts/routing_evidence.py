@@ -223,7 +223,32 @@ def load_projection(path: Path, *, require_expansion: bool = True) -> tuple[dict
     return projection, expansion
 
 
+def _transferred_pulp_paths(projection: dict[str, Any]) -> set[str]:
+    transferred: set[str] = set()
+    for index, item in enumerate(projection["slices"]):
+        row = _strict_keys(
+            item,
+            {"id", "state", "paths", "authority"},
+            f"ownership projection slices[{index}]",
+        )
+        if row.get("state") != "framework-authoritative-transferred":
+            continue
+        paths = row.get("paths")
+        if not isinstance(paths, list) or paths != sorted(set(paths)):
+            raise RoutingError("transferred ownership paths must be a sorted unique array")
+        for path_index, path_value in enumerate(paths):
+            path = _exact_path(
+                path_value,
+                f"ownership projection slices[{index}].paths[{path_index}]",
+            )
+            if path in transferred:
+                raise RoutingError("transferred ownership paths must be globally unique")
+            transferred.add(path)
+    return transferred
+
+
 def route_changes(
+    projection: dict[str, Any],
     expansion: dict[str, Any],
     changes: Iterable[tuple[str, str]],
     *,
@@ -231,12 +256,26 @@ def route_changes(
 ) -> dict[str, Any]:
     routes = expansion["routes"]
     index = {(row["repository"], row["path"]): row for row in routes}
+    transferred_pulp_paths = _transferred_pulp_paths(projection)
     results: list[dict[str, Any]] = []
     for change_index, (repository, path_value) in enumerate(changes):
         canonical_repository = _canonical_repository(repository)
         path = _exact_path(path_value, f"changes[{change_index}].path")
         exact = index.get((canonical_repository, path))
-        owner = exact["owner"] if exact is not None else canonical_repository
+        initial_transfer = (
+            exact is None
+            and canonical_repository == PULP_REPOSITORY
+            and path in transferred_pulp_paths
+        )
+        if exact is not None:
+            owner = exact["owner"]
+            route_kind = "exact"
+        elif initial_transfer:
+            owner = VELLUM_REPOSITORY
+            route_kind = "initial-cut-transfer"
+        else:
+            owner = canonical_repository
+            route_kind = "repository-default"
         if claimed_owner is not None and _canonical_repository(claimed_owner) != owner:
             raise RoutingError(
                 f"claimed owner {claimed_owner} conflicts with routed owner {owner} for {path}"
@@ -246,7 +285,7 @@ def route_changes(
                 "repository": repository,
                 "path": path,
                 "owner": owner,
-                "route_kind": "exact" if exact is not None else "repository-default",
+                "route_kind": route_kind,
                 "cell_roles": exact["cell_roles"] if exact is not None else [],
             }
         )

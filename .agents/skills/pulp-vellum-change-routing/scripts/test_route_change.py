@@ -36,6 +36,7 @@ ROOT = SCRIPTS.parents[3]
 WORKFLOW = ROOT / ".github/workflows/vellum-routing-contract.yml"
 PULP_EXACT_PATH = "tools/scripts/package_cli.py"
 VELLUM_EXACT_PATH = "cli/vellum"
+TRANSFERRED_PULP_PATH = "core/canvas/src/skia_canvas.cpp"
 
 
 def fixture_projection() -> dict:
@@ -65,7 +66,14 @@ def fixture_projection() -> dict:
         "framework_repository": VELLUM_REPOSITORY,
         "freeze_owner": "@danielraffel",
         "activation": {"state": "active"},
-        "slices": [],
+        "slices": [
+            {
+                "id": "canvas-kernel",
+                "state": "framework-authoritative-transferred",
+                "paths": [TRANSFERRED_PULP_PATH],
+                "authority": {},
+            }
+        ],
         "expansions": [
             {
                 "id": EXPANSION_ID,
@@ -138,6 +146,11 @@ def case_cli_contract() -> None:
         "retention-days: 90",
     ):
         assert required in workflow, f"workflow contract is missing {required!r}"
+    trusted_receipt_condition = (
+        "if: steps.projection.outputs.has_expansion == 'true' && "
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    )
+    assert workflow.count(trusted_receipt_condition) == 2
 
 
 def case_conflicting_owner_fail_closed() -> None:
@@ -159,14 +172,23 @@ def case_exact_projection_expansion() -> None:
 
 
 def case_generic_pulp_route() -> None:
-    result = route_changes(expansion(), [(PULP_REPOSITORY, "docs/reference/cli.md")])
+    projection = fixture_projection()
+    result = route_changes(
+        projection, expansion(), [(PULP_REPOSITORY, "docs/reference/cli.md")]
+    )
     assert result["decision"] == "single-owner"
     assert result["changes"][0]["owner"] == PULP_REPOSITORY
     assert result["changes"][0]["route_kind"] == "repository-default"
+    transferred = route_changes(
+        projection, expansion(), [(PULP_REPOSITORY, TRANSFERRED_PULP_PATH)]
+    )
+    assert transferred["changes"][0]["owner"] == VELLUM_REPOSITORY
+    assert transferred["changes"][0]["route_kind"] == "initial-cut-transfer"
 
 
 def case_mixed_multi_path_route() -> None:
     result = route_changes(
+        fixture_projection(),
         expansion(),
         [
             (PULP_REPOSITORY, PULP_EXACT_PATH),
@@ -179,7 +201,9 @@ def case_mixed_multi_path_route() -> None:
 
 
 def case_pulp_specific_route() -> None:
-    result = route_changes(expansion(), [(PULP_REPOSITORY, PULP_EXACT_PATH)])
+    result = route_changes(
+        fixture_projection(), expansion(), [(PULP_REPOSITORY, PULP_EXACT_PATH)]
+    )
     row = result["changes"][0]
     assert row["owner"] == PULP_REPOSITORY
     assert row["cell_roles"] == [
@@ -189,7 +213,9 @@ def case_pulp_specific_route() -> None:
 
 def case_vellum_generic_route() -> None:
     result = route_changes(
-        expansion(), [(VELLUM_REPOSITORY, "docs/reference/public-api.md")]
+        fixture_projection(),
+        expansion(),
+        [(VELLUM_REPOSITORY, "docs/reference/public-api.md")],
     )
     assert result["changes"][0]["owner"] == VELLUM_REPOSITORY
     assert result["changes"][0]["route_kind"] == "repository-default"
