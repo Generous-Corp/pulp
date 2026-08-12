@@ -1006,6 +1006,10 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             run_block,
         )
         self.assertIn(
+            'selected["control_standalone_host_floor"] = authoritative[',
+            run_block,
+        )
+        self.assertIn(
             'for key, value in authoritative["platform_library_stems"].items()',
             run_block,
         )
@@ -1015,6 +1019,11 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             run_block,
         )
         self.assertNotIn("selected = authoritative", run_block)
+        self.assertIn(
+            '"${matrix_ref}:inspect/include/pulp/inspect/control_registry_digest.inc"',
+            run_block,
+        )
+        self.assertIn('--control-registry-digest "$control_registry_digest"', run_block)
         self.assertIn('--matrix "$publication_matrix"', run_block)
         self.assertNotIn('--matrix "$matrix"', run_block)
 

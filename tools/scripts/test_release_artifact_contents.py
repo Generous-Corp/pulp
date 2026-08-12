@@ -847,6 +847,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             with self.assertRaisesRegex(rac.ContentError, "manifest contract"):
                 rac.verify_cli_archive(path, "darwin-arm64", VERSION)
 
+    def test_selected_source_registry_digest_overrides_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "manifest contract"):
+                rac.verify_cli_archive(
+                    path,
+                    "darwin-arm64",
+                    VERSION,
+                    rac.DEFAULT_MATRIX,
+                    "0" * 64,
+                )
+
     def test_negative_control_rejects_tampered_standalone_host_binding(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

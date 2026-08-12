@@ -11,7 +11,7 @@
   "rationale": "Record the standalone control-host release artifact matrix and packaging correction without transferring implementation authority.",
   "tests": [
     "python3 tools/scripts/test_package_cli.py (24 tests)",
-    "python3 tools/scripts/test_release_artifact_contents.py (45 tests; relocated verifier, canonical manifest, stale manifest, and host-binding tamper coverage)",
+    "python3 tools/scripts/test_release_artifact_contents.py (46 tests; selected-source digest, relocated verifier, canonical manifest, stale manifest, and host-binding tamper coverage)",
     "python3 tools/scripts/test_release_workflow_test_step.py (85 tests)",
     "cargo test --manifest-path experimental/pulp-rs/Cargo.toml --lib install::tests (current-floor closure rejection and pre-floor broker-only compatibility)",
     "vellum-expansion-watch"

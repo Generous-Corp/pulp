@@ -567,7 +567,10 @@ def _canonical_standalone_manifest(document: dict[str, object]) -> bytes:
 
 
 def verify_control_standalone_host(
-    archive: Archive, host_member: str, manifest_member: str
+    archive: Archive,
+    host_member: str,
+    manifest_member: str,
+    expected_registry_digest: str | None = None,
 ) -> None:
     manifest_bytes = archive.read(manifest_member, limit=64 * 1024)
     try:
@@ -594,7 +597,7 @@ def verify_control_standalone_host(
         "target": "pulp-control-standalone-host",
         "product_name": "Pulp Control Standalone Host",
         "bundle_id": "dev.pulp.control-standalone-host",
-        "registry_digest": _control_registry_digest(),
+        "registry_digest": expected_registry_digest or _control_registry_digest(),
         "endpoint_included": True,
         "unsafe_runtime_eval_acknowledged": False,
         "permission_terms": list(CONTROL_MANIFEST_PERMISSION_TERMS),
@@ -640,6 +643,7 @@ def verify_cli_archive(
     platform: str,
     version: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     with Archive(path) as archive:
         expected = cli_members(platform, matrix, version)
@@ -662,6 +666,7 @@ def verify_cli_archive(
                 archive,
                 CONTROL_STANDALONE_HOST_CLI_MEMBER,
                 CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+                expected_registry_digest,
             )
 
 
@@ -671,6 +676,7 @@ def verify_sdk_archive(
     version: str,
     source_sha: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     with Archive(path) as archive:
         names = set(archive.members)
@@ -820,6 +826,7 @@ def verify_sdk_archive(
                 archive,
                 CONTROL_STANDALONE_HOST_SDK_MEMBER,
                 CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+                expected_registry_digest,
             )
 
         if not platform.startswith("darwin-"):
@@ -881,6 +888,7 @@ def verify_platform(
     *,
     native_signatures: bool,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     if platform not in matrix.platforms:
         raise ContentError(f"unsupported release platform: {platform}")
@@ -889,8 +897,10 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform, version, matrix)
-    verify_sdk_archive(sdk, platform, version, source_sha, matrix)
+    verify_cli_archive(cli, platform, version, matrix, expected_registry_digest)
+    verify_sdk_archive(
+        sdk, platform, version, source_sha, matrix, expected_registry_digest
+    )
     if native_signatures:
         verify_native_macos_signatures(asset_dir, platform, version, matrix)
 
@@ -906,6 +916,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-sha", required=True, help="Exact 40-character release-tag commit"
     )
     parser.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX_PATH)
+    parser.add_argument(
+        "--control-registry-digest",
+        help="Frozen registry digest from the exact source ref that built the release",
+    )
     parser.add_argument("--native-signatures", action="store_true")
     return parser
 
@@ -930,6 +944,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.source_sha,
                 native_signatures=args.native_signatures,
                 matrix=matrix,
+                expected_registry_digest=args.control_registry_digest,
             )
             print(f"OK: {platform} release archives match the product matrix")
     except (ContentError, OSError, UnicodeError) as exc:

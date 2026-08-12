@@ -1819,10 +1819,24 @@ jobs:
               encoding="utf-8",
           )
           PY
+          control_registry_args=()
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' \
+              "${TAG#v}" \
+              "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["control_standalone_host_floor"])' "$publication_matrix")"; then
+            control_registry_digest="$(git show \
+              "${matrix_ref}:inspect/include/pulp/inspect/control_registry_digest.inc" \
+              | python3 -c 'import re,sys; text=sys.stdin.read(); match=re.search(r"[0-9a-f]{64}", text); print(match.group(0) if match else "")')"
+            if [[ ! "$control_registry_digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::selected release source has no valid frozen control registry digest"
+              exit 1
+            fi
+            control_registry_args+=(--control-registry-digest "$control_registry_digest")
+          fi
           python3 tools/scripts/release_artifact_contents.py release-assets \
             --all-platforms --version "${TAG#v}" \
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
-            --matrix "$publication_matrix"
+            --matrix "$publication_matrix" \
+            "${control_registry_args[@]}"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do
