@@ -53,7 +53,7 @@ void print_usage() {
     std::cout << "                    evaluates HTML; private/local and WebSocket access stays blocked\n";
     std::cout << "  --browser <path>  Chromium/Chrome executable for browser-solved HTML import\n";
     std::cout << "  --browser-interactions <json>\n";
-    std::cout << "                    Apply a versioned bounded click/type/wait plan before capture\n";
+    std::cout << "                    Apply a versioned bounded click/context-click/type/wait plan before capture\n";
     std::cout << "                    Typed text may appear in capture evidence; never type secrets\n";
     std::cout << "  --materialized-canvas-composition\n";
     std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";

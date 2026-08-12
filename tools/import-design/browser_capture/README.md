@@ -31,8 +31,9 @@ Successful output is:
 
 `--interactions <plan.json>` optionally reaches one deterministic secondary
 state before the same-frame evidence capture. Plans use
-`pulp-browser-interactions-v1` and contain only bounded `click`, `type`,
-`wait-for`, and `wait-ms` actions. The helper records selectors and typed-text
+`pulp-browser-interactions-v1` and contain only bounded `click`,
+`context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
+uses a real secondary-button press/release. The helper records selectors and typed-text
 length in `interaction-report.json`; it persists neither typed plaintext nor a
 per-action text hash. The published plan identity hashes a canonical redacted
 plan in which typed text is replaced by its length, so short private values

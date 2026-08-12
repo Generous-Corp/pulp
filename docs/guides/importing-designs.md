@@ -132,8 +132,9 @@ pulp import-design --file prototype.html \
   --browser-interactions patch-composer.json
 ```
 
-The `pulp-browser-interactions-v1` JSON plan supports `click`, `type`,
-`wait-for`, and `wait-ms`. Prefer `wait-for` with a visible selector after a
+The `pulp-browser-interactions-v1` JSON plan supports `click`, `context-click`,
+`type`, `wait-for`, and `wait-ms`. Use `context-click` for a real secondary-
+button context-menu gesture. Prefer `wait-for` with a visible selector after a
 click; strings in hidden or inert DOM are not proof that a screen rendered.
 Each completed action is recorded in `interaction-report.json`; typed text is
 represented only by its length, without plaintext or a per-action text hash.

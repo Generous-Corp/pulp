@@ -1045,8 +1045,8 @@ bool validate_interaction_report(
         const auto action = actions[static_cast<int>(index)];
         const auto name = string_member(action, "action");
         const bool allowed =
-            name == "click" || name == "type" || name == "wait-for" ||
-            name == "wait-ms";
+            name == "click" || name == "context-click" || name == "type" ||
+            name == "wait-for" || name == "wait-ms";
         if (!action.isObject() || !allowed ||
             string_member(action, "status") != "completed" ||
             action.hasObjectMember("text") ||

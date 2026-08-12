@@ -298,16 +298,17 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
           return result?.state === "hidden" || result?.state === "detached";
         },
         wait);
-    } else if (action.action === "click") {
+    } else if (action.action === "click" || action.action === "context-click") {
       const target = await probeUntil(
         cdp, action, index, "click", (result) => result?.ok === true, wait);
+      const button = action.action === "context-click" ? "right" : "left";
       await cdp.call("Input.dispatchMouseEvent", {
         type: "mousePressed", x: target.x, y: target.y,
-        button: "left", buttons: 1, clickCount: 1,
+        button, buttons: action.action === "context-click" ? 2 : 1, clickCount: 1,
       });
       await cdp.call("Input.dispatchMouseEvent", {
         type: "mouseReleased", x: target.x, y: target.y,
-        button: "left", buttons: 0, clickCount: 1,
+        button, buttons: 0, clickCount: 1,
       });
       await settle();
     } else if (action.action === "type") {

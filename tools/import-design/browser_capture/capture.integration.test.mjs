@@ -568,6 +568,69 @@ test("real browser clicks pass decorative overlays and use exposed target points
     }
   });
 
+test("real browser context-click captures the rendered context menu",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-context-click-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html,body { margin:0;width:160px;height:120px;overflow:hidden;background:#101820 }
+  #band { position:absolute;left:20px;top:20px;width:40px;height:80px;background:#2be1ff }
+  #menu { display:none;position:absolute;left:70px;top:30px;width:70px;height:50px;background:rgb(210,40,80) }
+</style>
+<div id="band"></div><div id="menu">MENU</div>
+<script>
+  document.getElementById('band').addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    document.getElementById('menu').style.display = 'block';
+  });
+</script>
+`);
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [
+          { action: "context-click", selector: "#band" },
+          { action: "wait-for", selector: "#menu", state: "visible" },
+        ],
+      }));
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 200, 100);
+      assert.ok(red > 190 && green < 60 && blue > 60 && alpha > 240);
+      const report = JSON.parse(
+        await readFile(path.join(output, "interaction-report.json"), "utf8"));
+      assert.deepEqual(report.actions.map(({ action }) => action),
+        ["context-click", "wait-for"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser wait-for visible rejects invisible ancestors and overlays",
   { timeout: 30000 }, async (context) => {
     const browser = await installedBrowser();

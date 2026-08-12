@@ -3764,8 +3764,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
 - If the requested screen is not the landing state, pass
   `--browser-interactions <plan.json>`. The
-  `pulp-browser-interactions-v1` plan accepts only bounded `click`, `type`,
-  `wait-for`, and `wait-ms` actions. End navigation sequences with
+  `pulp-browser-interactions-v1` plan accepts only bounded `click`,
+  `context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
+  uses a real secondary-button gesture. End navigation sequences with
   `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
   script source do not prove which screen rendered. Capture records action
   results and typed-text length without retaining the text or a per-action

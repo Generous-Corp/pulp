@@ -13,6 +13,7 @@ export const MAX_TOTAL_WAIT_MS = 30_000;
 
 const ACTION_FIELDS = {
   click: new Set(["action", "selector", "timeout_ms"]),
+  "context-click": new Set(["action", "selector", "timeout_ms"]),
   type: new Set(["action", "selector", "text", "timeout_ms"]),
   "wait-for": new Set(["action", "selector", "state", "timeout_ms"]),
   "wait-ms": new Set(["action", "milliseconds"]),
@@ -100,7 +101,7 @@ export function parseInteractionPlan(raw) {
     plainObject(candidate, label);
     const allowed = ACTION_FIELDS[candidate.action];
     if (!allowed) {
-      fail(`${label}.action must be click, type, wait-for, or wait-ms`);
+      fail(`${label}.action must be click, context-click, type, wait-for, or wait-ms`);
     }
     exactFields(candidate, allowed, label);
 
