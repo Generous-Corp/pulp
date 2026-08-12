@@ -12,6 +12,10 @@
 
 namespace pulp::inspect {
 
+namespace detail {
+struct ControlInstalledHostTestAccess;
+}
+
 class MotionInspector;
 class MotionScrubber;
 
@@ -84,6 +88,9 @@ class ControlInstalledHost {
   private:
     struct State;
     explicit ControlInstalledHost(std::shared_ptr<State> state);
+    static std::unique_ptr<ControlInstalledHost>
+    finish_start(std::shared_ptr<State> state, void (*before_owner_construction)());
+    friend struct detail::ControlInstalledHostTestAccess;
     std::shared_ptr<State> state_;
 };
 

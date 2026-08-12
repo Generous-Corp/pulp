@@ -269,6 +269,13 @@ if(TARGET pulp::inspect)
             COMMENT "Ad-hoc signing installed host closure E2E fixture"
             VERBATIM)
     endif()
+
+    add_executable(pulp-test-control-installed-host-lifecycle
+        test_control_installed_host_lifecycle.cpp)
+    target_link_libraries(pulp-test-control-installed-host-lifecycle PRIVATE
+        pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-control-installed-host-lifecycle
+        PROPERTIES LABELS "inspect;control;host;lifecycle")
 endif()
 
 add_executable(pulp-test-control-host-router test_control_host_router.cpp)
