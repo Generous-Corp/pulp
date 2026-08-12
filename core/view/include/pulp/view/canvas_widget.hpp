@@ -10,10 +10,39 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace pulp::view {
+
+/// Per-paint metadata for native, retained CanvasWidget content.
+struct NativeCanvasPaintContext {
+    canvas::Canvas& canvas;
+    Rect local_bounds;
+    float backing_scale = 1.0f;
+    std::uint64_t frame_id = 0;
+    canvas::RendererBackend backend = canvas::RendererBackend::unknown;
+};
+
+/// Retained native painter installed on a CanvasWidget.
+///
+/// Ownership is shared deliberately: CanvasWidget takes a strong snapshot at
+/// paint entry, so replacing/resetting the painter from a callback cannot
+/// destroy the object while its paint method is on the stack.
+class NativeCanvasPainter {
+public:
+    virtual ~NativeCanvasPainter() = default;
+    virtual void paint(const NativeCanvasPaintContext& context) = 0;
+};
+
+enum class NativeCanvasBackendRequirement {
+    any,
+    /// Production paints require Graphite-on-Dawn; RecordingCanvas remains
+    /// accepted so deterministic command fixtures can exercise the painter.
+    skia_dawn_allow_recording,
+    skia_dawn,
+};
 
 /// A draw command recorded from JS for replay in paint().
 /// Maps to CanvasRenderingContext2D methods.
@@ -170,6 +199,7 @@ struct CanvasDrawCmd {
 /// renders them each frame. Hot-reloadable — JS rebuilds commands on reload.
 class CanvasWidget : public View {
 public:
+    enum class ContentMode { recorded_commands, native_painter };
     struct NativeGpuTextureFrame {
         void* texture_handle = nullptr;
         uint32_t width = 0;
@@ -180,6 +210,30 @@ public:
     using NativeGpuTextureProvider = std::function<NativeGpuTextureFrame()>;
 
     CanvasWidget() = default;
+
+    void set_native_painter(
+        std::shared_ptr<NativeCanvasPainter> painter,
+        NativeCanvasBackendRequirement requirement =
+            NativeCanvasBackendRequirement::any) {
+        native_painter_ = std::move(painter);
+        native_backend_requirement_ = requirement;
+        content_mode_ = native_painter_ ? ContentMode::native_painter
+                                        : ContentMode::recorded_commands;
+        request_repaint();
+    }
+    void reset_native_painter() {
+        native_painter_.reset();
+        native_backend_requirement_ = NativeCanvasBackendRequirement::any;
+        content_mode_ = ContentMode::recorded_commands;
+        request_repaint();
+    }
+    ContentMode content_mode() const noexcept { return content_mode_; }
+    bool last_native_paint_succeeded() const noexcept {
+        return last_native_paint_succeeded_;
+    }
+    canvas::RendererBackend last_native_paint_backend() const noexcept {
+        return last_native_paint_backend_;
+    }
 
     void clear_commands() { commands_.clear(); }
     /// NaN / ±Infinity defense at the recording
@@ -252,6 +306,14 @@ private:
     }
 
     std::vector<CanvasDrawCmd> commands_;
+    std::shared_ptr<NativeCanvasPainter> native_painter_;
+    NativeCanvasBackendRequirement native_backend_requirement_ =
+        NativeCanvasBackendRequirement::any;
+    ContentMode content_mode_ = ContentMode::recorded_commands;
+    std::uint64_t native_frame_id_ = 0;
+    bool last_native_paint_succeeded_ = false;
+    canvas::RendererBackend last_native_paint_backend_ =
+        canvas::RendererBackend::unknown;
     NativeGpuTextureProvider native_gpu_texture_provider_;
     bool last_native_gpu_texture_draw_succeeded_ = false;
     // Curated named GPU post-effect state (see set_shader_effect). Sticky

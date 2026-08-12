@@ -26,6 +26,21 @@ inline bool canvas_paint_logging_enabled() {
     return true;
 }
 
+inline bool backend_satisfies(
+    NativeCanvasBackendRequirement requirement,
+    canvas::RendererBackend backend) noexcept {
+    switch (requirement) {
+        case NativeCanvasBackendRequirement::any:
+            return true;
+        case NativeCanvasBackendRequirement::skia_dawn_allow_recording:
+            return backend == canvas::RendererBackend::skia_dawn ||
+                   backend == canvas::RendererBackend::recording;
+        case NativeCanvasBackendRequirement::skia_dawn:
+            return backend == canvas::RendererBackend::skia_dawn;
+    }
+    return false;
+}
+
 // Translate CanvasDrawCmd::Type to a stable, grep-able
 // short string so the env-gated trace can summarise commands_ without dragging
 // a heavyweight reflection helper into the hot path. Names mirror the enum
@@ -151,6 +166,8 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // onto the parent View transform rather than overwriting it.
     canvas.capture_paint_baseline_transform();
     last_native_gpu_texture_draw_succeeded_ = false;
+    last_native_paint_succeeded_ = false;
+    last_native_paint_backend_ = canvas.renderer_backend();
 
     // Defend against unbalanced JS save/restore. If the
     // draw script reaches an early-return path that skips a matching
@@ -229,6 +246,37 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         }
     }
 #endif
+
+    // Native content is a distinct retained mode, not an extra overlay on the
+    // recorded Canvas2D stream. Take a strong snapshot so a painter may safely
+    // replace/reset itself from inside paint without invalidating the active
+    // call. The renderer identity comes from Canvas and is checked before any
+    // application drawing, providing a fail-closed Graphite/Dawn contract.
+    if (content_mode_ == ContentMode::native_painter) {
+        auto painter = native_painter_;
+        const auto backend = canvas.renderer_backend();
+        if (painter && backend_satisfies(native_backend_requirement_, backend)) {
+            // Establish a widget-local clip and an independently balanced
+            // state scope. restore_to_count cleans up extra saves left by a
+            // painter; callers must not restore below the scope they receive.
+            const int painter_depth = canvas.save_count();
+            canvas.save();
+            canvas.clip_rect(0.0f, 0.0f, widget_bounds.width,
+                             widget_bounds.height);
+            NativeCanvasPaintContext context{
+                canvas,
+                {0.0f, 0.0f, widget_bounds.width, widget_bounds.height},
+                canvas.backing_scale(),
+                native_frame_id_++,
+                backend,
+            };
+            painter->paint(context);
+            canvas.restore_to_count(painter_depth);
+            last_native_paint_succeeded_ = true;
+        }
+        canvas.restore_to_count(saved_depth);
+        return;
+    }
 
     for (auto& cmd : commands_) {
         switch (cmd.type) {

@@ -186,6 +186,9 @@ struct DrawCommand {
 
 class RecordingCanvas : public Canvas {
 public:
+    RendererBackend renderer_backend() const noexcept override {
+        return RendererBackend::recording;
+    }
     const std::vector<DrawCommand>& commands() const { return commands_; }
     void clear() { commands_.clear(); }
     size_t command_count() const { return commands_.size(); }

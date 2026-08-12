@@ -12,6 +12,16 @@ pulp_add_test_suite(pulp-test-view-geometry LIBRARIES pulp::view)
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 
+# Retained native CanvasWidget content: safe painter ownership/replacement,
+# balanced local paint scope, renderer metadata, and Graphite/Dawn fail-closed
+# policy with an explicit RecordingCanvas test allowance.
+pulp_add_test_suite(pulp-test-native-canvas-painter
+    LIBRARIES pulp::view pulp::render)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-native-canvas-painter PRIVATE
+        PULP_HAS_SKIA=1)
+endif()
+
 # CanvasWidget NaN/Infinity sanitization cluster.
 # Pins that JS-supplied NaN / ±Inf coords land as 0 in the recorded
 # draw command, while finite values pass through.

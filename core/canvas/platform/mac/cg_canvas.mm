@@ -18,6 +18,14 @@
 
 namespace pulp::canvas {
 
+float CoreGraphicsCanvas::backing_scale() const noexcept {
+    const auto m = current_transform();
+    const float sx = std::hypot(m.a, m.b);
+    const float sy = std::hypot(m.c, m.d);
+    const float scale = std::max(sx, sy);
+    return std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
+}
+
 CoreGraphicsCanvas::CoreGraphicsCanvas(CGContextRef ctx, float width, float height)
     : ctx_(ctx), width_(width), height_(height) {
     // Flip coordinate system (CG is bottom-up, we use top-down)
