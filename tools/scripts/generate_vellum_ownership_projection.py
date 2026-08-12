@@ -441,17 +441,29 @@ def verify_projection(
     expected_projection: dict[str, object] | None = None,
 ) -> None:
     projection = normalize_prepared_v1(projection)
+    comparison_projection = projection
+    if projection.get("schema_version") == 3:
+        if set(projection) != {
+            "schema_version", "framework_repository", "freeze_owner", "activation",
+            "slices", "expansions",
+        }:
+            raise ProjectionError("schema-v3 ownership projection has unknown fields")
+        if not isinstance(projection.get("expansions"), list) or not projection["expansions"]:
+            raise ProjectionError("schema-v3 ownership projection lacks exact-route expansions")
+        comparison_projection = json.loads(json.dumps(projection))
+        comparison_projection.pop("expansions")
+        comparison_projection["schema_version"] = 2
     expected = expected_projection
     if expected is None:
         expected = build_projection(manifest)
-        activation = projection.get("activation")
+        activation = comparison_projection.get("activation")
         if isinstance(activation, dict) and activation.get("state") == "active":
             event_id = activation.get("initial_transition_event")
             if not isinstance(event_id, str) or not EVENT_ID_RE.fullmatch(event_id):
                 raise ProjectionError("active projection lacks a valid initial transition event")
             event_path = repo / EVENT_DIRECTORY / f"{event_id}.json"
             expected = activate_projection(expected, load_activation_event(event_path))
-    if projection != expected:
+    if comparison_projection != expected:
         raise ProjectionError("ownership projection is stale; regenerate it from the cut manifest")
 
     manifest_paths = {

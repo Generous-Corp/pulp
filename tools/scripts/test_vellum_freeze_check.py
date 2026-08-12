@@ -60,6 +60,39 @@ def mapping(state: str = "active", slice_state: str = "framework-authoritative-t
     }
 
 
+def schema3_mapping():
+    value = mapping()
+    routing = freeze._routing_evidence_module()
+    routes = [
+        {
+            "repository": routing.PULP_REPOSITORY,
+            "path": "tools/scripts/package_cli.py",
+            "owner": routing.PULP_REPOSITORY,
+            "cell_roles": [
+                {
+                    "cell_id": "output.cli-and-immutable-runtime-assets",
+                    "role": "pulp_implementation",
+                }
+            ],
+        }
+    ]
+    value["schema_version"] = 3
+    value["expansions"] = [
+        {
+            "id": routing.EXPANSION_ID,
+            "state": "accepted-pending-vellum-acknowledgement",
+            "accepted_at": "2026-08-12T00:00:00Z",
+            "accepted_by": "@danielraffel",
+            "amendment_id": routing.AMENDMENT_ID,
+            "matrix_id": routing.MATRIX_ID,
+            "matrix_sha256": routing.MATRIX_SHA256,
+            "route_set_sha256": routing.canonical_sha256(routes),
+            "routes": routes,
+        }
+    ]
+    return value
+
+
 def change_event(event_id: str = "20260722-design-fix"):
     return {
         "schema_version": 1,
@@ -235,6 +268,37 @@ class FreezeUnitTests(unittest.TestCase):
         head["activation"]["vellum_authority_commit"] = "c" * 40
         with self.assertRaisesRegex(freeze.FreezeError, "immutable"):
             freeze.validate_map_transition(base, head)
+
+    def test_schema_v3_adds_only_a_valid_exact_route_expansion(self):
+        base = mapping()
+        head = schema3_mapping()
+        freeze.validate_map(head)
+        self.assertEqual(freeze.validate_map_transition(base, head), set())
+
+        changed_slice = json.loads(json.dumps(head))
+        changed_slice["slices"][0]["paths"].append("core/view/src/other.cpp")
+        with self.assertRaisesRegex(freeze.FreezeError, "cannot change initial-cut slices"):
+            freeze.validate_map_transition(base, changed_slice)
+
+    def test_schema_v3_expansion_is_immutable_and_cannot_downgrade(self):
+        base = schema3_mapping()
+        changed = json.loads(json.dumps(base))
+        changed["expansions"][0]["accepted_at"] = "2026-08-12T00:00:01Z"
+        with self.assertRaisesRegex(freeze.FreezeError, "immutable"):
+            freeze.validate_map_transition(base, changed)
+
+        downgraded = mapping()
+        with self.assertRaisesRegex(freeze.FreezeError, "cannot move backward"):
+            freeze.validate_map_transition(base, downgraded)
+
+    def test_schema_v3_rejects_conflicting_route_owner(self):
+        value = schema3_mapping()
+        value["expansions"][0]["routes"][0]["owner"] = "Generous-Corp/vellum"
+        value["expansions"][0]["route_set_sha256"] = freeze._routing_evidence_module().canonical_sha256(
+            value["expansions"][0]["routes"]
+        )
+        with self.assertRaisesRegex(freeze.FreezeError, "conflicts"):
+            freeze.validate_map(value)
 
     def test_transferred_slice_cannot_be_removed(self):
         base = mapping()

@@ -1,0 +1,66 @@
+name: Vellum routing contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.agents/skills/pulp-vellum-change-routing/**'
+      - '.github/vellum-ownership.json'
+      - '.github/workflows/vellum-routing-contract.yml'
+      - 'tools/scripts/generate_vellum_ownership_projection.py'
+      - 'tools/scripts/vellum_freeze_check.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  routing-contract:
+    name: vellum-routing-contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact Pulp source tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Execute the closed router contract suite
+        run: |
+          python3 .agents/skills/pulp-vellum-change-routing/scripts/test_route_change.py \
+            --json-report "$RUNNER_TEMP/vellum-routing-case-results.json"
+
+      - name: Validate the committed authority projection
+        id: projection
+        run: |
+          python3 .agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py \
+            validate --projection .github/vellum-ownership.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          projection = json.loads(
+              Path('.github/vellum-ownership.json').read_text(encoding='utf-8')
+          )
+          print(f"has_expansion={'true' if projection.get('schema_version') == 3 else 'false'}")
+          PY
+
+      - name: Emit exact-run routing evidence
+        if: steps.projection.outputs.has_expansion == 'true'
+        run: |
+          python3 .agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py \
+            receipt \
+            --projection .github/vellum-ownership.json \
+            --case-results "$RUNNER_TEMP/vellum-routing-case-results.json" \
+            --head-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/pulp-vellum-routing-contract-execution.json"
+
+      - name: Retain exact-run routing evidence
+        if: steps.projection.outputs.has_expansion == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pulp-vellum-routing-contract-execution
+          path: ${{ runner.temp }}/pulp-vellum-routing-contract-execution.json
+          if-no-files-found: error
+          retention-days: 90

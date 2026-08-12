@@ -186,6 +186,23 @@ class OwnershipProjectionTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(json.loads(first)["activation"]["state"], "prepared")
 
+    def test_schema_v3_expansion_does_not_reclassify_the_initial_cut(self) -> None:
+        value = manifest([entry("LICENSE.md", "framework-core")])
+        projection = projection_tool.build_projection(value)
+        projection["schema_version"] = 3
+        projection["expansions"] = [{"id": "full-design-import-render-v1"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            projection_tool.verify_projection(
+                repo=Path(temporary), manifest=value, projection=projection
+            )
+
+        projection["slices"][0]["paths"] = ["NOTICE.md"]
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(projection_tool.ProjectionError, "stale"):
+                projection_tool.verify_projection(
+                    repo=Path(temporary), manifest=value, projection=projection
+                )
+
     def test_prepared_v1_projection_remains_verifiable_during_bootstrap(self) -> None:
         value = manifest([entry("LICENSE.md", "framework-core")])
         legacy = projection_tool.build_projection(value)
