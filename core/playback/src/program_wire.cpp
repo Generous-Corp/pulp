@@ -123,6 +123,10 @@ measure(const PlaybackProgram& program,
     counts[ProgramWireSection::Program] = 1;
     counts[ProgramWireSection::TempoPoints] = tempo_points.size();
     counts[ProgramWireSection::Tracks] = program.tracks().size();
+    if (counts[ProgramWireSection::Tracks] > kProgramWireMaximumTracks)
+        return Measured(runtime::Err(
+            Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks),
+                  counts[ProgramWireSection::Tracks]}));
 
     for (const auto& owner : program.tracks()) {
         const auto& track = *owner;

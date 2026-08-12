@@ -203,6 +203,21 @@ std::shared_ptr<const Project> empty_lane_project() {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+std::shared_ptr<const Project> many_track_project(std::size_t track_count) {
+    std::vector<Track> tracks;
+    tracks.reserve(track_count);
+    for (std::size_t index = 0; index < track_count; ++index)
+        tracks.push_back(take(Track::create({100 + index}, "plain", {})));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::move(tracks)));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "many tracks";
+    input.next_item_id = 10'000;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 /// One track playing one audio clip, which is the program shape this version of
 /// the wire deliberately does not represent.
 std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
@@ -945,6 +960,14 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     REQUIRE(production_refused.error().code ==
             ProgramWireErrorCode::ProductionDeclarationUnsupported);
     REQUIRE(production_refused.error().detail == 10);
+
+    CompiledProgram too_many_tracks{many_track_project(kProgramWireMaximumTracks + 1u)};
+    auto track_limit = program_wire_encoded_size(*too_many_tracks.store.read(), kTempoPoints);
+    REQUIRE_FALSE(track_limit);
+    REQUIRE(track_limit.error().code == ProgramWireErrorCode::InvalidLimits);
+    REQUIRE(track_limit.error().section ==
+            static_cast<std::uint32_t>(ProgramWireSection::Tracks));
+    REQUIRE(track_limit.error().detail == kProgramWireMaximumTracks + 1u);
     // And the refusal is the encoder's, not this fixture's: the same call on a
     // program without audio succeeds.
     REQUIRE(program_wire_encoded_size(*program, kTempoPoints));
