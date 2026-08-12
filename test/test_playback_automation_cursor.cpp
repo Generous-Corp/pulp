@@ -1,4 +1,5 @@
 #include <pulp/playback/automation_cursor.hpp>
+#include <pulp/playback/program_wire.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
@@ -48,11 +49,114 @@ AutomationLane lane(ItemId id, std::vector<AutomationPoint> points) {
     return take(AutomationLane::create(id, DeviceParameterTarget{{99}, 7}, std::move(curve)));
 }
 
-std::shared_ptr<const AutomationProgram> program(const AutomationLane& source,
-                                                 std::shared_ptr<const CompiledTempoMap> map,
-                                                 ProgramGeneration generation = 1) {
-    return take(AutomationProgram::compile(source, std::move(map), generation));
+struct CursorProgramFixture {
+    std::shared_ptr<const AutomationProgram> direct;
+    std::vector<ProgramWireAutomationSegmentRecord> wire_segments;
+
+    const AutomationProgram* operator->() const noexcept {
+        return direct.get();
+    }
+    const CursorProgramFixture& operator*() const noexcept {
+        return *this;
+    }
+    void reset() noexcept {
+        direct.reset();
+        wire_segments.clear();
+    }
+};
+
+CursorProgramFixture program(const AutomationLane& source,
+                             std::shared_ptr<const CompiledTempoMap> map,
+                             ProgramGeneration generation = 1) {
+    CursorProgramFixture fixture;
+    fixture.direct = take(AutomationProgram::compile(source, std::move(map), generation));
+    fixture.wire_segments.reserve(fixture.direct->segments().size());
+    for (const auto& segment : fixture.direct->segments()) {
+        fixture.wire_segments.push_back({
+            .start_tick = segment.start_tick.value,
+            .end_tick = segment.end_tick.value,
+            .start_sample = segment.start_sample.value,
+            .end_sample = segment.end_sample.value,
+            .start_value = segment.start_value,
+            .end_value = segment.end_value,
+            .curvature = segment.curvature,
+            .interpolation = static_cast<std::uint8_t>(segment.interpolation),
+        });
+    }
+    return fixture;
 }
+
+AutomationProgramSegment read_cursor_wire_segment(const void* records, std::size_t index) noexcept {
+    const auto& record = static_cast<const ProgramWireAutomationSegmentRecord*>(records)[index];
+    return {
+        .start_tick = {record.start_tick},
+        .end_tick = {record.end_tick},
+        .start_sample = {record.start_sample},
+        .end_sample = {record.end_sample},
+        .start_value = record.start_value,
+        .end_value = record.end_value,
+        .interpolation = static_cast<AutomationInterpolation>(record.interpolation),
+        .curvature = record.curvature,
+    };
+}
+
+class ParityAutomationCursor {
+  public:
+    AutomationCursorResult process(const CursorProgramFixture& fixture,
+                                   const TransportSnapshot& transport,
+                                   std::span<AutomationBlockEvent> output,
+                                   std::uint32_t max_intersecting_segments =
+                                       std::numeric_limits<std::uint32_t>::max()) noexcept {
+        if (output.size() > wire_output_.size())
+            std::abort();
+        const auto direct_result =
+            direct_.process(*fixture.direct, transport, output, max_intersecting_segments);
+        const AutomationProgramView wire_program{
+            fixture.direct->generation(),
+            fixture.direct->instance_token(),
+            fixture.direct->lane_id(),
+            fixture.direct->tempo_map(),
+            AutomationSegmentView::from_records(
+                std::span<const ProgramWireAutomationSegmentRecord>{fixture.wire_segments},
+                read_cursor_wire_segment),
+            fixture.direct->leading_value()};
+        const auto wire_result =
+            wire_.process(wire_program, transport, std::span{wire_output_}.first(output.size()),
+                          max_intersecting_segments);
+        const bool same_result =
+            direct_result.code == wire_result.code &&
+            direct_result.adoption == wire_result.adoption &&
+            direct_result.emitted_events == wire_result.emitted_events &&
+            direct_result.candidate_points == wire_result.candidate_points &&
+            direct_result.intersecting_segments == wire_result.intersecting_segments;
+        if (!same_result || direct_.active_lane_id() != wire_.active_lane_id() ||
+            direct_.active_generation() != wire_.active_generation())
+            std::abort();
+        if ((direct_result.code == AutomationCursorCode::Ok ||
+             direct_result.code == AutomationCursorCode::Coalesced) &&
+            !std::equal(output.begin(), output.begin() + direct_result.emitted_events,
+                        wire_output_.begin()))
+            std::abort();
+        return direct_result;
+    }
+
+    void reset() noexcept {
+        direct_.reset();
+        wire_.reset();
+    }
+    ItemId active_lane_id() const noexcept {
+        return direct_.active_lane_id();
+    }
+    ProgramGeneration active_generation() const noexcept {
+        return direct_.active_generation();
+    }
+
+  private:
+    AutomationCursor direct_;
+    AutomationCursor wire_;
+    std::array<AutomationBlockEvent, AutomationPlaybackLimits::kMaximumEventsPerDevicePerBlock>
+        wire_output_{};
+};
 
 TransportSnapshot block(MasterTransport& transport, std::uint32_t frames) {
     TransportSnapshot snapshot;
@@ -105,7 +209,7 @@ TEST_CASE("automation cursor matches authored tick-domain interpolation and hold
     prepare_transport(clock, *map, 16);
     const auto snapshot = block(clock, 12);
     std::array<AutomationBlockEvent, 16> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, snapshot, events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -135,7 +239,7 @@ TEST_CASE("automation cursor evaluates tempo ramps in musical tick space") {
     prepare_transport(clock, *map, 64);
     const auto snapshot = block(clock, 64);
     std::array<AutomationBlockEvent, 64> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, snapshot, events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -177,7 +281,7 @@ TEST_CASE("host-beat-mapped automation follows host frames through a document te
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 3> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     AutomationCursorResult result;
     std::size_t allocations = 0;
     {
@@ -217,7 +321,7 @@ TEST_CASE("host-beat-mapped automation work is bounded independently of frame co
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -247,7 +351,7 @@ TEST_CASE("host-beat-mapped automation preserves authored knots under output coa
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -276,7 +380,7 @@ TEST_CASE("host-beat-mapped automation includes knots in the final output-frame 
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -306,7 +410,7 @@ TEST_CASE("host-beat-mapped automation collapses knots projected into one output
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -335,7 +439,7 @@ TEST_CASE("host-beat-mapped automation evaluates fractional ticks without sample
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -366,7 +470,7 @@ TEST_CASE("precise host ticks refine automation when rounded tick span is zero")
     snapshot.ranges[0].has_precise_host_ticks = true;
 
     std::array<AutomationBlockEvent, 4> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -400,7 +504,7 @@ TEST_CASE("precise fractional host starts evaluate mandatory Hold knots in docum
     snapshot.ranges[0].has_precise_host_ticks = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -431,7 +535,7 @@ TEST_CASE("host-beat-mapped automation remains safe at the positive tick edge") 
     snapshot.ranges[0].host_beat_mapping = true;
 
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -446,7 +550,7 @@ TEST_CASE("automation cursor preserves document position across mapped and legac
         {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {kTicksPerQuarter}, 1.0f}}));
     auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
     const auto compiled = program(source, map);
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     std::array<AutomationBlockEvent, 4> events{};
 
     TransportSnapshot mapped;
@@ -499,7 +603,7 @@ TEST_CASE("automation cursor coalesces deterministically to the caller budget") 
     prepare_transport(clock, *map, 16);
     const auto snapshot = block(clock, 12);
     std::array<AutomationBlockEvent, 3> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, snapshot, events);
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -520,7 +624,7 @@ TEST_CASE("automation cursor preserves authored peaks before optional refinement
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
     const auto snapshot = block(clock, 9);
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     std::array<AutomationBlockEvent, 2> insufficient{};
     const auto failed = cursor.process(*compiled, snapshot, insufficient);
@@ -551,7 +655,7 @@ TEST_CASE("automation cursor preserves transition ownership across hold boundari
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
     std::array<AutomationBlockEvent, 4> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, block(clock, 13), events);
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
@@ -574,7 +678,7 @@ TEST_CASE("same-sample interior knots preserve the incoming segment and latest w
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
     std::array<AutomationBlockEvent, 12> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, block(clock, 12), events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -597,7 +701,7 @@ TEST_CASE("same-sample interior knots preserve the incoming segment and latest w
     const auto hold_program = program(hold_lane, map);
     MasterTransport hold_clock;
     prepare_transport(hold_clock, *map, 16);
-    AutomationCursor hold_cursor;
+    ParityAutomationCursor hold_cursor;
     const auto hold_result = hold_cursor.process(*hold_program, block(hold_clock, 12), events);
     REQUIRE(hold_result.code == AutomationCursorCode::Ok);
     const auto hold_nine = std::find_if(events.begin(), events.begin() + hold_result.emitted_events,
@@ -619,7 +723,7 @@ TEST_CASE("same-sample final knots resolve to the latest authored winner") {
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
     std::array<AutomationBlockEvent, 12> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, block(clock, 12), events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -636,7 +740,7 @@ TEST_CASE("automation knots sharing one sample resolve to the latest authored wi
     MasterTransport clock;
     prepare_transport(clock, *map, 4);
     std::array<AutomationBlockEvent, 4> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, block(clock, 4), events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -652,7 +756,7 @@ TEST_CASE("failed output budgeting is transactional and leaves canaries untouche
     MasterTransport clock;
     prepare_transport(clock, *map, 8);
     const auto snapshot = block(clock, 8);
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto failed = cursor.process(*compiled, snapshot, {});
     REQUIRE(failed.code == AutomationCursorCode::InsufficientCapacity);
@@ -680,7 +784,7 @@ TEST_CASE("equal automation generation rejects a replacement program instance") 
     MasterTransport first_clock;
     prepare_transport(first_clock, *first_map, 8);
     std::array<AutomationBlockEvent, 8> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     REQUIRE(cursor.process(*first, block(first_clock, 8), events).adoption ==
             AutomationProgramAdoption::Adopted);
 
@@ -706,7 +810,7 @@ TEST_CASE("automation cursor accepts saturated positive sample ranges") {
     snapshot.ranges[0].frame_count = 4;
     snapshot.ranges[0].timeline_sample_start = {std::numeric_limits<std::int64_t>::max() - 1};
     std::array<AutomationBlockEvent, 4> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto result = cursor.process(*compiled, snapshot, events);
     REQUIRE(result.code == AutomationCursorCode::Ok);
@@ -726,7 +830,7 @@ TEST_CASE("automation cursor seeds both half-open ranges at a loop wrap") {
     std::array<AutomationBlockEvent, 4> events{};
     events[2].sample_offset = 0xfeedu;
     events[3].sample_offset = 0xbeefu;
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     const auto insufficient = cursor.process(*compiled, snapshot, std::span(events).first(1));
     REQUIRE(insufficient.code == AutomationCursorCode::InsufficientCapacity);
@@ -756,7 +860,7 @@ TEST_CASE("automation cursor rejects stale identities and reseeds newer generati
     MasterTransport clock;
     prepare_transport(clock, *map, 8);
     std::array<AutomationBlockEvent, 8> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     REQUIRE(cursor.process(*first, block(clock, 8), events).adoption ==
             AutomationProgramAdoption::Adopted);
@@ -776,7 +880,7 @@ TEST_CASE("stopped automation emits only on adoption and seek") {
     MasterTransport clock;
     prepare_transport(clock, *map, 8, false);
     std::array<AutomationBlockEvent, 2> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
 
     REQUIRE(cursor.process(*compiled, block(clock, 8), events).emitted_events == 1);
     REQUIRE(cursor.process(*compiled, block(clock, 8), events).emitted_events == 0);
@@ -796,7 +900,7 @@ TEST_CASE("automation cursor process is declared and probed realtime safe") {
     prepare_transport(clock, *map, 8);
     const auto snapshot = block(clock, 8);
     std::array<AutomationBlockEvent, 8> events{};
-    AutomationCursor cursor;
+    ParityAutomationCursor cursor;
     AutomationCursorResult result;
     std::size_t allocations = 0;
     {
