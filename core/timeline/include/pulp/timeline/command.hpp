@@ -177,10 +177,15 @@ struct SetNoteEvents {
 /// restore modifiers removed with their notes. The clip-level modifier seed and
 /// every controller lane carry over unchanged.
 struct InsertNotes {
+    /// Sequence containing the target track.
     ItemId sequence_id;
+    /// Track containing the target MIDI clip.
     ItemId track_id;
+    /// MIDI clip that receives the notes.
     ItemId clip_id;
+    /// Identity-bearing note values to insert.
     std::vector<NoteEvent> notes;
+    /// Optional modifiers attached only to notes in this insertion.
     std::vector<NoteModifier> modifiers;
 };
 
@@ -191,9 +196,13 @@ struct InsertNotes {
 /// `InsertNotes` inverse, so undo restores the complete note behavior without
 /// making forward callers restate clip-owned modifier data.
 struct RemoveNotes {
+    /// Sequence containing the target track.
     ItemId sequence_id;
+    /// Track containing the target MIDI clip.
     ItemId track_id;
+    /// MIDI clip from which the notes are removed.
     ItemId clip_id;
+    /// Exact current note values whose identities are removed.
     std::vector<NoteEvent> expected;
 };
 
