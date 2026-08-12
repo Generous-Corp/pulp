@@ -11,10 +11,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdio>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #if defined(_WIN32)
 #include <process.h>
 #define pulp_test_getpid() static_cast<int>(::_getpid())
@@ -25,6 +27,9 @@
 #include <vector>
 
 using pulp::view::FrameClock;
+using pulp::view::MouseButton;
+using pulp::view::MouseEvent;
+using pulp::view::PointerType;
 using pulp::view::Point;
 using pulp::view::Rect;
 using pulp::view::View;
@@ -56,13 +61,34 @@ public:
     int enter_count = 0;
     int leave_count = 0;
     int click_count = 0;
+    std::vector<MouseEvent> rich_events;
 
+    void on_mouse_event(const MouseEvent& event) override {
+        rich_events.push_back(event);
+    }
     void on_mouse_down(Point) override { ++down_count; }
     void on_mouse_up(Point) override { ++up_count; }
     void on_mouse_drag(Point) override { ++drag_count; }
     void on_mouse_enter() override { ++enter_count; }
     void on_mouse_leave() override { ++leave_count; }
 };
+
+double input_component(const SampleEvent& event, std::string_view name) {
+    for (const auto& [key, value] : event.components) {
+        if (key == name) return value;
+    }
+    FAIL("missing input component: " << name);
+    return 0.0;
+}
+
+void require_pointer_equal(const MouseEvent& actual, const MouseEvent& expected) {
+    REQUIRE(actual.phase == expected.phase);
+    REQUIRE(actual.pointer_type == expected.pointer_type);
+    REQUIRE(actual.pressure == expected.pressure);
+    REQUIRE(actual.modifiers == expected.modifiers);
+    REQUIRE(actual.button == expected.button);
+    REQUIRE(actual.pointer_id == expected.pointer_id);
+}
 
 /// Build a two-node tree with a target child at known coordinates.
 struct TestTree {
@@ -106,6 +132,13 @@ struct CoordReset {
 
 TEST_CASE("Input event round-trips through fixture serialize/parse",
           "[motion][input][fixture]") {
+    STATIC_REQUIRE(static_cast<int>(PointerType::mouse) == 0);
+    STATIC_REQUIRE(static_cast<int>(PointerType::touch) == 1);
+    STATIC_REQUIRE(static_cast<int>(PointerType::pen) == 2);
+    STATIC_REQUIRE(static_cast<int>(MouseButton::none) == 0);
+    STATIC_REQUIRE(static_cast<int>(MouseButton::left) == 1);
+    STATIC_REQUIRE(static_cast<int>(MouseButton::right) == 2);
+    STATIC_REQUIRE(static_cast<int>(MouseButton::middle) == 3);
     CoordReset reset;
     const auto path = tmp_fixture_path("rt");
 
@@ -143,13 +176,29 @@ TEST_CASE("Input event round-trips through fixture serialize/parse",
             REQUIRE(e.components[1].second == 150.0);
         } else if (e.input_kind == "click") {
             ++click_seen;
-            REQUIRE(e.components.size() == 2);
-            REQUIRE(e.components[0].second == 150.0);
+            REQUIRE(e.components.size() == 7);
+            const std::array click_keys{"button", "modifiers", "pointer_id",
+                                        "pointer_type", "pressure", "x", "y"};
+            for (std::size_t index = 0; index < click_keys.size(); ++index)
+                REQUIRE(e.components[index].first == click_keys[index]);
+            REQUIRE(input_component(e, "pointer_type") ==
+                    static_cast<double>(PointerType::mouse));
+            REQUIRE(input_component(e, "pressure") == 0.5);
+            REQUIRE(input_component(e, "modifiers") == 0.0);
+            REQUIRE(input_component(e, "button") ==
+                    static_cast<double>(MouseButton::left));
+            REQUIRE(input_component(e, "pointer_id") == 0.0);
+            REQUIRE(input_component(e, "x") == 150.0);
+            REQUIRE(input_component(e, "y") == 150.0);
         } else if (e.input_kind == "drag") {
             ++drag_seen;
-            // Drag carries 5 named components (sorted): end_x, end_y,
-            // start_x, start_y, steps
-            REQUIRE(e.components.size() == 5);
+            // Drag carries coordinates, step count, and the five pointer fields.
+            REQUIRE(e.components.size() == 10);
+            const std::array drag_keys{"button", "end_x", "end_y", "modifiers",
+                                       "pointer_id", "pointer_type", "pressure",
+                                       "start_x", "start_y", "steps"};
+            for (std::size_t index = 0; index < drag_keys.size(); ++index)
+                REQUIRE(e.components[index].first == drag_keys[index]);
             double end_x = 0, end_y = 0, start_x = 0, start_y = 0, steps = 0;
             for (const auto& [k, v] : e.components) {
                 if (k == "end_x") end_x = v;
@@ -169,6 +218,136 @@ TEST_CASE("Input event round-trips through fixture serialize/parse",
     REQUIRE(click_seen == 1);
     REQUIRE(drag_seen == 1);
 
+    std::remove(path.c_str());
+}
+
+TEST_CASE("input fixtures preserve non-default click and drag pointer identity",
+          "[motion][input][fixture][replay]") {
+    CoordReset reset;
+    const auto path = tmp_fixture_path("pointer-identity");
+    std::vector<MouseEvent> recorded;
+
+    {
+        FrameClock clock;
+        Coordinator::instance().bind(clock);
+        TestTree tree = TestTree::make();
+        tree.root->set_frame_clock(&clock);
+        auto recorder = make_input_recorder(path);
+
+        View::SimulatedPointer pen;
+        pen.type = PointerType::pen;
+        pen.pressure = 0.75f;
+        pen.modifiers = pulp::view::kModShift | pulp::view::kModAlt;
+        pen.button = MouseButton::right;
+        pen.pointer_id = 7;
+        tree.root->simulate_click({150, 150}, pen);
+
+        View::SimulatedPointer touch;
+        touch.type = PointerType::touch;
+        touch.pressure = 0.875f;
+        touch.modifiers = pulp::view::kModCtrl;
+        touch.button = MouseButton::left;
+        touch.pointer_id = 11;
+        tree.root->simulate_drag({150, 150}, {170, 170}, 2, touch);
+        recorded = tree.target->rich_events;
+    }
+    Coordinator::instance().reset();
+    REQUIRE(recorded.size() == 6);
+    const std::array expected_phases{
+        pulp::view::MousePhase::press, pulp::view::MousePhase::release,
+        pulp::view::MousePhase::press, pulp::view::MousePhase::drag,
+        pulp::view::MousePhase::drag, pulp::view::MousePhase::release};
+    for (std::size_t index = 0; index < expected_phases.size(); ++index)
+        REQUIRE(recorded[index].phase == expected_phases[index]);
+
+    auto events = load_fixture(path);
+    REQUIRE(events.size() == 2);
+    REQUIRE(input_component(events[0], "pointer_type") == 2.0);
+    REQUIRE(input_component(events[0], "pressure") == 0.75);
+    REQUIRE(input_component(events[0], "modifiers") ==
+            static_cast<double>(pulp::view::kModShift | pulp::view::kModAlt));
+    REQUIRE(input_component(events[0], "button") == 2.0);
+    REQUIRE(input_component(events[0], "pointer_id") == 7.0);
+    REQUIRE(input_component(events[1], "pointer_type") == 1.0);
+    REQUIRE(input_component(events[1], "pressure") == 0.875);
+    REQUIRE(input_component(events[1], "pointer_id") == 11.0);
+
+    {
+        FrameClock clock;
+        Coordinator::instance().bind(clock);
+        TestTree tree = TestTree::make();
+        tree.root->set_frame_clock(&clock);
+        REQUIRE(replay_inputs(path, *tree.root, clock) == 2);
+        REQUIRE(tree.target->rich_events.size() == recorded.size());
+        for (std::size_t index = 0; index < recorded.size(); ++index)
+            require_pointer_equal(tree.target->rich_events[index], recorded[index]);
+    }
+    Coordinator::instance().reset();
+    std::remove(path.c_str());
+}
+
+TEST_CASE("coordinate-only and invalid pointer metadata replay with historical defaults",
+          "[motion][input][fixture][replay]") {
+    CoordReset reset;
+    const auto path = tmp_fixture_path("legacy-pointer-defaults");
+    {
+        std::ofstream out(path);
+        out << "{\"motion_fixture_version\":2,\"policy\":\"full\",\"duration_scale\":1}\n";
+        auto write_input = [&out](std::string_view kind, std::string_view components) {
+            out << "{\"kind\":\"input\",\"view\":\"input\",\"metric\":\""
+                << kind << "\",\"t\":0,\"frame\":0,\"precision\":3,"
+                   "\"trace_id\":0,\"metric_id\":0,\"burst_id\":0,"
+                   "\"components\":"
+                << components << ",\"deltas\":{},\"input_kind\":\"" << kind
+                << "\",\"view_id\":\"target\"}\n";
+        };
+        write_input("click", "{\"x\":150,\"y\":150}");
+        write_input("drag", "{\"end_x\":170,\"end_y\":170,\"start_x\":150,"
+                            "\"start_y\":150,\"steps\":2}");
+        write_input("click", "{\"button\":2,\"modifiers\":3,\"pointer_id\":9,"
+                             "\"pointer_type\":8,\"pressure\":0.25,\"x\":150,\"y\":150}");
+        write_input("click", "{\"button\":2,\"modifiers\":3,\"pointer_id\":9,"
+                             "\"pointer_type\":2,\"pressure\":2,\"x\":150,\"y\":150}");
+        write_input("click", "{\"button\":2,\"modifiers\":-1,\"pointer_id\":9,"
+                             "\"pointer_type\":2,\"pressure\":0.25,\"x\":150,\"y\":150}");
+        write_input("click", "{\"button\":99,\"modifiers\":3,\"pointer_id\":9,"
+                             "\"pointer_type\":2,\"pressure\":0.25,\"x\":150,\"y\":150}");
+        write_input("click", "{\"button\":2,\"modifiers\":3,\"pointer_id\":-1,"
+                             "\"pointer_type\":2,\"pressure\":0.25,\"x\":150,\"y\":150}");
+    }
+
+    FrameClock clock;
+    Coordinator::instance().bind(clock);
+    TestTree tree = TestTree::make();
+    tree.root->set_frame_clock(&clock);
+    REQUIRE(replay_inputs(path, *tree.root, clock) == 7);
+    REQUIRE(tree.target->rich_events.size() == 16);
+    for (std::size_t index = 0; index < 6; ++index) {
+        const auto& event = tree.target->rich_events[index];
+        REQUIRE(event.pointer_type == PointerType::mouse);
+        REQUIRE(event.pressure == 0.5f);
+        REQUIRE(event.modifiers == 0);
+        REQUIRE(event.button == MouseButton::left);
+        REQUIRE(event.pointer_id == 0);
+    }
+    const std::array expected{
+        View::SimulatedPointer{PointerType::mouse, 0.25f, 3, MouseButton::right, 9},
+        View::SimulatedPointer{PointerType::pen, 0.5f, 3, MouseButton::right, 9},
+        View::SimulatedPointer{PointerType::pen, 0.25f, 0, MouseButton::right, 9},
+        View::SimulatedPointer{PointerType::pen, 0.25f, 3, MouseButton::left, 9},
+        View::SimulatedPointer{PointerType::pen, 0.25f, 3, MouseButton::right, 0},
+    };
+    for (std::size_t item = 0; item < expected.size(); ++item) {
+        for (std::size_t phase = 0; phase < 2; ++phase) {
+            const auto& event = tree.target->rich_events[6 + item * 2 + phase];
+            REQUIRE(event.pointer_type == expected[item].type);
+            REQUIRE(event.pressure == expected[item].pressure);
+            REQUIRE(event.modifiers == expected[item].modifiers);
+            REQUIRE(event.button == expected[item].button);
+            REQUIRE(event.pointer_id == expected[item].pointer_id);
+        }
+    }
+    Coordinator::instance().unbind();
     std::remove(path.c_str());
 }
 

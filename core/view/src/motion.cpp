@@ -1809,6 +1809,49 @@ double component_value(const std::vector<std::pair<std::string, double>>& comps,
     return 0.0;
 }
 
+std::optional<double> component_value_if_present(
+    const std::vector<std::pair<std::string, double>>& comps,
+    std::string_view name) {
+    for (const auto& [key, value] : comps) {
+        if (key == name) return value;
+    }
+    return std::nullopt;
+}
+
+bool is_integer_in_range(double value, double maximum) {
+    return std::isfinite(value) && value >= 0.0 && value <= maximum &&
+           std::trunc(value) == value;
+}
+
+View::SimulatedPointer pointer_from_components(
+    const std::vector<std::pair<std::string, double>>& components) {
+    View::SimulatedPointer pointer;
+
+    if (const auto value = component_value_if_present(components, "pointer_type");
+        value && is_integer_in_range(*value, static_cast<double>(PointerType::pen))) {
+        pointer.type = static_cast<PointerType>(static_cast<std::uint8_t>(*value));
+    }
+    if (const auto value = component_value_if_present(components, "pressure");
+        value && std::isfinite(*value) && *value >= 0.0 && *value <= 1.0) {
+        pointer.pressure = static_cast<float>(*value);
+    }
+    if (const auto value = component_value_if_present(components, "modifiers");
+        value && is_integer_in_range(
+                     *value, static_cast<double>(std::numeric_limits<std::uint16_t>::max()))) {
+        pointer.modifiers = static_cast<std::uint16_t>(*value);
+    }
+    if (const auto value = component_value_if_present(components, "button");
+        value && is_integer_in_range(*value, static_cast<double>(MouseButton::middle))) {
+        pointer.button = static_cast<MouseButton>(static_cast<std::uint8_t>(*value));
+    }
+    if (const auto value = component_value_if_present(components, "pointer_id");
+        value && is_integer_in_range(
+                     *value, static_cast<double>(std::numeric_limits<int>::max()))) {
+        pointer.pointer_id = static_cast<int>(*value);
+    }
+    return pointer;
+}
+
 }  // namespace
 
 int replay_inputs(const std::string& path, View& root_view, FrameClock& clock) {
@@ -1856,7 +1899,7 @@ int replay_inputs(const std::string& path, View& root_view, FrameClock& clock) {
         if (e.input_kind == "click") {
             const Point p{ static_cast<float>(component_value(e.components, "x")),
                            static_cast<float>(component_value(e.components, "y")) };
-            target->simulate_click(p);
+            target->simulate_click(p, pointer_from_components(e.components));
             ++replayed;
         } else if (e.input_kind == "hover") {
             const Point p{ static_cast<float>(component_value(e.components, "x")),
@@ -1870,7 +1913,8 @@ int replay_inputs(const std::string& path, View& root_view, FrameClock& clock) {
                             static_cast<float>(component_value(e.components, "end_y")) };
             const int steps = std::max(
                 1, static_cast<int>(component_value(e.components, "steps")));
-            target->simulate_drag(s, en, steps);
+            target->simulate_drag(s, en, steps,
+                                  pointer_from_components(e.components));
             ++replayed;
         }
     }
