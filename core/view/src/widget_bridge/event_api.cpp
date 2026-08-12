@@ -50,6 +50,35 @@ std::string wheel_payload(const MouseEvent& event) {
            "}";
 }
 
+std::string pointer_payload(const MouseEvent& event, bool moving) {
+    int button = 0;
+    switch (event.button) {
+        case MouseButton::left:   button = 0; break;
+        case MouseButton::middle: button = 1; break;
+        case MouseButton::right:  button = 2; break;
+        case MouseButton::none:   button = 0; break;
+    }
+    return std::string{"{"} +
+           "clientX:" + std::to_string(event.window_position.x) + "," +
+           "clientY:" + std::to_string(event.window_position.y) + "," +
+           "offsetX:" + std::to_string(event.position.x) + "," +
+           "offsetY:" + std::to_string(event.position.y) + "," +
+           "pointerId:" + std::to_string(event.pointer_id) + "," +
+           "pointerType:'" + std::string(event.pointerTypeString()) + "'," +
+           "isPrimary:" + (event.isPrimary() ? "true" : "false") + "," +
+           "pressure:" + std::to_string(event.pressure) + "," +
+           "altitudeAngle:" + std::to_string(event.altitude_angle) + "," +
+           "azimuthAngle:" + std::to_string(event.azimuth_angle) + "," +
+           "button:" + std::to_string(button) + "," +
+           "buttons:" + (moving ? "1" : "0") + "," +
+           "ctrlKey:" + (event.isCtrlDown() ? "true" : "false") + "," +
+           "shiftKey:" + (event.isShiftDown() ? "true" : "false") + "," +
+           "altKey:" + (event.isAltDown() ? "true" : "false") + "," +
+           "metaKey:" + ((event.isCmdDown() || event.isMetaDown())
+                              ? "true" : "false") +
+           "}";
+}
+
 void dispatch_gesture_js(const std::shared_ptr<BridgeCallbackState>& alive,
                          ScriptEngine* engine,
                          const std::string& id,
@@ -147,119 +176,49 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto* w = it->second.view;
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
-            auto previous_pointer = w->on_pointer_event;
-            w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
-                BridgeCallbackScope scope(alive);
-                if (previous_pointer) {
-                    previous_pointer(me);
-                }
-                if (me.is_wheel) {
-                    return;
-                }
-                // This channel carries the press/release edges only. A move —
-                // `MousePhase::drag` (button held) or `hover` (button up) —
-                // reaches JS as `pointermove` through `on_drag` /
-                // `on_pointer_move` below, and the two must not both report it.
-                //
-                // The type is otherwise inferred from `is_down`, which is what
-                // `MousePhase::automatic` asks for and what every press/release
-                // caller wants. But a drag tick carries `is_down == true` (the
-                // button IS still held), so inferring from it alone reported
-                // EVERY drag sample as a fresh `pointerdown`. A handler that
-                // latches its gesture origin on press — the standard knob idiom,
-                // `y0 = e.clientY` — re-latched on every sample, so its delta
-                // was always ~0 and the control never moved under a drag. A
-                // hover sample would likewise have reported a phantom
-                // `pointerup`.
-                if (me.phase == MousePhase::drag || me.phase == MousePhase::hover) {
-                    return;
-                }
-                std::string type;
-                if (me.is_down) type = "pointerdown";
-                else type = "pointerup";
-                if (me.is_cancelled) type = "pointercancel";
+            w->on_dom_pointer_event =
+                [alive, engine, id](const MouseEvent& me, bool is_dom_origin) {
+                    BridgeCallbackScope scope(alive);
+                    if (me.is_wheel || me.phase == MousePhase::drag ||
+                        me.phase == MousePhase::hover)
+                        return;
 
-                // W3C MouseEvent.button: left=0, middle=1, right=2.
-                int w3c_button = 0;
-                switch (me.button) {
-                    case MouseButton::left:   w3c_button = 0; break;
-                    case MouseButton::middle: w3c_button = 1; break;
-                    case MouseButton::right:  w3c_button = 2; break;
-                    case MouseButton::none:   w3c_button = 0; break;
-                }
-                std::string data = "{"
-                    "clientX:" + std::to_string(me.window_position.x) + ","
-                    "clientY:" + std::to_string(me.window_position.y) + ","
-                    "offsetX:" + std::to_string(me.position.x) + ","
-                    "offsetY:" + std::to_string(me.position.y) + ","
-                    "pointerId:" + std::to_string(me.pointer_id) + ","
-                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
-                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
-                    "pressure:" + std::to_string(me.pressure) + ","
-                    "altitudeAngle:" + std::to_string(me.altitude_angle) + ","
-                    "azimuthAngle:" + std::to_string(me.azimuth_angle) + ","
-                    "button:" + std::to_string(w3c_button) + ","
-                    "ctrlKey:" + (me.isCtrlDown() ? "true" : "false") + ","
-                    "shiftKey:" + (me.isShiftDown() ? "true" : "false") + ","
-                    "altKey:" + (me.isAltDown() ? "true" : "false") + ","
-                    "metaKey:" + (me.isCmdDown() ? "true" : "false") +
-                    "}";
+                    std::string type = me.is_down ? "pointerdown" : "pointerup";
+                    if (me.is_cancelled) type = "pointercancel";
+                    const auto data = pointer_payload(me, false);
+                    if (is_dom_origin)
+                        dispatch_event(alive, engine, id, type, data);
+                    else
+                        dispatch_callback_only(alive, engine, id, type, data);
 
-                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
-                    std::cerr << "[bridge] pointer " << type << " id=" << id << "\n";
-                }
-                dispatch_event(alive, engine, id, type, data);
+                    std::string mouse_type;
+                    if (type == "pointerdown") mouse_type = "mousedown";
+                    else if (type == "pointerup" || type == "pointercancel")
+                        mouse_type = "mouseup";
+                    if (!mouse_type.empty()) {
+                        if (is_dom_origin)
+                            dispatch_event(alive, engine, id, mouse_type, data);
+                        else
+                            dispatch_callback_only(alive, engine, id, mouse_type, data);
+                        if (is_dom_origin)
+                            dispatch_event(alive, engine, "__global__", mouse_type, data);
+                    }
+                };
 
-                std::string mouse_type;
-                if (type == "pointerdown") mouse_type = "mousedown";
-                else if (type == "pointerup") mouse_type = "mouseup";
-                else if (type == "pointercancel") mouse_type = "mouseup";
-                if (!mouse_type.empty()) {
-                    dispatch_event(alive, engine, id, mouse_type, data);
-                    dispatch_event(alive, engine, "__global__", mouse_type, data);
-                }
-            };
-
-            // W3C PointerEvents: forward drag as pointermove.
-            w->on_drag = [alive, engine, id, w](Point pos) {
-                BridgeCallbackScope scope(alive);
-                float wx = pos.x, wy = pos.y;
-                for (View* cur = w; cur; cur = cur->parent()) {
-                    wx += cur->bounds().x;
-                    wy += cur->bounds().y;
-                }
-                std::string data = "{"
-                    "clientX:" + std::to_string(wx) + ","
-                    "clientY:" + std::to_string(wy) + ","
-                    "offsetX:" + std::to_string(pos.x) + ","
-                    "offsetY:" + std::to_string(pos.y) + ","
-                    "pointerId:0,pointerType:'mouse',isPrimary:true,"
-                    "button:0,buttons:1}";
-                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
-                    std::cerr << "[bridge] drag id=" << id << " @(" << pos.x << "," << pos.y << ")\n";
-                }
-                dispatch_event(alive, engine, id, "pointermove", data);
-                dispatch_event(alive, engine, id, "mousemove", data);
-                dispatch_event(alive, engine, "__global__", "mousemove", data);
-            };
-
-            // Identity-preserving pointermove for iOS multi-touch.
-            w->on_pointer_move = [alive, engine, id](const MouseEvent& me) {
-                BridgeCallbackScope scope(alive);
-                std::string data = "{"
-                    "clientX:" + std::to_string(me.window_position.x) + ","
-                    "clientY:" + std::to_string(me.window_position.y) + ","
-                    "offsetX:" + std::to_string(me.position.x) + ","
-                    "offsetY:" + std::to_string(me.position.y) + ","
-                    "pointerId:" + std::to_string(me.pointer_id) + ","
-                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
-                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
-                    "pressure:" + std::to_string(me.pressure) + ","
-                    "button:0,buttons:1}";
-                dispatch_event(alive, engine, id, "pointermove", data);
-                dispatch_event(alive, engine, id, "mousemove", data);
-                dispatch_event(alive, engine, "__global__", "mousemove", data);
-            };
+            w->on_dom_pointer_move_event =
+                [alive, engine, id](const MouseEvent& me, bool is_dom_origin) {
+                    BridgeCallbackScope scope(alive);
+                    const auto data = pointer_payload(me, true);
+                    if (is_dom_origin) {
+                        dispatch_event(alive, engine, id, "pointermove", data);
+                        dispatch_event(alive, engine, id, "mousemove", data);
+                    } else {
+                        dispatch_callback_only(alive, engine, id, "pointermove", data);
+                        dispatch_callback_only(alive, engine, id, "mousemove", data);
+                    }
+                    if (is_dom_origin)
+                        dispatch_event(alive, engine, "__global__", "mousemove", data);
+                };
         }
         return choc::value::Value();
     });

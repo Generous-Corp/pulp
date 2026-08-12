@@ -603,6 +603,8 @@ void View::prepare_for_reuse() {
     // (Codex must-fix #5). Subclass callbacks are the subclass override's job.
     on_click = nullptr;
     on_pointer_event = nullptr;
+    on_dom_pointer_event = nullptr;
+    on_dom_pointer_move_event = nullptr;
     on_drag = nullptr;
     on_pointer_move = nullptr;
     on_gesture_cb = nullptr;

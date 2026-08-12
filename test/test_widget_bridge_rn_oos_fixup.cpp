@@ -344,8 +344,8 @@ TEST_CASE("WidgetBridge pumps microtasks after JS dispatch so drag-state commits
 
     auto* surface = bridge.widget("surface");
     REQUIRE(surface != nullptr);
-    REQUIRE(surface->on_pointer_event);
-    REQUIRE(surface->on_drag);
+    REQUIRE(surface->on_dom_pointer_event);
+    REQUIRE(surface->on_dom_pointer_move_event);
 
     // Sanity: nothing has run yet.
     REQUIRE_FALSE(engine.evaluate("drag_active").getWithDefault<bool>(true));
@@ -361,7 +361,7 @@ TEST_CASE("WidgetBridge pumps microtasks after JS dispatch so drag-state commits
     down.pointer_id = 1;
     down.pointer_type = PointerType::mouse;
     down.button = MouseButton::left;
-    surface->on_mouse_event(down);
+    surface->on_dom_pointer_event(down, true);
 
     REQUIRE(engine.evaluate("drag_active").getWithDefault<bool>(false));
 
@@ -369,7 +369,11 @@ TEST_CASE("WidgetBridge pumps microtasks after JS dispatch so drag-state commits
     // drag_active value (true), not the pre-down value (false). This is
     // the user-visible regression in #1923: pointermove handlers see
     // stale state and bail.
-    surface->on_drag({12.0f, 14.0f});
+    MouseEvent move = down;
+    move.position = {12.0f, 14.0f};
+    move.window_position = {112.0f, 114.0f};
+    move.phase = MousePhase::drag;
+    surface->on_dom_pointer_move_event(move, true);
 
     REQUIRE(engine.evaluate("move_count").getWithDefault<int>(0) == 1);
     REQUIRE(engine.evaluate("move_saw_drag_active").getWithDefault<bool>(false));

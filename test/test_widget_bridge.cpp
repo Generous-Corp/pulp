@@ -879,8 +879,8 @@ TEST_CASE("WidgetBridge on(id,'click',fn) auto-wires View::on_click", "[view][br
 
 // Repeated `on(id, 'click', fn)` calls (which @pulp/react performs on every
 // commitUpdate) must remain idempotent on the native side. registerClick is
-// overwriting-by-design (it stores its lambda on view->on_click), but
-// registerPointer chains (each call wraps the previous handler). The auto-wire
+// overwriting-by-design (it stores its lambda on view->on_click), while
+// registerPointer owns one DOM-origin callback. The auto-wire
 // in `on()` guards re-registration via __nativeRegistered__ so pointer events
 // don't grow an O(N) chain.
 TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge][issue-1006]") {
@@ -900,12 +900,12 @@ TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge]
 
     auto* panel = bridge.widget("panel");
     REQUIRE(panel != nullptr);
-    REQUIRE(static_cast<bool>(panel->on_pointer_event));
+    REQUIRE(static_cast<bool>(panel->on_dom_pointer_event));
 
     MouseEvent down;
     down.position = {10, 10};
     down.is_down = true;
-    panel->on_pointer_event(down);
+    panel->on_dom_pointer_event(down, true);
 
     // Three subscriptions but each call to on() overwrites the
     // __callbacks__ slot, so a single dispatch fires once. If the
@@ -972,7 +972,7 @@ TEST_CASE("WidgetBridge reinserted DOM elements re-arm native event routing",
 // press but no subsequent moves and touch orbit/pinch is inert. The element
 // bubble walk never reaches the `document` object (it owns a separate listener
 // map), so `__dispatch__` fans pointer events to `document` explicitly, and the
-// iOS GPU host drives the new `View::on_pointer_move` callback per touch. The
+// iOS GPU host drives the shared pointer dispatcher per touch. The
 // iOS AUv3 GPU path has no CI coverage, so this guards the JS half (dispatch +
 // document fan-out) on the headless engine lane.
 TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls touch)",
@@ -994,7 +994,7 @@ TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls
         canvas.id = 'orbit-canvas';
         document.body.appendChild(canvas);
         // addEventListener('pointermove') wires the canvas as a pointer target
-        // (registerPointer → on_pointer_event / on_pointer_move on its View).
+        // (registerPointer → DOM-origin pointer callbacks on its View).
         canvas.addEventListener('pointermove', function() { widget_moves += 1; });
     )");
 
@@ -1005,8 +1005,8 @@ TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls
     auto* canvas = bridge.widget(nativeId);
     REQUIRE(canvas != nullptr);
     // The identity-preserving move callback must be wired by registerPointer.
-    REQUIRE(static_cast<bool>(canvas->on_pointer_move));
-    REQUIRE(static_cast<bool>(canvas->on_pointer_event));
+    REQUIRE(static_cast<bool>(canvas->on_dom_pointer_move_event));
+    REQUIRE(static_cast<bool>(canvas->on_dom_pointer_event));
 
     // A touch move carrying real pointer identity must fire BOTH the canvas's
     // own move listener AND the document-level listener (the latter is what
@@ -1017,13 +1017,8 @@ TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls
     move.pointer_id = 0;
     move.pointer_type = PointerType::touch;
     move.is_down = true;
-    canvas->on_pointer_move(move);
-    // The canvas's own listener fires (>=1; the bridge's element + __callbacks__
-    // fan-out can deliver it more than once, which is pre-existing behavior and
-    // not what this test pins). The load-bearing assertion is that the
-    // document-level listener fires exactly once — that path regressed to zero
-    // without the fan-out, which is what broke OrbitControls touch.
-    REQUIRE(engine.evaluate("widget_moves").getWithDefault<int>(-1) >= 1);
+    canvas->on_dom_pointer_move_event(move, true);
+    REQUIRE(engine.evaluate("widget_moves").getWithDefault<int>(-1) == 1);
     REQUIRE(engine.evaluate("doc_moves").getWithDefault<int>(-1) == 1);
 
     // A touch release (pointerup, is_down=false) must reach the document-level
@@ -1034,7 +1029,7 @@ TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls
     up.pointer_id = 0;
     up.pointer_type = PointerType::touch;
     up.is_down = false;
-    canvas->on_pointer_event(up);
+    canvas->on_dom_pointer_event(up, true);
     REQUIRE(engine.evaluate("doc_ups").getWithDefault<int>(-1) == 1);
 }
 
@@ -1334,13 +1329,13 @@ TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids
 
     auto* first = bridge.widget("row__control");
     REQUIRE(first != nullptr);
-    REQUIRE(first->on_pointer_event);
+    REQUIRE(first->on_dom_pointer_event);
 
     MouseEvent down;
     down.is_down = true;
     down.position = {4, 5};
     down.window_position = {14, 15};
-    first->on_mouse_event(down);
+    first->on_dom_pointer_event(down, true);
 
     MouseEvent wheel;
     wheel.is_wheel = true;
@@ -1360,9 +1355,9 @@ TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids
 
     auto* second = bridge.widget("row__control");
     REQUIRE(second != nullptr);
-    REQUIRE(second->on_pointer_event);
+    REQUIRE(second->on_dom_pointer_event);
 
-    second->on_mouse_event(down);
+    second->on_dom_pointer_event(down, true);
     REQUIRE(second->on_dom_wheel_event);
     second->on_dom_wheel_event(wheel, true);
 
@@ -1666,8 +1661,8 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
 
     auto* surface = bridge.widget("surface");
     REQUIRE(surface != nullptr);
-    REQUIRE(surface->on_pointer_event);
-    REQUIRE(surface->on_drag);
+    REQUIRE(surface->on_dom_pointer_event);
+    REQUIRE(surface->on_dom_pointer_move_event);
     REQUIRE(surface->on_gesture_cb);
 
     MouseEvent down{};
@@ -1681,7 +1676,7 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     down.azimuth_angle = 1.2f;
     down.button = MouseButton::right;
     down.modifiers = static_cast<uint16_t>(kModCtrl | kModShift | kModAlt | kModCmd);
-    surface->on_mouse_event(down);
+    surface->on_dom_pointer_event(down, true);
 
     REQUIRE(engine.evaluate("pointer_down_id").getWithDefault<int>(-1) == 3);
     REQUIRE(engine.evaluate("pointer_down_type").toString() == "pen");
@@ -1697,15 +1692,19 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
 
     MouseEvent up = down;
     up.is_down = false;
-    surface->on_mouse_event(up);
+    surface->on_dom_pointer_event(up, true);
     REQUIRE(engine.evaluate("pointer_up_id").getWithDefault<int>(-1) == 3);
 
     MouseEvent cancel = up;
     cancel.is_cancelled = true;
-    surface->on_mouse_event(cancel);
+    surface->on_dom_pointer_event(cancel, true);
     REQUIRE(engine.evaluate("pointer_cancel_id").getWithDefault<int>(-1) == 3);
 
-    surface->on_drag({13.0f, 17.0f});
+    MouseEvent move = down;
+    move.position = {13.0f, 17.0f};
+    move.window_position = {113.0f, 117.0f};
+    move.phase = MousePhase::drag;
+    surface->on_dom_pointer_move_event(move, true);
     REQUIRE_THAT(engine.evaluate("pointer_move_x").getWithDefault<double>(0.0), WithinAbs(13.0, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_move_y").getWithDefault<double>(0.0), WithinAbs(17.0, 0.001));
 
@@ -2024,7 +2023,8 @@ TEST_CASE("WidgetBridge remounts native event registrations for reused widget id
     down.button = MouseButton::left;
     down.position = {42.0f, 64.0f};
     down.window_position = down.position;
-    surface->on_mouse_event(down);
+    REQUIRE(surface->on_dom_pointer_event);
+    surface->on_dom_pointer_event(down, true);
     REQUIRE(engine.evaluate("pointer_downs").getWithDefault<int>(0) == 1);
 
     MouseEvent wheel{};
@@ -5875,9 +5875,8 @@ TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgo
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // Plain containers, not value widgets: View's base on_mouse_event is what
-    // dispatches on_pointer_event, so this exercises the registrar's wiring
-    // rather than a widget's own mouse handling.
+    // Plain containers, not value widgets, exercise the registrar's DOM-origin
+    // callback rather than a widget's own mouse handling.
     bridge.load_script(R"(
         globalThis.hits = 0;
         createRow('box');
@@ -5891,7 +5890,8 @@ TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgo
 
     auto* first = bridge.widget("k");
     REQUIRE(first != nullptr);
-    first->on_mouse_event(down);
+    REQUIRE(first->on_dom_pointer_event);
+    first->on_dom_pointer_event(down, true);
     REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "1");
 
     // Tearing the subtree down must forget every registration channel for 'k',
@@ -5910,7 +5910,8 @@ TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgo
 
     auto* second = bridge.widget("k");
     REQUIRE(second != nullptr);
-    second->on_mouse_event(down);
+    REQUIRE(second->on_dom_pointer_event);
+    second->on_dom_pointer_event(down, true);
     REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "2");
 }
 
@@ -6029,8 +6030,8 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
 }
 
 // A gesture's press/release edges and its moves travel to JS on two different
-// callbacks: `on_pointer_event` carries the edges, `on_drag` / `on_pointer_move`
-// carry the moves. `deliver_mouse_drag` — the verb both macOS hosts call for
+// callbacks: `on_dom_pointer_event` carries the edges and
+// `on_dom_pointer_move_event` carries the moves. `deliver_mouse_drag` — the verb both macOS hosts call for
 // every drag sample — hits BOTH, with `is_down == true` because the button is
 // genuinely still held. Classifying that by `is_down` alone reported every drag
 // sample as a fresh `pointerdown`, which re-latched the gesture origin of any
@@ -6060,21 +6061,23 @@ TEST_CASE("WidgetBridge reports a drag tick as a move, not a fresh pointerdown",
     press.window_position = {10, 10};
     press.is_down = true;
     press.phase = MousePhase::press;
-    surface->on_pointer_event(press);
+    REQUIRE(surface->on_dom_pointer_event);
+    REQUIRE(surface->on_dom_pointer_move_event);
+    surface->on_dom_pointer_event(press, true);
 
     for (int i = 1; i <= 3; ++i) {
         MouseEvent drag = press;
         drag.position = {10, 10.0f + i};
         drag.window_position = drag.position;
         drag.phase = MousePhase::drag;
-        surface->on_pointer_event(drag);   // the modern channel, is_down still true
-        surface->on_drag(drag.position);   // the move channel, same tick
+        surface->on_dom_pointer_event(drag, true);  // edge channel stays silent
+        surface->on_dom_pointer_move_event(drag, true);
     }
 
     MouseEvent release = press;
     release.is_down = false;
     release.phase = MousePhase::release;
-    surface->on_pointer_event(release);
+    surface->on_dom_pointer_event(release, true);
 
     // Exactly one press edge for the whole gesture — the three drag samples must
     // not have re-fired it.
@@ -6109,7 +6112,8 @@ TEST_CASE("WidgetBridge does not report a hover sample as a pointerup",
     hover.window_position = {10, 10};
     hover.is_down = false;
     hover.phase = MousePhase::hover;
-    surface->on_pointer_event(hover);
+    REQUIRE(surface->on_dom_pointer_event);
+    surface->on_dom_pointer_event(hover, true);
 
     CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 0);
 }

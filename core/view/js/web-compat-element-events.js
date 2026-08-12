@@ -85,10 +85,10 @@ Element.prototype._registerNativeEvent = function(type) {
     var self = this;
     if (type === "click" || type === "mousedown" || type === "mouseup") {
         registerClick(id);
-        on(id, "click", function(data) {
-            var evt = _makeEvent("click", self, data);
-            self.dispatchEvent(evt);
-        });
+        // __dispatch__ owns the one Element::dispatchEvent entry. This
+        // callback preserves the low-level registration slot without entering
+        // the DOM a second time.
+        on(id, "click", function() {});
     } else if (type === "mouseenter" || type === "mouseleave" ||
                type === "pointerenter" || type === "pointerleave") {
         registerHover(id);
@@ -111,18 +111,13 @@ Element.prototype._registerNativeEvent = function(type) {
     } else if (type === "pointerdown" || type === "pointermove" || type === "pointerup" || type === "pointercancel") {
         // Register for pointer events — these are dispatched from C++ bridge
         if (typeof registerPointer === "function") registerPointer(id);
-        on(id, "pointerdown", function(data) {
-            self.dispatchEvent(_makeEvent("pointerdown", self, data));
-        });
-        on(id, "pointermove", function(data) {
-            self.dispatchEvent(_makeEvent("pointermove", self, data));
-        });
-        on(id, "pointerup", function(data) {
-            self.dispatchEvent(_makeEvent("pointerup", self, data));
-        });
-        on(id, "pointercancel", function(data) {
-            self.dispatchEvent(_makeEvent("pointercancel", self, data));
-        });
+        // Native pointer delivery has exactly one DOM origin. Keep no-op
+        // low-level callbacks for native ancestors and let __dispatch__ perform
+        // the sole Element dispatch + JS capture/bubble walk.
+        on(id, "pointerdown", function() {});
+        on(id, "pointermove", function() {});
+        on(id, "pointerup", function() {});
+        on(id, "pointercancel", function() {});
     } else if (type === "gesturestart" || type === "gesturechange" || type === "gestureend") {
         // Gesture events dispatched from C++ bridge
         if (typeof registerGesture === "function") registerGesture(id);
@@ -315,6 +310,7 @@ function Event(type, eventInitDict) {
     this.currentTarget = null;
     this.timeStamp = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
     this._stopped = false;
+    this._stoppedImmediate = false;
     this._defaultPrevented = false;
     this._noBubble = !this.bubbles;
 }
@@ -327,7 +323,10 @@ Event.prototype.CAPTURING_PHASE = Event.CAPTURING_PHASE;
 Event.prototype.AT_TARGET = Event.AT_TARGET;
 Event.prototype.BUBBLING_PHASE = Event.BUBBLING_PHASE;
 Event.prototype.stopPropagation = function() { this._stopped = true; };
-Event.prototype.stopImmediatePropagation = function() { this._stopped = true; };
+Event.prototype.stopImmediatePropagation = function() {
+    this._stopped = true;
+    this._stoppedImmediate = true;
+};
 Event.prototype.preventDefault = function() {
     if (this.cancelable) this._defaultPrevented = true;
 };
@@ -358,7 +357,7 @@ function _fireListeners(el, event) {
     event.currentTarget = el;
     for (var i = 0; i < listeners.length; i++) {
         listeners[i].fn.call(el, event);
-        if (event._stopped) break;
+        if (event._stoppedImmediate) break;
     }
 }
 
@@ -398,12 +397,13 @@ function _dispatchEvent(target, event) {
             for (var j = 0; j < listeners.length; j++) {
                 if (listeners[j].capture) {
                     listeners[j].fn.call(path[i], event);
-                    if (event._stopped) {
-                        event.eventPhase = 0;
-                        event.currentTarget = null;
-                        return;
-                    }
+                    if (event._stoppedImmediate) break;
                 }
+            }
+            if (event._stopped) {
+                event.eventPhase = 0;
+                event.currentTarget = null;
+                return;
             }
         }
     }
@@ -427,7 +427,7 @@ function _dispatchEvent(target, event) {
             for (var l = 0; l < listeners2.length; l++) {
                 if (!listeners2[l].capture) {
                     listeners2[l].fn.call(path[k], event);
-                    if (event._stopped) break;
+                    if (event._stoppedImmediate) break;
                 }
             }
         }

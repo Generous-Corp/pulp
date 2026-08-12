@@ -517,8 +517,8 @@ TEST_CASE("a custom-drawn canvas knob drives its param through a drag",
     // channels. Both are preconditions for the drag below — assert them so a
     // failure names which half broke.
     REQUIRE(root.hit_test({62, 62}) == canvas);
-    REQUIRE(static_cast<bool>(canvas->on_pointer_event));
-    REQUIRE(static_cast<bool>(canvas->on_drag));
+    REQUIRE(static_cast<bool>(canvas->on_dom_pointer_event));
+    REQUIRE(static_cast<bool>(canvas->on_dom_pointer_move_event));
 
     // Drag upward by 50px inside the canvas: +50/150 = +0.3333 over the 0.5 the
     // press latched.
@@ -529,7 +529,11 @@ TEST_CASE("a custom-drawn canvas knob drives its param through a drag",
     REQUIRE(canvas->command_count() > 0);
     // Release ended the gesture: a later move with no button must not move the
     // param.
-    canvas->on_drag({40, 0});
+    MouseEvent late_move{};
+    late_move.position = {40, 0};
+    late_move.window_position = {60, 20};
+    late_move.phase = MousePhase::hover;
+    canvas->on_dom_pointer_move_event(late_move, true);
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.8333f, 1e-3f));
 }
 

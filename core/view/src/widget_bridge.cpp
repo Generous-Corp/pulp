@@ -170,7 +170,11 @@ function __dispatch__(id, eventName) {
                         pointerType: (data && data.pointerType) || 'mouse',
                         isPrimary: true,
                         preventDefault: function () { this.defaultPrevented = true; },
-                        stopPropagation: function () { this._stopped = true; }
+                        stopPropagation: function () { this._stopped = true; },
+                        stopImmediatePropagation: function () {
+                            this._stopped = true;
+                            this._stoppedImmediate = true;
+                        }
                     };
                 // Pre-dispatch instrumentation: confirm event reaches root.
                 var pathLen = 0;
@@ -199,25 +203,17 @@ function __dispatch__(id, eventName) {
                 // drag/pinch move+up listeners onto the document. Without this
                 // fan-out OrbitControls receives the initial pointerdown on the
                 // canvas but no subsequent moves, so touch orbit/pinch is inert.
-                // Only pointer events are fanned (the synthesized mouse event
-                // below keeps its element-only delivery to avoid changing
-                // existing document-mouse semantics).
+                // Only pointer events are fanned; the separately delivered
+                // mouse event stays element-only to preserve document-mouse
+                // semantics.
                 if (typeof document !== 'undefined' && document.dispatchEvent &&
+                    !ev._stopped &&
                     /^(pointerdown|pointermove|pointerup|pointercancel)$/.test(eventName)) {
                     document.dispatchEvent(ev);
                 }
-                // For pointerdown/up, ALSO synthesize the mouse equivalent —
-                // many React components attach to onMouseDown rather than
-                // onPointerDown (Chainer is one). Skip if eventName is
-                // already a mouse-* type to avoid double-fire.
-                if (eventName === 'pointerdown' || eventName === 'pointerup' || eventName === 'pointermove') {
-                    var mouseType = (eventName === 'pointerdown') ? 'mousedown'
-                                  : (eventName === 'pointerup')   ? 'mouseup'
-                                  :                                  'mousemove';
-                    var mev = (typeof _makeEvent === 'function')
-                        ? _makeEvent(mouseType, el, data || {}) : { type: mouseType, target: el, currentTarget: el, bubbles: true };
-                    el.dispatchEvent(mev);
-                }
+                // Pointer registrars emit the corresponding mouse event as a
+                // separate bridge dispatch so direct @pulp/react listeners and
+                // web-compat share one source. Do not synthesize it again here.
             } catch (e) {
                 stats.lastErr = String(e && e.stack ? e.stack.slice(0, 200) : e);
                 if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));

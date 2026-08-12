@@ -1110,10 +1110,11 @@ public:
         first_box_shadow().blur = r;
         invalidate_subtree_caches_up();
     }
-
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
+    std::function<void(const MouseEvent&, bool)> on_dom_pointer_event;  ///< One DOM origin.
+    std::function<void(const MouseEvent&, bool)> on_dom_pointer_move_event;
     /// Bridge wheel delivery. `is_dom_origin` selects the one full DOM dispatch;
     /// registered ancestors receive only their low-level `on(id, "wheel", fn)`
     /// callback so Element bubbling is not duplicated.
@@ -1128,7 +1129,6 @@ public:
     /// only ever deliver one pointer can keep driving `on_drag`.
     std::function<void(const MouseEvent&)> on_pointer_move;
     std::function<void(const GestureEvent&)> on_gesture_cb;    ///< JS gesture event callback
-
     /// Right-click context menu callback. If set, called on right-click with view-local coords.
     /// Return a list of menu items; an empty return suppresses the menu.
     std::function<void(Point position)> on_context_menu;

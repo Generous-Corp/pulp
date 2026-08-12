@@ -927,10 +927,9 @@ strings MUST guarantee:
 ### Native-side registrars MUST be idempotent
 
 `registerPointer(id)` / `registerWheel(id)` (and any future
-`registerX(id)`) wrap the previous `on_pointer_event` lambda. If a React
-re-render re-issues the registration, each call stacks a new wrapper —
-N renders → N firings per event. Always gate the registration with a
-per-id set (e.g. `pointer_registered_`, `wheel_registered_`) and
+`registerX(id)`) install View callbacks. If a React re-render re-issues the
+registration, replacing or stacking those callbacks can multiply delivery or
+silently change callback ownership. Always gate registration per id/channel and
 early-return on duplicates.
 
 Wheel delivery has two distinct JS channels and must preserve both without
@@ -945,6 +944,22 @@ boundary for both searches; a registration on that scroller receives the tick,
 matching an `overflow:auto` DOM element, while registrations above it do not
 receive a tick the scroller consumes.
 
+Pointer delivery follows the same single-origin rule. Native dispatch walks the
+hit path, selects the deepest View with `on_dom_pointer_event` (or
+`on_dom_pointer_move_event`) as the sole full `__dispatch__` origin, and calls
+`__dispatchCallbackOnly__` for registered native ancestors. The origin's
+Element event performs the JS capture/bubble walk; full-dispatching an ancestor
+would enter that walk twice. This callback-only ancestor lane preserves direct
+`@pulp/react` `on(id, event, fn)` behavior without duplicating web-compat DOM
+listeners. Native `registerPointer` emits the corresponding mouse event; the JS
+DOM dispatcher must not synthesize a second one.
+
+Propagation cancellation is part of this boundary: `stopPropagation()` allows
+remaining listeners on the current target but prevents ancestor and document
+delivery; `stopImmediatePropagation()` also stops remaining listeners on the
+current target. Pointer document fanout occurs only when the Element dispatch
+did not stop propagation.
+
 ### macOS host-side bubbling
 
 `core/view/platform/mac/window_host_mac.mm` is the dispatch source for
@@ -953,10 +968,10 @@ mouse / pointer / wheel on macOS. Every dispatcher MUST:
 - Set `me.window_position = pt` for wheel events (clientX/Y derives from
   this). Without it JSX `e.clientX - rect.left` for anchor-frequency
   zoom gives the wrong anchor.
-- Bubble `on_pointer_event` up the parent chain (W3C bubbling) so a
-  wrap-div with `registerPointer` subscribed gets events from canvas
-  children that win `hit_test`. The Spectr FilterBank band-drawer is
-  this exact pattern.
+- Route pointer events through the shared dispatcher. It performs one full DOM
+  dispatch at the deepest registered origin, then callback-only native ancestor
+  delivery. Do not full-dispatch every registered ancestor: JavaScript already
+  performs W3C capture/bubbling from the origin.
 - Leave `on_mouse_down` / `on_mouse_drag` / `on_mouse_up` deepest-wins
   (those are the JUCE-style click channel, not the W3C bubbling channel).
 
@@ -997,6 +1012,8 @@ imported designs.
 - "Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws"
 - "Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}"
 - "Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)"
+- `pulp-test-widget-bridge-dispatch-document-event` `[pointer-semantics]`:
+  exact one-delivery, document bubbling, and stop/stopImmediate behavior
 
 Run with: `./build/test/pulp-test-widget-bridge "[contract]"`
 

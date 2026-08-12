@@ -755,10 +755,8 @@ Element.prototype._registerNativeEvent = function(type) {
     var self = this;
     if (type === "click" || type === "mousedown" || type === "mouseup") {
         registerClick(id);
-        on(id, "click", function() {
-            var evt = _makeEvent("click", self);
-            self.dispatchEvent(evt);
-        });
+        // __dispatch__ owns the sole DOM entry for native clicks.
+        on(id, "click", function() {});
     } else if (type === "mouseenter" || type === "mouseleave") {
         registerHover(id);
         on(id, "mouseenter", function() {
@@ -867,7 +865,7 @@ function _fireListeners(el, event) {
     event.currentTarget = el;
     for (var i = 0; i < listeners.length; i++) {
         listeners[i].fn.call(el, event);
-        if (event._stoppedImmediate || event._stopped) break;
+        if (event._stoppedImmediate) break;
     }
 }
 
@@ -887,9 +885,10 @@ function _dispatchEvent(target, event) {
             for (var j = 0; j < listeners.length; j++) {
                 if (listeners[j].capture) {
                     listeners[j].fn.call(path[i], event);
-                    if (event._stopped) return;
+                    if (event._stoppedImmediate) break;
                 }
             }
+            if (event._stopped) return;
         }
     }
 
@@ -905,7 +904,7 @@ function _dispatchEvent(target, event) {
             for (var l = 0; l < listeners2.length; l++) {
                 if (!listeners2[l].capture) {
                     listeners2[l].fn.call(path[k], event);
-                    if (event._stopped) return;
+                    if (event._stoppedImmediate) break;
                 }
             }
         }

@@ -467,7 +467,13 @@ var document = {
             event.preventDefault = function() { this.defaultPrevented = true; };
         }
         if (typeof event.stopPropagation !== 'function') {
-            event.stopPropagation = function() {};
+            event.stopPropagation = function() { this._stopped = true; };
+        }
+        if (typeof event.stopImmediatePropagation !== 'function') {
+            event.stopImmediatePropagation = function() {
+                this._stopped = true;
+                this._stoppedImmediate = true;
+            };
         }
         // Snapshot the list to tolerate handlers that
         // remove themselves during dispatch.
@@ -479,6 +485,7 @@ var document = {
                     __dispatchError__('document', event.type, String(e && e.stack ? e.stack : e));
                 }
             }
+            if (event._stoppedImmediate) break;
         }
         return !event.defaultPrevented;
     }
