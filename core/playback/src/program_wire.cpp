@@ -1298,11 +1298,41 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
         }
     }
 
+    lane_count_ = 0;
+    group_count_ = 0;
+    groups_.fill({});
+    for (const auto& track : candidate_view.tracks()) {
+        for (const auto& lane : candidate_view.automation_lanes_for(track)) {
+            auto group = group_count_;
+            for (std::size_t previous = 0; previous < lane_count_; ++previous) {
+                if (active_lanes_[previous].track->id == track.id &&
+                    same_capacity_group(*active_lanes_[previous].lane, lane)) {
+                    group = active_lanes_[previous].group_index;
+                    break;
+                }
+            }
+            if (group == group_count_)
+                ++group_count_;
+            active_lanes_[lane_count_++] = {
+                find_lane_state(lane_state_, {track.id}, {lane.lane_id}), &track, &lane, group};
+            ++groups_[group].lane_count;
+        }
+    }
+    std::size_t group_offset = 0;
+    for (std::size_t group = 0; group < group_count_; ++group) {
+        groups_[group].first_lane = group_offset;
+        group_offset += groups_[group].lane_count;
+        groups_[group].lane_count = 0;
+    }
+    for (std::size_t lane = 0; lane < lane_count_; ++lane) {
+        auto& group = groups_[active_lanes_[lane].group_index];
+        group_lane_indices_[group.first_lane + group.lane_count++] = lane;
+    }
+
     result.returned_pin = std::move(active_pin_);
     active_pin_ = std::move(candidate);
     active_view_ = candidate_view;
     tempo_map_ = &tempo_map;
-    lane_count_ = candidate_view.automation_lanes().size();
     result.adoption = ProgramWireAdoption::Adopted;
     return result;
 }
@@ -1328,9 +1358,10 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
     const auto limits = active_view_.automation_limits();
     std::uint64_t total_intersecting = 0;
     std::size_t output_index = 0;
-    for (const auto& track : active_view_.tracks()) {
-        for (const auto& lane : active_view_.automation_lanes_for(track)) {
-            auto* state = find_lane_state(lane_state_, {track.id}, {lane.lane_id});
+    for (std::size_t lane_index = 0; lane_index < lane_count_; ++lane_index) {
+            const auto& active = active_lanes_[lane_index];
+            auto* state = active.state;
+            const auto& lane = *active.lane;
             state->next_cursor = state->cursor;
             state->selected_count = 0;
             state->write_position = 0;
@@ -1358,17 +1389,13 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
             }
             state->event_count = state->cursor_result.emitted_events;
             total_intersecting += state->cursor_result.intersecting_segments;
-        }
     }
 
-    const auto walk_group = [&](const ProgramWireTrackRecord& track,
-                                std::span<const ProgramWireAutomationLaneRecord> lanes,
-                                std::size_t anchor, auto&& visitor) noexcept {
+    const auto walk_group = [&](std::size_t group_index, auto&& visitor) noexcept {
+        const auto& group = groups_[group_index];
         std::size_t heap_size = 0;
-        for (std::size_t index = 0; index < lanes.size(); ++index) {
-            if (!same_capacity_group(lanes[anchor], lanes[index]))
-                continue;
-            auto* state = find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id});
+        for (std::size_t index = 0; index < group.lane_count; ++index) {
+            auto* state = active_lanes_[group_lane_indices_[group.first_lane + index]].state;
             state->merge_position = 0;
             if (state->event_count != 0)
                 merge_heap_[heap_size++] = state;
@@ -1416,22 +1443,13 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
 
     // Count and select at the same per-device boundary as the native track
     // renderer. Nothing is committed or copied to caller output in this pass.
-    for (const auto& track : active_view_.tracks()) {
-        const auto lanes = active_view_.automation_lanes_for(track);
-        for (std::size_t anchor = 0; anchor < lanes.size(); ++anchor) {
-            bool seen_group = false;
-            for (std::size_t previous = 0; previous < anchor; ++previous)
-                seen_group = seen_group || same_capacity_group(lanes[anchor], lanes[previous]);
-            if (seen_group)
-                continue;
-
+    for (std::size_t group_index = 0; group_index < group_count_; ++group_index) {
+            const auto& group = groups_[group_index];
             std::uint64_t candidate_count = 0;
             std::uint64_t mandatory_count = 0;
             bool lane_coalesced = false;
-            for (std::size_t index = 0; index < lanes.size(); ++index) {
-                if (!same_capacity_group(lanes[anchor], lanes[index]))
-                    continue;
-                auto* state = find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id});
+            for (std::size_t index = 0; index < group.lane_count; ++index) {
+                auto* state = active_lanes_[group_lane_indices_[group.first_lane + index]].state;
                 candidate_count += state->event_count;
                 lane_coalesced =
                     lane_coalesced || state->cursor_result.code == AutomationCursorCode::Coalesced;
@@ -1450,7 +1468,7 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
                 lane_coalesced || candidate_count > limits.max_events_per_device_per_block;
             std::uint64_t optional_rank = 0;
             std::uint32_t optional_selection = 0;
-            walk_group(track, lanes, anchor,
+            walk_group(group_index,
                        [&](ProgramWireLaneState& state, AutomationBlockEvent event) noexcept {
                            const bool mandatory =
                                event.transition != AutomationTransition::LinearRamp;
@@ -1471,7 +1489,6 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
                                ++state.selected_count;
                            state.group_coalesced = group_coalesced;
                        });
-        }
     }
     for (const auto& state : lane_state_) {
         if (state.identity.lane_id.value != 0 &&
@@ -1483,21 +1500,13 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
 
     // Repeat the deterministic selection walk to publish the preflighted
     // events. Cursors are committed only after every group has succeeded.
-    for (const auto& track : active_view_.tracks()) {
-        const auto lanes = active_view_.automation_lanes_for(track);
-        for (std::size_t anchor = 0; anchor < lanes.size(); ++anchor) {
-            bool seen_group = false;
-            for (std::size_t previous = 0; previous < anchor; ++previous)
-                seen_group = seen_group || same_capacity_group(lanes[anchor], lanes[previous]);
-            if (seen_group)
-                continue;
+    for (std::size_t group_index = 0; group_index < group_count_; ++group_index) {
+            const auto& group = groups_[group_index];
             std::uint64_t candidate_count = 0;
             std::uint64_t mandatory_count = 0;
-            for (std::size_t index = 0; index < lanes.size(); ++index) {
-                if (!same_capacity_group(lanes[anchor], lanes[index]))
-                    continue;
+            for (std::size_t index = 0; index < group.lane_count; ++index) {
                 const auto* state =
-                    find_lane_state(lane_state_, {track.id}, {lanes[index].lane_id});
+                    active_lanes_[group_lane_indices_[group.first_lane + index]].state;
                 candidate_count += state->event_count;
                 for (std::uint32_t event = 0; event < state->event_count; ++event)
                     mandatory_count +=
@@ -1508,7 +1517,7 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
                 optional_count, limits.max_events_per_device_per_block - mandatory_count));
             std::uint64_t optional_rank = 0;
             std::uint32_t optional_selection = 0;
-            walk_group(track, lanes, anchor,
+            walk_group(group_index,
                        [&](ProgramWireLaneState& state, AutomationBlockEvent event) noexcept {
                            const bool mandatory =
                                event.transition != AutomationTransition::LinearRamp;
@@ -1528,23 +1537,20 @@ ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
                            if (selected)
                                output[state.output_index].events[state.write_position++] = event;
                        });
-        }
     }
 
-    output_index = 0;
-    for (const auto& track : active_view_.tracks()) {
-        for (const auto& lane : active_view_.automation_lanes_for(track)) {
-            auto* state = find_lane_state(lane_state_, {track.id}, {lane.lane_id});
-            auto& destination = output[output_index++];
-            destination.track_id = {track.id};
-            destination.lane_id = {lane.lane_id};
+    for (std::size_t lane_index = 0; lane_index < lane_count_; ++lane_index) {
+            const auto& active = active_lanes_[lane_index];
+            auto* state = active.state;
+            auto& destination = output[lane_index];
+            destination.track_id = {active.track->id};
+            destination.lane_id = {active.lane->lane_id};
             destination.result = state->cursor_result;
             destination.result.emitted_events = state->selected_count;
             if (state->group_coalesced)
                 destination.result.code = AutomationCursorCode::Coalesced;
             state->cursor = state->next_cursor;
             ++result.rendered_lanes;
-        }
     }
     return result;
 }

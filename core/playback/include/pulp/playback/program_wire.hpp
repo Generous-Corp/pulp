@@ -845,6 +845,17 @@ class ProgramWireAutomationConsumer {
     }
 
   private:
+    struct ActiveLane {
+        ProgramWireLaneState* state = nullptr;
+        const ProgramWireTrackRecord* track = nullptr;
+        const ProgramWireAutomationLaneRecord* lane = nullptr;
+        std::size_t group_index = 0;
+    };
+    struct CapacityGroup {
+        std::size_t first_lane = 0;
+        std::size_t lane_count = 0;
+    };
+
     std::span<ProgramWireLaneState> lane_state_;
     ProgramWireBytePin active_pin_;
     ProgramWireView active_view_;
@@ -852,6 +863,11 @@ class ProgramWireAutomationConsumer {
     std::size_t lane_count_ = 0;
     std::size_t track_capacity_ = 0;
     std::size_t wire_byte_capacity_ = 0;
+    std::array<ActiveLane, AutomationPlaybackLimits::kMaximumLanesPerTrack> active_lanes_{};
+    std::array<CapacityGroup, AutomationPlaybackLimits::kMaximumLanesPerTrack> groups_{};
+    std::array<std::size_t, AutomationPlaybackLimits::kMaximumLanesPerTrack>
+        group_lane_indices_{};
+    std::size_t group_count_ = 0;
     std::array<ProgramWireLaneState*, AutomationPlaybackLimits::kMaximumLanesPerTrack>
         merge_heap_{};
 };
