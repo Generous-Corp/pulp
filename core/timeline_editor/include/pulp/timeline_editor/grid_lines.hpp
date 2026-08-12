@@ -10,30 +10,47 @@
 
 namespace pulp::timeline_editor {
 
+/// Identifies the musical boundary represented by a grid line.
 enum class GridLineLevel : std::uint8_t {
+    /// Marks the first tick of a bar.
     Bar,
+    /// Marks a beat subdivision after the bar boundary.
     Beat,
 };
 
+/// Describes one visible musical boundary in projected screen coordinates.
 struct GridLine {
+    /// Musical position of the boundary.
     timebase::TickPosition tick{};
+    /// Horizontal pixel coordinate produced by the projection.
     float x = 0.0f;
+    /// Musical boundary level used to select its visual prominence.
     GridLineLevel level = GridLineLevel::Beat;
     constexpr auto operator<=>(const GridLine&) const = default;
 };
 
+/// Reports why grid-line generation stopped.
 enum class GridLineError : std::uint8_t {
+    /// Generation completed successfully.
     None,
+    /// The requested minimum pixel spacing is not finite.
     NonFiniteSpacing,
+    /// The requested minimum pixel spacing is zero or negative.
     NonPositiveSpacing,
+    /// Meter or tick arithmetic could not advance safely through the range.
     RangeOverflow,
+    /// The output span filled before generation completed.
     OutputTooSmall,
 };
 
+/// Carries the generation status and the number of lines written.
 struct GridLineResult {
+    /// Completion status for the generation attempt.
     GridLineError error = GridLineError::None;
+    /// Number of initialized entries in the caller-provided output span.
     std::size_t count = 0;
 
+    /// Returns true when generation completed without an error.
     constexpr explicit operator bool() const noexcept {
         return error == GridLineError::None;
     }
