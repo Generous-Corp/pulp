@@ -29,6 +29,7 @@ constexpr ItemId kGeneratedClip{110};
 constexpr TickDuration kStep{kTicksPerQuarter / 4};
 constexpr TickDuration kGate{kTicksPerQuarter / 8};
 constexpr TickDuration kClipDuration{3 * kStep.value};
+constexpr RationalRate kSampleRate{48'000, 1};
 
 template <typename T, typename E> std::optional<T> value_of(runtime::Result<T, E> result) {
     if (!result)
@@ -91,7 +92,7 @@ std::optional<Project> make_project(const SchemaRegistry& schemas) {
 
 std::shared_ptr<const CompiledTempoMap> make_tempo_map() {
     const std::array points{TempoPoint{{0}, 120.0}};
-    auto compiled = CompiledTempoMap::compile(points, {48'000, 1});
+    auto compiled = CompiledTempoMap::compile(points, kSampleRate);
     if (!compiled)
         return {};
     return std::make_shared<const CompiledTempoMap>(std::move(compiled).value());
@@ -122,6 +123,7 @@ baseline_request(const DocumentView& view, std::shared_ptr<const CompiledTempoMa
     request.project = view.snapshot;
     request.sequence_id = kSequence;
     request.tempo_map = std::move(tempo);
+    request.sample_rate = kSampleRate;
     request.document_revision = view.revision.value;
     request.dirty.all = true;
     request.invalidation =
@@ -288,6 +290,7 @@ int main() {
     incremental.project = committed->snapshot;
     incremental.sequence_id = kSequence;
     incremental.tempo_map = tempo;
+    incremental.sample_rate = kSampleRate;
     incremental.document_revision = committed->revision.value;
     incremental.invalidation = CompileInvalidationInput{registry, *committed};
     auto incremental_ticket = compiler.submit(std::move(incremental));
