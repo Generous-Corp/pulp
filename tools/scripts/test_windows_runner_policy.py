@@ -393,11 +393,10 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("Windows omitted by operator request", body)
 
     def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
-        """The long-polling required alias must leave classifiers runnable.
+        """The terminal required alias must leave classifiers runnable.
 
-        If it runs on `pulp-preamble`, several aliases can occupy every runner
-        capable of starting the next run's fail-closed classify/resolve jobs.
-        Hosted Linux is sufficient for the short API-only report.
+        The reporter starts after the matrix is terminal, but a dedicated alias
+        pool still keeps report traffic independent of preamble capacity.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
@@ -409,10 +408,19 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
 
     def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
-        """PR polling stays independent; merge-group reporting stays short."""
+        """Advisory results may delay but cannot determine required macOS."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
         self.assertIn("github.event_name != 'merge_group'", condition)
-        self.assertNotIn("build", self.workflow["jobs"]["macos"]["needs"])
+        self.assertEqual(
+            self.workflow["jobs"]["macos"]["needs"], ["build", "classify"]
+        )
+        self.assertNotIn(
+            "needs.build.result",
+            "\n".join(
+                step.get("run", "")
+                for step in self.workflow["jobs"]["macos"]["steps"]
+            ),
+        )
 
         pr_alias = self.workflow["jobs"]["macos"]
         self.assertIn("macos-pr-unused", pr_alias["name"])

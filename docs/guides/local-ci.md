@@ -867,13 +867,23 @@ branch when a Windows-touching change needs proof before merge.
 Windows are absent on `merge_group`, Windows remains reachable through
 `workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## The required macOS alias never long-polls on the merge queue
+## The required macOS alias reports after the native matrix is terminal
 
 Branch protection requires the stable `macos` alias so local/overflow provider
-changes cannot rename the gate. On `merge_group`, the build matrix contains only
-the real self-hosted macOS leg and the alias depends on that completed build.
-The hosted alias therefore runs only long enough to report the result; it does
-not occupy a hosted slot while polling through the native compile/test.
+changes cannot rename the gate. Both event-specific reporters depend on the
+terminal build matrix, then query the current workflow run's paginated jobs API
+and require exactly one `macOS ...` matrix leg with conclusion `success`.
+Missing, duplicate, null, skipped, cancelled, failed, and unknown conclusions
+all fail closed. The query is retried three times only for transport failure;
+there is no fixed-duration build poll that can expire before a queued macOS leg
+starts.
+
+Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
+Linux or Windows work can therefore delay when the reporter starts, but neither
+`needs.build.result` nor an advisory leg's conclusion determines the required
+macOS verdict. On `merge_group`, the matrix contains only the real self-hosted
+macOS leg, and the dedicated merge-group reporter retains the same stable
+`macos` check name.
 
 An alias is the **last job in the run**: it waits for the matrix leg and reports
 the outcome. Starve it of a runner and it never starts, so the *run* never
@@ -892,17 +902,18 @@ normally. If you hit it:
 ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel
 ```
 
-An advisory lane must never be able to strand a pull request, which is why these
-two moved off the hosted pool.
+Reporter runner isolation still matters: the PR/dispatch reporter uses the
+dedicated alias selector, while merge-group and advisory reporters use the
+preamble selector so no bare hosted-runner dependency can hold a run open.
 `tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
 through the toggle and that none is pinned to a bare `ubuntu-latest`.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
-stdin script, so a wedged checkout volume can freeze the routing probe or the
-`macos` outcome poll even though the jobs API response is already available.
+stdin script, so a wedged checkout volume can freeze the routing probe or a
+terminal `macos` jobs-response parser even though the API response is available.
 `RUNNER_TEMP` is not a safe boundary here: on self-hosted Studios it can also
-live below `/Volumes/Workshop`. Those two helpers first `cd /tmp` (`/private/tmp`
+live below `/Volumes/Workshop`. Those three helpers first `cd /tmp` (`/private/tmp`
 on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
 as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.

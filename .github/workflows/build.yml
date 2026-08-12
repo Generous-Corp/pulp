@@ -66,6 +66,10 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   resolve-provider:
     # Runner for the required-gate routing preamble. Defaults to ubuntu-latest
@@ -1486,10 +1490,11 @@ jobs:
         run: cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
-  # Stable required `macos` alias. PR/dispatch runs use the polling job below so
-  # advisory matrix legs cannot delay the required context. merge_group uses a
-  # separate job with the same displayed name after its macOS-only matrix
-  # completes, so it occupies hosted Linux only long enough to report.
+  # Stable required `macos` alias. Each event-specific reporter starts only
+  # after its build matrix is terminal, then reads the exact macOS leg from
+  # this workflow run. PR/dispatch runs retain the combined matrix, so advisory
+  # legs may delay the reporter but cannot determine its result. merge_group
+  # retains a separate reporter with the same displayed required-check name.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
   # On a skip-safe PR (classify said no native
@@ -1502,12 +1507,10 @@ jobs:
     # A skipped job still emits its displayed check name. Give the inactive
     # merge-group copy a non-required name so it cannot satisfy `macos` early.
     name: ${{ github.event_name == 'merge_group' && 'macos-pr-unused' || 'macos' }}
-    needs: [resolve-provider, classify]
-    # This job only polls the Actions API and sleeps while the real macOS matrix
-    # leg runs. Keeping it on `pulp-preamble` consumes the exact scarce runner
-    # needed by new resolve/classify jobs, so a handful of hour-long aliases can
-    # deadlock the merge queue. Default to hosted Linux; a dedicated alias pool
-    # can be selected explicitly without ever borrowing preamble capacity.
+    needs: [build, classify]
+    # This job performs one terminal jobs-API read after the combined matrix.
+    # Default to hosted Linux; a dedicated alias pool can be selected explicitly
+    # without borrowing preamble capacity.
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
@@ -1527,45 +1530,55 @@ jobs:
             echo "Skip-safe PR — no C++/Swift build input changed. macos gate ✓ (no native build)"
             exit 0
           fi
-          conclusion=""
-          max_attempts=360
-          for attempt in $(seq 1 "$max_attempts"); do
-            jobs_json="$(mktemp)"
-            jobs_err="$(mktemp)"
-            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" >"$jobs_json" 2>"$jobs_err"; then
-              if ! conclusion=$(
-                # The checkout may live on /Volumes/Workshop. Python stdin
-                # mode resolves cwd before executing this parser. RUNNER_TEMP
-                # may share /Volumes/Workshop with the checkout, so use the
-                # system temp volume to keep this aggregate responsive.
-                cd /tmp
-                python3 - "$jobs_json" <<'PY'
+          jobs_json="$(mktemp)"
+          jobs_err="$(mktemp)"
+          trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
+          api_ok=false
+          for attempt in 1 2 3; do
+            if gh api --paginate --slurp \
+              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
+              >"$jobs_json" 2>"$jobs_err"; then
+              api_ok=true
+              break
+            fi
+            echo "Jobs API request failed (transport attempt $attempt/3)."
+            cat "$jobs_err"
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$attempt"
+            fi
+          done
+          if [ "$api_ok" != "true" ]; then
+            echo "Jobs API remained unavailable — failing macos gate closed (required)"
+            exit 1
+          fi
+          # The checkout may live on /Volumes/Workshop. Python stdin mode
+          # resolves cwd before executing this parser, so use system /tmp.
+          conclusion=$(
+            cd /tmp
+            python3 - "$jobs_json" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as handle:
-              payload = json.load(handle)
-          for job in payload.get("jobs", []):
-              if job.get("name", "").startswith("macOS"):
-                  print(job.get("conclusion") or "")
-                  break
+              pages = json.load(handle)
+          if not isinstance(pages, list):
+              raise SystemExit("jobs API response was not a paginated list")
+          matches = [
+              job
+              for page in pages
+              if isinstance(page, dict)
+              for job in page.get("jobs", [])
+              if isinstance(job, dict)
+              and job.get("name", "").startswith("macOS")
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one macOS matrix leg, found {len(matches)}"
+              )
+          conclusion = matches[0].get("conclusion")
+          print(conclusion if isinstance(conclusion, str) else "")
           PY
-              ); then
-                echo "Could not parse jobs API response; retrying."
-                conclusion=""
-              fi
-            else
-              echo "Jobs API request failed; retrying."
-              cat "$jobs_err"
-              conclusion=""
-            fi
-            rm -f "$jobs_json" "$jobs_err"
-            if [ -n "$conclusion" ] && [ "$conclusion" != "null" ]; then
-              break
-            fi
-            echo "Waiting for macOS matrix leg to report (attempt $attempt/$max_attempts)..."
-            sleep 10
-          done
+          )
           echo "macOS leg conclusion: ${conclusion:-unknown}"
           if [ "$conclusion" = "success" ]; then
             echo "macOS leg green — macos gate ✓"
@@ -1586,6 +1599,8 @@ jobs:
     if: always() && github.event_name == 'merge_group'
     steps:
       - name: macOS-only merge-group outcome (required)
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1597,11 +1612,59 @@ jobs:
             echo "Skip-safe merge group — macos gate ✓"
             exit 0
           fi
-          if [ "${{ needs.build.result }}" = "success" ]; then
+          jobs_json="$(mktemp)"
+          jobs_err="$(mktemp)"
+          trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
+          api_ok=false
+          for attempt in 1 2 3; do
+            if gh api --paginate --slurp \
+              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
+              >"$jobs_json" 2>"$jobs_err"; then
+              api_ok=true
+              break
+            fi
+            echo "Jobs API request failed (transport attempt $attempt/3)."
+            cat "$jobs_err"
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$attempt"
+            fi
+          done
+          if [ "$api_ok" != "true" ]; then
+            echo "Jobs API remained unavailable — failing macos gate closed (required)"
+            exit 1
+          fi
+          conclusion=$(
+            cd /tmp
+            python3 - "$jobs_json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              pages = json.load(handle)
+          if not isinstance(pages, list):
+              raise SystemExit("jobs API response was not a paginated list")
+          matches = [
+              job
+              for page in pages
+              if isinstance(page, dict)
+              for job in page.get("jobs", [])
+              if isinstance(job, dict)
+              and job.get("name", "").startswith("macOS")
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one macOS matrix leg, found {len(matches)}"
+              )
+          conclusion = matches[0].get("conclusion")
+          print(conclusion if isinstance(conclusion, str) else "")
+          PY
+          )
+          echo "macOS leg conclusion: ${conclusion:-unknown}"
+          if [ "$conclusion" = "success" ]; then
             echo "Self-hosted macOS-only matrix green — macos gate ✓"
             exit 0
           fi
-          echo "Self-hosted macOS-only matrix result=${{ needs.build.result }} — failing macos gate"
+          echo "Self-hosted macOS-only matrix ${conclusion:-unknown} — failing macos gate"
           exit 1
 
   linux:
