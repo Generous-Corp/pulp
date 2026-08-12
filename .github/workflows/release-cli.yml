@@ -1362,10 +1362,9 @@ jobs:
             echo "--- $ART $CMD ---"
             set +e
             if [ "$ART" = "pulp-control-standalone-host" ]; then
-              # The installed host has no diagnostic CLI: without inherited
-              # bootstrap state it exits 65, while a supplied bootstrap may
-              # keep it alive. Bound both outcomes and terminate a live host
-              # cleanly after proving dyld reached main().
+              # The installed host has no diagnostic CLI. Give it an explicit
+              # non-socket stdin so the clean-runner contract is deterministic:
+              # initialization must reach the missing-bootstrap exit 65.
               python3 - "$BIN" /tmp/$ART-smoke.out /tmp/$ART-smoke.err <<'PY'
           import pathlib
           import subprocess
@@ -1374,19 +1373,16 @@ jobs:
           binary, stdout_path, stderr_path = sys.argv[1:]
           with pathlib.Path(stdout_path).open("wb") as stdout, \
                pathlib.Path(stderr_path).open("wb") as stderr:
-              process = subprocess.Popen([binary], stdout=stdout, stderr=stderr)
+              process = subprocess.Popen(
+                  [binary], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr
+              )
               try:
-                  return_code = process.wait(timeout=2)
+                  return_code = process.wait(timeout=5)
               except subprocess.TimeoutExpired:
-                  process.terminate()
-                  try:
-                      process.wait(timeout=5)
-                      return_code = 0
-                  except subprocess.TimeoutExpired:
-                      process.kill()
-                      process.wait()
-                      raise SystemExit("standalone host ignored termination")
-          if return_code not in (0, 65):
+                  process.kill()
+                  process.wait()
+                  raise SystemExit("standalone host did not reject missing bootstrap")
+          if return_code != 65:
               raise SystemExit(return_code)
           PY
             else

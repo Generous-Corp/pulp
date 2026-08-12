@@ -568,8 +568,9 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             "pulp-control-standalone-host.inspector-capabilities.json", run_block
         )
         self.assertIn("subprocess.TimeoutExpired", run_block)
-        self.assertIn("process.wait(timeout=5)\n                      return_code = 0", run_block)
-        self.assertIn("return_code not in (0, 65)", run_block)
+        self.assertIn("stdin=subprocess.DEVNULL", run_block)
+        self.assertIn("standalone host did not reject missing bootstrap", run_block)
+        self.assertIn("return_code != 65", run_block)
         self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
         self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
         self.assertIn('pulp-mcp) echo "--version"', run_block)
