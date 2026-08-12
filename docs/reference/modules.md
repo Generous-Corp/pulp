@@ -1880,11 +1880,10 @@ Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
 only a replacement note, erase carries only the expected note, and move, resize,
 and velocity edits carry both snapshots with the same note identity.
 `ValidatedNoteEditIntent::create` checks that shape and the note domain, and
-`NoteEditIntentHost` accepts only the validated wrapper. The legacy
-commit-on-release lowerer emits an O(clip) `ReplaceNoteContent` rewrite. Migrating
-that boundary to `SetNoteEvents`, `InsertNotes`, and `RemoveNotes` — and supporting
-continuous gesture updates — is a separate editor-integration step; the durable
-command vocabulary now supports those subset edits.
+`NoteEditIntentHost` accepts only the validated wrapper. Note intents deliberately
+have no transaction lowerer yet: granular
+note commands own that later boundary, so this editor API does not disguise an
+O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
 
 `undo_gesture_budget` answers how long a gesture can stream before the document
 refuses it, which an editor needs *before* it opens one. A gesture coalesces
