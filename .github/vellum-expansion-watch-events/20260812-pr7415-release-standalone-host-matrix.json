@@ -13,6 +13,7 @@
     "python3 tools/scripts/test_package_cli.py (24 tests)",
     "python3 tools/scripts/test_release_artifact_contents.py (41 tests)",
     "python3 tools/scripts/test_release_workflow_test_step.py (85 tests)",
+    "cargo test --manifest-path experimental/pulp-rs/Cargo.toml --lib install::tests (installer archive compatibility)",
     "vellum-expansion-watch"
   ],
   "disposition": "watch-only-no-authority",

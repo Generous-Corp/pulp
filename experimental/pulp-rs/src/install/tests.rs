@@ -34,6 +34,24 @@ fn control_release_payload_is_all_or_none() {
 }
 
 #[test]
+fn historical_broker_only_payload_does_not_claim_shared_runtime_as_companion() {
+    let archive = tempfile::tempdir().unwrap();
+    fs::write(archive.path().join(pulp_basename()), b"pulp").unwrap();
+    fs::write(archive.path().join(control_broker_basename()), b"broker").unwrap();
+    fs::write(
+        archive.path().join(control_standalone_runtime_basename()),
+        b"shared-wgpu-runtime",
+    )
+    .unwrap();
+
+    let extracted = locate_binaries_in_archive(archive.path()).unwrap();
+    assert!(extracted.new_control_broker.is_some());
+    assert!(extracted.new_control_standalone_host.is_none());
+    assert!(extracted.new_control_standalone_manifest.is_none());
+    assert!(extracted.new_control_standalone_runtime.is_none());
+}
+
+#[test]
 fn upgrade_url_macos_arm64_uses_targz() {
     let (asset, url) = upgrade_url_for("0.50.0", "darwin", "arm64");
     assert_eq!(asset, "pulp-darwin-arm64.tar.gz");
