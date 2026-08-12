@@ -217,6 +217,19 @@ static std::string canvas_program_report(const View& root) {
     return out.str();
 }
 
+static std::string canvas_program_frame_report(
+    const std::vector<std::string>& frame_programs) {
+    std::ostringstream out;
+    out << '[';
+    for (std::size_t i = 0; i < frame_programs.size(); ++i) {
+        if (i != 0) out << ',';
+        out << "{\"frame\":" << (i + 1)
+            << ",\"canvas_programs\":" << frame_programs[i] << '}';
+    }
+    out << ']';
+    return out.str();
+}
+
 static CanvasWidget* find_canvas_by_id(View& view, const std::string& id,
                                        uint32_t occurrence, uint32_t& seen) {
     if (auto* canvas = dynamic_cast<CanvasWidget*>(&view); canvas && canvas->id() == id) {
@@ -477,7 +490,9 @@ static const char* runtime_trace_script() {
         native_bounds_count: nativeBounds.length,
         native_bounds: nativeBounds,
         canvas_programs: Array.isArray(globalThis.__pulpCanvasPrograms__)
-            ? globalThis.__pulpCanvasPrograms__ : []
+            ? globalThis.__pulpCanvasPrograms__ : [],
+        canvas_program_frames: Array.isArray(globalThis.__pulpCanvasProgramFrames__)
+            ? globalThis.__pulpCanvasProgramFrames__ : []
     }, null, 2);
 })()
 )JS";
@@ -703,10 +718,20 @@ int main(int argc, char* argv[]) {
     // naturally, but pulp-screenshot's headless path has to pump
     // explicitly. __pulpRuntimeSettle__ is registered by WidgetBridge
     // exactly for this case (see widget_bridge.cpp:1144).
+    std::vector<std::string> canvas_program_frames;
+    if (!options.runtime_trace_path.empty())
+        canvas_program_frames.reserve(options.settle_frames);
     for (uint32_t remaining = options.settle_frames; remaining > 0;) {
-        const auto batch = std::min<uint32_t>(remaining, 64);
+        // A runtime trace is an animation oracle, not merely a final snapshot:
+        // pump one frame at a time and retain the native command-list size at
+        // every boundary. This catches Canvas2D programs that accidentally
+        // append forever even when their last rendered frame looks correct.
+        const auto batch = options.runtime_trace_path.empty()
+            ? std::min<uint32_t>(remaining, 64) : 1u;
         bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') "
                            "__pulpRuntimeSettle__(" + std::to_string(batch) + ");");
+        if (!options.runtime_trace_path.empty())
+            canvas_program_frames.push_back(canvas_program_report(root));
         remaining -= batch;
     }
     // A React commit during settling may replace a behavior-only CanvasWidget.
@@ -742,6 +767,8 @@ int main(int argc, char* argv[]) {
         try {
             engine.evaluate("globalThis.__pulpCanvasPrograms__ = " +
                             canvas_program_report(root) + ";");
+            engine.evaluate("globalThis.__pulpCanvasProgramFrames__ = " +
+                            canvas_program_frame_report(canvas_program_frames) + ";");
             auto trace = engine.evaluate(runtime_trace_script()).toString();
             if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
                 std::cerr << "Error: could not write runtime trace " << options.runtime_trace_path << "\n";

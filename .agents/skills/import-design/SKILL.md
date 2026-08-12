@@ -6368,6 +6368,15 @@ pulp-screenshot --compare spectr.ir-browser-capture/browser.png native.png \
   --threshold 0.99 --diff native-diff.png
 ```
 
+For any rAF/timer-driven CanvasWidget, use a production-length settle window
+(300 frames for Spectr) and inspect `runtime.json.canvas_program_frames`, not
+only the final `canvas_programs` entry. Each authored canvas must remain bounded
+across the whole window; a flat or naturally varying bounded series is valid,
+while a monotonic command-count ramp means the application is appending retained
+Canvas2D commands instead of replacing the frame. Keep a mutation fixture that
+removes the full-canvas clear and proves this oracle goes red. This is required
+before replacing a captured canvas snapshot with live native paint.
+
 The optional prelude is product-owned and runs in the captured document before
 its application scripts load. Use it for real analyzer, state, and host-bridge
 services that application modules may snapshot during declaration. Never put a

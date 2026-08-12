@@ -21,6 +21,33 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     out << bytes;
 }
 
+std::vector<unsigned long> canvas_counts(const std::string& trace,
+                                         const std::string& id) {
+    const std::string id_key = "\"id\"";
+    const std::string count_key = "\"command_count\"";
+    std::vector<unsigned long> counts;
+    for (std::size_t pos = 0; (pos = trace.find(id_key, pos)) != std::string::npos;) {
+        const auto colon = trace.find(':', pos + id_key.size());
+        const auto quoted = trace.find('"', colon + 1);
+        if (colon == std::string::npos || quoted == std::string::npos) break;
+        const auto end_quoted = trace.find('"', quoted + 1);
+        if (end_quoted == std::string::npos) break;
+        pos = end_quoted + 1;
+        if (trace.substr(quoted + 1, end_quoted - quoted - 1) != id) continue;
+        const auto count_pos = trace.find(count_key, pos);
+        if (count_pos == std::string::npos) break;
+        const auto count_colon = trace.find(':', count_pos + count_key.size());
+        if (count_colon == std::string::npos) break;
+        pos = count_colon + 1;
+        while (pos < trace.size() && (trace[pos] == ' ' || trace[pos] == '\n')) ++pos;
+        std::size_t end = pos;
+        while (end < trace.size() && trace[end] >= '0' && trace[end] <= '9') ++end;
+        if (end > pos) counts.push_back(std::stoul(trace.substr(pos, end - pos)));
+        pos = end;
+    }
+    return counts;
+}
+
 ScreenshotCliOptions parse_args(std::initializer_list<const char*> args) {
     std::vector<std::string> storage;
     storage.reserve(args.size() + 1);
@@ -146,6 +173,76 @@ TEST_CASE("pulp-screenshot runtime trace script records live native bounds",
     REQUIRE(script.find("reference_frame") != std::string::npos);
     REQUIRE(script.find("root-view-css-points") != std::string::npos);
     REQUIRE(script.find("canvas_programs") != std::string::npos);
+    REQUIRE(script.find("canvas_program_frames") != std::string::npos);
+}
+
+TEST_CASE("pulp-screenshot serializes per-frame native canvas programs",
+          "[tools][screenshot][runtime-trace]") {
+    const auto report = canvas_program_frame_report({
+        R"([{"id":"main","command_count":12}])",
+        R"([{"id":"main","command_count":9},{"id":"mini","command_count":3}])"
+    });
+
+    REQUIRE(report ==
+        R"([{"frame":1,"canvas_programs":[{"id":"main","command_count":12}]},{"frame":2,"canvas_programs":[{"id":"main","command_count":9},{"id":"mini","command_count":3}]}])");
+}
+
+TEST_CASE("pulp-screenshot runtime trace detects bounded and accumulating canvas frames",
+          "[tools][screenshot][runtime-trace]") {
+    const auto script = temp_file_path("animated-canvas.js");
+    const auto trace = temp_file_path("animated-canvas-trace.json");
+    const auto png = temp_file_path("animated-canvas.png");
+    std::filesystem::remove(trace);
+    std::filesystem::remove(png);
+
+    write_bytes(script, R"JS(
+        createCanvas('animated', 'root');
+        setFlex('animated', 'width', 80);
+        setFlex('animated', 'height', 40);
+        function tick() {
+            canvasClear('animated');
+            canvasRect('animated', 0, 0, 20, 20, '#33ccff');
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+    )JS");
+    REQUIRE(run_screenshot_cli({"--script", script.c_str(),
+                                "--output", png.c_str(),
+                                "--runtime-trace", trace.c_str(),
+                                "--settle-frames", "8",
+                                "--width", "80", "--height", "40",
+                                "--scale", "1", "--backend", "default"}) == 0);
+    const auto bounded = canvas_counts(read_file(trace.string()), "animated");
+    REQUIRE(bounded.size() == 9); // eight sampled frames plus the final summary
+    REQUIRE(std::all_of(bounded.begin(), bounded.end(),
+                        [](auto count) { return count == 1; }));
+
+    // Negative control: the same animation without the per-frame clear must be
+    // observable as an ever-growing native command stream.
+    write_bytes(script, R"JS(
+        createCanvas('animated', 'root');
+        setFlex('animated', 'width', 80);
+        setFlex('animated', 'height', 40);
+        function tick() {
+            canvasRect('animated', 0, 0, 20, 20, '#33ccff');
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+    )JS");
+    REQUIRE(run_screenshot_cli({"--script", script.c_str(),
+                                "--output", png.c_str(),
+                                "--runtime-trace", trace.c_str(),
+                                "--settle-frames", "8",
+                                "--width", "80", "--height", "40",
+                                "--scale", "1", "--backend", "default"}) == 0);
+    const auto accumulating = canvas_counts(read_file(trace.string()), "animated");
+    REQUIRE(accumulating.size() == 9);
+    REQUIRE(*std::min_element(accumulating.begin(), accumulating.end()) == 3);
+    REQUIRE(*std::max_element(accumulating.begin(), accumulating.end()) == 17);
+
+    std::filesystem::remove(script);
+    std::filesystem::remove(trace);
+    std::filesystem::remove(png);
 }
 
 TEST_CASE("pulp-screenshot option parser preserves documented defaults",
