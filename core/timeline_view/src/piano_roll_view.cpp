@@ -54,10 +54,20 @@ void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId 
     sequence_id_ = sequence_id;
     track_id_ = track_id;
     clip_id_ = clip_id;
-    maximum_note_duration_ = {};
-    for (const auto& note : notes())
-        maximum_note_duration_.value =
-            std::max(maximum_note_duration_.value, note.duration.value);
+    const auto all = notes();
+    note_interval_max_end_.assign(all.empty() ? 0 : all.size() * 4, {});
+    const auto build_interval_index = [&](auto&& self, std::size_t node, std::size_t begin,
+                                          std::size_t end) -> timebase::TickPosition {
+        if (end - begin == 1)
+            return note_interval_max_end_[node] = note_end(all[begin]);
+        const auto middle = begin + (end - begin) / 2;
+        const auto left_end = self(self, node * 2 + 1, begin, middle);
+        const auto right_end = self(self, node * 2 + 2, middle, end);
+        return note_interval_max_end_[node] =
+                   timebase::TickPosition{std::max(left_end.value, right_end.value)};
+    };
+    if (!all.empty())
+        build_interval_index(build_interval_index, 0, 0, all.size());
     // A rebind invalidates anything a live gesture believed about a note.
     drag_.reset();
 }
@@ -233,29 +243,14 @@ void PianoRollView::paint(canvas::Canvas& canvas) {
 
     const auto visible_start = layout_->time.visible_start();
     const auto visible_end = layout_->time.visible_end();
-    const auto earliest_possible_overlap = timebase::TickPosition{
-        visible_start.value <= maximum_note_duration_.value
-            ? 0
-            : visible_start.value - maximum_note_duration_.value};
     const auto all = notes();
-    const auto first = std::lower_bound(
-        all.begin(), all.end(), earliest_possible_overlap,
-        [](const NoteEvent& note, timebase::TickPosition start) { return note.start < start; });
     canvas.set_fill_color(kNoteFill);
-    for (auto candidate = first; candidate != all.end(); ++candidate) {
-        const auto& note = *candidate;
+
+    const auto paint_candidate = [&](const NoteEvent& note) {
         ++visited_candidate_count_;
-        // Notes are in canonical (start, id) order, so once a note starts at or
-        // after the visible end no later note can overlap the viewport and the
-        // scan is done. The lower bound starts no later than visible_start minus
-        // the longest bound note, so an earlier note cannot reach the viewport.
-        if (note.start.value >= visible_end.value)
-            break;
-        if (note_end(note).value <= visible_start.value)
-            continue;
         if (note.pitch < layout_->pitch.lowest_pitch() ||
             note.pitch > layout_->pitch.highest_pitch())
-            continue;
+            return;
 
         const float left = layout_->time.x_at(note.start);
         const float right = layout_->time.x_at(note_end(note));
@@ -263,11 +258,27 @@ void PianoRollView::paint(canvas::Canvas& canvas) {
         const float visible_left = std::max(left, 0.0f);
         const float visible_right = std::min(right, local.width);
         if (visible_right <= visible_left)
-            continue;
+            return;
         canvas.fill_rect(visible_left, centre - row_height * 0.5f, visible_right - visible_left,
                          row_height);
         ++painted_note_count_;
-    }
+    };
+
+    const auto paint_overlapping_range = [&](auto&& self, std::size_t node, std::size_t begin,
+                                              std::size_t end) -> void {
+        if (note_interval_max_end_[node].value <= visible_start.value ||
+            all[begin].start.value >= visible_end.value)
+            return;
+        if (end - begin == 1) {
+            paint_candidate(all[begin]);
+            return;
+        }
+        const auto middle = begin + (end - begin) / 2;
+        self(self, node * 2 + 1, begin, middle);
+        self(self, node * 2 + 2, middle, end);
+    };
+    if (!all.empty())
+        paint_overlapping_range(paint_overlapping_range, 0, 0, all.size());
 }
 
 void PianoRollView::on_mouse_down(view::Point position) {
