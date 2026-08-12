@@ -90,7 +90,24 @@ export interface SyntheticElementWrapper {
     style: Record<string, unknown>;
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
+    getBoundingClientRect: () => SyntheticLayoutRect;
 }
+
+export interface SyntheticLayoutRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+}
+
+const emptyLayoutRect = (): SyntheticLayoutRect => ({
+    x: 0, y: 0, width: 0, height: 0,
+    top: 0, right: 0, bottom: 0, left: 0,
+});
 
 function makeElementWrapper(id: string): SyntheticElementWrapper {
     return {
@@ -103,6 +120,21 @@ function makeElementWrapper(id: string): SyntheticElementWrapper {
         // write path.
         setAttribute(_name: string, _value: string): void { /* no-op */ },
         getAttribute(_name: string): string | null { return null; },
+        getBoundingClientRect(): SyntheticLayoutRect {
+            const rect = g().getLayoutRect?.(id) as Partial<SyntheticLayoutRect> | undefined;
+            if (!rect) return emptyLayoutRect();
+            const x = Number(rect.x ?? rect.left ?? 0);
+            const y = Number(rect.y ?? rect.top ?? 0);
+            const width = Number(rect.width ?? 0);
+            const height = Number(rect.height ?? 0);
+            return {
+                x, y, width, height,
+                top: Number(rect.top ?? y),
+                right: Number(rect.right ?? x + width),
+                bottom: Number(rect.bottom ?? y + height),
+                left: Number(rect.left ?? x),
+            };
+        },
     };
 }
 

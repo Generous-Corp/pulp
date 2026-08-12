@@ -233,6 +233,25 @@ describe('@pulp/react prop-applier — synthetic event factory', () => {
         expect(handler).toHaveBeenCalledTimes(1);
     });
 
+    it('currentTarget getBoundingClientRect uses the native layout bridge', () => {
+        const getLayoutRect = vi.fn(() => ({
+            x: 12, y: 34, width: 320, height: 180,
+            top: 34, right: 332, bottom: 214, left: 12,
+        }));
+        (globalThis as unknown as Record<string, unknown>).getLayoutRect = getLayoutRect;
+        try {
+            const evt = makeSyntheticEvent('canvas1', 'pointermove', [{ clientX: 40, clientY: 80 }]);
+            expect(evt.currentTarget.getBoundingClientRect()).toEqual({
+                x: 12, y: 34, width: 320, height: 180,
+                top: 34, right: 332, bottom: 214, left: 12,
+            });
+            expect(getLayoutRect).toHaveBeenCalledOnce();
+            expect(getLayoutRect).toHaveBeenCalledWith('canvas1');
+        } finally {
+            delete (globalThis as unknown as Record<string, unknown>).getLayoutRect;
+        }
+    });
+
     it('pointerType from a stylus dispatch is preserved on the synthetic event', () => {
         const handler = vi.fn();
         applyAllProps(instance('p3', 'View', { onPointerDown: handler }));
