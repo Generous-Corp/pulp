@@ -399,6 +399,62 @@ test("real browser interactions capture a same-document secondary screen",
     }
   });
 
+test("real browser clicks pass decorative overlays and use exposed target points",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-exposed-click-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html,body { margin:0;width:160px;height:120px;overflow:hidden }
+  button { position:absolute;left:20px;top:20px;width:120px;height:80px }
+  #texture { position:absolute;inset:0;z-index:3;pointer-events:none;
+    background:rgba(255,255,255,.02) }
+  #blocker { position:absolute;left:50px;top:40px;width:60px;height:40px;
+    z-index:2;background:#000 }
+</style>
+<button id="target" onclick="document.body.style.background='rgb(20,210,40)'">
+  Target
+</button>
+<div id="blocker"></div><div id="texture"></div>
+`);
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [{ action: "click", selector: "#target" }],
+      }));
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue] = rgbaPixel(screenshot, 10, 10);
+      assert.ok(red < 40 && green > 190 && blue < 60);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser wait-for visible rejects invisible ancestors and overlays",
   { timeout: 30000 }, async (context) => {
     const browser = await installedBrowser();

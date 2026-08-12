@@ -6286,6 +6286,44 @@ alone orphans them.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
+### Chromium state matrix -> computed DesignIR -> native proof
+
+For a React/Claude prototype, the browser capture is the visual authority and
+the native render is the implementation under test. Do not replace the source
+with a hand-built JSX approximation. Capture the patched shipping source at the
+authored size, once for every materially different screen (at minimum main and
+Settings), and drive secondary screens with the bounded interaction-plan JSON:
+
+```bash
+pulp-import-design --from claude --file editor.html --mode baked \
+  --emit ir-json --native-panel-lowering \
+  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --browser-interactions settings-interactions.json \
+  --render-size 1320x860 --output spectr-settings.ir.json --validate
+```
+
+The click executor follows actual browser pointer semantics: decorative
+`pointer-events:none` noise/glow may be clicked through, while a real blocker
+forces selection of an exposed centre/corner point or fails. `wait-for visible`
+is intentionally stricter and still requires visually uncovered paint.
+
+Computed layout, text runs, resolved fonts, colours, SVG paths, stacking and
+hit geometry lower through DesignIR. Executable `<canvas>` drawing programs do
+not: each becomes an explicit unpainted native-painter requirement. Native
+validation MUST refuse to score while
+`native_nodes_element_capture_fallback > 0`; a dark blank render can otherwise
+score deceptively well against a dark reference. Implement those regions with
+CanvasWidget/NativeCanvasPainter on Skia/Dawn, rerun every captured state, then
+require both pixel comparison and `check_panel_presence.py` to pass. Never call
+the browser screenshot itself a native result.
+
+Keep the repeatable evidence together: interaction JSON, capture envelope,
+semantic report, browser reference, DesignIR, native PNG, diff, presence report,
+and exact source/browser/Pulp commits. The Pulp capture/import orchestration is
+a `pulp-tooling-surface` and remains Pulp-owned; shared retained rendering and
+Skia/Dawn primitives are Vellum-owned and must be changed at their Vellum
+authority rather than forked in this importer.
+
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
 the code, and both were found by measuring rather than reasoning:

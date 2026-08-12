@@ -4,6 +4,7 @@
 #include <pulp/view/screenshot_compare.hpp>
 
 #include <chrono>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
@@ -67,11 +68,25 @@ std::optional<double> attribute_number(
     try {
         std::size_t consumed = 0;
         const double value = std::stod(found->second, &consumed);
-        if (consumed == 0 || !std::isfinite(value)) return std::nullopt;
+        if (consumed != found->second.size() || !std::isfinite(value))
+            return std::nullopt;
         return value;
     } catch (const std::exception&) {
         return std::nullopt;
     }
+}
+
+std::optional<std::uint64_t> attribute_uint64(
+    const pulp::view::IRNode& node, const char* key) {
+    const auto found = node.attributes.find(key);
+    if (found == node.attributes.end() || found->second.empty())
+        return std::nullopt;
+    std::uint64_t value = 0;
+    const auto* begin = found->second.data();
+    const auto* end = begin + found->second.size();
+    const auto [parsed_end, error] = std::from_chars(begin, end, value);
+    if (error != std::errc{} || parsed_end != end) return std::nullopt;
+    return value;
 }
 
 std::string extent(int width, int height) {
@@ -174,6 +189,37 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         options.reference.empty() || options.rendered.empty()) {
         result.error = "browser capture validation options are incomplete";
         return result;
+    }
+
+    // Native lowering deliberately leaves unsupported painted elements as
+    // explicit, unpainted fallbacks. A dark empty render can otherwise score
+    // extremely well against a dark UI: Spectr's two full-window canvas holes
+    // reported 88% on the main editor and 97% with Settings open. Refuse to
+    // produce a parity score until every such hole has a real native painter.
+    // The count is the authority; area is diagnostic and may exceed 1 when
+    // overlapping fallbacks each cover the panel.
+    const auto fallback_key =
+        ir.root.attributes.find("native_nodes_element_capture_fallback");
+    if (fallback_key != ir.root.attributes.end()) {
+        const auto fallback_count = attribute_uint64(
+            ir.root, "native_nodes_element_capture_fallback");
+        if (!fallback_count) {
+            result.error =
+                "native panel validation found malformed fallback coverage";
+            return result;
+        }
+        if (*fallback_count > 0) {
+            result.error =
+                "native panel validation refused: " +
+                std::to_string(*fallback_count) +
+                " painted element fallback(s) have no native painter";
+            if (const auto fraction = attribute_number(
+                    ir.root, "native_nodes_unpainted_area_fraction")) {
+                result.error += " (unpainted area fraction " +
+                                std::to_string(*fraction) + ")";
+            }
+            return result;
+        }
     }
 
     auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);

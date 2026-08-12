@@ -1009,6 +1009,69 @@ TEST_CASE("browser capture validator creates nested proof directories",
     CHECK(fs::is_regular_file(diff));
 }
 
+TEST_CASE("native browser validation refuses unpainted fallbacks before scoring",
+          "[import-design][browser-capture][validation]") {
+    TempTree tree;
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 32.0f;
+    ir.root.style.height = 32.0f;
+    ir.root.attributes["native_nodes_element_capture_fallback"] = "2";
+    ir.root.attributes["native_nodes_unpainted_area_fraction"] = "2.0000";
+
+    auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    const auto reference = pulp::view::render_to_png(
+        *root, 32, 32, 2.0f, pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(reference.empty());
+    const auto reference_path = tree.root / "reference.png";
+    tree.write(reference_path, reference);
+
+    const auto result = id::validate_browser_capture_design_ir(
+        ir,
+        {.reference = reference_path,
+         .rendered = tree.root / "render.png",
+         .diff = tree.root / "diff.png",
+         .width = 32,
+         .height = 32});
+    CHECK_FALSE(result.valid);
+    CHECK_FALSE(result.scored);
+    CHECK(result.error.find("2 painted element fallback(s)") !=
+          std::string::npos);
+    CHECK(result.error.find("2.000000") != std::string::npos);
+    CHECK_FALSE(fs::exists(tree.root / "render.png"));
+    CHECK_FALSE(fs::exists(tree.root / "diff.png"));
+}
+
+TEST_CASE("native browser validation rejects malformed fallback metadata",
+          "[import-design][browser-capture][validation]") {
+    TempTree tree;
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 32.0f;
+    ir.root.style.height = 32.0f;
+    const auto reference_path = tree.root / "reference.png";
+    tree.write(reference_path, "unused");
+
+    for (const auto* malformed : {"2oops", "1.5", "-1", "nan"}) {
+        DYNAMIC_SECTION("fallback count " << malformed) {
+            auto probe = ir;
+            probe.root.attributes[
+                "native_nodes_element_capture_fallback"] = malformed;
+            const auto result = id::validate_browser_capture_design_ir(
+                probe,
+                {.reference = reference_path,
+                 .rendered = tree.root / "render.png",
+                 .diff = tree.root / "diff.png",
+                 .width = 32,
+                 .height = 32});
+            CHECK_FALSE(result.valid);
+            CHECK(result.error.find("malformed fallback coverage") !=
+                  std::string::npos);
+        }
+    }
+}
+
 // The capture's own frame is checked against the box the design DECLARED.
 //
 // `resolve_reference_registration` deliberately does not do this: it snaps a

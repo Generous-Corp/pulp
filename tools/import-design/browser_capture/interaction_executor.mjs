@@ -35,7 +35,7 @@ function selectorProbeExpression(selector, operation) {
     if (!element) return { ok: false, state: "detached" };
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    const paintHitAt = (x, y) => {
+    const visualPaintHitAt = (x, y) => {
       const override = document.createElement("style");
       override.textContent =
         "*,:before,:after{pointer-events:auto!important}";
@@ -58,12 +58,12 @@ function selectorProbeExpression(selector, operation) {
         break;
       }
     }
-    const hasUncoveredPoint = (candidate) => {
+    const uncoveredPoint = (candidate, hitAt) => {
       const left = Math.max(0, candidate.left);
       const top = Math.max(0, candidate.top);
       const right = Math.min(innerWidth, candidate.right);
       const bottom = Math.min(innerHeight, candidate.bottom);
-      if (right <= left || bottom <= top) return false;
+      if (right <= left || bottom <= top) return null;
       const insetX = Math.min(1, (right - left) / 4);
       const insetY = Math.min(1, (bottom - top) / 4);
       const points = [
@@ -73,16 +73,19 @@ function selectorProbeExpression(selector, operation) {
         [left + insetX, bottom - insetY],
         [right - insetX, bottom - insetY],
       ];
-      return points.some(([x, y]) => {
-        const hit = paintHitAt(x, y);
-        return Boolean(hit && (element === hit || element.contains(hit)));
-      });
+      for (const [x, y] of points) {
+        const hit = hitAt(x, y);
+        if (hit && (element === hit || element.contains(hit))) return { x, y };
+      }
+      return null;
     };
     const visible = visualTreeVisible && rect.width > 0 && rect.height > 0;
     if (${JSON.stringify(operation)} === "observe") {
       return {
         ok: true,
-        state: visible && hasUncoveredPoint(rect) ? "visible" : "hidden"
+        state: visible && uncoveredPoint(rect, visualPaintHitAt)
+          ? "visible"
+          : "hidden"
       };
     }
     if (!visible) return { ok: false, state: "hidden" };
@@ -124,11 +127,18 @@ function selectorProbeExpression(selector, operation) {
     if (element.matches(":disabled") || style.pointerEvents === "none") {
       return { ok: false, error: "target is disabled or ignores pointer events" };
     }
-    const hit = paintHitAt(x, y);
-    if (!hit || !(element === hit || element.contains(hit))) {
+    // Dispatch at a point a real pointer can reach. Decorative texture and
+    // glow overlays commonly use pointer-events:none and therefore do not
+    // block a user; forcing those layers pointer-active here made otherwise
+    // usable controls impossible to drive. Partial interactive overlays still
+    // count, so probe the centre and four inset corners and use the first
+    // genuinely exposed point.
+    const clickPoint = uncoveredPoint(
+      positioned, (pointX, pointY) => document.elementFromPoint(pointX, pointY));
+    if (!clickPoint) {
       return { ok: false, error: "target is covered by another rendered element" };
     }
-    return { ok: true, x, y };
+    return { ok: true, x: clickPoint.x, y: clickPoint.y };
   })()`;
 }
 
