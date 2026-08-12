@@ -1,5 +1,7 @@
 #include <pulp/inspect/control_installed_host.hpp>
 
+#include "control_installed_host_test_access.hpp"
+
 #include <pulp/inspect/control_executor_slot.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_manifest.hpp>
@@ -12,8 +14,9 @@
 
 #include <atomic>
 #include <condition_variable>
-#include <stdexcept>
+#include <future>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -124,9 +127,15 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     MotionScrubber* motion_scrubber = nullptr;
     bool active = false;
     bool stopping = false;
+    std::function<void()> before_heartbeat_shutdown_lock;
 
     ~State() {
-        heartbeat_stop.store(true, std::memory_order_release);
+        if (before_heartbeat_shutdown_lock)
+            before_heartbeat_shutdown_lock();
+        {
+            std::lock_guard lock(mutex);
+            heartbeat_stop.store(true, std::memory_order_release);
+        }
         heartbeat_changed.notify_all();
         if (heartbeat_worker.joinable())
             heartbeat_worker.join();
@@ -482,6 +491,15 @@ ControlInstalledHost::~ControlInstalledHost() {
 }
 
 std::unique_ptr<ControlInstalledHost>
+ControlInstalledHost::finish_start(std::shared_ptr<State> state,
+                                   void (*before_owner_construction)()) {
+    state->heartbeat_worker = std::thread([raw = state.get()] { raw->run_heartbeat(); });
+    if (before_owner_construction)
+        before_owner_construction();
+    return std::unique_ptr<ControlInstalledHost>(new ControlInstalledHost(std::move(state)));
+}
+
+std::unique_ptr<ControlInstalledHost>
 ControlInstalledHost::start(ControlInstalledHostConfig config) {
     if (config.bootstrap.enrollment_id.empty() || !config.main_thread_rpc ||
         !config.trace_inspector || !config.motion_inspector ||
@@ -658,8 +676,7 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
         std::lock_guard lock(state->mutex);
         state->active = true;
     }
-    state->heartbeat_worker = std::thread([raw = state.get()] { raw->run_heartbeat(); });
-    return std::unique_ptr<ControlInstalledHost>(new ControlInstalledHost(std::move(state)));
+    return finish_start(std::move(state), nullptr);
 }
 
 bool ControlInstalledHost::ready() const {
@@ -689,6 +706,41 @@ void ControlInstalledHost::stop() noexcept {
     if (state_->connection)
         state_->connection->disconnect();
     state_->end_all();
+}
+
+void detail::ControlInstalledHostTestAccess::fail_owner_construction_after_heartbeat_start() {
+    auto state = std::make_shared<ControlInstalledHost::State>();
+    state->heartbeat_interval = std::chrono::hours(1);
+    (void)ControlInstalledHost::finish_start(std::move(state), [] {
+        throw std::runtime_error("installed host owner construction failed");
+    });
+}
+
+bool detail::ControlInstalledHostTestAccess::state_destruction_waits_for_heartbeat_mutex() {
+    auto state = std::make_shared<ControlInstalledHost::State>();
+    auto lock_attempted = std::make_shared<std::promise<void>>();
+    auto attempted = lock_attempted->get_future();
+    std::promise<void> allow_lock;
+    auto allowed = allow_lock.get_future().share();
+    state->before_heartbeat_shutdown_lock = [lock_attempted, allowed] {
+        lock_attempted->set_value();
+        allowed.wait();
+    };
+    std::unique_lock lock(state->mutex);
+    std::promise<void> destruction_finished;
+    auto finished = destruction_finished.get_future();
+    std::thread destroyer(
+        [state = std::move(state), finished = std::move(destruction_finished)]() mutable {
+            state.reset();
+            finished.set_value();
+        });
+    attempted.wait();
+    allow_lock.set_value();
+    const bool waited = finished.wait_for(std::chrono::milliseconds(100)) ==
+                        std::future_status::timeout;
+    lock.unlock();
+    destroyer.join();
+    return waited;
 }
 
 } // namespace pulp::inspect
