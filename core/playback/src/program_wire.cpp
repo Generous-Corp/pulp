@@ -29,6 +29,15 @@ constexpr std::uint32_t section_id(ProgramWireSection section) noexcept {
     return static_cast<std::uint32_t>(section);
 }
 
+std::size_t wire_hash(std::uint64_t value, std::size_t mask) noexcept {
+    value ^= value >> 30u;
+    value *= 0xBF58'476D'1CE4'E5B9ull;
+    value ^= value >> 27u;
+    value *= 0x94D0'49BB'1331'11EBull;
+    value ^= value >> 31u;
+    return static_cast<std::size_t>(value) & mask;
+}
+
 /// The known sections, in the ascending id order a canonical payload lays them
 /// out in. Indexing this array is also how the decoder decides an id is known.
 constexpr std::array<ProgramWireSection, 9> kSections{
@@ -704,15 +713,28 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                 Error{Code::RangeOutOfBounds, section_id(ProgramWireSection::Tracks), t}));
 
         const auto placements = view.device_placement_ids_for(track);
-        for (std::size_t placement = 0; placement < placements.size(); ++placement)
-            for (std::size_t previous = 0; previous < placement; ++previous)
-                if (placements[previous].value == placements[placement].value)
-                    return ViewResult(runtime::Err(
-                        Error{Code::NonCanonicalRangeOwnership,
-                              section_id(ProgramWireSection::DevicePlacementIds), placement}));
+        std::array<std::uint64_t, AutomationPlaybackLimits::kMaximumDevicePlacementsPerTrack * 2u>
+            placement_ids{};
+        for (std::size_t placement = 0; placement < placements.size(); ++placement) {
+            if (placements[placement].value == 0)
+                return ViewResult(runtime::Err(
+                    Error{Code::NonCanonicalRangeOwnership,
+                          section_id(ProgramWireSection::DevicePlacementIds), placement}));
+            auto slot = wire_hash(placements[placement].value, placement_ids.size() - 1u);
+            while (placement_ids[slot] != 0 &&
+                   placement_ids[slot] != placements[placement].value)
+                slot = (slot + 1u) & (placement_ids.size() - 1u);
+            if (placement_ids[slot] == placements[placement].value)
+                return ViewResult(runtime::Err(
+                    Error{Code::NonCanonicalRangeOwnership,
+                          section_id(ProgramWireSection::DevicePlacementIds), placement}));
+            placement_ids[slot] = placements[placement].value;
+        }
 
         std::uint64_t track_points = 0;
         const auto lanes = view.automation_lanes_for(track);
+        std::array<std::size_t, AutomationPlaybackLimits::kMaximumLanesPerTrack * 2u>
+            target_slots{};
         for (std::size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {
             const auto& lane = lanes[lane_index];
             if (lane.segment_first != segment_cursor)
@@ -738,8 +760,14 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                         Error{Code::AutomationTargetUnresolved,
                               section_id(ProgramWireSection::AutomationLanes), lane_index}));
             }
-            for (std::size_t previous = 0; previous < lane_index; ++previous) {
-                const auto& related = lanes[previous];
+            const auto target_hash =
+                lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)
+                    ? lane.device_placement_id ^
+                          (static_cast<std::uint64_t>(lane.device_param_id) << 32u)
+                    : 0x8000'0000'0000'0000ull | lane.mixer_parameter;
+            auto target_slot = wire_hash(target_hash, target_slots.size() - 1u);
+            while (target_slots[target_slot] != 0) {
+                const auto& related = lanes[target_slots[target_slot] - 1u];
                 const bool duplicate_device =
                     lane.target_kind ==
                         static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter) &&
@@ -755,7 +783,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                     return ViewResult(runtime::Err(
                         Error{Code::DuplicateAutomationTarget,
                               section_id(ProgramWireSection::AutomationLanes), lane_index}));
+                target_slot = (target_slot + 1u) & (target_slots.size() - 1u);
             }
+            target_slots[target_slot] = lane_index + 1u;
         }
     }
     if (clip_cursor != view.clip_ids_.size() || note_event_cursor != view.note_events_.size() ||
@@ -1076,14 +1106,6 @@ ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
     return nullptr;
 }
 
-ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
-                                      timeline::ItemId lane_id) noexcept {
-    for (auto& state : states)
-        if (state.identity.lane_id == lane_id)
-            return &state;
-    return nullptr;
-}
-
 bool same_cursor_identity(const ProgramWireLaneIdentity& lhs,
                           const ProgramWireLaneIdentity& rhs) noexcept {
     return lhs.producer_epoch == rhs.producer_epoch && lhs.track_id == rhs.track_id &&
@@ -1212,16 +1234,19 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
                 candidate_view.tracks().size()});
         return result;
     }
+    std::array<std::uint64_t, kProgramWireMaximumAutomationLanes * 2u> candidate_lane_ids{};
     for (std::size_t lane = 0; lane < candidate_view.automation_lanes().size(); ++lane) {
-        for (std::size_t previous = 0; previous < lane; ++previous) {
-            if (candidate_view.automation_lanes()[previous].lane_id ==
-                candidate_view.automation_lanes()[lane].lane_id) {
-                reject(ProgramWireConsumerCode::DecodeRejected,
-                       {ProgramWireErrorCode::NonCanonicalRangeOwnership,
-                        static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes), lane});
-                return result;
-            }
+        const auto lane_id = candidate_view.automation_lanes()[lane].lane_id;
+        auto slot = wire_hash(lane_id, candidate_lane_ids.size() - 1u);
+        while (candidate_lane_ids[slot] != 0 && candidate_lane_ids[slot] != lane_id)
+            slot = (slot + 1u) & (candidate_lane_ids.size() - 1u);
+        if (candidate_lane_ids[slot] == lane_id) {
+            reject(ProgramWireConsumerCode::DecodeRejected,
+                   {ProgramWireErrorCode::NonCanonicalRangeOwnership,
+                    static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes), lane});
+            return result;
         }
+        candidate_lane_ids[slot] = lane_id;
     }
     for (std::size_t index = 0; index < candidate_view.automation_lanes().size(); ++index) {
         if (candidate_view.automation_lanes()[index].evaluation_rate !=
@@ -1232,19 +1257,30 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
             return result;
         }
     }
-    if (active_pin_ && candidate_view.producer_epoch() == active_view_.producer_epoch()) {
-        for (const auto& track : candidate_view.tracks()) {
-            for (const auto& lane : candidate_view.automation_lanes_for(track)) {
-                const auto* active = find_lane_state(lane_state_, {lane.lane_id});
-                if (active != nullptr &&
-                    active->identity.producer_epoch == candidate_view.producer_epoch() &&
-                    lane.generation < active->identity.lane_generation) {
-                    reject(ProgramWireConsumerCode::StalePublication,
-                           {ProgramWireErrorCode::StaleLaneGeneration,
-                            static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
-                            lane.lane_id});
-                    return result;
-                }
+    if (candidate_view.producer_epoch() == lane_high_water_epoch_) {
+        for (const auto& lane : candidate_view.automation_lanes()) {
+            auto slot = wire_hash(lane.lane_id, lane_high_water_.size() - 1u);
+            std::size_t probes = 0;
+            while (lane_high_water_[slot].lane_id.value != 0 &&
+                   lane_high_water_[slot].lane_id.value != lane.lane_id &&
+                   probes < lane_high_water_.size()) {
+                slot = (slot + 1u) & (lane_high_water_.size() - 1u);
+                ++probes;
+            }
+            if (probes == lane_high_water_.size()) {
+                reject(ProgramWireConsumerCode::StateCapacityExceeded,
+                       {ProgramWireErrorCode::InvalidLimits,
+                        static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                        lane.lane_id});
+                return result;
+            }
+            if (lane_high_water_[slot].lane_id.value == lane.lane_id &&
+                lane.generation < lane_high_water_[slot].generation) {
+                reject(ProgramWireConsumerCode::StalePublication,
+                       {ProgramWireErrorCode::StaleLaneGeneration,
+                        static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                        lane.lane_id});
+                return result;
             }
         }
     }
@@ -1264,6 +1300,17 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
     // The decoder and all capacity checks have completed. From this point the
     // candidate cannot be rejected, so updating state and transferring pins is
     // one commit rather than a partially visible adoption.
+    if (candidate_view.producer_epoch() != lane_high_water_epoch_) {
+        lane_high_water_.fill({});
+        lane_high_water_epoch_ = candidate_view.producer_epoch();
+    }
+    for (const auto& lane : candidate_view.automation_lanes()) {
+        auto slot = wire_hash(lane.lane_id, lane_high_water_.size() - 1u);
+        while (lane_high_water_[slot].lane_id.value != 0 &&
+               lane_high_water_[slot].lane_id.value != lane.lane_id)
+            slot = (slot + 1u) & (lane_high_water_.size() - 1u);
+        lane_high_water_[slot] = {{lane.lane_id}, lane.generation};
+    }
     for (auto& state : lane_state_) {
         bool still_present = false;
         for (const auto& track : candidate_view.tracks()) {
@@ -1308,18 +1355,28 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
     lane_count_ = 0;
     group_count_ = 0;
     groups_.fill({});
+    std::array<std::size_t, kProgramWireMaximumAutomationLanes * 2u> group_slots{};
     for (const auto& track : candidate_view.tracks()) {
         for (const auto& lane : candidate_view.automation_lanes_for(track)) {
-            auto group = group_count_;
-            for (std::size_t previous = 0; previous < lane_count_; ++previous) {
-                if (active_lanes_[previous].track->id == track.id &&
-                    same_capacity_group(*active_lanes_[previous].lane, lane)) {
-                    group = active_lanes_[previous].group_index;
+            const auto target_hash =
+                lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)
+                    ? lane.device_placement_id
+                    : 0x8000'0000'0000'0000ull | lane.mixer_parameter;
+            auto slot = wire_hash(track.id ^ target_hash, group_slots.size() - 1u);
+            while (group_slots[slot] != 0) {
+                const auto& previous = active_lanes_[group_slots[slot] - 1u];
+                if (previous.track->id == track.id &&
+                    same_capacity_group(*previous.lane, lane))
                     break;
-                }
+                slot = (slot + 1u) & (group_slots.size() - 1u);
             }
-            if (group == group_count_)
+            auto group = group_count_;
+            if (group_slots[slot] != 0) {
+                group = active_lanes_[group_slots[slot] - 1u].group_index;
+            } else {
+                group_slots[slot] = lane_count_ + 1u;
                 ++group_count_;
+            }
             active_lanes_[lane_count_++] = {
                 find_lane_state(lane_state_, {track.id}, {lane.lane_id}), &track, &lane, group};
             ++groups_[group].lane_count;

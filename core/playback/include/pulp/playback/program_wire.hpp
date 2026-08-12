@@ -860,6 +860,10 @@ class ProgramWireAutomationConsumer {
         std::size_t first_lane = 0;
         std::size_t lane_count = 0;
     };
+    struct LaneHighWater {
+        timeline::ItemId lane_id;
+        ProgramGeneration generation = 0;
+    };
 
     std::span<ProgramWireLaneState> lane_state_;
     ProgramWireBytePin active_pin_;
@@ -873,6 +877,8 @@ class ProgramWireAutomationConsumer {
     std::array<std::size_t, kProgramWireMaximumAutomationLanes>
         group_lane_indices_{};
     std::size_t group_count_ = 0;
+    std::array<LaneHighWater, kProgramWireMaximumAutomationLanes * 2u> lane_high_water_{};
+    std::uint64_t lane_high_water_epoch_ = 0;
     std::array<ProgramWireLaneState*, kProgramWireMaximumAutomationLanes>
         merge_heap_{};
 };

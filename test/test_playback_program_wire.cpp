@@ -1714,6 +1714,52 @@ TEST_CASE("wire automation rejects a regressed lane moved to another track",
     REQUIRE(consumer.active_bytes().data() == active->span().data());
 }
 
+TEST_CASE("wire automation remembers lane generation across remove and re-add",
+          "[playback][wire][consumer]") {
+    const auto map = wire_tempo_map();
+    auto active = encode_project_bytes(wire_project(), map);
+    const auto [lane_section, lane_bytes] =
+        section_span(active->span(), ProgramWireSection::AutomationLanes);
+    REQUIRE(lane_bytes >= sizeof(ProgramWireAutomationLaneRecord));
+    const ProgramGeneration accepted_lane_generation = 2;
+    std::memcpy(active->span().data() + lane_section +
+                    offsetof(ProgramWireAutomationLaneRecord, generation),
+                &accepted_lane_generation, sizeof(accepted_lane_generation));
+    reseal(active->span());
+
+    auto removed = encode_project_bytes(many_track_project(1), map);
+    const ProgramGeneration removed_program_generation = 2;
+    std::memcpy(removed->span().data() + kPayloadAt +
+                    offsetof(ProgramWireProgramRecord, generation),
+                &removed_program_generation, sizeof(removed_program_generation));
+    reseal(removed->span());
+    REQUIRE(take(decode_program_wire(removed->span())).automation_lanes().empty());
+
+    WireBuffer stale(active->span().size());
+    std::memcpy(stale.span().data(), active->span().data(), active->span().size());
+    const ProgramGeneration readded_program_generation = 3;
+    const ProgramGeneration stale_lane_generation = 1;
+    std::memcpy(stale.span().data() + kPayloadAt +
+                    offsetof(ProgramWireProgramRecord, generation),
+                &readded_program_generation, sizeof(readded_program_generation));
+    std::memcpy(stale.span().data() + lane_section +
+                    offsetof(ProgramWireAutomationLaneRecord, generation),
+                &stale_lane_generation, sizeof(stale_lane_generation));
+    reseal(stale.span());
+
+    std::array<ProgramWireLaneState, 3> state;
+    ProgramWireAutomationConsumer consumer{state, 2};
+    REQUIRE(consumer.adopt(ProgramWireBytePin{active->span(), 101}, *map, kTempoPoints).adoption ==
+            ProgramWireAdoption::Adopted);
+    REQUIRE(consumer.adopt(ProgramWireBytePin{removed->span(), 102}, *map, kTempoPoints).adoption ==
+            ProgramWireAdoption::Adopted);
+    auto rejected = consumer.adopt(ProgramWireBytePin{stale.span(), 103}, *map, kTempoPoints);
+    REQUIRE(rejected.code == ProgramWireConsumerCode::StalePublication);
+    REQUIRE(rejected.wire_error.code == ProgramWireErrorCode::StaleLaneGeneration);
+    REQUIRE(rejected.returned_pin.owner_token() == 103);
+    REQUIRE(consumer.active_bytes().data() == removed->span().data());
+}
+
 TEST_CASE("wire decode adoption and production cursor render are realtime safe",
           "[playback][wire][consumer][rt-safety]") {
     STATIC_REQUIRE_FALSE(std::is_copy_constructible_v<ProgramWireBytePin>);
