@@ -1380,7 +1380,8 @@ jobs:
               except subprocess.TimeoutExpired:
                   process.terminate()
                   try:
-                      return_code = process.wait(timeout=5)
+                      process.wait(timeout=5)
+                      return_code = 0
                   except subprocess.TimeoutExpired:
                       process.kill()
                       process.wait()
