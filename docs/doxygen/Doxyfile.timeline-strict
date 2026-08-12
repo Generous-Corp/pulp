@@ -2,7 +2,10 @@
 
 PROJECT_NAME           = "Pulp Timeline API contract check"
 OUTPUT_DIRECTORY       = ../../build/api-docs-timeline-check
-INPUT                  = ../../core/timeline/include
+INPUT                  = ../../core/timeline/include \
+                         ../../core/music/include \
+                         ../../core/timeline_editor/include \
+                         ../../core/timeline_view/include
 
 EXTRACT_ALL            = YES
 GENERATE_HTML          = NO
