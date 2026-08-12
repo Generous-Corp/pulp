@@ -809,6 +809,8 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
                ProgramWireErrorCode::InvalidEnum);
     with_field(field(offsetof(ProgramWireTrackRecord, flags)), std::uint8_t{0x80},
                ProgramWireErrorCode::InvalidEnum);
+    with_field(field(offsetof(ProgramWireTrackRecord, flags)), std::uint8_t{0},
+               ProgramWireErrorCode::NonCanonicalRangeOwnership);
 
     // A record can be individually in range and still describe something no
     // renderer can act on. These are the two that reach past their own record:
@@ -835,6 +837,45 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
                std::int64_t{-1}, ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_value), 0.333f,
                ProgramWireErrorCode::MalformedSegment);
+
+    const auto [lane_section, lane_bytes] =
+        section_span(bytes, ProgramWireSection::AutomationLanes);
+    REQUIRE(lane_bytes >= 2 * sizeof(ProgramWireAutomationLaneRecord));
+    with_field(lane_section + offsetof(ProgramWireAutomationLaneRecord, device_placement_id),
+               std::uint64_t{999}, ProgramWireErrorCode::AutomationTargetUnresolved);
+    const auto second_lane = lane_section + sizeof(ProgramWireAutomationLaneRecord);
+    std::uint64_t original_placement = 0;
+    std::uint32_t original_param = 0;
+    std::memcpy(&original_placement,
+                bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_placement_id),
+                sizeof(original_placement));
+    std::memcpy(&original_param,
+                bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_param_id),
+                sizeof(original_param));
+    ProgramWireAutomationLaneRecord first_lane_record;
+    std::memcpy(&first_lane_record, bytes.data() + lane_section, sizeof(first_lane_record));
+    const auto duplicate_placement = first_lane_record.device_placement_id;
+    const auto duplicate_param = first_lane_record.device_param_id;
+    std::memcpy(bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_placement_id),
+                &duplicate_placement, sizeof(duplicate_placement));
+    std::memcpy(bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_param_id),
+                &duplicate_param, sizeof(duplicate_param));
+    reseal(bytes);
+    auto duplicate_target = decode_program_wire(bytes);
+    REQUIRE_FALSE(duplicate_target);
+    REQUIRE(duplicate_target.error().code == ProgramWireErrorCode::DuplicateAutomationTarget);
+    std::memcpy(bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_placement_id),
+                &original_placement, sizeof(original_placement));
+    std::memcpy(bytes.data() + second_lane +
+                    offsetof(ProgramWireAutomationLaneRecord, device_param_id),
+                &original_param, sizeof(original_param));
+    reseal(bytes);
+    REQUIRE(decode_program_wire(bytes));
 
     const std::size_t program_section = kPayloadAt;
     with_field(program_section + offsetof(ProgramWireProgramRecord, sample_rate_denominator),

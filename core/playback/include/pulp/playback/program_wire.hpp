@@ -255,6 +255,10 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// Track and lane ranges must exclusively partition their sections in
     /// canonical track/lane order; aliases and unowned records are rejected.
     NonCanonicalRangeOwnership,
+    /// A device lane names no placement in its owning track.
+    AutomationTargetUnresolved,
+    /// Two lanes in one track drive the same device parameter or mixer control.
+    DuplicateAutomationTarget,
     /// A record holds a value outside its enumeration.
     InvalidEnum,
     /// A note modifier is not a combination the document model admits — a zero

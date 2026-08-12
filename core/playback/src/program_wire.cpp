@@ -676,6 +676,10 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
             (track.flags & ~kProgramWireTrackHasAutomationProgram) != 0)
             return ViewResult(
                 runtime::Err(Error{Code::InvalidEnum, section_id(ProgramWireSection::Tracks), t}));
+        if (track.automation_lane_count != 0 &&
+            (track.flags & kProgramWireTrackHasAutomationProgram) == 0)
+            return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                 section_id(ProgramWireSection::Tracks), t}));
         if ((track.mixer_gain_lane != kProgramWireNoLane &&
              track.mixer_gain_lane >= track.automation_lane_count) ||
             (track.mixer_pan_lane != kProgramWireNoLane &&
@@ -683,8 +687,18 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
             return ViewResult(runtime::Err(
                 Error{Code::RangeOutOfBounds, section_id(ProgramWireSection::Tracks), t}));
 
+        const auto placements = view.device_placement_ids_for(track);
+        for (std::size_t placement = 0; placement < placements.size(); ++placement)
+            for (std::size_t previous = 0; previous < placement; ++previous)
+                if (placements[previous].value == placements[placement].value)
+                    return ViewResult(runtime::Err(
+                        Error{Code::NonCanonicalRangeOwnership,
+                              section_id(ProgramWireSection::DevicePlacementIds), placement}));
+
         std::uint64_t track_points = 0;
-        for (const auto& lane : view.automation_lanes_for(track)) {
+        const auto lanes = view.automation_lanes_for(track);
+        for (std::size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {
+            const auto& lane = lanes[lane_index];
             if (lane.segment_first != segment_cursor)
                 return ViewResult(runtime::Err(Error{
                     Code::NonCanonicalRangeOwnership,
@@ -696,6 +710,36 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                 return ViewResult(runtime::Err(
                     Error{Code::InvalidLimits, section_id(ProgramWireSection::AutomationLanes),
                           lane.lane_id}));
+            if (lane.target_kind ==
+                static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)) {
+                const auto found =
+                    std::find_if(placements.begin(), placements.end(),
+                                 [&](const ProgramWireIdRecord& placement) {
+                                     return placement.value == lane.device_placement_id;
+                                 });
+                if (found == placements.end())
+                    return ViewResult(runtime::Err(
+                        Error{Code::AutomationTargetUnresolved,
+                              section_id(ProgramWireSection::AutomationLanes), lane_index}));
+            }
+            for (std::size_t previous = 0; previous < lane_index; ++previous) {
+                const auto& related = lanes[previous];
+                const bool duplicate_device =
+                    lane.target_kind ==
+                        static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter) &&
+                    related.target_kind == lane.target_kind &&
+                    related.device_placement_id == lane.device_placement_id &&
+                    related.device_param_id == lane.device_param_id;
+                const bool duplicate_mixer =
+                    lane.target_kind ==
+                        static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) &&
+                    related.target_kind == lane.target_kind &&
+                    related.mixer_parameter == lane.mixer_parameter;
+                if (duplicate_device || duplicate_mixer)
+                    return ViewResult(runtime::Err(
+                        Error{Code::DuplicateAutomationTarget,
+                              section_id(ProgramWireSection::AutomationLanes), lane_index}));
+            }
         }
     }
     if (clip_cursor != view.clip_ids_.size() || note_event_cursor != view.note_events_.size() ||
