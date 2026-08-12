@@ -168,6 +168,9 @@ inline constexpr std::uint32_t kProgramWireMagic = 0x5750'4C50u;
 /// A track's mixer control that no automation lane supersedes.
 inline constexpr std::uint32_t kProgramWireNoLane = 0xFFFF'FFFFu;
 
+/// Decoder work and fixed scratch remain bounded even for untrusted payloads.
+inline constexpr std::size_t kProgramWireMaximumTracks = 1'024;
+
 enum class ProgramWireSection : std::uint32_t {
     Program = 1,
     TempoPoints = 2,

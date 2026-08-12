@@ -641,15 +641,23 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     std::uint64_t device_cursor = 0;
     std::uint64_t lane_cursor = 0;
     std::uint64_t segment_cursor = 0;
+    if (view.tracks_.size() > kProgramWireMaximumTracks)
+        return ViewResult(runtime::Err(
+            Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks),
+                  view.tracks_.size()}));
+    std::array<std::uint64_t, kProgramWireMaximumTracks * 2u> track_ids{};
     for (std::size_t t = 0; t < view.tracks_.size(); ++t) {
         const auto& track = view.tracks_[t];
         if (track.id == 0 || track.generation == 0)
             return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
                                                  section_id(ProgramWireSection::Tracks), t}));
-        for (std::size_t previous = 0; previous < t; ++previous)
-            if (view.tracks_[previous].id == track.id)
+        auto slot = static_cast<std::size_t>(track.id) & (track_ids.size() - 1u);
+        while (track_ids[slot] != 0 && track_ids[slot] != track.id)
+            slot = (slot + 1u) & (track_ids.size() - 1u);
+        if (track_ids[slot] == track.id)
                 return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
                                                      section_id(ProgramWireSection::Tracks), t}));
+        track_ids[slot] = track.id;
         if (!in_range(track.clip_first, track.clip_count, view.clip_ids_.size()) ||
             !in_range(track.note_event_first, track.note_event_count, view.note_events_.size()) ||
             !in_range(track.note_modifier_first, track.note_modifier_count,
@@ -1063,6 +1071,14 @@ ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
     return nullptr;
 }
 
+ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
+                                      timeline::ItemId lane_id) noexcept {
+    for (auto& state : states)
+        if (state.identity.lane_id == lane_id)
+            return &state;
+    return nullptr;
+}
+
 bool same_cursor_identity(const ProgramWireLaneIdentity& lhs,
                           const ProgramWireLaneIdentity& rhs) noexcept {
     return lhs.producer_epoch == rhs.producer_epoch && lhs.track_id == rhs.track_id &&
@@ -1212,7 +1228,7 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
     if (active_pin_ && candidate_view.producer_epoch() == active_view_.producer_epoch()) {
         for (const auto& track : candidate_view.tracks()) {
             for (const auto& lane : candidate_view.automation_lanes_for(track)) {
-                const auto* active = find_lane_state(lane_state_, {track.id}, {lane.lane_id});
+                const auto* active = find_lane_state(lane_state_, {lane.lane_id});
                 if (active != nullptr &&
                     active->identity.producer_epoch == candidate_view.producer_epoch() &&
                     lane.generation < active->identity.lane_generation) {
