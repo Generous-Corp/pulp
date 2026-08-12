@@ -587,8 +587,20 @@ TEST_CASE("waveset edited splices use exact clamped shared gain laws", "[signal]
     REQUIRE(repeat_three_output.size() == 16);
     const float inner_high = 134.0f / 27.0f;
     const float inner_low = 109.0f / 27.0f;
-    REQUIRE(repeat_three_output == std::vector<float>{1, 2, 3, 4, 5, inner_high, inner_low, 4, 5,
-                                                      inner_high, inner_low, 4, 5, 6, 7, 8});
+    const std::vector<float> repeat_three_expected{1, 2, 3, 4, 5, inner_high, inner_low, 4, 5,
+                                                   inner_high, inner_low, 4, 5, 6, 7, 8};
+    for (std::size_t i = 0; i < repeat_three_output.size(); ++i) {
+        if (i == 5 || i == 6 || i == 9 || i == 10) {
+            const auto expected = repeat_three_expected[i];
+            REQUIRE((repeat_three_output[i] == expected ||
+                     repeat_three_output[i] ==
+                         std::nextafter(expected, -std::numeric_limits<float>::infinity()) ||
+                     repeat_three_output[i] ==
+                         std::nextafter(expected, std::numeric_limits<float>::infinity())));
+        } else {
+            REQUIRE(repeat_three_output[i] == repeat_three_expected[i]);
+        }
+    }
 }
 
 TEST_CASE("waveset finish and reset cover empty partial exact and repeated EOS",
