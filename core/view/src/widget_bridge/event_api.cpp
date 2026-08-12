@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
 #include "bridge_dispatch.hpp"
+#include "../pointer_dispatch_internal.hpp"
 
 #include <pulp/view/gesture.hpp>
 #include <pulp/platform/popup_menu.hpp>
@@ -59,6 +60,8 @@ std::string pointer_payload(const MouseEvent& event, bool moving) {
         case MouseButton::none:   button = 0; break;
     }
     return std::string{"{"} +
+           "__pulpDispatchToken:" +
+               std::to_string(detail::dom_pointer_token()) + "," +
            "clientX:" + std::to_string(event.window_position.x) + "," +
            "clientY:" + std::to_string(event.window_position.y) + "," +
            "offsetX:" + std::to_string(event.position.x) + "," +

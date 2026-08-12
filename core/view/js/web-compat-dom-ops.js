@@ -30,59 +30,15 @@ function __pulpRegisterAutoDomEvents__(child) {
     if (child._autoEventsRegistered) return;
     child._autoEventsRegistered = true;
     if (typeof on === "function") {
-        on(child._id, "click", function (d) {
-            var ev = _makeEvent
-                ? _makeEvent("click", child, d)
-                : { type: "click", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.x) || 0, clientY: (d && d.y) || 0,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(ev);
-        });
-        on(child._id, "pointerdown", function (d) {
-            var ev = _makeEvent
-                ? _makeEvent("pointerdown", child, d)
-                : { type: "pointerdown", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                    button: (d && d.button) || 0, buttons: 1,
-                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(ev);
-            // Also synthesize 'mousedown' which is what React's
-            // mousedown delegate listens for in legacy mode.
-            var me = _makeEvent
-                ? _makeEvent("mousedown", child, d)
-                : { type: "mousedown", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                    button: (d && d.button) || 0, buttons: 1,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(me);
-        });
-        on(child._id, "pointermove", function (d) {
-            var ev = _makeEvent
-                ? _makeEvent("pointermove", child, d)
-                : { type: "pointermove", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(ev);
-        });
-        on(child._id, "pointerup", function (d) {
-            var ev = _makeEvent
-                ? _makeEvent("pointerup", child, d)
-                : { type: "pointerup", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                    button: (d && d.button) || 0, buttons: 0,
-                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(ev);
-            var me = _makeEvent
-                ? _makeEvent("mouseup", child, d)
-                : { type: "mouseup", target: child, bubbles: true, currentTarget: child,
-                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                    button: (d && d.button) || 0, buttons: 0,
-                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-            if (child.dispatchEvent) child.dispatchEvent(me);
-        });
+        // These callbacks arm native delivery for root-delegated listeners;
+        // they must not enter Element::dispatchEvent themselves. __dispatch__
+        // is the sole DOM fan-out owner, and the pointer registrar emits the
+        // corresponding mouse event on its own channel.
+        on(child._id, "click", function () {});
+        on(child._id, "pointerdown", function () {});
+        on(child._id, "pointermove", function () {});
+        on(child._id, "pointerup", function () {});
+        on(child._id, "pointercancel", function () {});
     }
 }
 

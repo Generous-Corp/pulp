@@ -73,6 +73,46 @@ TEST_CASE("native pointer and click enter the web-compat DOM exactly once",
     REQUIRE(engine.evaluate("deliveryCount('parentClick')").getWithDefault<int>(-1) == 1);
 }
 
+TEST_CASE("root-only delegated listeners see auto-registered child events once",
+          "[view][widget-bridge][pointer-semantics]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // React DOM delegates at the root and relies on appendChild to arm the
+    // child's native channel. There is deliberately no direct listener on the
+    // child: that direct registration would replace the auto callback and hide
+    // duplicate delivery from the auto-registration path.
+    bridge.load_script(R"JS(
+        var pointerHits = 0, mouseHits = 0, clickHits = 0;
+        var delegatedChild = document.createElement('div');
+        document.body.appendChild(delegatedChild);
+        document.body.addEventListener('pointerdown', function() { pointerHits++; });
+        document.body.addEventListener('mousedown', function() { mouseHits++; });
+        document.body.addEventListener('click', function() { clickHits++; });
+        function delegatedCounts() {
+            return [pointerHits, mouseHits, clickHits].join(',');
+        }
+    )JS");
+
+    const auto child_id = std::string(
+        engine.evaluate("delegatedChild._id").getWithDefault<std::string_view>(""));
+    auto* child = bridge.widget(child_id);
+    REQUIRE(child != nullptr);
+
+    REQUIRE(deliver_mouse_down(root, child, {10, 10}, 0, 1));
+    REQUIRE(engine.evaluate("delegatedCounts()").toString() == "1,1,0");
+
+    REQUIRE(static_cast<bool>(child->on_click));
+    child->on_click();
+    REQUIRE(engine.evaluate("delegatedCounts()").toString() == "1,1,1");
+}
+
 TEST_CASE("pointer propagation cancellation distinguishes stop from stopImmediate",
           "[view][widget-bridge][pointer-semantics]") {
     using namespace pulp::view;
@@ -151,6 +191,75 @@ TEST_CASE("direct bridge pointer callbacks keep one native ancestor delivery",
     REQUIRE(deliver_mouse_down(root, child, {10, 10}, 0, 1));
     REQUIRE(engine.evaluate("childHits").getWithDefault<int>(-1) == 1);
     REQUIRE(engine.evaluate("parentHits").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("direct pointer propagation controls native ancestors and same-target listeners",
+          "[view][widget-bridge][pointer-semantics]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The branded return objects are the low-level contract emitted by
+    // @pulp/react's synthetic-event wrapper. DOM listeners on the same target
+    // make the semantic difference observable: stopPropagation keeps them,
+    // while stopImmediatePropagation suppresses subsequent target listeners.
+    bridge.load_script(R"JS(
+        var mode = 'none';
+        var directChild = 0, targetFirst = 0, targetSecond = 0;
+        var domParent = 0, directParent = 0, directMouseParent = 0;
+        var parent = document.createElement('div');
+        var child = document.createElement('div');
+        document.body.appendChild(parent);
+        parent.appendChild(child);
+        child.addEventListener('pointerdown', function() { targetFirst++; });
+        child.addEventListener('pointerdown', function() { targetSecond++; });
+        parent.addEventListener('pointerdown', function() { domParent++; });
+        on(child._id, 'pointerdown', function() {
+            directChild++;
+            if (mode === 'stop') return { __pulpEventPropagation: 1 };
+            if (mode === 'immediate') return { __pulpEventPropagation: 2 };
+            return { __pulpEventPropagation: 0 };
+        });
+        on(parent._id, 'pointerdown', function() {
+            directParent++;
+            return { __pulpEventPropagation: 0 };
+        });
+        on(parent._id, 'mousedown', function() {
+            directMouseParent++;
+            return { __pulpEventPropagation: 0 };
+        });
+        function resetDirect(nextMode) {
+            mode = nextMode;
+            directChild = targetFirst = targetSecond = domParent = directParent =
+                directMouseParent = 0;
+        }
+        function directCounts() {
+            return [directChild, targetFirst, targetSecond, domParent, directParent,
+                    directMouseParent].join(',');
+        }
+    )JS");
+
+    const auto child_id = std::string(
+        engine.evaluate("child._id").getWithDefault<std::string_view>(""));
+    auto* child = bridge.widget(child_id);
+    REQUIRE(child != nullptr);
+
+    engine.evaluate("resetDirect('none')");
+    REQUIRE(deliver_mouse_down(root, child, {10, 10}, 0, 1));
+    REQUIRE(engine.evaluate("directCounts()").toString() == "1,1,1,1,1,1");
+
+    engine.evaluate("resetDirect('stop')");
+    REQUIRE(deliver_mouse_down(root, child, {10, 10}, 0, 1));
+    REQUIRE(engine.evaluate("directCounts()").toString() == "1,1,1,0,0,1");
+
+    engine.evaluate("resetDirect('immediate')");
+    REQUIRE(deliver_mouse_down(root, child, {10, 10}, 0, 1));
+    REQUIRE(engine.evaluate("directCounts()").toString() == "1,0,0,0,0,1");
 }
 
 TEST_CASE("document.addEventListener is real (not a no-op)",

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260812-pointer-bridge-propagation",
+  "kind": "change",
+  "created_at": "2026-08-12T02:02:52Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's JavaScript bridge delivers one native pointer event through separate target and ancestor evaluate calls. Direct @pulp/react synthetic-event cancellation therefore needs a scoped internal token spanning that Pulp-specific bridge walk; without it, stopPropagation is discarded and native ancestor callbacks still fire. This change adds no public View or MouseEvent API and is Pulp-only React/web-compat integration rather than generic Vellum framework behavior.",
+  "tests": [
+    "@pulp/react prop-applier-synthetic-event",
+    "Vellum freeze",
+    "pulp-test-widget-bridge-dispatch-document-event"
+  ],
+  "disposition": "pulp-only"
+}

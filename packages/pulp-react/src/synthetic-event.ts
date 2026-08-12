@@ -180,6 +180,9 @@ export interface SyntheticEvent {
     nativeEvent: { rawArgs: unknown[] };
     preventDefault: () => void;
     stopPropagation: () => void;
+    stopImmediatePropagation: () => void;
+    isPropagationStopped: () => boolean;
+    isImmediatePropagationStopped: () => boolean;
     defaultPrevented: boolean;
     // Position
     clientX: number;
@@ -248,6 +251,8 @@ export function makeSyntheticEvent(
     rawArgs: unknown[],
 ): SyntheticEvent {
     const target = makeElementWrapper(id);
+    let propagationStopped = false;
+    let immediatePropagationStopped = false;
     const evt: SyntheticEvent = {
         type: eventName,
         currentTarget: target,
@@ -255,7 +260,13 @@ export function makeSyntheticEvent(
         nativeEvent: { rawArgs },
         defaultPrevented: false,
         preventDefault() { evt.defaultPrevented = true; },
-        stopPropagation() { /* no-op — JSX handlers attach via on() with no bubble chain */ },
+        stopPropagation() { propagationStopped = true; },
+        stopImmediatePropagation() {
+            propagationStopped = true;
+            immediatePropagationStopped = true;
+        },
+        isPropagationStopped() { return propagationStopped; },
+        isImmediatePropagationStopped() { return immediatePropagationStopped; },
         clientX: 0, clientY: 0, offsetX: 0, offsetY: 0, button: 0,
         pointerId: 0, pointerType: 'mouse', isPrimary: true, pressure: 0.5,
         ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,

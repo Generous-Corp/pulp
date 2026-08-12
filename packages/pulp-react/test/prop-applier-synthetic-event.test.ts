@@ -128,15 +128,38 @@ describe('@pulp/react prop-applier — synthetic event factory', () => {
         expect(handler).toHaveBeenCalledTimes(1);
     });
 
-    it('stopPropagation is callable as a no-op', () => {
+    it('stopPropagation returns the native ancestor-cancellation marker', () => {
         const handler = vi.fn((e: { stopPropagation: () => void }) => {
-            // Should not throw — JSX consumers may call it reflexively even
-            // though @pulp/react has no bubble chain on this dispatch lane.
             e.stopPropagation();
         });
         applyAllProps(instance('btn5', 'Button', { onClick: handler }));
-        dispatch(bridge, 'btn5', 'click', 0);
+        expect(dispatch(bridge, 'btn5', 'click', 0)).toEqual({
+            __pulpEventPropagation: 1,
+        });
         expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('stopImmediatePropagation returns the same-target cancellation marker', () => {
+        const handler = vi.fn((e: {
+            stopImmediatePropagation: () => void;
+            isPropagationStopped: () => boolean;
+            isImmediatePropagationStopped: () => boolean;
+        }) => {
+            e.stopImmediatePropagation();
+            expect(e.isPropagationStopped()).toBe(true);
+            expect(e.isImmediatePropagationStopped()).toBe(true);
+        });
+        applyAllProps(instance('btn5-immediate', 'Button', { onClick: handler }));
+        expect(dispatch(bridge, 'btn5-immediate', 'click', 0)).toEqual({
+            __pulpEventPropagation: 2,
+        });
+    });
+
+    it('an uncancelled handler returns the continue marker', () => {
+        applyAllProps(instance('btn5-continue', 'Button', { onClick: vi.fn() }));
+        expect(dispatch(bridge, 'btn5-continue', 'click', 0)).toEqual({
+            __pulpEventPropagation: 0,
+        });
     });
 
     it('nativeEvent.rawArgs preserves the original bridge args (debug escape hatch)', () => {

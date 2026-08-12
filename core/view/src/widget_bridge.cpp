@@ -79,6 +79,40 @@ bool subtree_contains_view(View& node, const View* target) {
 static const char* kJSPreamble = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
+var __pulpEventPropagation__ = {};
+var __pulpEventPropagationOrder__ = [];
+
+function __pulpPropagationKey__(eventName, args) {
+    var data = args && args.length ? args[0] : null;
+    var token = data && typeof data === 'object'
+        ? data.__pulpDispatchToken
+        : 0;
+    return (typeof token === 'number' && token > 0)
+        ? String(token) + ':' + eventName
+        : '';
+}
+
+function __pulpPropagationLevel__(result) {
+    var level = result && typeof result === 'object'
+        ? result.__pulpEventPropagation
+        : 0;
+    return level === 2 ? 2 : level === 1 ? 1 : 0;
+}
+
+function __pulpRememberPropagation__(key, level) {
+    if (!key || level <= 0) return;
+    if (!Object.prototype.hasOwnProperty.call(__pulpEventPropagation__, key)) {
+        __pulpEventPropagationOrder__.push(key);
+    }
+    if ((__pulpEventPropagation__[key] || 0) < level) {
+        __pulpEventPropagation__[key] = level;
+    }
+    // Native dispatch tokens are monotonic, so old entries can never affect a
+    // later delivery. Bound retained state for long-running editor sessions.
+    while (__pulpEventPropagationOrder__.length > 128) {
+        delete __pulpEventPropagation__[__pulpEventPropagationOrder__.shift()];
+    }
+}
 //
 // Fan out events targeting the synthetic '__global__' id into
 // window._listeners[eventName] — `window.addEventListener('keydown',
@@ -88,23 +122,31 @@ var __nativeRegistered__ = {};
 // listeners just work.
 function __dispatchCallbackOnly__(id, eventName) {
     var args = Array.prototype.slice.call(arguments, 2);
+    var propagationKey = __pulpPropagationKey__(eventName, args);
+    var priorLevel = propagationKey
+        ? (__pulpEventPropagation__[propagationKey] || 0)
+        : 0;
+    if (priorLevel > 0) return priorLevel;
     var key = id + ':' + eventName;
     var cb = __callbacks__[key];
+    var level = 0;
     if (cb) {
         // Keep handler exceptions inside the JS dispatch boundary. If a React
         // handler throws out of evaluate(), it can unwind the C++ caller and
         // kill requestAnimationFrame's self-rescheduling chain. Surface the
         // error via __dispatchError__ if defined so handlers can throw without
         // halting the frame loop.
-        try { cb.apply(null, args); }
+        try { level = __pulpPropagationLevel__(cb.apply(null, args)); }
         catch (e) {
             if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
         }
     }
+    __pulpRememberPropagation__(propagationKey, level);
+    return level;
 }
 function __dispatch__(id, eventName) {
     var args = Array.prototype.slice.call(arguments, 2);
-    __dispatchCallbackOnly__.apply(null, arguments);
+    var callbackPropagation = __dispatchCallbackOnly__.apply(null, arguments);
     if (id === '__global__' && typeof window !== 'undefined' && window._listeners) {
         var list = window._listeners[eventName];
         if (list && list.length) {
@@ -176,6 +218,14 @@ function __dispatch__(id, eventName) {
                             this._stoppedImmediate = true;
                         }
                     };
+                // A direct @pulp/react handler runs before this web-compat
+                // target fan-out. stopPropagation still permits other target
+                // listeners; stopImmediatePropagation suppresses them too.
+                if (callbackPropagation === 1) ev._stopped = true;
+                else if (callbackPropagation === 2) {
+                    ev._stopped = true;
+                    ev._stoppedImmediate = true;
+                }
                 // Pre-dispatch instrumentation: confirm event reaches root.
                 var pathLen = 0;
                 var rootInPath = false;
@@ -191,8 +241,15 @@ function __dispatch__(id, eventName) {
                         __spectrLog('[disp] ' + eventName + ' id=' + id + ' pathLen=' + pathLen + ' rootInPath=' + rootInPath + ' rootListeners=' + rootListeners);
                     }
                 }
-                el.dispatchEvent(ev);
-                stats.dispatched = (stats.dispatched || 0) + 1;
+                if (callbackPropagation !== 2) {
+                    el.dispatchEvent(ev);
+                    stats.dispatched = (stats.dispatched || 0) + 1;
+                }
+                var propagationKey = __pulpPropagationKey__(eventName, args);
+                var observedPropagation = callbackPropagation;
+                if (ev._stoppedImmediate) observedPropagation = 2;
+                else if (ev._stopped && observedPropagation < 1) observedPropagation = 1;
+                __pulpRememberPropagation__(propagationKey, observedPropagation);
                 // Fan the bubbling pointer event to document-level listeners.
                 // In a real DOM, document is the top of the bubble path, but
                 // here `document` is a separate object with its own listener

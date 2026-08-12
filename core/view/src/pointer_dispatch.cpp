@@ -1,6 +1,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 
 #include <pulp/view/ui_components.hpp>  // ScrollView
+#include "pointer_dispatch_internal.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -86,6 +87,7 @@ void dispatch_dom_pointer_path(View& root,
                                const std::vector<ViewCapture>& path,
                                const MouseEvent& event,
                                bool moving) {
+    detail::ScopedDomPointerToken dispatch_token;
     bool has_origin = false;
     for (const auto& capture : path) {
         auto* view = capture.live_in(root);

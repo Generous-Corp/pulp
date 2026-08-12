@@ -256,6 +256,15 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     call('on', id, eventName, (...rawArgs: unknown[]) => {
         const evt = makeSyntheticEvent(id, eventName, rawArgs);
         handler(evt);
+        // The native pointer router walks registered View ancestors after the
+        // target dispatch. Return a branded result so the JS bridge can carry
+        // React's propagation decision across those separate callbacks while
+        // preserving stopPropagation vs stopImmediatePropagation at target.
+        return {
+            __pulpEventPropagation: evt.isImmediatePropagationStopped() ? 2
+                : evt.isPropagationStopped() ? 1
+                : 0,
+        };
     });
 }
 
