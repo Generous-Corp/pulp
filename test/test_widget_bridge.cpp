@@ -306,6 +306,62 @@ TEST_CASE("View::anchor_id() defaults to empty for non-imported views",
     REQUIRE(v.anchor_id().empty());
 }
 
+TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured paint",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCanvas('captured', 'root');
+        setAnchor('captured', 'chromium:backend-node:42');
+        createCol('behavior-root', 'root');
+        createCanvas('behavior', 'behavior-root');
+        setAnchor('behavior', 'behavior-canvas');
+        canvasFillRect('behavior', 1, 2, 3, 4, '#fff');
+    )js");
+
+    auto* captured = dynamic_cast<CanvasWidget*>(bridge.widget("captured"));
+    auto* behavior = dynamic_cast<CanvasWidget*>(bridge.widget("behavior"));
+    REQUIRE(captured != nullptr);
+    REQUIRE(behavior != nullptr);
+    REQUIRE(captured->command_count() == 0);
+
+    int edges = 0;
+    behavior->on_dom_pointer_event = [&edges](const MouseEvent&, bool) {
+        ++edges;
+    };
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0)
+    )js").getWithDefault<bool>(false));
+
+    bridge.load_script("canvasStrokeRect('behavior', 4, 5, 6, 7, '#0ff', 1);");
+    REQUIRE(behavior->command_count() == 2);
+    REQUIRE(captured->command_count() == 0);
+
+    REQUIRE(captured->on_dom_pointer_event);
+    MouseEvent down;
+    down.phase = MousePhase::press;
+    down.button = MouseButton::left;
+    down.is_down = true;
+    down.position = {10, 12};
+    down.window_position = down.position;
+    captured->on_dom_pointer_event(down, true);
+    REQUIRE(edges == 1);
+
+    REQUIRE_FALSE(engine.evaluate(
+        "bindCanvasBehaviorAt('missing', 'behavior-root', 0)")
+        .getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate(
+        "bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', NaN)")
+        .getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate(
+        "bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0.5)")
+        .getWithDefault<bool>(true));
+}
+
 TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

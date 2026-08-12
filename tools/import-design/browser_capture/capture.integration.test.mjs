@@ -234,6 +234,79 @@ test("a panel without declared indicators reuses its exact screenshot",
     }
   });
 
+test("real browser capture preserves the executable pre-mount document",
+  { timeout: 20000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-materialized-document-"));
+    const input = path.join(root, "loader.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><html><body>
+<script>
+  (async () => {
+    const source = 'window.__materializedAssetRan = true;';
+    const url = URL.createObjectURL(new Blob([source], {
+      type: 'text/javascript'
+    }));
+    const html = '<!doctype html><html><body style="margin:0;background:#123">' +
+      '<main style="width:320px;height:240px">READY</main>' +
+      '<script src="' + url + '"><\\/script></body></html>';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.documentElement.replaceWith(doc.documentElement);
+    const replacement = document.createElement('script');
+    replacement.src = url;
+    document.body.appendChild(replacement);
+    await new Promise((resolve) => { replacement.onload = resolve; });
+    globalThis.__pulpCaptureReady = Promise.resolve();
+  })();
+</script></body></html>`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const materialized = JSON.parse(await readFile(
+        path.join(output, "materialized-document.json"), "utf8"));
+      assert.match(materialized.html, /<main[^>]*>READY<\/main>/);
+      assert.doesNotMatch(materialized.html, /blob:/);
+      assert.equal(materialized.assets.length, 1);
+      assert.match(materialized.assets[0].id,
+        /^pulp-materialized-asset-[0-9a-f]{64}$/);
+      assert.equal(materialized.html.includes(materialized.assets[0].id), true);
+      assert.equal("url" in materialized.assets[0], false);
+      assert.equal(materialized.assets[0].mime_type, "text/javascript");
+      assert.equal(
+        Buffer.from(materialized.assets[0].data_base64, "base64").toString(),
+        "window.__materializedAssetRan = true;");
+      const envelope = JSON.parse(await readFile(
+        path.join(output, "capture.json"), "utf8"));
+      assert.equal(
+        envelope.provenance.source.materialized_document,
+        "materialized-document.json");
+      assert.equal(envelope.provenance.source.materialized_asset_count, 1);
+      assert.match(
+        envelope.provenance.source.materialized_document_sha256,
+        /^[0-9a-f]{64}$/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 // Pixels are read with virtual time running, so the JS freeze is the only
 // thing holding a canvas animation still. A page that repaints on every frame
 // without touching the DOM settles the document sample immediately and then

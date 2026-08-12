@@ -41,6 +41,11 @@ struct ScriptedUiOptions {
     /// explicit empty or reviewed set. Appended to preserve the public
     /// aggregate's legacy positional layout.
     CapabilitySet granted_capabilities = CapabilitySet::all();
+    /// Install the native runtime-design import endpoint before evaluating the
+    /// session bundle. Opt-in keeps ordinary scripted UIs unchanged while
+    /// allowing a generated @pulp/react bundle to materialize a captured,
+    /// executable browser document in this exact live realm.
+    bool enable_runtime_import = false;
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and
@@ -198,6 +203,7 @@ private:
     CapabilitySet granted_capabilities_ = CapabilitySet::all();
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
+    bool runtime_import_enabled_ = false;
     ValueChannelAccess value_channel_access_;
 
     std::unique_ptr<ScriptEngine> engine_;

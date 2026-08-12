@@ -6,6 +6,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/design_codegen.hpp>
+#include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/state/store.hpp>
@@ -49,6 +51,7 @@ using namespace pulp::state;
 static void print_usage() {
     std::cerr << "Usage: pulp-screenshot [options]\n";
     std::cerr << "  --script <file.js>   JS UI script to render\n";
+    std::cerr << "  --design-ir <file>   Mount a captured DesignIR as the visible native tree\n";
     std::cerr << "  --output <file.png>  Output PNG path (default: screenshot.png)\n";
     std::cerr << "  --width <px>         Width in points (default: 400)\n";
     std::cerr << "  --height <px>        Height in points (default: 300)\n";
@@ -95,6 +98,7 @@ static std::string base64_encode(const std::vector<uint8_t>& data) {
 
 struct ScreenshotCliOptions {
     std::string script_path;
+    std::string design_ir_path;
     std::string output_path = "screenshot.png";
     uint32_t width = 400;
     uint32_t height = 300;
@@ -131,6 +135,7 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--script" && i + 1 < argc) options.script_path = argv[++i];
+        else if (arg == "--design-ir" && i + 1 < argc) options.design_ir_path = argv[++i];
         else if (arg == "--output" && i + 1 < argc) options.output_path = argv[++i];
         else if (arg == "--width" && i + 1 < argc) options.width = static_cast<uint32_t>(std::stoi(argv[++i]));
         else if (arg == "--height" && i + 1 < argc) options.height = static_cast<uint32_t>(std::stoi(argv[++i]));
@@ -218,6 +223,39 @@ static const char* runtime_trace_script() {
             if (value != null && typeof value !== 'function') out[key] = String(value);
         });
         return out;
+    }
+    function runtimeImportDiagnostics() {
+        var out = {};
+        [
+            '__pulpRuntimeImportErr__',
+            '__pulpEvalErr__',
+            '__pulpFlushSyncErr__',
+            '__pulpCreateRootRenderErr__',
+            '__pulpShimError__',
+            '__pulpShimLog__'
+        ].forEach(function (key) {
+            var value = globalThis[key];
+            if (value != null && String(value).length) out[key] = String(value);
+        });
+        keys(globalThis).forEach(function (key) {
+            if (key.indexOf('__pulpPayloadErr_') !== 0) return;
+            var value = globalThis[key];
+            if (value != null && String(value).length) out[key] = String(value);
+        });
+        return out;
+    }
+    function runtimeImportState() {
+        function typeOf(name) {
+            try { return typeof globalThis[name]; } catch (e) { return 'error'; }
+        }
+        return {
+            react: typeOf('React'),
+            react_dom: typeOf('ReactDOM'),
+            babel: typeOf('Babel'),
+            app: typeOf('App'),
+            root_element: (typeof document !== 'undefined' && document.getElementById)
+                ? !!document.getElementById('root') : false
+        };
     }
     function textPreview(el) {
         var text = el && el._textContent != null ? String(el._textContent) : '';
@@ -355,6 +393,8 @@ static const char* runtime_trace_script() {
         document_listeners: listenerSummary(globalThis.document),
         add_event_listener_log_count: addEventLog.length,
         add_event_listener_log: addEventLog,
+        runtime_import_diagnostics: runtimeImportDiagnostics(),
+        runtime_import_state: runtimeImportState(),
         dispatch_hits: globalThis.__pulpDispatchHits__ || null,
         native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0,
         native_bounds_count: nativeBounds.length,
@@ -431,8 +471,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!options.demo && options.script_path.empty()) {
-        std::cerr << "Error: --script or --demo required\n";
+    if (!options.demo && options.script_path.empty() && options.design_ir_path.empty()) {
+        std::cerr << "Error: --script, --design-ir, or --demo required\n";
         print_usage();
         return 1;
     }
@@ -488,25 +528,64 @@ int main(int argc, char* argv[]) {
         engine.evaluate("setValue('mix', 0.8)");
         engine.evaluate("setValue('volume', 0.7)");
     } else {
-        // Load library JS files from the same directory
-        auto js_dir = std::filesystem::path(options.script_path).parent_path();
-        // Import artifacts reference their assets relative to the script
-        // (assets/<file> next to ui.js); resolve those against the script's
-        // own directory rather than the process CWD.
-        bridge.set_script_base_dir(js_dir);
-        for (auto& lib : {"oklch.js"}) {
-            auto lib_path = js_dir / lib;
-            if (std::filesystem::exists(lib_path)) {
-                bridge.load_script(read_file(lib_path.string()));
+        if (!options.script_path.empty()) {
+            // Load library JS files from the same directory. Import artifacts
+            // reference assets relative to the script (assets/<file> next to
+            // ui.js), not relative to the process working directory.
+            auto js_dir = std::filesystem::path(options.script_path).parent_path();
+            bridge.set_script_base_dir(js_dir);
+            for (auto& lib : {"oklch.js"}) {
+                auto lib_path = js_dir / lib;
+                if (std::filesystem::exists(lib_path)) {
+                    bridge.load_script(read_file(lib_path.string()));
+                }
             }
+
+            auto code = read_file(options.script_path);
+            if (code.empty()) {
+                std::cerr << "Error: could not read " << options.script_path << "\n";
+                return 1;
+            }
+            bridge.load_script(code);
         }
 
-        auto code = read_file(options.script_path);
-        if (code.empty()) {
-            std::cerr << "Error: could not read " << options.script_path << "\n";
-            return 1;
+        // Runtime behavior materializes first because the original executable
+        // document legitimately replaces document.body while bootstrapping.
+        // Mount the Chromium-computed DesignIR only after that replacement,
+        // then bind behavior into its stable native paint slots. This ordering
+        // makes the imported geometry/style the final visible authority.
+        if (!options.design_ir_path.empty()) {
+            const auto ir_text = read_file(options.design_ir_path);
+            if (ir_text.empty()) {
+                std::cerr << "Error: could not read " << options.design_ir_path << "\n";
+                return 1;
+            }
+            try {
+                auto ir = parse_design_ir_json(ir_text);
+                CodeGenOptions codegen;
+                codegen.mode = CodeGenMode::bridge_native_js;
+                // The executable document already owns `root`. Mount the
+                // visible DesignIR under a collision-free id so creating its
+                // Chromium paint tree cannot alias the hidden behavior tree.
+                codegen.root_variable = options.script_path.empty()
+                    ? "root" : "__pulp_design_ir_root__";
+                bridge.set_script_base_dir(
+                    std::filesystem::path(options.design_ir_path).parent_path());
+                const auto generated = generate_pulp_js(ir, codegen);
+                if (const char* dump = std::getenv("PULP_SHOT_DUMP_DESIGN_JS"))
+                    if (*dump) write_text_file(dump, generated);
+                bridge.load_script(generated);
+            } catch (const std::exception& e) {
+                std::cerr << "Error: invalid DesignIR: " << e.what() << "\n";
+                return 1;
+            }
         }
-        bridge.load_script(code);
+        if (!options.script_path.empty() && !options.design_ir_path.empty()) {
+            bridge.load_script(
+                "if (typeof __pulpBindMaterializedCanvases__ !== 'function') "
+                "throw new Error('script did not expose materialized canvas bindings'); "
+                "__pulpBindMaterializedCanvases__();");
+        }
 
         // After React mount, reconcile any oversize absolute descendants
         // with the viewport so bottom-anchored content lands within the

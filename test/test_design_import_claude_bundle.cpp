@@ -129,6 +129,42 @@ TEST_CASE("parse_claude_bundle returns nullopt when bundler tags are missing",
     REQUIRE_FALSE(bundle.has_value());
 }
 
+TEST_CASE("materialized browser document becomes a stable executable bundle",
+          "[view][import][materialized-browser]") {
+    const std::string json = R"JSON({
+      "schema":"pulp-materialized-browser-document-v1",
+      "version":1,
+      "html":"<!doctype html><html><body><div id=\"root\"></div><script src=\"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82\"></script></body></html>",
+      "mime_type":"text/html",
+      "assets":[{
+        "id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "mime_type":"text/javascript",
+        "byte_length":20,
+        "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
+        "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
+      }]
+    })JSON";
+    auto bundle = parse_materialized_browser_document(json);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->assets[0].uuid == "pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82");
+    REQUIRE(bundle->assets[0].mime == "text/javascript");
+    REQUIRE(std::string(bundle->assets[0].data.begin(), bundle->assets[0].data.end())
+            == "globalThis.okTrue=1;");
+    REQUIRE(bundle->javascript_indices == std::vector<size_t>{0});
+    REQUIRE(bundle->template_html.find("blob:") == std::string::npos);
+    REQUIRE(bundle->template_html.find("pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82")
+            != std::string::npos);
+
+    auto unresolved = json;
+    const auto asset_id = unresolved.find(
+        "pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82");
+    REQUIRE(asset_id != std::string::npos);
+    unresolved.replace(asset_id, 88,
+        "pulp-materialized-asset-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    REQUIRE_FALSE(parse_materialized_browser_document(unresolved).has_value());
+}
+
 TEST_CASE("parse_claude_bundle decodes a base64-gzip envelope",
           "[view][import][issue-468]") {
     const std::string js_a = "console.log('asset A');";

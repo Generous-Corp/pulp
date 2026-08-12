@@ -152,6 +152,7 @@ TEST_CASE("pulp-screenshot option parser preserves documented defaults",
     auto options = parse_args({});
 
     REQUIRE(options.script_path.empty());
+    REQUIRE(options.design_ir_path.empty());
     REQUIRE(options.output_path == "screenshot.png");
     REQUIRE(options.width == 400);
     REQUIRE(options.height == 300);
@@ -194,6 +195,19 @@ TEST_CASE("pulp-screenshot option parser accepts explicit render settings",
     REQUIRE(options.output_base64);
     REQUIRE(normalize_backend(options));
     REQUIRE(options.backend_name == "coregraphics");
+}
+
+TEST_CASE("pulp-screenshot option parser composes behavior with visible DesignIR",
+          "[tools][screenshot][design-ir]") {
+    auto options = parse_args({
+        "--script", "behavior.js",
+        "--design-ir", "panel.ir.json",
+        "--output", "native.png"
+    });
+
+    REQUIRE(options.script_path == "behavior.js");
+    REQUIRE(options.design_ir_path == "panel.ir.json");
+    REQUIRE(options.output_path == "native.png");
 }
 
 TEST_CASE("pulp-screenshot option parser handles aliases and last value wins",

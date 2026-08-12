@@ -6339,6 +6339,40 @@ a `pulp-tooling-surface` and remains Pulp-owned; shared retained rendering and
 Skia/Dawn primitives are Vellum-owned and must be changed at their Vellum
 authority rather than forked in this importer.
 
+For an executable React/Claude panel, keep those accepted DesignIR pixels and
+materialize behavior separately. Browser capture emits
+`materialized-document.json`: the exact adapter-patched HTML handed to
+`DOMParser` before React mounts, with every Blob URL rewritten to a
+content-addressed, hash-verified asset. Compile it into a hidden native behavior
+tree, mount DesignIR as the only visible tree, and gate against the browser
+frame from that SAME import transaction:
+
+```bash
+runtime=tools/import-design/jsx-runtime
+test -d "$runtime/node_modules" || (cd "$runtime" && npm ci)
+
+node "$runtime/materialized-runtime-transform.mjs" \
+  --in spectr.ir-browser-capture/materialized-document.json \
+  --design-ir spectr.ir.json \
+  --prelude spectr-native-services.js --out behavior.js
+
+pulp-screenshot --script behavior.js --design-ir spectr.ir.json \
+  --width 1320 --height 860 --scale 2 --backend skia \
+  --runtime-trace runtime.json --output native.png
+pulp-screenshot --compare spectr.ir-browser-capture/browser.png native.png \
+  --threshold 0.99 --diff native-diff.png
+```
+
+The optional prelude is product-owned and runs after captured helper scripts
+load but before the captured App mounts. Use it for real analyzer, state, and
+host-bridge services. Never put a product fallback in the generic transformer.
+The visible DesignIR owns geometry/style/captured canvas paint; the hidden tree
+owns closures and event logic. Bindings forward input without substituting its
+pixels. A previous fixed reference may differ in animated analyzer regions, so
+it is evidence history, not the native parity oracle. Do not show or accept a
+native result until this same-transaction gate passes, runtime diagnostics are
+empty, and a planted missing-service or broken-binding control fails.
+
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
 the code, and both were found by measuring rather than reasoning:

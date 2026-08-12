@@ -204,6 +204,14 @@ struct ClaudeBundle {
 /// `parse_claude_html` for the static-HTML pipeline.
 std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
 
+/// Decode the deterministic pre-mount document emitted by Chromium browser
+/// capture. The sidecar records the exact HTML passed to DOMParser after an
+/// adapter has patched the source, plus every Blob-backed asset it references.
+/// Returned bundles use stable synthetic asset IDs and can be evaluated by the
+/// same native runtime path as a regular Claude bundle.
+std::optional<ClaudeBundle> parse_materialized_browser_document(
+    const std::string& json);
+
 /// Normalize a constrained v0.dev React TSX export into the runtime-import
 /// bundle payload shape. Accepts either a bare single-file TSX component or
 /// a v0 code-project envelope with `[V0_FILE]tsx:file="..."` blocks.

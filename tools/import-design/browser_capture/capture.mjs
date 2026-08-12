@@ -444,12 +444,141 @@ async function configurePage(cdp, width, height, dpr) {
       });
     })()`,
   });
+  await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      // Capture the executable document at the browser loader's own handoff:
+      // after product adapters have patched the source, but before React has
+      // mounted into it.  A post-render outerHTML snapshot loses closures and
+      // canvas programs; the DOMParser input retains the exact scripts that
+      // produced the accepted Chromium frame.
+      const parser = DOMParser.prototype.parseFromString;
+      const createObjectURL = URL.createObjectURL.bind(URL);
+      const blobs = new Map();
+      globalThis.__pulpMaterializedDocument = null;
+      globalThis.__pulpMaterializedBlobs = blobs;
+      URL.createObjectURL = function(blob) {
+        const url = createObjectURL(blob);
+        if (blob instanceof Blob) blobs.set(url, blob);
+        return url;
+      };
+      DOMParser.prototype.parseFromString = function(source, type) {
+        if (String(type).toLowerCase() === 'text/html') {
+          globalThis.__pulpMaterializedDocument = {
+            html: String(source),
+            mime_type: 'text/html'
+          };
+        }
+        return parser.call(this, source, type);
+      };
+    })()`,
+  });
   try {
     await cdp.call("Browser.setDownloadBehavior", { behavior: "deny" });
   } catch {
     // Older compatible CDP builds may expose the command only on the browser
     // target. Headless download UI is still absent and navigation stays guarded.
   }
+}
+
+async function captureMaterializedDocument(cdp) {
+  const metadata = await cdp.call("Runtime.evaluate", {
+    expression: `(async () => {
+      const document = globalThis.__pulpMaterializedDocument;
+      if (!document || typeof document.html !== 'string') return null;
+      const urls = [...document.html.matchAll(/blob:[^\\s"'<>\\)]+/g)]
+        .map((match) => match[0]);
+      const unique = [...new Set(urls)];
+      if (unique.length > 256) {
+        throw new Error('materialized document references too many blob assets');
+      }
+      const assets = [];
+      let total = 0;
+      for (const url of unique) {
+        const blob = globalThis.__pulpMaterializedBlobs?.get(url);
+        if (!(blob instanceof Blob)) {
+          throw new Error('materialized blob was not captured: ' + url);
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        total += bytes.byteLength;
+        if (total > 64 * 1024 * 1024) {
+          throw new Error('materialized blob assets exceed 64 MiB');
+        }
+        assets.push({
+          url,
+          mime_type: blob.type || 'application/octet-stream',
+          byte_length: bytes.byteLength
+        });
+      }
+      return {
+        schema: 'pulp-materialized-browser-document-v1',
+        version: 1,
+        html: document.html,
+        mime_type: document.mime_type,
+        assets
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const materialized = metadata.result?.value ?? null;
+  if (!materialized) return null;
+
+  // Production bundles include Babel/React/font payloads. Returning them all
+  // in one Runtime.evaluate result can exceed Chrome's DevTools WebSocket
+  // message budget and close the connection without a protocol error. Read
+  // each bounded blob independently and assemble the durable sidecar here.
+  for (let index = 0; index < materialized.assets.length; index += 1) {
+    const payload = await cdp.call("Runtime.evaluate", {
+      expression: `(async () => {
+        const item = [...globalThis.__pulpMaterializedDocument.html
+          .matchAll(/blob:[^\\s"'<>\\)]+/g)].map((m) => m[0]);
+        const url = [...new Set(item)][${index}];
+        const blob = globalThis.__pulpMaterializedBlobs.get(url);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        }
+        return btoa(binary);
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const dataBase64 = payload.result?.value;
+    if (typeof dataBase64 !== "string") {
+      throw new Error(`materialized blob ${index} did not return bytes`);
+    }
+    materialized.assets[index].data_base64 = dataBase64;
+    const bytes = Buffer.from(dataBase64, "base64");
+    if (bytes.length !== materialized.assets[index].byte_length) {
+      throw new Error(`materialized blob ${index} length changed during capture`);
+    }
+    materialized.assets[index].sha256 = sha256(bytes);
+  }
+
+  // Blob URLs are realm-scoped and typically contain a fresh UUID on every
+  // launch.  They must not cross the browser/native handoff boundary.  Rewrite
+  // the executable document to content-addressed asset IDs so identical source
+  // material produces byte-identical sidecars across captures.
+  const stableAssets = new Map();
+  for (const asset of materialized.assets) {
+    const id = `pulp-materialized-asset-${asset.sha256}`;
+    materialized.html = materialized.html.split(asset.url).join(id);
+    if (!stableAssets.has(id)) {
+      stableAssets.set(id, {
+        id,
+        mime_type: asset.mime_type,
+        byte_length: asset.byte_length,
+        data_base64: asset.data_base64,
+        sha256: asset.sha256,
+      });
+    }
+  }
+  materialized.assets = [...stableAssets.values()];
+  if (materialized.html.includes("blob:")) {
+    throw new Error("materialized document retained an unresolved blob URL");
+  }
+  return materialized;
 }
 
 async function runProbe(options) {
@@ -823,6 +952,7 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
+    const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -933,6 +1063,13 @@ async function runCapture(options) {
     // DOMSnapshot through backendNodeId. This preserves transparent overlap and
     // paint order without flattening the whole editor into one photograph.
     const canvasAssets = await captureCanvasAssets(cdp, snapshot);
+    if (materializedDocument) {
+      materializedDocument.canvas_bindings = canvasAssets.map(
+        (asset, index) => ({
+          index,
+          anchor: `chromium:backend-node:${asset.backend_node_id}`,
+        }));
+    }
     const semanticReport = await evaluateSemantics(
       cdp, snapshot, {
         width: captureWidth,
@@ -1020,7 +1157,6 @@ async function runCapture(options) {
       error.code = "capture-dpr-mismatch";
       throw error;
     }
-
     progress.enterPhase("artifact-write");
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
@@ -1049,6 +1185,11 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
+      ...(materializedDocument
+        ? [writeJson(
+            path.join(outputDir, "materialized-document.json"),
+            materializedDocument)]
+        : []),
       ...(interactionReport
         ? [writeFile(
             path.join(outputDir, "interaction-report.json"),
@@ -1073,6 +1214,14 @@ async function runCapture(options) {
         source: {
           entry: authorized.relativeEntry.split(path.sep).join("/"),
           sha256: sha256(sourceBytes),
+          ...(materializedDocument
+            ? {
+                materialized_document: "materialized-document.json",
+                materialized_document_sha256: sha256(Buffer.from(
+                  serializeJson(materializedDocument), "utf8")),
+                materialized_asset_count: materializedDocument.assets.length,
+              }
+            : {}),
         },
         viewport: {
           initial: { width: initialWidth, height: initialHeight },

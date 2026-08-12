@@ -92,6 +92,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , granted_capabilities_(options.granted_capabilities)
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
+    , runtime_import_enabled_(options.enable_runtime_import)
     , value_channel_access_(
           options.value_channel_access
               ? std::move(options.value_channel_access)
@@ -576,6 +577,8 @@ bool ScriptedUiSession::rebuild_from_code(
         auto probe_bridge = std::make_unique<WidgetBridge>(
             *probe_engine, probe_root, probe_store, nullptr, granted_capabilities_);
         check_deadline();
+        if (runtime_import_enabled_)
+            probe_bridge->install_runtime_import_handlers();
         probe_bridge->set_asset_roots(asset_roots_);
         probe_bridge->set_script_base_dir(source_path.parent_path());
         load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
@@ -637,6 +640,8 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge = std::make_unique<WidgetBridge>(
             *next_engine, root_, store_, gpu_surface_, granted_capabilities_);
         check_deadline();
+        if (runtime_import_enabled_)
+            next_bridge->install_runtime_import_handlers();
         // Re-attach on every reload without retaining a processor generation.
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
