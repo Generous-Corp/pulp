@@ -24,7 +24,7 @@ These examples exist to test and validate specific subsystems of the framework.
 | [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU v2, CLAP, Standalone |
 | [Timeline Phase 1](example-timeline-phase1.html) | Audio-file, step-pattern, and multitrack graph/PDC playback through the Creative Timeline Engine | Headless, Standalone |
 | [Timeline session](example-timeline-session.html) | Clip-launching session and a full DAW-style project: launch quantization, per-track arbitration, nested sequences with divergence, takes/comp, journaled autosave | Headless |
-| [Timeline Plugin Proof](timeline-plugin-proof.md) | Loadable plugin owning a Timeline session, editor-host seam, native view shell, edit intents, and canonical plugin state | CLAP |
+| [Timeline Plugin Proof](timeline-plugin-proof.md) | Loadable plugin owning a Timeline session, two live piano-roll views, note gestures, undo, and canonical plugin state | CLAP |
 | [PulpEffect](example-pulp-effect.html) | Biquad filter with frequency, resonance, type, and mix | VST3, AU v2, CLAP |
 | [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU v2, CLAP |
 | [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |

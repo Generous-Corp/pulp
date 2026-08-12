@@ -334,6 +334,60 @@ TEST_CASE("routing spec replacement cannot strand held notes",
     }
 }
 
+TEST_CASE("ChannelRouter keeps held ownership across empty callbacks",
+          "[midi][utility][routing][partition][ownership]") {
+    std::array<std::array<std::array<int, 6>, 2>, 2> observed{};
+
+    for (std::size_t run = 0; run < observed.size(); ++run) {
+        midi::ChannelRouteSpec initial;
+        initial.accepted_channels = std::uint16_t{1} << 2;
+        initial.output_channel[2] = 9;
+        auto replacement = initial;
+        replacement.output_channel[2] = 11;
+        midi::ChannelRouter router(initial);
+        NoteBalance balance;
+        auto input = prepared_buffer();
+        auto output = prepared_buffer();
+
+        auto attack = midi::MidiEvent::note_on(2, 60, 100);
+        attack.sample_offset = 5;
+        REQUIRE(input.add(attack));
+        REQUIRE(router.process(input, output).complete);
+        REQUIRE(output.size() == 1);
+        observed[run][0] = {output[0].is_note_on(), output[0].is_note_off(),
+                            output[0].channel(),    output[0].note(),
+                            output[0].velocity(),   output[0].sample_offset};
+        balance.feed(output);
+
+        for (std::size_t callback = 0; callback < run * 3; ++callback) {
+            input.clear();
+            REQUIRE(router.process(input, output).complete);
+            REQUIRE(output.empty());
+        }
+        REQUIRE_FALSE(router.replace_spec(replacement));
+
+        input.clear();
+        auto release = midi::MidiEvent::note_off(2, 60);
+        release.sample_offset = 7;
+        REQUIRE(input.add(release));
+        REQUIRE(router.process(input, output).complete);
+        REQUIRE(output.size() == 1);
+        observed[run][1] = {output[0].is_note_on(), output[0].is_note_off(),
+                            output[0].channel(),    output[0].note(),
+                            output[0].velocity(),   output[0].sample_offset};
+        balance.feed(output);
+        REQUIRE(balance.balanced());
+        REQUIRE(router.replace_spec(replacement));
+    }
+
+    const std::array<std::array<int, 6>, 2> expected{{
+        {1, 0, 9, 60, 100, 5},
+        {0, 1, 9, 60, 0, 7},
+    }};
+    REQUIRE(observed[0] == expected);
+    REQUIRE(observed[1] == expected);
+}
+
 TEST_CASE("routing lifecycle flushes owned notes and suppresses stale releases",
           "[midi][utility][routing][lifecycle][ownership]") {
     auto input = prepared_buffer();

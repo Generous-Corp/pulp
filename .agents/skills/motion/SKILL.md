@@ -261,8 +261,11 @@ the process-wide `input_recording_enabled()` flag. `View::simulate_*` checks
 that flag (a single relaxed atomic load, off by default) and emits a
 `SampleEvent::Kind::Input` carrying the `input_kind` ("click" / "drag" /
 "hover"), the recorded target's `View::id()`, and the root-space coords on
-the existing `components` map (sorted by name: `x`/`y` for click+hover;
-`start_x`/`start_y`/`end_x`/`end_y`/`steps` for drag).
+the existing `components` map. Click and drag also carry `pointer_type`,
+`pressure`, `modifiers`, `button`, and `pointer_id`; hover remains
+coordinate-only. Canonical order is `button, modifiers, pointer_id,
+pointer_type, pressure, x, y` for click and `button, end_x, end_y, modifiers,
+pointer_id, pointer_type, pressure, start_x, start_y, steps` for drag.
 
 `replay_inputs(path, root, clock)`:
 
@@ -271,6 +274,10 @@ the existing `components` map (sorted by name: `x`/`y` for click+hover;
   subsequent inputs tick by the delta).
 - Dispatches each input through `root` (not the recorded `view_id` — root
   coords with `hit_test` land on the same descendant).
+- Restores click/drag pointer identity exactly. Older coordinate-only v2
+  fixtures retain the historical defaults (`mouse`, pressure `0.5`, no
+  modifiers, left button, pointer id `0`). Missing or invalid metadata fields
+  independently keep those defaults without discarding valid sibling fields.
 - Returns the number of inputs replayed.
 
 The motion stream that emerges — when paired with the same animation

@@ -1043,10 +1043,12 @@ is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
 `REQUIRE` list, which fails naming any module that is absent from the measured
 closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
 by it; it does not link `timeline_editor` at all. The positive inbound proof is
-`TimelinePluginProof_CLAP`: it requires `format timeline timeline_editor` under
-the `sequencer-plugin-editor` tier while recording the packaging-driven
-`playback` reach as per-target debt. Its native ruler/playhead view demonstrates
-the host seam without claiming a piano roll.
+`TimelinePluginProof_CLAP`: it requires `format timeline timeline_editor
+timeline_view` under the `sequencer-plugin-editor` tier. That tier includes the
+base `view` and `canvas` rungs intentionally reached by the concrete piano-roll
+view, while packaging-driven `playback` remains per-target debt. Its processor
+implements the host seam and embeds the real piano-roll view, while the editor
+and view modules remain independent of playback.
 
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the

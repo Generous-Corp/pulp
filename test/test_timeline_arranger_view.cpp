@@ -1,5 +1,6 @@
 #include "timeline_command_test_helpers.hpp"
 
+#include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline/transaction.hpp>
@@ -8,6 +9,9 @@
 #include <pulp/canvas/recording_canvas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <string>
+#include <vector>
 
 using namespace pulp::timeline;
 using namespace pulp::timeline_editor;
@@ -95,7 +99,106 @@ std::int64_t start_after_round_trip(const Project& project) {
     return clip(decoded.value()).start().value;
 }
 
+std::string canonical_project(const Project& project) {
+    const auto registry = builtin_registry();
+    auto encoded = serialize_project(project, registry);
+    REQUIRE(encoded);
+    return std::move(encoded).value().json;
+}
+
+struct CanonicalHistory {
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+    std::vector<EditIntent> intents;
+};
+
+CanonicalHistory exercise_device_drag(PointerType pointer_type) {
+    auto owned = DocumentSession::create(make_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+
+    const auto baseline = canonical_project(*session->snapshot());
+    std::vector<EditIntent> intents;
+    {
+        ScriptedUiHost<EditIntent> host;
+        ArrangerView view;
+        configure(view, *session->snapshot(), host);
+        view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+        pulp::view::View::SimulatedPointer pointer;
+        pointer.type = pointer_type;
+        const float grab_x = unit_layout().lane_left_px + 10.0f;
+        view.simulate_drag({grab_x, 20.0f}, {grab_x + 200.0f, 20.0f}, 4, pointer);
+
+        REQUIRE(host.intents().size() >= 3);
+        intents.assign(host.intents().begin(), host.intents().end());
+    }
+
+    const auto undo_group = writer.allocate_undo_group_id();
+    REQUIRE(undo_group.valid());
+    for (const auto& intent : intents) {
+        EditIntentIdentity identity;
+        identity.transaction_id = writer.allocate_transaction_id();
+        identity.command_id = writer.allocate_command_id();
+        identity.expected_revision = session->revision();
+        identity.undo_group = undo_group;
+        auto lowered = lower_edit_intent(intent, identity);
+        REQUIRE(lowered);
+        REQUIRE(session->submit(writer, std::move(lowered).value()));
+    }
+
+    const auto edited = canonical_project(*session->snapshot());
+    REQUIRE(session->undo(writer));
+    const auto undone = canonical_project(*session->snapshot());
+    REQUIRE(session->redo(writer));
+    const auto redone = canonical_project(*session->snapshot());
+    return {baseline, edited, undone, redone, std::move(intents)};
+}
+
 } // namespace
+
+TEST_CASE("Arranger mouse and touch drags share one exact undoable document edit",
+          "[timeline][arranger][parity]") {
+    const auto mouse = exercise_device_drag(PointerType::mouse);
+    const auto touch = exercise_device_drag(PointerType::touch);
+
+    REQUIRE(mouse.edited != mouse.baseline);
+    CHECK(mouse.intents == touch.intents);
+    CHECK(mouse.edited == touch.edited);
+    CHECK(mouse.undone == mouse.baseline);
+    CHECK(touch.undone == touch.baseline);
+    CHECK(mouse.redone == mouse.edited);
+    CHECK(touch.redone == touch.edited);
+}
+
+TEST_CASE("Arranger touch metrics extend the clip boundary beyond mouse tolerance",
+          "[timeline][arranger][pointer]") {
+    const auto project = make_project();
+    const auto exercise = [&](PointerType pointer_type) {
+        ScriptedUiHost<EditIntent> host;
+        ArrangerView view;
+        configure(view, project, host);
+        view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+        pulp::view::View::SimulatedPointer pointer;
+        pointer.type = pointer_type;
+        const float start = unit_layout().lane_left_px + kTicksPerQuarter + 10.0f;
+        view.simulate_drag({start, 20.0f}, {start + 200.0f, 20.0f}, 4, pointer);
+        return std::vector<EditIntent>(host.intents().begin(), host.intents().end());
+    };
+
+    const auto mouse = exercise(PointerType::mouse);
+    const auto touch = exercise(PointerType::touch);
+    CHECK(mouse.empty());
+    REQUIRE(touch.size() >= 3);
+    REQUIRE(touch.back().replacement_range.has_value());
+    CHECK(std::get<MusicalTimeRange>(*touch.back().replacement_range).start.value == 200);
+}
 
 TEST_CASE("Arranger clip drag survives a serialize round trip with its authored start",
           "[timeline][arranger]") {

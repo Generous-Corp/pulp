@@ -204,6 +204,7 @@ def main() -> int:
                         env=environment,
                         shell=True,
                         text=True,
+                        input="",
                         capture_output=True,
                         timeout=15,
                         check=False,

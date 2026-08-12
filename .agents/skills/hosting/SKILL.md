@@ -820,6 +820,14 @@ Two things that bite when baking analog VCF nodes:
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
   modulation accumulation.
+- Signal-graph declarations are split by dependency weight:
+  `custom_node_type.hpp` owns the registration vocabulary,
+  `signal_graph_node.hpp` owns node identity and retained state,
+  `signal_graph_connection.hpp` owns edge metadata, and
+  `signal_graph_runtime.hpp` owns `SignalGraph` execution and mutation.
+  `signal_graph.hpp` is the compatibility umbrella. Include the narrowest
+  contract that supplies the names a header uses; do not move declarations
+  back into the umbrella.
 - Custom graph nodes are registered per `SignalGraph` with `CustomNodeType`
   (`type_id`, `version`, port counts, default name, optional process
   callback), then instantiated with `add_custom_node(type_id)` or

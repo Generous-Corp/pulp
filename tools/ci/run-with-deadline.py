@@ -24,6 +24,8 @@ def terminate_group(process, grace_seconds=5):
             os.killpg(process.pid, 0)
         except ProcessLookupError:
             break
+        except PermissionError:
+            pass
         time.sleep(0.05)
     else:
         try:
