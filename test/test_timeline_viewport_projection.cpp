@@ -156,6 +156,45 @@ TEST_CASE("Time-pitch queries use half-open time and inclusive pitch bounds",
     CHECK(index.query({0}, {1}, 80, 70).notes.empty());
 }
 
+TEST_CASE("Time-pitch queries preserve pitch-mask word boundaries",
+          "[timeline-editor][spatial-index]") {
+    std::vector<timeline::NoteEvent> notes{
+        {{30}, {0}, {100}, 48'000, 64, 0},
+        {{10}, {0}, {100}, 48'000, 63, 0},
+        {{20}, {0}, {100}, 48'000, 127, 0},
+    };
+    auto content = timeline::MidiContent::create(std::move(notes));
+    REQUIRE(content);
+    const TimePitchIndex index{content.value()};
+
+    const auto pitch_63 = index.query({10}, {11}, 63, 63);
+    CHECK(pitch_63.visited_candidates == 1);
+    REQUIRE(pitch_63.notes.size() == 1);
+    CHECK(pitch_63.notes[0].id == timeline::ItemId{10});
+
+    const auto pitch_64 = index.query({10}, {11}, 64, 64);
+    CHECK(pitch_64.visited_candidates == 1);
+    REQUIRE(pitch_64.notes.size() == 1);
+    CHECK(pitch_64.notes[0].id == timeline::ItemId{30});
+
+    const auto pitch_127 = index.query({10}, {11}, 127, 127);
+    CHECK(pitch_127.visited_candidates == 1);
+    REQUIRE(pitch_127.notes.size() == 1);
+    CHECK(pitch_127.notes[0].id == timeline::ItemId{20});
+
+    const auto pitches_63_to_64 = index.query({10}, {11}, 63, 64);
+    CHECK(pitches_63_to_64.visited_candidates == 2);
+    REQUIRE(pitches_63_to_64.notes.size() == 2);
+    CHECK(pitches_63_to_64.notes[0].id == timeline::ItemId{10});
+    CHECK(pitches_63_to_64.notes[1].id == timeline::ItemId{30});
+
+    const auto pitches_64_to_127 = index.query({10}, {11}, 64, 127);
+    CHECK(pitches_64_to_127.visited_candidates == 2);
+    REQUIRE(pitches_64_to_127.notes.size() == 2);
+    CHECK(pitches_64_to_127.notes[0].id == timeline::ItemId{20});
+    CHECK(pitches_64_to_127.notes[1].id == timeline::ItemId{30});
+}
+
 TEST_CASE("Time-pitch index bounds candidate visits at ten-thousand-note scale",
           "[timeline-editor][spatial-index]") {
     constexpr std::int64_t count = 10'000;
