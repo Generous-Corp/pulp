@@ -69,10 +69,9 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 #
 # The timeline rungs are deliberately NOT here. A tier is an upper bound, so
 # naming a module a claimant does not link is not a harmless over-estimate — it
-# reads as a proven link and is not one. StepSequencer_CLAP reaches `timeline`
-# only through the view stack (recorded as debt, where a fact about today
-# belongs) and does not reach `timeline_editor` at all. A plugin that genuinely
-# carries the editor states so with REQUIRE.
+# reads as a proven link and is not one. The default view stack reaches neither
+# `timeline` nor `timeline_editor`; a plugin that genuinely carries the editor
+# states so with REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
     platform runtime music timebase audio midi format)
 
@@ -104,22 +103,16 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # reaching less, so an entry a documented guard can remove is APPENDED under
 # that same guard below, which keeps it rot-checked wherever the guard holds.
 #
-# StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
-# write and cannot cut from its own CMakeLists account for all of it.
+# StepSequencer_CLAP: measured, not chosen. Two packaging edges the plugin does
+# not write and cannot cut from its own CMakeLists account for all of it.
 #
 #   pulp-view — every plugin links the view stack whether or not it draws.
 #     VST3, CLAP and AU each link ${_PULP_VIEW_TARGET} unconditionally in
 #     tools/cmake/PulpPluginFormats.cmake and FATAL_ERROR if it is absent. The
-#     stack then reaches the plugin host and, through it, the transport:
-#       StepSequencer_CLAP -> pulp-view -> pulp-view-script -> pulp-view-core
-#         -> pulp-host -> pulp-playback -> pulp-timeline
-#     which is the only reason this plugin reaches pulp-timeline at all: the
-#     sequencer's own code carries no pulp/timeline include and no timeline
-#     link. view, host, playback, timeline and canvas all arrive this way, so
-#     cutting the one unconditional link would delete five entries at once.
-#     `render` is NOT among them: pulp_add_plugin links it directly per format
+#     stack reaches canvas but stops below plugin hosting and playback. `render`
+#     is NOT charged to that edge: pulp_add_plugin links it directly per format
 #     under PULP_HAS_SKIA (tools/cmake/PulpUtils.cmake), which is the edge the
-#     closure report names, so cutting the view link alone leaves it reached.
+#     closure report names.
 #
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
@@ -165,32 +158,9 @@ set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
 #     (tools/cmake/PulpUtils.cmake), which is the edge the closure report names,
 #     and core/view's `if(TARGET pulp-render)` block. Guarding on either edge
 #     would make the entry unfalsifiable from one side.
-#
-#   host, playback, timeline — core/host is skipped on iOS (App Store policy
-#     disallows dlopen of third-party plugins), so the pulp-view-core ->
-#     pulp-host hop does not exist there. `playback` and `timeline` are guarded
-#     on the same condition for a DIFFERENT reason, and the difference matters:
-#     core/playback and core/timeline are added unconditionally and ARE built on
-#     iOS. They are guarded because this target's only route to them runs
-#     THROUGH host — reachability, not existence. The iOS configure is what
-#     established that, by naming all three as unreached; the closure report
-#     could not have, since it records one shortest chain per module and a
-#     second, longer edge would be invisible in it.
-#
-#     That claim stays refutable: add a direct pulp::playback link on iOS and
-#     the module is reached while the condition is false, which the walk reports
-#     as "outside tier". What it does NOT catch is the carrying hop being
-#     rerouted rather than removed. The way to close that is to DERIVE the set
-#     from the graph — re-run the closure with pulp-host excluded and take the
-#     difference — so the exemption is recomputed per configure instead of
-#     asserted here. Recorded as the follow-up; this list is the interim.
 if(PULP_ENABLE_GPU)
     list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
     list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
-endif()
-if(NOT IOS)
-    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP host playback timeline)
-    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP host playback)
 endif()
 
 # ── Walk ─────────────────────────────────────────────────────────────────────

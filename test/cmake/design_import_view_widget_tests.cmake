@@ -108,7 +108,7 @@ pulp_add_test_suite(pulp-test-property-panel
 pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 
 # GraphEditorView tests
-pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view pulp::host)
 # GraphEditorView opening a node's plugin editor (first EditorAttachment consumer)
 pulp_add_test_suite(pulp-test-graph-editor-open LIBRARIES pulp::view pulp::host)
 

@@ -34,6 +34,6 @@ target_link_libraries(pulp-timeline-view
         pulp::timeline-editor
         pulp::timeline
         pulp::timebase
-        pulp::view
+        pulp::view-core
         pulp::canvas
 )

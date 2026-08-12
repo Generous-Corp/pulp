@@ -56,7 +56,7 @@ pulp_add_test_suite(pulp-test-native-core-ffi
 # NativeCoreProcessor seam + RT-safety harnesses; no Rust required.
 pulp_add_test_suite(pulp-test-native-core-processor
     SOURCES test_native_core_processor.cpp test_rt_safety.cpp test_signal_graph_rt_safety.cpp $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp> $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
-    LIBRARIES pulp::format ${CMAKE_DL_LIBS}
+    LIBRARIES pulp::format pulp::host ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # Public node ABI (pulp_node_v1) conformance — always built, no Rust. Pins the
