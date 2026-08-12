@@ -1308,10 +1308,15 @@ jobs:
             case "$1" in
               pulp-mcp) echo "--version" ;;
               pulp-import-design) echo "--help" ;;
+              pulp-control-standalone-host) echo "" ;;
               *)        echo "help" ;;
             esac
           }
           CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)
+          if [ -x /tmp/pulp-smoke/pulp-control-standalone-host ]; then
+            CLI_ARTIFACTS+=(pulp-control-standalone-host)
+            test -s /tmp/pulp-smoke/pulp-control-standalone-host.inspector-capabilities.json
+          fi
           if [ -x /tmp/pulp-smoke/pulp-import-design ]; then
             CLI_ARTIFACTS+=(pulp-import-design)
             test -s /tmp/pulp-smoke/browser_capture/capture.mjs
@@ -1356,7 +1361,36 @@ jobs:
             fi
             echo "--- $ART $CMD ---"
             set +e
-            "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            if [ "$ART" = "pulp-control-standalone-host" ]; then
+              # The installed host has no diagnostic CLI: without inherited
+              # bootstrap state it exits 65, while a supplied bootstrap may
+              # keep it alive. Bound both outcomes and terminate a live host
+              # cleanly after proving dyld reached main().
+              python3 - "$BIN" /tmp/$ART-smoke.out /tmp/$ART-smoke.err <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+
+          binary, stdout_path, stderr_path = sys.argv[1:]
+          with pathlib.Path(stdout_path).open("wb") as stdout, \
+               pathlib.Path(stderr_path).open("wb") as stderr:
+              process = subprocess.Popen([binary], stdout=stdout, stderr=stderr)
+              try:
+                  return_code = process.wait(timeout=2)
+              except subprocess.TimeoutExpired:
+                  process.terminate()
+                  try:
+                      return_code = process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+                      raise SystemExit("standalone host ignored termination")
+          if return_code not in (0, 65):
+              raise SystemExit(return_code)
+          PY
+            else
+              "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            fi
             rc=$?
             set -e
             echo "exit=$rc"

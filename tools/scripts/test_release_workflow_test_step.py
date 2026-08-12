@@ -561,6 +561,14 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
         )
         self.assertIn("CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)", run_block)
+        self.assertIn(
+            "CLI_ARTIFACTS+=(pulp-control-standalone-host)", run_block
+        )
+        self.assertIn(
+            "pulp-control-standalone-host.inspector-capabilities.json", run_block
+        )
+        self.assertIn("subprocess.TimeoutExpired", run_block)
+        self.assertIn("return_code not in (0, 65)", run_block)
         self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
         self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
         self.assertIn('pulp-mcp) echo "--version"', run_block)
