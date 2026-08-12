@@ -12,6 +12,7 @@ publication.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -65,6 +66,35 @@ CONTROL_STANDALONE_HOST_SDK_MEMBER = (
 )
 CONTROL_STANDALONE_HOST_SDK_MANIFEST = (
     "pulp-sdk/libexec/pulp/pulp-control-standalone-host.inspector-capabilities.json"
+)
+CONTROL_MANIFEST_PERMISSION_TERMS = (
+    "implemented",
+    "built",
+    "host_available",
+    "activated",
+    "policy_eligible",
+    "client_granted",
+    "session_live",
+)
+CONTROL_STANDALONE_HOST_CAPABILITIES = (
+    "dev.pulp.instance/read@1",
+    "dev.pulp.state/read@1",
+)
+CONTROL_STANDALONE_HOST_MANIFEST_FIELDS = frozenset(
+    {
+        "schema",
+        "schema_version",
+        "profile",
+        "target",
+        "product_name",
+        "bundle_id",
+        "build_id",
+        "registry_digest",
+        "endpoint_included",
+        "unsafe_runtime_eval_acknowledged",
+        "permission_terms",
+        "capabilities",
+    }
 )
 
 
@@ -497,6 +527,116 @@ def require_mode(archive: Archive, name: str, expected: int) -> None:
         )
 
 
+def _control_registry_digest() -> str:
+    path = (
+        Path(__file__).parents[2]
+        / "inspect/include/pulp/inspect/control_registry_digest.inc"
+    )
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContentError(f"could not read frozen control registry digest: {exc}") from exc
+    match = re.search(r'"([0-9a-f]{64})"', contents)
+    if match is None:
+        raise ContentError(f"invalid frozen control registry digest: {path}")
+    return match.group(1)
+
+
+def _canonical_standalone_manifest(document: dict[str, object]) -> bytes:
+    capabilities = ", ".join(
+        json.dumps(value) for value in document["capabilities"]
+    )
+    permission_terms = ", ".join(
+        json.dumps(value) for value in document["permission_terms"]
+    )
+    return (
+        "{\n"
+        f'  "schema": {json.dumps(document["schema"])},\n'
+        f'  "schema_version": {document["schema_version"]},\n'
+        f'  "profile": {json.dumps(document["profile"])},\n'
+        f'  "target": {json.dumps(document["target"])},\n'
+        f'  "product_name": {json.dumps(document["product_name"])},\n'
+        f'  "bundle_id": {json.dumps(document["bundle_id"])},\n'
+        f'  "build_id": {json.dumps(document["build_id"])},\n'
+        f'  "registry_digest": {json.dumps(document["registry_digest"])},\n'
+        f'  "endpoint_included": {str(document["endpoint_included"]).lower()},\n'
+        "  \"unsafe_runtime_eval_acknowledged\": "
+        f'{str(document["unsafe_runtime_eval_acknowledged"]).lower()},\n'
+        f'  "permission_terms": [{permission_terms}],\n'
+        f'  "capabilities": [{capabilities}]\n'
+        "}\n"
+    ).encode()
+
+
+def verify_control_standalone_host(
+    archive: Archive, host_member: str, manifest_member: str
+) -> None:
+    manifest_bytes = archive.read(manifest_member, limit=64 * 1024)
+    try:
+        document = json.loads(manifest_bytes.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ContentError(
+            f"{archive.path.name}: invalid Standalone host manifest: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest root must be an object"
+        )
+    fields = frozenset(document)
+    if fields != CONTROL_STANDALONE_HOST_MANIFEST_FIELDS:
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest field mismatch; "
+            f"missing={sorted(CONTROL_STANDALONE_HOST_MANIFEST_FIELDS - fields)}, "
+            f"unexpected={sorted(fields - CONTROL_STANDALONE_HOST_MANIFEST_FIELDS)}"
+        )
+    expected = {
+        "schema": "dev.pulp.control/artifact-manifest@1",
+        "schema_version": 1,
+        "profile": "developer-local",
+        "target": "pulp-control-standalone-host",
+        "product_name": "Pulp Control Standalone Host",
+        "bundle_id": "dev.pulp.control-standalone-host",
+        "registry_digest": _control_registry_digest(),
+        "endpoint_included": True,
+        "unsafe_runtime_eval_acknowledged": False,
+        "permission_terms": list(CONTROL_MANIFEST_PERMISSION_TERMS),
+        "capabilities": list(CONTROL_STANDALONE_HOST_CAPABILITIES),
+    }
+    mismatches = {
+        key: (document.get(key), value)
+        for key, value in expected.items()
+        if document.get(key) != value or type(document.get(key)) is not type(value)
+    }
+    build_id = document.get("build_id")
+    if not isinstance(build_id, str) or not re.fullmatch(r"build:[0-9a-f]{32}", build_id):
+        mismatches["build_id"] = (build_id, "build: followed by 32 lowercase hex digits")
+    if mismatches:
+        raise ContentError(
+            f"{archive.path.name}: invalid Standalone host manifest contract: {mismatches}"
+        )
+    if manifest_bytes != _canonical_standalone_manifest(document):
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest is not canonical"
+        )
+
+    host_bytes = archive.read(host_member, limit=512 * 1024 * 1024)
+    digest = hashlib.sha256(manifest_bytes).hexdigest().encode()
+    markers = (
+        b"PULP_STANDALONE_COMPONENT_V1",
+        b"PULP_INSPECT_SHIPPING_MANIFEST_V1",
+        b"PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1",
+        b"PULP_CONTROL_MANIFEST_SHA256_" + digest + b"_V1",
+        b"PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1",
+        b"PULP_INSPECT_CAPABILITY_STATE_READ_V1",
+    )
+    missing_markers = [marker.decode() for marker in markers if marker not in host_bytes]
+    if missing_markers:
+        raise ContentError(
+            f"{archive.path.name}: Standalone host/manifest binding mismatch; "
+            f"missing markers={missing_markers}"
+        )
+
+
 def verify_cli_archive(
     path: Path,
     platform: str,
@@ -520,6 +660,11 @@ def verify_cli_archive(
         if control_standalone_host_required(platform, matrix, version):
             require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MEMBER, 0o700)
             require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MANIFEST, 0o600)
+            verify_control_standalone_host(
+                archive,
+                CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+            )
 
 
 def verify_sdk_archive(
@@ -673,6 +818,11 @@ def verify_sdk_archive(
         if control_standalone_host_required(platform, matrix, version):
             require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MEMBER, 0o700)
             require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MANIFEST, 0o600)
+            verify_control_standalone_host(
+                archive,
+                CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+            )
 
         if not platform.startswith("darwin-"):
             apple_only = sorted(

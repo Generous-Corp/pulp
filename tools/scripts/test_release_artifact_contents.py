@@ -165,7 +165,47 @@ FIXTURE_HANDOFF_SCHEMA = (
 ).read_bytes()
 
 
+def standalone_manifest_payload() -> bytes:
+    document = {
+        "schema": "dev.pulp.control/artifact-manifest@1",
+        "schema_version": 1,
+        "profile": "developer-local",
+        "target": "pulp-control-standalone-host",
+        "product_name": "Pulp Control Standalone Host",
+        "bundle_id": "dev.pulp.control-standalone-host",
+        "build_id": "build:0123456789abcdef0123456789abcdef",
+        "registry_digest": rac._control_registry_digest(),
+        "endpoint_included": True,
+        "unsafe_runtime_eval_acknowledged": False,
+        "permission_terms": list(rac.CONTROL_MANIFEST_PERMISSION_TERMS),
+        "capabilities": list(rac.CONTROL_STANDALONE_HOST_CAPABILITIES),
+    }
+    return rac._canonical_standalone_manifest(document)
+
+
+def standalone_host_payload() -> bytes:
+    digest = hashlib.sha256(standalone_manifest_payload()).hexdigest()
+    return (
+        "PULP_STANDALONE_COMPONENT_V1\0"
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1\0"
+        "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1\0"
+        f"PULP_CONTROL_MANIFEST_SHA256_{digest}_V1\0"
+        "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1\0"
+        "PULP_INSPECT_CAPABILITY_STATE_READ_V1"
+    ).encode()
+
+
 def member_payload(name: str, platform: str = "linux-x64") -> bytes:
+    if name in {
+        rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+        rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+    }:
+        return standalone_manifest_payload()
+    if name in {
+        rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+        rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+    }:
+        return standalone_host_payload()
     if name == "pulp-sdk/version.txt":
         return f"{VERSION}\n".encode()
     if name == "pulp-sdk/sdk_build_type.txt":
@@ -757,6 +797,67 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
 
             with self.assertRaisesRegex(rac.ContentError, "mode is 0o700"):
                 rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_malformed_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+            with mock.patch(
+                __name__ + ".member_payload",
+                side_effect=lambda name, platform="linux-x64": (
+                    b"{not-json"
+                    if name == rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST
+                    else original_member_payload(name, platform)
+                ),
+            ):
+                write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "invalid Standalone host manifest"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_stale_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+
+            def stale_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name != rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST:
+                    return original_member_payload(name, platform)
+                document = json.loads(standalone_manifest_payload())
+                document["registry_digest"] = "0" * 64
+                return rac._canonical_standalone_manifest(document)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=stale_payload):
+                write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "manifest contract"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_tampered_standalone_host_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sdk = set(rac.required_sdk_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+
+            def tampered_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == rac.CONTROL_STANDALONE_HOST_SDK_MEMBER:
+                    return standalone_host_payload().replace(
+                        b"PULP_CONTROL_MANIFEST_SHA256_", b"TAMPERED_MANIFEST_SHA256_"
+                    )
+                return original_member_payload(name, platform)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=tampered_payload):
+                write_archive(path, sdk, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "binding mismatch"):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA, rac.DEFAULT_MATRIX
+                )
 
     def test_negative_control_invalid_signature_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
