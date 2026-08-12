@@ -171,6 +171,11 @@ inline constexpr std::uint32_t kProgramWireNoLane = 0xFFFF'FFFFu;
 /// Decoder work and fixed scratch remain bounded even for untrusted payloads.
 inline constexpr std::size_t kProgramWireMaximumTracks = 1'024;
 
+/// Total automation lanes one publication consumer can prepare across all
+/// tracks. This is deliberately separate from the carried per-track ceiling;
+/// callers size ProgramWireLaneState storage against this publication bound.
+inline constexpr std::size_t kProgramWireMaximumAutomationLanes = 1'024;
+
 enum class ProgramWireSection : std::uint32_t {
     Program = 1,
     TempoPoints = 2,
@@ -863,12 +868,12 @@ class ProgramWireAutomationConsumer {
     std::size_t lane_count_ = 0;
     std::size_t track_capacity_ = 0;
     std::size_t wire_byte_capacity_ = 0;
-    std::array<ActiveLane, AutomationPlaybackLimits::kMaximumLanesPerTrack> active_lanes_{};
-    std::array<CapacityGroup, AutomationPlaybackLimits::kMaximumLanesPerTrack> groups_{};
-    std::array<std::size_t, AutomationPlaybackLimits::kMaximumLanesPerTrack>
+    std::array<ActiveLane, kProgramWireMaximumAutomationLanes> active_lanes_{};
+    std::array<CapacityGroup, kProgramWireMaximumAutomationLanes> groups_{};
+    std::array<std::size_t, kProgramWireMaximumAutomationLanes>
         group_lane_indices_{};
     std::size_t group_count_ = 0;
-    std::array<ProgramWireLaneState*, AutomationPlaybackLimits::kMaximumLanesPerTrack>
+    std::array<ProgramWireLaneState*, kProgramWireMaximumAutomationLanes>
         merge_heap_{};
 };
 

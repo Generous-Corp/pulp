@@ -172,7 +172,7 @@ class AutomationSegmentView {
 /// native program or pinned wire bytes alive for the complete process call.
 class AutomationProgramView {
   public:
-    AutomationProgramView() = default;
+    AutomationProgramView() = delete;
     AutomationProgramView(ProgramGeneration generation,
                           AutomationProgramInstanceToken instance_token, timeline::ItemId lane_id,
                           const timebase::CompiledTempoMap& tempo_map,
