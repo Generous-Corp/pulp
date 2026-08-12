@@ -811,8 +811,11 @@ struct ProgramWireAutomationRenderResult {
 /// AutomationCursor algorithm used by direct PlaybackProgram consumers.
 class ProgramWireAutomationConsumer {
   public:
+    explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state,
+                                           std::size_t track_capacity) noexcept
+        : lane_state_(lane_state), track_capacity_(track_capacity) {}
     explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state) noexcept
-        : lane_state_(lane_state) {}
+        : ProgramWireAutomationConsumer(lane_state, lane_state.size()) {}
     ProgramWireAutomationConsumer(const ProgramWireAutomationConsumer&) = delete;
     ProgramWireAutomationConsumer& operator=(const ProgramWireAutomationConsumer&) = delete;
 
@@ -836,6 +839,7 @@ class ProgramWireAutomationConsumer {
     ProgramWireView active_view_;
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;
     std::size_t lane_count_ = 0;
+    std::size_t track_capacity_ = 0;
 };
 
 } // namespace pulp::playback

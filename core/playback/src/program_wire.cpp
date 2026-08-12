@@ -646,6 +646,10 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (track.id == 0 || track.generation == 0)
             return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
                                                  section_id(ProgramWireSection::Tracks), t}));
+        for (std::size_t previous = 0; previous < t; ++previous)
+            if (view.tracks_[previous].id == track.id)
+                return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                     section_id(ProgramWireSection::Tracks), t}));
         if (!in_range(track.clip_first, track.clip_count, view.clip_ids_.size()) ||
             !in_range(track.note_event_first, track.note_event_count, view.note_events_.size()) ||
             !in_range(track.note_modifier_first, track.note_modifier_count,
@@ -1136,6 +1140,13 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
                {ProgramWireErrorCode::InvalidLimits,
                 static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
                 candidate_view.automation_lanes().size()});
+        return result;
+    }
+    if (candidate_view.tracks().size() > track_capacity_) {
+        reject(ProgramWireConsumerCode::StateCapacityExceeded,
+               {ProgramWireErrorCode::InvalidLimits,
+                static_cast<std::uint32_t>(ProgramWireSection::Tracks),
+                candidate_view.tracks().size()});
         return result;
     }
     for (std::size_t lane = 0; lane < candidate_view.automation_lanes().size(); ++lane) {

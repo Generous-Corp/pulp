@@ -802,6 +802,9 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
     with_field(track_section + sizeof(ProgramWireTrackRecord) +
                    offsetof(ProgramWireTrackRecord, clip_first),
                std::uint32_t{0}, ProgramWireErrorCode::NonCanonicalRangeOwnership);
+    with_field(track_section + sizeof(ProgramWireTrackRecord) +
+                   offsetof(ProgramWireTrackRecord, id),
+               std::uint64_t{10}, ProgramWireErrorCode::NonCanonicalRangeOwnership);
     with_field(field(offsetof(ProgramWireTrackRecord, mixer_gain_lane)), std::uint32_t{7},
                ProgramWireErrorCode::RangeOutOfBounds);
     with_field(field(offsetof(ProgramWireTrackRecord, provider_selected)), std::uint8_t{9},
@@ -1351,6 +1354,25 @@ TEST_CASE("wire automation consumer matches every direct production cursor lane"
                            wire_events[index].begin() + output[index].result.emitted_events,
                            direct_events[index].begin()));
     }
+}
+
+TEST_CASE("wire automation consumer bounds tracks without automation",
+          "[playback][wire][consumer][capacity]") {
+    const auto map = wire_tempo_map();
+    auto bytes = encode_project_bytes(wire_project(), map);
+    REQUIRE(take(decode_program_wire(bytes->span())).tracks().size() == 2);
+
+    std::array<ProgramWireLaneState, 3> state;
+    ProgramWireAutomationConsumer consumer{state, 1};
+    auto rejected = consumer.adopt(ProgramWireBytePin{bytes->span(), 70}, *map, kTempoPoints);
+    REQUIRE(rejected.code == ProgramWireConsumerCode::StateCapacityExceeded);
+    REQUIRE(rejected.adoption == ProgramWireAdoption::Rejected);
+    REQUIRE(rejected.wire_error.code == ProgramWireErrorCode::InvalidLimits);
+    REQUIRE(rejected.wire_error.section ==
+            static_cast<std::uint32_t>(ProgramWireSection::Tracks));
+    REQUIRE(rejected.wire_error.detail == 2);
+    REQUIRE(rejected.returned_pin.owner_token() == 70);
+    REQUIRE_FALSE(consumer.active_bytes().data());
 }
 
 TEST_CASE("wire automation uses the production per-device event ceiling",
