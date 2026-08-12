@@ -871,6 +871,8 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
         2 * sizeof(ProgramWireIdRecord) + 3 * sizeof(ProgramWireAutomationLaneRecord);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, curvature),
                std::numeric_limits<float>::quiet_NaN(), ProgramWireErrorCode::MalformedSegment);
+    with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, curvature), 1.01f,
+               ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_sample),
                std::int64_t{-1}, ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_value), 0.333f,
@@ -1396,6 +1398,36 @@ TEST_CASE("wire automation consumer matches every direct production cursor lane"
                            wire_events[index].begin() + output[index].result.emitted_events,
                            direct_events[index].begin()));
     }
+}
+
+TEST_CASE("wire automation rejects sample anchors forged away from the tempo map",
+          "[playback][wire][consumer]") {
+    const auto map = wire_tempo_map();
+    auto bytes = encode_project_bytes(wire_project(), map);
+    const auto [segment_section, segment_bytes] =
+        section_span(bytes->span(), ProgramWireSection::AutomationSegments);
+    REQUIRE(segment_bytes >= sizeof(ProgramWireAutomationSegmentRecord));
+    const auto segment_count = segment_bytes / sizeof(ProgramWireAutomationSegmentRecord);
+    for (std::size_t index = 0; index < segment_count; ++index) {
+        const auto record_at = segment_section + index * sizeof(ProgramWireAutomationSegmentRecord);
+        ProgramWireAutomationSegmentRecord record;
+        std::memcpy(&record, bytes->span().data() + record_at, sizeof(record));
+        ++record.start_sample;
+        ++record.end_sample;
+        std::memcpy(bytes->span().data() + record_at, &record, sizeof(record));
+    }
+    reseal(bytes->span());
+    REQUIRE(decode_program_wire(bytes->span()));
+
+    std::array<ProgramWireLaneState, 3> state;
+    ProgramWireAutomationConsumer consumer{state, 2};
+    auto rejected = consumer.adopt(ProgramWireBytePin{bytes->span(), 68}, *map, kTempoPoints);
+    REQUIRE(rejected.code == ProgramWireConsumerCode::TempoMapMismatch);
+    REQUIRE(rejected.adoption == ProgramWireAdoption::Rejected);
+    REQUIRE(rejected.wire_error.section ==
+            static_cast<std::uint32_t>(ProgramWireSection::AutomationSegments));
+    REQUIRE(rejected.returned_pin.owner_token() == 68);
+    REQUIRE_FALSE(consumer.active_bytes().data());
 }
 
 TEST_CASE("program wire round trips an empty automation lane", "[playback][wire][consumer]") {

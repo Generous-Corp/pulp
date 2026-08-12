@@ -835,7 +835,8 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         // endpoint does not stay local: it reaches every sample the lane feeds.
         if (segment.end_tick < segment.start_tick || segment.end_sample < segment.start_sample ||
             !std::isfinite(segment.start_value) || !std::isfinite(segment.end_value) ||
-            !std::isfinite(segment.curvature))
+            !std::isfinite(segment.curvature) || segment.curvature < -1.0f ||
+            segment.curvature > 1.0f)
             return ViewResult(runtime::Err(Error{
                 Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments), s}));
     }
@@ -1218,6 +1219,16 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
     if (!wire_tempo_matches(candidate_view, tempo_map, tempo_points)) {
         reject(ProgramWireConsumerCode::TempoMapMismatch, {ProgramWireErrorCode::TempoMapMismatch});
         return result;
+    }
+    for (std::size_t index = 0; index < candidate_view.automation_segments().size(); ++index) {
+        const auto& segment = candidate_view.automation_segments()[index];
+        if (tempo_map.ticks_to_samples({segment.start_tick}).value != segment.start_sample ||
+            tempo_map.ticks_to_samples({segment.end_tick}).value != segment.end_sample) {
+            reject(ProgramWireConsumerCode::TempoMapMismatch,
+                   {ProgramWireErrorCode::TempoMapMismatch,
+                    static_cast<std::uint32_t>(ProgramWireSection::AutomationSegments), index});
+            return result;
+        }
     }
     if (candidate_view.automation_lanes().size() > lane_state_.size() ||
         candidate_view.automation_lanes().size() > active_lanes_.size()) {
