@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -52,6 +53,38 @@ def activation_event(*, slices: list[str] | None = None) -> dict[str, object]:
         "counterpart": (
             "provenance/authority/records/native-design-kernel-v1.json"
         ),
+    }
+
+
+def accepted_expansion() -> dict[str, object]:
+    routes = [
+        {
+            "repository": "Generous-Corp/pulp",
+            "path": "tools/import-design/main.cpp",
+            "owner": "Generous-Corp/pulp",
+            "cell_roles": [
+                {
+                    "cell_id": "source.figma",
+                    "role": "pulp_implementation",
+                }
+            ],
+        }
+    ]
+    route_set_sha256 = hashlib.sha256(
+        json.dumps(routes, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        "id": "full-design-import-render-v1",
+        "state": "accepted-pending-vellum-acknowledgement",
+        "accepted_at": "2026-08-12T00:00:00Z",
+        "accepted_by": "@danielraffel",
+        "amendment_id": "full-design-import-render-v1-exact-boundary-amendment-1",
+        "matrix_id": "full-design-import-render-v1-compatibility-matrix",
+        "matrix_sha256": (
+            "1792666eb1dd7d3f46dc607f4ee3dccbbc1232a6c2e6ab2331507c4b87122e1c"
+        ),
+        "route_set_sha256": route_set_sha256,
+        "routes": routes,
     }
 
 
@@ -190,7 +223,7 @@ class OwnershipProjectionTests(unittest.TestCase):
         value = manifest([entry("LICENSE.md", "framework-core")])
         projection = projection_tool.build_projection(value)
         projection["schema_version"] = 3
-        projection["expansions"] = [{"id": "full-design-import-render-v1"}]
+        projection["expansions"] = [accepted_expansion()]
         with tempfile.TemporaryDirectory() as temporary:
             projection_tool.verify_projection(
                 repo=Path(temporary), manifest=value, projection=projection
@@ -199,6 +232,17 @@ class OwnershipProjectionTests(unittest.TestCase):
         projection["slices"][0]["paths"] = ["NOTICE.md"]
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(projection_tool.ProjectionError, "stale"):
+                projection_tool.verify_projection(
+                    repo=Path(temporary), manifest=value, projection=projection
+                )
+
+    def test_schema_v3_verification_rejects_malformed_expansion(self) -> None:
+        value = manifest([entry("LICENSE.md", "framework-core")])
+        projection = projection_tool.build_projection(value)
+        projection["schema_version"] = 3
+        projection["expansions"] = [{"id": "full-design-import-render-v1"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(projection_tool.ProjectionError, "invalid exact-route"):
                 projection_tool.verify_projection(
                     repo=Path(temporary), manifest=value, projection=projection
                 )
