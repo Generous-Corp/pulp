@@ -1767,12 +1767,20 @@ step sequencer packaged as a CLAP, carrying no editing stack" — **not** "a pia
 roll inside a plugin".
 
 `TimelinePluginProof_CLAP` is the positive counterpart. Its processor owns a
-`Project` and `DocumentSession`, implements `EditIntentHost`, returns a native
-view from `create_view()`, and stores canonical Timeline JSON in plugin-owned
-state. It claims `sequencer-plugin-editor` and requires `format timeline
-timeline_editor`, so configure fails if any of those three disappears. Its view
-is deliberately only a ruler/playhead shell: the target proves the integration
-boundary, not a piano-roll interaction surface.
+`Project` and `DocumentSession`, implements `NoteEditIntentHost`, returns a
+native `PianoRollView` from `create_view()`, and stores canonical Timeline JSON
+in plugin-owned state. It lowers insert, move, and resize gestures against the
+current MIDI snapshot, then rebinds and repaints every live view after accepted
+or rejected submissions, undo, and state restore. State restore also recognizes
+the prior four-quarter empty-clip proof shape and migrates it to the MIDI proof
+while preserving its clip start and all other authored state. It claims
+`sequencer-plugin-editor` and
+requires `format timeline timeline_editor timeline_view`, so configure fails if
+any of those four disappears. The direct `timeline_view` link and lower bound
+are the proof that the piano-roll implementation ships inside the plugin rather
+than merely existing elsewhere in the build. The tier includes the base `view`
+and `canvas` rungs because those are mandatory closure of the concrete view,
+not target-specific debt.
 
 **Know where the verdict runs.** The assertion lives in the consumer's own
 `CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
