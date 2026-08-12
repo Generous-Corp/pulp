@@ -704,6 +704,63 @@ fn staged_broker_version_mismatch_refuses_before_installed_state_is_read() {
 }
 
 #[test]
+fn current_broker_without_standalone_closure_is_rejected_after_version_match() {
+    let (_root, archive, mut plan, broker) =
+        broker_lifecycle_fixture("0.803.0", "0.803.1");
+    let staged = archive.path().join(control_broker_basename());
+    plan.version = crate::build_info::control_standalone_host_floor().to_owned();
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        None,
+        |_, _| panic!("incomplete current release must not reconcile"),
+        |_| Ok(Some(plan.version.clone())),
+        |_| panic!("incomplete current release must not inspect installed state"),
+    );
+
+    if cfg!(target_os = "macos") {
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("requires the complete Standalone runtime closure"));
+    } else {
+        assert_eq!(result.unwrap(), ControlBrokerInstall::NotPresent);
+    }
+    assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+}
+
+#[test]
+fn historical_broker_without_standalone_closure_remains_installable() {
+    let (_root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.803.0");
+    let staged = archive.path().join(control_broker_basename());
+    let reconciled = std::cell::Cell::new(false);
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        None,
+        |_, _| {
+            reconciled.set(true);
+            Ok(())
+        },
+        |_| Ok(Some("0.803.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    )
+    .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(result, ControlBrokerInstall::Replaced);
+        assert!(reconciled.get());
+        assert_eq!(fs::read(&broker).unwrap(), b"candidate-broker");
+    } else {
+        assert_eq!(result, ControlBrokerInstall::NotPresent);
+        assert!(!reconciled.get());
+        assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+    }
+}
+
+#[test]
 #[cfg(target_os = "macos")]
 fn competing_broker_installer_cannot_replace_the_active_transaction() {
     let (_root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.795.0");

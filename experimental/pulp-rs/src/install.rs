@@ -806,6 +806,19 @@ fn install_control_broker_path_with_version_probe(
             plan.version
         )));
     }
+    let candidate = crate::parse::SemverCompat::parse(&candidate_version);
+    let standalone_floor =
+        crate::parse::SemverCompat::parse(crate::build_info::control_standalone_host_floor());
+    if !candidate.comparable || !standalone_floor.comparable {
+        return Err(CliError::Other(
+            "could not compare staged control broker release with Standalone host floor".to_owned(),
+        ));
+    }
+    if candidate.cmp_triple(&standalone_floor) != std::cmp::Ordering::Less && companions.is_none() {
+        return Err(CliError::Other(format!(
+            "control broker release {candidate_version} requires the complete Standalone runtime closure"
+        )));
+    }
     let installed_version = if existed {
         inspect_installed_version(&dst)?
     } else {
