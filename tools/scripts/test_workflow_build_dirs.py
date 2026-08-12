@@ -14,6 +14,8 @@ Run:
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -108,15 +110,102 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
 
-    def test_build_workflow_shipyard_dispatch_fetches_capability_base(self) -> None:
+    def test_build_workflow_fetches_event_pinned_capability_base(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
         fetch_step = """- name: Fetch protected capability base
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main"""
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \\
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi"""
         self.assertIn(fetch_step, text)
         self.assertLess(text.index(fetch_step), text.index("- name: Test (non-Windows)"))
+
+    def test_event_pinned_fetch_repairs_a_shallow_pull_request_checkout(self) -> None:
+        def git(
+            repo: Path, *args: str, check: bool = True
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["git", *args],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=check,
+            )
+
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-base-source-") as source_tmp:
+            source = Path(source_tmp)
+            git(source, "init", "-q", "-b", "main")
+            git(source, "config", "user.name", "Pulp CI test")
+            git(source, "config", "user.email", "ci-test@pulp.audio")
+            (source / "fixture.txt").write_text("base\n", encoding="utf-8")
+            git(source, "add", "fixture.txt")
+            git(source, "commit", "-q", "-m", "base")
+            base_sha = git(source, "rev-parse", "HEAD").stdout.strip()
+
+            git(source, "switch", "-q", "-c", "feature")
+            (source / "fixture.txt").write_text("feature\n", encoding="utf-8")
+            git(source, "commit", "-qam", "feature")
+            head_sha = git(source, "rev-parse", "HEAD").stdout.strip()
+            git(source, "switch", "-q", "main")
+            git(source, "merge", "-q", "--no-ff", "feature", "-m", "synthetic merge")
+            merge_sha = git(source, "rev-parse", "HEAD").stdout.strip()
+
+            with tempfile.TemporaryDirectory(
+                prefix="pulp-capability-base-checkout-"
+            ) as checkout_tmp:
+                checkout = Path(checkout_tmp)
+                git(checkout, "init", "-q")
+                git(checkout, "remote", "add", "origin", source.as_uri())
+                git(
+                    checkout,
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "origin",
+                    f"+{merge_sha}:refs/remotes/pull/1/merge",
+                )
+
+                missing_base = git(
+                    checkout,
+                    "cat-file",
+                    "-e",
+                    f"{base_sha}^{{commit}}",
+                    check=False,
+                )
+                self.assertNotEqual(missing_base.returncode, 0)
+
+                # A warm checkout may carry a newer origin/main. The force in
+                # the workflow is required to restore the event-pinned base.
+                git(
+                    checkout,
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "origin",
+                    f"+{head_sha}:refs/remotes/origin/main",
+                )
+                git(
+                    checkout,
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "origin",
+                    f"+{base_sha}:refs/remotes/origin/main",
+                )
+                resolved = git(
+                    checkout,
+                    "rev-parse",
+                    "refs/remotes/origin/main^0",
+                ).stdout.strip()
+                self.assertEqual(resolved, base_sha)
 
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
