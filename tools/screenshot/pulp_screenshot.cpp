@@ -537,6 +537,23 @@ int main(int argc, char* argv[]) {
     // exactly for this case (see widget_bridge.cpp:1144).
     bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
 
+    // React component errors are reported to the generated JSX boundary after
+    // the initial render returns. Refuse the otherwise indistinguishable blank
+    // frame with the actual application exception instead of reducing it to a
+    // generic capture failure.
+    try {
+        const auto jsx_error = engine.evaluate(
+            "typeof globalThis.__pulpJsxError__ === 'string'"
+            " ? globalThis.__pulpJsxError__ : ''").toString();
+        if (!jsx_error.empty()) {
+            std::cerr << "Error: native JSX runtime failed: " << jsx_error << "\n";
+            return 3;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: native JSX error inspection failed: " << e.what() << "\n";
+        return 3;
+    }
+
     if (!options.runtime_trace_path.empty()) {
         try {
             auto trace = engine.evaluate(runtime_trace_script()).toString();
