@@ -120,6 +120,7 @@
 /// adopting realm. AutomationPlaybackLimits is carried, because those ceilings
 /// size the arrays a block render writes into.
 
+#include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/program.hpp>
 #include <pulp/runtime/result.hpp>
@@ -257,6 +258,8 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// either of which would propagate through every sample downstream.
     MalformedSegment,
     InvalidSampleRate,
+    InvalidGeneration,
+    MalformedTempoMap,
     /// The carried automation ceilings are not a configuration the renderer
     /// accepts.
     InvalidLimits,
@@ -683,5 +686,101 @@ decode_program_wire(std::span<const std::byte> bytes) noexcept;
 bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& program,
                           std::span<const timebase::TempoPoint> tempo_points,
                           std::uint64_t producer_epoch) noexcept;
+
+enum class ProgramWireConsumerCode : std::uint8_t {
+    Ok,
+    MissingProgram,
+    InvalidRenderRange,
+    InsufficientOutputCapacity,
+    DecodeRejected,
+    StaleGeneration,
+};
+
+enum class ProgramWireAdoption : std::uint8_t {
+    Adopted,
+    Unchanged,
+    Rejected,
+};
+
+struct ProgramWireAdoptionResult {
+    ProgramWireConsumerCode code = ProgramWireConsumerCode::Ok;
+    ProgramWireAdoption adoption = ProgramWireAdoption::Unchanged;
+    ProgramWireError wire_error{};
+};
+
+struct ProgramWireRenderedNoteEvent {
+    std::uint64_t track_id = 0;
+    std::uint32_t sample_offset = 0;
+    std::uint64_t clip_id = 0;
+    std::uint64_t note_id = 0;
+    std::uint16_t velocity = 0;
+    std::uint8_t pitch = 0;
+    std::uint8_t channel = 0;
+    NoteProgramEventKind kind = NoteProgramEventKind::Off;
+    constexpr bool operator==(const ProgramWireRenderedNoteEvent&) const = default;
+};
+
+struct ProgramWireRenderedAutomationEvent {
+    std::uint64_t track_id = 0;
+    std::uint64_t lane_id = 0;
+    std::uint32_t sample_offset = 0;
+    float value = 0.0f;
+    ProgramWireTargetKind target_kind = ProgramWireTargetKind::DeviceParameter;
+    std::uint64_t device_placement_id = 0;
+    std::uint32_t device_param_id = 0;
+    std::uint8_t mixer_parameter = 0;
+    constexpr bool operator==(const ProgramWireRenderedAutomationEvent&) const = default;
+};
+
+struct ProgramWireRenderResult {
+    ProgramWireConsumerCode code = ProgramWireConsumerCode::Ok;
+    ProgramWireAdoption adoption = ProgramWireAdoption::Unchanged;
+    ProgramWireError wire_error{};
+    std::uint32_t note_event_count = 0;
+    std::uint32_t automation_event_count = 0;
+};
+
+/// Realtime-side owner of one validated program-wire view.
+///
+/// The consumer borrows the adopted byte range; it does not retain, rebuild, or
+/// share ownership with the source PlaybackProgram. The caller must keep
+/// `active_bytes()` alive until a later successful adoption replaces it. A
+/// rejected payload leaves both the borrowed generation and caller-owned output
+/// untouched, so the producer may reclaim the rejected candidate immediately.
+class ProgramWireConsumer {
+  public:
+    static constexpr audio::RtSafetyClass consume_rt_safety_class =
+        audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs;
+
+    ProgramWireAdoptionResult adopt(std::span<const std::byte> bytes) noexcept;
+
+    ProgramWireRenderResult
+    render(timebase::SamplePosition start, std::uint32_t frame_count,
+           std::span<ProgramWireRenderedNoteEvent> note_output,
+           std::span<ProgramWireRenderedAutomationEvent> automation_output) const noexcept;
+
+    /// Validates and adopts `bytes`, then renders the active generation. Decode
+    /// or ordering rejection returns before touching either output span.
+    ProgramWireRenderResult
+    consume(std::span<const std::byte> bytes, timebase::SamplePosition start,
+            std::uint32_t frame_count, std::span<ProgramWireRenderedNoteEvent> note_output,
+            std::span<ProgramWireRenderedAutomationEvent> automation_output) noexcept;
+
+    bool has_program() const noexcept {
+        return !active_.bytes().empty();
+    }
+    std::span<const std::byte> active_bytes() const noexcept {
+        return active_.bytes();
+    }
+    std::uint64_t producer_epoch() const noexcept {
+        return has_program() ? active_.producer_epoch() : 0;
+    }
+    std::uint64_t generation() const noexcept {
+        return has_program() ? active_.program().generation : 0;
+    }
+
+  private:
+    ProgramWireView active_;
+};
 
 } // namespace pulp::playback

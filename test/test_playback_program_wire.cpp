@@ -4,10 +4,12 @@
 #include <pulp/playback/program_wire.hpp>
 #include <pulp/playback/track_automation_program.hpp>
 
+#include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -16,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -73,7 +76,7 @@ AutomationLane mixer_lane(std::uint64_t lane_id, TrackMixerParameter parameter, 
 /// lane superseding an authored constant, and a bare second track whose ranges
 /// are all empty, so every `(first, count)` range has both a populated and an
 /// empty case in one payload.
-std::shared_ptr<const Project> wire_project() {
+std::shared_ptr<const Project> wire_project(float first_lane_value = 0.25f) {
     std::vector<NoteEvent> notes{
         {{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0},
         {{31}, {kTicksPerQuarter}, {kTicksPerQuarter / 2}, 0x4000, 67, 3},
@@ -98,7 +101,7 @@ std::shared_ptr<const Project> wire_project() {
     automated.clips.push_back(
         take(Clip::create({20}, {0}, {kTicksPerQuarter * 4}, std::move(content))));
     automated.device_chain = {{{40}}, {{41}}};
-    automated.automation_lanes.push_back(device_lane(50, 41, 7, 0.25f));
+    automated.automation_lanes.push_back(device_lane(50, 41, 7, first_lane_value));
     automated.automation_lanes.push_back(device_lane(51, 40, 9, 0.75f));
     automated.automation_lanes.push_back(mixer_lane(52, TrackMixerParameter::Gain, 0.5f));
     automated.mixer = {0.75f, -0.25f};
@@ -170,9 +173,8 @@ std::shared_ptr<const Project> six_lane_project() {
         automated.automation_lanes.push_back(
             device_lane(50 + i, (i % 2 == 0) ? 40 : 41, 7 + i, 0.25f));
 
-    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
-                                          std::vector<Track>{take(Track::create(
-                                              std::move(automated)))}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, std::vector<Track>{take(Track::create(std::move(automated)))}));
     ProjectInput input;
     input.id = {1};
     input.name = "six";
@@ -378,6 +380,62 @@ void normalize_instance_tokens(std::span<std::byte> bytes) {
         std::memcpy(bytes.data() + lane_token_at(bytes, i), &sentinel, sizeof(sentinel));
     }
     reseal(bytes);
+}
+
+struct DirectWireRender {
+    std::vector<ProgramWireRenderedNoteEvent> notes;
+    std::vector<ProgramWireRenderedAutomationEvent> automation;
+};
+
+DirectWireRender render_direct(const PlaybackProgram& program, SamplePosition start,
+                               std::uint32_t frame_count) {
+    DirectWireRender rendered;
+    for (const auto& owner : program.tracks()) {
+        const auto& track = *owner;
+        for (const auto& event : track.arrangement_note_events()) {
+            if (event.sample < start)
+                continue;
+            const auto distance = static_cast<std::uint64_t>(event.sample.value) -
+                                  static_cast<std::uint64_t>(start.value);
+            if (distance >= frame_count)
+                continue;
+            rendered.notes.push_back({track.id().value, static_cast<std::uint32_t>(distance),
+                                      event.clip_id.value, event.note_id.value, event.velocity,
+                                      event.pitch, event.channel, event.kind});
+        }
+        const auto* automation = track.automation_program();
+        if (automation == nullptr)
+            continue;
+        for (const auto& lane_owner : automation->programs()) {
+            const auto& lane = *lane_owner;
+            ProgramWireRenderedAutomationEvent event;
+            event.track_id = track.id().value;
+            event.lane_id = lane.lane_id().value;
+            std::visit(
+                [&](const auto& target) {
+                    using Target = std::decay_t<decltype(target)>;
+                    if constexpr (std::is_same_v<Target, DeviceParameterTarget>) {
+                        event.target_kind = ProgramWireTargetKind::DeviceParameter;
+                        event.device_placement_id = target.device_placement_id.value;
+                        event.device_param_id = target.param_id;
+                    } else {
+                        event.target_kind = ProgramWireTargetKind::TrackMixer;
+                        event.mixer_parameter = static_cast<std::uint8_t>(target.parameter);
+                    }
+                },
+                lane.target());
+            std::size_t segment_index = 0;
+            for (std::uint32_t frame = 0; frame < frame_count; ++frame) {
+                const SamplePosition sample{start.value + static_cast<std::int64_t>(frame)};
+                segment_index = select_automation_segment(lane, sample, frame == 0, segment_index);
+                event.sample_offset = frame;
+                event.value = evaluate_automation_segment(
+                    lane, segment_index, sample, program.tempo_map().samples_to_ticks(sample));
+                rendered.automation.push_back(event);
+            }
+        }
+    }
+    return rendered;
 }
 
 } // namespace
@@ -757,18 +815,76 @@ TEST_CASE("program wire rejects records that index outside their section", "[pla
     const std::size_t segment_section =
         modifier_section + 2 * sizeof(ProgramWireNoteModifierRecord) +
         2 * sizeof(ProgramWireIdRecord) + 3 * sizeof(ProgramWireAutomationLaneRecord);
+    const auto lane_section = section_span(bytes, ProgramWireSection::AutomationLanes).first;
+    with_field(lane_section + offsetof(ProgramWireAutomationLaneRecord, leading_value),
+               std::numeric_limits<float>::quiet_NaN(), ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, curvature),
                std::numeric_limits<float>::quiet_NaN(), ProgramWireErrorCode::MalformedSegment);
     with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_sample),
                std::int64_t{-1}, ProgramWireErrorCode::MalformedSegment);
+    std::int64_t second_start = 0;
+    std::memcpy(&second_start,
+                bytes.data() + segment_section + sizeof(ProgramWireAutomationSegmentRecord) +
+                    offsetof(ProgramWireAutomationSegmentRecord, start_sample),
+                sizeof(second_start));
+    with_field(segment_section + sizeof(ProgramWireAutomationSegmentRecord) +
+                   offsetof(ProgramWireAutomationSegmentRecord, start_sample),
+               second_start + 1, ProgramWireErrorCode::MalformedSegment);
+
+    WireBuffer valid_before_shift(fixture.size);
+    std::memcpy(valid_before_shift.span().data(), bytes.data(), fixture.size);
+    ProgramWireAutomationLaneRecord first_lane;
+    std::memcpy(&first_lane, bytes.data() + lane_section, sizeof(first_lane));
+    for (std::size_t s = 0; s < first_lane.segment_count; ++s) {
+        const auto record =
+            segment_section + (static_cast<std::size_t>(first_lane.segment_first) + s) *
+                                  sizeof(ProgramWireAutomationSegmentRecord);
+        for (const auto field_offset : {offsetof(ProgramWireAutomationSegmentRecord, start_sample),
+                                        offsetof(ProgramWireAutomationSegmentRecord, end_sample)}) {
+            std::int64_t value = 0;
+            std::memcpy(&value, bytes.data() + record + field_offset, sizeof(value));
+            ++value;
+            std::memcpy(bytes.data() + record + field_offset, &value, sizeof(value));
+        }
+    }
+    reseal(bytes);
+    const auto shifted = decode_program_wire(bytes);
+    REQUIRE_FALSE(shifted);
+    REQUIRE(shifted.error().code == ProgramWireErrorCode::MalformedSegment);
+    std::memcpy(bytes.data(), valid_before_shift.span().data(), fixture.size);
+    REQUIRE(decode_program_wire(bytes));
 
     const std::size_t program_section = kPayloadAt;
     with_field(program_section + offsetof(ProgramWireProgramRecord, sample_rate_denominator),
                std::uint64_t{0}, ProgramWireErrorCode::InvalidSampleRate);
+    with_field(program_section + offsetof(ProgramWireProgramRecord, sample_rate_numerator),
+               std::uint64_t{kMaximumCompiledSampleRate + 1u},
+               ProgramWireErrorCode::InvalidSampleRate);
     with_field(program_section + offsetof(ProgramWireProgramRecord, max_lanes_per_track),
                std::uint32_t{0}, ProgramWireErrorCode::InvalidLimits);
     with_field(program_section + offsetof(ProgramWireProgramRecord, max_points_per_lane),
                std::uint32_t{0xFFFF'FFFF}, ProgramWireErrorCode::InvalidLimits);
+
+    WireBuffer valid_before_range_test(fixture.size);
+    std::memcpy(valid_before_range_test.span().data(), bytes.data(), fixture.size);
+    const auto tempo_section = section_span(bytes, ProgramWireSection::TempoPoints).first;
+    const auto maximum_rate = std::uint64_t{kMaximumCompiledSampleRate};
+    const auto one_bpm = std::bit_cast<std::uint64_t>(1.0);
+    const auto final_tick = std::numeric_limits<std::int64_t>::max();
+    std::memcpy(bytes.data() + program_section +
+                    offsetof(ProgramWireProgramRecord, sample_rate_numerator),
+                &maximum_rate, sizeof(maximum_rate));
+    std::memcpy(bytes.data() + tempo_section + offsetof(ProgramWireTempoPointRecord, bpm_bits),
+                &one_bpm, sizeof(one_bpm));
+    std::memcpy(bytes.data() + tempo_section + sizeof(ProgramWireTempoPointRecord) +
+                    offsetof(ProgramWireTempoPointRecord, tick),
+                &final_tick, sizeof(final_tick));
+    reseal(bytes);
+    const auto range_rejected = decode_program_wire(bytes);
+    REQUIRE_FALSE(range_rejected);
+    REQUIRE(range_rejected.error().code == ProgramWireErrorCode::MalformedTempoMap);
+    std::memcpy(bytes.data(), valid_before_range_test.span().data(), fixture.size);
+    REQUIRE(decode_program_wire(bytes));
 }
 
 TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][wire]") {
@@ -793,8 +909,7 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
 
     const auto schemas = production_schemas();
     CompiledProgram with_nondefault_production{nondefault_production_project(schemas), nullptr,
-                                               nullptr,
-                                               nondefault_production_registry(schemas)};
+                                               nullptr, nondefault_production_registry(schemas)};
     const auto nondefault = with_nondefault_production.store.read();
     REQUIRE(nondefault->find_track({10}) != nullptr);
     REQUIRE(nondefault->find_track({10})->arrangement_production().reproducibility ==
@@ -1038,8 +1153,7 @@ TEST_CASE("one producer's successive programs are distinguishable on the wire",
     // is a silently wrong render rather than a decode error.
 
     WireBuffer again(fixture.size);
-    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch, again.span())) ==
-            fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch, again.span())) == fixture.size);
     REQUIRE(fixture.size > 0);
     REQUIRE(std::memcmp(fixture.bytes().data(), again.span().data(), fixture.size) != 0);
 
@@ -1133,8 +1247,7 @@ TEST_CASE("a version 1 reader is refused rather than left to misread the lane st
     constexpr std::size_t kVersion1LaneRecordBytes = 48;
     REQUIRE(lane_bytes % kVersion1LaneRecordBytes == 0);
     REQUIRE(lane_bytes / kVersion1LaneRecordBytes == 7);
-    REQUIRE(lane_bytes / kVersion1LaneRecordBytes !=
-            decoded.value().automation_lanes().size());
+    REQUIRE(lane_bytes / kVersion1LaneRecordBytes != decoded.value().automation_lanes().size());
 
     // And the guard that stops it, which is the only one there is: the payload
     // states a minimum reader version above 1, so a version 1 reader refuses at
@@ -1185,4 +1298,191 @@ TEST_CASE("program wire refuses a lane with no instance token", "[playback][wire
     std::memcpy(bytes.data() + token_at, &original, sizeof(original));
     reseal(bytes);
     REQUIRE(decode_program_wire(bytes));
+}
+
+TEST_CASE("wire consumer renders the direct program sample and event identically",
+          "[playback][wire][consumer]") {
+    EncodedFixture fixture;
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 2048> automation{};
+
+    const auto result = consumer.consume(fixture.bytes(), {0}, 512, notes, automation);
+    REQUIRE(result.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(result.adoption == ProgramWireAdoption::Adopted);
+    REQUIRE(consumer.active_bytes().data() == fixture.bytes().data());
+    REQUIRE(consumer.generation() == fixture.program->generation());
+
+    const auto direct = render_direct(*fixture.program, {0}, 512);
+    REQUIRE(result.note_event_count == direct.notes.size());
+    REQUIRE(result.automation_event_count == direct.automation.size());
+    REQUIRE(std::equal(notes.begin(), notes.begin() + result.note_event_count, direct.notes.begin(),
+                       direct.notes.end()));
+    REQUIRE(std::equal(automation.begin(), automation.begin() + result.automation_event_count,
+                       direct.automation.begin(), direct.automation.end()));
+
+    const auto boundary = fixture.program->tempo_map().ticks_to_samples(kTempoPoints[1].tick);
+    const SamplePosition boundary_start{boundary.value - 8};
+    const auto boundary_result = consumer.render(boundary_start, 32, notes, automation);
+    const auto boundary_direct = render_direct(*fixture.program, boundary_start, 32);
+    REQUIRE(boundary_result.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(boundary_result.automation_event_count == boundary_direct.automation.size());
+    REQUIRE(std::equal(automation.begin(),
+                       automation.begin() + boundary_result.automation_event_count,
+                       boundary_direct.automation.begin(), boundary_direct.automation.end()));
+}
+
+TEST_CASE("wire consumer re-adopts same-generation non-lane content changes",
+          "[playback][wire][consumer]") {
+    EncodedFixture fixture;
+    WireBuffer changed(fixture.size);
+    std::memcpy(changed.span().data(), fixture.bytes().data(), fixture.size);
+    const auto note_section = section_span(changed.span(), ProgramWireSection::NoteEvents).first;
+    constexpr std::uint16_t replacement_velocity = 0x1234;
+    std::memcpy(changed.span().data() + note_section +
+                    offsetof(ProgramWireNoteEventRecord, velocity),
+                &replacement_velocity, sizeof(replacement_velocity));
+    reseal(changed.span());
+    REQUIRE(decode_program_wire(changed.span()));
+
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> automation{};
+    REQUIRE(consumer.consume(fixture.bytes(), {0}, 64, notes, automation).adoption ==
+            ProgramWireAdoption::Adopted);
+    const auto replacement = consumer.consume(changed.span(), {0}, 64, notes, automation);
+    REQUIRE(replacement.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(replacement.adoption == ProgramWireAdoption::Adopted);
+    REQUIRE(consumer.active_bytes().data() == changed.span().data());
+    REQUIRE(std::find_if(notes.begin(), notes.begin() + replacement.note_event_count,
+                         [](const auto& event) {
+                             return event.velocity == replacement_velocity;
+                         }) != notes.begin() + replacement.note_event_count);
+}
+
+TEST_CASE("wire consumer rejects an unrepresentable render range without output",
+          "[playback][wire][consumer]") {
+    EncodedFixture fixture;
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> automation{};
+    REQUIRE(consumer.adopt(fixture.bytes()).adoption == ProgramWireAdoption::Adopted);
+    notes.fill({.track_id = 0xBAD});
+    automation.fill({.track_id = 0xBAD});
+    const auto expected_notes = notes;
+    const auto expected_automation = automation;
+    const auto result =
+        consumer.render({std::numeric_limits<std::int64_t>::max() - 1}, 3, notes, automation);
+    REQUIRE(result.code == ProgramWireConsumerCode::InvalidRenderRange);
+    REQUIRE(notes == expected_notes);
+    REQUIRE(automation == expected_automation);
+}
+
+TEST_CASE("wire consumer rejects damaged generations without partial state or output",
+          "[playback][wire][consumer]") {
+    EncodedFixture fixture;
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> automation{};
+    const auto adopted = consumer.consume(fixture.bytes(), {0}, 64, notes, automation);
+    REQUIRE(adopted.code == ProgramWireConsumerCode::Ok);
+
+    const auto baseline_notes = notes;
+    const auto baseline_automation = automation;
+    const auto active = consumer.active_bytes();
+
+    notes.fill({.track_id = 0xBAD});
+    automation.fill({.track_id = 0xBAD});
+    const auto untouched_notes = notes;
+    const auto untouched_automation = automation;
+    auto truncated =
+        consumer.consume(fixture.bytes().first(fixture.size - 1u), {0}, 64, notes, automation);
+    REQUIRE(truncated.code == ProgramWireConsumerCode::DecodeRejected);
+    REQUIRE(truncated.adoption == ProgramWireAdoption::Rejected);
+    REQUIRE(notes == untouched_notes);
+    REQUIRE(automation == untouched_automation);
+    REQUIRE(consumer.active_bytes().data() == active.data());
+
+    WireBuffer malformed(fixture.size);
+    std::memcpy(malformed.span().data(), fixture.bytes().data(), fixture.size);
+    malformed.span()[0] ^= std::byte{0x01};
+    auto rejected = consumer.consume(malformed.span(), {0}, 64, notes, automation);
+    REQUIRE(rejected.code == ProgramWireConsumerCode::DecodeRejected);
+    REQUIRE(rejected.adoption == ProgramWireAdoption::Rejected);
+    REQUIRE(notes == untouched_notes);
+    REQUIRE(automation == untouched_automation);
+    REQUIRE(consumer.active_bytes().data() == active.data());
+
+    const auto rendered = consumer.render({0}, 64, notes, automation);
+    REQUIRE(rendered.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(std::equal(notes.begin(), notes.begin() + rendered.note_event_count,
+                       baseline_notes.begin()));
+    REQUIRE(std::equal(automation.begin(), automation.begin() + rendered.automation_event_count,
+                       baseline_automation.begin()));
+}
+
+TEST_CASE("wire consumer re-adopts a same-generation replacement by instance token",
+          "[playback][wire][consumer]") {
+    const auto map = wire_tempo_map();
+    EncodedFixture first{map};
+    CompiledProgram changed{wire_project(0.875f), nullptr, map};
+    const auto second_program = changed.store.read();
+    REQUIRE(second_program->generation() == first.program->generation());
+
+    const auto second_size = take(program_wire_encoded_size(*second_program, kTempoPoints));
+    REQUIRE(second_size == first.size);
+    WireBuffer second(second_size);
+    REQUIRE(take(encode_program_wire(*second_program, kTempoPoints, kEpoch, second.span())) ==
+            second_size);
+
+    const auto first_view = take(decode_program_wire(first.bytes()));
+    const auto second_view = take(decode_program_wire(second.span()));
+    REQUIRE(first_view.producer_epoch() == second_view.producer_epoch());
+    REQUIRE(first_view.program().generation == second_view.program().generation);
+    REQUIRE(first_view.automation_lanes().front().lane_id ==
+            second_view.automation_lanes().front().lane_id);
+    REQUIRE(first_view.automation_lanes().front().instance_token !=
+            second_view.automation_lanes().front().instance_token);
+
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> first_output{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> second_output{};
+    const auto first_result = consumer.consume(first.bytes(), {0}, 64, notes, first_output);
+    REQUIRE(first_result.adoption == ProgramWireAdoption::Adopted);
+    const auto second_result = consumer.consume(second.span(), {0}, 64, notes, second_output);
+
+    const auto direct = render_direct(*second_program, {0}, 64);
+    REQUIRE(second_result.automation_event_count == direct.automation.size());
+    REQUIRE(std::equal(second_output.begin(),
+                       second_output.begin() + second_result.automation_event_count,
+                       direct.automation.begin(), direct.automation.end()));
+    REQUIRE_FALSE(std::equal(
+        first_output.begin(), first_output.begin() + first_result.automation_event_count,
+        second_output.begin(), second_output.begin() + second_result.automation_event_count));
+    REQUIRE(second_result.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(second_result.adoption == ProgramWireAdoption::Adopted);
+    REQUIRE(consumer.active_bytes().data() == second.span().data());
+}
+
+TEST_CASE("wire decode adoption and render take no realtime allocation or lock",
+          "[playback][wire][consumer][rt-safety]") {
+    STATIC_REQUIRE(ProgramWireConsumer::consume_rt_safety_class ==
+                   audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs);
+    EncodedFixture fixture;
+    ProgramWireConsumer consumer;
+    std::array<ProgramWireRenderedNoteEvent, 16> notes{};
+    std::array<ProgramWireRenderedAutomationEvent, 256> automation{};
+    ProgramWireRenderResult result;
+    std::size_t allocations = 0;
+    {
+        test::ScopedRtProcessProbe probe;
+        result = consumer.consume(fixture.bytes(), {0}, 64, notes, automation);
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(result.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(result.adoption == ProgramWireAdoption::Adopted);
+    REQUIRE(result.note_event_count != 0);
+    REQUIRE(result.automation_event_count != 0);
+    REQUIRE(allocations == 0);
 }

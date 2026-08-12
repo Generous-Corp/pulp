@@ -3,6 +3,7 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/automation_program.hpp>
 #include <pulp/playback/track_automation_program.hpp>
+#include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/automation_lane.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <utility>
 #include <variant>
 
@@ -232,6 +234,16 @@ ProgramWireAutomationLaneRecord lane_record(const AutomationProgram& lane,
                lane.target());
     return record;
 }
+
+struct WireTempoPosition {
+    std::size_t segment = 0;
+    std::int64_t anchor = 0;
+};
+
+void advance_wire_tempo_position_to_tick(const ProgramWireView& view, std::int64_t tick,
+                                         WireTempoPosition& position) noexcept;
+std::int64_t wire_ticks_to_samples(const ProgramWireView& view, WireTempoPosition position,
+                                   std::int64_t tick) noexcept;
 
 } // namespace
 
@@ -601,19 +613,67 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     if (scalars.producer_epoch == 0)
         return ViewResult(runtime::Err(
             Error{Code::InvalidProducerEpoch, section_id(ProgramWireSection::Program)}));
+    if (scalars.generation == 0)
+        return ViewResult(
+            runtime::Err(Error{Code::InvalidGeneration, section_id(ProgramWireSection::Program)}));
     if (scalars.sample_rate_numerator == 0 || scalars.sample_rate_denominator == 0)
         return ViewResult(
             runtime::Err(Error{Code::InvalidSampleRate, section_id(ProgramWireSection::Program),
                                scalars.sample_rate_denominator}));
+    const auto sample_rate = view.sample_rate().normalized();
+    if (!sample_rate.valid() || sample_rate.as_long_double() >
+                                    static_cast<long double>(timebase::kMaximumCompiledSampleRate))
+        return ViewResult(
+            runtime::Err(Error{Code::InvalidSampleRate, section_id(ProgramWireSection::Program)}));
     if (!view.automation_limits().valid())
         return ViewResult(
             runtime::Err(Error{Code::InvalidLimits, section_id(ProgramWireSection::Program)}));
 
-    for (const auto& point : view.tempo_points_)
+    if (view.tempo_points_.empty())
+        return ViewResult(runtime::Err(
+            Error{Code::MalformedTempoMap, section_id(ProgramWireSection::TempoPoints)}));
+    constexpr long double kInt64MaximumRoundingBoundary = 9'223'372'036'854'775'807.5L;
+    std::int64_t tempo_anchor = 0;
+    for (std::size_t p = 0; p < view.tempo_points_.size(); ++p) {
+        const auto& point = view.tempo_points_[p];
+        const auto bpm = std::bit_cast<double>(point.bpm_bits);
         if (point.curve_to_next > static_cast<std::uint8_t>(timebase::TempoCurve::LinearInTicks))
             return ViewResult(
                 runtime::Err(Error{Code::InvalidEnum, section_id(ProgramWireSection::TempoPoints),
                                    point.curve_to_next}));
+        if (!std::isfinite(bpm) || bpm < 1.0 || bpm > 1'000.0 || (p == 0 && point.tick != 0) ||
+            (p != 0 && point.tick <= view.tempo_points_[p - 1].tick) ||
+            (p + 1 == view.tempo_points_.size() &&
+             point.curve_to_next != static_cast<std::uint8_t>(timebase::TempoCurve::Constant)))
+            return ViewResult(runtime::Err(
+                Error{Code::MalformedTempoMap, section_id(ProgramWireSection::TempoPoints), p}));
+        if (p + 1u < view.tempo_points_.size()) {
+            const auto& next = view.tempo_points_[p + 1u];
+            const auto ticks = static_cast<long double>(next.tick - point.tick);
+            const auto scale = sample_rate.as_long_double() * 60.0L /
+                               static_cast<long double>(timebase::kTicksPerQuarter);
+            long double duration = 0.0L;
+            if (point.curve_to_next == static_cast<std::uint8_t>(timebase::TempoCurve::Constant) ||
+                bpm == std::bit_cast<double>(next.bpm_bits)) {
+                duration = ticks * scale / static_cast<long double>(bpm);
+            } else {
+                const auto slope = (static_cast<long double>(std::bit_cast<double>(next.bpm_bits)) -
+                                    static_cast<long double>(bpm)) /
+                                   ticks;
+                duration =
+                    scale * std::log1p(slope * ticks / static_cast<long double>(bpm)) / slope;
+            }
+            if (!std::isfinite(duration) || duration < 0.0L ||
+                duration >= kInt64MaximumRoundingBoundary)
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedTempoMap, section_id(ProgramWireSection::TempoPoints), p}));
+            const auto rounded_duration = static_cast<std::int64_t>(std::llround(duration));
+            if (tempo_anchor > std::numeric_limits<std::int64_t>::max() - rounded_duration)
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedTempoMap, section_id(ProgramWireSection::TempoPoints), p}));
+            tempo_anchor += rounded_duration;
+        }
+    }
 
     // Every span a caller can reach is bounds-checked here, so the accessors
     // that return subspans can be unconditional.
@@ -657,11 +717,43 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (lane.instance_token == 0)
             return ViewResult(runtime::Err(Error{
                 Code::InvalidInstanceToken, section_id(ProgramWireSection::AutomationLanes), l}));
+        if (!std::isfinite(lane.leading_value))
+            return ViewResult(runtime::Err(
+                Error{Code::MalformedSegment, section_id(ProgramWireSection::AutomationLanes), l}));
         if (lane.target_kind > static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) ||
             lane.evaluation_rate > static_cast<std::uint8_t>(AutomationEvaluationRate::BlockRate) ||
             lane.mixer_parameter > static_cast<std::uint8_t>(timeline::TrackMixerParameter::Pan))
             return ViewResult(runtime::Err(
                 Error{Code::InvalidEnum, section_id(ProgramWireSection::AutomationLanes), l}));
+        const auto segments = view.segments_for(lane);
+        WireTempoPosition tempo_position;
+        for (std::size_t s = 0; s < segments.size(); ++s) {
+            const auto& segment = segments[s];
+            const auto terminal = s + 1u == segments.size();
+            if (segment.end_tick < segment.start_tick ||
+                segment.end_sample < segment.start_sample || !std::isfinite(segment.start_value) ||
+                !std::isfinite(segment.end_value) || !std::isfinite(segment.curvature) ||
+                (terminal && (segment.start_tick != segment.end_tick ||
+                              segment.start_sample != segment.end_sample)) ||
+                (!terminal && segment.start_tick >= segment.end_tick) ||
+                (s != 0 && (segments[s - 1u].end_tick != segment.start_tick ||
+                            segments[s - 1u].end_sample != segment.start_sample ||
+                            segments[s - 1u].end_value != segment.start_value)))
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments),
+                    lane.segment_first + s}));
+            advance_wire_tempo_position_to_tick(view, segment.start_tick, tempo_position);
+            if (wire_ticks_to_samples(view, tempo_position, segment.start_tick) !=
+                segment.start_sample)
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments),
+                    lane.segment_first + s}));
+            advance_wire_tempo_position_to_tick(view, segment.end_tick, tempo_position);
+            if (wire_ticks_to_samples(view, tempo_position, segment.end_tick) != segment.end_sample)
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments),
+                    lane.segment_first + s}));
+        }
     }
 
     for (std::size_t s = 0; s < view.automation_segments_.size(); ++s) {
@@ -865,6 +957,373 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
             return false;
     }
     return true;
+}
+
+namespace {
+
+std::int64_t rounded_and_clamped(long double value) noexcept {
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (value <= minimum)
+        return std::numeric_limits<std::int64_t>::min();
+    if (value >= maximum)
+        return std::numeric_limits<std::int64_t>::max();
+    return static_cast<std::int64_t>(std::llround(value));
+}
+
+std::int64_t saturating_add(std::int64_t lhs, std::int64_t rhs) noexcept {
+    if (rhs > 0 && lhs > std::numeric_limits<std::int64_t>::max() - rhs)
+        return std::numeric_limits<std::int64_t>::max();
+    if (rhs < 0 && lhs < std::numeric_limits<std::int64_t>::min() - rhs)
+        return std::numeric_limits<std::int64_t>::min();
+    return lhs + rhs;
+}
+
+std::uint64_t integer_distance(std::int64_t lhs, std::int64_t rhs) noexcept {
+    if (lhs >= rhs)
+        return static_cast<std::uint64_t>(lhs) - static_cast<std::uint64_t>(rhs);
+    return static_cast<std::uint64_t>(rhs) - static_cast<std::uint64_t>(lhs);
+}
+
+double wire_bpm(const ProgramWireTempoPointRecord& point) noexcept {
+    return std::bit_cast<double>(point.bpm_bits);
+}
+
+long double wire_samples_from_segment_start(const ProgramWireView& view, std::size_t index,
+                                            std::int64_t delta_ticks) noexcept {
+    const auto points = view.tempo_points();
+    const auto& point = points[index];
+    const auto ticks = static_cast<long double>(delta_ticks);
+    const auto scale = view.sample_rate().as_long_double() * 60.0L /
+                       static_cast<long double>(timebase::kTicksPerQuarter);
+    if (delta_ticks < 0 || index + 1u == points.size() ||
+        point.curve_to_next == static_cast<std::uint8_t>(timebase::TempoCurve::Constant) ||
+        wire_bpm(point) == wire_bpm(points[index + 1u]))
+        return ticks * scale / static_cast<long double>(wire_bpm(point));
+
+    const auto length = static_cast<long double>(points[index + 1u].tick - point.tick);
+    const auto slope = (static_cast<long double>(wire_bpm(points[index + 1u])) -
+                        static_cast<long double>(wire_bpm(point))) /
+                       length;
+    const auto relative = slope * ticks / static_cast<long double>(wire_bpm(point));
+    return scale * std::log1p(relative) / slope;
+}
+
+long double wire_ticks_from_segment_start(const ProgramWireView& view, std::size_t index,
+                                          long double delta_samples) noexcept {
+    const auto points = view.tempo_points();
+    const auto& point = points[index];
+    const auto inverse_scale = static_cast<long double>(timebase::kTicksPerQuarter) /
+                               (view.sample_rate().as_long_double() * 60.0L);
+    if (delta_samples < 0.0L || index + 1u == points.size() ||
+        point.curve_to_next == static_cast<std::uint8_t>(timebase::TempoCurve::Constant) ||
+        wire_bpm(point) == wire_bpm(points[index + 1u]))
+        return delta_samples * inverse_scale * static_cast<long double>(wire_bpm(point));
+
+    const auto length = static_cast<long double>(points[index + 1u].tick - point.tick);
+    const auto slope = (static_cast<long double>(wire_bpm(points[index + 1u])) -
+                        static_cast<long double>(wire_bpm(point))) /
+                       length;
+    return static_cast<long double>(wire_bpm(point)) *
+           std::expm1(delta_samples * inverse_scale * slope) / slope;
+}
+
+void advance_wire_tempo_position(const ProgramWireView& view, std::int64_t sample,
+                                 WireTempoPosition& position) noexcept {
+    const auto points = view.tempo_points();
+    while (position.segment + 1u < points.size()) {
+        const auto next_anchor = saturating_add(
+            position.anchor,
+            rounded_and_clamped(wire_samples_from_segment_start(
+                view, position.segment,
+                points[position.segment + 1u].tick - points[position.segment].tick)));
+        if (sample < next_anchor)
+            break;
+        ++position.segment;
+        position.anchor = next_anchor;
+    }
+}
+
+void advance_wire_tempo_position_to_tick(const ProgramWireView& view, std::int64_t tick,
+                                         WireTempoPosition& position) noexcept {
+    const auto points = view.tempo_points();
+    while (position.segment + 1u < points.size() && tick >= points[position.segment + 1u].tick) {
+        position.anchor = saturating_add(
+            position.anchor,
+            rounded_and_clamped(wire_samples_from_segment_start(
+                view, position.segment,
+                points[position.segment + 1u].tick - points[position.segment].tick)));
+        ++position.segment;
+    }
+}
+
+WireTempoPosition wire_tempo_position(const ProgramWireView& view, std::int64_t sample) noexcept {
+    WireTempoPosition position;
+    advance_wire_tempo_position(view, sample, position);
+    return position;
+}
+
+std::int64_t wire_ticks_to_samples(const ProgramWireView& view, WireTempoPosition position,
+                                   std::int64_t tick) noexcept {
+    const auto points = view.tempo_points();
+    while (position.segment != 0 && tick < points[position.segment].tick) {
+        const auto previous = position.segment - 1u;
+        const auto duration = rounded_and_clamped(wire_samples_from_segment_start(
+            view, previous, points[position.segment].tick - points[previous].tick));
+        position.anchor -= duration;
+        position.segment = previous;
+    }
+    return saturating_add(position.anchor,
+                          rounded_and_clamped(wire_samples_from_segment_start(
+                              view, position.segment, tick - points[position.segment].tick)));
+}
+
+std::int64_t wire_sample_to_tick(const ProgramWireView& view, std::int64_t sample,
+                                 WireTempoPosition position) noexcept {
+    advance_wire_tempo_position(view, sample, position);
+    const auto points = view.tempo_points();
+    const auto estimate_offset = rounded_and_clamped(wire_ticks_from_segment_start(
+        view, position.segment,
+        static_cast<long double>(sample) - static_cast<long double>(position.anchor)));
+    auto low = saturating_add(points[position.segment].tick, estimate_offset);
+    auto high = low;
+    std::int64_t step = 1;
+    while (wire_ticks_to_samples(view, position, low) >= sample) {
+        high = low;
+        if (low == std::numeric_limits<std::int64_t>::min())
+            break;
+        const auto decrement = static_cast<std::int64_t>(std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(step),
+            integer_distance(low, std::numeric_limits<std::int64_t>::min())));
+        low -= decrement;
+        step = std::min<std::int64_t>(step * 2, std::numeric_limits<std::int64_t>::max() / 2);
+    }
+    step = 1;
+    while (wire_ticks_to_samples(view, position, high) < sample) {
+        low = high;
+        if (high == std::numeric_limits<std::int64_t>::max())
+            break;
+        const auto increment = static_cast<std::int64_t>(std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(step),
+            integer_distance(std::numeric_limits<std::int64_t>::max(), high)));
+        high += increment;
+        step = std::min<std::int64_t>(step * 2, std::numeric_limits<std::int64_t>::max() / 2);
+    }
+    while (integer_distance(low, high) > 1) {
+        const auto midpoint = std::midpoint(low, high);
+        if (wire_ticks_to_samples(view, position, midpoint) < sample)
+            low = midpoint;
+        else
+            high = midpoint;
+    }
+    const auto upper_tick = wire_ticks_to_samples(view, position, low) >= sample ? low : high;
+    const auto upper_sample = wire_ticks_to_samples(view, position, upper_tick);
+    if (upper_sample == sample)
+        return upper_tick;
+    const auto lower_tick =
+        upper_tick == std::numeric_limits<std::int64_t>::min() ? upper_tick : upper_tick - 1;
+    const auto lower_sample = wire_ticks_to_samples(view, position, lower_tick);
+    const auto nearest_tick =
+        integer_distance(sample, lower_sample) <= integer_distance(upper_sample, sample)
+            ? lower_tick
+            : upper_tick;
+    const auto nearest_sample = wire_ticks_to_samples(view, position, nearest_tick);
+    if (nearest_tick != std::numeric_limits<std::int64_t>::min() &&
+        wire_ticks_to_samples(view, position, nearest_tick - 1) == nearest_sample)
+        return wire_sample_to_tick(view, nearest_sample, wire_tempo_position(view, nearest_sample));
+    return nearest_tick;
+}
+
+float wire_automation_value(const ProgramWireView& view,
+                            const ProgramWireAutomationLaneRecord& lane, std::int64_t sample,
+                            std::int64_t tick) noexcept {
+    const auto segments = view.segments_for(lane);
+    if (segments.empty())
+        return lane.leading_value;
+    const auto found =
+        std::upper_bound(segments.begin(), segments.end(), sample,
+                         [](std::int64_t value, const ProgramWireAutomationSegmentRecord& segment) {
+                             return value < segment.end_sample;
+                         });
+    const auto index = found == segments.end() ? segments.size() - 1u
+                                               : static_cast<std::size_t>(found - segments.begin());
+    if (sample < segments.front().start_sample)
+        return lane.leading_value;
+    const auto& segment = segments[index];
+    if (segment.start_sample == segment.end_sample)
+        return segment.end_value;
+    if (segment.start_tick == segment.end_tick || tick <= segment.start_tick)
+        return segment.start_value;
+    if (tick >= segment.end_tick)
+        return segment.end_value;
+    if (segment.interpolation == static_cast<std::uint8_t>(timeline::AutomationInterpolation::Hold))
+        return segment.start_value;
+    return timeline::evaluate_continuous_automation_segment(
+        timebase::TickPosition{tick}, timebase::TickPosition{segment.start_tick},
+        timebase::TickPosition{segment.end_tick}, segment.start_value, segment.end_value,
+        segment.curvature);
+}
+
+template <typename Record>
+bool same_records(std::span<const Record> lhs, std::span<const Record> rhs) noexcept {
+    return lhs.size() == rhs.size() &&
+           (lhs.empty() || std::memcmp(lhs.data(), rhs.data(), lhs.size_bytes()) == 0);
+}
+
+bool same_publication(const ProgramWireView& lhs, const ProgramWireView& rhs) noexcept {
+    if (std::memcmp(&lhs.program(), &rhs.program(), sizeof(ProgramWireProgramRecord)) != 0 ||
+        !same_records(lhs.tempo_points(), rhs.tempo_points()) ||
+        !same_records(lhs.tracks(), rhs.tracks()) ||
+        !same_records(lhs.clip_ids(), rhs.clip_ids()) ||
+        !same_records(lhs.note_events(), rhs.note_events()) ||
+        !same_records(lhs.note_modifiers(), rhs.note_modifiers()) ||
+        !same_records(lhs.device_placement_ids(), rhs.device_placement_ids()))
+        return false;
+
+    const auto left = lhs.automation_lanes();
+    const auto right = rhs.automation_lanes();
+    if (left.size() != right.size())
+        return false;
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        if (left[i].lane_id != right[i].lane_id || left[i].generation != right[i].generation ||
+            left[i].instance_token != right[i].instance_token)
+            return false;
+    }
+    return true;
+}
+
+bool sample_offset(std::int64_t sample, timebase::SamplePosition start, std::uint32_t frame_count,
+                   std::uint32_t& offset) noexcept {
+    if (sample < start.value)
+        return false;
+    const auto delta = static_cast<std::uint64_t>(sample) - static_cast<std::uint64_t>(start.value);
+    if (delta >= frame_count)
+        return false;
+    offset = static_cast<std::uint32_t>(delta);
+    return true;
+}
+
+} // namespace
+
+ProgramWireAdoptionResult ProgramWireConsumer::adopt(std::span<const std::byte> bytes) noexcept {
+    auto decoded = decode_program_wire(bytes);
+    if (!decoded)
+        return {ProgramWireConsumerCode::DecodeRejected, ProgramWireAdoption::Rejected,
+                decoded.error()};
+
+    const auto& candidate = decoded.value();
+    if (!has_program()) {
+        active_ = candidate;
+        return {ProgramWireConsumerCode::Ok, ProgramWireAdoption::Adopted};
+    }
+    if (candidate.producer_epoch() != active_.producer_epoch()) {
+        active_ = candidate;
+        return {ProgramWireConsumerCode::Ok, ProgramWireAdoption::Adopted};
+    }
+    if (candidate.program().generation < active_.program().generation)
+        return {ProgramWireConsumerCode::StaleGeneration, ProgramWireAdoption::Rejected};
+    if (candidate.program().generation == active_.program().generation &&
+        same_publication(candidate, active_))
+        return {ProgramWireConsumerCode::Ok, ProgramWireAdoption::Unchanged};
+
+    active_ = candidate;
+    return {ProgramWireConsumerCode::Ok, ProgramWireAdoption::Adopted};
+}
+
+ProgramWireRenderResult ProgramWireConsumer::render(
+    timebase::SamplePosition start, std::uint32_t frame_count,
+    std::span<ProgramWireRenderedNoteEvent> note_output,
+    std::span<ProgramWireRenderedAutomationEvent> automation_output) const noexcept {
+    ProgramWireRenderResult result;
+    if (!has_program()) {
+        result.code = ProgramWireConsumerCode::MissingProgram;
+        return result;
+    }
+    if (frame_count == 0 || start.value > std::numeric_limits<std::int64_t>::max() -
+                                              static_cast<std::int64_t>(frame_count - 1u)) {
+        result.code = ProgramWireConsumerCode::InvalidRenderRange;
+        return result;
+    }
+
+    std::uint64_t note_count = 0;
+    std::uint64_t automation_count = 0;
+    for (const auto& track : active_.tracks()) {
+        for (const auto& event : active_.note_events_for(track)) {
+            std::uint32_t offset = 0;
+            if (sample_offset(event.sample, start, frame_count, offset))
+                ++note_count;
+        }
+        for (const auto& lane : active_.automation_lanes_for(track)) {
+            const auto lane_count =
+                lane.evaluation_rate ==
+                        static_cast<std::uint8_t>(AutomationEvaluationRate::SampleAccurate)
+                    ? static_cast<std::uint64_t>(frame_count)
+                    : 1u;
+            if (automation_count > std::numeric_limits<std::uint64_t>::max() - lane_count) {
+                result.code = ProgramWireConsumerCode::InsufficientOutputCapacity;
+                return result;
+            }
+            automation_count += lane_count;
+        }
+    }
+    if (note_count > note_output.size() || automation_count > automation_output.size() ||
+        note_count > std::numeric_limits<std::uint32_t>::max() ||
+        automation_count > std::numeric_limits<std::uint32_t>::max()) {
+        result.code = ProgramWireConsumerCode::InsufficientOutputCapacity;
+        return result;
+    }
+
+    std::uint32_t notes_written = 0;
+    std::uint32_t automation_written = 0;
+    for (const auto& track : active_.tracks()) {
+        for (const auto& event : active_.note_events_for(track)) {
+            std::uint32_t offset = 0;
+            if (!sample_offset(event.sample, start, frame_count, offset))
+                continue;
+            note_output[notes_written++] = {
+                track.id,       offset,
+                event.clip_id,  event.note_id,
+                event.velocity, event.pitch,
+                event.channel,  static_cast<NoteProgramEventKind>(event.kind)};
+        }
+        for (const auto& lane : active_.automation_lanes_for(track)) {
+            const auto count = lane.evaluation_rate == static_cast<std::uint8_t>(
+                                                           AutomationEvaluationRate::SampleAccurate)
+                                   ? frame_count
+                                   : 1u;
+            auto tempo_position = wire_tempo_position(active_, start.value);
+            for (std::uint32_t frame = 0; frame < count; ++frame) {
+                const auto sample = saturating_add(start.value, frame);
+                advance_wire_tempo_position(active_, sample, tempo_position);
+                const auto tick = wire_sample_to_tick(active_, sample, tempo_position);
+                automation_output[automation_written++] = {
+                    track.id,
+                    lane.lane_id,
+                    frame,
+                    wire_automation_value(active_, lane, sample, tick),
+                    static_cast<ProgramWireTargetKind>(lane.target_kind),
+                    lane.device_placement_id,
+                    lane.device_param_id,
+                    lane.mixer_parameter,
+                };
+            }
+        }
+    }
+    result.note_event_count = notes_written;
+    result.automation_event_count = automation_written;
+    return result;
+}
+
+ProgramWireRenderResult ProgramWireConsumer::consume(
+    std::span<const std::byte> bytes, timebase::SamplePosition start, std::uint32_t frame_count,
+    std::span<ProgramWireRenderedNoteEvent> note_output,
+    std::span<ProgramWireRenderedAutomationEvent> automation_output) noexcept {
+    const auto adoption = adopt(bytes);
+    if (adoption.adoption == ProgramWireAdoption::Rejected)
+        return {adoption.code, adoption.adoption, adoption.wire_error};
+    auto rendered = render(start, frame_count, note_output, automation_output);
+    rendered.adoption = adoption.adoption;
+    return rendered;
 }
 
 } // namespace pulp::playback
