@@ -5396,7 +5396,11 @@ proof images.
   pixels, nothing downstream can retint or theme it, and the bitmap does not
   survive being saved, because a project persists the DesignIR and the ui.js,
   not the scratch directory the asset lived in. Count `faithful_capture` nodes
-  in the installed IR: on a natively lowered panel it is zero.
+  in the installed IR: on a natively lowered panel it is zero. Imperative
+  `<canvas>` backing stores are the narrow exception: while the frame is frozen,
+  each canvas is captured as its own integrity-bound PNG asset and reinserted at
+  its exact Chromium paint position. That preserves the rest of the panel as
+  native text/shape/image nodes; it is not a whole-panel photograph.
 
 ## Colour: the agent chooses it, and it belongs on the root
 
@@ -6308,14 +6312,25 @@ forces selection of an exposed centre/corner point or fails. `wait-for visible`
 is intentionally stricter and still requires visually uncovered paint.
 
 Computed layout, text runs, resolved fonts, colours, SVG paths, stacking and
-hit geometry lower through DesignIR. Executable `<canvas>` drawing programs do
-not: each becomes an explicit unpainted native-painter requirement. Native
-validation MUST refuse to score while
-`native_nodes_element_capture_fallback > 0`; a dark blank render can otherwise
-score deceptively well against a dark reference. Implement those regions with
-CanvasWidget/NativeCanvasPainter on Skia/Dawn, rerun every captured state, then
-require both pixel comparison and `check_panel_presence.py` to pass. Never call
-the browser screenshot itself a native result.
+hit geometry lower through DesignIR. While Chromium virtual time is paused,
+each executable `<canvas>` backing store lowers as a separate, hash-verified
+PNG asset bound to its DOM `backendNodeId`. Canvas-heavy captures use a flat
+root paint list because Chromium can interleave canvas, pseudo-element and
+ancestor paint in an order a nested native tree cannot express; ordinary
+non-canvas panels retain native hierarchy. This is the static-parity bridge,
+not the final live-canvas implementation: replace each snapshot with a
+CanvasWidget/NativeCanvasPainter on Skia/Dawn when live behavior is required,
+without changing its box or paint slot, then rerun every captured state.
+
+Always pin `--render-size` to the authored dimensions. A different host window
+size invalidates the geometry comparison even if the import is correct. For an
+animated design, distinguish two gates: a same-frozen-frame comparison may use
+a strict threshold, while comparison to a previously approved fixed reference
+needs either masked dynamic regions or a deliberately lower threshold. Prove
+that threshold with a planted compositor mutation; in the Spectr reference the
+correct same-frame render scored 99% while hierarchy substituted for Chromium
+paint order scored 88%. Never call the browser screenshot itself a native
+result.
 
 Keep the repeatable evidence together: interaction JSON, capture envelope,
 semantic report, browser reference, DesignIR, native PNG, diff, presence report,

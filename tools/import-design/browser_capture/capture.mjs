@@ -292,6 +292,111 @@ function pngDimensions(bytes) {
   };
 }
 
+const MAX_CAPTURED_CANVASES = 32;
+const MAX_CAPTURED_CANVAS_PIXELS = 64 * 1024 * 1024;
+
+async function captureCanvasAssets(cdp, snapshot) {
+  const document = snapshot.documents?.[0];
+  const nodes = document?.nodes;
+  const strings = snapshot.strings ?? [];
+  if (!nodes) return [];
+
+  const canvases = [];
+  const seenBackendNodeIds = new Set();
+  for (let index = 0; index < (nodes.nodeName?.length ?? 0); index++) {
+    const tag = String(strings[nodes.nodeName[index]] ?? "").toLowerCase();
+    if (tag !== "canvas") continue;
+    const backendNodeId = nodes.backendNodeId?.[index];
+    if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
+    if (seenBackendNodeIds.has(backendNodeId)) {
+      throw new Error(
+        `browser capture found duplicate canvas backend node ${backendNodeId}`);
+    }
+    seenBackendNodeIds.add(backendNodeId);
+    canvases.push(backendNodeId);
+  }
+  if (canvases.length > MAX_CAPTURED_CANVASES) {
+    throw new Error(
+      `browser capture found ${canvases.length} canvases; maximum is ` +
+      `${MAX_CAPTURED_CANVASES}`);
+  }
+
+  const assets = [];
+  let totalPixels = 0;
+  for (const backendNodeId of canvases) {
+    const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
+    const objectId = resolved.object?.objectId;
+    if (!objectId) {
+      throw new Error(`could not resolve canvas backend node ${backendNodeId}`);
+    }
+    try {
+      // Inspect the backing-store dimensions before asking Chromium to encode
+      // anything.  A malicious or accidental enormous canvas must fail before
+      // toDataURL can allocate its unbounded intermediate PNG/base64 buffers.
+      const measured = await cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function() {
+          if (!(this instanceof HTMLCanvasElement))
+            throw new Error('resolved node is not a canvas');
+          return { width: this.width, height: this.height };
+        }`,
+        returnByValue: true,
+      });
+      const width = Number(measured.result?.value?.width);
+      const height = Number(measured.result?.value?.height);
+      const pixels = width * height;
+      if (!Number.isInteger(width) || !Number.isInteger(height) ||
+          width <= 0 || height <= 0 || !Number.isSafeInteger(pixels)) {
+        throw new Error(`canvas backend node ${backendNodeId} has invalid size`);
+      }
+      totalPixels += pixels;
+      if (!Number.isSafeInteger(totalPixels) ||
+          totalPixels > MAX_CAPTURED_CANVAS_PIXELS) {
+        throw new Error(
+          `captured canvas pixels exceed ${MAX_CAPTURED_CANVAS_PIXELS}`);
+      }
+
+      const captured = await cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function() { return this.toDataURL('image/png'); }`,
+        returnByValue: true,
+      });
+      const dataUrl = captured.result?.value;
+      const prefix = "data:image/png;base64,";
+      if (typeof dataUrl !== "string" || !dataUrl.startsWith(prefix)) {
+        throw new Error(
+          `canvas backend node ${backendNodeId} could not be captured as PNG`);
+      }
+      const encoded = dataUrl.slice(prefix.length);
+      if (encoded.length === 0 || encoded.length % 4 !== 0 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+        throw new Error(
+          `canvas backend node ${backendNodeId} returned invalid PNG base64`);
+      }
+      const bytes = Buffer.from(encoded, "base64");
+      const dimensions = pngDimensions(bytes);
+      if (dimensions.width !== width || dimensions.height !== height) {
+        throw new Error(
+          `canvas backend node ${backendNodeId} PNG size does not match backing store`);
+      }
+      assets.push({
+        id: `canvas:${backendNodeId}`,
+        kind: "canvas-snapshot",
+        mime_type: "image/png",
+        path: `canvas-${backendNodeId}.png`,
+        sha256: sha256(bytes),
+        width_px: width,
+        height_px: height,
+        backend_node_id: backendNodeId,
+        bytes,
+      });
+    } finally {
+      await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
+    }
+  }
+  return assets;
+}
+
 function serializeJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -823,6 +928,11 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
+    // Canvas backing stores are imperative paint, not computed style. Snapshot
+    // each one while the same browser frame is frozen, then bind it back to the
+    // DOMSnapshot through backendNodeId. This preserves transparent overlap and
+    // paint order without flattening the whole editor into one photograph.
+    const canvasAssets = await captureCanvasAssets(cdp, snapshot);
     const semanticReport = await evaluateSemantics(
       cdp, snapshot, {
         width: captureWidth,
@@ -924,6 +1034,8 @@ async function runCapture(options) {
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
       writeFile(
         path.join(outputDir, "browser-static.png"), staticScreenshotBytes),
+      ...canvasAssets.map((asset) =>
+        writeFile(path.join(outputDir, asset.path), asset.bytes)),
       // `layout.styles` rows are positional: entry N is the Nth property of
       // the request. Recording the request order alongside the data keeps the
       // snapshot self-describing, so a consumer never has to hardcode a
@@ -1043,7 +1155,7 @@ async function runCapture(options) {
         sha256: sha256(staticScreenshotBytes),
         width_px: pixels.width,
         height_px: pixels.height,
-      }],
+      }, ...canvasAssets.map(({ bytes: _bytes, ...asset }) => asset)],
       semantics: {
         schema: semanticReport.schema,
         report: "semantic-report.json",

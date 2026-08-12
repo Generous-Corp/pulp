@@ -222,7 +222,16 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         }
     }
 
-    auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    // `asset_ref` is the portable IR contract; native ImageView materialization
+    // consumes the resolved `asset_path`. Browser validation must exercise the
+    // same manifest-resolution step as generated native exports, otherwise a
+    // perfectly captured canvas arrives as an empty ImageView and the parity
+    // gate scores a black frame instead of the artifact it claims to validate.
+    auto render_ir = ir;
+    pulp::view::enrich_imported_image_asset_metadata(
+        render_ir, render_ir.asset_manifest);
+    auto root = pulp::view::build_native_view_tree(
+        render_ir, render_ir.asset_manifest);
     if (!root) {
         result.error = "could not materialize browser capture DesignIR";
         return result;

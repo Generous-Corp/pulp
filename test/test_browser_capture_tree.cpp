@@ -305,7 +305,10 @@ struct LoweredSnapshot {
 /// Lower into a root the caller already shaped — the panel frame a real caller
 /// passes in, whose own size and `overflow` are part of what the tree lands in.
 PaintedTreeCounts lower_into(const SnapshotSpec& spec, const std::string& name,
-                             IRNode& root) {
+                             IRNode& root,
+                             const std::unordered_map<int, std::string>&
+                                 captured_element_assets = {},
+                             bool flatten_to_paint_order = false) {
     const auto path = write_snapshot(build_snapshot(spec), name);
     const auto index = CapturedStyleIndex::load(path);
     // The index holds no reference to the file, so it goes now rather than at
@@ -313,13 +316,19 @@ PaintedTreeCounts lower_into(const SnapshotSpec& spec, const std::string& name,
     // leave the snapshot behind exactly on the runs someone wants to inspect.
     fs::remove(path);
     REQUIRE(index);
-    return lower_painted_tree(*index, 0.0, 0.0, root);
+    return lower_painted_tree(*index, 0.0, 0.0, root,
+                              captured_element_assets,
+                              flatten_to_paint_order);
 }
 
 LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
-                               const std::string& name) {
+                               const std::string& name,
+                               const std::unordered_map<int, std::string>&
+                                   captured_element_assets = {},
+                               bool flatten_to_paint_order = false) {
     LoweredSnapshot out;
-    out.counts = lower_into(spec, name, out.root);
+    out.counts = lower_into(spec, name, out.root, captured_element_assets,
+                            flatten_to_paint_order);
     return out;
 }
 
@@ -1355,6 +1364,91 @@ TEST_CASE("canvas and image elements classify away from native",
     });
     REQUIRE(image != nullptr);
     CHECK(attribute(*image, "src") == "logo.png");
+}
+
+TEST_CASE("captured canvas lowers as its own integrity-bound image layer",
+          "[browser-capture][native-lowering]") {
+    // backendNodeId mirrors nodeName in this compact fixture, so the canvas is
+    // backend node 6. The browser capture owns the bytes; tree lowering owns
+    // only the stable asset reference and exact Chromium box/paint position.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                      "[10,20,80,40]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "captured-canvas", {{6, "canvas:6"}});
+
+    CHECK(lowered.counts.element_capture_fallback == 0);
+    CHECK(lowered.counts.image_asset == 1);
+    CHECK(lowered.counts.unpainted_fallback_area == 0.0);
+
+    const auto* canvas = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "captured_element") == "canvas";
+    });
+    REQUIRE(canvas != nullptr);
+    CHECK(canvas->type == "image");
+    CHECK(attribute(*canvas, "asset_ref") == "canvas:6");
+    CHECK(attribute(*canvas, "source_tag") == "canvas");
+    REQUIRE(canvas->style.object_fit);
+    CHECK(*canvas->style.object_fit == "fill");
+    CHECK(canvas->attributes.count("unpainted") == 0);
+    REQUIRE(canvas->style.left);
+    REQUIRE(canvas->style.top);
+    REQUIRE(canvas->style.width);
+    REQUIRE(canvas->style.height);
+    CHECK(*canvas->style.left == Catch::Approx(10.0));
+    CHECK(*canvas->style.top == Catch::Approx(20.0));
+    CHECK(*canvas->style.width == Catch::Approx(80.0));
+    CHECK(*canvas->style.height == Catch::Approx(40.0));
+}
+
+TEST_CASE("captured canvas panel follows Chromium's flat paint order",
+          "[browser-capture][native-lowering][paint-order]") {
+    // Paint order deliberately disagrees with DOM ancestry: the canvas paints
+    // before its parent panel, while a later pseudo/background sibling paints
+    // after both. A nested native tree must draw a parent before its child and
+    // therefore cannot express this list. The baked canvas lane flattens the
+    // solved Chromium layers so the captured program is neither covered by its
+    // own parent nor reordered around the later overlay.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,6,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,2]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[12,14]]",
+            .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                      "[0,0,200,100],[0,0,200,100],[0,0,200,100]]",
+            .paint_orders = "[0,1,1,4,2,5]",
+        },
+        "captured-canvas-flat", {{6, "canvas:6"}},
+        /*flatten_to_paint_order=*/true);
+
+    REQUIRE(lowered.root.children.size() == 5);
+    int last_z = -1;
+    int canvas_index = -1;
+    for (std::size_t i = 0; i < lowered.root.children.size(); ++i) {
+        const auto& child = lowered.root.children[i];
+        REQUIRE(child.style.z_index);
+        CHECK(*child.style.z_index > last_z);
+        last_z = *child.style.z_index;
+        if (attribute(child, "captured_element") == "canvas")
+            canvas_index = static_cast<int>(i);
+        CHECK(child.children.empty());
+    }
+    REQUIRE(canvas_index >= 0);
+    CHECK(attribute(lowered.root.children[static_cast<std::size_t>(canvas_index)],
+                    "asset_ref") == "canvas:6");
+    CHECK(lowered.counts.max_depth == 1);
+    CHECK(lowered.counts.root_children == 5);
 }
 
 TEST_CASE("a fallback that carries no raster says it paints nothing",

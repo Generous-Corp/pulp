@@ -719,7 +719,10 @@ std::string_view to_string(PaintClass paint_class) {
 PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      double dx,
                                      double dy,
-                                     IRNode& root) {
+                                     IRNode& root,
+                                     const std::unordered_map<int, std::string>&
+                                         captured_element_assets,
+                                     bool flatten_to_paint_order) {
     PaintedTreeCounts counts;
     const auto painted = index.painted_nodes();
     counts.painted = static_cast<int>(painted.size());
@@ -1078,9 +1081,18 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             ++counts.svg_refused;
             if (svg_subtree.refusal == SvgRefusal::paint_unavailable)
                 ++counts.svg_refused_stale_capture;
+        } else if (capture_only &&
+                   captured_element_assets.count(node.backend_node_id) != 0) {
+            paint_class = PaintClass::image_asset;
+            lowered.type = "image";
+            lowered.attributes["asset_ref"] =
+                captured_element_assets.at(node.backend_node_id);
+            lowered.attributes["captured_element"] = node.tag_name;
+            lowered.style.object_fit = "fill";
         } else if (capture_only) {
             // WHY it cannot be drawn, because the two reasons have different
-            // fixes: a `<canvas>` is the permanent answer, a rotation is a
+            // fixes: an uncaptured `<canvas>` needs a native painter (or a
+            // same-frame snapshot in the baked lane), while a rotation is a
             // transform the IR does not carry yet.
             capture_fallback(
                 is_capture_only_element(node.tag_name) ? "element" : "transform",
@@ -1445,6 +1457,31 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // The panel frame's own clip. The caller sizes the frame to the crop it
     // asked for, so this is the window every lowered node is drawn through.
     const ClipRect root_clip = overflow_clip_of(root, -dx, -dy);
+
+    // A baked browser panel is a paint artifact, not a DOM runtime. Chromium's
+    // paint order can interleave nodes from separate DOM subtrees (pseudo
+    // elements and canvas overlays do this routinely), which no nested View
+    // tree can express without repainting an ancestor after one of its own
+    // descendants. For the native-panel lane, emit the solved paint list
+    // directly under the root. Every node already carries absolute browser
+    // geometry and its resolved CSS clip, so flattening loses no placement or
+    // clipping information and makes sibling order exactly Chromium's order.
+    // The hierarchical form remains the default for callers that need source
+    // ancestry rather than a pixel-faithful baked panel.
+    if (flatten_to_paint_order) {
+        int flat_z = 0;
+        for (auto& entry : slots) {
+            entry.node.style.left = static_cast<float>(entry.box.left + dx);
+            entry.node.style.top = static_cast<float>(entry.box.top + dy);
+            entry.node.style.width = static_cast<float>(entry.box.width);
+            entry.node.style.height = static_cast<float>(entry.box.height);
+            entry.node.style.z_index = flat_z++;
+            root.children.push_back(std::move(entry.node));
+        }
+        counts.max_depth = slots.empty() ? 0 : 1;
+        counts.root_children = static_cast<int>(slots.size());
+        return counts;
+    }
 
     std::vector<int> composed_order;   // slots in composed pre-order
     composed_order.reserve(slots.size());

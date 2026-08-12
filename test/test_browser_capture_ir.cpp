@@ -215,6 +215,32 @@ std::string with_primary_surface(std::string capture,
     return capture;
 }
 
+std::string with_canvas_asset(std::string capture,
+                              std::string_view hash,
+                              int backend_node_id = 42,
+                              std::string_view id = "canvas:42",
+                              std::string_view path = "canvas-42.png",
+                              int width = 8,
+                              int height = 4) {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string canvas = R"JSON(  },{
+    "id":")JSON" + std::string(id) + R"JSON(",
+    "kind":"canvas-snapshot",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":)JSON" + std::to_string(width) + R"JSON(,
+    "height_px":)JSON" + std::to_string(height) + R"JSON(,
+    "backend_node_id":)JSON" + std::to_string(backend_node_id) + R"JSON(
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), canvas);
+    return capture;
+}
+
 void write_valid_reports(const TempCapture& temp) {
     temp.write("semantic-report.json", R"JSON({
       "schema":"pulp-browser-semantics-v1",
@@ -373,6 +399,89 @@ TEST_CASE("browser static frame is a validated runtime asset, not the A/B oracle
         CHECK_FALSE(result);
         CHECK(result.error.find("invalid") != std::string::npos);
     }
+}
+
+TEST_CASE("browser capture accepts an integrity-bound canvas snapshot asset",
+          "[import-design][browser-capture][ir][canvas]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas)));
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html"});
+    REQUIRE(result);
+    REQUIRE(result.design_ir->asset_manifest.assets.size() == 2);
+    CHECK(result.design_ir->asset_manifest.assets[1].asset_id == "canvas:42");
+    CHECK(result.design_ir->asset_manifest.assets[1].width == 8);
+    CHECK(result.design_ir->asset_manifest.assets[1].height == 4);
+}
+
+TEST_CASE("browser capture rejects a tampered canvas snapshot asset",
+          "[import-design][browser-capture][ir][canvas]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        std::string(64, '0')));
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html"});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("canvas PNG hash") != std::string::npos);
+}
+
+TEST_CASE("browser capture rejects duplicate canvas asset identifiers",
+          "[import-design][browser-capture][ir][canvas][security]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_canvas_asset(
+        std::move(capture), pulp::runtime::sha256_hex(canvas), 43,
+        "canvas:42", "canvas-43.png");
+    temp.write("capture.json", capture);
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", {});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("duplicate canvas asset identifiers") !=
+          std::string::npos);
+}
+
+TEST_CASE("browser capture rejects oversized canvas assets before file access",
+          "[import-design][browser-capture][ir][canvas][security]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    temp.write("browser.png", reference);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        std::string(64, '0'), 42, "canvas:42", "missing-canvas.png",
+        8193, 8193));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", {});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("canvas pixel safety limit") != std::string::npos);
 }
 
 TEST_CASE("browser interaction evidence is contained parsed and integrity-bound",

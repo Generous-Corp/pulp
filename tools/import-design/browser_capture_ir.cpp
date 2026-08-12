@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <system_error>
+#include <unordered_set>
 
 namespace pulp::import_design {
 
@@ -1360,6 +1362,84 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.source_adapter = "browser-capture";
     ir.source_version = "pulp-browser-capture-v1";
     ir.asset_manifest.assets.push_back(std::move(backing));
+    std::unordered_map<int, std::string> captured_element_assets;
+    std::unordered_set<std::string> captured_asset_ids{
+        "reference:browser"};
+    constexpr std::uint64_t kMaximumCapturedCanvasPixels =
+        64ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t kMaximumCapturedCanvases = 32;
+    std::uint64_t captured_canvas_pixels = 0;
+    std::size_t captured_canvas_count = 0;
+    if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
+        const auto assets = envelope["assets"];
+        for (uint32_t i = 0; i < assets.size(); ++i) {
+            const auto asset = assets[static_cast<int>(i)];
+            if (!asset.isObject() ||
+                string_member(asset, "kind") != "canvas-snapshot")
+                continue;
+            const auto id = string_member(asset, "id");
+            const auto path = string_member(asset, "path");
+            const auto mime = string_member(asset, "mime_type");
+            const double backend = number_member(asset, "backend_node_id", -1.0);
+            const double width = number_member(asset, "width_px", -1.0);
+            const double height = number_member(asset, "height_px", -1.0);
+            if (id.empty() || path.empty() || mime != "image/png" ||
+                !std::isfinite(backend) || std::trunc(backend) != backend ||
+                backend <= 0.0 || backend > std::numeric_limits<int>::max() ||
+                !std::isfinite(width) || std::trunc(width) != width ||
+                width <= 0.0 || width > std::numeric_limits<int>::max() ||
+                !std::isfinite(height) || std::trunc(height) != height ||
+                height <= 0.0 || height > std::numeric_limits<int>::max()) {
+                result.error = "browser canvas asset metadata is invalid";
+                return result;
+            }
+            if (!captured_asset_ids.emplace(id).second) {
+                result.error =
+                    "browser capture has duplicate canvas asset identifiers";
+                return result;
+            }
+            if (++captured_canvas_count > kMaximumCapturedCanvases) {
+                result.error =
+                    "browser capture exceeds the canvas asset count limit";
+                return result;
+            }
+            const auto canvas_pixels =
+                static_cast<std::uint64_t>(width) *
+                static_cast<std::uint64_t>(height);
+            if (canvas_pixels > kMaximumCapturedCanvasPixels ||
+                captured_canvas_pixels >
+                    kMaximumCapturedCanvasPixels - canvas_pixels) {
+                result.error =
+                    "browser capture exceeds the canvas pixel safety limit";
+                return result;
+            }
+            captured_canvas_pixels += canvas_pixels;
+            auto local = contained_sidecar(envelope_path, path, result.error);
+            if (!local) return result;
+            const auto hash = string_member(asset, "sha256");
+            if (hash.size() != 64 || file_sha256(*local) != hash) {
+                result.error = "browser canvas PNG hash does not match capture envelope";
+                return result;
+            }
+            if (!validate_png_header(*local, static_cast<int>(width),
+                                     static_cast<int>(height), result.error))
+                return result;
+            const int backend_id = static_cast<int>(backend);
+            if (!captured_element_assets.emplace(backend_id, id).second) {
+                result.error = "browser capture has duplicate canvas backend node assets";
+                return result;
+            }
+            IRAssetRef canvas;
+            canvas.asset_id = id;
+            canvas.original_uri = "pulp-capture:///" + path;
+            canvas.local_path = local->string();
+            canvas.content_hash = hash;
+            canvas.mime = mime;
+            canvas.width = static_cast<int>(width);
+            canvas.height = static_cast<int>(height);
+            ir.asset_manifest.assets.push_back(std::move(canvas));
+        }
+    }
     if (!load_token_report(
             *token_report, ir,
             static_cast<int>(number_member(tokens, "color_count", -1.0)),
@@ -1489,7 +1569,13 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // belongs to rather than under it.
     if (native_lowering) {
         const auto tree = lower_painted_tree(
-            *captured_styles, control_dx, control_dy, ir.root);
+            *captured_styles, control_dx, control_dy, ir.root,
+            captured_element_assets,
+            // A captured canvas can interleave with pseudo-elements and DOM
+            // ancestors in Chromium's paint list. Preserve hierarchy for
+            // ordinary native panels; switch to the exact flat compositor only
+            // when executable canvas paint was captured as an image layer.
+            /*flatten_to_paint_order=*/!captured_element_assets.empty());
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =

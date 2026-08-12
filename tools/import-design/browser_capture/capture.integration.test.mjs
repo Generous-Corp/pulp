@@ -291,6 +291,32 @@ test("real browser capture freezes a canvas animation and names its browser",
         run.stderr,
         new RegExp(`\\[browser-capture\\] browser=[^/]+/${
           envelope.provenance.browser.version.replace(/\./g, "\\.")} `));
+      const snapshot = JSON.parse(
+        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const document = snapshot.documents[0];
+      const canvasIndex = document.nodes.nodeName.findIndex(
+        (name) => String(snapshot.strings[name]).toLowerCase() === "canvas");
+      assert.notEqual(canvasIndex, -1);
+      const backendNodeId = document.nodes.backendNodeId[canvasIndex];
+      const canvasAsset = envelope.assets.find(
+        (asset) => asset.kind === "canvas-snapshot");
+      assert.deepEqual(canvasAsset, {
+        id: `canvas:${backendNodeId}`,
+        kind: "canvas-snapshot",
+        mime_type: "image/png",
+        path: `canvas-${backendNodeId}.png`,
+        sha256: canvasAsset.sha256,
+        width_px: 320,
+        height_px: 240,
+        backend_node_id: backendNodeId,
+      });
+      assert.match(canvasAsset.sha256, /^[0-9a-f]{64}$/);
+      const canvasPng = await readFile(path.join(output, canvasAsset.path));
+      assert.equal(
+        createHash("sha256").update(canvasPng).digest("hex"),
+        canvasAsset.sha256);
+      const [red, green, blue, alpha] = rgbaPixel(canvasPng, 40, 80);
+      assert.ok(red + green + blue > 80 && alpha > 240);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
