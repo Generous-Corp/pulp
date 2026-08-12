@@ -57,19 +57,8 @@ def activation_event(*, slices: list[str] | None = None) -> dict[str, object]:
 
 
 def accepted_expansion() -> dict[str, object]:
-    routes = [
-        {
-            "repository": "Generous-Corp/pulp",
-            "path": "tools/import-design/main.cpp",
-            "owner": "Generous-Corp/pulp",
-            "cell_roles": [
-                {
-                    "cell_id": "source.figma",
-                    "role": "pulp_implementation",
-                }
-            ],
-        }
-    ]
+    routing = projection_tool._routing_evidence_module()
+    routes = routing.approved_routes()
     route_set_sha256 = hashlib.sha256(
         json.dumps(routes, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

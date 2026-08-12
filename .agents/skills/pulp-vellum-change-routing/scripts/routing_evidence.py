@@ -20,6 +20,11 @@ EXPANSION_ID = "full-design-import-render-v1"
 MATRIX_ID = "full-design-import-render-v1-compatibility-matrix"
 AMENDMENT_ID = "full-design-import-render-v1-exact-boundary-amendment-1"
 MATRIX_SHA256 = "1792666eb1dd7d3f46dc607f4ee3dccbbc1232a6c2e6ab2331507c4b87122e1c"
+AMENDMENT_SHA256 = "cf9b07233e9c66763e1f68391d2df4252dca01bbc7de5acac10dca006fbf5287"
+ROUTE_SET_SHA256 = "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028"
+APPROVED_ROUTES_PATH = (
+    Path(__file__).resolve().parents[1] / "references/approved-exact-routes.v1.json"
+)
 WORKFLOW_PATH = ".github/workflows/vellum-routing-contract.yml"
 REQUIRED_CASE_IDS = [
     "authority-load",
@@ -35,6 +40,11 @@ SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 OWNER = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 CELL_ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+SLICE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+EVENT_ID = re.compile(r"^[0-9]{8}-[a-z0-9][a-z0-9-]{2,79}$")
+RECORD_PATH = re.compile(
+    r"^provenance/authority/records/[a-z0-9][a-z0-9._-]{2,120}\.json$"
+)
 
 
 class RoutingError(RuntimeError):
@@ -93,6 +103,30 @@ def _canonical_repository(repository: str) -> str:
     if repository not in {PULP_REPOSITORY, VELLUM_REPOSITORY}:
         raise RoutingError(f"unsupported repository: {repository}")
     return repository
+
+
+def approved_routes() -> list[dict[str, Any]]:
+    try:
+        value = json.loads(APPROVED_ROUTES_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RoutingError(f"approved exact-route artifact is unavailable: {error}") from error
+    expected = {
+        "schema_version": 1,
+        "matrix_id": MATRIX_ID,
+        "matrix_sha256": MATRIX_SHA256,
+        "amendment_id": AMENDMENT_ID,
+        "amendment_sha256": AMENDMENT_SHA256,
+        "route_set_sha256": ROUTE_SET_SHA256,
+    }
+    if not isinstance(value, dict) or set(value) != set(expected) | {"routes"}:
+        raise RoutingError("approved exact-route artifact fields differ")
+    for key, expected_value in expected.items():
+        if value.get(key) != expected_value:
+            raise RoutingError(f"approved exact-route artifact {key} differs")
+    routes = value.get("routes")
+    if not isinstance(routes, list) or canonical_sha256(routes) != ROUTE_SET_SHA256:
+        raise RoutingError("approved exact-route artifact routes differ")
+    return routes
 
 
 def validate_expansion(expansion: Any) -> dict[str, Any]:
@@ -177,7 +211,121 @@ def validate_expansion(expansion: Any) -> dict[str, Any]:
         raise RoutingError("ownership expansion route_set_sha256 is invalid")
     if route_set_sha256 != canonical_sha256(routes):
         raise RoutingError("ownership expansion route_set_sha256 differs from routes")
+    if route_set_sha256 != ROUTE_SET_SHA256 or routes != approved_routes():
+        raise RoutingError("ownership expansion routes differ from the approved exact boundary")
     return value
+
+
+def _validate_base_projection(projection: dict[str, Any]) -> None:
+    activation = _strict_keys(
+        projection.get("activation"),
+        {
+            "state",
+            "pulp_extraction_base",
+            "vellum_authority_commit",
+            "authority_record_path",
+            "initial_transition_event",
+            "accepted_by",
+            "accepted_at",
+        },
+        "ownership projection activation",
+    )
+    state = activation.get("state")
+    if state not in {"prepared", "active"}:
+        raise RoutingError("ownership projection activation state differs")
+    if not isinstance(activation.get("pulp_extraction_base"), str) or SHA40.fullmatch(
+        activation["pulp_extraction_base"]
+    ) is None:
+        raise RoutingError("ownership projection extraction base is invalid")
+    authority_fields = (
+        "vellum_authority_commit",
+        "authority_record_path",
+        "initial_transition_event",
+        "accepted_by",
+        "accepted_at",
+    )
+    if state == "prepared":
+        if any(activation.get(field) is not None for field in authority_fields):
+            raise RoutingError("prepared ownership activation must not carry authority")
+    else:
+        if not isinstance(activation.get("vellum_authority_commit"), str) or SHA40.fullmatch(
+            activation["vellum_authority_commit"]
+        ) is None:
+            raise RoutingError("active ownership authority commit is invalid")
+        if not isinstance(activation.get("authority_record_path"), str) or RECORD_PATH.fullmatch(
+            activation["authority_record_path"]
+        ) is None:
+            raise RoutingError("active ownership authority record is invalid")
+        if not isinstance(activation.get("initial_transition_event"), str) or EVENT_ID.fullmatch(
+            activation["initial_transition_event"]
+        ) is None:
+            raise RoutingError("active ownership transition event is invalid")
+        if activation.get("accepted_by") != "@danielraffel":
+            raise RoutingError("active ownership acceptance owner differs")
+        _utc_timestamp(activation.get("accepted_at"), "ownership activation accepted_at")
+
+    slices = projection.get("slices")
+    if not isinstance(slices, list) or not slices:
+        raise RoutingError("ownership projection slices must be a non-empty array")
+    seen_ids: set[str] = set()
+    for index, item in enumerate(slices):
+        row = _strict_keys(
+            item,
+            {"id", "state", "paths", "authority"},
+            f"ownership projection slices[{index}]",
+        )
+        slice_id = row.get("id")
+        if (
+            not isinstance(slice_id, str)
+            or SLICE_ID.fullmatch(slice_id) is None
+            or slice_id in seen_ids
+        ):
+            raise RoutingError("ownership projection slice id is invalid or duplicated")
+        seen_ids.add(slice_id)
+        slice_state = row.get("state")
+        if slice_state not in {
+            "pulp-authoritative-untransferred",
+            "framework-authoritative-transferred",
+            "framework-reimplemented-no-transfer",
+            "pulp-only",
+            "excluded",
+        }:
+            raise RoutingError(f"ownership projection slice {slice_id} state is invalid")
+        paths = row.get("paths")
+        if not isinstance(paths, list) or not paths or paths != sorted(set(paths)):
+            raise RoutingError(f"ownership projection slice {slice_id} paths are invalid")
+        for path in paths:
+            if (
+                not isinstance(path, str)
+                or not path
+                or path.startswith(("/", "-"))
+                or "\\" in path
+                or ".." in Path(path).parts
+            ):
+                raise RoutingError(f"ownership projection slice {slice_id} path is unsafe")
+        authority = row.get("authority")
+        if slice_state == "framework-authoritative-transferred":
+            authority = _strict_keys(
+                authority,
+                {"event_id", "vellum_commit", "counterpart", "accepted_by", "accepted_at"},
+                f"ownership projection slice {slice_id} authority",
+            )
+            if (
+                not isinstance(authority.get("event_id"), str)
+                or EVENT_ID.fullmatch(authority["event_id"]) is None
+                or not isinstance(authority.get("vellum_commit"), str)
+                or SHA40.fullmatch(authority["vellum_commit"]) is None
+                or not isinstance(authority.get("counterpart"), str)
+                or RECORD_PATH.fullmatch(authority["counterpart"]) is None
+                or authority.get("accepted_by") != "@danielraffel"
+            ):
+                raise RoutingError(f"ownership projection slice {slice_id} authority is invalid")
+            _utc_timestamp(
+                authority.get("accepted_at"),
+                f"ownership projection slice {slice_id} authority accepted_at",
+            )
+        elif authority is not None:
+            raise RoutingError(f"ownership projection slice {slice_id} has unexpected authority")
 
 
 def validate_projection(
@@ -200,10 +348,7 @@ def validate_projection(
         raise RoutingError("ownership projection framework repository differs")
     if projection.get("freeze_owner") != "@danielraffel":
         raise RoutingError("ownership projection freeze owner differs")
-    if not isinstance(projection.get("activation"), dict):
-        raise RoutingError("ownership projection activation is unavailable")
-    if not isinstance(projection.get("slices"), list):
-        raise RoutingError("ownership projection slices are unavailable")
+    _validate_base_projection(projection)
     if schema == 2:
         if require_expansion:
             raise RoutingError("ownership projection has no accepted exact-route expansion")

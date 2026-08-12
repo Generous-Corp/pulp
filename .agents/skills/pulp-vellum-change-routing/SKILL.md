@@ -37,6 +37,11 @@ other unlisted Pulp paths remain Pulp-owned, and unlisted Vellum paths remain
 Vellum-owned. A result with both owners is `coordinated`, not permission to copy
 either repository's product-specific code into the other.
 
+The exact routes are independently frozen in
+`references/approved-exact-routes.v1.json`, bound to the reviewed matrix,
+amendment, and route-set digests. A projection cannot substitute a newly
+self-hashed route set.
+
 ## Fail closed
 
 Stop when the command reports a malformed projection, unsafe path, duplicate

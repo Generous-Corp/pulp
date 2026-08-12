@@ -23,6 +23,7 @@ from routing_evidence import (
     RoutingError,
     VELLUM_REPOSITORY,
     canonical_sha256,
+    approved_routes,
     load_projection,
     route_changes,
     validate_expansion,
@@ -40,38 +41,33 @@ TRANSFERRED_PULP_PATH = "core/canvas/src/skia_canvas.cpp"
 
 
 def fixture_projection() -> dict:
-    routes = [
-        {
-            "repository": PULP_REPOSITORY,
-            "path": PULP_EXACT_PATH,
-            "owner": PULP_REPOSITORY,
-            "cell_roles": [
-                {"cell_id": "output.cli-and-immutable-runtime-assets", "role": "pulp_implementation"}
-            ],
-        },
-        {
-            "repository": VELLUM_REPOSITORY,
-            "path": VELLUM_EXACT_PATH,
-            "owner": VELLUM_REPOSITORY,
-            "cell_roles": [
-                {
-                    "cell_id": "output.cli-and-immutable-runtime-assets",
-                    "role": "vellum_future_implementation",
-                }
-            ],
-        },
-    ]
+    routes = approved_routes()
+    authority = {
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "accepted_by": "@danielraffel",
+        "accepted_at": "2026-07-24T12:03:00Z",
+    }
     return {
         "schema_version": 3,
         "framework_repository": VELLUM_REPOSITORY,
         "freeze_owner": "@danielraffel",
-        "activation": {"state": "active"},
+        "activation": {
+            "state": "active",
+            "pulp_extraction_base": "2ccff748f0d59da34b01ce1fbceabcf19f452731",
+            "vellum_authority_commit": authority["vellum_commit"],
+            "authority_record_path": authority["counterpart"],
+            "initial_transition_event": authority["event_id"],
+            "accepted_by": authority["accepted_by"],
+            "accepted_at": authority["accepted_at"],
+        },
         "slices": [
             {
                 "id": "canvas-kernel",
                 "state": "framework-authoritative-transferred",
                 "paths": [TRANSFERRED_PULP_PATH],
-                "authority": {},
+                "authority": authority,
             }
         ],
         "expansions": [
@@ -103,6 +99,22 @@ def case_authority_load() -> None:
         projection, loaded = load_projection(path, require_expansion=True)
         assert projection["schema_version"] == 3
         assert loaded is not None and loaded["id"] == EXPANSION_ID
+    malformed = fixture_projection()
+    malformed["activation"] = {}
+    try:
+        validate_projection(malformed, require_expansion=True)
+    except RoutingError as error:
+        assert "activation" in str(error)
+    else:
+        raise AssertionError("malformed activation authority was accepted")
+    malformed = fixture_projection()
+    malformed["slices"][0]["authority"] = {}
+    try:
+        validate_projection(malformed, require_expansion=True)
+    except RoutingError as error:
+        assert "authority" in str(error)
+    else:
+        raise AssertionError("malformed slice authority was accepted")
 
 
 def case_cli_contract() -> None:
@@ -168,7 +180,16 @@ def case_conflicting_owner_fail_closed() -> None:
 def case_exact_projection_expansion() -> None:
     value = expansion()
     assert value["route_set_sha256"] == canonical_sha256(value["routes"])
-    assert len(value["routes"]) == 2
+    assert len(value["routes"]) == 223
+    changed = copy.deepcopy(value)
+    changed["routes"][0]["path"] = "compat/forged.json"
+    changed["route_set_sha256"] = canonical_sha256(changed["routes"])
+    try:
+        validate_expansion(changed)
+    except RoutingError as error:
+        assert "approved exact boundary" in str(error)
+    else:
+        raise AssertionError("self-hashed routes outside the approved boundary were accepted")
 
 
 def case_generic_pulp_route() -> None:

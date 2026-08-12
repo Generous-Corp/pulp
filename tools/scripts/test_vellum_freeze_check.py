@@ -63,19 +63,7 @@ def mapping(state: str = "active", slice_state: str = "framework-authoritative-t
 def schema3_mapping():
     value = mapping()
     routing = freeze._routing_evidence_module()
-    routes = [
-        {
-            "repository": routing.PULP_REPOSITORY,
-            "path": "tools/scripts/package_cli.py",
-            "owner": routing.PULP_REPOSITORY,
-            "cell_roles": [
-                {
-                    "cell_id": "output.cli-and-immutable-runtime-assets",
-                    "role": "pulp_implementation",
-                }
-            ],
-        }
-    ]
+    routes = routing.approved_routes()
     value["schema_version"] = 3
     value["expansions"] = [
         {
