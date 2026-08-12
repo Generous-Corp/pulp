@@ -504,7 +504,10 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     std::array<std::size_t, kSectionCount> offsets{};
     std::array<std::size_t, kSectionCount> lengths{};
     std::uint64_t tiled = 0;
-    std::size_t previous_known_section = kSectionCount;
+    std::uint32_t previous_section_id = 0;
+    bool noncanonical_section_order = false;
+    std::uint32_t noncanonical_section_id = 0;
+    std::uint32_t noncanonical_previous_id = 0;
 
     for (std::uint32_t i = 0; i < header.section_count; ++i) {
         ProgramWireSectionEntry entry;
@@ -518,6 +521,12 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
             return ViewResult(runtime::Err(Error{Code::SectionsNotTiled, entry.id, entry.offset}));
         if (entry.offset % kProgramWireAlignment != 0)
             return ViewResult(runtime::Err(Error{Code::SectionMisaligned, entry.id, entry.offset}));
+        if (i != 0 && entry.id <= previous_section_id && !noncanonical_section_order) {
+            noncanonical_section_order = true;
+            noncanonical_section_id = entry.id;
+            noncanonical_previous_id = previous_section_id;
+        }
+        previous_section_id = entry.id;
         tiled = entry.offset + entry.bytes;
 
         std::size_t known = kSectionCount;
@@ -531,10 +540,6 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         }
         if (seen[known])
             return ViewResult(runtime::Err(Error{Code::DuplicateSection, entry.id, i}));
-        if (previous_known_section != kSectionCount && known < previous_known_section)
-            return ViewResult(runtime::Err(Error{Code::NonCanonicalSectionOrder, entry.id,
-                                                 section_id(kSections[previous_known_section])}));
-        previous_known_section = known;
         if (entry.bytes % kRecordSizes[known] != 0)
             return ViewResult(runtime::Err(Error{Code::BadRecordSize, entry.id, entry.bytes}));
         seen[known] = true;
@@ -546,6 +551,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     for (std::size_t k = 0; k < kSectionCount; ++k)
         if (!seen[k])
             return ViewResult(runtime::Err(Error{Code::MissingSection, section_id(kSections[k])}));
+    if (noncanonical_section_order)
+        return ViewResult(runtime::Err(Error{Code::NonCanonicalSectionOrder,
+                                             noncanonical_section_id, noncanonical_previous_id}));
 
     const auto count_of = [&](ProgramWireSection section) {
         const auto index = WireCounts::index_of(section);
@@ -1007,6 +1015,13 @@ ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
     return nullptr;
 }
 
+bool same_cursor_identity(const ProgramWireLaneIdentity& lhs,
+                          const ProgramWireLaneIdentity& rhs) noexcept {
+    return lhs.producer_epoch == rhs.producer_epoch && lhs.track_id == rhs.track_id &&
+           lhs.lane_id == rhs.lane_id && lhs.lane_generation == rhs.lane_generation &&
+           lhs.instance_token == rhs.instance_token;
+}
+
 bool same_publication_identity(const ProgramWireView& lhs, const ProgramWireView& rhs) noexcept {
     if (lhs.producer_epoch() != rhs.producer_epoch() ||
         lhs.program().generation != rhs.program().generation ||
@@ -1150,7 +1165,7 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
                 // reaching this would mean internal state corruption.
                 std::abort();
             }
-            if (!(state->identity == identity))
+            if (!same_cursor_identity(state->identity, identity))
                 state->cursor.reset();
             state->identity = identity;
         }

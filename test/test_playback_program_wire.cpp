@@ -736,6 +736,42 @@ TEST_CASE("program wire skips an unknown section only when the writer marked it 
     REQUIRE(decode_program_wire(bytes));
 }
 
+TEST_CASE("optional unknown sections participate in canonical directory order",
+          "[playback][wire]") {
+    EncodedFixture fixture;
+    WireBuffer expanded(fixture.size + sizeof(ProgramWireSectionEntry));
+    ProgramWireHeader header;
+    std::memcpy(&header, fixture.bytes().data(), sizeof(header));
+    ++header.section_count;
+    const auto expanded_payload_at =
+        sizeof(ProgramWireHeader) + header.section_count * sizeof(ProgramWireSectionEntry);
+    std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader),
+                fixture.bytes().data() + sizeof(ProgramWireHeader),
+                9 * sizeof(ProgramWireSectionEntry));
+    ProgramWireSectionEntry optional;
+    optional.id = 0;
+    optional.flags = kProgramWireSectionOptional;
+    optional.offset = header.payload_bytes;
+    std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader) +
+                    9 * sizeof(ProgramWireSectionEntry),
+                &optional, sizeof(optional));
+    std::memcpy(expanded.span().data() + expanded_payload_at, fixture.bytes().data() + kPayloadAt,
+                header.payload_bytes);
+    header.body_checksum = program_wire_checksum(expanded.span().subspan(sizeof(header)));
+    std::memcpy(expanded.span().data(), &header, sizeof(header));
+    auto descending = decode_program_wire(expanded.span());
+    REQUIRE_FALSE(descending);
+    REQUIRE(descending.error().code == ProgramWireErrorCode::NonCanonicalSectionOrder);
+
+    optional.id = 10;
+    std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader) +
+                    9 * sizeof(ProgramWireSectionEntry),
+                &optional, sizeof(optional));
+    header.body_checksum = program_wire_checksum(expanded.span().subspan(sizeof(header)));
+    std::memcpy(expanded.span().data(), &header, sizeof(header));
+    REQUIRE(decode_program_wire(expanded.span()));
+}
+
 TEST_CASE("program wire rejects records that index outside their section", "[playback][wire]") {
     EncodedFixture fixture;
     const auto bytes = fixture.bytes();
@@ -1336,6 +1372,50 @@ TEST_CASE("wire automation publication identity re-adopts by instance token",
     std::fill(first->span().begin(), first->span().end(), std::byte{0xA5});
     REQUIRE(consumer.render(snapshot, output).code == ProgramWireConsumerCode::Ok);
     REQUIRE(event_storage[0][0].value == -0.5f);
+}
+
+TEST_CASE("wire automation preserves stable lane cursors across outer generations",
+          "[playback][wire][consumer]") {
+    const auto map = wire_tempo_map();
+    auto first = encode_project_bytes(wire_project(), map);
+    auto first_view = take(decode_program_wire(first->span()));
+    WireBuffer next(first->span().size());
+    std::memcpy(next.span().data(), first->span().data(), first->span().size());
+    const auto next_program_generation = first_view.program().generation + 1u;
+    std::memcpy(next.span().data() + kPayloadAt + offsetof(ProgramWireProgramRecord, generation),
+                &next_program_generation, sizeof(next_program_generation));
+    const auto [track_section, track_bytes] = section_span(next.span(), ProgramWireSection::Tracks);
+    REQUIRE(track_bytes >= sizeof(ProgramWireTrackRecord));
+    const auto next_track_generation = first_view.tracks().front().generation + 1u;
+    std::memcpy(next.span().data() + track_section + offsetof(ProgramWireTrackRecord, generation),
+                &next_track_generation, sizeof(next_track_generation));
+    reseal(next.span());
+    REQUIRE(decode_program_wire(next.span()));
+
+    std::array<ProgramWireLaneState, 3> state;
+    ProgramWireAutomationConsumer consumer{state};
+    REQUIRE(consumer.adopt(ProgramWireBytePin{first->span(), 61}, *map, kTempoPoints).adoption ==
+            ProgramWireAdoption::Adopted);
+    MasterTransport clock;
+    MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    config.initially_playing = false;
+    REQUIRE(clock.prepare(*map, config) == TransportError::None);
+    std::array<std::array<AutomationBlockEvent, 64>, 3> event_storage;
+    std::array<ProgramWireAutomationLaneOutput, 3> output;
+    for (std::size_t index = 0; index < output.size(); ++index)
+        output[index].events = event_storage[index];
+    TransportSnapshot snapshot;
+    REQUIRE(clock.begin_block(64, snapshot) == TransportError::None);
+    REQUIRE(consumer.render(snapshot, output).code == ProgramWireConsumerCode::Ok);
+    REQUIRE(output[0].result.emitted_events == 1);
+
+    auto adopted = consumer.adopt(ProgramWireBytePin{next.span(), 62}, *map, kTempoPoints);
+    REQUIRE(adopted.adoption == ProgramWireAdoption::Adopted);
+    REQUIRE(adopted.returned_pin.owner_token() == 61);
+    REQUIRE(clock.begin_block(64, snapshot) == TransportError::None);
+    REQUIRE(consumer.render(snapshot, output).code == ProgramWireConsumerCode::Ok);
+    REQUIRE(output[0].result.emitted_events == 0);
 }
 
 TEST_CASE("wire decode adoption and production cursor render are realtime safe",
