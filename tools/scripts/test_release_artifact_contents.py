@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 import re
 import tarfile
 import tempfile
@@ -350,6 +351,15 @@ def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
 
 
 class ReleaseArtifactContentsTests(unittest.TestCase):
+    def test_relocated_backfill_verifier_resolves_registry_from_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+            os.environ, {"GITHUB_WORKSPACE": str(ROOT)}
+        ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
+            self.assertEqual(
+                rac._control_registry_digest(),
+                "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+            )
+
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
         runtime_manifest = (
             ROOT

@@ -528,10 +528,8 @@ def require_mode(archive: Archive, name: str, expected: int) -> None:
 
 
 def _control_registry_digest() -> str:
-    path = (
-        Path(__file__).parents[2]
-        / "inspect/include/pulp/inspect/control_registry_digest.inc"
-    )
+    checkout = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
+    path = checkout / "inspect/include/pulp/inspect/control_registry_digest.inc"
     try:
         contents = path.read_text(encoding="utf-8")
     except OSError as exc:
