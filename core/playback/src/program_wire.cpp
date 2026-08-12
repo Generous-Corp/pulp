@@ -1158,6 +1158,22 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
             return result;
         }
     }
+    if (active_pin_ && candidate_view.producer_epoch() == active_view_.producer_epoch()) {
+        for (const auto& track : candidate_view.tracks()) {
+            for (const auto& lane : candidate_view.automation_lanes_for(track)) {
+                const auto* active = find_lane_state(lane_state_, {track.id}, {lane.lane_id});
+                if (active != nullptr &&
+                    active->identity.producer_epoch == candidate_view.producer_epoch() &&
+                    lane.generation < active->identity.lane_generation) {
+                    reject(ProgramWireConsumerCode::StalePublication,
+                           {ProgramWireErrorCode::StaleLaneGeneration,
+                            static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                            lane.lane_id});
+                    return result;
+                }
+            }
+        }
+    }
 
     if (active_pin_ && candidate_view.producer_epoch() == active_view_.producer_epoch() &&
         candidate_view.program().generation < active_view_.program().generation) {

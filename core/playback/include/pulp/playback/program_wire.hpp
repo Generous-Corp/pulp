@@ -259,6 +259,8 @@ enum class ProgramWireErrorCode : std::uint8_t {
     AutomationTargetUnresolved,
     /// Two lanes in one track drive the same device parameter or mixer control.
     DuplicateAutomationTarget,
+    /// A publication from the active producer regresses one lane generation.
+    StaleLaneGeneration,
     /// A record holds a value outside its enumeration.
     InvalidEnum,
     /// A note modifier is not a combination the document model admits — a zero
