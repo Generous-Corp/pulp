@@ -184,6 +184,25 @@ std::shared_ptr<const Project> six_lane_project() {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+std::shared_ptr<const Project> empty_lane_project() {
+    auto curve = take(AutomationCurve::create({}));
+    TrackInput track;
+    track.id = {10};
+    track.name = "empty automation";
+    track.device_chain = {{{40}}};
+    track.automation_lanes.push_back(take(AutomationLane::create(
+        {50}, DeviceParameterTarget{{40}, 7}, std::move(curve))));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, std::vector<Track>{take(Track::create(std::move(track)))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "empty automation";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 /// One track playing one audio clip, which is the program shape this version of
 /// the wire deliberately does not represent.
 std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
@@ -1354,6 +1373,31 @@ TEST_CASE("wire automation consumer matches every direct production cursor lane"
                            wire_events[index].begin() + output[index].result.emitted_events,
                            direct_events[index].begin()));
     }
+}
+
+TEST_CASE("program wire round trips an empty automation lane", "[playback][wire][consumer]") {
+    const auto map = wire_tempo_map();
+    auto bytes = encode_project_bytes(empty_lane_project(), map);
+    const auto view = take(decode_program_wire(bytes->span()));
+    REQUIRE(view.automation_lanes().size() == 1);
+    REQUIRE(view.automation_lanes().front().segment_count == 0);
+
+    std::array<ProgramWireLaneState, 1> state;
+    ProgramWireAutomationConsumer consumer{state, 1};
+    REQUIRE(consumer.adopt(ProgramWireBytePin{bytes->span(), 69}, *map, kTempoPoints).adoption ==
+            ProgramWireAdoption::Adopted);
+    MasterTransport clock;
+    MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    config.initially_playing = true;
+    REQUIRE(clock.prepare(*map, config) == TransportError::None);
+    TransportSnapshot snapshot;
+    REQUIRE(clock.begin_block(64, snapshot) == TransportError::None);
+    std::array<AutomationBlockEvent, 64> events;
+    std::array<ProgramWireAutomationLaneOutput, 1> output{{{.events = events}}};
+    const auto rendered = consumer.render(snapshot, output);
+    REQUIRE(rendered.code == ProgramWireConsumerCode::Ok);
+    REQUIRE(output.front().result.emitted_events == 0);
 }
 
 TEST_CASE("wire automation consumer bounds tracks without automation",

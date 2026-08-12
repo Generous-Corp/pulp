@@ -774,8 +774,7 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (lane.instance_token == 0)
             return ViewResult(runtime::Err(Error{
                 Code::InvalidInstanceToken, section_id(ProgramWireSection::AutomationLanes), l}));
-        if (lane.lane_id == 0 || lane.generation == 0 || lane.segment_count == 0 ||
-            !std::isfinite(lane.leading_value))
+        if (lane.lane_id == 0 || lane.generation == 0 || !std::isfinite(lane.leading_value))
             return ViewResult(runtime::Err(
                 Error{Code::MalformedSegment, section_id(ProgramWireSection::AutomationLanes), l}));
         if (lane.target_kind > static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) ||
@@ -809,6 +808,8 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
 
     for (const auto& lane : view.automation_lanes_) {
         const auto segments = view.segments_for(lane);
+        if (segments.empty())
+            continue;
         for (std::size_t index = 1; index < segments.size(); ++index) {
             const auto& previous = segments[index - 1u];
             const auto& current = segments[index];
@@ -1176,7 +1177,8 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
     };
 
     if (const auto capacity = wire_consumer_capacity_error(
-            candidate.bytes(), track_capacity_, lane_state_.size(), wire_byte_capacity_)) {
+            candidate.bytes(), track_capacity_,
+            std::min(lane_state_.size(), active_lanes_.size()), wire_byte_capacity_)) {
         reject(ProgramWireConsumerCode::StateCapacityExceeded, *capacity);
         return result;
     }
@@ -1191,7 +1193,8 @@ ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
         reject(ProgramWireConsumerCode::TempoMapMismatch, {ProgramWireErrorCode::TempoMapMismatch});
         return result;
     }
-    if (candidate_view.automation_lanes().size() > lane_state_.size()) {
+    if (candidate_view.automation_lanes().size() > lane_state_.size() ||
+        candidate_view.automation_lanes().size() > active_lanes_.size()) {
         reject(ProgramWireConsumerCode::StateCapacityExceeded,
                {ProgramWireErrorCode::InvalidLimits,
                 static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
