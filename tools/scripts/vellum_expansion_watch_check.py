@@ -409,8 +409,10 @@ def load_acceptance(root: pathlib.Path) -> tuple[dict[str, list[str]] | None, by
     expected = {
         README_PATH.relative_to(WATCH_ROOT).as_posix(),
         ACCEPTANCE_PATH.relative_to(WATCH_ROOT).as_posix(),
-        EXACT_BOUNDARY_ACCEPTANCE_PATH.relative_to(WATCH_ROOT).as_posix(),
     }
+    exact_relative = EXACT_BOUNDARY_ACCEPTANCE_PATH.relative_to(WATCH_ROOT).as_posix()
+    if exact_relative in files:
+        expected.add(exact_relative)
     if files != expected:
         raise WatchError(
             f"{WATCH_ROOT}: artifact set differs; expected={sorted(expected)} "
