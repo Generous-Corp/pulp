@@ -1544,7 +1544,7 @@ jobs:
           trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
           api_ok=false
           for attempt in 1 2 3; do
-            if gh api --paginate --slurp \
+            if gh api --paginate \
               "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
               >"$jobs_json" 2>"$jobs_err"; then
               api_ok=true
@@ -1569,9 +1569,19 @@ jobs:
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as handle:
-              pages = json.load(handle)
-          if not isinstance(pages, list):
-              raise SystemExit("jobs API response was not a paginated list")
+              payload = handle.read()
+          decoder = json.JSONDecoder()
+          pages = []
+          offset = 0
+          while offset < len(payload):
+              while offset < len(payload) and payload[offset].isspace():
+                  offset += 1
+              if offset == len(payload):
+                  break
+              page, offset = decoder.raw_decode(payload, offset)
+              pages.append(page)
+          if not pages or not all(isinstance(page, dict) for page in pages):
+              raise SystemExit("jobs API response did not contain object pages")
           matches = [
               job
               for page in pages
@@ -1626,7 +1636,7 @@ jobs:
           trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
           api_ok=false
           for attempt in 1 2 3; do
-            if gh api --paginate --slurp \
+            if gh api --paginate \
               "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
               >"$jobs_json" 2>"$jobs_err"; then
               api_ok=true
@@ -1649,9 +1659,19 @@ jobs:
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as handle:
-              pages = json.load(handle)
-          if not isinstance(pages, list):
-              raise SystemExit("jobs API response was not a paginated list")
+              payload = handle.read()
+          decoder = json.JSONDecoder()
+          pages = []
+          offset = 0
+          while offset < len(payload):
+              while offset < len(payload) and payload[offset].isspace():
+                  offset += 1
+              if offset == len(payload):
+                  break
+              page, offset = decoder.raw_decode(payload, offset)
+              pages.append(page)
+          if not pages or not all(isinstance(page, dict) for page in pages):
+              raise SystemExit("jobs API response did not contain object pages")
           matches = [
               job
               for page in pages

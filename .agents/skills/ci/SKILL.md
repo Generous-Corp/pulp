@@ -341,8 +341,8 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
    action. This alone avoids chasing main-side breakage. Its check-run query
    must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
-   bare `--paginate` concatenates page documents and breaks JSON decoding past
-   100 check runs.
+   bare `--paginate` concatenates page documents and breaks its single-document
+   JSON decoding past 100 check runs.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
    `macos` gate runs on the **fast local JIT VM pool** selected by
    `pulp-gate-fast` (M3 + M5), which is usually idle. Confirm with:
@@ -1352,7 +1352,9 @@ uses, or the golden warms a cache the real jobs never touch.
   resume build polling. PR/dispatch runs retain the combined matrix, so advisory
   legs may delay the reporter but `needs.build.result` must never determine it.
   The merge-group report uses the short-lived preamble pool and preserves the
-  stable required context name.
+  stable required context name. These two reporters intentionally use bare
+  `gh api --paginate` and decode the concatenated JSON object stream; do not add
+  `--slurp`, because older preamble images reject that newer flag.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes

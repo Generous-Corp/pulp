@@ -881,6 +881,11 @@ all fail closed. The query is retried three times only for transport failure;
 there is no fixed-duration build poll that can expire before a queued macOS leg
 starts.
 
+The reporters use `gh api --paginate` and decode its concatenated JSON object
+stream directly. Keep that compatibility boundary: some preamble images support
+pagination but do not provide the newer `--slurp` flag. The parser still reads
+every page and rejects an empty response or any non-object page.
+
 Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
 Linux or Windows work can therefore delay when the reporter starts, but neither
 `needs.build.result` nor an advisory leg's conclusion determines the required
