@@ -68,6 +68,32 @@ def event(*families: str, event_id: str = "20260811-render-watch-change") -> dic
     }
 
 
+def refresh_event() -> dict:
+    return {
+        "schema_version": 1,
+        "kind": "authority-expansion-watch-refresh",
+        "event_id": "20260813-exact-boundary-audit-refresh",
+        "created_at": "2026-08-13T16:02:12Z",
+        "acceptance_id": "full-design-import-render-v1-pulp-watch",
+        "acceptance_sha256": watch.EXPECTED_ACCEPTANCE_SHA256,
+        "capability_families": [],
+        "rationale": (
+            "Record the current-main exact-boundary audit refresh without "
+            "rewriting the immutable acceptance or transferring authority."
+        ),
+        "tests": ["vellum-expansion-watch"],
+        "disposition": "watch-only-no-authority",
+        "authority_effect": "none",
+        "refresh": {
+            "audited_at": "2026-08-13T16:02:12Z",
+            "pulp_main_commit": "f856cbfad79554025d6c70f604f6af835d55ad3a",
+            "open_pr_audit_complete": True,
+            "open_pr_rows": [],
+            "open_vellum_overlap_count": 0,
+        },
+    }
+
+
 def run(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*args],
@@ -295,6 +321,19 @@ class Tests(unittest.TestCase):
             report["affected_families"],
             ["design-ir-contract", "render-assets-and-backends"],
         )
+
+    def test_refresh_event_is_append_only_evidence_without_scope_claim(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        write_json(
+            repo / watch.EVENT_ROOT / "20260813-exact-boundary-audit-refresh.json",
+            refresh_event(),
+        )
+        head = self.commit(repo, "record exact-boundary audit refresh")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
+        self.assertEqual(report["affected_families"], [])
 
     def test_event_with_extra_family_fails(self) -> None:
         temporary, repo = self.git_repo()

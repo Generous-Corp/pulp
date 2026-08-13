@@ -487,7 +487,7 @@ def _affected(scopes: dict[str, list[str]], paths: set[str]) -> set[str]:
 
 
 def validate_event(value: Any, filename: str) -> set[str]:
-    fields = {
+    common_fields = {
         "schema_version",
         "kind",
         "event_id",
@@ -500,11 +500,15 @@ def validate_event(value: Any, filename: str) -> set[str]:
         "disposition",
         "authority_effect",
     }
+    kind = value.get("kind") if isinstance(value, dict) else None
+    fields = set(common_fields)
+    if kind == "authority-expansion-watch-refresh":
+        fields.add("refresh")
     _exact_keys(value, fields, filename)
     if value["schema_version"] != 1 or type(value["schema_version"]) is not int:
         raise WatchError(f"{filename}: schema_version must be integer 1")
     expected = {
-        "kind": "authority-expansion-watch-change",
+        "kind": kind,
         "acceptance_id": "full-design-import-render-v1-pulp-watch",
         "acceptance_sha256": EXPECTED_ACCEPTANCE_SHA256,
         "disposition": "watch-only-no-authority",
@@ -522,7 +526,35 @@ def validate_event(value: Any, filename: str) -> set[str]:
     if not isinstance(value["rationale"], str) or len(value["rationale"].strip()) < 24:
         raise WatchError(f"{filename}: rationale is too short")
     _strings(value["tests"], f"{filename}.tests")
-    families = _strings(value["capability_families"], f"{filename}.capability_families")
+    families = value["capability_families"]
+    if kind == "authority-expansion-watch-refresh":
+        if families != []:
+            raise WatchError(f"{filename}: refresh events cannot claim capability families")
+        refresh = value["refresh"]
+        _exact_keys(
+            refresh,
+            {
+                "audited_at",
+                "pulp_main_commit",
+                "open_pr_audit_complete",
+                "open_pr_rows",
+                "open_vellum_overlap_count",
+            },
+            f"{filename}.refresh",
+        )
+        _utc(refresh["audited_at"], f"{filename}.refresh.audited_at")
+        if not SHA40.fullmatch(refresh["pulp_main_commit"]):
+            raise WatchError(f"{filename}.refresh.pulp_main_commit: expected full SHA")
+        if refresh["open_pr_audit_complete"] is not True:
+            raise WatchError(f"{filename}.refresh.open_pr_audit_complete: expected true")
+        if refresh["open_pr_rows"] != []:
+            raise WatchError(f"{filename}.refresh.open_pr_rows: expected empty audit")
+        if refresh["open_vellum_overlap_count"] != 0:
+            raise WatchError(
+                f"{filename}.refresh.open_vellum_overlap_count: expected zero"
+            )
+        return set()
+    families = _strings(families, f"{filename}.capability_families")
     if families != sorted(families) or not set(families) <= set(EXPECTED_SCOPES):
         raise WatchError(f"{filename}: capability_families must be sorted and known")
     return set(families)
