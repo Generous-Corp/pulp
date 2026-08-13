@@ -39,7 +39,12 @@ concurrency:
 
 jobs:
   version-skill-check:
-    runs-on: ubuntu-latest
+    # Default-hosted. The runner controller may prefer an approved healthy,
+    # disposable Mac Pro Shipyard pool for this unprivileged gate by setting the
+    # variable to a JSON runner name or label list. It must clear the variable
+    # when that pool is unhealthy so the ubuntu-latest fallback takes effect.
+    # Never reuse this seam for secret-bearing or pull_request_target jobs.
+    runs-on: ${{ fromJSON(vars.PULP_VERSION_SKILL_RUNS_ON_JSON || '"ubuntu-latest"') }}
     name: Enforce version & skill sync
 
     env:
@@ -287,6 +292,7 @@ jobs:
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
           python3 tools/scripts/test_config_doc_check.py
+          python3 tools/scripts/test_version_skill_runner_routing.py
           python3 tools/scripts/test_compat_aggregate.py
           python3 tools/scripts/test_screenshot_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py

@@ -163,6 +163,17 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 
 `.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge. Its `concurrency` uses **`cancel-in-progress: false`** (2026-07-21): because it posts the *required* `Enforce version & skill sync` check, cancelling an in-flight run under a churning main would leave that required check stuck at `cancelled` (never `success`), silently blocking merge. Do not flip a required-check gate back to `cancel-in-progress: true`.
 
+The required job defaults to GitHub-hosted `ubuntu-latest`. Version/Skill is an
+unprivileged `pull_request` and `merge_group` gate, so the runner controller
+should prefer a healthy approved disposable Mac Pro Shipyard pool by setting
+`PULP_VERSION_SKILL_RUNS_ON_JSON` to a JSON runner name or label list accepted
+by `runs-on`. The controller must clear the variable whenever that pool is
+unhealthy, restoring the hosted fallback. The variable is unset by default;
+this repository does not activate a self-hosted selector. Because pull requests
+execute the proposed tree, the local pool must remain isolated and disposable.
+Never apply this selector pattern to secret-bearing or `pull_request_target`
+jobs on generic local runners; those require a separate trusted design.
+
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
 
