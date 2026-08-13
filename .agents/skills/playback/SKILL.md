@@ -811,6 +811,28 @@ hand the program itself over some serialization of pointers.
 
 Things worth knowing before changing it:
 
+- **Consume pinned bytes, not a retained source program.**
+  `ProgramWireAutomationConsumer` takes a move-only `ProgramWireBytePin`,
+  validates the exact prepared `CompiledTempoMap` object and its source tempo
+  points, and returns the candidate pin on reject/unchanged or the retired pin
+  on adoption. The caller supplies fixed lane state and explicit track/byte
+  capacity; the consumer also enforces the separate
+  `kProgramWireMaximumAutomationLanes` whole-publication ceiling. A rejection
+  changes neither the active pin nor cursor state, so rejected and retired
+  buffers may be poisoned immediately after their pins return.
+- **Wire automation uses the production cursor and device boundary.** The
+  consumer adapts borrowed segment records to `AutomationProgramView`, then
+  runs the same `AutomationCursor` algorithm as an in-process
+  `AutomationProgram`. Adoption precomputes fixed-capacity lane/group topology;
+  block rendering uses the production mandatory-knot, optional coalescing,
+  per-device event, and aggregate work ceilings without allocation or locks.
+  This is automation parity only, not whole note/audio render parity.
+- **Publication identity is global per lane even when attachment moves.** The
+  active key includes producer epoch, track/lane identities, lane generation,
+  and instance token. A lane generation may not regress under the same producer
+  merely because the lane moved tracks; track identity controls cursor
+  continuity, not stale-publication detection. Empty automation lanes remain
+  valid and render no events.
 - **Decode allocates nothing.** Records are native-layout, eight-byte-multiple,
   eight-byte-aligned structs, so `decode_program_wire` hands back typed spans
   borrowed straight out of the buffer. That is why the format asserts
