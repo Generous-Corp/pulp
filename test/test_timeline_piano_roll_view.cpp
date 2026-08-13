@@ -12,8 +12,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -91,6 +93,30 @@ Project make_note_project() {
     return std::move(project).value();
 }
 
+Project make_modified_note_project() {
+    std::vector<NoteEvent> notes{
+        NoteEvent{kNoteA, {0}, {120}, 1000, 60, 0},
+        NoteEvent{kNoteB, {240}, {120}, 1000, 62, 0},
+        NoteEvent{kNoteC, {480}, {120}, 1000, 64, 0},
+    };
+    std::vector<NoteModifier> modifiers{
+        NoteModifier{kNoteB, 4096, 2, 1, 2, NoteConditionKind::EveryNth},
+    };
+    auto content = MidiContent::create(std::move(notes), std::move(modifiers), 0xBEEF);
+    REQUIRE(content);
+    auto authored = Clip::create(kClip, {0}, {kClipTicks}, std::move(content).value());
+    REQUIRE(authored);
+    auto track = Track::create(kTrack, "track", {std::move(authored).value()});
+    REQUIRE(track);
+    auto sequence =
+        Sequence::create(kSequence, "sequence", TickDuration{kClipTicks}, {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project =
+        Project::create({{1}, "project", 100, kSequence, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
 Project make_dense_note_project(bool include_long_note = false) {
     constexpr std::int64_t stride = 10;
     constexpr std::uint64_t first_note_id = 1'000;
@@ -149,6 +175,7 @@ PianoRollView& configure(PianoRollView& view, const Project& project,
     view.set_layout(unit_layout());
     view.set_host(&host);
     view.set_hit_metrics(HitMetrics::for_pointer(PointerType::mouse));
+    view.set_continuous_gestures(true);
     return view;
 }
 
@@ -198,6 +225,41 @@ struct Session {
             return false;
         return static_cast<bool>(session->submit(writer, std::move(lowered).value()));
     }
+
+    /// Lowers one continuous stream against each newly committed note array,
+    /// keeping every phase in one document undo group.
+    bool apply_continuous(std::span<const ValidatedNoteEditIntent> intents) {
+        const auto group = writer.allocate_undo_group_id();
+        for (const auto& intent : intents) {
+            EditIntentIdentity identity;
+            identity.transaction_id = writer.allocate_transaction_id();
+            identity.command_id = writer.allocate_command_id();
+            identity.expected_revision = session->revision();
+            identity.undo_group = group;
+
+            auto lowered = lower_note_edit_intent(intent, notes(), identity);
+            if (!lowered || !session->submit(writer, std::move(lowered).value()))
+                return false;
+        }
+        return true;
+    }
+};
+
+class CallbackNoteHost final : public NoteEditIntentHost {
+  public:
+    using Callback = std::function<IntentResult(const ValidatedNoteEditIntent&)>;
+
+    UiPlayhead playhead() const noexcept override { return {}; }
+    AuditionResult begin_audition(const AuditionRequest&) noexcept override { return {}; }
+    void end_audition(AuditionHandle) noexcept override {}
+
+    IntentResult submit_intent(const ValidatedNoteEditIntent& intent) noexcept override {
+        intents.push_back(intent);
+        return callback ? callback(intent) : IntentResult{};
+    }
+
+    Callback callback;
+    std::vector<ValidatedNoteEditIntent> intents;
 };
 
 SchemaRegistry builtin_registry() {
@@ -253,12 +315,12 @@ CanonicalHistory exercise_device_drag(PointerType pointer_type) {
         pointer.type = pointer_type;
         view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4, pointer);
 
-        REQUIRE(host.intents().size() == 1);
+        REQUIRE(host.intents().size() == 4);
         intents.assign(host.intents().begin(), host.intents().end());
     }
 
     REQUIRE(intents.front().value().kind == NoteEditIntentKind::Move);
-    REQUIRE(session.apply(intents.front()));
+    REQUIRE(session.apply_continuous(intents));
     const auto edited = canonical_project(session.project());
 
     REQUIRE(session.session->undo(session.writer));
@@ -319,10 +381,14 @@ TEST_CASE("Piano roll touch metrics distinguish an edge resize from a mouse body
 
     const auto mouse = exercise(PointerType::mouse);
     const auto touch = exercise(PointerType::touch);
-    REQUIRE(mouse.size() == 1);
-    REQUIRE(touch.size() == 1);
-    CHECK(mouse.front().value().kind == NoteEditIntentKind::Move);
-    CHECK(touch.front().value().kind == NoteEditIntentKind::Resize);
+    REQUIRE(mouse.size() == 4);
+    REQUIRE(touch.size() == 4);
+    CHECK(std::all_of(mouse.begin(), mouse.end(), [](const auto& intent) {
+        return intent.value().kind == NoteEditIntentKind::Move;
+    }));
+    CHECK(std::all_of(touch.begin(), touch.end(), [](const auto& intent) {
+        return intent.value().kind == NoteEditIntentKind::Resize;
+    }));
 }
 
 TEST_CASE("Piano roll click inserts a note that survives a serialize round trip",
@@ -368,12 +434,27 @@ TEST_CASE("Piano roll drag moves a note in time and pitch through the document",
     // 120px right and two rows up — two semitones, since y decreases upward.
     view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
 
-    // Commit-on-release: exactly one intent for the whole drag, closed.
-    REQUIRE(host.intents().size() == 1);
-    const auto& intent = host.intents().front().value();
-    REQUIRE(intent.kind == NoteEditIntentKind::Move);
-    REQUIRE(intent.phase == GesturePhase::Single);
-    REQUIRE(session.apply(host.intents().front()));
+    REQUIRE(host.intents().size() == 4);
+    const std::array phases{GesturePhase::Begin, GesturePhase::Update,
+                            GesturePhase::Update, GesturePhase::End};
+    const std::array starts{270, 300, 330, 360};
+    const std::array<std::uint8_t, 4> pitches{62, 63, 63, 64};
+    NoteEvent expected{kNoteB, {240}, {120}, 1000, 62, 0};
+    for (std::size_t index = 0; index < host.intents().size(); ++index) {
+        const auto& intent = host.intents()[index].value();
+        REQUIRE(intent.kind == NoteEditIntentKind::Move);
+        REQUIRE(intent.phase == phases[index]);
+        REQUIRE(intent.expected);
+        REQUIRE(intent.replacement);
+        CHECK(intent.expected->id == expected.id);
+        CHECK(intent.expected->start == expected.start);
+        CHECK(intent.expected->pitch == expected.pitch);
+        CHECK(intent.replacement->id == kNoteB);
+        CHECK(intent.replacement->start.value == starts[index]);
+        CHECK(intent.replacement->pitch == pitches[index]);
+        expected = *intent.replacement;
+    }
+    REQUIRE(session.apply_continuous(host.intents()));
 
     const auto restored = notes_after_round_trip(session.project());
     REQUIRE(restored.size() == 3);
@@ -396,9 +477,22 @@ TEST_CASE("Piano roll edge drag resizes a note through the document",
     // Note A runs [0, 120). Grab its trailing edge and drag out to tick 300.
     view.simulate_drag({120.0f, y_of(60)}, {300.0f, y_of(60)}, 4);
 
-    REQUIRE(host.intents().size() == 1);
-    REQUIRE(host.intents().front().value().kind == NoteEditIntentKind::Resize);
-    REQUIRE(session.apply(host.intents().front()));
+    REQUIRE(host.intents().size() == 4);
+    const std::array phases{GesturePhase::Begin, GesturePhase::Update,
+                            GesturePhase::Update, GesturePhase::End};
+    const std::array durations{165, 210, 255, 300};
+    NoteEvent expected{kNoteA, {0}, {120}, 1000, 60, 0};
+    for (std::size_t index = 0; index < host.intents().size(); ++index) {
+        const auto& intent = host.intents()[index].value();
+        REQUIRE(intent.kind == NoteEditIntentKind::Resize);
+        REQUIRE(intent.phase == phases[index]);
+        REQUIRE(intent.expected);
+        REQUIRE(intent.replacement);
+        CHECK(intent.expected->duration == expected.duration);
+        CHECK(intent.replacement->duration.value == durations[index]);
+        expected = *intent.replacement;
+    }
+    REQUIRE(session.apply_continuous(host.intents()));
 
     const auto restored = notes_after_round_trip(session.project());
     const auto* resized = find_note(restored, kNoteA);
@@ -407,6 +501,185 @@ TEST_CASE("Piano roll edge drag resizes a note through the document",
     // A resize moves the trailing edge only.
     CHECK(resized->start.value == 0);
     CHECK(resized->pitch == 60);
+}
+
+TEST_CASE("Piano roll shift drag emits exact continuous velocity payloads",
+          "[timeline][piano-roll][continuous]") {
+    auto session = Session::create(make_note_project());
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    configure(view, session.project(), host);
+
+    pulp::view::View::SimulatedPointer pointer;
+    pointer.modifiers = pulp::view::kModShift;
+    view.simulate_drag({250.0f, y_of(62)}, {250.0f, y_of(62) - 40.0f}, 4, pointer);
+
+    REQUIRE(host.intents().size() == 4);
+    const std::array phases{GesturePhase::Begin, GesturePhase::Update,
+                            GesturePhase::Update, GesturePhase::End};
+    const std::array velocities{2280, 3560, 4840, 6120};
+    NoteEvent expected{kNoteB, {240}, {120}, 1000, 62, 0};
+    for (std::size_t index = 0; index < host.intents().size(); ++index) {
+        const auto& intent = host.intents()[index].value();
+        REQUIRE(intent.kind == NoteEditIntentKind::SetVelocity);
+        REQUIRE(intent.phase == phases[index]);
+        REQUIRE(intent.expected);
+        REQUIRE(intent.replacement);
+        CHECK(intent.expected->velocity == expected.velocity);
+        CHECK(intent.replacement->velocity == velocities[index]);
+        CHECK(intent.replacement->id == kNoteB);
+        CHECK(intent.replacement->start.value == 240);
+        CHECK(intent.replacement->pitch == 62);
+        expected = *intent.replacement;
+    }
+    REQUIRE(session.apply_continuous(host.intents()));
+    CHECK(find_note(session.notes(), kNoteB)->velocity == 6120);
+}
+
+TEST_CASE("Piano roll one-sample drag preserves the closed Single path",
+          "[timeline][piano-roll][continuous]") {
+    const auto project = make_note_project();
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    configure(view, project, host);
+
+    view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 1);
+
+    REQUIRE(host.intents().size() == 1);
+    CHECK(host.intents().front().value().kind == NoteEditIntentKind::Move);
+    CHECK(host.intents().front().value().phase == GesturePhase::Single);
+    REQUIRE(host.intents().front().value().replacement);
+    CHECK(host.intents().front().value().replacement->start.value == 360);
+    CHECK(host.intents().front().value().replacement->pitch == 64);
+}
+
+TEST_CASE("Continuous note edits preserve identity modifiers seed and byte-exact history",
+          "[timeline][piano-roll][continuous]") {
+    auto session = Session::create(make_modified_note_project());
+    const auto baseline = canonical_project(session.project());
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    configure(view, session.project(), host);
+
+    view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
+    REQUIRE(session.apply_continuous(host.intents()));
+    const auto edited = canonical_project(session.project());
+    REQUIRE(edited != baseline);
+
+    const auto& edited_content = std::get<MidiContent>(session.project()
+                                                            .find_sequence(kSequence)
+                                                            ->find_track(kTrack)
+                                                            ->find_clip(kClip)
+                                                            ->content());
+    REQUIRE(edited_content.modifier_for(kNoteB));
+    CHECK(edited_content.modifier_for(kNoteB)->probability == 4096);
+    CHECK(edited_content.modifier_for(kNoteB)->ratchet_count == 2);
+    CHECK(edited_content.modifier_seed() == 0xBEEF);
+    CHECK(find_note(edited_content.notes(), kNoteB)->id == kNoteB);
+
+    REQUIRE(session.session->undo(session.writer));
+    CHECK(canonical_project(session.project()) == baseline);
+    REQUIRE(session.session->redo(session.writer));
+    CHECK(canonical_project(session.project()) == edited);
+}
+
+TEST_CASE("Cancelling an open piano roll transform restores canonical bytes",
+          "[timeline][piano-roll][continuous]") {
+    auto session = Session::create(make_note_project());
+    const auto baseline = canonical_project(session.project());
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    configure(view, session.project(), host);
+
+    view.on_mouse_down({250.0f, y_of(62)});
+    view.on_mouse_drag({280.0f, y_of(62)});
+    view.on_mouse_drag({310.0f, y_of(62)});
+    view.on_mouse_cancel({310.0f, y_of(62)});
+
+    REQUIRE(host.intents().size() == 2);
+    CHECK(host.intents()[0].value().phase == GesturePhase::Begin);
+    CHECK(host.intents()[1].value().phase == GesturePhase::Cancel);
+    REQUIRE(session.apply_continuous(host.intents()));
+    CHECK(canonical_project(session.project()) == baseline);
+}
+
+TEST_CASE("Continuous piano roll gestures survive accepted synchronous snapshot rebinds",
+          "[timeline][piano-roll][continuous]") {
+    auto session = Session::create(make_note_project());
+    const auto baseline = canonical_project(session.project());
+    CallbackNoteHost host;
+    PianoRollView view;
+    configure(view, session.project(), host);
+    const auto group = session.writer.allocate_undo_group_id();
+    std::uint64_t accepted_sequence = 0;
+    host.callback = [&](const ValidatedNoteEditIntent& intent) {
+        EditIntentIdentity identity;
+        identity.transaction_id = session.writer.allocate_transaction_id();
+        identity.command_id = session.writer.allocate_command_id();
+        identity.expected_revision = session.session->revision();
+        identity.undo_group = group;
+        auto lowered = lower_note_edit_intent(intent, session.notes(), identity);
+        if (!lowered || !session.session->submit(session.writer, std::move(lowered).value()))
+            return IntentResult{IntentStatus::Rejected, 0};
+        view.set_clip(&session.project(), kSequence, kTrack, kClip);
+        return IntentResult{IntentStatus::Accepted, ++accepted_sequence};
+    };
+
+    view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
+
+    REQUIRE(host.intents.size() == 4);
+    CHECK(host.intents.front().value().phase == GesturePhase::Begin);
+    CHECK(host.intents.back().value().phase == GesturePhase::End);
+    CHECK_FALSE(view.gesture_open());
+    CHECK(find_note(session.notes(), kNoteB)->start.value == 360);
+    CHECK(find_note(session.notes(), kNoteB)->pitch == 64);
+    const auto edited = canonical_project(session.project());
+    REQUIRE(session.session->undo(session.writer));
+    CHECK(canonical_project(session.project()) == baseline);
+    REQUIRE(session.session->redo(session.writer));
+    CHECK(canonical_project(session.project()) == edited);
+}
+
+TEST_CASE("Piano roll closes through Single when the host does not accept Begin",
+          "[timeline][piano-roll][continuous]") {
+    for (const auto status : {IntentStatus::Deferred, IntentStatus::Rejected}) {
+        const auto project = make_note_project();
+        ScriptedUiHost<ValidatedNoteEditIntent> host;
+        host.set_intent_status(status);
+        PianoRollView view;
+        configure(view, project, host);
+
+        view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
+
+        REQUIRE(host.intents().size() == 2);
+        CHECK(host.intents().front().value().phase == GesturePhase::Begin);
+        CHECK(host.intents().back().value().phase == GesturePhase::Single);
+        CHECK_FALSE(view.gesture_open());
+    }
+}
+
+TEST_CASE("A release-only host retains existing piano roll drag behavior",
+          "[timeline][piano-roll][continuous]") {
+    auto session = Session::create(make_note_project());
+    CallbackNoteHost host;
+    PianoRollView view;
+    configure(view, session.project(), host);
+    host.callback = [&](const ValidatedNoteEditIntent& intent) {
+        if (intent.value().phase != GesturePhase::Single)
+            return IntentResult{IntentStatus::Rejected, 0};
+        if (!session.apply(intent))
+            return IntentResult{IntentStatus::Rejected, 0};
+        view.set_clip(&session.project(), kSequence, kTrack, kClip);
+        return IntentResult{IntentStatus::Accepted, 1};
+    };
+
+    view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
+
+    REQUIRE(host.intents.size() == 2);
+    CHECK(host.intents.front().value().phase == GesturePhase::Begin);
+    CHECK(host.intents.back().value().phase == GesturePhase::Single);
+    CHECK(find_note(session.notes(), kNoteB)->start.value == 360);
+    CHECK(find_note(session.notes(), kNoteB)->pitch == 64);
 }
 
 TEST_CASE("Piano roll secondary click erases a note and leaves the rest authored",
@@ -670,10 +943,13 @@ TEST_CASE("Piano roll refuses a move that would push a note out of its clip",
     // dragged for, with no signal that it happened.
     view.simulate_drag({10.0f, y_of(60)}, {960.0f, y_of(60)}, 4);
 
-    CHECK(host.intents().empty());
+    REQUIRE(host.intents().size() == 3);
+    CHECK(host.intents().front().value().phase == GesturePhase::Begin);
+    CHECK(host.intents().back().value().phase == GesturePhase::Cancel);
     REQUIRE(view.refusals().size() == 1);
     CHECK(view.refusals().front() == PianoRollRefusal::OutsideClip);
-    // The document never saw it.
+    REQUIRE(session.apply_continuous(host.intents()));
+    // The open group was restored before it closed.
     CHECK(find_note(session.notes(), kNoteA)->start.value == 0);
 }
 
@@ -690,9 +966,11 @@ TEST_CASE("Piano roll resize stops at the clip end because the projection clamps
     // on the clip end rather than past it. A note ending where its clip ends is
     // legal, so this succeeds where the move was refused.
     view.simulate_drag({600.0f, y_of(64)}, {2000.0f, y_of(64)}, 4);
-    REQUIRE(host.intents().size() == 1);
+    REQUIRE(host.intents().size() == 2);
+    CHECK(host.intents().front().value().phase == GesturePhase::Begin);
+    CHECK(host.intents().back().value().phase == GesturePhase::End);
     REQUIRE(view.refusals().empty());
-    REQUIRE(session.apply(host.intents().front()));
+    REQUIRE(session.apply_continuous(host.intents()));
 
     const auto restored = notes_after_round_trip(session.project());
     const auto* resized = find_note(restored, kNoteC);
@@ -762,7 +1040,7 @@ TEST_CASE("Lowering refuses a stale expected note instead of overwriting it",
 
     NoteEditIntent raw;
     raw.kind = NoteEditIntentKind::Move;
-    raw.phase = GesturePhase::Single;
+    raw.phase = GesturePhase::Begin;
     raw.sequence_id = kSequence;
     raw.track_id = kTrack;
     raw.clip_id = kClip;
@@ -776,6 +1054,7 @@ TEST_CASE("Lowering refuses a stale expected note instead of overwriting it",
     EditIntentIdentity identity;
     identity.transaction_id = TransactionId{WriterId{1}, 1};
     identity.command_id = CommandId{WriterId{1}, 1};
+    identity.undo_group = UndoGroupId{WriterId{1}, 1};
 
     auto lowered = lower_note_edit_intent(validated.value(), session.notes(), identity);
     REQUIRE_FALSE(lowered);
@@ -824,7 +1103,9 @@ TEST_CASE("Piano roll refuses a resize dragged back past its own note start",
     // Note A runs [0, 120). Drag its trailing edge left to the roll origin: the
     // new end lands on its own start, so the duration would be zero.
     view.simulate_drag({120.0f, y_of(60)}, {0.0f, y_of(60)}, 4);
-    CHECK(host.intents().empty());
+    REQUIRE(host.intents().size() == 3);
+    CHECK(host.intents().front().value().phase == GesturePhase::Begin);
+    CHECK(host.intents().back().value().phase == GesturePhase::Cancel);
     REQUIRE(view.refusals().size() == 1);
     CHECK(view.refusals().front() == PianoRollRefusal::InvalidNote);
 }
