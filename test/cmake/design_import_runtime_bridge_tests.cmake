@@ -77,7 +77,7 @@ add_executable(pulp-test-offscreen-capture-rt-contract
 target_sources(pulp-test-offscreen-capture-rt-contract PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
 target_link_libraries(pulp-test-offscreen-capture-rt-contract
-    PRIVATE pulp::view Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    PRIVATE pulp::view pulp::native-components Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
 target_compile_definitions(pulp-test-offscreen-capture-rt-contract PRIVATE
     $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 catch_discover_tests(pulp-test-offscreen-capture-rt-contract

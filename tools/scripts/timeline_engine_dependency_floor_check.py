@@ -151,27 +151,16 @@ LINK_CLOSURE_DEBT = {
     "timeline_view": {
         "audio",
         "events",
-        "format",
-        "graph",
-        "host",
         "midi",
-        "playback",
         "render",
         "sample_bank_manifest",
         "signal",
         "state",
     },
-    # core/timeline_view links pulp::view for its canvas and input types, and
-    # pulp::view's own closure reaches the whole desktop stack — most of this
-    # arrives through `view -> host -> playback`. None of it is a header the
-    # view rung may include: the floor row deliberately omits `playback` so a
-    # view's only coupling toward audio stays the SequencerUiHost interface,
-    # and widening the row to silence this would grant exactly the include
-    # rights the omission exists to deny.
-    #
-    # This is the debt to pay down if a view is ever to link something
-    # narrower than pulp::view. Until then the gate polices the artifact the
-    # link actually produces rather than the one the row describes.
+    # core/timeline_view links the concrete pulp::view-core target for canvas
+    # and input types. Its closure still carries the ordinary view substrate
+    # recorded above, but host, playback, format, and graph are absent: the
+    # host-backed GraphEditorView implementation now lives in core/host.
 }
 
 # Modules under core/ that link a declared engine module but carry no floor row
@@ -325,7 +314,9 @@ def link_dependencies(cmake_text: str) -> list[str]:
 
 
 def module_key(token: str) -> str:
-    """Map a link token to its core/ directory name: timeline-editor -> timeline_editor."""
+    """Map a link target spelling to the core/ directory that implements it."""
+    if token == "view-core":
+        return "view"
     return token.replace("-", "_")
 
 
@@ -404,8 +395,9 @@ def verify(repo_root: Path) -> list[str]:
         if not cmake.is_file():
             errors.append(f"missing {module} build file: {cmake}")
             continue
+        allowed_keys = {module_key(name) for name in allowed}
         for dependency in link_dependencies(cmake.read_text(errors="replace")):
-            if dependency not in allowed:
+            if module_key(dependency) not in allowed_keys:
                 errors.append(
                     f"{cmake.relative_to(repo_root)}: {module} outside-floor "
                     f"pulp::{dependency} link"
@@ -414,8 +406,7 @@ def verify(repo_root: Path) -> list[str]:
         # A declared floor is a claim about the artifact, not about one build
         # file. Follow what the linked libraries themselves link, so a row
         # cannot stay green by depending on a module that breaches it.
-        reachable = ({module_key(name) for name in allowed}
-                     | LINK_CLOSURE_DEBT.get(module, set()))
+        reachable = allowed_keys | LINK_CLOSURE_DEBT.get(module, set())
         for dependency, path in sorted(transitive_modules(repo_root, module).items()):
             if dependency in reachable or len(path) < 3:
                 continue  # depth-one links are reported by the direct scan above
@@ -519,6 +510,48 @@ def run_selftest() -> int:
 
         if verify(root):
             print("selftest valid fixture was rejected")
+            return 1
+
+        # The concrete view target is the view module, not a separate floor.
+        # Prove that spelling is accepted, then restore the forbidden production
+        # chain and require the transitive walk to expose playback through it.
+        timeline_view_cmake = fixtures["timeline_view"][1]
+        timeline_view_links = " ".join(
+            "pulp::view-core" if name == "view" else f"pulp::{name}"
+            for name in sorted(MODULE_FLOORS["timeline_view"])
+        )
+        timeline_view_cmake.write_text(
+            "target_link_libraries(pulp-timeline-view PUBLIC "
+            f"{timeline_view_links})\n"
+        )
+        view_root = root / "core" / "view"
+        view_root.mkdir(parents=True)
+        view_cmake = view_root / "CMakeLists.txt"
+        view_cmake.write_text("")
+        if verify(root):
+            print("selftest rejected pulp::view-core as the concrete view target")
+            return 1
+
+        host_cmake = consumer_cmakes["host"]
+        host_cmake.write_text(
+            "target_link_libraries(pulp-host PUBLIC pulp::playback)\n"
+        )
+        view_cmake.write_text(
+            "target_link_libraries(pulp-view-core PUBLIC pulp::host)\n"
+        )
+        if not any(
+            "timeline_view outside-floor pulp::playback link via "
+            "timeline_view -> view -> host -> playback" in error
+            for error in verify(root)
+        ):
+            print("selftest missed view-core restoring transitive playback")
+            return 1
+        host_cmake.write_text(
+            "target_link_libraries(pulp-host PUBLIC pulp::timeline)\n"
+        )
+        shutil.rmtree(view_root)
+        if verify(root):
+            print("selftest rejected the restored playback-free view fixture")
             return 1
 
         # A helper target defined in a module's build file — whose own name

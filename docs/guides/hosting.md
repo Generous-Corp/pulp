@@ -195,6 +195,21 @@ graph.connect(plug, 0, out,  0);
 Execution walks `graph.processing_order()` each block and invokes
 `PluginSlot::process()` on each plugin node.
 
+`pulp::view::widgets::GraphEditorView` provides a draggable, connectable desktop
+view for this model. It is an opt-in host-backed widget: including and using it
+requires host headers and symbols, so consumers link both libraries directly.
+
+```cmake
+target_link_libraries(my_graph_editor PRIVATE pulp::view pulp::host)
+```
+
+The declaration is unavailable when the host headers are unavailable, including
+iOS builds; guard conditional use with `PULP_VIEW_HAS_GRAPH_EDITOR_VIEW`.
+
+`pulp::view::PluginManagerPanel` follows the same link boundary because its
+model uses the host scanner. Link both targets when you instantiate it, and
+guard conditional use with `PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL`.
+
 ## Swapping a hosted plugin live
 
 Because the graph owns each hosted plugin behind a node, you can **replace

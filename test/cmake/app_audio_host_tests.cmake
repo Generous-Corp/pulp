@@ -44,6 +44,23 @@ pulp_add_test_suite(pulp-test-preset-browser LIBRARIES pulp::view)
 add_executable(pulp-test-plugin-manager-panel test_plugin_manager_panel.cpp)
 target_link_libraries(pulp-test-plugin-manager-panel PRIVATE
     pulp::view pulp::host Catch2::Catch2WithMain)
+
+# PluginManagerPanel is deliberately absent from the view-only binary surface.
+# Require direct dependencies so unrelated transitive links cannot hide the
+# public consumer contract.
+get_target_property(_pulp_plugin_manager_links
+    pulp-test-plugin-manager-panel LINK_LIBRARIES)
+foreach(_pulp_plugin_manager_dependency IN ITEMS pulp::view pulp::host)
+    list(FIND _pulp_plugin_manager_links
+        ${_pulp_plugin_manager_dependency} _pulp_plugin_manager_link_index)
+    if(_pulp_plugin_manager_link_index EQUAL -1)
+        message(FATAL_ERROR
+            "pulp-test-plugin-manager-panel must link ${_pulp_plugin_manager_dependency} directly")
+    endif()
+endforeach()
+unset(_pulp_plugin_manager_dependency)
+unset(_pulp_plugin_manager_link_index)
+unset(_pulp_plugin_manager_links)
 catch_discover_tests(pulp-test-plugin-manager-panel)
 
 # DSP expansion tests (FIR, Ballistics, LogRamp, ProcessorChain, LookupTable, TPT)

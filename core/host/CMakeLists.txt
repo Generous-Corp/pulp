@@ -36,11 +36,12 @@ target_sources(pulp-host PRIVATE
     src/timeline_automation_delivery.cpp
     src/timeline_graph_binding.cpp
     src/timeline_graph_stretch_policy.cpp
+    src/graph_editor_view.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
-target_link_libraries(pulp-host PRIVATE pulp::platform)
+target_link_libraries(pulp-host PRIVATE pulp::platform pulp::view-core)
 # node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds
 # pulp-host. Link the dynamic-loader libs where they are a separate library.
 if(NOT WIN32)
