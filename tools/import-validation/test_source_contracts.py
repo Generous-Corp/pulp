@@ -23,7 +23,7 @@ SPEC.loader.exec_module(checker)
 
 ROOT = checker.REPO_ROOT
 REGISTRY_PATH = checker.DEFAULT_REGISTRY
-TODAY = dt.date(2026, 5, 14)
+TODAY = dt.date(2026, 8, 12)
 
 
 def _load_registry() -> dict:
