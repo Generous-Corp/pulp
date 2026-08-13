@@ -1090,7 +1090,8 @@ jobs:
         shell: bash
         run: |
           if [ "${RUNNER_OS}" = "macOS" ]; then
-            bash test/cmake/test_ios_source_syntax.sh "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"
+            bash test/cmake/test_ios_compile_gate.sh \
+              "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
           fi
           # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro
           # VM without claiming an entire shared Studio host. Keep this literal:
