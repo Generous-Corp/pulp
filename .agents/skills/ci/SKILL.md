@@ -3582,7 +3582,21 @@ What it does:
 - Triggers every 30 minutes (`schedule:` cron `*/30 * * * *`) plus
   `workflow_dispatch:` with `in_progress_max_minutes` /
   `queued_max_minutes` inputs to override the thresholds for manual runs.
-- Runs on `ubuntu-latest` — it only calls the GitHub API, no build.
+- Runner selection is operator-controlled through
+  the boolean `PULP_SCHEDULED_CONTROLS_USE_LOCAL`, with exact `ubuntu-latest`
+  fallback unless its value is exactly `1`. When hosted Actions is starved, an
+  operator may enable the hard-coded approved disposable Mac Pro Linux selector
+  `["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`.
+  The workflow does not accept a free-form selector; an empty, malformed, or
+  mistyped switch fails closed to hosted `ubuntu-latest` rather than acquiring
+  an arbitrary self-hosted runner.
+  This selector is shared only by the trusted Required gate liveness, Stale run
+  reaper, and Pending-intent liveness `push`/`schedule`/`workflow_dispatch`
+  entry jobs. Never reuse it for `pull_request_target`, secret-bearing deploys,
+  Vellum trusted, or ordinary PR code execution. Selection happens before job
+  assignment; GitHub cannot migrate an already queued hosted job after the
+  variable changes.
+  The reaper only calls the GitHub API; it does not build Pulp.
   `permissions: actions: write` (required to cancel runs) + `contents: read`.
 - Pages through `actions/runs?status=in_progress` and `?status=queued`
   via `gh api --paginate` and cancels anything past the threshold via

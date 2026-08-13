@@ -66,7 +66,10 @@ concurrency:
 jobs:
   reap:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: ubuntu-latest
+    # Keep the recovery control dispatchable while hosted Actions is starved.
+    # Operators may select the approved disposable Mac Pro Linux pool; unset
+    # remains the exact public hosted fallback.
+    runs-on: ${{ fromJSON(vars.PULP_SCHEDULED_CONTROLS_USE_LOCAL == '1' && '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]' || '"ubuntu-latest"') }}
     name: Cancel stuck workflow runs
 
     env:

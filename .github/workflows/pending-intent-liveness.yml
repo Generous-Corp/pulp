@@ -31,7 +31,10 @@ permissions:
 jobs:
   check:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: ubuntu-latest
+    # Operator-controlled escape from hosted-queue starvation. The local
+    # selector is restricted to the approved disposable Mac Pro Linux pool;
+    # unset remains the exact public hosted fallback.
+    runs-on: ${{ fromJSON(vars.PULP_SCHEDULED_CONTROLS_USE_LOCAL == '1' && '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]' || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
         with:
