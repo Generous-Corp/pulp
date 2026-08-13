@@ -11,6 +11,41 @@
   },
   "hotspots": [
     {
+      "path": "core/host/include/pulp/host/signal_graph.hpp",
+      "max_loc": 9,
+      "note": "Compatibility umbrella for independently compilable custom-node, node, connection, and runtime contracts; declarations belong in the focused headers"
+    },
+    {
+      "path": "core/host/include/pulp/host/custom_node_type.hpp",
+      "max_loc": 267,
+      "note": "Focused custom-node registration contract; execution and retained graph state belong in their focused headers"
+    },
+    {
+      "path": "core/host/include/pulp/host/signal_graph_node.hpp",
+      "max_loc": 130,
+      "note": "Focused SignalGraph node identity and retained-state contract"
+    },
+    {
+      "path": "core/host/include/pulp/host/signal_graph_connection.hpp",
+      "max_loc": 55,
+      "note": "Focused SignalGraph connection metadata contract"
+    },
+    {
+      "path": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+      "max_loc": 1555,
+      "note": "SignalGraph runtime and mutation contract; node, connection, and custom registration declarations must remain outside this header"
+    },
+    {
+      "path": "core/host/src/timeline_graph_binding.cpp",
+      "max_loc": 978,
+      "note": "Timeline-to-SignalGraph binding hotspot; subsequent sequencer integration must decompose before growing it"
+    },
+    {
+      "path": "core/playback/src/program_compiler.cpp",
+      "max_loc": 1268,
+      "note": "Playback program compiler hotspot; subsequent sequencer lowering work cannot grow the monolith silently"
+    },
+    {
       "path": "core/view/include/pulp/view/widget_bridge.hpp",
       "max_loc": 509,
       "note": "WidgetBridge public header. The ~75 sub-API registrar declarations moved out to the src-only widget_bridge/registrars.hpp (BridgeRegistrars friend), shrinking this header 571->509 and cutting the recompile blast radius of adding a bridge API. Keep new registrars out of this header; ceiling locks the win."

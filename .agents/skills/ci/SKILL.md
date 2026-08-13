@@ -4049,6 +4049,16 @@ smokes can monopolize the self-hosted macOS runner. `tools/scripts/
 test_workflow_build_dirs.py` asserts the label-exclude contract alongside
 the build-directory invariant.
 
+**Capability-history checks need the protected base in shallow checkouts.** A
+depth-1 `pull_request` checkout contains GitHub's synthetic merge commit but not
+its base parent. Before CTest, `build.yml` force-fetches the event-pinned
+`pull_request.base.sha` into `refs/remotes/origin/main`; fetching moving current
+main would compare against a different contract when main advances. Shipyard's
+`workflow_dispatch` payload has no base SHA, so it retains the explicit main
+fetch. `test_workflow_build_dirs.py` pins the workflow wiring and proves the
+missing-base negative control plus the event-pinned repair with local shallow
+repositories.
+
 **macOS builds with the Ninja generator.** `build.yml`'s Configure step
 passes `-G Ninja` on macOS only (Linux/Windows keep their default
 generator). Ninja schedules parallelism better and is faster on the

@@ -546,6 +546,17 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
+# Each public SignalGraph contract must compile from a clean translation unit.
+# This catches accidental transitive-include dependencies without adding a
+# runtime test binary.
+add_library(pulp-test-host-signal-graph-headers OBJECT
+    header_compile/host_custom_node_type.cpp
+    header_compile/host_signal_graph_node.cpp
+    header_compile/host_signal_graph_connection.cpp
+    header_compile/host_signal_graph_runtime.cpp
+    header_compile/host_signal_graph_umbrella.cpp)
+target_link_libraries(pulp-test-host-signal-graph-headers PRIVATE pulp::host)
+
 # Bake-layer parameter injection (Forge Probe A, production path). Exercises the
 # BakedGraphProcessor injection mailbox + ParamCursor over the routed executor;
 # reuses the same RT-allocation probe wiring as the signal-graph suite.

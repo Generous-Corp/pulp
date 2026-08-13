@@ -785,14 +785,23 @@ jobs:
           # 2nd+ run of any PR (cache + build dir stay warm).
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
 
-      # Shipyard PR validation arrives through workflow_dispatch, whose event
-      # payload has no pull_request.base.sha. Keep the capability-history gate
-      # fail-closed while giving it the protected base that its default
-      # PULP_AGENT_CAPABILITY_BASE_REF=origin/main contract requires.
+      # A depth-1 pull-request checkout contains only GitHub's synthetic merge
+      # commit, not its protected-base parent. Materialize the event-pinned base
+      # at the ref used by the fail-closed capability-history gate. Shipyard PR
+      # validation arrives through workflow_dispatch, whose payload has no
+      # pull_request.base.sha, so that path retains the protected main fetch.
       - name: Fetch protected capability base
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+        run: |
+          if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Set up Namespace macOS cache
         if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')

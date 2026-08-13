@@ -343,11 +343,14 @@ If a dependency pin changes and a stale cache is suspected, the key includes
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
 
-Shipyard PR validation dispatches `build.yml` through `workflow_dispatch`.
-Unlike a `pull_request` event, that payload has no protected base SHA, so the
-shallow build checkout fetches `origin/main` before running CTest. The
-agent-capability manifest gate uses that ref to compare the branch with
-protected capability history and intentionally fails closed if it is missing.
+The agent-capability manifest gate compares a branch with protected capability
+history through `origin/main` and intentionally fails closed if that ref is
+missing. A depth-1 `pull_request` checkout contains only GitHub's synthetic merge
+commit, so `build.yml` fetches the event-pinned `pull_request.base.sha` into that
+local ref before CTest. This must be the event SHA, not a moving fetch of current
+main. Shipyard PR validation instead arrives through `workflow_dispatch`, whose
+payload has no protected base SHA, so that path retains the explicit protected
+main fetch.
 
 The required `macos` gate runs the shipyard `mac` target
 (`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
