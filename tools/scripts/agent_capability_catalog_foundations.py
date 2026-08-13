@@ -319,6 +319,60 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="audio.boundary-diagnostics",
+        domain="audio",
+        summary=(
+            "Deterministic non-realtime diagnosis of processor, standalone-boundary, "
+            "and device telemetry for reported missing or incorrect audio."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "none",
+            "prepare": "none",
+            "process": "control",
+            "reset": "none",
+            "release": "result destruction off audio",
+        },
+        state_model=(
+            "Pure report construction from already-published probe snapshots, optional "
+            "device counters, and an explicit silence threshold."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "optional processor and standalone-boundary probe snapshots, optional device "
+            "statistics, and a linear-amplitude silence threshold"
+        ),
+        output_domain="boundary diagnosis and owned stage-by-stage diagnostic text",
+        units=["linear amplitude", "frames", "hertz", "event count"],
+        latency="zero",
+        tail="none",
+        scheduling="caller-clocked after probe publication; never on the audio thread",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_function",
+                include="pulp/audio/audio_boundary_report.hpp",
+                qualified_name="pulp::audio::build_boundary_report",
+                target="Pulp::audio",
+                header_fingerprint=(
+                    "sha256:45c6b48d154b28a714f220c5f27e5b7f201ea8b3540b6f1fdf2eca44de99307e"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::build_boundary_report",
+            "operation": "function_call",
+            "arguments": "pulp::audio::BoundaryReportInputs{}",
+        }],
+    ),
+    capability(
         key="midi.mpe-voice-tracker",
         contract_version={"major": 2, "minor": 0},
         domain="midi",

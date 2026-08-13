@@ -9,6 +9,7 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/audio/audio_boundary_report.hpp": "Pulp::audio",
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
     "pulp/audio/midi_voice_modulation_adapter.hpp": "Pulp::audio",
     "pulp/audio/onset_detector.hpp": "Pulp::audio",
