@@ -198,6 +198,13 @@ struct CanvasDrawCmd {
 /// JS fills the command list via bridge functions, then the widget
 /// renders them each frame. Hot-reloadable — JS rebuilds commands on reload.
 class CanvasWidget : public View {
+private:
+    struct RecordedCommands;
+    struct RepaintObserver {
+        CanvasWidget* owner = nullptr;
+        RecordedCommands* stream = nullptr;
+    };
+
 public:
     enum class ContentMode { recorded_commands, native_painter };
     struct NativeGpuTextureFrame {
@@ -209,7 +216,15 @@ public:
     };
     using NativeGpuTextureProvider = std::function<NativeGpuTextureFrame()>;
 
-    CanvasWidget() = default;
+    CanvasWidget()
+        : repaint_observer_(std::make_shared<RepaintObserver>()) {
+        repaint_observer_->owner = this;
+        observe_recorded_commands();
+    }
+    ~CanvasWidget() override {
+        repaint_observer_->owner = nullptr;
+        repaint_observer_->stream = nullptr;
+    }
 
     void set_native_painter(
         std::shared_ptr<NativeCanvasPainter> painter,
@@ -235,7 +250,10 @@ public:
         return last_native_paint_backend_;
     }
 
-    void clear_commands() { recorded_commands_->commands.clear(); }
+    void clear_commands() {
+        recorded_commands_->commands.clear();
+        notify_recorded_command_consumers();
+    }
     /// NaN / ±Infinity defense at the recording
     /// boundary. JS callers can produce non-finite numerics from any
     /// arithmetic mishap (divide-by-zero on a zero parent rect during a
@@ -275,7 +293,9 @@ public:
     /// DesignIR canvas can remain visible while the hidden React realm that
     /// authors its Canvas2D program is replaced during reload.
     void share_recorded_commands_from(CanvasWidget& source) {
+        if (recorded_commands_ == source.recorded_commands_) return;
         recorded_commands_ = source.recorded_commands_;
+        observe_recorded_commands();
         request_repaint();
     }
     bool last_native_gpu_texture_draw_succeeded() const { return last_native_gpu_texture_draw_succeeded_; }
@@ -317,9 +337,26 @@ private:
 
     struct RecordedCommands {
         std::vector<CanvasDrawCmd> commands;
+        std::vector<std::weak_ptr<RepaintObserver>> observers;
     };
+    void observe_recorded_commands() {
+        repaint_observer_->stream = recorded_commands_.get();
+        recorded_commands_->observers.emplace_back(repaint_observer_);
+    }
+    void notify_recorded_command_consumers() {
+        auto& observers = recorded_commands_->observers;
+        observers.erase(std::remove_if(observers.begin(), observers.end(),
+            [this](const std::weak_ptr<RepaintObserver>& weak) {
+                auto observer = weak.lock();
+                if (!observer) return true;
+                if (observer->owner && observer->stream == recorded_commands_.get())
+                    observer->owner->request_repaint();
+                return false;
+            }), observers.end());
+    }
     std::shared_ptr<RecordedCommands> recorded_commands_ =
         std::make_shared<RecordedCommands>();
+    std::shared_ptr<RepaintObserver> repaint_observer_;
     std::shared_ptr<NativeCanvasPainter> native_painter_;
     NativeCanvasBackendRequirement native_backend_requirement_ =
         NativeCanvasBackendRequirement::any;

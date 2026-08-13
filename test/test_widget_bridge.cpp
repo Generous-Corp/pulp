@@ -308,9 +308,21 @@ TEST_CASE("View::anchor_id() defaults to empty for non-imported views",
 
 TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured paint",
           "[view][bridge][canvas-binding]") {
+    class RepaintHost final : public WindowHost {
+    public:
+        void show() override {}
+        void hide() override {}
+        bool is_visible() const override { return true; }
+        void repaint() override { ++count; }
+        void set_close_callback(std::function<void()>) override {}
+        void run_event_loop() override {}
+        int count = 0;
+    } host;
+
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
+    root.set_window_host(&host);
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
@@ -348,7 +360,9 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
     REQUIRE(behavior->command_count() == 2);
     REQUIRE(captured->command_count() == 2);
     CHECK(&captured->commands() == &behavior->commands());
+    const int before_redraw = host.count;
     bridge.load_script("canvasClear('behavior'); canvasFillRect('behavior', 8, 9, 10, 11, '#f0f');");
+    REQUIRE(host.count > before_redraw);
     REQUIRE(behavior->command_count() == 1);
     REQUIRE(captured->command_count() == 1);
 
