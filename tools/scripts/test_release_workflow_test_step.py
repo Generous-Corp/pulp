@@ -48,6 +48,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -569,7 +570,8 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         )
         self.assertIn("subprocess.TimeoutExpired", run_block)
         self.assertIn("stdin=subprocess.DEVNULL", run_block)
-        self.assertIn("standalone host did not reject missing bootstrap", run_block)
+        self.assertIn("standalone host ignored termination", run_block)
+        self.assertIn("standalone host exited before bootstrap", run_block)
         self.assertIn("return_code != 65", run_block)
         self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
         self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
@@ -580,6 +582,55 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn('"$BIN" $CMD', run_block)
         self.assertIn("Library not loaded", run_block)
         self.assertIn("cannot open shared object", run_block)
+
+    def _run_standalone_host_smoke(self, program: str) -> subprocess.CompletedProcess[str]:
+        run_block = self._find_step_run(
+            "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
+        )
+        match = re.search(
+            r"python3 - \"\$BIN\" /tmp/\$ART-smoke\.out /tmp/\$ART-smoke\.err "
+            r"<<'PY'\n(?P<script>.*?)\n\s*PY",
+            run_block,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "standalone-host smoke helper was not found")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "host"
+            binary.write_text(program, encoding="utf-8")
+            binary.chmod(0o755)
+            return subprocess.run(
+                [
+                    sys.executable,
+                    "-",
+                    str(binary),
+                    str(root / "stdout"),
+                    str(root / "stderr"),
+                ],
+                input=textwrap.dedent(match.group("script")),
+                text=True,
+                capture_output=True,
+                timeout=12,
+                check=False,
+            )
+
+    def test_unix_standalone_host_smoke_accepts_bounded_dormant_host(self) -> None:
+        result = self._run_standalone_host_smoke(
+            "#!/bin/sh\ntrap 'exit 0' TERM\nwhile :; do sleep 1; done\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unix_standalone_host_smoke_accepts_bootstrap_rejection(self) -> None:
+        result = self._run_standalone_host_smoke("#!/bin/sh\nexit 65\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unix_standalone_host_smoke_rejects_unexpected_early_exit(self) -> None:
+        result = self._run_standalone_host_smoke("#!/bin/sh\nexit 64\n")
+        self.assertEqual(result.returncode, 64, result.stderr)
+
+    def test_unix_standalone_host_smoke_rejects_early_success(self) -> None:
+        result = self._run_standalone_host_smoke("#!/bin/sh\nexit 0\n")
+        self.assertNotEqual(result.returncode, 0, result.stderr)
 
     def test_windows_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
