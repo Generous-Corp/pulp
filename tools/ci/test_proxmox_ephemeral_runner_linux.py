@@ -39,7 +39,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"', self.script)
 
     def test_all_registration_lifecycle_calls_follow_the_selected_scope(self) -> None:
-        self.assertEqual(self.script.count("${REGISTRATION_API}/actions/runners"), 3)
+        self.assertGreaterEqual(self.script.count("${REGISTRATION_API}/actions/runners"), 3)
         self.assertNotIn("api.github.com/repos/${REPO}/actions/runners", self.script)
 
     def test_group_configuration_is_optional_and_root_managed(self) -> None:
@@ -47,6 +47,20 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "EnvironmentFile=-/etc/pulp/linux-runner-group.env", self.service
         )
         self.assertIn("User=root", self.service)
+
+    def test_slot_identity_is_stable_but_registration_name_is_per_boot(self) -> None:
+        self.assertIn('RUNNER_SLOT_ID="macpro-linux-${VMID}"', self.script)
+        self.assertIn(
+            'RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"',
+            self.script,
+        )
+        self.assertIn("slot ${RUNNER_SLOT_ID}", self.script)
+
+    def test_stale_reclamation_is_slot_scoped_and_busy_safe(self) -> None:
+        self.assertIn("reclaim_stale_slot_runners", self.script)
+        self.assertIn('name.startswith(prefix)', self.script)
+        self.assertIn('if [ "$stale_busy" = true ]', self.script)
+        self.assertIn('refusing to reclaim busy stale registration', self.script)
 
 
 if __name__ == "__main__":

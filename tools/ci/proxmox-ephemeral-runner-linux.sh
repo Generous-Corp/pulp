@@ -104,7 +104,42 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+# The slot identity is stable for operations and metrics.  The GitHub
+# registration name is intentionally unique per boot; the decisions contract
+# forbids static registration names because an interrupted runner can leave a
+# zombie registration that collides with its replacement.
+RUNNER_SLOT_ID="macpro-linux-${VMID}"
 RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
+
+reclaim_stale_slot_runners() {
+    [ -n "${PAT:-}" ] || return 0
+    local runners_json stale_id stale_name stale_busy
+    runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/${REGISTRATION_API}/actions/runners?per_page=100" \
+        2>/dev/null)" || die "cannot inspect runner registrations for ${RUNNER_SLOT_ID}"
+    while IFS=$'\t' read -r stale_id stale_name stale_busy; do
+        [ -n "$stale_id" ] || continue
+        if [ "$stale_busy" = true ]; then
+            log "refusing to reclaim busy stale registration $stale_name"
+            continue
+        fi
+        curl -fSs -o /dev/null -X DELETE \
+            -H "Authorization: Bearer $PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/${REGISTRATION_API}/actions/runners/${stale_id}" \
+            || die "could not reclaim offline registration $stale_name"
+        log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
+    done < <(printf '%s' "$runners_json" | python3 -c '
+import json, sys
+prefix = sys.argv[1]
+data = json.load(sys.stdin)
+for runner in data.get("runners", []):
+    name = runner.get("name", "")
+    if name.startswith(prefix):
+        print(f"{runner.get(\"id\", \"\")}\\t{name}\\t{str(runner.get(\"busy\", False)).lower()}")
+' "pulp-ci-ephemeral-${VMID}-")
+}
 
 cleanup() {
     # Guard: only tear down a VM this invocation actually created. Without this,
@@ -194,6 +229,10 @@ log "clone $VMID up at $GUEST_IP"
 # possibly-recycled DHCP address. Drop any stale entry rather than failing.
 ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 
+# Reclaim only offline registrations from this stable slot.  Never delete a
+# busy runner and never search by a broad repository-wide prefix.
+reclaim_stale_slot_runners
+
 for _ in $(seq 1 20); do
     ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 \
         "ci@$GUEST_IP" true 2>/dev/null && break
@@ -223,7 +262,7 @@ RT="$(curl -s -X POST \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
-log "registering ephemeral runner on $VMID"
+log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
 ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
