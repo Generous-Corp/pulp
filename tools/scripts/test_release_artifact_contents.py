@@ -230,6 +230,19 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
             )
             + "\n"
         ).encode()
+    if name == "pulp-sdk/include/pulp/runtime/build_info.hpp":
+        return (
+            "#pragma once\n"
+            "#include <string_view>\n"
+            "namespace pulp::runtime {\n"
+            'inline constexpr std::string_view kBuildType = "Release";\n'
+            'inline constexpr std::string_view kBuildIso8601 = "2026-08-10T00:00:00Z";\n'
+            f'inline constexpr std::string_view kGitSha = "{SOURCE_SHA[:7]}";\n'
+            "inline constexpr bool kGitDirty = false;\n"
+            f'inline constexpr std::string_view kSdkVersion = "{VERSION}";\n'
+            f'inline constexpr std::string_view kStampLabel = "{VERSION} fixture";\n'
+            "}\n"
+        ).encode()
     importer = (
         "pulp-sdk/bin/pulp-import-design.exe"
         if platform.startswith("windows-")
@@ -293,18 +306,22 @@ def write_archive(
     as_zip: bool,
     platform: str = "linux-x64",
     mode_overrides: dict[str, int] | None = None,
+    payload_overrides: dict[str, bytes] | None = None,
 ) -> None:
     mode_overrides = mode_overrides or {}
+    payload_overrides = payload_overrides or {}
     if as_zip:
         with zipfile.ZipFile(path, "w") as archive:
             for name in sorted(members):
                 info = zipfile.ZipInfo(name)
                 info.external_attr = mode_overrides.get(name, 0o755) << 16
-                archive.writestr(info, member_payload(name, platform))
+                archive.writestr(
+                    info, payload_overrides.get(name, member_payload(name, platform))
+                )
         return
     with tarfile.open(path, "w:gz") as archive:
         for name in sorted(members):
-            data = member_payload(name, platform)
+            data = payload_overrides.get(name, member_payload(name, platform))
             info = tarfile.TarInfo(name)
             info.size = len(data)
             if name in {
@@ -918,6 +935,57 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
+
+    def test_negative_control_missing_installed_build_info_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/include/pulp/runtime/build_info.hpp")
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False
+            )
+            with self.assertRaisesRegex(rac.ContentError, "build_info.hpp"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_tampered_installed_build_info_fires(self) -> None:
+        member = "pulp-sdk/include/pulp/runtime/build_info.hpp"
+        mutations = {
+            "dirty": member_payload(member).replace(
+                b"kGitDirty = false", b"kGitDirty = true"
+            ),
+            "build type": member_payload(member).replace(
+                b'kBuildType = "Release"', b'kBuildType = "Debug"'
+            ),
+            "version": member_payload(member).replace(
+                b'kSdkVersion = "9.8.7"', b'kSdkVersion = "1.2.3"'
+            ),
+            "source SHA": member_payload(member).replace(
+                b'kGitSha = "aaaaaaa"', b'kGitSha = "bbbbbbb"'
+            ),
+        }
+        for name, payload in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                _cli, sdk = make_platform(root, "linux-x64")
+                write_archive(
+                    root / rac.sdk_asset_name("linux-x64"),
+                    sdk,
+                    as_zip=False,
+                    platform="linux-x64",
+                    payload_overrides={member: payload},
+                )
+                with self.assertRaisesRegex(
+                    rac.ContentError, "unsafe installed build_info.hpp"
+                ):
+                    rac.verify_platform(
+                        root,
+                        "linux-x64",
+                        VERSION,
+                        SOURCE_SHA,
+                        native_signatures=False,
+                    )
 
     def test_negative_control_missing_capability_handoff_fires_at_new_floor(self) -> None:
         with tempfile.TemporaryDirectory() as td:

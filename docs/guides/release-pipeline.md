@@ -10,9 +10,17 @@ Starting at the SDK provenance floor in
 `official-release` marker binding its version tag to the exact clean source
 commit and archive platform, and proving inspector/audio-probe features were
 disabled. The release finalizer verifies that marker against the resolved tag
-SHA before publication. Marker-era manual runs cannot substitute `source_ref`
+SHA and the installed `pulp/runtime/build_info.hpp` before publication, rejecting
+dirty/non-Release metadata or a version/source SHA inconsistent with the marker.
+Marker-era manual runs cannot substitute `source_ref`
 or overlay current `main`; repair the source and create a new tag instead.
 Historical pre-marker backfills retain their compatibility path.
+Compatibility helpers for those backfills are materialized under the runner's
+temporary directory, never inside the tagged checkout, so historical build-info
+dirty probes do not mistake the helper payload for a source modification.
+Linux dependency-action files that must temporarily exist at checkout-relative
+paths are recorded and removed immediately after the action runs, before CMake
+configures the SDK build metadata.
 
 If you're hunting a specific layer:
 
@@ -286,7 +294,9 @@ The asset table is only the outer contract. Before publication,
 enforces the internal product matrix: the complete public Pulp library target
 set, VST3/CLAP/LV2 development surfaces on every SDK, Audio Unit on Darwin,
 matching version and Release markers, exact CLI payloads, safe paths, and Unix
-executable modes. Each native build leg runs the same verifier before upload;
+executable modes. For marker-era SDKs it also cross-checks the installed runtime
+build metadata against the full-SHA provenance marker. Each native build leg runs
+the same verifier before upload;
 Darwin additionally performs real strict code-signature verification after
 re-signing installed Mach-O files whose RPATHs changed during install. This is
 what prevents a green publisher from shipping a correctly named archive full of

@@ -28,6 +28,28 @@ VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 PLATFORM_RE = re.compile(r"(?:darwin|linux|windows)-(?:arm64|x64)")
 INSPECTOR_SDK_FLOOR = (0, 772, 0)
 PRODUCT_MATRIX = Path(__file__).with_name("release_product_matrix.json")
+BUILD_INFO_PATH = Path("include/pulp/runtime/build_info.hpp")
+BUILD_INFO_MAX_BYTES = 64 * 1024
+BUILD_INFO_CANONICAL_RE = re.compile(
+    r"""\A\s*
+    \#pragma[^\S\r\n]+once[^\S\r\n]*\r?\n\s*
+    \#include[^\S\r\n]+<string_view>[^\S\r\n]*\r?\n\s*
+    namespace\s+pulp::runtime\s*\{\s*
+    inline\s+constexpr\s+std::string_view\s+kBuildType\s*=\s*
+        "(?P<build_type>[^"\\\r\n]*)"\s*;\s*
+    inline\s+constexpr\s+std::string_view\s+kBuildIso8601\s*=\s*
+        "(?:\\[^\r\n]|[^"\\\r\n])*"\s*;\s*
+    inline\s+constexpr\s+std::string_view\s+kGitSha\s*=\s*
+        "(?P<git_sha>[^"\\\r\n]*)"\s*;\s*
+    inline\s+constexpr\s+bool\s+kGitDirty\s*=\s*
+        (?P<git_dirty>true|false)\s*;\s*
+    inline\s+constexpr\s+std::string_view\s+kSdkVersion\s*=\s*
+        "(?P<sdk_version>[^"\\\r\n]*)"\s*;\s*
+    inline\s+constexpr\s+std::string_view\s+kStampLabel\s*=\s*
+        "(?:\\[^\r\n]|[^"\\\r\n])*"\s*;\s*
+    \}\s*\Z""",
+    re.VERBOSE,
+)
 
 
 class ProvenanceError(RuntimeError):
@@ -75,6 +97,143 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise ProvenanceError(f"cannot read {path}: {exc}") from exc
+
+
+def _read_bounded_text(path: Path, *, limit: int) -> str:
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(limit + 1)
+    except OSError as exc:
+        raise ProvenanceError(f"cannot read {path}: {exc}") from exc
+    if len(data) > limit:
+        raise ProvenanceError(f"{path} exceeds the {limit}-byte limit")
+    try:
+        return data.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise ProvenanceError(f"{path} is not valid UTF-8: {exc}") from exc
+
+
+def _strip_cpp_comments(text: str) -> str:
+    if re.search(r"\\\r?\n", text):
+        raise ProvenanceError(
+            "installed build_info.hpp contains unsupported C++ line splicing"
+        )
+    output: list[str] = []
+    index = 0
+    state = "code"
+    while index < len(text):
+        char = text[index]
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if state == "code":
+            if char == "/" and following == "/":
+                output.extend("  ")
+                index += 2
+                state = "line-comment"
+                continue
+            if char == "/" and following == "*":
+                output.extend("  ")
+                index += 2
+                state = "block-comment"
+                continue
+            output.append(char)
+            if char == '"':
+                state = "string"
+            elif char == "'":
+                state = "character"
+            index += 1
+            continue
+        if state == "line-comment":
+            output.append("\n" if char == "\n" else " ")
+            index += 1
+            if char == "\n":
+                state = "code"
+            continue
+        if state == "block-comment":
+            if char == "*" and following == "/":
+                output.extend("  ")
+                index += 2
+                state = "code"
+            else:
+                output.append("\n" if char == "\n" else " ")
+                index += 1
+            continue
+        output.append(char)
+        index += 1
+        if char == "\\" and index < len(text):
+            output.append(text[index])
+            index += 1
+        elif (state == "string" and char == '"') or (
+            state == "character" and char == "'"
+        ):
+            state = "code"
+    if state in {"block-comment", "string", "character"}:
+        raise ProvenanceError("installed build_info.hpp has unterminated C++ syntax")
+    return "".join(output)
+
+
+def parse_build_info(text: str) -> dict[str, str | bool]:
+    text = _strip_cpp_comments(text)
+    if 'R"' in text:
+        raise ProvenanceError(
+            "installed build_info.hpp contains unsupported C++ raw strings"
+        )
+    if "%:" in text:
+        raise ProvenanceError(
+            "installed build_info.hpp contains unsupported preprocessing digraphs"
+        )
+    match = BUILD_INFO_CANONICAL_RE.fullmatch(text)
+    if match is None:
+        raise ProvenanceError(
+            "installed build_info.hpp does not match the canonical generated structure"
+        )
+    return {
+        "kBuildType": match.group("build_type"),
+        "kGitSha": match.group("git_sha"),
+        "kGitDirty": match.group("git_dirty") == "true",
+        "kSdkVersion": match.group("sdk_version"),
+    }
+
+
+def verify_build_info_text(
+    text: str, *, expected_version: str, expected_source_sha: str
+) -> dict[str, str | bool]:
+    build_info = parse_build_info(text)
+    if build_info["kBuildType"] != "Release":
+        raise ProvenanceError(
+            "installed build_info.hpp is not a Release build "
+            f"(kBuildType={build_info['kBuildType']!r})"
+        )
+    if build_info["kGitDirty"] is not False:
+        raise ProvenanceError("installed build_info.hpp reports tracked source changes")
+    if build_info["kSdkVersion"] != expected_version:
+        raise ProvenanceError(
+            "installed build_info.hpp SDK version does not match provenance "
+            f"({build_info['kSdkVersion']!r} != {expected_version!r})"
+        )
+    short_sha = build_info["kGitSha"]
+    if (
+        not isinstance(short_sha, str)
+        or re.fullmatch(r"[0-9a-f]{7,40}", short_sha) is None
+        or not expected_source_sha.startswith(short_sha)
+    ):
+        raise ProvenanceError(
+            "installed build_info.hpp source SHA does not match provenance "
+            f"({short_sha!r} is not a prefix of {expected_source_sha!r})"
+        )
+    return build_info
+
+
+def verify_installed_build_info(
+    prefix: Path, *, expected_version: str, expected_source_sha: str
+) -> dict[str, str | bool]:
+    return verify_build_info_text(
+        _read_bounded_text(
+            prefix / BUILD_INFO_PATH,
+            limit=BUILD_INFO_MAX_BYTES,
+        ),
+        expected_version=expected_version,
+        expected_source_sha=expected_source_sha,
+    )
 
 
 def _cache_bool(build_dir: Path, name: str) -> bool:
@@ -132,7 +291,13 @@ def build_release_marker(
             "official provenance requires HEAD, the release tag, and source SHA "
             f"to identify one commit (HEAD={head}, tag={tagged}, requested={source_sha})"
         )
-    dirty = _git(source_dir, "status", "--porcelain", "--untracked-files=no")
+    dirty = _git(
+        source_dir,
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+        "--ignore-submodules=untracked",
+    )
     if dirty:
         raise ProvenanceError(
             "official provenance requires a clean tracked source tree; "
@@ -148,7 +313,7 @@ def build_release_marker(
             f"audio_probes=OFF and inspector={'ON' if expected_inspector else 'OFF'}"
         )
 
-    return {
+    marker = {
         "schema": SCHEMA,
         "kind": "release",
         "profile": PROFILE,
@@ -164,6 +329,12 @@ def build_release_marker(
             "inspector": expected_inspector,
         },
     }
+    verify_installed_build_info(
+        prefix,
+        expected_version=version,
+        expected_source_sha=source_sha,
+    )
+    return marker
 
 
 def write_atomically(path: Path, marker: dict[str, object]) -> None:
@@ -231,6 +402,11 @@ def verify_release_marker(
         raise ProvenanceError(f"{path}: marker version does not match selected SDK prefix")
     if _read_text(prefix / "sdk_build_type.txt") != "Release":
         raise ProvenanceError(f"{path}: selected SDK prefix is not Release")
+    verify_installed_build_info(
+        prefix,
+        expected_version=version,
+        expected_source_sha=source_sha,
+    )
     return marker
 
 
