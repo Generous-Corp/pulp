@@ -6,10 +6,14 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline_editor/scripted_ui_host.hpp>
 #include <pulp/timeline_view/piano_roll_view.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -40,6 +44,15 @@ constexpr ItemId kNoteA{10};
 constexpr ItemId kNoteB{11};
 constexpr ItemId kNoteC{12};
 constexpr std::size_t kDenseNoteCount = 10'000;
+
+std::uint64_t fnv1a64(const std::vector<std::uint8_t>& bytes) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
 
 PianoRollLayout layout_over(std::int64_t visible_start, std::int64_t visible_ticks,
                             float pixel_extent) {
@@ -500,6 +513,87 @@ TEST_CASE("Piano roll paint bounds candidate work for ten thousand real notes",
     view.paint(rebound);
     CHECK(view.painted_note_count() == 0);
     CHECK(view.visited_candidate_count() == 0);
+}
+
+TEST_CASE("Piano roll pitch ruler shares projection rows and emits audition requests",
+          "[timeline][piano-roll][ruler]") {
+    auto projection =
+        PitchProjection::create(kLowPitch, kHighPitch, PixelSpan{32.0f, kRollHeight});
+    REQUIRE(projection);
+
+    PianoRollPitchRuler ruler;
+    ruler.set_bounds({7.0f, 0.0f, 64.0f, 10.0f});
+    ruler.set_pitch_projection(projection.value());
+
+    CHECK(ruler.orientation() ==
+          pulp::view::MidiKeyboard::Orientation::vertical_chromatic_rows);
+    CHECK(ruler.show_note_names());
+    CHECK(ruler.first_note() == kLowPitch);
+    CHECK(ruler.last_note() == kHighPitch);
+    CHECK(ruler.bounds().x == 7.0f);
+    CHECK(ruler.bounds().y == 32.0f);
+    CHECK(ruler.bounds().width == 64.0f);
+    CHECK(ruler.bounds().height == kRollHeight);
+
+    std::vector<int> note_ons;
+    std::vector<int> note_offs;
+    float velocity = 0.0f;
+    ruler.on_note_on = [&](int note, float requested_velocity) {
+        note_ons.push_back(note);
+        velocity = requested_velocity;
+    };
+    ruler.on_note_off = [&](int note) { note_offs.push_back(note); };
+
+    const float local_c4_y = projection.value().y_at(60) - projection.value().pixels().origin;
+    ruler.simulate_drag({12.0f, local_c4_y},
+                        {12.0f, projection.value().y_at(62) -
+                                    projection.value().pixels().origin},
+                        1);
+
+    REQUIRE(note_ons == std::vector<int>{60, 62});
+    CHECK(note_offs == std::vector<int>{60, 62});
+    CHECK(velocity == 0.8f);
+}
+
+TEST_CASE("Piano roll renders ten thousand notes through Skia within its wall-clock budget",
+          "[timeline][piano-roll][culling][screenshot]") {
+    if (!pulp::view::raw_rgba_render_available()) {
+        SKIP("Skia raster rendering is not available in this build");
+    }
+
+    const auto project = make_dense_note_project();
+    PianoRollView view;
+    view.set_bounds({0.0f, 0.0f, 40.0f, kRollHeight});
+    view.set_clip(&project, kSequence, kTrack, kClip);
+    view.set_layout(layout_over(50'000, 40, 40.0f));
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto png = pulp::view::render_to_png(view, 40, 480, 1.0f,
+                                               pulp::view::ScreenshotBackend::skia);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    REQUIRE_FALSE(png.empty());
+    const auto metadata = pulp::view::inspect_png_metadata(png);
+    REQUIRE(metadata.valid);
+    CHECK(metadata.width == 40);
+    CHECK(metadata.height == 480);
+    CHECK(view.painted_note_count() == 4);
+    CHECK(view.visited_candidate_count() == 4);
+    CHECK(elapsed < std::chrono::seconds{2});
+
+    const auto content = pulp::view::analyze_screenshot_content(png);
+    REQUIRE(content.valid);
+    CHECK(content.unique_colors >= 3);
+    CHECK(content.non_background_coverage > 0.01);
+
+    std::uint32_t rgba_width = 0;
+    std::uint32_t rgba_height = 0;
+    const auto rgba = pulp::view::render_to_rgba(view, 40, 480, 1.0f, &rgba_width,
+                                                  &rgba_height);
+    REQUIRE_FALSE(rgba.empty());
+    CHECK(rgba_width == 40);
+    CHECK(rgba_height == 480);
+    CHECK(fnv1a64(rgba) == 0x4e52bc808038c4a5ULL);
 }
 
 TEST_CASE("Piano roll culling stays bounded with one long note among ten thousand short notes",

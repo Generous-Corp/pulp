@@ -8,6 +8,7 @@
 #include <pulp/timeline_editor/edit_intent.hpp>
 #include <pulp/timeline_editor/viewport_projection.hpp>
 #include <pulp/view/hit_metrics.hpp>
+#include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstddef>
@@ -37,6 +38,21 @@ struct PianoRollLayout {
     /// Grid the authored start of an inserted or moved note lands on. Zero
     /// snaps nothing, which is what a free-time edit wants.
     timebase::TickDuration snap{};
+};
+
+/// Pitch ruler for a piano roll, using the shared MIDI keyboard interaction and
+/// C4 naming convention over the editor kernel's resolved pitch projection.
+///
+/// Assign `on_note_on` and `on_note_off` to receive audition requests. The
+/// ruler deliberately does not own an audio engine or decide how those requests
+/// are rendered.
+class PianoRollPitchRuler final : public view::MidiKeyboard {
+  public:
+    PianoRollPitchRuler();
+
+    /// Aligns this ruler's frame and inclusive note range to a piano-roll
+    /// projection while preserving its current horizontal frame.
+    void set_pitch_projection(const timeline_editor::PitchProjection& projection);
 };
 
 /// Why the piano roll declined to emit an intent a gesture would otherwise

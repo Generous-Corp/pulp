@@ -48,6 +48,20 @@ constexpr timebase::TickPosition note_end(const NoteEvent& note) noexcept {
 
 PianoRollView::PianoRollView() = default;
 
+PianoRollPitchRuler::PianoRollPitchRuler() {
+    set_orientation(view::MidiKeyboard::Orientation::vertical_chromatic_rows);
+    set_show_note_names(true);
+}
+
+void PianoRollPitchRuler::set_pitch_projection(
+    const timeline_editor::PitchProjection& projection) {
+    set_range(projection.lowest_pitch(), projection.highest_pitch());
+    const auto frame = bounds();
+    const auto pixels = projection.pixels();
+    set_bounds({frame.x, pixels.origin, frame.width, pixels.extent});
+    request_repaint();
+}
+
 void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId track_id,
                              ItemId clip_id) {
     project_ = project;
