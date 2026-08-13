@@ -425,9 +425,24 @@ TEST_CASE("Linux dispatch publishes connected JACK timing and invalidates it",
     CHECK(timing->route_instance_token != 0);
     CHECK(timing->timestamp_source == AudioTimingSource::device_clock);
 
+    const auto first_route_token = timing->route_instance_token;
     device->stop();
-    device->close();
     CHECK_FALSE(query_audio_io_timing(*device).has_value());
+
+    REQUIRE(device->start([](const BufferView<const float>&,
+                             BufferView<float>&,
+                             const CallbackContext&) {}));
+    timing.reset();
+    for (int attempt = 0; attempt < 100 && !timing; ++attempt) {
+        timing = query_audio_io_timing(*device);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(timing.has_value());
+    CHECK(timing->route_instance_token != first_route_token);
+
+    device->stop();
+    CHECK_FALSE(query_audio_io_timing(*device).has_value());
+    device->close();
 }
 #endif
 
