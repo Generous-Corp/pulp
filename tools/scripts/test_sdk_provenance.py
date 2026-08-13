@@ -48,6 +48,7 @@ class SdkProvenanceTests(unittest.TestCase):
         self.sha = subprocess.check_output(
             ["git", "-C", self.source, "rev-parse", "HEAD"], text=True
         ).strip()
+        self.write_build_info()
         subprocess.run(
             ["git", "-C", self.source, "-c", "tag.gpgSign=false", "tag", f"v{VERSION}"],
             check=True,
@@ -67,6 +68,30 @@ class SdkProvenanceTests(unittest.TestCase):
         }
         arguments.update(overrides)
         return provenance.build_release_marker(**arguments)
+
+    def write_build_info(
+        self,
+        *,
+        build_type: str = "Release",
+        dirty: bool = False,
+        version: str = VERSION,
+        source_sha: str | None = None,
+    ) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "#pragma once\n\n"
+            "#include <string_view>\n\n"
+            "namespace pulp::runtime {\n"
+            f'inline constexpr std::string_view kBuildType = "{build_type}";\n'
+            'inline constexpr std::string_view kBuildIso8601 = "2026-08-10T00:00:00Z";\n'
+            f'inline constexpr std::string_view kGitSha = "{(source_sha or self.sha)[:7]}";\n'
+            f"inline constexpr bool kGitDirty = {'true' if dirty else 'false'};\n"
+            f'inline constexpr std::string_view kSdkVersion = "{version}";\n'
+            f'inline constexpr std::string_view kStampLabel = "{version} fixture";\n'
+            "}\n",
+            encoding="utf-8",
+        )
 
     def test_stamp_and_verify_positive_release_marker(self) -> None:
         marker = self.marker()
@@ -158,6 +183,12 @@ class SdkProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(provenance.ProvenanceError, "does not match"):
             self.marker(release_tag="v1.2.3")
 
+    def test_rejects_oversized_installed_build_info(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.write_bytes(b" " * (provenance.BUILD_INFO_MAX_BYTES + 1))
+        with self.assertRaisesRegex(provenance.ProvenanceError, "byte limit"):
+            self.marker()
+
     def test_rejects_tag_source_mismatch(self) -> None:
         subprocess.run(
             ["git", "-C", self.source, "-c", "user.name=Test", "-c", "user.email=test@example.com",
@@ -182,6 +213,7 @@ class SdkProvenanceTests(unittest.TestCase):
     def test_historical_release_before_inspector_floor_requires_component_off(self) -> None:
         version = "0.771.0"
         (self.prefix / "version.txt").write_text(f"{version}\n", encoding="utf-8")
+        self.write_build_info(version=version)
         (self.build / "CMakeCache.txt").write_text(
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
@@ -251,6 +283,128 @@ class SdkProvenanceTests(unittest.TestCase):
         tracked.write_text("dirty\n", encoding="utf-8")
         with self.assertRaisesRegex(provenance.ProvenanceError, "clean tracked source"):
             self.marker(source_sha=later)
+
+    def test_untracked_source_input_does_not_block_official_marker(self) -> None:
+        (self.source / "configure-input.txt").write_text(
+            "untracked\n", encoding="utf-8"
+        )
+        self.assertEqual(self.marker()["source_git_dirty"], False)
+
+    def test_rejects_unsafe_installed_build_info(self) -> None:
+        cases = (
+            ({"dirty": True}, "tracked source changes"),
+            ({"build_type": "Debug"}, "not a Release build"),
+            ({"version": "1.2.3"}, "SDK version does not match"),
+            ({"source_sha": "b" * 40}, "source SHA does not match"),
+        )
+        for values, message in cases:
+            with self.subTest(values=values):
+                self.write_build_info(**values)
+                with self.assertRaisesRegex(provenance.ProvenanceError, message):
+                    self.marker()
+        self.write_build_info()
+
+    def test_rejects_duplicate_installed_build_info_constant(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                'inline constexpr std::string_view kSdkVersion = "9.8.7";\n'
+            )
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "canonical generated structure"
+        ):
+            self.marker()
+
+    def test_rejects_commented_safe_values_with_alternate_active_declaration(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.write_text(
+            "/*\n"
+            'inline constexpr std::string_view kBuildType = "Release";\n'
+            f'inline constexpr std::string_view kGitSha = "{self.sha[:7]}";\n'
+            "inline constexpr bool kGitDirty = false;\n"
+            f'inline constexpr std::string_view kSdkVersion = "{VERSION}";\n'
+            "*/\n"
+            'constexpr inline std::string_view kBuildType = "Debug";\n'
+            f'constexpr inline std::string_view kGitSha = "{self.sha[:7]}";\n'
+            "constexpr inline bool kGitDirty = true;\n"
+            f'constexpr inline std::string_view kSdkVersion = "{VERSION}";\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "canonical generated structure"
+        ):
+            self.marker()
+
+    def test_rejects_preprocessor_disabled_safe_declarations(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.write_text("#if 0\n" + path.read_text(encoding="utf-8") + "#endif\n")
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "canonical generated structure"
+        ):
+            self.marker()
+
+    def test_rejects_preprocessor_directives_joined_on_one_line(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "#pragma once\n\n#include <string_view>\n\n",
+                "#pragma once #include <string_view>\n",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "canonical generated structure"
+        ):
+            self.marker()
+
+    def test_rejects_preprocessor_directives_split_across_lines(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        original = path.read_text(encoding="utf-8")
+        for old, new in (
+            ("#pragma once", "#pragma\nonce"),
+            ("#include <string_view>", "#include\n<string_view>"),
+        ):
+            with self.subTest(directive=old):
+                path.write_text(original.replace(old, new), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    provenance.ProvenanceError, "canonical generated structure"
+                ):
+                    self.marker()
+        path.write_text(original, encoding="utf-8")
+
+    def test_rejects_declarations_hidden_by_continued_line_comments(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        hidden = "".join(
+            f"// \\\n{line}\n"
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "inline constexpr" in line
+        )
+        path.write_text(hidden, encoding="utf-8")
+        with self.assertRaisesRegex(provenance.ProvenanceError, "line splicing"):
+            self.marker()
+
+    def test_rejects_preprocessing_digraphs(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        path.write_text(
+            "%:if 0\n" + path.read_text(encoding="utf-8") + "%:endif\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "digraphs"):
+            self.marker()
+
+    def test_rejects_declarations_embedded_in_raw_string(self) -> None:
+        path = self.prefix / provenance.BUILD_INFO_PATH
+        declarations = "\n".join(
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "inline constexpr" in line
+        )
+        path.write_text(
+            f'constexpr auto payload = R"fixture(\n{declarations}\n)fixture";\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "raw strings"):
+            self.marker()
 
     def test_verify_rejects_marker_for_different_prefix_version(self) -> None:
         marker = self.marker()

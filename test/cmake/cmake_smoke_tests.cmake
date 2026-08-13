@@ -358,6 +358,14 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+add_test(NAME cmake-pulp-git-state
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-pulp-git-state
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_git_state.cmake)
+set_tests_properties(cmake-pulp-git-state PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 30)
 # PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
 # option. ON must produce a clear configure warning rather than silently doing
 # nothing or implying Swift is globally enabled.
