@@ -139,6 +139,8 @@ class ValidatedNoteEditIntent {
     NoteEditIntent value_;
 };
 
+enum class NoteLoweringError : std::uint8_t;
+
 /// Host binding used by a piano-roll front-end before command lowering.
 using NoteEditIntentHost = SequencerUiHostT<ValidatedNoteEditIntent>;
 
@@ -204,6 +206,8 @@ struct EditGestureSubmitError {
     std::optional<timeline::ModelError> model_error;
     /// Exact committed result when code is SubmissionResultMismatch.
     std::optional<timeline::CommitResult> commit_result;
+    /// Exact note-lowering diagnostic when a note intent could not be lowered.
+    std::optional<NoteLoweringError> note_lowering_error;
 };
 
 class EditGestureIdentityAllocator;
@@ -233,6 +237,9 @@ class EditGestureIdentityIssue {
         : identity_(std::move(identity)), phase_(phase), provenance_(provenance) {}
 
     runtime::Result<timeline::Transaction, timeline::ModelError> lower(EditIntent intent) const;
+    runtime::Result<timeline::Transaction, NoteLoweringError>
+    lower(ValidatedNoteEditIntent intent,
+          std::span<const timeline::NoteEvent> current_notes) const;
 
     void invalidate() noexcept {
         identity_ = {};
@@ -364,25 +371,26 @@ class EditGestureIdentityAllocator {
         if (!transaction)
             return lowering_error(transaction.error());
 
-        const auto phase = pending_phase_;
-        const auto command = pending_command_;
-        auto document_result = session.submit(writer, std::move(*transaction));
-        issue.invalidate();
-        clear_pending();
-        if (document_result) {
-            if (document_result->applied_commands.size() != 1 ||
-                document_result->applied_commands.front() != command ||
-                !session.is_current_publication(*document_result)) {
-                if (phase == timeline::GesturePhase::Begin)
-                    state_ = session.is_gesture_open(provenance_, undo_group_)
-                                 ? EditGestureIdentityState::Open
-                                 : EditGestureIdentityState::AwaitingBegin;
-                return submission_result_error(std::move(*document_result));
-            }
-            state_ = committed_state_after(phase);
-        }
-        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Ok(
-            EditGestureSubmitOutcome{std::move(document_result), state_}));
+        return submit_lowered(session, writer, issue, std::move(*transaction));
+    }
+
+    /// Lowers and submits one note gesture using this allocator's opaque identity.
+    runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
+    submit(timeline::DocumentSession& session, timeline::WriterToken& writer,
+           EditGestureIdentityIssue&& issue, ValidatedNoteEditIntent intent,
+           std::span<const timeline::NoteEvent> current_notes) {
+        if (!matches_pending(issue))
+            return submit_error(EditGestureIdentityError::ForeignOrStaleIssue);
+        if (!writer.provenance().valid())
+            return submit_error(EditGestureIdentityError::InvalidWriter);
+        if (writer.provenance() != provenance_)
+            return submit_error(EditGestureIdentityError::WriterMismatch);
+
+        auto transaction = issue.lower(std::move(intent), current_notes);
+        if (!transaction)
+            return note_lowering_error(transaction.error());
+
+        return submit_lowered(session, writer, issue, std::move(*transaction));
     }
 
     /// Returns the one undo group shared by every issue from this allocator.
@@ -426,6 +434,30 @@ class EditGestureIdentityAllocator {
         return EditGestureIdentityState::Closed;
     }
 
+    runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
+    submit_lowered(timeline::DocumentSession& session, timeline::WriterToken& writer,
+                   EditGestureIdentityIssue& issue, timeline::Transaction transaction) {
+        const auto phase = pending_phase_;
+        const auto command = pending_command_;
+        auto document_result = session.submit(writer, std::move(transaction));
+        issue.invalidate();
+        clear_pending();
+        if (document_result) {
+            if (document_result->applied_commands.size() != 1 ||
+                document_result->applied_commands.front() != command ||
+                !session.is_current_publication(*document_result)) {
+                if (phase == timeline::GesturePhase::Begin)
+                    state_ = session.is_gesture_open(provenance_, undo_group_)
+                                 ? EditGestureIdentityState::Open
+                                 : EditGestureIdentityState::AwaitingBegin;
+                return submission_result_error(std::move(*document_result));
+            }
+            state_ = committed_state_after(phase);
+        }
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Ok(
+            EditGestureSubmitOutcome{std::move(document_result), state_}));
+    }
+
     void clear_pending() noexcept {
         pending_ = false;
         pending_transaction_ = {};
@@ -443,21 +475,29 @@ class EditGestureIdentityAllocator {
     static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     submit_error(EditGestureIdentityError error) {
         return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(
-            runtime::Err(EditGestureSubmitError{error, std::nullopt, std::nullopt}));
+            runtime::Err(EditGestureSubmitError{error, std::nullopt, std::nullopt,
+                                                std::nullopt}));
     }
 
     static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     lowering_error(timeline::ModelError error) {
         return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Err(
             EditGestureSubmitError{EditGestureIdentityError::IntentLoweringFailed, error,
-                                   std::nullopt}));
+                                   std::nullopt, std::nullopt}));
+    }
+
+    static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
+    note_lowering_error(NoteLoweringError error) {
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Err(
+            EditGestureSubmitError{EditGestureIdentityError::IntentLoweringFailed,
+                                   std::nullopt, std::nullopt, error}));
     }
 
     static runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     submission_result_error(timeline::CommitResult result) {
         return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Err(
             EditGestureSubmitError{EditGestureIdentityError::SubmissionResultMismatch,
-                                   std::nullopt, std::move(result)}));
+                                   std::nullopt, std::move(result), std::nullopt}));
     }
 
     timeline::WriterToken::Provenance provenance_;
@@ -534,6 +574,18 @@ inline runtime::Result<timeline::Transaction, timeline::ModelError>
 EditGestureIdentityIssue::lower(EditIntent intent) const {
     intent.phase = phase_;
     return lower_edit_intent(intent, identity_);
+}
+
+inline runtime::Result<timeline::Transaction, NoteLoweringError>
+EditGestureIdentityIssue::lower(ValidatedNoteEditIntent intent,
+                                std::span<const timeline::NoteEvent> current_notes) const {
+    auto value = intent.value();
+    value.phase = phase_;
+    auto authoritative = ValidatedNoteEditIntent::create(std::move(value));
+    if (!authoritative)
+        return runtime::Result<timeline::Transaction, NoteLoweringError>(
+            runtime::Err(NoteLoweringError::InvalidIdentity));
+    return lower_note_edit_intent(*authoritative, current_notes, identity_);
 }
 
 /// @}
