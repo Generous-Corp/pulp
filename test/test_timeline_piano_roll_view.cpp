@@ -722,7 +722,7 @@ TEST_CASE("A piano roll bound to a non-MIDI clip stays inert", "[timeline][piano
     CHECK(host.intents().empty());
 }
 
-TEST_CASE("Lowering refuses a continuous note gesture instead of emitting a doomed transaction",
+TEST_CASE("Lowering emits a granular command for continuous and Single note gestures",
           "[timeline][piano-roll]") {
     auto session = Session::create(make_note_project());
 
@@ -743,11 +743,12 @@ TEST_CASE("Lowering refuses a continuous note gesture instead of emitting a doom
     identity.undo_group = UndoGroupId{WriterId{1}, 1};
 
     auto lowered = lower_note_edit_intent(validated.value(), session.notes(), identity);
-    REQUIRE_FALSE(lowered);
-    CHECK(lowered.error() == NoteLoweringError::ContinuousGestureUnsupported);
+    REQUIRE(lowered);
+    CHECK(lowered->gesture_phase == GesturePhase::Begin);
+    REQUIRE(lowered->commands.size() == 1);
+    CHECK(std::holds_alternative<SetNoteEvents>(lowered->commands[0].command));
 
-    // The Single-phase form of the same edit lowers and commits, so the refusal
-    // above is about the phase and not about the edit.
+    // Commit-on-release remains supported by the same granular command path.
     raw.phase = GesturePhase::Single;
     auto single = ValidatedNoteEditIntent::create(raw);
     REQUIRE(single);

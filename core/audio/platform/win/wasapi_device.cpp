@@ -4,12 +4,29 @@
 #include <combaseapi.h>
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <algorithm>
 
 // REFERENCE_TIME units: 100-nanosecond intervals
 static constexpr long long REFTIMES_PER_SEC = 10'000'000LL;
 
 namespace pulp::audio::win {
+
+namespace {
+
+std::uint64_t next_wasapi_route_instance_token() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    auto current = next.load(std::memory_order_relaxed);
+    while (current != std::numeric_limits<std::uint64_t>::max()) {
+        if (next.compare_exchange_weak(
+                current, current + 1, std::memory_order_relaxed)) {
+            return current;
+        }
+    }
+    return 0;
+}
+
+} // namespace
 
 // ── WasapiDevice ─────────────────────────────────────────────────────────
 
@@ -26,6 +43,8 @@ WasapiDevice::~WasapiDevice() {
 }
 
 bool WasapiDevice::open(const DeviceConfig& config) {
+    audio_io_timing_.invalidate();
+    route_invalidation_gate_.reset();
     config_ = config;
 
     // Activate the audio client
@@ -34,7 +53,7 @@ bool WasapiDevice::open(const DeviceConfig& config) {
         nullptr, reinterpret_cast<void**>(&audio_client_));
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not activate audio client (0x{:08x})", static_cast<unsigned>(hr));
-        return false;
+        return finish_failed_open_(hr);
     }
 
     // Get the mix format (what the device natively supports in shared mode)
@@ -42,8 +61,7 @@ bool WasapiDevice::open(const DeviceConfig& config) {
     hr = audio_client_->GetMixFormat(&mix_format);
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not get mix format (0x{:08x})", static_cast<unsigned>(hr));
-        close();
-        return false;
+        return finish_failed_open_(hr);
     }
 
     // Use the device's native format in shared mode. Pick the channel
@@ -116,26 +134,51 @@ bool WasapiDevice::open(const DeviceConfig& config) {
         runtime::log_error("WASAPI: could not initialize audio client ({} mode, 0x{:08x})",
                            config_.share_mode == ShareMode::exclusive ? "exclusive" : "shared",
                            static_cast<unsigned>(hr));
-        close();
-        return false;
+        return finish_failed_open_(hr);
     }
 
     // Set the event handle for buffer notifications
     hr = audio_client_->SetEventHandle(buffer_event_);
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not set event handle (0x{:08x})", static_cast<unsigned>(hr));
-        close();
-        return false;
+        return finish_failed_open_(hr);
     }
 
     // Get the actual buffer size allocated by WASAPI
     hr = audio_client_->GetBufferSize(&buffer_frames_);
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not get buffer size (0x{:08x})", static_cast<unsigned>(hr));
-        close();
-        return false;
+        return finish_failed_open_(hr);
     }
     config_.buffer_size = static_cast<int>(buffer_frames_);
+
+    REFERENCE_TIME stream_latency = 0;
+    const HRESULT latency_hr = audio_client_->GetStreamLatency(&stream_latency);
+    if (wasapi_result_invalidates_route(latency_hr))
+        return finish_failed_open_(latency_hr);
+    if (SUCCEEDED(latency_hr) && stream_latency >= 0) {
+        const auto route_instance_token = next_wasapi_route_instance_token();
+        WasapiTimingValues values{};
+        values.stream_latency_100ns =
+            static_cast<std::uint64_t>(stream_latency);
+        values.endpoint_buffer_frames = buffer_frames_;
+        values.sample_rate_hz =
+            static_cast<std::uint32_t>(config_.sample_rate);
+        values.direction = flow_ == eCapture
+            ? WasapiTimingDirection::capture
+            : WasapiTimingDirection::render;
+        audio_io_timing_.publish(make_wasapi_audio_io_timing(
+            values, route_instance_token, 1));
+        if (!audio_io_timing_.read()) {
+            runtime::log_warn(
+                "WASAPI: stream timing could not be represented without "
+                "understating the endpoint path");
+        }
+    } else {
+        runtime::log_warn(
+            "WASAPI: stream latency unavailable (0x{:08x}); timing disabled",
+            static_cast<unsigned>(latency_hr));
+    }
 
     // Get the direction-specific service interface.
     if (flow_ == eCapture) {
@@ -146,8 +189,7 @@ bool WasapiDevice::open(const DeviceConfig& config) {
             runtime::log_error(
                 "WASAPI: could not get capture client (0x{:08x})",
                 static_cast<unsigned>(hr));
-            close();
-            return false;
+            return finish_failed_open_(hr);
         }
     } else {
         hr = audio_client_->GetService(
@@ -157,8 +199,7 @@ bool WasapiDevice::open(const DeviceConfig& config) {
             runtime::log_error(
                 "WASAPI: could not get render client (0x{:08x})",
                 static_cast<unsigned>(hr));
-            close();
-            return false;
+            return finish_failed_open_(hr);
         }
     }
 
@@ -264,13 +305,31 @@ HRESULT WasapiDevice::initialize_shared_low_latency_(WAVEFORMATEX* fmt) {
     return hr;
 }
 
-void WasapiDevice::on_device_invalidated_() {
+bool WasapiDevice::handle_route_invalidation_(HRESULT result) {
+    if (!wasapi_result_invalidates_route(result))
+        return false;
+    is_running_.store(false, std::memory_order_release);
+    audio_io_timing_.invalidate();
+    route_invalidation_gate_.mark_pending();
+    return true;
+}
+
+bool WasapiDevice::finish_failed_open_(HRESULT result) {
+    handle_route_invalidation_(result);
+    close();
+    notify_route_invalidation_();
+    return false;
+}
+
+void WasapiDevice::notify_route_invalidation_() {
+    if (!route_invalidation_gate_.take_notification())
+        return;
+
     runtime::log_warn(
-        "WASAPI: device invalidated ({} stream); stopping and notifying host",
+        "WASAPI: route invalidated ({} stream); stopping and notifying host",
         flow_ == eCapture ? "capture" : "render");
     // Stop the loop. The thread is about to break; stop()/close() called from
     // the host (in response to the notification) will join us and release COM.
-    is_running_.store(false, std::memory_order_release);
     // Notify the host so it can re-open the device. We do NOT attempt a
     // transparent in-place reopen — clean-stop + notify is the contract.
     if (owner_) owner_->fire_device_change();
@@ -284,6 +343,7 @@ void WasapiDevice::close() {
     if (stop_event_)     { CloseHandle(stop_event_);   stop_event_     = nullptr; }
     channel_buffers_.clear();
     channel_ptrs_.clear();
+    audio_io_timing_.invalidate();
     is_open_ = false;
 }
 
@@ -301,15 +361,30 @@ bool WasapiDevice::start(AudioCallback callback) {
     if (flow_ == eRender) {
         BYTE* data = nullptr;
         HRESULT hr = render_client_->GetBuffer(buffer_frames_, &data);
+        if (handle_route_invalidation_(hr)) {
+            callback_ = nullptr;
+            notify_route_invalidation_();
+            return false;
+        }
         if (SUCCEEDED(hr)) {
             std::memset(data, 0,
                 buffer_frames_ * actual_channels_ * sizeof(float));
-            render_client_->ReleaseBuffer(buffer_frames_, 0);
+            hr = render_client_->ReleaseBuffer(buffer_frames_, 0);
+            if (handle_route_invalidation_(hr)) {
+                callback_ = nullptr;
+                notify_route_invalidation_();
+                return false;
+            }
         }
     }
 
     // Start the audio stream
     HRESULT hr = audio_client_->Start();
+    if (handle_route_invalidation_(hr)) {
+        callback_ = nullptr;
+        notify_route_invalidation_();
+        return false;
+    }
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not start audio client (0x{:08x})",
             static_cast<unsigned>(hr));
@@ -344,15 +419,23 @@ void WasapiDevice::stop() {
     }
 
     if (audio_client_ && (was_running || had_thread)) {
-        audio_client_->Stop();
-        audio_client_->Reset();
+        const HRESULT stop_hr = audio_client_->Stop();
+        if (!handle_route_invalidation_(stop_hr)) {
+            const HRESULT reset_hr = audio_client_->Reset();
+            handle_route_invalidation_(reset_hr);
+        }
     }
 
     callback_ = nullptr;
+    notify_route_invalidation_();
 }
 
 DeviceInfo WasapiDevice::info() const {
     return WasapiSystem::query_device_info(device_);
+}
+
+std::optional<AudioIoTiming> WasapiDevice::audio_io_timing() const noexcept {
+    return audio_io_timing_.read();
 }
 
 void WasapiDevice::render_thread_func() {
@@ -385,7 +468,7 @@ void WasapiDevice::render_thread_func() {
             // How many frames are available in the shared render buffer?
             UINT32 padding = 0;
             hr = audio_client_->GetCurrentPadding(&padding);
-            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
+            if (handle_route_invalidation_(hr)) break;
             if (FAILED(hr)) continue;
             available = buffer_frames_ - padding;
         }
@@ -394,7 +477,7 @@ void WasapiDevice::render_thread_func() {
         // Get the output buffer from WASAPI
         BYTE* data = nullptr;
         hr = render_client_->GetBuffer(available, &data);
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
+        if (handle_route_invalidation_(hr)) break;
         if (FAILED(hr)) continue;
 
         auto* interleaved = reinterpret_cast<float*>(data);
@@ -433,9 +516,11 @@ void WasapiDevice::render_thread_func() {
             std::memset(data, 0, available * actual_channels_ * sizeof(float));
         }
 
-        render_client_->ReleaseBuffer(available, 0);
+        hr = render_client_->ReleaseBuffer(available, 0);
+        if (handle_route_invalidation_(hr)) break;
         sample_position_ += available;
     }
+    notify_route_invalidation_();
 }
 
 // ── Capture thread ──────────────────────────────────────────────────
@@ -469,7 +554,7 @@ void WasapiDevice::capture_thread_func() {
         // GetNextPacketSize == 0.
         UINT32 packet_frames = 0;
         HRESULT hr = capture_client_->GetNextPacketSize(&packet_frames);
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
+        if (handle_route_invalidation_(hr)) break;
         if (FAILED(hr)) continue;
 
         while (packet_frames > 0 && is_running_.load(std::memory_order_relaxed)) {
@@ -478,9 +563,12 @@ void WasapiDevice::capture_thread_func() {
             DWORD  flags        = 0;
 
             hr = capture_client_->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
-            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
+            if (handle_route_invalidation_(hr)) break;
             if (FAILED(hr) || frames == 0) {
-                if (SUCCEEDED(hr)) capture_client_->ReleaseBuffer(frames);
+                if (SUCCEEDED(hr)) {
+                    hr = capture_client_->ReleaseBuffer(frames);
+                    handle_route_invalidation_(hr);
+                }
                 break;
             }
 
@@ -515,7 +603,8 @@ void WasapiDevice::capture_thread_func() {
                 }
             }
 
-            capture_client_->ReleaseBuffer(frames);
+            hr = capture_client_->ReleaseBuffer(frames);
+            if (handle_route_invalidation_(hr)) break;
 
             if (callback_) {
                 // Capture has no output buffer to fill — the user gets
@@ -539,10 +628,11 @@ void WasapiDevice::capture_thread_func() {
             sample_position_ += frames;
 
             hr = capture_client_->GetNextPacketSize(&packet_frames);
-            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
+            if (handle_route_invalidation_(hr)) break;
             if (FAILED(hr)) break;
         }
     }
+    notify_route_invalidation_();
 }
 
 std::wstring WasapiDevice::get_device_name(IMMDevice* device) {
@@ -833,6 +923,12 @@ DeviceInfo WasapiSystem::default_input_device() {
 
 // Factory function
 namespace pulp::audio {
+
+std::optional<AudioIoTiming> query_audio_io_timing(
+    const AudioDevice& device) noexcept {
+    const auto* wasapi = dynamic_cast<const win::WasapiDevice*>(&device);
+    return wasapi ? wasapi->audio_io_timing() : std::nullopt;
+}
 
 std::unique_ptr<AudioSystem> create_audio_system() {
     return std::make_unique<win::WasapiSystem>();

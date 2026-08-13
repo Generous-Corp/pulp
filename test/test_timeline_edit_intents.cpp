@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <type_traits>
 #include <vector>
@@ -74,6 +75,46 @@ NoteEditIntent note_intent(NoteEditIntentKind kind) {
     intent.track_id = {4};
     intent.clip_id = {5};
     return intent;
+}
+
+NoteModifier modifier(ItemId note_id, std::uint16_t probability) {
+    NoteModifier result;
+    result.note_id = note_id;
+    result.probability = probability;
+    return result;
+}
+
+Project note_project_with_modifiers() {
+    const std::vector<NoteEvent> notes{note({6}), note({7}, kTicksPerQuarter)};
+    auto content = MidiContent::create(notes, {modifier({6}, 1024), modifier({7}, 4096)}, 0xBEEF);
+    REQUIRE(content);
+    auto clip = Clip::create({5}, {0}, {4 * kTicksPerQuarter}, std::move(content).value());
+    REQUIRE(clip);
+    auto track = Track::create({4}, "track", {std::move(clip).value()});
+    REQUIRE(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 8, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+const MidiContent& note_content(const Project& project) {
+    return std::get<MidiContent>(clip(project).content());
+}
+
+const NoteEvent& find_note(const Project& project, ItemId id) {
+    const auto notes = note_content(project).notes();
+    const auto found = std::find_if(notes.begin(), notes.end(),
+                                    [id](const NoteEvent& value) { return value.id == id; });
+    REQUIRE(found != notes.end());
+    return *found;
+}
+
+EditIntentIdentity identity(WriterToken& writer, DocumentRevision revision,
+                            std::optional<UndoGroupId> group = {}) {
+    return {writer.allocate_transaction_id(), revision, writer.allocate_command_id(), group};
 }
 
 Clip note_clip_with_lane_value(std::uint32_t value) {
@@ -451,4 +492,162 @@ TEST_CASE("A note gesture crosses the host seam as one comparable value") {
     auto different_validated = ValidatedNoteEditIntent::create(different);
     REQUIRE(different_validated);
     REQUIRE_FALSE(different_validated.value() == validated.value());
+}
+
+TEST_CASE("Note edit intents lower to the granular command for each verb") {
+    const std::vector<NoteEvent> current{note({20})};
+    auto identity = fixed_identity();
+
+    auto insert = note_intent(NoteEditIntentKind::Insert);
+    insert.replacement = note({21}, kTicksPerQuarter);
+    auto inserted = ValidatedNoteEditIntent::create(insert);
+    REQUIRE(inserted);
+    auto insert_transaction = lower_note_edit_intent(inserted.value(), current, identity);
+    REQUIRE(insert_transaction);
+    REQUIRE(std::holds_alternative<InsertNotes>(insert_transaction->commands[0].command));
+
+    auto erase = note_intent(NoteEditIntentKind::Erase);
+    erase.expected = current[0];
+    auto erased = ValidatedNoteEditIntent::create(erase);
+    REQUIRE(erased);
+    auto erase_transaction = lower_note_edit_intent(erased.value(), current, identity);
+    REQUIRE(erase_transaction);
+    REQUIRE(std::holds_alternative<RemoveNotes>(erase_transaction->commands[0].command));
+
+    for (const auto kind : {NoteEditIntentKind::Move, NoteEditIntentKind::Resize,
+                            NoteEditIntentKind::SetVelocity}) {
+        auto transform = note_intent(kind);
+        transform.expected = current[0];
+        transform.replacement = current[0];
+        if (kind == NoteEditIntentKind::Move)
+            transform.replacement->start = {kTicksPerQuarter};
+        else if (kind == NoteEditIntentKind::Resize)
+            transform.replacement->duration = {2 * kTicksPerQuarter};
+        else
+            transform.replacement->velocity = 32'000;
+        auto validated = ValidatedNoteEditIntent::create(transform);
+        REQUIRE(validated);
+        auto transaction = lower_note_edit_intent(validated.value(), current, identity);
+        REQUIRE(transaction);
+        REQUIRE(std::holds_alternative<SetNoteEvents>(transaction->commands[0].command));
+    }
+}
+
+TEST_CASE("A granular continuous note gesture is one canonical undo group") {
+    auto baseline = note_project_with_modifiers();
+    auto session = std::move(DocumentSession::create(baseline)).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto group = writer.allocate_undo_group_id();
+
+    NoteEvent expected = find_note(*session->snapshot(), {6});
+    auto groupless = note_intent(NoteEditIntentKind::Move);
+    groupless.phase = GesturePhase::Begin;
+    groupless.expected = expected;
+    groupless.replacement = expected;
+    groupless.replacement->start = {kTicksPerQuarter / 8};
+    auto validated_groupless = ValidatedNoteEditIntent::create(groupless);
+    REQUIRE(validated_groupless);
+    auto refused = lower_note_edit_intent(validated_groupless.value(),
+                                          note_content(*session->snapshot()).notes(),
+                                          identity(writer, session->revision()));
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error() == NoteLoweringError::InvalidIdentity);
+
+    using GestureStep = std::pair<GesturePhase, std::int64_t>;
+    for (const auto [phase, start] :
+         std::array<GestureStep, 3>{GestureStep{GesturePhase::Begin, kTicksPerQuarter / 8},
+                                    GestureStep{GesturePhase::Update, kTicksPerQuarter / 4},
+                                    GestureStep{GesturePhase::End, kTicksPerQuarter / 2}}) {
+        auto raw = note_intent(NoteEditIntentKind::Move);
+        raw.phase = phase;
+        raw.expected = expected;
+        raw.replacement = expected;
+        raw.replacement->start = {start};
+        auto validated = ValidatedNoteEditIntent::create(raw);
+        REQUIRE(validated);
+        auto lowered =
+            lower_note_edit_intent(validated.value(), note_content(*session->snapshot()).notes(),
+                                   identity(writer, session->revision(), group));
+        REQUIRE(lowered);
+        REQUIRE(lowered->gesture_phase == phase);
+        REQUIRE(lowered->undo_group == group);
+        REQUIRE(std::holds_alternative<SetNoteEvents>(lowered->commands[0].command));
+        REQUIRE(session->submit(writer, std::move(lowered).value()));
+        expected = *raw.replacement;
+    }
+
+    const Project edited = *session->snapshot();
+    CHECK(find_note(edited, {6}).start == TickPosition{kTicksPerQuarter / 2});
+    REQUIRE(note_content(edited).modifier_for({6}) != nullptr);
+    CHECK(note_content(edited).modifier_for({6})->probability == 1024);
+    CHECK(note_content(edited).modifier_seed() == 0xBEEF);
+
+    REQUIRE(session->undo(writer));
+    CHECK(same_project(*session->snapshot(), baseline));
+    REQUIRE(session->redo(writer));
+    CHECK(same_project(*session->snapshot(), edited));
+}
+
+TEST_CASE("Granular insert and erase preserve identities and note modifiers through history") {
+    auto session = std::move(DocumentSession::create(note_project_with_modifiers())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto erase = note_intent(NoteEditIntentKind::Erase);
+    erase.expected = find_note(*session->snapshot(), {7});
+    auto validated_erase = ValidatedNoteEditIntent::create(erase);
+    REQUIRE(validated_erase);
+    auto remove =
+        lower_note_edit_intent(validated_erase.value(), note_content(*session->snapshot()).notes(),
+                               identity(writer, session->revision()));
+    REQUIRE(remove);
+    REQUIRE(std::holds_alternative<RemoveNotes>(remove->commands[0].command));
+    REQUIRE(session->submit(writer, std::move(remove).value()));
+    CHECK_FALSE(session->snapshot()->locate({7})->active);
+    CHECK(note_content(*session->snapshot()).modifier_for({7}) == nullptr);
+    REQUIRE(session->undo(writer));
+    CHECK(session->snapshot()->locate({7})->active);
+    REQUIRE(note_content(*session->snapshot()).modifier_for({7}) != nullptr);
+    CHECK(note_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+    CHECK(note_content(*session->snapshot()).modifier_seed() == 0xBEEF);
+
+    auto insert = note_intent(NoteEditIntentKind::Insert);
+    insert.replacement = note({8}, 2 * kTicksPerQuarter);
+    auto validated_insert = ValidatedNoteEditIntent::create(insert);
+    REQUIRE(validated_insert);
+    auto add =
+        lower_note_edit_intent(validated_insert.value(), note_content(*session->snapshot()).notes(),
+                               identity(writer, session->revision()));
+    REQUIRE(add);
+    REQUIRE(std::holds_alternative<InsertNotes>(add->commands[0].command));
+    REQUIRE(session->submit(writer, std::move(add).value()));
+    CHECK(session->snapshot()->locate({8})->active);
+    CHECK(find_note(*session->snapshot(), {8}).id == ItemId{8});
+    REQUIRE(note_content(*session->snapshot()).modifier_for({6}) != nullptr);
+    REQUIRE(note_content(*session->snapshot()).modifier_for({7}) != nullptr);
+    CHECK(note_content(*session->snapshot()).modifier_for({6})->probability == 1024);
+    CHECK(note_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+    CHECK(note_content(*session->snapshot()).modifier_seed() == 0xBEEF);
+    REQUIRE(session->undo(writer));
+    CHECK_FALSE(session->snapshot()->locate({8})->active);
+    REQUIRE(session->redo(writer));
+    CHECK(session->snapshot()->locate({8})->active);
+    REQUIRE(note_content(*session->snapshot()).modifier_for({6}) != nullptr);
+    REQUIRE(note_content(*session->snapshot()).modifier_for({7}) != nullptr);
+    CHECK(note_content(*session->snapshot()).modifier_for({6})->probability == 1024);
+    CHECK(note_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+    CHECK(note_content(*session->snapshot()).modifier_seed() == 0xBEEF);
+}
+
+TEST_CASE("Granular note lowering names stale expected values before submission") {
+    const std::vector<NoteEvent> current{note({20})};
+    auto raw = note_intent(NoteEditIntentKind::Move);
+    raw.expected = current[0];
+    raw.expected->pitch = 71;
+    raw.replacement = *raw.expected;
+    raw.replacement->start = {kTicksPerQuarter};
+    auto validated = ValidatedNoteEditIntent::create(raw);
+    REQUIRE(validated);
+    auto lowered = lower_note_edit_intent(validated.value(), current, fixed_identity());
+    REQUIRE_FALSE(lowered);
+    CHECK(lowered.error() == NoteLoweringError::ExpectedNoteMismatch);
 }

@@ -729,6 +729,8 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
     def test_linux_dependency_action_is_available_before_use(self) -> None:
         ensure_name = "Ensure shared Linux dependency action exists"
         install_name = "Install Linux dependencies"
+        cleanup_name = "Remove materialized Linux dependency action"
+        bootstrap_name = "Bootstrap dependencies"
         self.assertLess(
             self.text.index(f"- name: {ensure_name}"),
             self.text.index(f"- name: {install_name}"),
@@ -743,6 +745,20 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("workflow_sha='${{ github.workflow_sha }}'", run_block)
         self.assertIn("${repo}/${workflow_sha}/${path}", run_block)
         self.assertNotIn("${repo}/main/${path}", run_block)
+        self.assertIn("pulp-release-created-linux-deps.txt", run_block)
+        self.assertIn("printf '%s\\n' \"$path\"", run_block)
+        self.assertLess(
+            self.text.index(f"- name: {install_name}"),
+            self.text.index(f"- name: {cleanup_name}"),
+        )
+        self.assertLess(
+            self.text.index(f"- name: {cleanup_name}"),
+            self.text.index(f"- name: {bootstrap_name}"),
+        )
+        cleanup_block = self._find_step_run(cleanup_name)
+        self.assertIn("pulp-release-created-linux-deps.txt", cleanup_block)
+        self.assertIn('grep -Fxq "$path" "$created_manifest"', cleanup_block)
+        self.assertIn('rm -f -- "$path"', cleanup_block)
 
     def test_backfill_overlay_keeps_cli_cmake_source_list_from_tag(self) -> None:
         run_block = self._find_step_run(
@@ -826,9 +842,14 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
-            'ln -s ../../tools/import-design "$compat_dir/tools/import-design"',
+            'compat_dir="${RUNNER_TEMP:?}/pulp-release-backfill-helpers"',
             run_block,
         )
+        self.assertIn(
+            "tools/import-design/browser_capture/runtime_manifest.txt",
+            run_block,
+        )
+        self.assertIn('if [ -f "$runtime_manifest" ]', run_block)
         self.assertIn(
             'cp tools/scripts/release_product_matrix.json',
             run_block,
@@ -878,7 +899,11 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         )
         unix_package = self._find_step_run("Package CLI (Unix)")
         windows_package = self._find_step_run("Package CLI (Windows)")
-        self.assertIn("compat_dir=.release-backfill-helpers", ensure_block)
+        self.assertIn(
+            'compat_dir="${RUNNER_TEMP:?}/pulp-release-backfill-helpers"',
+            ensure_block,
+        )
+        self.assertNotIn("compat_dir=.release-backfill-helpers", ensure_block)
         self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
         self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
         self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)

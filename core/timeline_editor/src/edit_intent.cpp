@@ -260,18 +260,14 @@ lower_note_edit_intent(const ValidatedNoteEditIntent& validated,
         return refuse(NoteLoweringError::InvalidIdentity);
 
     const auto& intent = validated.value();
-    // The refusal that names this function's scope. A continuous drag is not a
-    // malformed gesture — it is one this command cannot carry, and emitting a
-    // transaction for it would fail partway through rather than up front.
-    if (intent.phase != GesturePhase::Single)
-        return refuse(NoteLoweringError::ContinuousGestureUnsupported);
-
-    std::vector<NoteEvent> replacement(current_notes.begin(), current_notes.end());
+    if (intent.phase != GesturePhase::Single &&
+        (!identity.undo_group || !identity.undo_group->valid() ||
+         identity.undo_group->writer != identity.transaction_id.writer))
+        return refuse(NoteLoweringError::InvalidIdentity);
 
     if (intent.kind == NoteEditIntentKind::Insert) {
         if (index_of_note(current_notes, intent.replacement->id))
             return refuse(NoteLoweringError::DuplicateNoteIdentity);
-        replacement.push_back(*intent.replacement);
     } else {
         const auto found = index_of_note(current_notes, intent.expected->id);
         if (!found)
@@ -281,22 +277,29 @@ lower_note_edit_intent(const ValidatedNoteEditIntent& validated,
         // ExpectedValueMismatch the caller has to decode after the fact.
         if (!equal_note(current_notes[*found], *intent.expected))
             return refuse(NoteLoweringError::ExpectedNoteMismatch);
-        if (intent.kind == NoteEditIntentKind::Erase)
-            replacement.erase(replacement.begin() + static_cast<std::ptrdiff_t>(*found));
-        else
-            replacement[*found] = *intent.replacement;
     }
 
     Transaction result;
     result.id = identity.transaction_id;
     result.expected_revision = identity.expected_revision;
     result.undo_group = identity.undo_group;
-    result.gesture_phase = GesturePhase::Single;
-    result.commands.push_back(
-        {identity.command_id,
-         ReplaceNoteContent{intent.sequence_id, intent.track_id, intent.clip_id,
-                            std::vector<NoteEvent>(current_notes.begin(), current_notes.end()),
-                            std::move(replacement)}});
+    result.gesture_phase = intent.phase;
+    if (intent.kind == NoteEditIntentKind::Insert) {
+        result.commands.push_back(
+            {identity.command_id,
+             InsertNotes{intent.sequence_id, intent.track_id, intent.clip_id,
+                         {*intent.replacement}, {}}});
+    } else if (intent.kind == NoteEditIntentKind::Erase) {
+        result.commands.push_back(
+            {identity.command_id,
+             RemoveNotes{intent.sequence_id, intent.track_id, intent.clip_id,
+                         {*intent.expected}}});
+    } else {
+        result.commands.push_back(
+            {identity.command_id,
+             SetNoteEvents{intent.sequence_id, intent.track_id, intent.clip_id,
+                           {*intent.expected}, {*intent.replacement}}});
+    }
     return runtime::Ok(std::move(result));
 }
 

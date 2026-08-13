@@ -325,6 +325,8 @@ jobs:
           set -euo pipefail
           repo='${{ github.repository }}'
           workflow_sha='${{ github.workflow_sha }}'
+          created_manifest="${RUNNER_TEMP:?}/pulp-release-created-linux-deps.txt"
+          : > "$created_manifest"
           required=(
             .github/actions/install-linux-build-deps/action.yml
             tools/ci/install_linux_build_deps.py
@@ -335,6 +337,7 @@ jobs:
               mkdir -p "$(dirname "${path}")"
               curl -fsSL "https://raw.githubusercontent.com/${repo}/${workflow_sha}/${path}" \
                 -o "${path}"
+              printf '%s\n' "$path" >> "$created_manifest"
             fi
           done
 
@@ -347,6 +350,24 @@ jobs:
         uses: ./.github/actions/install-linux-build-deps
         with:
           profile: native-webview
+
+      - name: Remove materialized Linux dependency action
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          created_manifest="${RUNNER_TEMP:?}/pulp-release-created-linux-deps.txt"
+          test -f "$created_manifest"
+          required=(
+            .github/actions/install-linux-build-deps/action.yml
+            tools/ci/install_linux_build_deps.py
+            tools/ci/linux_build_deps.json
+          )
+          for path in "${required[@]}"; do
+            if grep -Fxq "$path" "$created_manifest"; then
+              rm -f -- "$path"
+            fi
+          done
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
@@ -494,7 +515,7 @@ jobs:
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
-          compat_dir=.release-backfill-helpers
+          compat_dir="${RUNNER_TEMP:?}/pulp-release-backfill-helpers"
           rm -rf "$compat_dir"
           mkdir -p "$compat_dir/tools/scripts"
           for path in \
@@ -533,8 +554,15 @@ jobs:
           done
           if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then
             # Make the selected tag's runtime manifest visible at the relative
-            # path expected by the current compatibility packager.
-            ln -s ../../tools/import-design "$compat_dir/tools/import-design"
+            # path expected by the current compatibility packager. Keep the
+            # compatibility tree outside the source checkout: historical tags'
+            # build-info probes include untracked files in their dirty bit.
+            runtime_manifest=tools/import-design/browser_capture/runtime_manifest.txt
+            if [ -f "$runtime_manifest" ]; then
+              mkdir -p "$compat_dir/tools/import-design/browser_capture"
+              cp "$runtime_manifest" \
+                "$compat_dir/tools/import-design/browser_capture/runtime_manifest.txt"
+            fi
             cp tools/scripts/release_product_matrix.json \
               "$compat_dir/release_product_matrix.json"
             authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"

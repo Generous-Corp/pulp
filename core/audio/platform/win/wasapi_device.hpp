@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wasapi_io_timing.hpp"
 #include <pulp/audio/device.hpp>
 
 #ifndef _WIN32
@@ -84,6 +85,7 @@ public:
     DeviceInfo info() const override;
     double sample_rate() const override { return config_.sample_rate; }
     int buffer_size() const override { return config_.buffer_size; }
+    std::optional<AudioIoTiming> audio_io_timing() const noexcept;
 
     /// Direction this device wraps. eRender = output, eCapture = input.
     EDataFlow flow() const { return flow_; }
@@ -110,11 +112,11 @@ private:
     // which case the caller falls back to the standard shared Initialize.
     HRESULT initialize_shared_low_latency_(WAVEFORMATEX* fmt);
 
-    // Handle AUDCLNT_E_DEVICE_INVALIDATED from an I/O thread (W4b): mark the
-    // stream not-running and fire the owning AudioSystem's device-change
-    // notification so the host can re-open. Idempotent-safe to call once per
-    // invalidation; the caller breaks its loop afterwards.
-    void on_device_invalidated_();
+    // Route terminal device/resource/service failures through one withdrawal
+    // path before the host receives its re-open notification.
+    bool handle_route_invalidation_(HRESULT result);
+    bool finish_failed_open_(HRESULT result);
+    void notify_route_invalidation_();
 
     IMMDevice*           device_         = nullptr;
     EDataFlow            flow_           = eRender;
@@ -133,6 +135,8 @@ private:
     UINT32 buffer_frames_ = 0;
     int actual_channels_ = 0;     ///< channels delivered to the user callback
     int engine_channels_ = 0;     ///< channels in the WASAPI packet stride
+    WasapiTimingPublication audio_io_timing_;
+    WasapiRouteInvalidationGate route_invalidation_gate_;
 
     std::thread io_thread_;
 
