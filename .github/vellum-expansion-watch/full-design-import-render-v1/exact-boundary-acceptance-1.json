@@ -1,0 +1,90 @@
+{
+  "acceptance_id": "full-design-import-render-v1-exact-boundary-acceptance-1",
+  "accepted_at": "2026-08-13T06:30:00Z",
+  "accepted_by": "@danielraffel",
+  "authority_effect": "none",
+  "counterpart": {
+    "amendment_id": "full-design-import-render-v1-exact-boundary-amendment-1",
+    "amendment_merge_commit": "66e3ec523fabaa8b1f33fd0b69660232ba0e898a",
+    "amendment_path": "provenance/authority/expansions/full-design-import-render-v1/exact-boundary-amendment-1.json",
+    "amendment_sha256": "cf9b07233e9c66763e1f68391d2df4252dca01bbc7de5acac10dca006fbf5287",
+    "matrix_merge_commit": "bbe187d581f3f021a25b3ebd01332f89bbde142e",
+    "matrix_path": "provenance/authority/expansions/full-design-import-render-v1/compatibility-matrix.json",
+    "matrix_sha256": "1792666eb1dd7d3f46dc607f4ee3dccbbc1232a6c2e6ab2331507c4b87122e1c",
+    "repository": "danielraffel/vellum"
+  },
+  "gates": {
+    "exact_matrix_routes_accepted": true,
+    "pulp_consumption_authorized": false,
+    "refreshed_open_pr_audit_complete": true,
+    "source_work_authorized": false,
+    "vellum_acknowledgement_required": true
+  },
+  "implementation_authority": "forbidden-until-vellum-exact-boundary-acknowledged",
+  "kind": "full-design-import-render-exact-boundary-acceptance",
+  "pulp_repository": "Generous-Corp/pulp",
+  "refresh": {
+    "audited_at": "2026-08-13T06:30:00Z",
+    "open_pr_audit_complete": true,
+    "open_pr_rows": [
+      {
+        "disposition": "Pulp counterpart route; retain Pulp ownership until the PR is resolved.",
+        "head_commit": "9f1f426a5fdf6c748cebfa09d0074afd366d4d31",
+        "merge_base_commit": "2b5966b1b4b3690e250003fc5e075668b9a17b7b",
+        "paths": [
+          "external/skia-build/VERSION.md"
+        ],
+        "pull_request": 7312,
+        "repository": "Generous-Corp/pulp",
+        "resolution": "pulp-counterpart"
+      },
+      {
+        "disposition": "Pulp counterpart packaging work; retain Pulp ownership until the PR is resolved.",
+        "head_commit": "185d63aa912d0a5d3c55d54575a1dc5eda959251",
+        "merge_base_commit": "449678ecf272ba00036b38a63de7714c1d0df51d",
+        "paths": [
+          "tools/scripts/package_cli.py",
+          "tools/scripts/test_package_cli.py"
+        ],
+        "pull_request": 7415,
+        "repository": "Generous-Corp/pulp",
+        "resolution": "pulp-counterpart"
+      }
+    ],
+    "open_vellum_overlap_count": 0,
+    "pulp_main_commit": "ed2090af334ad5a9e6d874bf8d03c00182bd4713"
+  },
+  "routing_projection": {
+    "expansion_id": "full-design-import-render-v1",
+    "path": ".github/vellum-ownership.json",
+    "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
+    "router_contract_check": {
+      "app_id": 15368,
+      "branch": "main",
+      "contract_scope": "full-bound-router-contract-suite",
+      "event": "push",
+      "name": "vellum-routing-contract",
+      "required_case_ids": [
+        "authority-load",
+        "cli-contract",
+        "conflicting-owner-fail-closed",
+        "exact-projection-expansion",
+        "generic-pulp-route",
+        "mixed-multi-path-route",
+        "pulp-specific-route",
+        "vellum-generic-route"
+      ],
+      "workflow_path": ".github/workflows/vellum-routing-contract.yml"
+    },
+    "router_contract_test_path": ".agents/skills/pulp-vellum-change-routing/scripts/test_route_change.py",
+    "router_contract_test_sha256": "7d0f9619a3e89e6ebbd6619a1ec224e54012709aabe09434885864ef5843b3bd",
+    "router_dependency_path": ".agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py",
+    "router_dependency_sha256": "b5070e57c03bfacec828c7eec8a15bf0e479de412971bb6413d976a8b29efef5",
+    "router_path": ".agents/skills/pulp-vellum-change-routing/scripts/route_change.py",
+    "router_sha256": "7659fb2be23ae16f071165acd8a898af9f57159e52bd50f79975cb62c2fbe2c7",
+    "schema_version": 3,
+    "sha256": "c02c332a9cae6006404fc88bb12440490165d0eebf3b8cb1a89bb18bdfc02752"
+  },
+  "schema_version": 1,
+  "state": "accepted"
+}

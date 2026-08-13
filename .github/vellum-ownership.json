@@ -8,9 +8,2716 @@
     "state": "active",
     "vellum_authority_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
   },
+  "expansions": [
+    {
+      "accepted_at": "2026-08-13T06:30:00Z",
+      "accepted_by": "@danielraffel",
+      "amendment_id": "full-design-import-render-v1-exact-boundary-amendment-1",
+      "id": "full-design-import-render-v1",
+      "matrix_id": "full-design-import-render-v1-compatibility-matrix",
+      "matrix_sha256": "1792666eb1dd7d3f46dc607f4ee3dccbbc1232a6c2e6ab2331507c4b87122e1c",
+      "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
+      "routes": [
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "compat/imports.json",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.react-native",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "compat/rn.json",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/include/pulp/view/design_ir.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/include/pulp/view/design_sources.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/include/pulp/view/screenshot.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.jsx-react",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/claude_bundle.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pencil",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.react-native",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.stitch",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.v0",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/claude_bundle_sources.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.pencil",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.stitch",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_import.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.design-md",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_import_designmd.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.v0",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_import_v0_tsx.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_ir_analysis.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.canonical-design-ir",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_ir_json.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/design_ir_normalize.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/jsx_lock.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/lock_to_source.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.recognition-resolver",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/recognition_resolver.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/screenshot_compare.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/screenshot_gpu.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-cpu",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/screenshot_skia.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.token-lock-to-design-md",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/token_lock.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.runtime-import-api",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "core/view/src/widget_bridge/runtime_import_api.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/chrome_for_testing.rs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/install_import_design.rs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/tests/chrome_for_testing_tool_test.rs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "external/skia-build/VERSION.md",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "packages/pulp-import-ir/src/adapters/claude-design-html/lower.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.figma-mcp-context",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "packages/pulp-import-ir/src/types.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "packages/pulp-import-ir/test/build-output.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.figma-mcp-context",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "packages/pulp-import-ir/test/scenarios/scenarios.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-swiftui",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "templates/swiftui-design-host/DesignHostApp.swift",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/cmake/cli_import_tool_tests.cmake",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.jsx-react",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/figma/level-meter-panel.tsx",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/imports/fig/synthetic.fig",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/imports/figma-plugin/synthetic-knob.png",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.stitch",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/imports/stitch/2025.04/code.html",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pencil",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/pencil/gain-stage-card.tsx",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.v0",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/v0-dev/audio-control-panel.tsx",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/support/render_scenario.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_browser_capture_backend.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_browser_capture_svg_render.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_cli_import_detect.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_browser_capture.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-cpp",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_cpp_codegen_golden.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_import_claude_bundle.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.jsx-react",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_import_claude_runtime.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.design-md",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_import_designmd.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.source-vs-skia-fidelity",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "output.baked-swiftui",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_import_screenshot_parity.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_import_sources.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "output.canonical-design-ir",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_design_ir_normalize.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-rest",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_figma_rest_export.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_font_rendering_goldens.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_html_intake.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_html_project_stager.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_import_object_coverage.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_jsx_lock.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_lock_to_source.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.recognition-resolver",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_recognition_resolver.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_render_scenario.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-cpu",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_screenshot.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_screenshot_capture.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_screenshot_cli_contracts.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_screenshot_compare.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_screenshot_gpu.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.token-lock-to-design-md",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_token_lock.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.react-native",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_widget_bridge_rn_style.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.runtime-import-api",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_widget_bridge_runtime_import.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/src/assets.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/src/extract.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/effects.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/faithful-vector.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/layout.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/masks.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/node-dispatch.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/paints.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/primitive-geometry.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/figma-plugin/test/text-runs.test.ts",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.react-native",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/tests/test_rn_adapter.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/tests/test_verifier.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/verifier.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/visual/differ.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/visual/runner.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/visual/tests/test_differ.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/harness/visual/tests/test_runner.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/capture.integration.test.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/capture.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/interaction_executor.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/interaction_plan.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/interactions.test.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/semantics.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture/semantics.test.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture_backend.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_capture_ir.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/browser_html_import.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/fig/fig.test.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/fig/scene.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/fig_decode.mjs",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-rest",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/figma_rest_export.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/html_intake.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/html_project_stager.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/html_project_stager.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/import_detect.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/import_detect.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.jsx-react",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/node_runtime.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-cpp",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "output.baked-swiftui",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "output.live-js",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.figma-mcp-context",
+              "role": "pulp_implementation"
+            },
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/pulp_import_design.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-design/svg_shape_lowering.hpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.design-md",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-validation/designmd-roundtrip.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.live-js",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-validation/figma-roundtrip.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pencil",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-validation/pencil-roundtrip.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.stitch",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-validation/stitch-roundtrip.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.live-js",
+              "role": "pulp_proof"
+            },
+            {
+              "cell_id": "source.v0",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/import-validation/v0-roundtrip.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/screenshot/pulp_screenshot.cpp",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.source-vs-skia-fidelity",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/scripts/figma_import_diff.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/scripts/package_cli.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.source-vs-skia-fidelity",
+              "role": "pulp_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/scripts/render-figma-import.sh",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "pulp_proof"
+            }
+          ],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_package_cli.py",
+          "repository": "Generous-Corp/pulp"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "apps/app-host/main.mm",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "apps/app-host/test_phase3_scenario.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "apps/app-host/test_text_semantics.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "apps/app-host/text_semantics.mm",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/claude-design.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.claude-design",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/claude-design.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.design-md",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/design-md.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.design-md",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/design-md.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pencil",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/pencil.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pencil",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/pencil.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.react-native",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/react-native.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.react-native",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/react-native.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.stitch",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/stitch.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.stitch",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/stitch.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.v0",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/v0.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.v0",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/adapters/v0.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/browser-discovery.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/browser-discovery.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/capture.integration.test.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/capture.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/containment.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/containment.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/lower.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.agent-html-chromium",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/lower.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/project-stager.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.html-project-staging-containment",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/chromium/project-stager.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/fig-decode.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-local-fig",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/fig-decode.test.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-mcp-context",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/mcp-context.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-mcp-context",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/mcp-context.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-rest",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/rest_export.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-rest",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/figma/test_rest_export.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.jsx-react",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/react/bundle.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.jsx-react",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/react/bundle.test.mjs",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/source-detect.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/source-detect.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/source-router.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.detection-and-routing",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "authoring/source-router.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/install_chrome_for_testing.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.managed-chromium-install-discovery",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/tests/test_chrome_for_testing.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/tests/test_import_backend.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/tests/test_native_backend.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/tests/test_sdk_artifact.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/tests/test_web_backend.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/vellum",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/vellum_native_backend.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/vellum_scenario.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.capture-native-and-web",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "cli/vellum_web_backend.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "fixtures/design-ir/pulp-emitter-generic.pulp.zip",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/src/design_ir_renderer.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_dawn_surface.mm",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-cpu",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_raster_surface.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.paint-effects-and-clipping",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.vector-svg-paths",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/tests/design_ir_renderer_test.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_style_test.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-cpu",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/tests/skia_raster_surface_test.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.skia-graphite-dawn-macos15-arm64",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "graphics/tests/text_shaping_concurrency_test.cpp",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/bin/backend-source.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/schema/design-ir-v1.schema.json",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/assets.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/diagnostics.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/figma-plugin.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-cpp",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/generate-cpp.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.live-js",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/generate-js.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-swiftui",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/generate-swiftui.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/identity.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/jsx-lock.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/lock-to-source.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/normalize.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/overlay.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/pulp-v1.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.recognition-resolver",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/recognition-resolver.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/reimport.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.canonical-design-ir",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/stable-json.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.token-lock-to-design-md",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/token-lock.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.canonical-design-ir",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/src/validate.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.raster-images-and-assets",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "source.figma-plugin-json",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "source.figma-plugin-zip",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/figma-plugin.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-cpp",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/generate-cpp.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.live-js",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/generate-js.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.baked-swiftui",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/generate-swiftui.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/jsx-lock.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.lock-to-source-generated-and-jsx",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/lock-to-source.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.deterministic-normalize-diagnostics",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "output.canonical-design-ir",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "source.canonical-design-ir",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/normalize.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "source.pulp-design-ir-v1-compat",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/pulp-v1.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.recognition-resolver",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/recognition-resolver.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.reimport-overlays-stable-identity",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/reimport.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.token-lock-to-design-md",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-design-ir/test/token-lock.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.runtime-import-api",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-ui/src/runtime-import.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.interactions-semantics-accessibility",
+              "role": "vellum_future_implementation"
+            },
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-ui/src/runtime.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "ir.runtime-import-api",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-ui/test/runtime-import.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.semantic-snapshots-assertions",
+              "role": "vellum_future_proof"
+            },
+            {
+              "cell_id": "render.layout-and-node-dispatch",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "packages/vellum-ui/test/runtime.test.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/Inter-Regular.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/Jost-Bold.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/Jost-Medium.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/Jost-Regular.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/Jost-SemiBold.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/NotoSansArabic-Variable.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/NotoSansJP-Variable.ttf",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "render.text-runs-fonts-fallback",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "runtime/assets/fonts/README.md",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "output.cli-and-immutable-runtime-assets",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "scripts/build-sdk-artifact.sh",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/differ.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.source-vs-skia-fidelity",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/import_fidelity.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/runner.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/tests/test_differ.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.source-vs-skia-fidelity",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/tests/test_import_fidelity.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.pixel-diff-goldens-montage",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "tools/visual/tests/test_runner.py",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_implementation"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "web/consumer/vellum_host.js",
+          "repository": "Generous-Corp/vellum"
+        },
+        {
+          "cell_roles": [
+            {
+              "cell_id": "harness.input-scenarios",
+              "role": "vellum_future_proof"
+            }
+          ],
+          "owner": "Generous-Corp/vellum",
+          "path": "web/tests/run_text_semantics_browser.py",
+          "repository": "Generous-Corp/vellum"
+        }
+      ],
+      "state": "accepted-pending-vellum-acknowledgement"
+    }
+  ],
   "framework_repository": "Generous-Corp/vellum",
   "freeze_owner": "@danielraffel",
-  "schema_version": 2,
+  "schema_version": 3,
   "slices": [
     {
       "authority": {
