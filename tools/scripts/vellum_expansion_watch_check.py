@@ -22,7 +22,8 @@ EXACT_BOUNDARY_ACCEPTANCE_PATH = WATCH_ROOT / (
 )
 README_PATH = WATCH_ROOT / "README.md"
 EVENT_ROOT = pathlib.Path(".github/vellum-expansion-watch-events")
-EXPECTED_ACCEPTANCE_SHA256 = "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd"
+EXPECTED_ACCEPTANCE_SHA256 = "ef74b4b519e54ce1249f62deb26f3636709f992cbeb684a064a15910a77bee76"
+HISTORICAL_EVENT_ACCEPTANCE_SHA256 = "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd"
 EXPECTED_README_SHA256 = "1626043485af997f94c4ca8221c936ef5e6f72117b62d988f994e8829e5cb8ef"
 EXPECTED_ACCEPTED_AT = "2026-08-11T07:11:14Z"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -507,10 +508,15 @@ def validate_event(value: Any, filename: str) -> set[str]:
     _exact_keys(value, fields, filename)
     if value["schema_version"] != 1 or type(value["schema_version"]) is not int:
         raise WatchError(f"{filename}: schema_version must be integer 1")
+    event_acceptance_sha256 = (
+        EXPECTED_ACCEPTANCE_SHA256
+        if kind == "authority-expansion-watch-refresh"
+        else HISTORICAL_EVENT_ACCEPTANCE_SHA256
+    )
     expected = {
         "kind": kind,
         "acceptance_id": "full-design-import-render-v1-pulp-watch",
-        "acceptance_sha256": EXPECTED_ACCEPTANCE_SHA256,
+        "acceptance_sha256": event_acceptance_sha256,
         "disposition": "watch-only-no-authority",
         "authority_effect": "none",
     }
