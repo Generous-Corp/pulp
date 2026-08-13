@@ -6369,3 +6369,17 @@ Things that cost time here, all of them found by measuring:
   exactly this reason); and text clipped inside a box whose ink still ends short
   of the clip edge. Nodes it cannot measure are counted under `unmeasurable` and
   are never folded into the passing count.
+
+## Runnable agent HTML: enforce its own browser reference
+
+For a self-contained `--from html` artifact, Chromium's settled source capture
+is the reference. Invoke the importer with `--screenshot-backend skia`,
+`--strict-fidelity`, and `--fail-below <percent>` (Forge uses 85). Do **not**
+manufacture a second reference PNG and do not accept a mere advisory similarity
+line: `--fail-below` makes a below-threshold native render exit nonzero.
+
+The CLI must defer the missing-reference check for runnable generic HTML until
+browser capture has had the chance to supply that reference. `--offline` and
+all non-browser sources still require an explicit `--reference`; if browser
+capture cannot produce its source image, the import must fail closed. Keep a
+browser-backed regression test for both halves of this rule.
