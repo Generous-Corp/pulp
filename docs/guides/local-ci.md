@@ -192,6 +192,40 @@ that a pull request changing its own workflow cannot target the group before
 enabling automatic PR or merge-group routing. Repository variables, event-name
 conditions, and tests in this repository are not substitutes for that control.
 
+The supervisor supports that migration without weakening the existing pool.
+Leave `/etc/pulp/linux-runner-group.env` absent for repository registration and
+dispatch-only use. For an automatic pool, install
+`tools/ci/verify_linux_runner_group.py` as
+`/usr/local/lib/pulp/verify_linux_runner_group.py`, set only the numeric group
+id in the root-owned environment file, and restart one slot first:
+
+```sh
+install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
+  /usr/local/lib/pulp/verify_linux_runner_group.py
+install -d -o root -g root -m 0755 /etc/pulp
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$RUNNER_GROUP_ID" \
+  > /etc/pulp/linux-runner-group.env
+chmod 0600 /etc/pulp/linux-runner-group.env
+systemctl restart pulp-ephemeral-pool@1
+```
+
+With the variable present, every clone verifies the live group before it is
+created, registers at organization scope, and receives the additional
+`pulp-auto-linux-x64` label. A missing field, extra repository or workflow,
+default group, unavailable API, or invalid group name keeps the slot offline.
+Never put the automatic selector on the older labels alone: doing so can match
+a repository-level runner that lacks the protected-workflow boundary.
+
+Runner-group verification is necessary but not sufficient for required CI.
+GitHub Actions has no queued-job timeout that can retarget `runs-on` to hosted
+capacity, and the required `macos` alias currently waits for the entire build
+matrix. Keep automatic PR and merge-group Linux hosted until the Linux job is
+independent of that alias and an external health controller selects the local
+label only while an online disposable slot is available. Unsetting the selector
+before dispatch is the hosted fallback; it cannot rescue a job after GitHub has
+assigned its labels. Secret-bearing and `pull_request_target` jobs remain
+ineligible regardless of runner health.
+
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
 `explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux

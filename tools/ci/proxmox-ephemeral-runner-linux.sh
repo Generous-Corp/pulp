@@ -31,9 +31,13 @@ GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
+ORG="${REPO%%/*}"
 LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
+RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
+GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}"
+GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -42,6 +46,33 @@ die() { log "ERROR: $*"; exit 1; }
 
 [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
 PAT="$(cat "$PAT_FILE")"
+
+# Repository runners remain dispatch-only. Automatic PR or merge-group work is
+# permitted only when the controller can prove that an organization runner
+# group admits the protected default-branch workflow and this repository alone.
+# The extra label prevents a selector for the restricted pool from matching an
+# older repository-level worker during a staged rollout.
+REGISTRATION_API="repos/${REPO}"
+RUNNER_URL="https://github.com/${REPO}"
+RUNNER_GROUP_ARG=""
+if [ -n "$RUNNER_GROUP_ID" ]; then
+    [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
+        || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
+    [ "$RUNNER_GROUP_ID" != 1 ] \
+        || die "runner group 1 is the default group"
+    [ -r "$GROUP_VERIFIER" ] \
+        || die "runner-group verifier is missing at $GROUP_VERIFIER"
+    command -v "$GH_CLI" >/dev/null 2>&1 \
+        || die "$GH_CLI is not on PATH"
+    GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
+        --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID")" \
+        || die "automatic Linux runner group policy is not fail-closed"
+    [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
+    REGISTRATION_API="orgs/${ORG}"
+    RUNNER_URL="https://github.com/${ORG}"
+    RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
+    LABELS="${LABELS},pulp-auto-linux-x64"
+fi
 
 # ── admission ────────────────────────────────────────────────────────────────
 # Ask before taking. A refused job queues on GitHub, which is recoverable; an
@@ -91,7 +122,7 @@ cleanup() {
     if [ -n "${PAT:-}" ]; then
         runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/actions/runners?per_page=100" 2>/dev/null)" \
+            "https://api.github.com/${REGISTRATION_API}/actions/runners?per_page=100" 2>/dev/null)" \
             || { log "ERROR: cannot read runner registrations; leaving clone $VMID for safe recovery"; return; }
         runner_lookup="$(printf '%s' "$runners_json" | python3 -c "
 import json,sys
@@ -106,7 +137,7 @@ else: print('not-found:'+str(d.get('total_count', 0)))
             rid="${runner_lookup#found:}"
             if ! curl -fSs -o /dev/null -X DELETE -H "Authorization: Bearer $PAT" \
                 -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/runners/${rid}"; then
+                "https://api.github.com/${REGISTRATION_API}/actions/runners/${rid}"; then
                 log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
                 return
             fi
@@ -188,7 +219,7 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 log "minting registration token"
 RT="$(curl -s -X POST \
     -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${REPO}/actions/runners/registration-token" \
+    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
@@ -196,7 +227,7 @@ log "registering ephemeral runner on $VMID"
 ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
-      --url https://github.com/${REPO} --token ${RT} \
+      --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 " >/dev/null 2>&1 || die "runner registration failed"
 
