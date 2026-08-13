@@ -3,6 +3,7 @@
 #include <pulp/timeline/document_session.hpp>
 
 #include <array>
+#include <span>
 #include <string_view>
 
 namespace {
@@ -167,17 +168,17 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"scene_id":"30","sequence_id":"5","slot_id":"31"})"),
         envelope("pulp.timeline.command.insert_sequence",
                  "{\"sequence\":" + std::string(parsed->raw(sequence)) + "}"),
-        envelope("pulp.timeline.command.clone_sequence",
-                 R"({"cloned_sequence_id":"30","id_remap":[{"new_id":"30","old_id":"5"},{"new_id":"31","old_id":"6"},{"new_id":"32","old_id":"7"},{"new_id":"33","old_id":"8"},{"new_id":"34","old_id":"9"},{"new_id":"35","old_id":"10"},{"new_id":"36","old_id":"11"},{"new_id":"37","old_id":"12"},{"new_id":"38","old_id":"13"},{"new_id":"39","old_id":"14"},{"new_id":"40","old_id":"15"}],"source_sequence_id":"5"})"),
+        envelope(
+            "pulp.timeline.command.clone_sequence",
+            R"({"cloned_sequence_id":"30","id_remap":[{"new_id":"30","old_id":"5"},{"new_id":"31","old_id":"6"},{"new_id":"32","old_id":"7"},{"new_id":"33","old_id":"8"},{"new_id":"34","old_id":"9"},{"new_id":"35","old_id":"10"},{"new_id":"36","old_id":"11"},{"new_id":"37","old_id":"12"},{"new_id":"38","old_id":"13"},{"new_id":"39","old_id":"14"},{"new_id":"40","old_id":"15"}],"source_sequence_id":"5"})"),
         envelope("pulp.timeline.command.remove_sequence", R"({"sequence_id":"30"})"),
         envelope(
             "pulp.timeline.command.set_clip_sequence_ref",
             R"({"clip_id":"7","expected":{"sequence_id":"30","source_start":"0"},"replacement":{"sequence_id":"30","source_start":"100"},"sequence_id":"5","track_id":"6"})"),
-        envelope(
-            "pulp.timeline.command.set_track_mixer",
-            R"({"expected":{"gain_linear_bits":"1065353216","pan_bits":"0"},)"
-            R"("replacement":{"gain_linear_bits":"1056964608","pan_bits":"0"},)"
-            R"("sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_track_mixer",
+                 R"({"expected":{"gain_linear_bits":"1065353216","pan_bits":"0"},)"
+                 R"("replacement":{"gain_linear_bits":"1056964608","pan_bits":"0"},)"
+                 R"("sequence_id":"5","track_id":"6"})"),
         envelope("pulp.timeline.command.insert_track",
                  R"({"before_track_id":"34","sequence_id":"5","track":)" +
                      std::string(parsed->raw(track)) + "}"),
@@ -185,16 +186,22 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope(
             "pulp.timeline.command.set_track_name",
             R"({"expected":"authored","replacement":"lead vocal","sequence_id":"5","track_id":"6"})"),
-        envelope(
-            "pulp.timeline.command.move_track",
-            R"({"expected_before_track_id":"34","replacement_before_track_id":"35",)"
-            R"("sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.move_track",
+                 R"({"expected_before_track_id":"34","replacement_before_track_id":"35",)"
+                 R"("sequence_id":"5","track_id":"6"})"),
         // Appended, like every entry before it: the assertions below are keyed
         // by index into this list, so a new envelope anywhere but the end
         // renumbers all of them.
         envelope("pulp.timeline.command.set_note_events",
                  R"({"clip_id":"7","expected":[)" + note + R"(],"replacement":[)" +
                      transformed_note + R"(],"sequence_id":"5","track_id":"6"})"),
+        envelope(
+            "pulp.timeline.command.insert_notes",
+            R"({"clip_id":"7","modifiers":[{"condition":"fill","condition_offset":1,"condition_period":4,"note_id":"10","probability":16384,"ratchet_count":2}],"notes":[)" +
+                note + R"(],"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_notes",
+                 R"({"clip_id":"7","expected":[)" + transformed_note +
+                     R"(],"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -266,6 +273,16 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(note_events.expected[0].pitch == 60);
     REQUIRE(note_events.replacement[0].id == ItemId{10});
     REQUIRE(note_events.replacement[0].pitch == 72);
+    REQUIRE(std::holds_alternative<InsertNotes>(commands[40]));
+    const auto& insert_notes = std::get<InsertNotes>(commands[40]);
+    REQUIRE(insert_notes.notes.size() == 1);
+    REQUIRE(insert_notes.notes[0].id == ItemId{10});
+    REQUIRE(insert_notes.modifiers.size() == 1);
+    REQUIRE(insert_notes.modifiers[0].condition == NoteConditionKind::Fill);
+    REQUIRE(std::holds_alternative<RemoveNotes>(commands[41]));
+    const auto& remove_notes = std::get<RemoveNotes>(commands[41]);
+    REQUIRE(remove_notes.expected.size() == 1);
+    REQUIRE(remove_notes.expected[0].pitch == 72);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
@@ -278,6 +295,64 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     auto slot_limited = deserialize_commands(batch, registry, no_slots);
     REQUIRE_FALSE(slot_limited);
     REQUIRE(slot_limited.error().code == PersistenceErrorCode::LimitExceeded);
+}
+
+TEST_CASE("Batch note commands compare and charge every retained payload") {
+    const NoteEvent note{{10}, {0}, {25}, 32768, 60, 0};
+    NoteModifier modifier;
+    modifier.note_id = note.id;
+    modifier.probability = 16384;
+    modifier.condition_period = 4;
+    modifier.condition_offset = 1;
+    modifier.ratchet_count = 2;
+    modifier.condition = NoteConditionKind::Fill;
+
+    const Command inserted = InsertNotes{{5}, {6}, {7}, {note}, {modifier}};
+    CHECK(equivalent(inserted, Command(InsertNotes{{5}, {6}, {7}, {note}, {modifier}})));
+    auto different_insert = std::get<InsertNotes>(inserted);
+    different_insert.modifiers[0].probability += 1;
+    CHECK_FALSE(equivalent(inserted, Command(std::move(different_insert))));
+    CHECK(retained_size(inserted) ==
+          sizeof(InsertNotes) + sizeof(NoteEvent) + sizeof(NoteModifier));
+
+    const Command removed = RemoveNotes{{5}, {6}, {7}, {note}};
+    CHECK(equivalent(removed, Command(RemoveNotes{{5}, {6}, {7}, {note}})));
+    auto different_remove = std::get<RemoveNotes>(removed);
+    different_remove.expected[0].pitch += 1;
+    CHECK_FALSE(equivalent(removed, Command(std::move(different_remove))));
+    CHECK(retained_size(removed) == sizeof(RemoveNotes) + sizeof(NoteEvent));
+
+    std::vector<NoteEvent> many_notes(101, note);
+    std::vector<NoteModifier> many_modifiers(101, modifier);
+    const Command wide_insert =
+        InsertNotes{{5}, {6}, {7}, std::move(many_notes), std::move(many_modifiers)};
+    CHECK(retained_size(wide_insert) >=
+          retained_size(inserted) + 100 * (sizeof(NoteEvent) + sizeof(NoteModifier)));
+
+    std::vector<NoteEvent> many_expected(101, note);
+    const Command wide_remove = RemoveNotes{{5}, {6}, {7}, std::move(many_expected)};
+    CHECK(retained_size(wide_remove) >= retained_size(removed) + 100 * sizeof(NoteEvent));
+}
+
+TEST_CASE("Insert-notes persistence requires its complete inverse payload") {
+    const auto registry = builtins();
+    const auto missing_modifiers = deserialize_commands(
+        "[" +
+            envelope("pulp.timeline.command.insert_notes",
+                     R"({"clip_id":"7","notes":[],"sequence_id":"5","track_id":"6"})") +
+            "]",
+        registry);
+    REQUIRE_FALSE(missing_modifiers);
+
+    const auto too_many_modifiers = deserialize_commands(
+        "[" +
+            envelope(
+                "pulp.timeline.command.insert_notes",
+                R"({"clip_id":"7","modifiers":[{"condition":"always","condition_offset":0,"condition_period":1,"note_id":"10","probability":65535,"ratchet_count":1}],"notes":[],"sequence_id":"5","track_id":"6"})") +
+            "]",
+        registry);
+    REQUIRE_FALSE(too_many_modifiers);
+    CHECK(too_many_modifiers.error().code == PersistenceErrorCode::LimitExceeded);
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {
@@ -364,9 +439,9 @@ Project modifier_payload_project() {
     NoteModifier ratcheted;
     ratcheted.note_id = {11};
     ratcheted.ratchet_count = 3;
-    auto content = take(MidiContent::create(
-        {{{10}, {0}, {25}, 32768, 60, 0}, {{11}, {25}, {25}, 32768, 64, 0}}, {chance, ratcheted},
-        0xABCDEF));
+    auto content = take(
+        MidiContent::create({{{10}, {0}, {25}, 32768, 60, 0}, {{11}, {25}, {25}, 32768, 64, 0}},
+                            {chance, ratcheted}, 0xABCDEF));
     auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
     auto track = take(Track::create({6}, "authored", {value}));
     auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
@@ -427,8 +502,7 @@ TEST_CASE("A note-content envelope without the modifier fields still decodes") {
         "[" +
         envelope("pulp.timeline.command.replace_note_content",
                  R"({"clip_id":"7","expected":[],"expected_modifiers":)" + modifiers +
-                     R"(,"replacement":)" + notes +
-                     R"(,"sequence_id":"5","track_id":"6"})") +
+                     R"(,"replacement":)" + notes + R"(,"sequence_id":"5","track_id":"6"})") +
         "]";
     auto rejected = deserialize_commands(overlong, registry);
     REQUIRE_FALSE(rejected);
@@ -440,12 +514,24 @@ namespace {
 // The same clip with note ten raised an octave, so the replacement array below
 // is encoder output too rather than JSON written to match the decoder.
 Project moved_payload_project() {
-    auto content = take(MidiContent::create(
-        {{{10}, {0}, {25}, 32768, 72, 0}, {{11}, {25}, {25}, 32768, 64, 0}}));
+    auto content = take(
+        MidiContent::create({{{10}, {0}, {25}, 32768, 72, 0}, {{11}, {25}, {25}, 32768, 64, 0}}));
     auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
     auto track = take(Track::create({6}, "authored", {value}));
     auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
     return take(Project::create(ProjectInput{{1}, "moved payloads", 12, {5}, {}, {sequence}}));
+}
+
+// Both identities survive, but their storage order reverses because the notes
+// cross in time. This is the case independently canonicalized command arrays
+// used to mis-pair during decode.
+Project crossed_payload_project() {
+    auto content = take(
+        MidiContent::create({{{10}, {30}, {25}, 32768, 60, 0}, {{11}, {0}, {25}, 32768, 64, 0}}));
+    auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
+    auto track = take(Track::create({6}, "authored", {value}));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    return take(Project::create(ProjectInput{{1}, "crossed payloads", 12, {5}, {}, {sequence}}));
 }
 
 // Returns a copy of the clip's encoded note array, so the caller holds bytes
@@ -505,16 +591,76 @@ TEST_CASE("A set-note-events envelope reduces through the authoritative document
     // Command decode gates on exact version equality and has no upgrade hook, so
     // this type is pinned at 1 the same way every other command is. A future
     // widening has to arrive as optional fields, not a version.
-    auto bumped = deserialize_commands(
-        "[" +
-            envelope("pulp.timeline.command.set_note_events",
-                     R"({"clip_id":"7","expected":)" + before + R"(,"replacement":)" + after +
-                         R"(,"sequence_id":"5","track_id":"6"})",
-                     2) +
-            "]",
-        registry);
+    auto bumped = deserialize_commands("[" +
+                                           envelope("pulp.timeline.command.set_note_events",
+                                                    R"({"clip_id":"7","expected":)" + before +
+                                                        R"(,"replacement":)" + after +
+                                                        R"(,"sequence_id":"5","track_id":"6"})",
+                                                    2) +
+                                           "]",
+                                       registry);
     REQUIRE_FALSE(bumped);
     CHECK(bumped.error().code == PersistenceErrorCode::UnsupportedSchemaVersion);
+}
+
+TEST_CASE("Persisted set-note-events pairs identities when edited notes cross in time") {
+    const auto registry = builtins();
+    const auto before_project = modifier_payload_project();
+    const auto after_project = crossed_payload_project();
+    const auto before = clip_notes_json(before_project, registry);
+    const auto after = clip_notes_json(after_project, registry);
+
+    const auto batch =
+        "[" + envelope("pulp.timeline.command.set_note_events",
+                       R"({"clip_id":"7","expected":)" + before + R"(,"replacement":)" +
+                           after + R"(,"sequence_id":"5","track_id":"6"})") +
+        "]";
+    auto commands = take(deserialize_commands(batch, registry));
+    REQUIRE(commands.size() == 1);
+    const auto& decoded = std::get<SetNoteEvents>(commands[0]);
+    REQUIRE(decoded.expected.size() == 2);
+    REQUIRE(decoded.replacement.size() == 2);
+    CHECK(decoded.expected[0].id == ItemId{10});
+    CHECK(decoded.replacement[0].id == ItemId{10});
+    CHECK(decoded.expected[1].id == ItemId{11});
+    CHECK(decoded.replacement[1].id == ItemId{11});
+
+    auto session = take(DocumentSession::create(before_project));
+    auto writer = take(session->register_writer());
+    Transaction submitted;
+    submitted.id = writer.allocate_transaction_id();
+    submitted.expected_revision = session->revision();
+    submitted.commands.push_back({writer.allocate_command_id(), std::move(commands[0])});
+    REQUIRE(session->submit(writer, std::move(submitted)));
+
+    const auto notes = [&]() -> std::span<const NoteEvent> {
+        const auto* sequence = session->snapshot()->find_sequence({5});
+        const auto* track = sequence->find_track({6});
+        const auto* clip = track->find_clip({7});
+        return std::get<MidiContent>(clip->content()).notes();
+    };
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{11});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{10});
+    CHECK(notes()[1].start == TickPosition{30});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == after);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{10});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{11});
+    CHECK(notes()[1].start == TickPosition{25});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == before);
+
+    REQUIRE(session->redo(writer));
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{11});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{10});
+    CHECK(notes()[1].start == TickPosition{30});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == after);
 }
 
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {
@@ -535,10 +681,9 @@ TEST_CASE("Decoded command batch reduces through the authoritative document sess
 
 TEST_CASE("Typed move-track JSON reads an absent endpoint as the last position") {
     const auto registry = builtins();
-    const auto batch = "[" +
-                       envelope("pulp.timeline.command.move_track",
-                                R"({"sequence_id":"5","track_id":"6"})") +
-                       "]";
+    const auto batch =
+        "[" +
+        envelope("pulp.timeline.command.move_track", R"({"sequence_id":"5","track_id":"6"})") + "]";
     const auto commands = take(deserialize_commands(batch, registry));
     REQUIRE(commands.size() == 1);
     const auto& move = std::get<MoveTrack>(commands[0]);

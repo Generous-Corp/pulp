@@ -34,6 +34,24 @@ fn control_release_payload_is_all_or_none() {
 }
 
 #[test]
+fn historical_broker_only_payload_does_not_claim_shared_runtime_as_companion() {
+    let archive = tempfile::tempdir().unwrap();
+    fs::write(archive.path().join(pulp_basename()), b"pulp").unwrap();
+    fs::write(archive.path().join(control_broker_basename()), b"broker").unwrap();
+    fs::write(
+        archive.path().join(control_standalone_runtime_basename()),
+        b"shared-wgpu-runtime",
+    )
+    .unwrap();
+
+    let extracted = locate_binaries_in_archive(archive.path()).unwrap();
+    assert!(extracted.new_control_broker.is_some());
+    assert!(extracted.new_control_standalone_host.is_none());
+    assert!(extracted.new_control_standalone_manifest.is_none());
+    assert!(extracted.new_control_standalone_runtime.is_none());
+}
+
+#[test]
 fn upgrade_url_macos_arm64_uses_targz() {
     let (asset, url) = upgrade_url_for("0.50.0", "darwin", "arm64");
     assert_eq!(asset, "pulp-darwin-arm64.tar.gz");
@@ -683,6 +701,63 @@ fn staged_broker_version_mismatch_refuses_before_installed_state_is_read() {
         fs::read(root.path().join("state/operations/terminal.json")).unwrap(),
         b"terminal"
     );
+}
+
+#[test]
+fn current_broker_without_standalone_closure_is_rejected_after_version_match() {
+    let (_root, archive, mut plan, broker) =
+        broker_lifecycle_fixture("0.803.0", "0.803.1");
+    let staged = archive.path().join(control_broker_basename());
+    plan.version = crate::build_info::control_standalone_host_floor().to_owned();
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        None,
+        |_, _| panic!("incomplete current release must not reconcile"),
+        |_| Ok(Some(plan.version.clone())),
+        |_| panic!("incomplete current release must not inspect installed state"),
+    );
+
+    if cfg!(target_os = "macos") {
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("requires the complete Standalone runtime closure"));
+    } else {
+        assert_eq!(result.unwrap(), ControlBrokerInstall::NotPresent);
+    }
+    assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+}
+
+#[test]
+fn historical_broker_without_standalone_closure_remains_installable() {
+    let (_root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.803.0");
+    let staged = archive.path().join(control_broker_basename());
+    let reconciled = std::cell::Cell::new(false);
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        None,
+        |_, _| {
+            reconciled.set(true);
+            Ok(())
+        },
+        |_| Ok(Some("0.803.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    )
+    .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(result, ControlBrokerInstall::Replaced);
+        assert!(reconciled.get());
+        assert_eq!(fs::read(&broker).unwrap(), b"candidate-broker");
+    } else {
+        assert_eq!(result, ControlBrokerInstall::NotPresent);
+        assert!(!reconciled.get());
+        assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+    }
 }
 
 #[test]

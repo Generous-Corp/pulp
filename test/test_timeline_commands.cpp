@@ -8,9 +8,9 @@ TEST_CASE("Tempo and meter commands path-copy atomically and produce exact inver
     const auto original = make_project();
     const auto tempo = make_tempo_map(90.0);
     const auto meter = make_meter_map({7, 8});
-    auto edit = transaction({1}, 1, 1, {},
-                            {SetTempoMap{original.tempo_map(), tempo},
-                             SetMeterMap{original.meter_map(), meter}});
+    auto edit = transaction(
+        {1}, 1, 1, {},
+        {SetTempoMap{original.tempo_map(), tempo}, SetMeterMap{original.meter_map(), meter}});
     auto changed = reduce_transaction(original, edit);
     REQUIRE(changed);
     REQUIRE(changed->project.tempo_map() == tempo);
@@ -29,8 +29,7 @@ TEST_CASE("Tempo and meter commands path-copy atomically and produce exact inver
 
     auto atomic_failure = transaction(
         {1}, 3, 5, {},
-        {SetTempoMap{original.tempo_map(), tempo},
-         SetMeterMap{meter, make_meter_map({3, 4})}});
+        {SetTempoMap{original.tempo_map(), tempo}, SetMeterMap{meter, make_meter_map({3, 4})}});
     auto rejected = reduce_transaction(original, atomic_failure);
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
@@ -151,6 +150,40 @@ void check_lanes_intact(const MidiContent& content) {
 
 } // namespace
 
+TEST_CASE("MIDI clip equivalence and retained bytes include controller lanes") {
+    const auto original = make_authored_clip_project();
+    const auto& original_clip = clip(original);
+    const auto& original_content = midi_content(original);
+    const std::vector<NoteEvent> notes(original_content.notes().begin(),
+                                       original_content.notes().end());
+    const std::vector<NoteModifier> modifiers(original_content.modifiers().begin(),
+                                              original_content.modifiers().end());
+    std::vector<MidiExpressionLane> changed_lanes(original_content.lanes().begin(),
+                                                  original_content.lanes().end());
+    changed_lanes[0].points[0].value ^= 1;
+
+    auto changed_content = MidiContent::create(notes, modifiers, original_content.modifier_seed(),
+                                               std::move(changed_lanes));
+    REQUIRE(changed_content);
+    auto changed_clip = Clip::create(original_clip.id(), original_clip.start(),
+                                     original_clip.duration(), std::move(changed_content).value());
+    REQUIRE(changed_clip);
+    CHECK_FALSE(equivalent(original_clip, changed_clip.value()));
+
+    auto lane_free_content =
+        MidiContent::create(notes, modifiers, original_content.modifier_seed(), {});
+    REQUIRE(lane_free_content);
+    auto lane_free_clip =
+        Clip::create(original_clip.id(), original_clip.start(), original_clip.duration(),
+                     std::move(lane_free_content).value());
+    REQUIRE(lane_free_clip);
+    const Command with_lanes{InsertClip{{3}, {4}, original_clip}};
+    const Command without_lanes{InsertClip{{3}, {4}, std::move(lane_free_clip).value()}};
+    CHECK(retained_size(with_lanes) >= retained_size(without_lanes) +
+                                           2 * sizeof(MidiExpressionLane) +
+                                           2 * sizeof(MidiLanePoint));
+}
+
 TEST_CASE("ReplaceNoteContent carries the modifiers, seed, and lanes of the notes it retains") {
     const auto original = make_authored_clip_project();
     // The fixture builds under NDEBUG, where its asserts vanish: state what the
@@ -232,9 +265,9 @@ TEST_CASE("Undoing a note removal restores the removed note's modifier") {
     auto writer = std::move(session->register_writer()).value();
     REQUIRE(midi_content(*session->snapshot()).modifier_for({7})->probability == 4096);
 
-    auto edit = session_transaction(
-        writer, session->revision(),
-        {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    auto edit =
+        session_transaction(writer, session->revision(),
+                            {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
     REQUIRE(session->submit(writer, std::move(edit)));
     REQUIRE(midi_content(*session->snapshot()).notes().size() == 1);
     REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) == nullptr);
@@ -268,8 +301,8 @@ TEST_CASE("Undoing a note removal restores the removed note's modifier") {
 
 TEST_CASE("A shrinking note edit drops the orphaned modifier and keeps every lane") {
     const auto original = make_authored_clip_project();
-    auto edit = transaction({1}, 1, 1, {},
-                            {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    auto edit =
+        transaction({1}, 1, 1, {}, {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
     auto changed = reduce_transaction(original, edit);
     REQUIRE(changed);
 
@@ -308,8 +341,8 @@ TEST_CASE("Two note-content transactions differing only in modifiers are not equ
     CHECK_FALSE(equivalent(first, retry));
 
     auto gated = transaction({1}, 1, 1, {}, {quiet});
-    gated.commands[0].command = ReplaceNoteContent{{3},  {4}, {5}, expected, replacement,
-                                                   {chance(6, 1024)}, {chance(6, 1024)}};
+    gated.commands[0].command = ReplaceNoteContent{
+        {3}, {4}, {5}, expected, replacement, {chance(6, 1024)}, {chance(6, 1024)}};
     CHECK_FALSE(equivalent(first, gated));
     CHECK(equivalent(first, transaction({1}, 1, 1, {}, {quiet})));
 }
@@ -320,8 +353,13 @@ TEST_CASE("Note-content retained size counts the modifiers the payload carries")
     const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
 
     const Command bare{ReplaceNoteContent{{3}, {4}, {5}, expected, replacement}};
-    const Command carrying{ReplaceNoteContent{
-        {3}, {4}, {5}, expected, replacement, {chance(6, 1024)}, {chance(6, 1024), chance(7, 4096)}}};
+    const Command carrying{ReplaceNoteContent{{3},
+                                              {4},
+                                              {5},
+                                              expected,
+                                              replacement,
+                                              {chance(6, 1024)},
+                                              {chance(6, 1024), chance(7, 4096)}}};
 
     // The journal budgets a command by this number and the fallthrough answers
     // `sizeof(T)` for a payload it does not know, so a field it forgets is
@@ -493,9 +531,8 @@ TEST_CASE("SetNoteEvents costs the notes under the gesture rather than the clip"
     std::vector<NoteEvent> clip_notes;
     clip_notes.reserve(200);
     for (std::uint64_t index = 0; index < 200; ++index)
-        clip_notes.push_back(modifier_note(6 + index,
-                                           static_cast<std::int64_t>(index) * kTicksPerQuarter / 8,
-                                           60));
+        clip_notes.push_back(
+            modifier_note(6 + index, static_cast<std::int64_t>(index) * kTicksPerQuarter / 8, 60));
 
     const std::vector<NoteEvent> one_note{clip_notes[0]};
     const std::vector<NoteEvent> one_note_moved{modifier_note(6, 0, 72)};
@@ -534,6 +571,183 @@ TEST_CASE("Two SetNoteEvents differing only in the value they start from are not
     elsewhere.replacement = {modifier_note(6, kTicksPerQuarter, 71)};
     CHECK_FALSE(equivalent(first, transaction({1}, 1, 1, {}, {elsewhere})));
     CHECK(equivalent(first, transaction({1}, 1, 1, {}, {from_sixty})));
+}
+
+TEST_CASE("Batch note insert computes an exact canonical inverse") {
+    const auto original = make_authored_clip_project();
+    const NoteEvent later = modifier_note(20, 3 * kTicksPerQuarter / 4, 71);
+    const NoteEvent earlier = modifier_note(21, kTicksPerQuarter / 4, 55);
+    auto edit = transaction({1}, 1, 1, {},
+                            {InsertNotes{{3}, {4}, {5}, {later, earlier}, {chance(20, 3072)}}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+    const auto& after = midi_content(changed->project);
+    REQUIRE(after.notes().size() == 4);
+    CHECK(after.modifier_seed() == 0xABCDEF);
+    REQUIRE(after.modifier_for({20}) != nullptr);
+    CHECK(after.modifier_for({20})->probability == 3072);
+    REQUIRE(after.modifier_for({6}) != nullptr);
+    CHECK(after.modifier_for({6})->probability == 1024);
+    check_lanes_intact(after);
+    CHECK(changed->project.next_item_id() == 22);
+    REQUIRE(changed->project.locate({20}).has_value());
+    REQUIRE(changed->project.locate({21}).has_value());
+    CHECK(changed->project.locate({20})->active);
+    CHECK(changed->project.locate({21})->active);
+    REQUIRE(changed->inverses.size() == 1);
+    const auto& inverse = std::get<RemoveNotes>(changed->inverses[0]);
+    REQUIRE(inverse.expected.size() == 2);
+    CHECK(inverse.expected[0].id == ItemId{21});
+    CHECK(inverse.expected[1].id == ItemId{20});
+    auto restored =
+        reduce_transaction(changed->project, transaction({1}, 2, 2, {}, changed->inverses));
+    REQUIRE(restored);
+    const auto& back = midi_content(restored->project);
+    REQUIRE(back.notes().size() == 2);
+    CHECK(back.modifier_for({20}) == nullptr);
+    REQUIRE(back.modifier_for({6}) != nullptr);
+    CHECK(back.modifier_for({6})->probability == 1024);
+    CHECK(back.modifier_seed() == 0xABCDEF);
+    check_lanes_intact(back);
+    CHECK(restored->project.next_item_id() == 22);
+    const auto first_location = restored->project.locate({20});
+    REQUIRE(first_location.has_value());
+    CHECK(*first_location == ItemLocation{ItemKind::Note, {5}, {3}, {4}, {5}, false});
+    const auto second_location = restored->project.locate({21});
+    REQUIRE(second_location.has_value());
+    CHECK(*second_location == ItemLocation{ItemKind::Note, {5}, {3}, {4}, {5}, false});
+}
+
+TEST_CASE("Batch note insert tombstones survive undo redo and journal replay") {
+    const auto checkpoint = make_authored_clip_project();
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    const InsertNotes insert{
+        {3}, {4}, {5}, {modifier_note(20, kTicksPerQuarter / 4, 67)}, {chance(20, 3072)}};
+    REQUIRE(session->submit(writer, session_transaction(writer, session->revision(), {insert})));
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->locate({20}).has_value());
+    CHECK_FALSE(session->snapshot()->locate({20})->active);
+
+    auto ordinary_reuse =
+        session->submit(writer, session_transaction(writer, session->revision(), {insert}));
+    REQUIRE_FALSE(ordinary_reuse);
+    CHECK(ordinary_reuse.error().code == ConflictCode::IdentityNotAvailable);
+    CHECK(ordinary_reuse.error().item == ItemId{20});
+    REQUIRE(session->redo(writer));
+    const auto& redone = midi_content(*session->snapshot());
+    REQUIRE(redone.modifier_for({20}) != nullptr);
+    CHECK(redone.modifier_for({20})->probability == 3072);
+    check_lanes_intact(redone);
+    auto replayed = session->journal().replay(checkpoint, {});
+    REQUIRE(replayed);
+    const auto& replayed_content = midi_content(replayed.value());
+    REQUIRE(replayed_content.modifier_for({20}) != nullptr);
+    CHECK(replayed_content.modifier_for({20})->probability == 3072);
+    check_lanes_intact(replayed_content);
+}
+
+TEST_CASE("Removing notes gates every field and undo restores their modifiers") {
+    const auto checkpoint = make_authored_clip_project();
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto exact = modifier_note(7, kTicksPerQuarter / 2, 64);
+    std::vector<NoteEvent> stale(5, exact);
+    stale[0].start.value += 1;
+    stale[1].duration.value += 1;
+    stale[2].velocity += 1;
+    stale[3].pitch += 1;
+    stale[4].channel += 1;
+    for (const auto& value : stale) {
+        auto rejected =
+            session->submit(writer, session_transaction(writer, session->revision(),
+                                                        {RemoveNotes{{3}, {4}, {5}, {value}}}));
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+        CHECK(rejected.error().item == ItemId{7});
+    }
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) != nullptr);
+
+    REQUIRE(session->submit(writer, session_transaction(writer, session->revision(),
+                                                        {RemoveNotes{{3}, {4}, {5}, {exact}}})));
+    const auto& after = midi_content(*session->snapshot());
+    REQUIRE(after.notes().size() == 1);
+    CHECK(after.modifier_for({7}) == nullptr);
+    CHECK(after.modifier_for({6})->probability == 1024);
+    CHECK(after.modifier_seed() == 0xABCDEF);
+    check_lanes_intact(after);
+    REQUIRE(session->undo(writer));
+    const auto& restored = midi_content(*session->snapshot());
+    REQUIRE(restored.notes().size() == 2);
+    REQUIRE(restored.modifier_for({7}) != nullptr);
+    CHECK(restored.modifier_for({7})->probability == 4096);
+    CHECK(restored.modifier_seed() == 0xABCDEF);
+    check_lanes_intact(restored);
+    REQUIRE(session->redo(writer));
+    const auto& redone = midi_content(*session->snapshot());
+    CHECK(redone.modifier_for({7}) == nullptr);
+    CHECK(redone.modifier_for({6})->probability == 1024);
+    check_lanes_intact(redone);
+    auto replayed = session->journal().replay(checkpoint, {});
+    REQUIRE(replayed);
+    const auto& replayed_content = midi_content(replayed.value());
+    CHECK(replayed_content.modifier_for({7}) == nullptr);
+    CHECK(replayed_content.modifier_for({6})->probability == 1024);
+    check_lanes_intact(replayed_content);
+}
+
+TEST_CASE("Batch note commands reject empty duplicate malformed and occupied payloads") {
+    const auto original = make_authored_clip_project();
+    const auto reject = [&](Command command) {
+        return reduce_transaction(original, transaction({1}, 1, 1, {}, {std::move(command)}));
+    };
+
+    auto empty_insert = reject(InsertNotes{{3}, {4}, {5}, {}, {}});
+    REQUIRE_FALSE(empty_insert);
+    CHECK(empty_insert.error().code == ConflictCode::ModelInvariant);
+    auto empty_remove = reject(RemoveNotes{{3}, {4}, {5}, {}});
+    REQUIRE_FALSE(empty_remove);
+    CHECK(empty_remove.error().code == ConflictCode::ModelInvariant);
+
+    const auto duplicate = modifier_note(20, 0, 60);
+    auto duplicate_insert = reject(InsertNotes{{3}, {4}, {5}, {duplicate, duplicate}, {}});
+    REQUIRE_FALSE(duplicate_insert);
+    CHECK(duplicate_insert.error().code == ConflictCode::ModelInvariant);
+    auto duplicate_remove = reject(RemoveNotes{{3}, {4}, {5}, {kBothNotes[0], kBothNotes[0]}});
+    REQUIRE_FALSE(duplicate_remove);
+    CHECK(duplicate_remove.error().code == ConflictCode::ModelInvariant);
+    CHECK(duplicate_remove.error().item == ItemId{6});
+
+    const auto rejects_identity = [&](ItemId id) {
+        auto result = reject(InsertNotes{{3}, {4}, {5}, {modifier_note(id.value, 0, 60)}, {}});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == ConflictCode::IdentityNotAvailable);
+        CHECK(result.error().item == id);
+    };
+    rejects_identity({6});  // Live note.
+    rejects_identity({10}); // Live MIDI lane point: identities are global across kinds.
+    rejects_identity({13}); // Unused gap below the monotonic allocation frontier.
+
+    auto malformed_note = modifier_note(20, 0, 60);
+    malformed_note.duration = {0};
+    auto malformed = reject(InsertNotes{{3}, {4}, {5}, {malformed_note}, {}});
+    REQUIRE_FALSE(malformed);
+    CHECK(malformed.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(malformed.error().model_error.has_value());
+    CHECK(malformed.error().model_error->item == ItemId{20});
+
+    auto foreign_modifier =
+        reject(InsertNotes{{3}, {4}, {5}, {modifier_note(20, 0, 60)}, {chance(6, 2048)}});
+    REQUIRE_FALSE(foreign_modifier);
+    CHECK(foreign_modifier.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(foreign_modifier.error().model_error.has_value());
+    CHECK(foreign_modifier.error().model_error->code == ModelErrorCode::MissingItem);
+    CHECK(foreign_modifier.error().model_error->item == ItemId{6});
+
+    CHECK(midi_content(original).notes().size() == 2);
+    CHECK(midi_content(original).modifiers().size() == 2);
+    CHECK(midi_content(original).modifier_seed() == 0xABCDEF);
+    check_lanes_intact(midi_content(original));
 }
 
 TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
@@ -611,7 +825,7 @@ TEST_CASE("Timeline command diagnostics preserve target and media failure kinds"
                                      {std::move(track).value()});
     REQUIRE(sequence);
     MediaAsset asset{{9}, "asset", 10, {48'000, 1}, content_hash(), AssetStoragePolicy::External,
-                     {},  {}, {}};
+                     {},  {},      {}};
     auto with_asset =
         Project::create({{1}, "project", 10, {3}, {asset}, {std::move(sequence).value()}});
     REQUIRE(with_asset);
@@ -638,19 +852,19 @@ TEST_CASE("Timeline reduction support preserves full ownership and atomic identi
     auto project = Project::create({{1}, "project", 8, {3}, {}, {std::move(sequence).value()}});
     REQUIRE(project);
 
-    auto wrong_parent = transaction(
-        {1}, 1, 1, {}, {SetNoteVelocity{{3}, {7}, {5}, {6}, 1000, 2000}});
+    auto wrong_parent =
+        transaction({1}, 1, 1, {}, {SetNoteVelocity{{3}, {7}, {5}, {6}, 1000, 2000}});
     auto parent_rejected = reduce_transaction(project.value(), wrong_parent);
     REQUIRE_FALSE(parent_rejected);
     REQUIRE(parent_rejected.error().code == ConflictCode::ParentMismatch);
 
     auto notes = MidiContent::create({{{8}, {0}, {kTicksPerQuarter / 4}, 1000, 60, 0}});
     REQUIRE(notes);
-    auto colliding = Clip::create({8}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
-                                  std::move(notes).value());
+    auto colliding =
+        Clip::create({8}, {2 * kTicksPerQuarter}, {kTicksPerQuarter}, std::move(notes).value());
     REQUIRE(colliding);
-    auto duplicate_identity = transaction(
-        {1}, 2, 2, {}, {InsertClip{{3}, {4}, std::move(colliding).value()}});
+    auto duplicate_identity =
+        transaction({1}, 2, 2, {}, {InsertClip{{3}, {4}, std::move(colliding).value()}});
     auto identity_rejected = reduce_transaction(project.value(), duplicate_identity);
     REQUIRE_FALSE(identity_rejected);
     REQUIRE(identity_rejected.error().code == ConflictCode::ModelInvariant);
@@ -711,13 +925,13 @@ TEST_CASE("Asset commands include audio loop metadata in equality and retained s
         .points = {{240, AudioLoopPointKind::Manual}, {480, AudioLoopPointKind::Automatic}},
         .tags = {"drums", "warm"},
     };
-    MediaAsset asset{{9}, "loop.wav", 960, {48'000, 1}, content_hash(),
-                     AssetStoragePolicy::External, {}, {}, loop};
+    MediaAsset asset{
+        {9}, "loop.wav", 960, {48'000, 1}, content_hash(), AssetStoragePolicy::External,
+        {},  {},         loop};
     const Command with_loop = CreateAsset{asset};
     REQUIRE(equivalent(with_loop, Command{CreateAsset{asset}}));
-    REQUIRE(retained_size(with_loop) >=
-            2 * sizeof(AudioLoopPoint) + 2 * sizeof(std::string) + loop.tags[0].size() +
-                loop.tags[1].size());
+    REQUIRE(retained_size(with_loop) >= 2 * sizeof(AudioLoopPoint) + 2 * sizeof(std::string) +
+                                            loop.tags[0].size() + loop.tags[1].size());
 
     asset.loop_info.reset();
     REQUIRE_FALSE(equivalent(with_loop, Command{CreateAsset{asset}}));
@@ -739,8 +953,8 @@ TEST_CASE("Sequence commands include groove state in equality and retained size"
                                                  .name = "sequence",
                                                  .musical_duration = TickDuration{480},
                                                  .groove = std::move(second_groove).value()});
-    auto plain = Sequence::create(SequenceInput{
-        .id = {50}, .name = "sequence", .musical_duration = TickDuration{480}});
+    auto plain = Sequence::create(
+        SequenceInput{.id = {50}, .name = "sequence", .musical_duration = TickDuration{480}});
     REQUIRE(first);
     REQUIRE(second);
     REQUIRE(plain);
@@ -757,32 +971,28 @@ TEST_CASE("Sequence command retained size includes derived outgoing references")
     auto reference_clips = [](bool distinct_targets) {
         std::vector<Clip> clips;
         for (std::uint64_t index = 0; index < 4; ++index) {
-            auto clip = Clip::create(
-                {100 + index},
-                TickPosition{static_cast<std::int64_t>(index * 120)},
-                TickDuration{120},
-                SequenceRef{{200 + (distinct_targets ? index : 0)}, TickPosition{0}});
+            auto clip =
+                Clip::create({100 + index}, TickPosition{static_cast<std::int64_t>(index * 120)},
+                             TickDuration{120},
+                             SequenceRef{{200 + (distinct_targets ? index : 0)}, TickPosition{0}});
             REQUIRE(clip);
             clips.push_back(std::move(clip).value());
         }
         return clips;
     };
 
-    auto unique_track =
-        Track::create({60}, "references", reference_clips(true));
-    auto repeated_track =
-        Track::create({60}, "references", reference_clips(false));
+    auto unique_track = Track::create({60}, "references", reference_clips(true));
+    auto repeated_track = Track::create({60}, "references", reference_clips(false));
     REQUIRE(unique_track);
     REQUIRE(repeated_track);
-    auto unique = Sequence::create(
-        {50}, "sequence", TickDuration{480}, {std::move(unique_track).value()});
-    auto repeated = Sequence::create(
-        {50}, "sequence", TickDuration{480}, {std::move(repeated_track).value()});
+    auto unique =
+        Sequence::create({50}, "sequence", TickDuration{480}, {std::move(unique_track).value()});
+    auto repeated =
+        Sequence::create({50}, "sequence", TickDuration{480}, {std::move(repeated_track).value()});
     REQUIRE(unique);
     REQUIRE(repeated);
     REQUIRE(unique->outgoing_sequence_refs().size() == 4);
     REQUIRE(repeated->outgoing_sequence_refs().size() == 1);
     REQUIRE(retained_size(Command{InsertSequence{unique.value()}}) ==
-            retained_size(Command{InsertSequence{repeated.value()}}) +
-                3 * sizeof(ItemId));
+            retained_size(Command{InsertSequence{repeated.value()}}) + 3 * sizeof(ItemId));
 }

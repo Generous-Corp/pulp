@@ -11,6 +11,9 @@ fn main() {
     let broker_floor = json_string_field(&matrix, "control_broker_floor")
         .expect("release product matrix must declare control_broker_floor");
     println!("cargo:rustc-env=PULP_CONTROL_BROKER_FLOOR={broker_floor}");
+    let standalone_host_floor = json_string_field(&matrix, "control_standalone_host_floor")
+        .expect("release product matrix must declare control_standalone_host_floor");
+    println!("cargo:rustc-env=PULP_CONTROL_STANDALONE_HOST_FLOOR={standalone_host_floor}");
 
     if let Ok(version) = std::env::var("PULP_RS_BUILD_VERSION") {
         if !version.is_empty() {
