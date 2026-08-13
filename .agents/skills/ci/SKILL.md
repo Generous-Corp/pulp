@@ -488,10 +488,14 @@ together, or the drift check fails. Full rationale:
 ## A red `macos` or `linux` alias does not mean tests failed
 
 `macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
-The required `macos` alias reports after the build matrix is terminal; it does
-not poll while the native build runs. Alias jobs run no build and produce no
-build output of their own — a `linux` alias log is about 48 lines, and it says
-so outright:
+The required `macos` alias runs no build and produces no build output of its
+own. On PR/manual runs it reports after the combined matrix is terminal. On
+`merge_group` its dedicated reporter depends only on routing + classification
+and polls the current run's jobs until the one macOS matrix leg is terminal;
+it must not depend on `build`, because that would make the required macOS
+context wait for the independently routed Linux leg. It accepts only macOS
+`success`; missing, duplicate, failed, skipped, cancelled, or null terminal
+state fails closed. A `linux` alias log is about 48 lines, and says so outright:
 
 ```
 Linux leg conclusion: cancelled
@@ -1360,8 +1364,12 @@ uses, or the golden warms a cache the real jobs never touch.
   malformed JSON and invalid cardinality are verdict failures, not reasons to
   resume build polling. PR/dispatch runs retain the combined matrix, so advisory
   legs may delay the reporter but `needs.build.result` must never determine it.
-  The merge-group report uses the short-lived preamble pool and preserves the
-  stable required context name. These two reporters intentionally use bare
+  The merge-group report uses the preamble pool and preserves the stable
+  required context name. It occupies one preamble slot for the macOS build
+  duration, so keep at least two reporter-capable runners online; two concurrent
+  queue entries may temporarily consume both. A real queued/running macOS job
+  has no fixed poll deadline, but twelve consecutive polls with no macOS job at
+  all fail closed as a matrix-materialization error. These two reporters use bare
   `gh api --paginate` and decode the concatenated JSON object stream; do not add
   `--slurp`, because older preamble images reject that newer flag.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
@@ -2767,14 +2775,16 @@ merge-group, and push events deliberately ignore the configured private selector
 and use the provider fallback (GitHub-hosted by default) until the external
 runner-group boundary above exists.
 
-The Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
+The protected automatic Mac Pro selector is
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`
 and is served by the Proxmox ephemeral pool described in
-`docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
-the displayed Linux provider from the selector that actually resolved. A
-dispatch using the configured selector fails loudly if it resolves hosted; a
-successfully assigned self-hosted job still has no live capacity fallback.
+`docs/guides/local-ci.md`. The extra `pulp-auto-linux-x64` label is a deliberate
+opt-in boundary: a generic Mac Pro runner without it cannot receive merge-group
+code. `resolve-provider` authorizes the exact selector automatically only for
+`merge_group` while the short RFC 3339 lease is valid; pull requests and push
+events remain hosted. It emits `linux_route_reason` as `explicit-dispatch`,
+`local-enabled`, `security-hosted`, or `unconfigured-hosted`, and derives the
+displayed Linux provider from the selector that actually resolved.
 
 Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
 proof during hosted saturation. Its default remains true so ordinary manual

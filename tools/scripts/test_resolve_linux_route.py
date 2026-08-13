@@ -20,7 +20,7 @@ VELLUM_FREEZE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-freeze-ch
 VERSION_SKILL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
-    '"pulp-host-macpro"]'
+    '"pulp-host-macpro","pulp-auto-linux-x64"]'
 )
 
 _SPEC = importlib.util.spec_from_file_location("linux_route_under_test", SCRIPT)
@@ -39,7 +39,9 @@ def test_dispatch_uses_configured_self_hosted_selector() -> None:
     )
     assert metadata["linux_route_reason"] == "explicit-dispatch"
     assert metadata["linux_provider"] == "local"
-    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-host-macpro"
+    labels = json.loads(metadata["configured_selector_json"])
+    assert "pulp-host-macpro" in labels
+    assert labels[-1] == "pulp-auto-linux-x64"
     assert metadata["event_authorized_selector_json"] == metadata["configured_selector_json"]
 
 

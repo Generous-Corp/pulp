@@ -182,7 +182,9 @@ short lease only while the disposable pool and its exact Mac Pro labels are
 healthy. An absent, malformed, expired, or implausibly distant lease restores
 `ubuntu-latest` before the matrix is created. The workflow token cannot census
 repository runners, so the workflow does not pretend an internal probe can make
-this decision. The pool is native x86_64, which the job requires.
+this decision. The protected automatic selector additionally requires
+`pulp-auto-linux-x64`; ordinary Mac Pro runners without that opt-in label cannot
+receive merge-group code. The pool is native x86_64, which the job requires.
 
 The checked-in `normal-local-fast` profile is the producer contract: it names
 the selector and lease variables, a 300-second TTL, the exact `merge_group`
@@ -898,16 +900,22 @@ branch when a Windows-touching change needs proof before merge.
 Windows are absent on `merge_group`, Windows remains reachable through
 `workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## The required macOS alias reports after the native matrix is terminal
+## The required macOS alias follows macOS, not advisory Linux
 
 Branch protection requires the stable `macos` alias so local/overflow provider
-changes cannot rename the gate. Both event-specific reporters depend on the
-terminal build matrix, then query the current workflow run's paginated jobs API
-and require exactly one `macOS ...` matrix leg with conclusion `success`.
-Missing, duplicate, null, skipped, cancelled, failed, and unknown conclusions
-all fail closed. The query is retried three times only for transport failure;
-there is no fixed-duration build poll that can expire before a queued macOS leg
-starts.
+changes cannot rename the gate. The PR/manual reporter still starts after the
+combined build matrix is terminal. The merge-group reporter instead starts
+after routing and classification, then polls the current workflow run until the
+one `macOS ...` matrix leg is terminal. It never depends on the combined `build`
+job, so a queued or slow independently routed Linux leg cannot delay the
+required context. Both paths accept only a macOS conclusion of `success`.
+Missing, duplicate, null, skipped, cancelled, failed, and unknown terminal
+conclusions fail closed. Each API read gets three transport attempts; the
+merge-group terminal wait has no fixed poll-count deadline that could expire
+before a real queued or running macOS leg starts. A missing macOS job is a
+different state: after 12 ten-second observations without any matching job, the
+reporter fails closed with an explicit matrix-materialization error instead of
+silently occupying a runner forever.
 
 The reporters use `gh api --paginate` and decode its concatenated JSON object
 stream directly. Keep that compatibility boundary: some preamble images support
@@ -917,17 +925,18 @@ every page and rejects an empty response or any non-object page.
 Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
 Linux or Windows work can therefore delay when the reporter starts, but neither
 `needs.build.result` nor an advisory leg's conclusion determines the required
-macOS verdict. On `merge_group`, the matrix contains only the real self-hosted
-macOS leg, and the dedicated merge-group reporter retains the same stable
-`macos` check name.
+macOS verdict. On `merge_group`, the matrix contains the real self-hosted macOS
+leg plus the separately routed Linux leg. The dedicated merge-group reporter
+retains the same stable `macos` check name and observes macOS directly while
+Linux continues independently.
 
-An alias is the **last job in the run**: it waits for the matrix leg and reports
-the outcome. Starve it of a runner and it never starts, so the *run* never
-reaches a terminal state. A run that never terminates holds its `concurrency`
-group, and `build.yml` sets `cancel-in-progress` on that group — so the next
-push's run sits at status `pending` with **zero jobs** and never dispatches. The
-pull request is then wedged: no checks, no failure, nothing to re-run. It
-survives further pushes and clears only by cancelling the older run by hand.
+The PR alias is the **last job in the run**; the merge-group alias can finish as
+soon as macOS does. Starve either reporter of a runner and its required context
+never posts. A non-terminal run can also hold its `concurrency` group, and
+`build.yml` sets `cancel-in-progress` on that group — so the next push's run can
+sit at status `pending` with **zero jobs** and never dispatch. The pull request
+is then wedged: no checks, no failure, nothing to re-run. It survives further
+pushes and clears only by cancelling the older run by hand.
 
 The tell is a `Build and Test` run whose `status` is `pending` and whose `jobs`
 array is **empty**, while the sibling workflows from the same trigger dispatched
@@ -943,6 +952,13 @@ dedicated alias selector, while merge-group and advisory reporters use the
 preamble selector so no bare hosted-runner dependency can hold a run open.
 `tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
 through the toggle and that none is pinned to a bare `ubuntu-latest`.
+The independent merge-group reporter is intentionally long-lived: it occupies
+one preamble slot for roughly the macOS build duration. Keep at least two
+reporter-capable preamble runners online. With the merge queue's two-entry build
+cap, both slots can be occupied by reporters, delaying unrelated classifier or
+resolver preambles until one macOS leg finishes; this is preferred to making
+the required `macos` context depend on the congested hosted pool or on advisory
+Linux terminality.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
@@ -1831,7 +1847,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Selector for the local-first unprivileged Linux x86_64 Proxmox VM pool; automatic use is limited to trusted merge groups with a valid short lease | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Protected selector for the local-first unprivileged Linux x86_64 Proxmox VM pool; automatic use is limited to trusted merge groups with a valid short lease and requires `pulp-auto-linux-x64` | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]'` |
 | `PULP_LOCAL_LINUX_LEASE_UNTIL` | Shipyard-issued RFC 3339 health lease; must be unexpired and at most 15 minutes ahead, otherwise automatic merge-group routing falls back to `ubuntu-latest` | `gh variable set PULP_LOCAL_LINUX_LEASE_UNTIL --body '2026-08-13T18:30:00Z'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 

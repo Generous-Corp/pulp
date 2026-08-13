@@ -99,7 +99,7 @@ jobs:
           # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
-          #       "pulp-host-macpro"].
+          #       "pulp-host-macpro","pulp-auto-linux-x64"].
           # A workflow_dispatch input overrides it. Trusted merge groups may
           # use this exact generic, secret-free selector while the separate
           # short operator lease is valid. Pull requests stay hosted because
@@ -1647,10 +1647,13 @@ jobs:
     # Symmetric bootstrap: on non-merge events this skipped job must not emit
     # the required name owned by the polling path above.
     name: ${{ github.event_name == 'merge_group' && 'macos' || 'macos-merge-unused' }}
-    needs: [build, classify]
-    # This path does not poll: the macOS-only build is terminal before it
-    # starts. Use the short-lived preamble pool so a green owned build cannot
-    # sit behind unrelated hosted-Linux congestion.
+    needs: [resolve-provider, classify]
+    # This reporter starts beside the build matrix and polls only the macOS leg.
+    # It therefore preserves the required macOS verdict without waiting for an
+    # independently routed Linux leg to become terminal. Use the short-lived
+    # preamble pool so a green owned build cannot sit behind unrelated
+    # hosted-Linux congestion. This occupies one preamble slot for the macOS
+    # build duration; keep at least two reporter-capable runners online.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: always() && github.event_name == 'merge_group'
     steps:
@@ -1660,6 +1663,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
+            echo "resolve-provider did not succeed — failing macos gate closed"
+            exit 1
+          fi
           if [ "${{ needs.classify.result }}" != "success" ]; then
             echo "classify did not succeed — failing macos gate closed"
             exit 1
@@ -1671,27 +1678,29 @@ jobs:
           jobs_json="$(mktemp)"
           jobs_err="$(mktemp)"
           trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
-          api_ok=false
-          for attempt in 1 2 3; do
-            if gh api --paginate \
-              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
-              >"$jobs_json" 2>"$jobs_err"; then
-              api_ok=true
-              break
+          missing_polls=0
+          while true; do
+            api_ok=false
+            for attempt in 1 2 3; do
+              if gh api --paginate \
+                "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
+                >"$jobs_json" 2>"$jobs_err"; then
+                api_ok=true
+                break
+              fi
+              echo "Jobs API request failed (transport attempt $attempt/3)."
+              cat "$jobs_err"
+              if [ "$attempt" -lt 3 ]; then
+                sleep "$attempt"
+              fi
+            done
+            if [ "$api_ok" != "true" ]; then
+              echo "Jobs API remained unavailable — failing macos gate closed (required)"
+              exit 1
             fi
-            echo "Jobs API request failed (transport attempt $attempt/3)."
-            cat "$jobs_err"
-            if [ "$attempt" -lt 3 ]; then
-              sleep "$attempt"
-            fi
-          done
-          if [ "$api_ok" != "true" ]; then
-            echo "Jobs API remained unavailable — failing macos gate closed (required)"
-            exit 1
-          fi
-          conclusion=$(
-            cd /tmp
-            python3 - "$jobs_json" <<'PY'
+            conclusion=$(
+              cd /tmp
+              python3 - "$jobs_json" <<'PY'
           import json
           import sys
 
@@ -1717,21 +1726,44 @@ jobs:
               if isinstance(job, dict)
               and job.get("name", "").startswith("macOS")
           ]
-          if len(matches) != 1:
+          if len(matches) > 1:
               raise SystemExit(
-                  f"expected exactly one macOS matrix leg, found {len(matches)}"
+                  f"expected at most one macOS matrix leg, found {len(matches)}"
               )
+          if not matches:
+              print("__missing__")
+              raise SystemExit(0)
+          if matches[0].get("status") != "completed":
+              print("__pending__")
+              raise SystemExit(0)
           conclusion = matches[0].get("conclusion")
           print(conclusion if isinstance(conclusion, str) else "")
           PY
-          )
-          echo "macOS leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "Self-hosted macOS-only matrix green — macos gate ✓"
-            exit 0
-          fi
-          echo "Self-hosted macOS-only matrix ${conclusion:-unknown} — failing macos gate"
-          exit 1
+            )
+            if [ "$conclusion" = "__missing__" ]; then
+              missing_polls=$((missing_polls + 1))
+              if [ "$missing_polls" -ge 12 ]; then
+                echo "macOS matrix job did not materialize after 12 polls — failing macos gate closed"
+                exit 1
+              fi
+              echo "macOS matrix job not visible yet ($missing_polls/12)"
+              sleep 10
+              continue
+            fi
+            missing_polls=0
+            if [ "$conclusion" = "__pending__" ]; then
+              echo "macOS leg not terminal yet — waiting without depending on Linux"
+              sleep 10
+              continue
+            fi
+            echo "macOS leg conclusion: ${conclusion:-unknown}"
+            if [ "$conclusion" = "success" ]; then
+              echo "Self-hosted macOS matrix green — macos gate ✓"
+              exit 0
+            fi
+            echo "Self-hosted macOS matrix ${conclusion:-unknown} — failing macos gate"
+            exit 1
+          done
 
   linux:
     needs: [build, classify]

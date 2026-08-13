@@ -70,7 +70,7 @@ runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 
 [targets."macpro.linux-x64-vm"]
-runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
+runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro", "pulp-auto-linux-x64"]
 
 [targets."macstudio.windows-arm64-qemu"]
 runs_on_json = ["self-hosted", "Windows", "ARM64", "pulp-build-windows"]

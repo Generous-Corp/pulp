@@ -59,6 +59,7 @@ MAC_PRO_LINUX_LABELS = (
     "x64",
     "pulp-build-linux-x64",
     "pulp-host-macpro",
+    "pulp-auto-linux-x64",
 )
 MAX_LEASE_HORIZON = dt.timedelta(minutes=15)
 

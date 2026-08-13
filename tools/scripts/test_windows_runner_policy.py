@@ -336,19 +336,19 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_only_required_macos(self) -> None:
-        """Advisory hosted legs must not sit in the path every merge takes.
+    def test_merge_group_matrix_keeps_macos_and_protected_linux(self) -> None:
+        """Windows stays out while protected local-first Linux validates the queue.
 
         A merge-group leg runs per queued entry, so Windows there is the single
-        largest consumer of hosted minutes while gating nothing — `windows` is
-        advisory, and only `macos` plus the version/skill and Vellum checks are
-        required. Linux has already reported on the PR head; broader coverage
-        remains in the nightly cross-platform suite.
+        largest consumer of hosted minutes while gating nothing. Linux is kept
+        for the health-leased protected Mac Pro route with hosted fallback, and
+        the required macOS reporter must therefore remain independent of its
+        terminal state.
         """
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
         self.assertIn("macos", keys)
-        self.assertNotIn("linux", keys)
+        self.assertIn("linux", keys)
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.
@@ -428,8 +428,16 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         merge_alias = self.workflow["jobs"]["macos-merge-group"]
         self.assertIn("macos-merge-unused", merge_alias["name"])
         self.assertIn("'macos'", merge_alias["name"])
-        self.assertIn("build", merge_alias["needs"])
+        self.assertNotIn("build", merge_alias["needs"])
+        self.assertIn("resolve-provider", merge_alias["needs"])
         self.assertIn("classify", merge_alias["needs"])
+        merge_body = "\n".join(
+            step.get("run", "") for step in merge_alias["steps"]
+        )
+        self.assertIn("macOS leg not terminal yet", merge_body)
+        self.assertIn("without depending on Linux", merge_body)
+        self.assertIn("keep at least two reporter-capable runners online", read(WORKFLOWS / "build.yml"))
+        self.assertIn("did not materialize after 12 polls", merge_body)
         merge_condition = " ".join(merge_alias["if"].split())
         self.assertEqual(
             merge_condition, "always() && github.event_name == 'merge_group'"

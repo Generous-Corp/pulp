@@ -68,15 +68,7 @@ aliases = {
     "macos-merge-group": job_body(text, "macos-merge-group"),
 }
 for name, job in aliases.items():
-    require(
-        "needs: [build, classify]" in job,
-        f"{name} must wait for the terminal build matrix and classification",
-    )
     require("if: always()" in job, f"{name} must report after failed dependencies")
-    require(
-        "max_attempts" not in job and "sleep 10" not in job,
-        f"{name} must not race runner assignment with a polling deadline",
-    )
     require(
         "needs.build.result" not in job,
         f"{name} must not let advisory matrix conclusions determine macos",
@@ -92,8 +84,8 @@ for name, job in aliases.items():
         f"{name} must make exactly three bounded transport attempts",
     )
     require(
-        'startswith("macOS")' in job and "if len(matches) != 1" in job,
-        f"{name} must accept exactly one macOS matrix leg",
+        'startswith("macOS")' in job,
+        f"{name} must select only the macOS matrix leg",
     )
     require(
         'if [ "$conclusion" = "success" ]' in job,
@@ -103,6 +95,14 @@ for name, job in aliases.items():
 
 require("Skip-safe PR" in aliases["macos"], "native skip must remain green")
 require(
+    "needs: [build, classify]" in aliases["macos"],
+    "PR reporter must wait for the terminal combined matrix",
+)
+require(
+    "if len(matches) != 1" in aliases["macos"],
+    "terminal PR reporter must accept exactly one macOS leg",
+)
+require(
     "classify job did not succeed" in aliases["macos"],
     "classification uncertainty must remain fail-closed",
 )
@@ -110,13 +110,21 @@ require(
     "github.event_name == 'merge_group'" in aliases["macos-merge-group"],
     "merge_group must retain the stable macos alias",
 )
+require(
+    "needs: [resolve-provider, classify]" in aliases["macos-merge-group"],
+    "merge-group reporter must not depend on Linux terminality through build",
+)
+require(
+    "while true" in aliases["macos-merge-group"]
+    and 'if len(matches) > 1' in aliases["macos-merge-group"]
+    and 'print("__missing__")' in aliases["macos-merge-group"]
+    and 'print("__pending__")' in aliases["macos-merge-group"]
+    and "sleep 10" in aliases["macos-merge-group"],
+    "merge-group reporter must wait for one terminal macOS leg without a fixed poll limit",
+)
 
 parsers = {name: parser_from(job) for name, job in aliases.items()}
-require(
-    len(set(parsers.values())) == 1,
-    "PR and merge-group aliases must interpret jobs identically",
-)
-parser = next(iter(parsers.values()))
+parser = parsers["macos"]
 
 success = run_parser(
     parser,
@@ -151,5 +159,50 @@ for invalid in (
 ):
     result = run_parser(parser, invalid)
     require(result.returncode != 0, f"parser accepted invalid payload: {invalid!r}")
+
+merge_parser = parsers["macos-merge-group"]
+missing = run_parser(merge_parser, [{"jobs": []}])
+require(
+    missing.returncode == 0 and missing.stdout.strip() == "__missing__",
+    missing.stderr,
+)
+require(
+    '"$missing_polls" -ge 12' in aliases["macos-merge-group"]
+    and "did not materialize after 12 polls" in aliases["macos-merge-group"],
+    "a missing matrix job must fail closed on a bounded observable policy",
+)
+
+for jobs in (
+    [{"name": "macOS (ARM64) [local]", "status": "queued", "conclusion": None}],
+    [{"name": "macOS (ARM64) [local]", "status": "in_progress", "conclusion": None}],
+):
+    result = run_parser(merge_parser, [{"jobs": jobs}])
+    require(
+        result.returncode == 0 and result.stdout.strip() == "__pending__",
+        result.stderr,
+    )
+
+for conclusion in ("success", "failure", "cancelled", "skipped", None):
+    result = run_parser(
+        merge_parser,
+        [{
+            "jobs": [{
+                "name": "macOS (ARM64) [local]",
+                "status": "completed",
+                "conclusion": conclusion,
+            }]
+        }],
+    )
+    expected = conclusion if isinstance(conclusion, str) else ""
+    require(result.returncode == 0 and result.stdout.strip() == expected, result.stderr)
+
+duplicate = run_parser(
+    merge_parser,
+    [{"jobs": [
+        {"name": "macOS one", "status": "completed", "conclusion": "success"},
+        {"name": "macOS two", "status": "completed", "conclusion": "success"},
+    ]}],
+)
+require(duplicate.returncode != 0, "merge-group parser accepted duplicate macOS legs")
 
 print("required macos alias contract: ok")
