@@ -1,6 +1,7 @@
 #include <pulp/playback/automation_cursor.hpp>
 
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/timeline/automation_curve.hpp>
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,10 @@
 
 namespace pulp::playback {
 namespace {
+
+AutomationProgramSegment read_native_segment(const void* records, std::size_t index) noexcept {
+    return static_cast<const AutomationProgramSegment*>(records)[index];
+}
 
 struct EvaluatedPoint {
     float value = 0.0f;
@@ -31,8 +36,7 @@ timebase::SamplePosition add_saturating(timebase::SamplePosition start,
 }
 
 template <typename Visitor>
-void visit_unique_knots(std::span<const AutomationProgramSegment> segments,
-                        Visitor&& visitor) noexcept {
+void visit_unique_knots(AutomationSegmentView segments, Visitor&& visitor) noexcept {
     if (segments.empty())
         return;
     auto previous = segments.front().start_sample;
@@ -45,9 +49,9 @@ void visit_unique_knots(std::span<const AutomationProgramSegment> segments,
     }
 }
 
-std::span<const AutomationProgramSegment> segments_intersecting(const AutomationProgram& program,
-                                                                const TransportRange& range,
-                                                                std::uint32_t frames) noexcept {
+AutomationSegmentView segments_intersecting(const AutomationProgramView& program,
+                                            const TransportRange& range,
+                                            std::uint32_t frames) noexcept {
     const auto segments = program.segments();
     const auto first = std::lower_bound(
         segments.begin(), segments.end(), range.timeline_sample_start,
@@ -60,12 +64,13 @@ std::span<const AutomationProgramSegment> segments_intersecting(const Automation
         [](timebase::SamplePosition sample, const AutomationProgramSegment& segment) {
             return sample < segment.start_sample;
         });
-    return {first, last};
+    const auto offset = static_cast<std::size_t>(first - segments.begin());
+    return segments.subspan(offset, static_cast<std::size_t>(last - first));
 }
 
-std::span<const AutomationProgramSegment>
-host_mapped_segments_intersecting(const AutomationProgram& program, const TransportRange& range,
-                                  std::uint32_t) noexcept {
+AutomationSegmentView host_mapped_segments_intersecting(const AutomationProgramView& program,
+                                                        const TransportRange& range,
+                                                        std::uint32_t) noexcept {
     const auto segments = program.segments();
     if (range.has_precise_host_ticks) {
         const auto start = static_cast<long double>(range.host_tick_start);
@@ -80,7 +85,8 @@ host_mapped_segments_intersecting(const AutomationProgram& program, const Transp
                              [](const AutomationProgramSegment& segment, long double tick) {
                                  return static_cast<long double>(segment.start_tick.value) < tick;
                              });
-        return {first, last};
+        const auto offset = static_cast<std::size_t>(first - segments.begin());
+        return segments.subspan(offset, static_cast<std::size_t>(last - first));
     }
     const auto first =
         std::lower_bound(segments.begin(), segments.end(), range.timeline_tick_start,
@@ -92,7 +98,8 @@ host_mapped_segments_intersecting(const AutomationProgram& program, const Transp
                          [](const AutomationProgramSegment& segment, timebase::TickPosition tick) {
                              return segment.start_tick < tick;
                          });
-    return {first, last};
+    const auto offset = static_cast<std::size_t>(first - segments.begin());
+    return segments.subspan(offset, static_cast<std::size_t>(last - first));
 }
 
 long double tick_offset_from(timebase::TickPosition origin, timebase::TickPosition tick) noexcept {
@@ -164,8 +171,8 @@ bool frame_offset_for(const TransportRange& range, std::uint32_t frames,
 }
 
 template <typename Visitor>
-void visit_unique_host_knot_frames(std::span<const AutomationProgramSegment> segments,
-                                   const TransportRange& range, Visitor&& visitor) noexcept {
+void visit_unique_host_knot_frames(AutomationSegmentView segments, const TransportRange& range,
+                                   Visitor&& visitor) noexcept {
     if (segments.empty())
         return;
     auto previous_tick = segments.front().start_tick;
@@ -283,7 +290,7 @@ bool refinable_interval(const AutomationProgramSegment& segment, const Transport
     return true;
 }
 
-RangeTopology range_topology(const AutomationProgram& program, const TransportRange& range,
+RangeTopology range_topology(const AutomationProgramView& program, const TransportRange& range,
                              std::uint32_t frames) noexcept {
     RangeTopology topology;
     const auto segments = segments_intersecting(program, range, frames);
@@ -301,7 +308,7 @@ RangeTopology range_topology(const AutomationProgram& program, const TransportRa
     return topology;
 }
 
-RangeTopology host_mapped_range_topology(const AutomationProgram& program,
+RangeTopology host_mapped_range_topology(const AutomationProgramView& program,
                                          const TransportRange& range,
                                          std::uint32_t frames) noexcept {
     RangeTopology topology;
@@ -321,7 +328,7 @@ std::uint32_t refinement_rank(std::uint32_t selection, std::uint32_t selected_co
     return static_cast<std::uint32_t>(std::min<std::uint64_t>(rank, candidate_count - 1u));
 }
 
-std::uint32_t populate_range_selection(const AutomationProgram& program,
+std::uint32_t populate_range_selection(const AutomationProgramView& program,
                                        const TransportRange& range, std::uint32_t frames,
                                        std::uint32_t refinable_count,
                                        std::uint32_t selected_refinements,
@@ -364,11 +371,10 @@ std::uint32_t populate_range_selection(const AutomationProgram& program,
     return written;
 }
 
-std::uint32_t
-populate_host_mapped_range_selection(const AutomationProgram& program, const TransportRange& range,
-                                     std::uint32_t frames, std::uint32_t refinable_count,
-                                     std::uint32_t selected_refinements,
-                                     std::span<AutomationBlockEvent> output) noexcept {
+std::uint32_t populate_host_mapped_range_selection(
+    const AutomationProgramView& program, const TransportRange& range, std::uint32_t frames,
+    std::uint32_t refinable_count, std::uint32_t selected_refinements,
+    std::span<AutomationBlockEvent> output) noexcept {
     std::uint32_t written = 0;
     output[written++] = {range.sample_offset, 0.0f, AutomationTransition::Seed};
     const auto segments = host_mapped_segments_intersecting(program, range, frames);
@@ -402,7 +408,7 @@ populate_host_mapped_range_selection(const AutomationProgram& program, const Tra
     return written;
 }
 
-bool host_mapped_mandatory_tick_at_frame(const AutomationProgram& program,
+bool host_mapped_mandatory_tick_at_frame(const AutomationProgramView& program,
                                          const TransportRange& range, std::uint32_t frame,
                                          long double& document_tick_offset) noexcept {
     const auto segments = program.segments();
@@ -424,7 +430,7 @@ bool host_mapped_mandatory_tick_at_frame(const AutomationProgram& program,
                              return host_offset_from_start(segment.end_tick) < value;
                          });
     if (upper != segments.begin()) {
-        const auto candidate = std::prev(upper)->end_tick;
+        const auto candidate = (*std::prev(upper)).end_tick;
         std::uint32_t candidate_frame = 0;
         if (host_mapped_output_offset_for_tick_exact(range, candidate, candidate_frame) &&
             candidate_frame == frame) {
@@ -443,17 +449,47 @@ bool host_mapped_mandatory_tick_at_frame(const AutomationProgram& program,
     return false;
 }
 
-EvaluatedPoint evaluate(const AutomationProgram& program, timebase::SamplePosition sample,
+EvaluatedPoint evaluate(const AutomationProgramView& program, timebase::SamplePosition sample,
                         timebase::TempoCursor& tempo, bool cold,
                         std::size_t& segment_index) noexcept {
-    segment_index = select_automation_segment(program, sample, cold, segment_index);
+    const auto segments = program.segments();
+    if (cold) {
+        const auto found = std::upper_bound(
+            segments.begin(), segments.end(), sample,
+            [](timebase::SamplePosition value, const AutomationProgramSegment& segment) {
+                return value < segment.end_sample;
+            });
+        segment_index = found == segments.end()
+                            ? segments.size() - 1u
+                            : static_cast<std::size_t>(found - segments.begin());
+    } else {
+        while (segment_index + 1u < segments.size() &&
+               sample >= segments[segment_index].end_sample) {
+            ++segment_index;
+        }
+    }
     if (sample < program.segments().front().start_sample)
         return {program.leading_value(), segment_index};
     const auto tick = cold ? tempo.seek(sample).tick : tempo.advance(sample).tick;
-    return {evaluate_automation_segment(program, segment_index, sample, tick), segment_index};
+    const auto segment = segments[segment_index];
+    float value = segment.start_value;
+    if (segment.start_sample == segment.end_sample) {
+        value = segment.end_value;
+    } else if (segment.start_tick == segment.end_tick || tick <= segment.start_tick) {
+        value = segment.start_value;
+    } else if (tick >= segment.end_tick) {
+        value = segment.end_value;
+    } else if (segment.interpolation == timeline::AutomationInterpolation::Hold) {
+        value = segment.start_value;
+    } else {
+        value = timeline::evaluate_continuous_automation_segment(
+            tick, segment.start_tick, segment.end_tick, segment.start_value, segment.end_value,
+            segment.curvature);
+    }
+    return {value, segment_index};
 }
 
-EvaluatedPoint evaluate_host_mapped(const AutomationProgram& program,
+EvaluatedPoint evaluate_host_mapped(const AutomationProgramView& program,
                                     timebase::TickPosition tick_origin, long double tick_offset,
                                     std::size_t& segment_index) noexcept {
     const auto segments = program.segments();
@@ -464,7 +500,7 @@ EvaluatedPoint evaluate_host_mapped(const AutomationProgram& program,
     if (tick_offset < tick_offset_from(tick_origin, segments.front().start_tick))
         return {program.leading_value(), segment_index};
 
-    const auto& segment = segments[segment_index];
+    const auto segment = segments[segment_index];
     if (segment.start_tick == segment.end_tick)
         return {segment.end_value, segment_index};
     const auto segment_start = tick_offset_from(tick_origin, segment.start_tick);
@@ -489,9 +525,8 @@ EvaluatedPoint evaluate_host_mapped(const AutomationProgram& program,
             segment_index};
 }
 
-AutomationTransition transition_between(std::span<const AutomationProgramSegment> segments,
-                                        std::size_t from, std::size_t to,
-                                        bool host_beat_mapping) noexcept {
+AutomationTransition transition_between(AutomationSegmentView segments, std::size_t from,
+                                        std::size_t to, bool host_beat_mapping) noexcept {
     const auto last = std::min(to > from ? to - 1u : from, segments.size() - 1u);
     for (auto index = from; index <= last; ++index) {
         const auto has_extent = host_beat_mapping
@@ -505,6 +540,15 @@ AutomationTransition transition_between(std::span<const AutomationProgramSegment
 
 } // namespace
 
+AutomationProgramView AutomationProgramView::from(const AutomationProgram& program) noexcept {
+    return {program.generation(),
+            program.instance_token(),
+            program.lane_id(),
+            program.tempo_map(),
+            AutomationSegmentView::from_records(program.segments(), read_native_segment),
+            program.leading_value()};
+}
+
 void AutomationCursor::reset() noexcept {
     active_key_ = {};
     active_instance_token_ = {};
@@ -513,6 +557,14 @@ void AutomationCursor::reset() noexcept {
 }
 
 AutomationCursorResult AutomationCursor::process(const AutomationProgram& program,
+                                                 const TransportSnapshot& transport,
+                                                 std::span<AutomationBlockEvent> output,
+                                                 std::uint32_t max_intersecting_segments) noexcept {
+    return process(AutomationProgramView::from(program), transport, output,
+                   max_intersecting_segments);
+}
+
+AutomationCursorResult AutomationCursor::process(const AutomationProgramView& program,
                                                  const TransportSnapshot& transport,
                                                  std::span<AutomationBlockEvent> output,
                                                  std::uint32_t max_intersecting_segments) noexcept {
