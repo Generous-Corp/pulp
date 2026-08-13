@@ -19,6 +19,7 @@ on:
       - "core/audio/include/pulp/audio/wav_decoder.hpp"
       - "core/audio/src/wav_decoder.cpp"
       - "examples/web-demos/**"
+      - "examples/timeline-sdk-consumer/registered_chord_renderer.cpp"
       - "examples/pulp-gain/**"
       - "examples/super-convolver/**"
       - "packages/pulp-web-player/**"
@@ -223,6 +224,13 @@ jobs:
         working-directory: examples/web-demos/wasm-build
         run: |
           set -euo pipefail
+          # The installed-SDK consumer's main() is linked against the production
+          # pulp-wam-dsp object closure. Its exact notes and committed semantic
+          # hash are therefore one shared native/WASM oracle, not a parallel
+          # JavaScript fixture that can drift.
+          registered_output="$(node build/pulp-wam-registered-chord-renderer.js)"
+          printf '%s\n' "$registered_output"
+          grep -Fq "deterministic hash 0x3c07dc8dbb99c381" <<<"$registered_output"
           # Effect + instrument feature coverage (the runner takes a built .wasm).
           # Covers param + plugin_state_io round-trip AND hostile-state rejection
           # (32-bit overflow blob, corrupted CRC, truncation) — no worklet trap.
