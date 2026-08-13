@@ -8,6 +8,7 @@ import base64
 import collections
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -57,9 +58,25 @@ CHANGE_DISPOSITIONS = {
     "emergency-exception",
 }
 
+ROUTING_EVIDENCE_PATH = (
+    ROOT
+    / ".agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py"
+)
+
 
 class FreezeError(RuntimeError):
     pass
+
+
+def _routing_evidence_module():
+    spec = importlib.util.spec_from_file_location(
+        "pulp_vellum_routing_evidence", ROUTING_EVIDENCE_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise FreezeError("Vellum routing evidence validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @dataclass(frozen=True)
@@ -169,17 +186,19 @@ def _parse_utc(value: Any, field: str) -> dt.datetime:
 
 
 def validate_map(mapping: dict[str, Any]) -> None:
-    allowed_top = {
+    base_top = {
         "schema_version",
         "framework_repository",
         "freeze_owner",
         "activation",
         "slices",
     }
+    schema_version = mapping.get("schema_version")
+    allowed_top = base_top | ({"expansions"} if schema_version == 3 else set())
     if set(mapping) != allowed_top:
         raise FreezeError("ownership map has missing or unknown top-level fields")
-    if mapping.get("schema_version") != 2:
-        raise FreezeError("ownership map schema_version must be 2")
+    if schema_version not in {2, 3}:
+        raise FreezeError("ownership map schema_version must be 2 or 3")
     if mapping.get("framework_repository") != EXPECTED_FRAMEWORK_REPOSITORY:
         raise FreezeError("ownership map framework_repository is not the approved repository")
     if mapping.get("freeze_owner") != EXPECTED_FREEZE_OWNER:
@@ -299,6 +318,13 @@ def validate_map(mapping: dict[str, Any]) -> None:
                 f"non-transferred slice {slice_id} cannot carry authority metadata"
             )
 
+    if schema_version == 3:
+        routing = _routing_evidence_module()
+        try:
+            routing.validate_projection(mapping, require_expansion=True)
+        except routing.RoutingError as error:
+            raise FreezeError(f"ownership map exact-route expansion is invalid: {error}") from error
+
 
 def _slice_map(mapping: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["id"]: item for item in mapping["slices"]}
@@ -354,6 +380,16 @@ def validate_map_transition(
         return set()
     base_map = _upgrade_prepared_v1(base_map)
     validate_map(base_map)
+    if base_map["schema_version"] == 3 and head_map["schema_version"] != 3:
+        raise FreezeError("ownership map schema_version cannot move backward")
+    if base_map["schema_version"] == 3:
+        if head_map["expansions"] != base_map["expansions"]:
+            raise FreezeError("accepted exact-route expansions are immutable")
+    elif head_map["schema_version"] == 3:
+        if head_map["activation"] != base_map["activation"]:
+            raise FreezeError("schema-v3 acceptance cannot change activation metadata")
+        if head_map["slices"] != base_map["slices"]:
+            raise FreezeError("schema-v3 acceptance cannot change initial-cut slices")
     for field in ("framework_repository", "freeze_owner"):
         if base_map[field] != head_map[field]:
             raise FreezeError(f"ownership map {field} is immutable")
