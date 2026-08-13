@@ -649,12 +649,24 @@ Linux pool and example-validation advisory macOS selector remain
 `workflow_dispatch`-only.
 For a future automatic Mac Pro pool, use the supervisor's distinct
 `pulp-auto-linux-x64` label only after its live organization group verifier
-passes. A healthy runner is not a hosted fallback: once `runs-on` selects local
-labels, GitHub cannot retarget a queued job, and the required `macos` alias
-currently waits for the whole build matrix. Keep PR and merge-group Linux
-hosted until that dependency is split and an external health controller can
-unset the selector before dispatch; never route `pull_request_target` or
-secret-bearing work to the generic pool.
+passes. Automatic clones also require an enabled Proxmox firewall and a per-VM
+IP/ARP source filter plus an egress policy that permits DNS to the LAN gateway
+but denies private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations. Policy write, compile, and active-state failures must stop the VM
+before registration.
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+Use a separate organization-capable controller token for organization runner
+group, registration, inventory, and deletion APIs; the repository runner token
+is not that credential.
+A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
+GitHub cannot retarget a queued job, and the required `macos` alias currently
+waits for the whole build matrix. Keep PR and merge-group Linux hosted until
+that dependency is split and an external health controller can unset the
+selector before dispatch; never route `pull_request_target` or secret-bearing
+work to the generic pool.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.

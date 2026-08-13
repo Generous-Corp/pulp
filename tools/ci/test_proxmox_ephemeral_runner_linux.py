@@ -58,10 +58,87 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_stale_reclamation_is_slot_scoped_and_busy_safe(self) -> None:
         self.assertIn("reclaim_stale_slot_runners", self.script)
-        self.assertIn('name.startswith(prefix)', self.script)
-        self.assertIn('if [ "$stale_busy" = true ]', self.script)
-        self.assertIn('refusing to reclaim busy stale registration', self.script)
-        self.assertIn('runner_id = runner.get("id", "")', self.script)
+        self.assertIn('index($2, prefix) == 1', self.script)
+        self.assertIn('multiple registrations claim ${RUNNER_SLOT_ID}', self.script)
+        self.assertIn('[ "$match_count" = 1 ]', self.script)
+        self.assertIn('[ "$stale_busy" = false ]', self.script)
+        self.assertIn('[ "$stale_status" = offline ]', self.script)
+        self.assertIn('registration $stale_name is not offline', self.script)
+
+    def test_runner_inventory_is_paginated_for_organization_scope(self) -> None:
+        self.assertGreaterEqual(self.script.count('"$GH_CLI" api --paginate'), 2)
+        self.assertGreaterEqual(
+            self.script.count(".runners[] | [.id,.name,.busy,.status] | @tsv"), 2
+        )
+        self.assertNotIn("runner lookup exceeded one API page", self.script)
+
+    def test_controller_dependencies_and_org_credential_are_fail_closed(self) -> None:
+        self.assertIn('command -v "$GH_CLI"', self.script)
+        self.assertLess(
+            self.script.index('command -v "$GH_CLI"'),
+            self.script.index("# ── admission"),
+        )
+        self.assertIn("gh-org-runner-pat", self.script)
+        self.assertIn(
+            'automatic Linux runner organization PAT is missing', self.script
+        )
+
+    def test_automatic_pool_requires_private_network_isolation(self) -> None:
+        self.assertIn(
+            'automatic Linux runners require the Proxmox firewall', self.script
+        )
+        self.assertIn('NET0="${NET0},firewall=1"', self.script)
+        self.assertIn("ipfilter: 1", self.script)
+        self.assertIn("[IPSET ipfilter-net0]", self.script)
+        self.assertIn("${GUEST_IP}", self.script)
+        self.assertIn('cannot write automatic runner firewall policy', self.script)
+        self.assertIn('cannot install automatic runner firewall policy', self.script)
+        self.assertIn('"$FIREWALL_STATUS_BIN" compile', self.script)
+        self.assertIn('automatic runner firewall policy is not active', self.script)
+        self.assertIn('automatic runner firewall rules are not installed', self.script)
+        self.assertIn('iptables-save', self.script)
+        self.assertIn('ip6tables-save', self.script)
+        self.assertIn('ebtables-save', self.script)
+        self.assertIn('ipset test "PVEFW-${VMID}-ipfilter-net0-v4"', self.script)
+        self.assertIn('--arp-ip-src ${GUEST_IP} -j RETURN', self.script)
+        self.assertIn('-A tap${VMID}i0-OUT-ARP -j DROP', self.script)
+        self.assertNotIn('chmod 600 "$VM_FIREWALL_TMP"', self.script)
+        self.assertGreater(
+            self.script.index('qm set "$VMID"'),
+            self.script.index('VM_FIREWALL_FILE="${FIREWALL_DIR}/${VMID}.fw"'),
+        )
+        self.assertLess(
+            self.script.index('qm set "$VMID"'),
+            self.script.index('"$FIREWALL_STATUS_BIN" compile'),
+        )
+        self.assertLess(
+            self.script.index('automatic runner firewall rules are not installed'),
+            self.script.index("# ── wait for the guest"),
+        )
+        self.assertIn(
+            "OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53",
+            self.script,
+        )
+        for subnet in (
+            "0.0.0.0/8",
+            "10.0.0.0/8",
+            "100.64.0.0/10",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "172.16.0.0/12",
+            "192.0.0.0/24",
+            "192.0.2.0/24",
+            "192.88.99.0/24",
+            "192.168.0.0/16",
+            "198.18.0.0/15",
+            "198.51.100.0/24",
+            "203.0.113.0/24",
+            "224.0.0.0/4",
+            "240.0.0.0/4",
+            "::/0",
+        ):
+            self.assertIn(f"OUT DROP -dest {subnet}", self.script)
+        self.assertIn('rm -f "$VM_FIREWALL_FILE"', self.script)
 
 
 if __name__ == "__main__":

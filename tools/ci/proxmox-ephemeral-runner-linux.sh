@@ -34,10 +34,14 @@ REPO="Generous-Corp/pulp"
 ORG="${REPO%%/*}"
 LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
+ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
 RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
 GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}"
 GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
+FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
+FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
+AUTOMATIC_NETWORK_ISOLATION=0
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -46,6 +50,8 @@ die() { log "ERROR: $*"; exit 1; }
 
 [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
 PAT="$(cat "$PAT_FILE")"
+command -v "$GH_CLI" >/dev/null 2>&1 \
+    || die "$GH_CLI is not on PATH"
 
 # Repository runners remain dispatch-only. Automatic PR or merge-group work is
 # permitted only when the controller can prove that an organization runner
@@ -62,16 +68,28 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         || die "runner group 1 is the default group"
     [ -r "$GROUP_VERIFIER" ] \
         || die "runner-group verifier is missing at $GROUP_VERIFIER"
-    command -v "$GH_CLI" >/dev/null 2>&1 \
-        || die "$GH_CLI is not on PATH"
+    [ -r "$ORG_PAT_FILE" ] \
+        || die "automatic Linux runner organization PAT is missing"
+    PAT="$(cat "$ORG_PAT_FILE")"
     GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
         --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID")" \
         || die "automatic Linux runner group policy is not fail-closed"
     [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
+    command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
+        || die "$FIREWALL_STATUS_BIN is not on PATH"
+    for tool in iptables-save ip6tables-save ipset ebtables-save; do
+        command -v "$tool" >/dev/null 2>&1 \
+            || die "$tool is required for automatic runner firewall proof"
+    done
+    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
+        || die "automatic Linux runners require the Proxmox firewall"
+    [ -d "$FIREWALL_DIR" ] \
+        || die "automatic Linux runner firewall directory is missing"
     REGISTRATION_API="orgs/${ORG}"
     RUNNER_URL="https://github.com/${ORG}"
     RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
     LABELS="${LABELS},pulp-auto-linux-x64"
+    AUTOMATIC_NETWORK_ISOLATION=1
 fi
 
 # ── admission ────────────────────────────────────────────────────────────────
@@ -113,34 +131,26 @@ RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
 
 reclaim_stale_slot_runners() {
     [ -n "${PAT:-}" ] || return 0
-    local runners_json stale_id stale_name stale_busy
-    runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/${REGISTRATION_API}/actions/runners?per_page=100" \
-        2>/dev/null)" || die "cannot inspect runner registrations for ${RUNNER_SLOT_ID}"
-    while IFS=$'\t' read -r stale_id stale_name stale_busy; do
-        [ -n "$stale_id" ] || continue
-        if [ "$stale_busy" = true ]; then
-            log "refusing to reclaim busy stale registration $stale_name"
-            continue
-        fi
-        curl -fSs -o /dev/null -X DELETE \
-            -H "Authorization: Bearer $PAT" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/${REGISTRATION_API}/actions/runners/${stale_id}" \
-            || die "could not reclaim offline registration $stale_name"
-        log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
-    done < <(printf '%s' "$runners_json" | python3 -c '
-import json, sys
-prefix = sys.argv[1]
-data = json.load(sys.stdin)
-for runner in data.get("runners", []):
-    name = runner.get("name", "")
-    if name.startswith(prefix):
-        runner_id = runner.get("id", "")
-        busy = str(runner.get("busy", False)).lower()
-        print(f"{runner_id}\\t{name}\\t{busy}")
-' "pulp-ci-ephemeral-${VMID}-")
+    local runners_tsv slot_matches match_count stale_id stale_name stale_busy stale_status
+    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+        || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
+    slot_matches="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+        -v prefix="pulp-ci-ephemeral-${VMID}-" 'index($2, prefix) == 1')"
+    [ -n "$slot_matches" ] || return 0
+    match_count="$(printf '%s\n' "$slot_matches" | wc -l | tr -d ' ')"
+    [ "$match_count" = 1 ] \
+        || die "multiple registrations claim ${RUNNER_SLOT_ID}"
+    IFS=$'\t' read -r stale_id stale_name stale_busy stale_status <<< "$slot_matches"
+    [ "$stale_busy" = false ] \
+        || die "registration $stale_name is busy or has an invalid busy state"
+    [ "$stale_status" = offline ] \
+        || die "registration $stale_name is not offline"
+    GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+        "${REGISTRATION_API}/actions/runners/${stale_id}" \
+        || die "could not reclaim offline registration $stale_name"
+    log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
 }
 
 cleanup() {
@@ -157,37 +167,34 @@ cleanup() {
     # otherwise leave an offline ghost runner that GitHub still schedules to —
     # jobs then queue against a VM that no longer exists.
     if [ -n "${PAT:-}" ]; then
-        runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/${REGISTRATION_API}/actions/runners?per_page=100" 2>/dev/null)" \
-            || { log "ERROR: cannot read runner registrations; leaving clone $VMID for safe recovery"; return; }
-        runner_lookup="$(printf '%s' "$runners_json" | python3 -c "
-import json,sys
-try: d=json.load(sys.stdin)
-except Exception: sys.exit(1)
-for r in d.get('runners',[]):
-    if r['name']=='${RUNNER_NAME}': print('found:'+str(r['id'])); break
-else: print('not-found:'+str(d.get('total_count', 0)))
-" 2>/dev/null)" \
-            || { log "ERROR: cannot parse runner registrations; leaving clone $VMID for safe recovery"; return; }
-        if [[ "$runner_lookup" == found:* ]]; then
-            rid="${runner_lookup#found:}"
-            if ! curl -fSs -o /dev/null -X DELETE -H "Authorization: Bearer $PAT" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/${REGISTRATION_API}/actions/runners/${rid}"; then
+        runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+            "${REGISTRATION_API}/actions/runners?per_page=100" \
+            --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+            || { log "ERROR: cannot read all runner registrations; leaving clone $VMID for safe recovery"; return; }
+        runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+            -v name="$RUNNER_NAME" '$2 == name')"
+        if [ -n "$runner_lookup" ]; then
+            [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+                || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
+            IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
+            [ "$runner_busy" = false ] && [ "$runner_status" = offline ] \
+                || { log "ERROR: exact runner is not offline and idle; leaving clone $VMID for safe recovery"; return; }
+            if ! GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+                "${REGISTRATION_API}/actions/runners/${rid}"; then
                 log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
                 return
             fi
             log "deregistered runner id $rid"
-        elif [ "${runner_lookup#not-found:}" -gt 100 ]; then
-            log "ERROR: runner lookup exceeded one API page; leaving clone $VMID for safe recovery"
-            return
         fi
     fi
     log "destroying clone $VMID"
     qm stop "$VMID" >/dev/null 2>&1 || true
     for _ in $(seq 1 24); do [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break; sleep 5; done
-    qm destroy "$VMID" --purge >/dev/null 2>&1 || log "WARN: destroy of $VMID failed — check manually"
+    if qm destroy "$VMID" --purge >/dev/null 2>&1; then
+        [ -n "${VM_FIREWALL_FILE:-}" ] && rm -f "$VM_FIREWALL_FILE"
+    else
+        log "WARN: destroy of $VMID failed — check manually"
+    fi
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -209,13 +216,99 @@ CLONED=1
 # The id is now committed to disk (200.conf exists), so no other slot can pick
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
+NET0="virtio=${GUEST_MAC},bridge=vmbr0"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    VM_FIREWALL_FILE="${FIREWALL_DIR}/${VMID}.fw"
+    VM_FIREWALL_TMP="$(mktemp)" \
+        || die "cannot allocate automatic runner firewall policy"
+    umask 077
+    if ! cat > "$VM_FIREWALL_TMP" <<EOF
+[OPTIONS]
+enable: 1
+ipfilter: 1
+policy_in: ACCEPT
+policy_out: ACCEPT
+
+[IPSET ipfilter-net0]
+${GUEST_IP}
+
+[RULES]
+OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53
+OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p tcp -dport 53
+OUT DROP -dest 0.0.0.0/8
+OUT DROP -dest 10.0.0.0/8
+OUT DROP -dest 100.64.0.0/10
+OUT DROP -dest 127.0.0.0/8
+OUT DROP -dest 169.254.0.0/16
+OUT DROP -dest 172.16.0.0/12
+OUT DROP -dest 192.0.0.0/24
+OUT DROP -dest 192.0.2.0/24
+OUT DROP -dest 192.88.99.0/24
+OUT DROP -dest 192.168.0.0/16
+OUT DROP -dest 198.18.0.0/15
+OUT DROP -dest 198.51.100.0/24
+OUT DROP -dest 203.0.113.0/24
+OUT DROP -dest 224.0.0.0/4
+OUT DROP -dest 240.0.0.0/4
+OUT DROP -dest ::/0
+EOF
+    then
+        rm -f "$VM_FIREWALL_TMP"
+        die "cannot write automatic runner firewall policy"
+    fi
+    if ! cp "$VM_FIREWALL_TMP" "$VM_FIREWALL_FILE"; then
+        rm -f "$VM_FIREWALL_TMP"
+        die "cannot install automatic runner firewall policy"
+    fi
+    rm -f "$VM_FIREWALL_TMP"
+    NET0="${NET0},firewall=1"
+fi
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
     --cpuunits 50 --balloon 0 --onboot 0 \
-    --net0 "virtio=${GUEST_MAC},bridge=vmbr0" \
+    --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/24,gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_IPV4_GATEWAY" >/dev/null \
     || die "failed to apply deterministic network identity to clone $VMID"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    "$FIREWALL_STATUS_BIN" compile >/dev/null \
+        || die "automatic runner firewall policy does not compile"
+    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
+        || die "automatic runner firewall policy is not active"
+fi
 qm start "$VMID" >/dev/null || die "start failed"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    firewall_active=0
+    blocked_ipv4=(
+        0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8
+        169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24
+        192.88.99.0/24 192.168.0.0/16 198.18.0.0/15
+        198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4
+    )
+    for _ in $(seq 1 15); do
+        iptables_rules="$(iptables-save 2>/dev/null)" || iptables_rules=""
+        ip6tables_rules="$(ip6tables-save 2>/dev/null)" || ip6tables_rules=""
+        ebtables_rules="$(ebtables-save 2>/dev/null)" || ebtables_rules=""
+        vm_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$iptables_rules" || true)"
+        vm6_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$ip6tables_rules" || true)"
+        vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
+        all_ipv4_drops=1
+        for subnet in "${blocked_ipv4[@]}"; do
+            grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
+                || { all_ipv4_drops=0; break; }
+        done
+        if [ "$all_ipv4_drops" = 1 ] \
+            && grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
+            && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then
+            firewall_active=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$firewall_active" = 1 ] \
+        || die "automatic runner firewall rules are not installed"
+fi
 
 # ── wait for the guest ───────────────────────────────────────────────────────
 for _ in $(seq 1 45); do

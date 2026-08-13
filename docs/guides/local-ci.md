@@ -196,8 +196,12 @@ The supervisor supports that migration without weakening the existing pool.
 Leave `/etc/pulp/linux-runner-group.env` absent for repository registration and
 dispatch-only use. For an automatic pool, install
 `tools/ci/verify_linux_runner_group.py` as
-`/usr/local/lib/pulp/verify_linux_runner_group.py`, set only the numeric group
-id in the root-owned environment file, and restart one slot first:
+`/usr/local/lib/pulp/verify_linux_runner_group.py`. Install a distinct
+organization-capable controller token at
+`/root/.config/pulp/secrets/gh-org-runner-pat` (mode 600, root) with organization
+`Self-hosted runners: read/write`; do not reuse the repository-only token as the
+documented trust boundary. Set only the numeric group id in the root-owned
+environment file, and restart one slot first:
 
 ```sh
 install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
@@ -215,6 +219,21 @@ created, registers at organization scope, and receives the additional
 default group, unavailable API, or invalid group name keeps the slot offline.
 Never put the automatic selector on the older labels alone: doing so can match
 a repository-level runner that lacks the protected-workflow boundary.
+
+The automatic pool also requires Proxmox VM-firewall isolation. The protected
+workflow controls orchestration, but the checked-out pull-request source and its
+build system remain untrusted. Before an organization-scoped clone starts, the
+supervisor requires `pve-firewall status` to report `enabled/running`, enables
+the firewall on that clone's NIC, installs an exact-address IP/ARP source filter,
+and installs a per-VM egress policy. The generated policy must write, compile,
+enable on the clone NIC, and appear in the active IP, ARP, and egress rules
+before the guest can register. DNS to the LAN gateway is allowed;
+all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations are denied; public IPv4 egress remains available for source and
+dependency downloads. Do not enable the automatic slots on a flat bridged LAN
+without that policy. Repository-scoped operator-dispatch clones retain the prior
+network behavior because they are not reachable by automatic pull-request or
+merge-group selection.
 
 Runner-group verification is necessary but not sufficient for required CI.
 GitHub Actions has no queued-job timeout that can retarget `runs-on` to hosted
@@ -266,7 +285,7 @@ first.
 The three clone VMIDs have deterministic network identities: `200..202` map to
 `192.168.86.251..253` and stable locally administered MAC addresses. Do not return
 to random clone MACs. Each short-lived MAC retains a DHCP lease after its VM is
-destroyed, and normal CI volume exhausted the LAN lease pool on 2026-08-02.
+destroyed, and normal CI volume can exhaust the LAN lease pool.
 The GitHub runner registration remains unique per invocation; stable network
 identity must not become a static Actions runner name.
 
