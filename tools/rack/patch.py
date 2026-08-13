@@ -3999,6 +3999,10 @@ class RuntimeQualityContract(NamedTuple):
     minimum_audible_layers: int = 0
     spectral_evolution: bool = False
     evolving: bool = False
+    # Periodic LFOs can change a patch at distant checkpoints while still
+    # returning to exactly the same state. A "never repeats" promise needs an
+    # entropy source, not merely visible movement.
+    nonrepeating: bool = False
     stereo: bool = False
     decorrelated_stereo: bool = False
     duration_seconds: float | None = None
@@ -4068,6 +4072,15 @@ def compile_runtime_quality_contract(prompt: str) -> RuntimeQualityContract:
         or affirmed(
         r"\b(?:slow|continuous|long[- ]term|gradual|microscopic|geological)\w*\b"
         r"[^,]{0,65}\b(?:evol|mov|chang|shift|transform|arc|breathe)\w*\b"))
+    nonrepeating = any(
+        re.search(
+            r"\b(?:never\s+repeat\w*|non[- ]?repeat(?:ing)?|"
+            r"non[- ]?looping|(?:does not|doesn't|do not|don't|without)\s+"
+            r"(?:ever\s+)?repeat\w*|(?:without|avoid)\s+(?:a\s+)?"
+            r"(?:short\s+)?loop\w*)\b", clause)
+        and not re.search(r"\bnot\s+(?:never\s+repeat|non[- ]?repeat|"
+                          r"non[- ]?loop)", clause)
+        for clause in clauses)
     stereo = affirmed(
         r"\b(stereo|left\s*/?\s*right|independent left|decorrelated|spatial|"
         r"extremely wide|wide on headphones)\b")
@@ -4082,6 +4095,7 @@ def compile_runtime_quality_contract(prompt: str) -> RuntimeQualityContract:
         minimum_audible_layers=minimum_audible_layers,
         spectral_evolution=spectral_evolution,
         evolving=evolving,
+        nonrepeating=nonrepeating,
         stereo=stereo,
         decorrelated_stereo=decorrelated_stereo,
         duration_seconds=long_horizon_seconds(prompt))
@@ -4103,6 +4117,10 @@ def runtime_quality_contract_prompt(contract: RuntimeQualityContract) -> str:
         requirements.append("dominant audible timbre must evolve spectrally")
     elif contract.evolving:
         requirements.append("material evolution must appear in real DSP")
+    if contract.nonrepeating:
+        requirements.append(
+            "a connected entropy or stochastic source must prevent the "
+            "audible patch from being only a periodic loop")
     if contract.stereo:
         requirements.append("both stereo lanes must remain materially audible")
     if contract.decorrelated_stereo:
@@ -4173,19 +4191,66 @@ def runtime_quality_static_errors(
     is active. This is path activity, not counterfactual proof that every source
     contributes above zero gain. No module identities or topology are blessed.
     """
-    if not contract.multiple_audible_layers:
-        return []
-    paths = runtime_quality_layer_paths(patch, inv)
-    roots = set().union(*paths) if paths else set()
-    required = max(2, contract.minimum_audible_layers)
-    if len(roots) >= required:
-        return []
-    return [
-        "runtime quality FAIL: multiple independent source paths were "
-        "requested, but "
-        f"only {len(roots)} of {required} required independent audio source "
-        "path(s) reach the output; "
-        "left/right copies of one source do not count as layers"]
+    errors = []
+    if contract.multiple_audible_layers:
+        paths = runtime_quality_layer_paths(patch, inv)
+        roots = set().union(*paths) if paths else set()
+        required = max(2, contract.minimum_audible_layers)
+        if len(roots) < required:
+            errors.append(
+                "runtime quality FAIL: multiple independent source paths were "
+                "requested, but "
+                f"only {len(roots)} of {required} required independent audio source "
+                "path(s) reach the output; "
+                "left/right copies of one source do not count as layers")
+    if contract.nonrepeating and not has_connected_entropy_source(patch, inv):
+        errors.append(
+            "runtime quality FAIL: the request promises that it never repeats, "
+            "but no noise, random, stochastic, or sample-and-hold source is "
+            "connected through the patch to an audio output; periodic LFOs "
+            "alone cannot prove that promise")
+    return errors
+
+
+def has_connected_entropy_source(patch: dict, inv: dict) -> bool:
+    """Prove that an inventory-described entropy source can affect audio.
+
+    Follow CV and audio cables alike: a random CV source is relevant only when
+    its downstream modulation reaches an interface. This rejects disconnected
+    decorative random modules without blessing any module identity.
+    """
+    modules = {module.get("id"): module for module in patch.get("modules") or []}
+    outgoing: dict[object, set] = {}
+    for cable in patch.get("cables") or []:
+        source, target = cable.get("outputModuleId"), cable.get("inputModuleId")
+        if source in modules and target in modules:
+            outgoing.setdefault(source, set()).add(target)
+
+    def entropy(module: dict) -> bool:
+        entry = (inv.get(module.get("plugin"), {}).get("modules", {})
+                 .get(module.get("model"), {}))
+        words = " ".join(str(value) for value in (
+            entry.get("name", ""), entry.get("description", ""),
+            *(entry.get("tags") or []))).casefold()
+        return bool(re.search(
+            r"\b(?:noise|random\w*|stochastic|probabil\w*|sample(?: |-)and(?: |-)hold|"
+            r"chaos|chaotic|entropy)\b", words))
+
+    outputs = {module_id for module_id, module in modules.items()
+               if is_audio_interface(module)}
+    for source_id, module in modules.items():
+        if not entropy(module):
+            continue
+        frontier, seen = [source_id], {source_id}
+        while frontier:
+            current = frontier.pop()
+            if current in outputs and current != source_id:
+                return True
+            for target in outgoing.get(current, set()):
+                if target not in seen:
+                    seen.add(target)
+                    frontier.append(target)
+    return False
 
 
 def long_horizon_seconds(prompt: str) -> float | None:
@@ -4223,7 +4288,7 @@ def runtime_quality_seconds(contract: RuntimeQualityContract) -> float | None:
     if any((contract.evolving, contract.stereo,
             contract.multiple_audible_layers,
             contract.no_obvious_sequence, contract.sustained,
-            contract.decorrelated_stereo)):
+            contract.decorrelated_stereo, contract.nonrepeating)):
         return 60.0
     return None
 
