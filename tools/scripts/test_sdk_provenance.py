@@ -281,18 +281,30 @@ class SdkProvenanceTests(unittest.TestCase):
             check=True,
         )
         tracked.write_text("dirty\n", encoding="utf-8")
-        with self.assertRaisesRegex(provenance.ProvenanceError, "clean tracked source"):
+        with self.assertRaisesRegex(provenance.ProvenanceError, "clean source tree"):
             self.marker(source_sha=later)
 
-    def test_untracked_source_input_does_not_block_official_marker(self) -> None:
+    def test_untracked_source_input_blocks_official_marker(self) -> None:
         (self.source / "configure-input.txt").write_text(
             "untracked\n", encoding="utf-8"
         )
-        self.assertEqual(self.marker()["source_git_dirty"], False)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                self.source,
+                "config",
+                "status.showUntrackedFiles",
+                "no",
+            ],
+            check=True,
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "clean source tree"):
+            self.marker()
 
     def test_rejects_unsafe_installed_build_info(self) -> None:
         cases = (
-            ({"dirty": True}, "tracked source changes"),
+            ({"dirty": True}, "source-tree changes"),
             ({"build_type": "Debug"}, "not a Release build"),
             ({"version": "1.2.3"}, "SDK version does not match"),
             ({"source_sha": "b" * 40}, "source SHA does not match"),

@@ -107,6 +107,7 @@ jobs:
       # platform -> runs-on. Every build/smoke leg indexes this by matrix.platform,
       # so routing is data, not a chain of ternaries in the `runs-on:` key.
       map: ${{ steps.resolve.outputs.map }}
+      marker_era: ${{ steps.release-policy.outputs.marker_era }}
     steps:
       # The resolver is a repo script (so it can be unit-tested), so it needs the
       # repo. Always resolve from the DEFAULT branch's copy, never the tag's: a
@@ -122,6 +123,29 @@ jobs:
           # default branch has decided whether that substitution is permitted.
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
+
+      - name: Resolve trusted release policy
+        id: release-policy
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - "$RELEASE_VERSION" tools/scripts/release_product_matrix.json \
+              "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import sys
+
+          def version(value):
+              return tuple(int(part) for part in value.removeprefix("v").split("."))
+
+          with open(sys.argv[2], encoding="utf-8") as handle:
+              floor = json.load(handle)["sdk_provenance_floor"]
+          with open(sys.argv[3], "a", encoding="utf-8") as output:
+              output.write(
+                  f"marker_era={'true' if version(sys.argv[1]) >= version(floor) else 'false'}\n"
+              )
+          PY
 
       - name: Reject marker-era source substitution
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
@@ -741,6 +765,21 @@ jobs:
         run: rustup target add x86_64-apple-darwin
         shell: bash
 
+      - name: Verify marker-era selected source is clean
+        shell: bash
+        env:
+          MARKER_ERA: ${{ needs.resolve-macos-runner.outputs.marker_era }}
+        run: |
+          set -euo pipefail
+          if [ "$MARKER_ERA" = "true" ]; then
+            dirty="$(git status --porcelain --untracked-files=all --ignore-submodules=none)"
+            if [ -n "$dirty" ]; then
+              echo "::error::Marker-era release source is dirty before configure" >&2
+              printf '%s\n' "$dirty" >&2
+              exit 1
+            fi
+          fi
+
       # Build the CLI binary WITHOUT WebView; the SDK build below
       # reconfigures with WebView=ON so plugin authors still get the
       # WebView code in the SDK tarball.
@@ -934,6 +973,7 @@ jobs:
               --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
             )
           fi
+          mkdir -p build/release-output
           python3 "$PULP_RELEASE_PACKAGER" \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
@@ -943,12 +983,13 @@ jobs:
             "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
-            --out pulp-${{ matrix.platform }}.tar.gz
+            --out build/release-output/pulp-${{ matrix.platform }}.tar.gz
         shell: bash
 
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
+          New-Item -ItemType Directory -Force build/release-output | Out-Null
           $importDesignArgs = @()
           if ((Test-Path build/tools/import-design/Release/pulp-import-design.exe) `
               -and (Test-Path build/tools/import-design/Release/browser_capture-v1)) {
@@ -966,20 +1007,20 @@ jobs:
             @importDesignArgs `
             --build-dir build `
             --platform ${{ matrix.platform }} `
-            --out pulp-${{ matrix.platform }}.zip
+            --out build/release-output/pulp-${{ matrix.platform }}.zip
         shell: pwsh
 
       # On Linux the CLI was built with PULP_BUILD_WEBVIEW=OFF (issue
       # #720). For the SDK tarball, do a SEPARATE configure+build into
-      # `build-sdk/` with WebView=ON so plugin authors who consume the
+      # `build/sdk-build/` with WebView=ON so plugin authors who consume the
       # SDK still get WebViewPanel + make_webview_embedded_resource_fetcher
       # symbols in the split view-core archive. Using a separate build directory
       # avoids re-linking the already-built CLI binary against
       # libwebkit2gtk during the reconfigure (which would defeat the
       # purpose of the split).
       #
-      # On macOS/Windows the CLI configure already used WebView=ON, so
-      # we just symlink the SDK build dir to the existing build dir.
+      # On macOS/Windows the CLI configure already used WebView=ON, so the
+      # install step uses `build/` directly.
       - name: Prepare SDK build dir (Linux)
         if: runner.os == 'Linux'
         # Same PULP_REQUIRE_GPU_FOR_SDK gating as the CLI configure above —
@@ -999,7 +1040,7 @@ jobs:
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
             INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
           fi
-          cmake -S . -B build-sdk \
+          cmake -S . -B build/sdk-build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
@@ -1009,7 +1050,7 @@ jobs:
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
           # binary (built in `build/` with WebView=OFF) portable.
-          cmake --build build-sdk --config Release
+          cmake --build build/sdk-build --config Release
         shell: bash
 
       - name: Report Linux SDK glibc floor (min-OS validation)
@@ -1017,7 +1058,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          BIN="$(find build build-sdk -type f \( -name pulp -o -name 'libpulp*.so' \) 2>/dev/null | head -1)"
+          BIN="$(find build build/sdk-build -type f \( -name pulp -o -name 'libpulp*.so' \) 2>/dev/null | head -1)"
           echo "measuring glibc floor of: ${BIN:-<none found>}"
           if [ -n "$BIN" ]; then
             python3 tools/scripts/measure_min_os.py --elf "$BIN" --max 2.34 \
@@ -1026,11 +1067,6 @@ jobs:
             echo "::warning::no pulp binary found to measure"
           fi
 
-      - name: Prepare SDK build dir (macOS)
-        if: runner.os == 'macOS'
-        run: ln -snf build build-sdk
-        shell: bash
-
       - name: Build SDK tarball (Unix)
         if: runner.os != 'Windows'
         env:
@@ -1038,18 +1074,25 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
-          # build-sdk on Linux is the WebView=ON build (separate dir to
-          # avoid re-linking the CLI binary against libwebkit2gtk).
-          # build-sdk on macOS is a symlink to build (CLI was built with
-          # WebView=ON there).
-          cmake --install build-sdk --prefix sdk-staging --config Release
+          sdk_build_dir=build
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Linux's WebView-enabled SDK uses a separate ignored build tree so
+            # its configure cannot see the already-packaged CLI as source dirt.
+            sdk_build_dir=build/sdk-build
+          fi
+          sdk_staging="$PWD/build/release-sdk-staging"
+          sdk_package="$PWD/build/release-sdk-package"
+          release_output="$PWD/build/release-output"
+          rm -rf "$sdk_staging" "$sdk_package"
+          mkdir -p "$release_output" "$sdk_package"
+          cmake --install "$sdk_build_dir" --prefix "$sdk_staging" --config Release
           # CMake rewrites install RPATHs while copying executables into the SDK.
           # On Mach-O that invalidates the build-time code signature. Re-sign the
           # installed bytes before stamping provenance: the agent-capability
           # handoff hashes pulp-import-design, so signing it after the stamp makes
           # the archive internally inconsistent.
           if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
-            python3 tools/scripts/resign_macos_release_tree.py sdk-staging
+            python3 tools/scripts/resign_macos_release_tree.py "$sdk_staging"
           fi
           if [ -z "$SOURCE_REF" ]; then
             # The current positive release marker must ship with the current
@@ -1057,22 +1100,22 @@ jobs:
             # only development markers and reject an official SDK at
             # find_package(Pulp) time.
             install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE" \
-              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
+              "$sdk_staging/lib/cmake/Pulp/PulpSdkProvenance.cmake"
             python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
-              --prefix sdk-staging \
-              --build-dir build-sdk \
+              --prefix "$sdk_staging" \
+              --build-dir "$sdk_build_dir" \
               --source-dir . \
               --release-tag "$RELEASE_TAG" \
               --source-sha "$(git rev-parse HEAD)" \
               --platform "${{ matrix.platform }}"
           fi
-          test -f sdk-staging/lib/libpulp-view.a
-          test -f sdk-staging/lib/libpulp-view-core.a
-          python3 - <<'PY'
+          test -f "$sdk_staging/lib/libpulp-view.a"
+          test -f "$sdk_staging/lib/libpulp-view-core.a"
+          SDK_STAGING="$sdk_staging" python3 - <<'PY'
           import os
           from pathlib import Path
           platform = os.environ["MATRIX_PLATFORM"]
-          data = Path("sdk-staging/lib/libpulp-view-core.a").read_bytes()
+          data = (Path(os.environ["SDK_STAGING"]) / "lib/libpulp-view-core.a").read_bytes()
           # WebView lane (existing).
           assert b"WebViewPanel" in data, "WebViewPanel symbol missing"
           assert b"make_webview_embedded_resource_fetcher" in data, (
@@ -1096,9 +1139,10 @@ jobs:
               )
               print("OK: MacGpuWindowHost symbol present in libpulp-view-core.a")
           PY
-          mv sdk-staging pulp-sdk
-          tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
-          rm -rf pulp-sdk
+          mv "$sdk_staging" "$sdk_package/pulp-sdk"
+          tar -C "$sdk_package" -czf \
+            "$release_output/pulp-sdk-${{ matrix.platform }}.tar.gz" pulp-sdk
+          rm -rf "$sdk_package"
         shell: bash
 
       - name: Build SDK tarball (Windows)
@@ -1107,14 +1151,19 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
-          cmake --install build --prefix sdk-staging --config Release
+          $sdkStaging = 'build/release-sdk-staging'
+          $sdkPackage = 'build/release-sdk-package'
+          $releaseOutput = 'build/release-output'
+          Remove-Item -Recurse -Force $sdkStaging, $sdkPackage -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $sdkPackage, $releaseOutput | Out-Null
+          cmake --install build --prefix $sdkStaging --config Release
           if ([string]::IsNullOrEmpty($env:SOURCE_REF)) {
             Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE `
-              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
+              "$sdkStaging/lib/cmake/Pulp/PulpSdkProvenance.cmake"
             $releaseTag = $env:RELEASE_TAG
             $sourceSha = (git rev-parse HEAD).Trim()
             python $env:PULP_SDK_PROVENANCE_HELPER stamp `
-              --prefix sdk-staging `
+              --prefix $sdkStaging `
               --build-dir build `
               --source-dir . `
               --release-tag $releaseTag `
@@ -1124,16 +1173,18 @@ jobs:
               throw 'Failed to stamp official SDK provenance'
             }
           }
-          if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
-            throw "sdk-staging/lib/pulp-view.lib missing"
+          if (!(Test-Path "$sdkStaging/lib/pulp-view.lib")) {
+            throw "$sdkStaging/lib/pulp-view.lib missing"
           }
-          if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
-            throw "sdk-staging/lib/pulp-view-core.lib missing"
+          if (!(Test-Path "$sdkStaging/lib/pulp-view-core.lib")) {
+            throw "$sdkStaging/lib/pulp-view-core.lib missing"
           }
-          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
-          Rename-Item sdk-staging pulp-sdk
-          Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
-          Remove-Item -Recurse pulp-sdk
+          $env:PULP_RELEASE_SDK_STAGING = $sdkStaging
+          python -c "import os; from pathlib import Path; data = (Path(os.environ['PULP_RELEASE_SDK_STAGING']) / 'lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+          Move-Item $sdkStaging "$sdkPackage/pulp-sdk"
+          Compress-Archive -Path "$sdkPackage/pulp-sdk" `
+            -DestinationPath "$releaseOutput/pulp-sdk-${{ matrix.platform }}.tar.gz"
+          Remove-Item -Recurse $sdkPackage
         shell: pwsh
 
       - name: Verify release archive product matrix (Unix)
@@ -1153,7 +1204,7 @@ jobs:
               2>&1 | grep -q -- '--source-sha'; then
             source_sha_args+=(--source-sha "$(git rev-parse HEAD)")
           fi
-          python3 "$PULP_RELEASE_CONTENT_VERIFIER" . \
+          python3 "$PULP_RELEASE_CONTENT_VERIFIER" build/release-output \
             --platform "${{ matrix.platform }}" \
             --version "${RELEASE_TAG#v}" \
             "${source_sha_args[@]}" \
@@ -1173,7 +1224,7 @@ jobs:
           if ($verifierHelp.Contains('--source-sha')) {
             $sourceShaArgs = @('--source-sha', (git rev-parse HEAD).Trim())
           }
-          python $env:PULP_RELEASE_CONTENT_VERIFIER . `
+          python $env:PULP_RELEASE_CONTENT_VERIFIER build/release-output `
             --platform "${{ matrix.platform }}" `
             --version $version `
             @sourceShaArgs
@@ -1206,7 +1257,9 @@ jobs:
               entry = platforms.get(manifest_key) or platforms.get("macos-arm64")
               if entry is not None:
                   floor = entry["floor"]
-          Path(f"pulp-{platform}.min-os").write_text(f"{floor}\n", encoding="utf-8")
+          output = Path("build/release-output")
+          output.mkdir(parents=True, exist_ok=True)
+          (output / f"pulp-{platform}.min-os").write_text(f"{floor}\n", encoding="utf-8")
           PY
         shell: bash
 
@@ -1214,20 +1267,20 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: |
-            pulp-${{ matrix.platform }}.*
-            pulp-sdk-${{ matrix.platform }}.*
+            build/release-output/pulp-${{ matrix.platform }}.*
+            build/release-output/pulp-sdk-${{ matrix.platform }}.*
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v6
         with:
           name: pulp-${{ matrix.platform }}
-          path: pulp-${{ matrix.platform }}.*
+          path: build/release-output/pulp-${{ matrix.platform }}.*
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v6
         with:
           name: pulp-sdk-${{ matrix.platform }}
-          path: pulp-sdk-${{ matrix.platform }}.*
+          path: build/release-output/pulp-sdk-${{ matrix.platform }}.*
 
   # ── Portable-binary smoke gate (#391) ─────────────────────────────
   #

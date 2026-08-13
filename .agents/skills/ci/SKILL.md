@@ -1284,13 +1284,18 @@ uses, or the golden warms a cache the real jobs never touch.
   every marker back to that exact tag SHA and archive platform before publish,
   and parses the installed `include/pulp/runtime/build_info.hpp` to reject dirty
   or non-Release metadata and a version/short-SHA inconsistent with the marker.
-  Build-info dirt means tracked source changes; untracked configure/build inputs
-  do not change the identity of an otherwise clean release checkout.
-  Manual-backfill compatibility helpers live under `RUNNER_TEMP`, outside the
-  tagged checkout, because older tags' build-info probes include untracked files.
+  Build-info dirt preserves the full visible checkout state: tracked changes,
+  untracked files, and dirty submodules all mark it dirty. Manual-backfill
+  compatibility helpers live under `RUNNER_TEMP`, outside the tagged checkout,
+  while generated build, staging, and archive outputs stay under the ignored
+  repository-root `build/` tree. Release-only inputs therefore do not weaken or
+  accidentally trip that general source-integrity signal.
   The Linux dependency action is the exception because local actions must be
   checkout-relative; record only files materialized for an old tag and remove
-  those exact files immediately after the action runs, before CMake configures.
+  those exact files immediately after the action runs. Marker-era legs require
+  an empty `git status --porcelain --untracked-files=all
+  --ignore-submodules=none` immediately before CMake configures, with the era
+  resolved from the trusted default-branch matrix rather than selected source.
   Keep the marker stamp, `PulpSdkProvenance.cmake` fail-closed consumer cache,
   archive verifier, and Forge preflight in lockstep. A manual marker-era
   `source_ref` substitution is forbidden; evaluate its floor from the trusted

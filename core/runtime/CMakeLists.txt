@@ -22,10 +22,11 @@ string(TIMESTAMP PULP_BUILD_ISO8601 "%Y-%m-%dT%H:%M:%SZ" UTC)
 set(PULP_BUILD_TYPE "$<CONFIG>")
 set(PULP_VERSION "${PROJECT_VERSION}")
 
-# Best-effort git short SHA + tracked-change probe. Empty when the source
+# Best-effort git short SHA + dirty-tree probe. Empty when the source
 # tree isn't a git checkout (distribution tarball) — the generated
-# header documents that case. Untracked configure/build inputs do not
-# change the identity of an otherwise clean source commit.
+# header documents that case. Release automation keeps compatibility
+# helpers and generated inputs outside the checkout or under ignored paths,
+# so any visible tracked, untracked, or submodule change remains meaningful.
 set(PULP_GIT_SHA "")
 set(PULP_GIT_DIRTY "false")
 find_package(Git QUIET)
@@ -36,7 +37,7 @@ if(GIT_FOUND AND EXISTS "${PULP_ROOT_DIR}/.git")
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
     include("${PULP_ROOT_DIR}/tools/cmake/PulpGitState.cmake")
-    pulp_git_tracked_dirty("${PULP_ROOT_DIR}" PULP_GIT_DIRTY)
+    pulp_git_dirty("${PULP_ROOT_DIR}" PULP_GIT_DIRTY)
 endif()
 
 # Compose a single ready-to-display label so the running app can just

@@ -182,10 +182,10 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         symbols in the split view-core archive so plugin authors can use
         WebView through the SDK.
         """
-        # Either a separate `build-sdk` configure with WebView=ON, or
+        # Either a separate ignored SDK build with WebView=ON, or
         # the original single configure with WebView=ON, is acceptable.
         sdk_build_dir = re.search(
-            r"-B\s*build-sdk[\s\S]{1,400}?-DPULP_BUILD_WEBVIEW=ON",
+            r"-B\s*build/sdk-build[\s\S]{1,400}?-DPULP_BUILD_WEBVIEW=ON",
             self.text,
         )
         self.assertTrue(
@@ -198,8 +198,8 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
 
     def test_sdk_symbol_check_uses_view_core_archive(self) -> None:
         """Phase 9 split keeps WebView symbols in the view-core archive."""
-        self.assertIn("sdk-staging/lib/libpulp-view-core.a", self.text)
-        self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        self.assertIn('Path(os.environ["SDK_STAGING"]) / "lib/libpulp-view-core.a"', self.text)
+        self.assertIn("Path(os.environ['PULP_RELEASE_SDK_STAGING']) / 'lib/pulp-view-core.lib'", self.text)
         self.assertNotIn(
             'data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()',
             self.text,
@@ -289,8 +289,9 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         windows_block = self.text[windows_start:verify_start]
         self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_block)
         self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_block)
-        self.assertIn("--prefix sdk-staging", self.text)
-        self.assertIn("--build-dir build-sdk", self.text)
+        self.assertIn('--prefix "$sdk_staging"', self.text)
+        self.assertIn('--build-dir "$sdk_build_dir"', self.text)
+        self.assertIn("--prefix $sdkStaging", self.text)
 
     def test_sdk_stamp_passes_release_tag_through_the_environment(self) -> None:
         unix_start = self.text.index("- name: Build SDK tarball (Unix)")
@@ -468,7 +469,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
         self.assertIn('"${import_design_args[@]}"', run_block)
-        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+        self.assertRegex(run_block, r"--out\s+build/release-output/pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
         step_start = self.text.index("- name: Strip binaries (Unix)")
@@ -514,7 +515,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             run_block,
         )
         self.assertIn("@importDesignArgs", run_block)
-        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
+        self.assertRegex(run_block, r"--out\s+build/release-output/pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
     def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
@@ -883,12 +884,14 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
 
-    def test_manual_dispatch_compatibility_helpers_do_not_dirty_tracked_source(
+    def test_manual_dispatch_compatibility_helpers_leave_source_clean_before_configure(
         self,
     ) -> None:
         ensure_block = self._find_step_run(
             "Ensure release-content verifier helpers exist"
         )
+        clean_step_name = "Verify marker-era selected source is clean"
+        clean_block = self._find_step_run(clean_step_name)
         unix_stamp = self._find_step_run("Build SDK tarball (Unix)")
         windows_stamp = self._find_step_run("Build SDK tarball (Windows)")
         unix_verify = self._find_step_run(
@@ -904,6 +907,24 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             ensure_block,
         )
         self.assertNotIn("compat_dir=.release-backfill-helpers", ensure_block)
+        self.assertIn(
+            "git status --porcelain --untracked-files=all --ignore-submodules=none",
+            clean_block,
+        )
+        self.assertNotIn("--untracked-files=no", clean_block)
+        self.assertIn('if [ "$MARKER_ERA" = "true" ]', clean_block)
+        self.assertIn(
+            "MARKER_ERA: ${{ needs.resolve-macos-runner.outputs.marker_era }}",
+            self.text,
+        )
+        self.assertIn(
+            "marker_era: ${{ steps.release-policy.outputs.marker_era }}",
+            self.text,
+        )
+        self.assertLess(
+            self.text.index(f"- name: {clean_step_name}"),
+            self.text.index("- name: Configure (CLI, no WebView on Linux)"),
+        )
         self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
         self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
         self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)
@@ -937,9 +958,13 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             windows_stamp.index("$env:PULP_SDK_PROVENANCE_HELPER stamp"),
         )
         self.assertLess(
-            unix_stamp.index("resign_macos_release_tree.py sdk-staging"),
+            unix_stamp.index('resign_macos_release_tree.py "$sdk_staging"'),
             unix_stamp.index('"$PULP_SDK_PROVENANCE_HELPER" stamp'),
         )
+        self.assertIn("build/release-output", unix_package)
+        self.assertIn("build/release-output", windows_package)
+        self.assertIn('sdk_staging="$PWD/build/release-sdk-staging"', unix_stamp)
+        self.assertIn("$sdkStaging = 'build/release-sdk-staging'", windows_stamp)
 
     def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
         unix_block = self._find_step_run("Build SDK tarball (Unix)")

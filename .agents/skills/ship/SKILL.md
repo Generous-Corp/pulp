@@ -987,11 +987,16 @@ stamps the selected install prefix, and its downloaded-asset finalizer
 re-verifies the exact tag SHA/platform and parses the installed
 `include/pulp/runtime/build_info.hpp` before publication. Dirty/non-Release
 build metadata, or a build-info version/short-SHA inconsistent with the marker,
-fails closed. Untracked configure/build inputs are excluded from the dirty bit;
-tracked source changes are not. Manual-backfill compatibility helpers must stay
-under `RUNNER_TEMP`, outside historical tagged checkouts whose older probes count
-untracked files as dirt. Checkout-relative Linux dependency-action files are
-recorded when materialized and removed immediately after use, before configure.
+fails closed. The dirty bit covers tracked changes, untracked files, and dirty
+submodules. Manual-backfill compatibility helpers must stay under `RUNNER_TEMP`,
+outside the tagged checkout, while generated build, staging, and archive
+outputs stay under the ignored repository-root `build/` tree. Release-only
+inputs therefore do not weaken or accidentally trip that general
+source-integrity signal. Checkout-relative Linux dependency-action files are
+recorded when materialized and removed immediately after use; marker-era legs
+then require an empty `git status --porcelain --untracked-files=all
+--ignore-submodules=none` before configure. Resolve the marker-era policy from
+the trusted default-branch matrix rather than the selected release source.
 Marker-era manual
 backfills must build the tag itself; `source_ref` substitution is reserved for
 pre-marker history.

@@ -20,7 +20,14 @@ temporary directory, never inside the tagged checkout, so historical build-info
 dirty probes do not mistake the helper payload for a source modification.
 Linux dependency-action files that must temporarily exist at checkout-relative
 paths are recorded and removed immediately after the action runs, before CMake
-configures the SDK build metadata.
+configures the SDK build metadata. Marker-era legs then require an empty
+`git status --porcelain --untracked-files=all --ignore-submodules=none`
+immediately before configure; command-line flags override runner Git config, so
+tracked files, untracked files, and dirty submodules all fail closed. The
+marker-era decision comes from the trusted default-branch product matrix, not
+the selected release source. Generated build, staging, and archive outputs stay
+under the ignored repository-root `build/` tree so they do not weaken or
+accidentally trip this source-integrity signal.
 
 If you're hunting a specific layer:
 

@@ -204,7 +204,7 @@ def verify_build_info_text(
             f"(kBuildType={build_info['kBuildType']!r})"
         )
     if build_info["kGitDirty"] is not False:
-        raise ProvenanceError("installed build_info.hpp reports tracked source changes")
+        raise ProvenanceError("installed build_info.hpp reports source-tree changes")
     if build_info["kSdkVersion"] != expected_version:
         raise ProvenanceError(
             "installed build_info.hpp SDK version does not match provenance "
@@ -295,12 +295,12 @@ def build_release_marker(
         source_dir,
         "status",
         "--porcelain",
-        "--untracked-files=no",
-        "--ignore-submodules=untracked",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
     )
     if dirty:
         raise ProvenanceError(
-            "official provenance requires a clean tracked source tree; "
+            "official provenance requires a clean source tree; "
             f"git status reported: {dirty!r}"
         )
 
