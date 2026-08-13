@@ -274,6 +274,10 @@ test("real browser capture preserves the executable pre-mount document",
       '<script src="' + url + '"><\\/script></body></html>';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     document.documentElement.replaceWith(doc.documentElement);
+    // Parsing a later helper document must not replace the executable source
+    // authority selected by the live-root installation above.
+    new DOMParser().parseFromString(
+      '<!doctype html><html><body>STALE HELPER</body></html>', 'text/html');
     const replacement = document.createElement('script');
     replacement.src = url;
     document.body.appendChild(replacement);
@@ -299,6 +303,7 @@ test("real browser capture preserves the executable pre-mount document",
       const materialized = JSON.parse(await readFile(
         path.join(output, "materialized-document.json"), "utf8"));
       assert.match(materialized.html, /<button[^>]*>READY<\/button>/);
+      assert.doesNotMatch(materialized.html, /STALE HELPER/);
       assert.doesNotMatch(materialized.html, /blob:/);
       assert.equal(materialized.assets.length, 2);
       const scriptAsset = materialized.assets.find(

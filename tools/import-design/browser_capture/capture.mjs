@@ -469,8 +469,10 @@ async function configurePage(cdp, width, height, dpr) {
       // canvas programs; the DOMParser input retains the exact scripts that
       // produced the accepted Chromium frame.
       const parser = DOMParser.prototype.parseFromString;
+      const replaceWith = Element.prototype.replaceWith;
       const createObjectURL = URL.createObjectURL.bind(URL);
       const blobs = new Map();
+      const parsedDocuments = new WeakMap();
       globalThis.__pulpMaterializedDocument = null;
       globalThis.__pulpMaterializedBlobs = blobs;
       URL.createObjectURL = function(blob) {
@@ -479,13 +481,29 @@ async function configurePage(cdp, width, height, dpr) {
         return url;
       };
       DOMParser.prototype.parseFromString = function(source, type) {
-        if (String(type).toLowerCase() === 'text/html') {
-          globalThis.__pulpMaterializedDocument = {
+        const parsed = parser.call(this, source, type);
+        if (String(type).toLowerCase() === 'text/html' && parsed?.documentElement) {
+          parsedDocuments.set(parsed.documentElement, {
             html: String(source),
             mime_type: 'text/html'
-          };
+          });
         }
-        return parser.call(this, source, type);
+        return parsed;
+      };
+      Element.prototype.replaceWith = function(...replacements) {
+        // A loader may parse helpers, SVG fragments, or sanitization probes
+        // after constructing its executable document.  The last DOMParser
+        // call is therefore not an authority boundary.  Commit only the
+        // parsed root that actually replaces the live document root.
+        if (this === document.documentElement) {
+          const installed = replacements.find((replacement) =>
+            replacement && parsedDocuments.has(replacement));
+          if (installed) {
+            globalThis.__pulpMaterializedDocument =
+              parsedDocuments.get(installed);
+          }
+        }
+        return replaceWith.apply(this, replacements);
       };
     })()`,
   });
