@@ -92,9 +92,9 @@ reduce_set_note_velocity(const Project& project, const SetNoteVelocity& velocity
 runtime::Result<NoteCommandReduction, TransactionError>
 reduce_set_note_events(const Project& project, const SetNoteEvents& set,
                        const Transaction& transaction, CommandId command) {
-    if (const auto code = target_error(project, set.clip_id,
-                                       expected_location(ItemKind::Clip, project, set.sequence_id,
-                                                         set.track_id, set.clip_id)))
+    if (const auto code = target_error(
+            project, set.clip_id,
+            expected_location(ItemKind::Clip, project, set.sequence_id, set.track_id, set.clip_id)))
         return reject_reduction<NoteCommandReduction>(*code, transaction, command, set.clip_id,
                                                       set.track_id);
     const auto* sequence = project.find_sequence(set.sequence_id);
@@ -149,9 +149,9 @@ reduce_set_note_events(const Project& project, const SetNoteEvents& set,
         if (const auto code = target_error(project, gate.id, note_location))
             return reject_reduction<NoteCommandReduction>(*code, transaction, command, gate.id,
                                                           set.clip_id);
-        const auto found = std::lower_bound(
-            by_id.begin(), by_id.end(), gate.id,
-            [](const std::pair<ItemId, std::size_t>& entry, ItemId id) { return entry.first < id; });
+        const auto found = std::lower_bound(by_id.begin(), by_id.end(), gate.id,
+                                            [](const std::pair<ItemId, std::size_t>& entry,
+                                               ItemId id) { return entry.first < id; });
         if (found == by_id.end() || found->first != gate.id)
             return reject_reduction<NoteCommandReduction>(ConflictCode::TargetMissing, transaction,
                                                           command, gate.id, set.clip_id);
@@ -159,9 +159,8 @@ reduce_set_note_events(const Project& project, const SetNoteEvents& set,
         // named once, so no two iterations write the same slot and an earlier
         // replacement can never satisfy a later note's gate.
         if (!equal_note(notes->notes()[found->second], gate))
-            return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
-                                                          transaction, command, gate.id,
-                                                          set.clip_id);
+            return reject_reduction<NoteCommandReduction>(
+                ConflictCode::ExpectedValueMismatch, transaction, command, gate.id, set.clip_id);
         next[found->second] = set.replacement[i];
     }
 
@@ -209,8 +208,170 @@ reduce_set_note_events(const Project& project, const SetNoteEvents& set,
         std::move(next_project).value(),
         SetNoteEvents{set.sequence_id, set.track_id, set.clip_id, std::move(inverse_expected),
                       std::move(inverse_replacement)},
-        {set.clip_id, set.track_id, set.sequence_id,
-         DirtyFlags::Content | DirtyFlags::Notes}});
+        {set.clip_id, set.track_id, set.sequence_id, DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_insert_notes(const Project& project, const InsertNotes& insert,
+                    const Transaction& transaction, CommandId command,
+                    bool allow_tombstone_restore) {
+    if (const auto code =
+            target_error(project, insert.clip_id,
+                         expected_location(ItemKind::Clip, project, insert.sequence_id,
+                                           insert.track_id, insert.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, insert.clip_id,
+                                                      insert.track_id);
+    const auto* sequence = project.find_sequence(insert.sequence_id);
+    const auto* track = sequence->find_track(insert.track_id);
+    const auto* clip = track->find_clip(insert.clip_id);
+    const auto* content = std::get_if<MidiContent>(&clip->content());
+    if (!content)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, insert.clip_id);
+    if (insert.notes.empty())
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, insert.clip_id);
+
+    // Validate and canonicalize the inserted subset on its own first. Besides
+    // rejecting malformed notes and modifiers, this proves that every supplied
+    // modifier belongs to a note this command inserts rather than quietly
+    // changing the behavior of an unrelated live note.
+    auto inserted = MidiContent::create(insert.notes, insert.modifiers, content->modifier_seed());
+    if (!inserted)
+        return runtime::Err(model_failure(transaction, command, inserted.error()));
+
+    const auto location = expected_location(ItemKind::Note, project, insert.sequence_id,
+                                            insert.track_id, insert.clip_id);
+    std::vector<OwnedIdentity> identities;
+    identities.reserve(inserted->notes().size());
+    for (const auto& note : inserted->notes())
+        identities.push_back({note.id, location});
+    auto identity_plan =
+        plan_identity_insert(project, identities, allow_tombstone_restore, transaction, command);
+    if (!identity_plan)
+        return runtime::Err(identity_plan.error());
+
+    std::vector<NoteEvent> next_notes(content->notes().begin(), content->notes().end());
+    next_notes.insert(next_notes.end(), inserted->notes().begin(), inserted->notes().end());
+    std::vector<NoteModifier> next_modifiers(content->modifiers().begin(),
+                                             content->modifiers().end());
+    next_modifiers.insert(next_modifiers.end(), inserted->modifiers().begin(),
+                          inserted->modifiers().end());
+    auto next_content = MidiContent::create(
+        std::move(next_notes), std::move(next_modifiers), content->modifier_seed(),
+        std::vector<MidiExpressionLane>(content->lanes().begin(), content->lanes().end()));
+    if (!next_content)
+        return runtime::Err(model_failure(transaction, command, next_content.error()));
+
+    std::vector<NoteEvent> inverse_expected(inserted->notes().begin(), inserted->notes().end());
+    auto next_project = replace_note_content(
+        project, *sequence, *track, *clip, std::move(next_content).value(),
+        identity_plan->mutations, identity_plan->next_item_id, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(
+        NoteCommandReduction{std::move(next_project).value(),
+                             RemoveNotes{insert.sequence_id, insert.track_id, insert.clip_id,
+                                         std::move(inverse_expected)},
+                             {insert.clip_id, insert.track_id, insert.sequence_id,
+                              DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_remove_notes(const Project& project, const RemoveNotes& remove,
+                    const Transaction& transaction, CommandId command) {
+    if (const auto code =
+            target_error(project, remove.clip_id,
+                         expected_location(ItemKind::Clip, project, remove.sequence_id,
+                                           remove.track_id, remove.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, remove.clip_id,
+                                                      remove.track_id);
+    const auto* sequence = project.find_sequence(remove.sequence_id);
+    const auto* track = sequence->find_track(remove.track_id);
+    const auto* clip = track->find_clip(remove.clip_id);
+    const auto* content = std::get_if<MidiContent>(&clip->content());
+    if (!content)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, remove.clip_id);
+    if (remove.expected.empty())
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, remove.clip_id);
+
+    std::vector<ItemId> removed_ids;
+    removed_ids.reserve(remove.expected.size());
+    for (const auto& note : remove.expected)
+        removed_ids.push_back(note.id);
+    std::sort(removed_ids.begin(), removed_ids.end());
+    if (const auto duplicate = std::adjacent_find(removed_ids.begin(), removed_ids.end());
+        duplicate != removed_ids.end())
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, *duplicate, remove.clip_id);
+
+    std::vector<std::pair<ItemId, std::size_t>> by_id;
+    by_id.reserve(content->notes().size());
+    for (std::size_t index = 0; index < content->notes().size(); ++index)
+        by_id.emplace_back(content->notes()[index].id, index);
+    std::sort(by_id.begin(), by_id.end());
+    const auto location = expected_location(ItemKind::Note, project, remove.sequence_id,
+                                            remove.track_id, remove.clip_id);
+    for (const auto& expected : remove.expected) {
+        if (const auto code = target_error(project, expected.id, location))
+            return reject_reduction<NoteCommandReduction>(*code, transaction, command, expected.id,
+                                                          remove.clip_id);
+        const auto found = std::lower_bound(by_id.begin(), by_id.end(), expected.id,
+                                            [](const std::pair<ItemId, std::size_t>& entry,
+                                               ItemId id) { return entry.first < id; });
+        if (found == by_id.end() || found->first != expected.id)
+            return reject_reduction<NoteCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                          command, expected.id, remove.clip_id);
+        if (!equal_note(content->notes()[found->second], expected))
+            return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                          transaction, command, expected.id,
+                                                          remove.clip_id);
+    }
+
+    std::vector<NoteEvent> next_notes;
+    std::vector<NoteEvent> removed_notes;
+    next_notes.reserve(content->notes().size() - remove.expected.size());
+    removed_notes.reserve(remove.expected.size());
+    for (const auto& note : content->notes()) {
+        if (std::binary_search(removed_ids.begin(), removed_ids.end(), note.id))
+            removed_notes.push_back(note);
+        else
+            next_notes.push_back(note);
+    }
+    std::vector<NoteModifier> next_modifiers;
+    std::vector<NoteModifier> removed_modifiers;
+    next_modifiers.reserve(content->modifiers().size());
+    removed_modifiers.reserve(remove.expected.size());
+    for (const auto& modifier : content->modifiers()) {
+        if (std::binary_search(removed_ids.begin(), removed_ids.end(), modifier.note_id))
+            removed_modifiers.push_back(modifier);
+        else
+            next_modifiers.push_back(modifier);
+    }
+    auto next_content = MidiContent::create(
+        std::move(next_notes), std::move(next_modifiers), content->modifier_seed(),
+        std::vector<MidiExpressionLane>(content->lanes().begin(), content->lanes().end()));
+    if (!next_content)
+        return runtime::Err(model_failure(transaction, command, next_content.error()));
+
+    std::vector<OwnedIdentity> identities;
+    identities.reserve(removed_ids.size());
+    for (const auto id : removed_ids)
+        identities.push_back({id, location});
+    const auto identity_changes = plan_identity_deactivate(identities);
+    auto next_project =
+        replace_note_content(project, *sequence, *track, *clip, std::move(next_content).value(),
+                             identity_changes, std::nullopt, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(
+        NoteCommandReduction{std::move(next_project).value(),
+                             InsertNotes{remove.sequence_id, remove.track_id, remove.clip_id,
+                                         std::move(removed_notes), std::move(removed_modifiers)},
+                             {remove.clip_id, remove.track_id, remove.sequence_id,
+                              DirtyFlags::Content | DirtyFlags::Notes}});
 }
 
 runtime::Result<NoteCommandReduction, TransactionError>
@@ -370,6 +531,11 @@ reduce_note_command(const Project& project, const Command& command, const Transa
                                                    allow_tombstone_restore);
             else if constexpr (std::is_same_v<T, SetNoteEvents>)
                 return reduce_set_note_events(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, InsertNotes>)
+                return reduce_insert_notes(project, value, transaction, command_id,
+                                           allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveNotes>)
+                return reduce_remove_notes(project, value, transaction, command_id);
             else {
                 static_assert(!is_note_command_type<T>,
                               "a note command claimed in transaction_dispatch_internal.hpp has no "

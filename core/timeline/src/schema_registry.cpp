@@ -528,6 +528,17 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_notes", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"modifiers", SchemaValueKind::Array},
+                               {"notes", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_notes", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     // The modifier arrays are optional at the current version because a command
     // schema has no migration edges to walk: decode gates on exact version
     // equality, so raising the version would reject every envelope already
