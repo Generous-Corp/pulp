@@ -415,16 +415,24 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
         createPanel('xh-calc-px', '');
         var sd4 = new CSSStyleDeclaration({ _id: 'xh-calc-px', _nativeCreated: true });
         sd4._applyProperty('maxHeight', 'calc(100px + 50px)');
+
+        // Viewport units must remain typed until native layout. Collapsing
+        // this to the naked number 90 is the 90vh -> 90px modal regression.
+        createPanel('xh-vh', '');
+        var sd5 = new CSSStyleDeclaration({ _id: 'xh-vh', _nativeCreated: true });
+        sd5._applyProperty('maxHeight', '90vh');
     )");
 
     auto* mw_pct      = dynamic_cast<Panel*>(bridge.widget("mw-pct"));
     auto* mh_pct      = dynamic_cast<Panel*>(bridge.widget("mh-pct"));
     auto* xw_calc_pct = dynamic_cast<Panel*>(bridge.widget("xw-calc-pct"));
     auto* xh_calc_px  = dynamic_cast<Panel*>(bridge.widget("xh-calc-px"));
+    auto* xh_vh       = dynamic_cast<Panel*>(bridge.widget("xh-vh"));
     REQUIRE(mw_pct      != nullptr);
     REQUIRE(mh_pct      != nullptr);
     REQUIRE(xw_calc_pct != nullptr);
     REQUIRE(xh_calc_px  != nullptr);
+    REQUIRE(xh_vh       != nullptr);
 
     // % survives: dim_<dim>.unit is the percent sentinel.
     REQUIRE(mw_pct->flex().dim_min_width.unit  == DimensionUnit::percent);
@@ -439,6 +447,8 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
     // calc-family px resolves to 150.
     REQUIRE(xh_calc_px->flex().dim_max_height.unit == DimensionUnit::px);
     REQUIRE_THAT(xh_calc_px->flex().dim_max_height.value, WithinAbs(150.0f, 0.001f));
+    REQUIRE(xh_vh->flex().dim_max_height.unit == DimensionUnit::vh);
+    REQUIRE_THAT(xh_vh->flex().dim_max_height.value, WithinAbs(90.0f, 0.001f));
 }
 
 // Focus-guard for global key shortcuts. Bare-key shortcuts (no Ctrl/Alt/

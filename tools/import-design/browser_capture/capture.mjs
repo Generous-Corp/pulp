@@ -66,6 +66,8 @@ import {
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
+import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
+import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -538,6 +540,33 @@ async function captureMaterializedDocument(cdp) {
   const materialized = metadata.result?.value ?? null;
   if (!materialized) return null;
 
+  // Parse only bounded @font-face declarations from the already-captured
+  // durable HTML. Keeping this outside Runtime.evaluate avoids realm and
+  // template-escape differences when Claude replaces the live document with
+  // one produced by DOMParser.
+  const fontBindings = [];
+  for (const style of materialized.html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
+    for (const face of style[1].matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+      const read = (name) => {
+        const match = face[1].match(new RegExp(
+          `(?:^|;)\\s*${name}\\s*:\\s*([^;}]*)`, "i"));
+        return match ? match[1].trim() : "";
+      };
+      const family = read("font-family").replace(/^(['"])(.*)\1$/, "$2");
+      const source = read("src");
+      const match = source.match(/url\((?:['"])?(blob:[^)'"\s]+)(?:['"])?\)/);
+      if (!family || !match) continue;
+      fontBindings.push({ family, url: match[1],
+        weight: read("font-weight") || "normal",
+        style: read("font-style") || "normal",
+        unicode_range: read("unicode-range") });
+      if (fontBindings.length > 256) {
+        throw new Error("materialized document contains too many font bindings");
+      }
+    }
+  }
+  materialized.font_bindings = fontBindings;
+
   // Production bundles include Babel/React/font payloads. Returning them all
   // in one Runtime.evaluate result can exceed Chrome's DevTools WebSocket
   // message budget and close the connection without a protocol error. Read
@@ -579,6 +608,9 @@ async function captureMaterializedDocument(cdp) {
   for (const asset of materialized.assets) {
     const id = `pulp-materialized-asset-${asset.sha256}`;
     materialized.html = materialized.html.split(asset.url).join(id);
+    for (const binding of materialized.font_bindings || []) {
+      if (binding.url === asset.url) binding.asset_id = id;
+    }
     if (!stableAssets.has(id)) {
       stableAssets.set(id, {
         id,
@@ -590,10 +622,58 @@ async function captureMaterializedDocument(cdp) {
     }
   }
   materialized.assets = [...stableAssets.values()];
+  const stableFontBindings = new Map();
+  for (const binding of materialized.font_bindings || []) {
+    if (!binding.asset_id) {
+      throw new Error(`captured font face ${binding.family} did not resolve to an asset`);
+    }
+    const stable = {
+      family: binding.family,
+      asset_id: binding.asset_id,
+      weight: binding.weight,
+      style: binding.style,
+      unicode_range: binding.unicode_range,
+      // Native font managers do not implement CSS @font-face unicode-range
+      // selection. Give every packaged face a stable private family alias so
+      // the materialized text join can select the exact subset Chromium used.
+      runtime_family: `${binding.family} [${binding.asset_id}]`,
+    };
+    const key = JSON.stringify(stable);
+    if (!stableFontBindings.has(key)) stableFontBindings.set(key, stable);
+  }
+  materialized.font_bindings = [...stableFontBindings.values()];
   if (materialized.html.includes("blob:")) {
     throw new Error("materialized document retained an unresolved blob URL");
   }
   return materialized;
+}
+
+async function captureMaterializedSurfaceStyle(cdp) {
+  const result = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      const color = (node) => {
+        if (!node) return '';
+        const value = String(getComputedStyle(node).backgroundColor || '').trim();
+        return value.length <= 128 ? value : '';
+      };
+      const opaque = (value) => {
+        if (!value || value === 'transparent') return false;
+        const match = value.match(/^rgba?\\(([^)]+)\\)$/i);
+        if (!match) return true;
+        const parts = match[1].split(',').map((part) => Number(part.trim()));
+        return parts.length < 4 || (Number.isFinite(parts[3]) && parts[3] > 0);
+      };
+      const body = color(document.body);
+      const html = color(document.documentElement);
+      return { background_color: opaque(body) ? body : html };
+    })()`,
+    returnByValue: true,
+  });
+  const value = result.result?.value;
+  const background = String(value?.background_color ?? '').trim();
+  return {
+    background_color: background.length <= 128 ? background : '',
+  };
 }
 
 async function runProbe(options) {
@@ -977,6 +1057,12 @@ async function runCapture(options) {
     // frozen frame.
     finalExtent = await freezeAndMeasureDocumentExtent(cdp);
     if (materializedDocument) {
+      // The executable React subtree may deliberately leave its root
+      // transparent and rely on the document/body surface for the accepted
+      // frame.  A native materialization has no browser body behind it, so
+      // retain that frozen surface colour as part of the capture contract.
+      materializedDocument.surface_style =
+        await captureMaterializedSurfaceStyle(cdp);
       const frameTime = await cdp.call("Runtime.evaluate", {
         expression:
           "Number(globalThis.__pulpLastAnimationFrameTimestamp || 0)",
@@ -1137,6 +1223,11 @@ async function runCapture(options) {
     // faces reported have to be the ones the frozen frame was shaped with.
     const platformFontReport = await evaluatePlatformFonts(
       cdp, snapshot, COMPUTED_STYLES);
+    if (materializedDocument) {
+      materializedDocument.layout_bindings = buildMaterializedLayoutBindings(snapshot);
+      materializedDocument.text_bindings = buildMaterializedTextBindings(
+        snapshot, platformFontReport);
+    }
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
     await networkGuard.awaitProvenance();

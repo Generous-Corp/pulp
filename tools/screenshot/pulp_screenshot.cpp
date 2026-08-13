@@ -230,6 +230,15 @@ static std::string canvas_program_frame_report(
     return out.str();
 }
 
+static std::string label_line_break_report() {
+    const auto counts = Label::line_break_path_counts();
+    std::ostringstream out;
+    out << "{\"cached\":" << counts.cached
+        << ",\"reflowed\":" << counts.reflowed
+        << ",\"uncached\":" << counts.uncached << '}';
+    return out.str();
+}
+
 static CanvasWidget* find_canvas_by_id(View& view, const std::string& id,
                                        uint32_t occurrence, uint32_t& seen) {
     if (auto* canvas = dynamic_cast<CanvasWidget*>(&view); canvas && canvas->id() == id) {
@@ -464,6 +473,27 @@ static const char* runtime_trace_script() {
             document_body_bounds: rectFor(body)
         };
     }
+    function materializedStateSummary() {
+        var activation = null;
+        var active = '';
+        try {
+            if (typeof globalThis.__pulpRequestedMaterializedActivation__ === 'function')
+                activation = globalThis.__pulpRequestedMaterializedActivation__();
+        } catch (e) {
+            activation = { error: String(e) };
+        }
+        try {
+            if (typeof globalThis.__pulpRefreshMaterializedState__ === 'function')
+                active = String(globalThis.__pulpRefreshMaterializedState__() || '');
+        } catch (e) {
+            active = 'error: ' + String(e);
+        }
+        return {
+            requested: String(globalThis.__pulpRequestedMaterializedState__ || ''),
+            active: active,
+            activation: activation
+        };
+    }
     var addEventLog = Array.isArray(globalThis.__pulpAddELLog__)
         ? globalThis.__pulpAddELLog__.map(function (entry) {
             return { op: String(entry.op || ''), type: String(entry.type || ''), fn: String(entry.fn || '') };
@@ -485,14 +515,18 @@ static const char* runtime_trace_script() {
         add_event_listener_log: addEventLog,
         runtime_import_diagnostics: runtimeImportDiagnostics(),
         runtime_import_state: runtimeImportState(),
+        materialized_state: materializedStateSummary(),
         dispatch_hits: globalThis.__pulpDispatchHits__ || null,
+        materialized_metadata_diagnostics:
+            globalThis.__pulpMaterializedMetadataDiagnostics__ || null,
         native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0,
         native_bounds_count: nativeBounds.length,
         native_bounds: nativeBounds,
         canvas_programs: Array.isArray(globalThis.__pulpCanvasPrograms__)
             ? globalThis.__pulpCanvasPrograms__ : [],
         canvas_program_frames: Array.isArray(globalThis.__pulpCanvasProgramFrames__)
-            ? globalThis.__pulpCanvasProgramFrames__ : []
+            ? globalThis.__pulpCanvasProgramFrames__ : [],
+        label_line_break_counts: globalThis.__pulpLabelLineBreakCounts__ || null
     }, null, 2);
 })()
 )JS";
@@ -769,6 +803,9 @@ int main(int argc, char* argv[]) {
                             canvas_program_report(root) + ";");
             engine.evaluate("globalThis.__pulpCanvasProgramFrames__ = " +
                             canvas_program_frame_report(canvas_program_frames) + ";");
+            // The counters are paint-path evidence, so publish them only
+            // after capture below. Publishing here reports zeros even when
+            // every Label uses its captured Chromium line boxes.
             auto trace = engine.evaluate(runtime_trace_script()).toString();
             if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
                 std::cerr << "Error: could not write runtime trace " << options.runtime_trace_path << "\n";
@@ -813,6 +850,23 @@ int main(int argc, char* argv[]) {
         png = render_to_png(*capture_root, options.width, options.height, options.scale, backend);
         if (png.empty()) {
             std::cerr << "Error: rendering failed\n";
+            return 1;
+        }
+    }
+
+    if (!options.runtime_trace_path.empty()) {
+        try {
+            engine.evaluate("globalThis.__pulpLabelLineBreakCounts__ = " +
+                            label_line_break_report() + ";");
+            auto trace = engine.evaluate(runtime_trace_script()).toString();
+            if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
+                std::cerr << "Error: could not update runtime trace "
+                          << options.runtime_trace_path << "\n";
+                return 1;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: runtime trace paint evidence failed: "
+                      << e.what() << "\n";
             return 1;
         }
     }

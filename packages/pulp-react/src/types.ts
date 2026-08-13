@@ -704,6 +704,16 @@ export interface PulpInstance {
     /// `null` when the Element shim isn't available (e.g. pure-JS
     /// unit tests with no bridge engine).
     _dom?: unknown;
+    /// Native id that owns this element's rendered text when it differs from
+    /// the semantic DOM element id. Imported lowercase HTML controls are
+    /// styled DOM boxes, not opinionated stock Pulp widgets, so a plain-text
+    /// `<button>` owns a generated Label child while click/accessibility stay
+    /// on the complete button rectangle.
+    textTargetId?: string;
+    /// True for a React host text node synthesized as a Label. The owning DOM
+    /// element publishes these renderer targets by ordinal so Chromium text
+    /// evidence can address mixed content such as `<button><span>*</span>Save`.
+    anonymousTextTarget?: boolean;
 }
 
 // ── Container ──────────────────────────────────────────────────────

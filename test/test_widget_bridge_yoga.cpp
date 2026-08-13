@@ -76,12 +76,10 @@ TEST_CASE("setFlex min/max width/height accept percent strings",
     REQUIRE_THAT(f.dim_max_height.value, WithinAbs(90.0f, 0.001f));
 }
 
-// pulp #1712 — rn/height status flipped from `partial` to `supported`
-// after reclassifying `vh` as architectural-OOS (Pulp has no global
-// viewport context). This test backs the supported claim by exercising
-// every value form rn/height accepts: number (px), percent string,
-// and 'auto' keyword.
-TEST_CASE("setFlex height accepts number, %, auto (rn/height supported claim)",
+// Viewport units stay symbolic in FlexStyle and resolve from the current root
+// bounds during every layout. This is essential for imported plugin editors:
+// the host can resize the viewport after the React tree was materialized.
+TEST_CASE("setFlex height accepts px, %, viewport units, and auto",
           "[view][bridge][css][issue-1712][rn-height]") {
     ScriptEngine engine;
     View root;
@@ -93,17 +91,21 @@ TEST_CASE("setFlex height accepts number, %, auto (rn/height supported claim)",
         createPanel('px',  '');
         createPanel('pct', '');
         createPanel('aut', '');
+        createPanel('view', '');
         setFlex('px',  'height', 120);
         setFlex('pct', 'height', '50%');
+        setFlex('view', 'height', '25vh');
         setFlex('aut', 'height', 'auto');
     )");
 
     auto* px = bridge.widget("px");
     auto* pct = bridge.widget("pct");
     auto* aut = bridge.widget("aut");
+    auto* view = bridge.widget("view");
     REQUIRE(px != nullptr);
     REQUIRE(pct != nullptr);
     REQUIRE(aut != nullptr);
+    REQUIRE(view != nullptr);
 
     REQUIRE(px->flex().dim_height.unit == DimensionUnit::px);
     REQUIRE_THAT(px->flex().dim_height.value, WithinAbs(120.0f, 0.001f));
@@ -111,7 +113,58 @@ TEST_CASE("setFlex height accepts number, %, auto (rn/height supported claim)",
     REQUIRE(pct->flex().dim_height.unit == DimensionUnit::percent);
     REQUIRE_THAT(pct->flex().dim_height.value, WithinAbs(50.0f, 0.001f));
 
+    REQUIRE(view->flex().dim_height.unit == DimensionUnit::vh);
+    REQUIRE_THAT(view->flex().dim_height.value, WithinAbs(25.0f, 0.001f));
+
     REQUIRE(aut->flex().dim_height.unit == DimensionUnit::auto_);
+}
+
+TEST_CASE("viewport max-height re-resolves after host resize",
+          "[view][bridge][css][viewport-units][responsive]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 800, 600});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('modal', '');
+        setFlex('modal', 'height', 1000);
+        setFlex('modal', 'max_height', '90vh');
+    )");
+
+    auto* modal = bridge.widget("modal");
+    REQUIRE(modal != nullptr);
+    REQUIRE(modal->flex().dim_max_height.unit == DimensionUnit::vh);
+    REQUIRE_THAT(modal->flex().dim_max_height.value, WithinAbs(90.0f, 0.001f));
+
+    root.layout_children();
+    REQUIRE_THAT(modal->bounds().height, WithinAbs(540.0f, 1.0f));
+
+    root.set_bounds({0, 0, 800, 400});
+    root.layout_children();
+    REQUIRE_THAT(modal->bounds().height, WithinAbs(360.0f, 1.0f));
+}
+
+TEST_CASE("setFlex dimensions reject finite doubles that overflow float",
+          "[view][bridge][css][finite]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('bounded-dimension', '')");
+    auto* child = bridge.widget("bounded-dimension");
+    REQUIRE(child != nullptr);
+    child->flex().preferred_width = 41.0f;
+    child->flex().dim_width = {41.0f, DimensionUnit::px};
+
+    bridge.load_script("setFlex('bounded-dimension', 'width', 1e100)");
+    CHECK(child->flex().preferred_width == 41.0f);
+    CHECK(child->flex().dim_width.value == 41.0f);
+
+    bridge.load_script("setFlex('bounded-dimension', 'width', '1e100px')");
+    CHECK(child->flex().preferred_width == 41.0f);
+    CHECK(child->flex().dim_width.value == 41.0f);
 }
 
 TEST_CASE("setFlex min/max width/height numeric path stays px",

@@ -6359,6 +6359,7 @@ test -d "$runtime/node_modules" || (cd "$runtime" && npm ci)
 node "$runtime/materialized-runtime-transform.mjs" \
   --in spectr.ir-browser-capture/materialized-document.json \
   --design-ir spectr.ir.json \
+  --state-atlas spectr.ir-browser-capture/captured-states.json \
   --prelude spectr-native-services.js --out behavior.js
 
 pulp-screenshot --script behavior.js --design-ir spectr.ir.json \
@@ -6391,6 +6392,18 @@ diagnostics are empty, and a planted missing-service or broken-binding control
 fails. Do not promote executable canvas paint merely because it runs: first
 prove that replacement independently matches its same-transaction canvas
 snapshot, including fonts, SVG/image assets, clipping, and compositing order.
+
+For dropdowns, context menus, settings, preset managers, and other alternate
+states, capture a `pulp-materialized-state-atlas-v1` document in the SAME
+Chromium transaction. Every entry must provide a stable id, its captured paint,
+the event sequence that activates it, and (when available) a semantic selector
+that proves the live materialized application reached the intended state. The
+runtime executes the original closures first and swaps native visual authority
+only after the match succeeds. Never use a state atlas as a screenshot-only
+interaction fake: invalid activation, a missing captured image, an unknown
+state, or a failed semantic match must fail closed. Validate the home state and
+every accepted atlas state independently against its own same-transaction
+browser frame.
 
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not

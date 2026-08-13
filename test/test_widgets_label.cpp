@@ -671,6 +671,71 @@ TEST_CASE("Label decoration follows every captured line without double alignment
     CHECK(strokes[0].f[1] != Catch::Approx(strokes[1].f[1]));
 }
 
+TEST_CASE("Label honors Chromium captured vertical line positions",
+          "[view][widget][label-cache][alignment]") {
+    Label label("CENTERED");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_bounds({0, 0, 100, 40});
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes(
+        {{7, 3, 58, 16, 0, 8}}, 100.0f, face, false);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        return;
+    }
+    CHECK(fills[0].f[0] == Catch::Approx(7.0f));
+    // The exact ascent is backend/font dependent, but moving the captured top
+    // by 3px must move the baseline by the same 3px instead of re-centering.
+    Label at_zero("CENTERED");
+    at_zero.set_font_family("Inter");
+    at_zero.set_font_size(12.0f);
+    at_zero.set_bounds({0, 0, 100, 40});
+    at_zero.set_cached_line_boxes(
+        {{7, 0, 58, 16, 0, 8}}, 100.0f, face, false);
+    RecordingCanvas zero_canvas;
+    at_zero.paint(zero_canvas);
+    const auto zero_fills = commands_of(zero_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(zero_fills.size() == 1);
+    CHECK(fills[0].f[1] - zero_fills[0].f[1] == Catch::Approx(3.0f));
+}
+
+TEST_CASE("Attributed Label honors each Chromium captured line position",
+          "[view][widget][label-cache][alignment][attributed]") {
+    Label label("TOP BOTTOM");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_bounds({0, 0, 120, 50});
+    AttributedString attributed;
+    TextSpan span;
+    span.text = "TOP BOTTOM";
+    span.font_family = "Inter";
+    span.font_size = 12.0f;
+    attributed.append(span);
+    label.set_attributed_string(std::move(attributed));
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes(
+        {{4, 2, 24, 15, 0, 3}, {6, 25, 48, 15, 4, 6}},
+        120.0f, face, true);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        return;
+    }
+    REQUIRE(fills.size() == 2);
+    CHECK(fills[0].f[0] == Catch::Approx(4.0f));
+    CHECK(fills[1].f[0] == Catch::Approx(6.0f));
+    CHECK(fills[1].f[1] - fills[0].f[1] == Catch::Approx(23.0f));
+}
+
 // pulp #1410 — verify that nowrap puts a Label into single-line paint
 // mode (multi_line=false). Truncation is #1407's surface; this test
 // just confirms the multi_line side-effect path the bridge relies on.

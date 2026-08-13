@@ -64,7 +64,9 @@ pulp import-design --from claude --file editor.html --mode baked \
 
 node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs \
   --in editor.ir-browser-capture/materialized-document.json \
-  --design-ir editor.ir.json --out editor-behavior.js
+  --design-ir editor.ir.json \
+  --state-atlas editor.ir-browser-capture/captured-states.json \
+  --out editor-behavior.js
 
 pulp-screenshot --script editor-behavior.js --design-ir editor.ir.json \
   --width 1320 --height 860 --scale 2 --backend skia \
@@ -75,6 +77,12 @@ This is not a WebView or a hand-built visual approximation: native Skia draws
 the hash-verified Chromium frame, while transparent native CanvasWidget targets
 receive pointer input and retain the original materialized closures. The full
 frame and every canvas snapshot come from the same frozen Chromium transaction.
+Dropdowns, settings, preset managers, and other interaction states use the same
+contract: each state-atlas entry names the activation event, a semantic match,
+and its same-transaction Chromium paint. The live materialized application
+still performs the state change; native Skia selects the captured visual state
+only after the semantic match succeeds. A state whose activation fails or whose
+captured paint is missing fails closed rather than displaying an approximation.
 Do not substitute executable canvas paint for the accepted pixels until that
 paint independently passes the same-frame visual gate. Keep the chrome-only and
 per-canvas captures as diagnostic evidence for that later handoff.

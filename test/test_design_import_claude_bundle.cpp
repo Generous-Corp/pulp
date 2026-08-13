@@ -165,6 +165,38 @@ TEST_CASE("materialized browser document becomes a stable executable bundle",
     REQUIRE_FALSE(parse_materialized_browser_document(unresolved).has_value());
 }
 
+TEST_CASE("materialized browser document binds packaged fonts fail closed",
+          "[view][import][materialized-browser][font]") {
+    const std::string json = R"JSON({
+      "schema":"pulp-materialized-browser-document-v1","version":1,
+      "html":"<html><body><div id=\"root\"></div></body></html>",
+      "assets":[{
+        "id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "mime_type":"font/woff2","byte_length":20,
+        "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
+        "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
+      }],
+      "font_bindings":[{"family":"Captured Mono",
+        "runtime_family":"Captured Mono [latin]",
+        "asset_id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "weight":"600","style":"normal","unicode_range":"U+0000-00FF"}]
+    })JSON";
+    auto bundle = parse_materialized_browser_document(json);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->font_bindings.size() == 1);
+    REQUIRE(bundle->font_bindings[0].family == "Captured Mono");
+    REQUIRE(bundle->font_bindings[0].runtime_family == "Captured Mono [latin]");
+    REQUIRE(bundle->font_bindings[0].unicode_range == "U+0000-00FF");
+    REQUIRE(bundle->font_bindings[0].asset_index == 0);
+
+    auto missing = json;
+    const auto id = missing.rfind("pulp-materialized-asset-");
+    REQUIRE(id != std::string::npos);
+    missing.replace(id, 88,
+        "pulp-materialized-asset-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    REQUIRE_FALSE(parse_materialized_browser_document(missing).has_value());
+}
+
 TEST_CASE("parse_claude_bundle decodes a base64-gzip envelope",
           "[view][import][issue-468]") {
     const std::string js_a = "console.log('asset A');";

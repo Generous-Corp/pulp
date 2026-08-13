@@ -248,6 +248,9 @@ test("real browser capture preserves the executable pre-mount document",
     const output = path.join(root, "capture");
     const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
     try {
+      const fontBase64 = (await readFile(fileURLToPath(new URL(
+        "../../../packages/pulp-web-player/src/theme/inter.woff2",
+        import.meta.url)))).toString("base64");
       await writeFile(input, `<!doctype html><html><body>
 <script>
   (async () => {
@@ -255,9 +258,18 @@ test("real browser capture preserves the executable pre-mount document",
     const url = URL.createObjectURL(new Blob([source], {
       type: 'text/javascript'
     }));
+    const fontBytes = Uint8Array.from(atob(${JSON.stringify(fontBase64)}),
+      (character) => character.charCodeAt(0));
+    const fontUrl = URL.createObjectURL(new Blob([fontBytes], {
+      type: 'font/woff2'
+    }));
     const html = '<!doctype html><html><body style="margin:0;background:#123">' +
+      '<style>@font-face{font-family:"Captured Inter";src:url("' + fontUrl +
+      '") format("woff2");font-weight:400;font-style:normal;' +
+      'unicode-range:U+0000-00FF,U+20AC}</style>' +
       '<main style="width:320px;height:240px">' +
-      '<button style="width:120px;height:40px" onclick="void 0">READY</button>' +
+      '<button style="width:120px;height:40px;font-family:&quot;Captured Inter&quot;"' +
+      ' onclick="void 0">READY</button>' +
       '</main>' +
       '<script src="' + url + '"><\\/script></body></html>';
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -266,6 +278,8 @@ test("real browser capture preserves the executable pre-mount document",
     replacement.src = url;
     document.body.appendChild(replacement);
     await new Promise((resolve) => { replacement.onload = resolve; });
+    await document.fonts.load('16px "Captured Inter"');
+    await document.fonts.ready;
     globalThis.__pulpCaptureReady = Promise.resolve();
   })();
 </script></body></html>`);
@@ -286,15 +300,29 @@ test("real browser capture preserves the executable pre-mount document",
         path.join(output, "materialized-document.json"), "utf8"));
       assert.match(materialized.html, /<button[^>]*>READY<\/button>/);
       assert.doesNotMatch(materialized.html, /blob:/);
-      assert.equal(materialized.assets.length, 1);
-      assert.match(materialized.assets[0].id,
+      assert.equal(materialized.assets.length, 2);
+      const scriptAsset = materialized.assets.find(
+        (asset) => asset.mime_type === "text/javascript");
+      const fontAsset = materialized.assets.find(
+        (asset) => asset.mime_type === "font/woff2");
+      assert.ok(scriptAsset);
+      assert.ok(fontAsset);
+      assert.match(scriptAsset.id,
         /^pulp-materialized-asset-[0-9a-f]{64}$/);
-      assert.equal(materialized.html.includes(materialized.assets[0].id), true);
-      assert.equal("url" in materialized.assets[0], false);
-      assert.equal(materialized.assets[0].mime_type, "text/javascript");
+      assert.equal(materialized.html.includes(scriptAsset.id), true);
+      assert.equal(materialized.html.includes(fontAsset.id), true);
+      assert.equal("url" in scriptAsset, false);
       assert.equal(
-        Buffer.from(materialized.assets[0].data_base64, "base64").toString(),
+        Buffer.from(scriptAsset.data_base64, "base64").toString(),
         "window.__materializedAssetRan = true;");
+      assert.deepEqual(materialized.font_bindings, [{
+        family: "Captured Inter",
+        asset_id: fontAsset.id,
+        weight: "400",
+        style: "normal",
+        unicode_range: "U+0000-00FF,U+20AC",
+        runtime_family: `Captured Inter [${fontAsset.id}]`,
+      }]);
       assert.equal(materialized.semantic_bindings.length, 1);
       for (const binding of materialized.semantic_bindings) {
         assert.equal(binding.anchor,
@@ -307,12 +335,24 @@ test("real browser capture preserves the executable pre-mount document",
       assert.equal(materialized.semantic_bindings[0].name, "READY");
       assert.equal(materialized.semantic_bindings[0].bounds.width, 120);
       assert.equal(materialized.semantic_bindings[0].bounds.height, 40);
+      assert.ok(materialized.text_bindings.length >= 1);
+      const readyText = materialized.text_bindings.find(
+        (binding) => binding.text === "READY");
+      assert.ok(readyText);
+      assert.equal(readyText.anchor, "body");
+      assert.equal(readyText.path.at(-1).tag, "button");
+      assert.ok(readyText.basis.width > 0);
+      assert.ok(readyText.basis.resolved_face.length > 0);
+      assert.ok(readyText.boxes.length >= 1);
+      assert.ok(readyText.boxes.every((box) =>
+        Number.isFinite(box.left) && Number.isFinite(box.top) &&
+        box.width >= 0 && box.height > 0 && box.length > 0));
       const envelope = JSON.parse(await readFile(
         path.join(output, "capture.json"), "utf8"));
       assert.equal(
         envelope.provenance.source.materialized_document,
         "materialized-document.json");
-      assert.equal(envelope.provenance.source.materialized_asset_count, 1);
+      assert.equal(envelope.provenance.source.materialized_asset_count, 2);
       assert.match(
         envelope.provenance.source.materialized_document_sha256,
         /^[0-9a-f]{64}$/);
@@ -396,6 +436,7 @@ test("real browser capture freezes a canvas animation and names its browser",
         width_px: 320,
         height_px: 240,
         backend_node_id: backendNodeId,
+        bounds: canvasAsset.bounds,
       });
       assert.match(canvasAsset.sha256, /^[0-9a-f]{64}$/);
       const canvasPng = await readFile(path.join(output, canvasAsset.path));
@@ -632,7 +673,11 @@ test("real browser context-click captures the rendered context menu",
   });
 
 test("real browser wait-for visible rejects invisible ancestors and overlays",
-  { timeout: 30000 }, async (context) => {
+  // Three independent browser captures run sequentially here. Materialized
+  // font/layout evidence makes each capture more expensive than the original
+  // screenshot-only probe, so bound the individual interaction at 4 seconds
+  // while allowing the three cold Chrome processes to finish.
+  { timeout: 60000 }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");

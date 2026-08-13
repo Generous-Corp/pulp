@@ -6,10 +6,12 @@
   "slices": [
     "canvas-kernel"
   ],
-  "rationale": "Backport the reviewed retained NativeCanvasPainter primitive from immutable Vellum commit ab5cca9c7a6219ee3e2820ce6fa5c757b479f1c1. The primitive gives imported native CanvasWidget programs a bounded painter callback with explicit backend identity and state cleanup; Pulp consumes it for the Chromium-to-DesignIR-to-Skia migration without forking canvas semantics in import tooling.",
+  "rationale": "Backport the reviewed retained NativeCanvasPainter primitive from immutable Vellum commit ab5cca9c7a6219ee3e2820ce6fa5c757b479f1c1. The primitive gives imported native CanvasWidget programs a bounded painter callback with explicit backend identity and state cleanup; Pulp consumes it for the Chromium-to-DesignIR-to-Skia migration without forking canvas semantics in import tooling. The subsequent Pulp-only materialized-import integration records bounded Chromium canvas programs and same-transaction paint evidence through this primitive; it does not transfer Pulp capture tooling or plugin-host behavior into Vellum.",
   "tests": [
     "Vellum freeze",
+    "pulp-test-browser-capture-import",
     "pulp-test-canvas-widget",
+    "pulp-test-canvas2d-shim",
     "pulp-test-native-canvas-painter"
   ],
   "disposition": "framework-backport",

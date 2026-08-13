@@ -28,6 +28,33 @@ import { applyEventProp } from './prop-applier-events.js';
 // Bridge setters dispatch through `call()` in prop-applier-internal.ts.
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
+type EventCallbackRegistry = Map<string, (...args: unknown[]) => unknown>;
+function eventCallbackRegistry(): EventCallbackRegistry {
+    const host = globalThis as unknown as Record<string, unknown>;
+    const windowProxy = host.window as Record<string, unknown> | undefined;
+    const hostRegistry = host.__pulpReactEventCallbacks__ instanceof Map
+        ? host.__pulpReactEventCallbacks__ as EventCallbackRegistry : null;
+    const proxyRegistry = windowProxy?.__pulpReactEventCallbacks__ instanceof Map
+        ? windowProxy.__pulpReactEventCallbacks__ as EventCallbackRegistry : null;
+    const registry = hostRegistry ?? proxyRegistry
+        ?? new Map<string, (...args: unknown[]) => unknown>();
+    if (hostRegistry && proxyRegistry && hostRegistry !== proxyRegistry) {
+        for (const [key, callback] of proxyRegistry) {
+            if (!hostRegistry.has(key)) hostRegistry.set(key, callback);
+        }
+    }
+    host.__pulpReactEventCallbacks__ = registry;
+    if (windowProxy) windowProxy.__pulpReactEventCallbacks__ = registry;
+    return registry;
+}
+
+export function clearMaterializedEventCallbacks(id: string): void {
+    const prefix = `${id}:`;
+    const registry = eventCallbackRegistry();
+    for (const key of registry.keys()) {
+        if (key.startsWith(prefix)) registry.delete(key);
+    }
+}
 
 let _aap_count = 0;
 function logApply(stage: string, id: string, type: string, propCount: number): void {
@@ -210,12 +237,29 @@ function gestureRegistrarFor(eventName: string): string | null {
 }
 
 function applyEventHandler(id: string, key: string, value: unknown): void {
-    if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
+    if (typeof value !== 'function') {
+        eventCallbackRegistry().delete(`${id}:${eventName}`);
+        // WidgetBridge's listener table is replace-only. Install an inert
+        // callback so a conditional React handler cannot remain live after
+        // its prop disappears. This is intentionally different from leaving
+        // the old closure registered: dynamic imported controls frequently
+        // change ownership while a menu/modal mounts or unmounts.
+        call('on', id, eventName, () => ({ __pulpEventPropagation: 0 }));
+        return;
+    }
     if (isHoverEvent(eventName)) {
         // Arm the native hover dispatchers exactly once (idempotent on
         // the bridge — re-registers replace the lambdas, same shape).
         call('registerHover', id);
+    }
+    if (eventName === 'click') {
+        // Generic DOM-styled controls (lowercase <button>, role=button
+        // containers) do not have a stock widget subclass to pre-install an
+        // on_click callback. Arm the shared click-on-release seam explicitly.
+        // This is idempotent for native TextButton and keeps the whole owning
+        // rectangle—not its generated text child—as the action target.
+        call('registerClick', id);
     }
     if (isPointerEvent(eventName)) {
         // Without this call the bridge keeps the JS listener in its
@@ -253,7 +297,7 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     // synthetic-event module header for the full surface and the
     // event-type → field-extraction routing.
     const handler = value as (e: unknown) => void;
-    call('on', id, eventName, (...rawArgs: unknown[]) => {
+    const callback = (...rawArgs: unknown[]) => {
         const evt = makeSyntheticEvent(id, eventName, rawArgs);
         handler(evt);
         // The native pointer router walks registered View ancestors after the
@@ -265,7 +309,9 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
                 : evt.isPropagationStopped() ? 1
                 : 0,
         };
-    });
+    };
+    eventCallbackRegistry().set(`${id}:${eventName}`, callback);
+    call('on', id, eventName, callback);
 }
 
 /// Emit one setSvgRect call carrying the full geometry (x, y, width,
@@ -624,6 +670,11 @@ export function applyChangedProps(
         if (key === 'children') continue;
         if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
         if (!(key in newProps)) {
+            if (isEventHandler(key)) {
+                applyEventHandler(id, key, undefined);
+                mutated = true;
+                continue;
+            }
             // Specific resets we can do meaningfully
             if (key === 'visible')  { call('setVisible', id, true); mutated = true; }
             if (key === 'opacity')  { call('setOpacity', id, 1.0); mutated = true; }

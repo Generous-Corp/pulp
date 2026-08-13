@@ -35,11 +35,12 @@ describe('@pulp/react build output', () => {
   it('dist/index.mjs exists and is small (no React inlined)', () => {
     const st = statSync(distMjs);
     // After externalizing react / react-reconciler / scheduler the bundle
-    // is ~106 KB for the prop-applier, host-config, and intrinsic surface.
-    // If anyone re-inlines react it jumps to ~950 KB. A 130 KB ceiling
-    // keeps a wide gap from a React-inlined bundle while leaving room
-    // for the non-React surface to keep growing.
-    expect(st.size).toBeLessThan(130 * 1024);
+    // is ~135 KB for the prop-applier, host-config, intrinsic surface, and
+    // renderer-neutral materialized-import metadata bridge. If anyone
+    // re-inlines React it jumps to ~950 KB. A 140 KB ceiling keeps a wide gap
+    // from that failure signature; the explicit import/source checks below
+    // remain the primary oracle that React itself stayed external.
+    expect(st.size).toBeLessThan(140 * 1024);
   });
 
   it('keeps `react` as an external ESM import (not inlined)', () => {

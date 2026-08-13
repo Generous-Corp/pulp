@@ -671,6 +671,27 @@ TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __glo
     REQUIRE(engine.evaluate("win_keys.join(',')").toString() == "Escape,a");
 }
 
+TEST_CASE("Classic-script window aliases share one browser global property bag",
+          "[view][bridge][web-compat][window]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        window.__captured_app_state__ = { analyzer_phase: 17 };
+        globalThis.window.__native_service_state__ = { mounted: true };
+    )");
+
+    REQUIRE(engine.evaluate("window === globalThis.window").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("self === window").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("document === globalThis.document").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("globalThis.window.__captured_app_state__.analyzer_phase")
+                .getWithDefault<int>(0) == 17);
+    REQUIRE(engine.evaluate("window.__native_service_state__.mounted")
+                .getWithDefault<bool>(false));
+}
+
 TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws",
           "[view][bridge][events][contract]") {
     // Pre-fix a throw from any handler (a stale ref in a React tick,

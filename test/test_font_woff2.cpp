@@ -20,6 +20,9 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 
 using pulp::canvas::register_font_woff2;
@@ -97,6 +100,13 @@ TEST_CASE("register_font_woff2: exact magic without header payload is rejected",
     REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Tiny WOFF2"));
 }
 
+TEST_CASE("register_font_woff2: compressed input is bounded before decoding",
+          "[font][woff2][materialized-import]") {
+    std::vector<std::uint8_t> bytes(16u * 1024u * 1024u + 1u, 0);
+    std::copy(kWoff2Magic.begin(), kWoff2Magic.end(), bytes.begin());
+    REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Oversized"));
+}
+
 TEST_CASE("register_font_woff2: valid magic + truncated payload is rejected",
           "[font][woff2][issue-2163]") {
     // The magic is correct so the structural pre-check passes, but
@@ -132,3 +142,18 @@ TEST_CASE("woff2_decoder_available: returns a stable bool",
     not_woff2.resize(32, 0);
     REQUIRE_FALSE(register_font_woff2(not_woff2.data(), not_woff2.size(), ""));
 }
+
+#if PULP_HAS_SKIA
+TEST_CASE("captured WOFF2 bytes decode and register under their CSS family",
+          "[font][woff2][materialized-import]") {
+    REQUIRE(woff2_decoder_available());
+    std::ifstream input(PULP_TEST_WOFF2_FIXTURE, std::ios::binary);
+    REQUIRE(input.good());
+    const std::vector<std::uint8_t> bytes{
+        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    REQUIRE(bytes.size() > 4);
+    REQUIRE(register_font_woff2(bytes.data(), bytes.size(),
+                                "Pulp Captured Inter"));
+    REQUIRE(pulp::canvas::is_font_registered("Pulp Captured Inter"));
+}
+#endif

@@ -516,6 +516,16 @@ var window = {
     }
 };
 
+// A browser classic-script realm has one Window object: `window`, `self`, and
+// `globalThis.window` must all observe the same property bag. WidgetBridge
+// evaluates compatibility modules independently, so relying on an engine's
+// top-level `var` mirroring rules can leave captured application scripts
+// writing to this lexical `window` while native runtime services read a
+// different object from `globalThis.window`.
+globalThis.window = window;
+globalThis.document = document;
+globalThis.self = window;
+
 function __installGlobalIfMissing(name, value) {
     if (typeof globalThis[name] === "undefined") {
         globalThis[name] = value;

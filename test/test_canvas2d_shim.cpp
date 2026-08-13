@@ -118,6 +118,28 @@ TEST_CASE("Canvas2D full-frame clear replaces retained RAF commands",
     REQUIRE(canvas->command_count() < 16);
 }
 
+TEST_CASE("Canvas2D full-frame replacement tolerates backing-store rounding",
+          "[view][canvas2d][frame-replacement]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 2456; c.height = 1600;
+        var ctx = c.getContext('2d');
+        ctx._pulpRetainedCanvasFrames = true;
+        for (var frame = 0; frame < 300; ++frame) {
+            ctx.setTransform(2, 0, 0, 2, 0, 0);
+            ctx.clearRect(0, 0, 1227.9375, 800);
+            ctx.fillRect(0, 0, 10, 10);
+        }
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() < 16);
+}
+
 TEST_CASE("Canvas2D partial and clipped clears preserve retained history",
           "[view][canvas2d][frame-replacement]") {
     ScriptedBridge env;
@@ -179,6 +201,7 @@ TEST_CASE("Canvas2D materialized DPR transforms replay in logical pixels",
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
         c.width = 400; c.height = 200;
+        c.style.width = '200px'; c.style.height = '100px';
         var ctx = c.getContext('2d');
         ctx.setTransform(2, 0, 0, 2, 40, 20);
         globalThis.__logical_transform__ = ctx.getTransform();
@@ -196,6 +219,47 @@ TEST_CASE("Canvas2D materialized DPR transforms replay in logical pixels",
     REQUIRE(it->x2 == Catch::Approx(20.0f));
     REQUIRE(it->y2 == Catch::Approx(10.0f));
 
+    const auto logical = env.engine.evaluate("globalThis.__logical_transform__");
+    REQUIRE(logical.isObject());
+    REQUIRE(logical["a"].getFloat64() == Catch::Approx(2.0));
+    REQUIRE(logical["d"].getFloat64() == Catch::Approx(2.0));
+    REQUIRE(logical["e"].getFloat64() == Catch::Approx(40.0));
+    REQUIRE(logical["f"].getFloat64() == Catch::Approx(20.0));
+}
+
+TEST_CASE("Canvas2D materialized transforms honor backing store to CSS fit",
+          "[view][canvas2d][materialized-dpr][authored-fit]") {
+    ScriptedBridge env;
+    env.load(R"(
+        globalThis.__pulpLogicalCanvasScale__ = true;
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 2640; c.height = 1720;
+        // Use a test-host-sized proportional fit of the same authored
+        // 1320x860 canvas. The production Spectr capture is 1228x800; this
+        // 307x200 box has the identical independent backing/CSS relationship
+        // while remaining inside the fixture's 400x300 root.
+        c.style.width = '307px'; c.style.height = '200px';
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 2, 40, 20);
+        globalThis.__logical_transform__ = ctx.getTransform();
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+    const auto it = std::find_if(canvas->commands().begin(), canvas->commands().end(),
+                                 [](const auto& command) {
+                                     return command.type == CanvasDrawCmd::Type::set_transform;
+                                 });
+    REQUIRE(it != canvas->commands().end());
+    REQUIRE(it->x == Catch::Approx(307.0f / 1320.0f));
+    REQUIRE(it->h == Catch::Approx(200.0f / 860.0f));
+    REQUIRE(it->x2 == Catch::Approx(40.0f * 307.0f / 2640.0f));
+    REQUIRE(it->y2 == Catch::Approx(20.0f * 200.0f / 1720.0f));
+
+    // Browser-visible getTransform remains authored/backing-store truth; only
+    // the native bridge projection is fitted to the CSS box.
     const auto logical = env.engine.evaluate("globalThis.__logical_transform__");
     REQUIRE(logical.isObject());
     REQUIRE(logical["a"].getFloat64() == Catch::Approx(2.0));

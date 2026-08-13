@@ -26,9 +26,12 @@ catch_discover_tests(pulp-test-browser-capture-backend
 if(_PULP_NODE_FOR_TESTS)
     file(GLOB _PULP_BROWSER_CAPTURE_NODE_TESTS CONFIGURE_DEPENDS
          ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.test.mjs)
+    file(GLOB _PULP_MATERIALIZED_RUNTIME_NODE_TESTS CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/*.test.mjs)
     add_test(NAME pulp-browser-capture-node-unit
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
-                     ${_PULP_BROWSER_CAPTURE_NODE_TESTS})
+                     ${_PULP_BROWSER_CAPTURE_NODE_TESTS}
+                     ${_PULP_MATERIALIZED_RUNTIME_NODE_TESTS})
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
         TIMEOUT 180
         LABELS "parser-import;browser-capture;node")

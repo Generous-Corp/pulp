@@ -903,6 +903,30 @@
       ]
     },
     {
+      "name": "Brotli",
+      "category": "canvas",
+      "license": "MIT",
+      "version": "v1.2.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/google/brotli.git",
+      "upstream": { "kind": "git-tag", "ref": "v1.2.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": ["tools/cmake/PulpDependencies.cmake", "core/canvas/CMakeLists.txt"]
+    },
+    {
+      "name": "WOFF2",
+      "category": "canvas",
+      "license": "MIT",
+      "version": "fb9c3379f260",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/google/woff2.git",
+      "upstream": { "kind": "git-commit", "ref": "fb9c3379f2605b10f3e8f1d9636664ab5576775c" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": ["tools/cmake/PulpDependencies.cmake", "core/canvas/CMakeLists.txt"]
+    },
+    {
       "name": "simdjson",
       "category": "scene",
       "license": "Apache-2.0",

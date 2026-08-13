@@ -189,12 +189,25 @@ struct ClaudeBundleAsset {
     std::vector<uint8_t> data; ///< already base64-decoded + gunzipped if compressed
 };
 
+/// One captured @font-face rule joined to a content-addressed bundle asset.
+/// Weight/style remain descriptive today; the font's own tables are the
+/// renderer authority for variant selection after registration.
+struct ClaudeBundleFontBinding {
+    std::string family;
+    std::string runtime_family;
+    size_t asset_index = 0;
+    std::string weight;
+    std::string style;
+    std::string unicode_range;
+};
+
 /// Result of unpacking a Claude Design bundle's `<script type="__bundler/manifest">`
 /// + `<script type="__bundler/template">` pair.
 struct ClaudeBundle {
     std::vector<ClaudeBundleAsset> assets;  ///< all assets (JS, fonts, etc.) in manifest order
     std::vector<size_t> javascript_indices; ///< indices into assets[] of MIME `text/javascript`,
                                             ///< in the order the template's <script src> tags reference them
+    std::vector<ClaudeBundleFontBinding> font_bindings; ///< captured @font-face assets
     std::string template_html;              ///< the unwrapped HTML template (with `<div id="root">` etc.)
 };
 

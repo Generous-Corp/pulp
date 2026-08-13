@@ -2206,6 +2206,13 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
             { left: 1, top: 2, width: 30, height: 10, start: 0, length: 3 },
             { left: 1, top: 12, width: 40, height: 10, start: 3, length: 4 }
         ], 80, 'Inter-Regular');
+        setFontWeight('title', 1e100);
+        setLetterSpacing('title', 1e100);
+        setLineHeight('title', -1);
+        setFontSize('title', 1e100);
+        setCapturedLineBoxes('title', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 3 }
+        ], 1e100, 'Invalid');
         setMultiLine('title', 1);
         setText('editor', 'typed');
         setPlaceholder('editor', 'Enter value');

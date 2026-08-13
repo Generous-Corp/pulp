@@ -139,7 +139,7 @@ std::future<FontState> register_font_url(const std::string& url,
 /// cleanly and validates the decompressed sfnt bytes before handing them to
 /// Skia.
 ///
-/// Behavior today (security-gated, detection-only):
+/// Behavior:
 ///   * Null / empty input → false.
 ///   * Bytes whose first 4 bytes are not the WOFF2 magic (`wOF2`,
 ///     0x774F4632 big-endian) → false. This is the structural reject
@@ -153,9 +153,9 @@ std::future<FontState> register_font_url(const std::string& url,
 ///     payload is decompressed, validated via `validate_font_bytes`,
 ///     and forwarded to `register_font(...)`.
 ///
-/// Vendoring an in-tree woff2/Brotli decoder is intentionally deferred:
-/// Pulp's MIT release stays free of large third-party blobs until a real
-/// workload demands one.
+/// Pulp's pinned Brotli/woff2 sources are compiled directly into pulp-canvas,
+/// so an installed static SDK has no hidden private decoder target that a
+/// downstream plugin must rediscover or link separately.
 bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
                          const std::string& family_override = "");
 

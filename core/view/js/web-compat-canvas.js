@@ -147,16 +147,16 @@ function CanvasRenderingContext2D(canvasEl) {
     // subset where a provable full-backing-store clear begins a replacement
     // frame. Keeping this opt-in avoids changing ordinary Canvas semantics.
     this._pulpRetainedCanvasFrames = globalThis.__pulpRetainedCanvasFrames__ === true;
-    // A browser canvas records in backing-store pixels, while CanvasWidget
-    // replays into Pulp's logical coordinate space and the renderer applies
-    // the backing scale later. Materialized browser applications therefore
-    // divide absolute Canvas2D transforms by devicePixelRatio at the bridge
-    // boundary. The JS-side transform remains browser-accurate for clear
-    // coverage, getTransform(), and hit testing.
-    this._pulpLogicalCanvasScale = globalThis.__pulpLogicalCanvasScale__ === true
-        ? Number((globalThis.window && globalThis.window.devicePixelRatio)
-                 || globalThis.devicePixelRatio || 1)
-        : 1;
+    // A browser canvas records in backing-store pixels, then independently
+    // scales that backing store into its CSS layout box. CanvasWidget replays
+    // directly into that CSS-sized logical box. Materialized browser
+    // applications therefore divide each output axis by the ACTUAL
+    // backing-store-to-CSS ratio, not merely by devicePixelRatio. Those are
+    // equal for an unscaled canvas, but differ whenever a fixed authored UI is
+    // proportionally fitted (for example 1320x860 authored into 1228x800).
+    // Read the ratio lazily in _setBridgeTransform because responsive layout
+    // and canvas width/height assignments can both change it after getContext.
+    this._pulpLogicalCanvasScale = globalThis.__pulpLogicalCanvasScale__ === true;
     // JS-side mirror of the current path so isPointInPath / isPointInStroke
     // can answer synchronously via a JS hit test. Each subpath is an array
     // of [x, y] points appended by moveTo / lineTo; cubic and quadratic
@@ -169,9 +169,31 @@ function CanvasRenderingContext2D(canvasEl) {
 
 CanvasRenderingContext2D.prototype._setBridgeTransform = function(a, b, c, d, e, f) {
     if (typeof canvasSetTransform !== "function") return;
-    var s = this._pulpLogicalCanvasScale;
-    if (!(s > 0) || !isFinite(s)) s = 1;
-    canvasSetTransform(this._id, a / s, b / s, c / s, d / s, e / s, f / s);
+    var sx = 1, sy = 1;
+    if (this._pulpLogicalCanvasScale) {
+        var cssWidth = Number(this.canvas && this.canvas.clientWidth);
+        var cssHeight = Number(this.canvas && this.canvas.clientHeight);
+        var backingWidth = Number(this.canvas && this.canvas.width);
+        var backingHeight = Number(this.canvas && this.canvas.height);
+        sx = (cssWidth > 0 && isFinite(cssWidth) &&
+              backingWidth > 0 && isFinite(backingWidth))
+            ? backingWidth / cssWidth : 0;
+        sy = (cssHeight > 0 && isFinite(cssHeight) &&
+              backingHeight > 0 && isFinite(backingHeight))
+            ? backingHeight / cssHeight : 0;
+        // During initial detached layout clientWidth/clientHeight may still be
+        // zero. Preserve the former DPR behavior as the conservative fallback
+        // until the element has a real native layout box.
+        var dpr = Number((globalThis.window && globalThis.window.devicePixelRatio)
+                         || globalThis.devicePixelRatio || 1);
+        if (!(dpr > 0) || !isFinite(dpr)) dpr = 1;
+        if (!(sx > 0) || !isFinite(sx)) sx = dpr;
+        if (!(sy > 0) || !isFinite(sy)) sy = dpr;
+    }
+    // For |a c e| / |b d f|, CSS backing-store presentation scales the
+    // complete x output row by 1/sx and y output row by 1/sy.
+    canvasSetTransform(this._id,
+        a / sx, b / sy, c / sx, d / sy, e / sx, f / sy);
 };
 
 // DOMMatrix-like return value for getTransform(). The HTML5 spec returns a
@@ -643,12 +665,19 @@ CanvasRenderingContext2D.prototype.clearRect = function(x, y, w, h) {
     var top = t[3] * ny + t[5];
     var right = t[0] * (nx + nw) + t[4];
     var bottom = t[3] * (ny + nh) + t[5];
+    // Layout may derive a fractional CSS extent from a whole-pixel backing
+    // store (for example 1227.9375 CSS px -> 2456 backing px at 2x). Treat a
+    // sub-pixel rounding remainder as full coverage; requiring bit-exact
+    // equality rejects every later RAF and grows the retained command stream
+    // forever. The tolerance is strictly less than one backing-store pixel,
+    // so a genuinely partial clear remains observable.
+    var coverageTolerance = 0.5;
     var full = this._pulpRetainedCanvasFrames
         && axisAligned && this._clipDepth === 0
         && isFinite(left) && isFinite(top) && isFinite(right) && isFinite(bottom)
-        && left <= 0 && top <= 0
-        && right >= Number(this.canvas.width || 0)
-        && bottom >= Number(this.canvas.height || 0);
+        && left <= coverageTolerance && top <= coverageTolerance
+        && right >= Number(this.canvas.width || 0) - coverageTolerance
+        && bottom >= Number(this.canvas.height || 0) - coverageTolerance;
     if (full && typeof canvasClear === "function") {
         canvasClear(this._id);
         // Native replay starts from default state after command replacement.

@@ -6,11 +6,14 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "rationale": "Pulp's JavaScript bridge delivers one native pointer event through separate target and ancestor evaluate calls. Direct @pulp/react synthetic-event cancellation therefore needs a scoped internal token spanning that Pulp-specific bridge walk; without it, stopPropagation is discarded and native ancestor callbacks still fire. This change adds no public View or MouseEvent API and is Pulp-only React/web-compat integration rather than generic Vellum framework behavior.",
+  "rationale": "Pulp's JavaScript bridge delivers one native pointer event through separate target and ancestor evaluate calls. Direct @pulp/react synthetic-event cancellation therefore needs a scoped internal token spanning that Pulp-specific bridge walk; without it, stopPropagation is discarded and native ancestor callbacks still fire. Pulp's later materialized-import integration also keeps the source application's QuickJS closures and hit behavior behind same-transaction DesignIR paint, captured typography, layout, and alternate-state atlases. These are Pulp-only Chromium, React bridge, and plugin-host concerns; a future Vellum importer should implement the same behavioral and visual parity contracts against its independent APIs rather than copy this integration.",
   "tests": [
     "@pulp/react prop-applier-synthetic-event",
     "Vellum freeze",
-    "pulp-test-widget-bridge-dispatch-document-event"
+    "pulp-test-design-import-claude-bundle",
+    "pulp-test-widget-bridge-dispatch-document-event",
+    "pulp-test-widget-bridge-yoga",
+    "pulp-test-widgets-label"
   ],
   "disposition": "pulp-only"
 }

@@ -10,7 +10,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
-import { applyAllProps } from '../src/prop-applier.js';
+import {
+    applyAllProps,
+    applyChangedProps,
+    clearMaterializedEventCallbacks,
+} from '../src/prop-applier.js';
 import { makeSyntheticEvent } from '../src/synthetic-event.js';
 import type { PulpInstance } from '../src/types.js';
 
@@ -37,7 +41,48 @@ describe('@pulp/react prop-applier — synthetic event factory', () => {
         bridge.install();
     });
     afterEach(() => {
+        delete (globalThis as Record<string, unknown>).__pulpReactEventCallbacks__;
         bridge.uninstall();
+    });
+
+    it('shares current handlers with materialized semantic activation', () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        const item = instance('dynamic-action', 'Button', { onClick: first });
+        applyAllProps(item);
+        const callbacks = (globalThis as Record<string, unknown>)
+            .__pulpReactEventCallbacks__ as Map<string, (...args: unknown[]) => unknown>;
+        expect(callbacks.get('dynamic-action:click')).toBeTypeOf('function');
+        callbacks.get('dynamic-action:click')!(0);
+        expect(first).toHaveBeenCalledTimes(1);
+
+        applyChangedProps(item, { onClick: first }, { onClick: second });
+        callbacks.get('dynamic-action:click')!(0);
+        expect(first).toHaveBeenCalledTimes(1);
+        expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    it('removing and detaching a handler cannot execute its stale closure', () => {
+        const handler = vi.fn();
+        const item = instance('conditional-action', 'Button', { onClick: handler });
+        applyAllProps(item);
+        const callbacks = (globalThis as Record<string, unknown>)
+            .__pulpReactEventCallbacks__ as Map<string, (...args: unknown[]) => unknown>;
+
+        applyChangedProps(item, { onClick: handler }, {});
+        expect(callbacks.has('conditional-action:click')).toBe(false);
+        const registrations = bridge.calls.filter(
+            (call) => call.fn === 'on' && call.args[0] === 'conditional-action' &&
+                call.args[1] === 'click',
+        );
+        const inert = registrations.at(-1)!.args[2] as (...args: unknown[]) => unknown;
+        inert(0);
+        expect(handler).not.toHaveBeenCalled();
+
+        applyChangedProps(item, {}, { onClick: handler });
+        expect(callbacks.has('conditional-action:click')).toBe(true);
+        clearMaterializedEventCallbacks('conditional-action');
+        expect(callbacks.has('conditional-action:click')).toBe(false);
     });
 
     it('onMouseEnter handler receives an event object (not literal 0)', () => {

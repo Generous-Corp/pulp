@@ -123,10 +123,11 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
     cached_line_basis_face_ = std::move(basis_face);
     cached_line_basis_text_ = apply_text_transform(text_);
     cached_line_basis_font_variant_ = font_variant();
-    cached_line_basis_font_size_ = font_size_;
-    cached_line_basis_font_weight_ = font_weight_;
-    cached_line_basis_font_style_ = font_style_;
-    cached_line_basis_letter_spacing_ = letter_spacing_;
+    const auto resolved = resolve_text_style();
+    cached_line_basis_font_size_ = resolved.font_size;
+    cached_line_basis_font_weight_ = resolved.font_weight;
+    cached_line_basis_font_style_ = resolved.font_slant;
+    cached_line_basis_letter_spacing_ = resolved.letter_spacing;
     shaped_cache_valid_ = false;
 }
 
@@ -207,10 +208,10 @@ bool Label::cached_line_layout_usable(
     //    after a register_font. An empty basis face means the capture recorded
     //    none, which is unverifiable and therefore unusable.
     if (cached_line_basis_face_.empty()) return false;
-    const std::string family =
-        font_family_.empty() ? std::string("Inter") : font_family_;
-    const auto slant = font_style_ == 2 ? canvas::FontSlant::Oblique
-                     : font_style_ == 1 ? canvas::FontSlant::Italic
+    const auto resolved_style = resolve_text_style();
+    const std::string& family = resolved_style.family;
+    const auto slant = resolved_style.font_slant == 2 ? canvas::FontSlant::Oblique
+                     : resolved_style.font_slant == 1 ? canvas::FontSlant::Italic
                                         : canvas::FontSlant::Normal;
     if (canvas::resolved_face_identity(
             family, static_cast<float>(effective_font_weight()), slant) !=
@@ -241,7 +242,11 @@ bool Label::cached_line_layout_usable(
     // 2. The width the text was broken at. A break is a function of the box,
     //    so a box of a different width has different breaks — including the
     //    auto-width case this exists for, where the box was sized BY the text.
-    if (std::abs(layout_width - cached_line_basis_width_) > 0.5f) return false;
+    const bool exact_basis_width =
+        std::abs(layout_width - cached_line_basis_width_) <= 0.5f;
+    const bool yoga_pixel_rounded_basis_width =
+        std::abs(layout_width - std::ceil(cached_line_basis_width_)) <= 0.001f;
+    if (!exact_basis_width && !yoga_pixel_rounded_basis_width) return false;
 
     // 3. The text itself. Offsets index the string the capture broke, so any
     //    edit — a translation, a text-transform, a bound value — makes every
@@ -284,11 +289,14 @@ canvas::ShapedLayout Label::layout_from_cached_lines(
         line.text = utf16_slice(text, box.start, box.length);
         line.width = box.width;
         line.x_offset = box.left;
-        // Stack the lines on the Label's own line height rather than the
-        // captured tops. The captured rects agree with that stacking when the
-        // basis holds, and driving one geometry from two sources is how the
-        // two drift apart later.
-        line.y = line_height * static_cast<float>(layout.lines.size());
+        // Chromium's line rectangle is the layout evidence.  In particular,
+        // its top is relative to the owning element's content box and is not
+        // necessarily the value native vertical centering would derive from
+        // font metrics.  Dropping it shifted button captions/icons and made
+        // compact footer labels look clipped even when the captured face and
+        // width were valid.
+        line.y = box.top;
+        line.height = box.height;
         line.first_segment = 0;
         line.segment_count = 0;
         layout.total_width = std::max(layout.total_width, line.width);
@@ -307,8 +315,8 @@ canvas::ShapedLayout Label::layout_attributed_from_cached_lines(
         canvas::ShapedLayout::Line line;
         line.width = box.width;
         line.x_offset = box.left;
-        line.y = line_height * static_cast<float>(layout.lines.size());
-        line.height = line_height;
+        line.y = box.top;
+        line.height = box.height;
 
         int span_start = 0;
         const int line_start = box.start;
@@ -1056,7 +1064,9 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
             canvas.set_fill_color({style.color.r, style.color.g,
                                    style.color.b, style.color.a});
             const float fragment_baseline = captured_positions
-                ? baseline_y + emitted * line_height
+                ? baseline_y + line.y -
+                      (layout.lines.empty() ? 0.0f
+                                            : layout.lines.front().y)
                 : baseline_y + line.y + line.ascent -
                       (layout.lines.empty() ? 0.0f : layout.lines.front().ascent);
             canvas.fill_text(fragment.text, x, fragment_baseline);
@@ -1366,6 +1376,13 @@ void Label::paint(canvas::Canvas& canvas) {
             baseline_y = (bounds().height - text_h) * 0.5f + first_line_ascent;
             break;
     }
+    if (captured_cache_usable && shaped_layout != nullptr &&
+        !shaped_layout->lines.empty()) {
+        // A cached browser line box already resolved padding, line-height and
+        // vertical-align. Its top plus the active face ascent is the native
+        // baseline. Do not center that evidence a second time.
+        baseline_y = shaped_layout->lines.front().y + first_line_ascent;
+    }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
     // with paint_attributed_() so per-range styled text honors the same
@@ -1470,14 +1487,20 @@ void Label::paint(canvas::Canvas& canvas) {
             // of `\n`-splitting. Line-clamp + ellipsis logic is identical,
             // driven by source_lines (= shaped_layout.line_count) and
             // visible_lines.
+            const float captured_first_top = captured_cache_usable &&
+                    !shaped_layout->lines.empty()
+                ? shaped_layout->lines.front().y : 0.0f;
             for (const auto& shaped_line : shaped_layout->lines) {
                 if (emitted >= visible_lines) break;
                 std::string line = shaped_line.text;
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                canvas.fill_text(line, x + shaped_line.x_offset, y);
-                decorate_plain(line, x + shaped_line.x_offset, y,
+                const float line_baseline = captured_cache_usable
+                    ? baseline_y + shaped_line.y - captured_first_top
+                    : y;
+                canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);
+                decorate_plain(line, x + shaped_line.x_offset, line_baseline,
                                captured_cache_usable);
                 y += lh;
                 ++emitted;

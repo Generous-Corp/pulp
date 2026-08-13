@@ -5,6 +5,8 @@ interaction_executor.mjs
 interaction_plan.mjs
 interaction_plan_protocol.json
 lifecycle.mjs
+materialized_layout_bindings.mjs
+materialized_text_bindings.mjs
 network_dependencies.mjs
 platform_fonts.mjs
 renderers.mjs

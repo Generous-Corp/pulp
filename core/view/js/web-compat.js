@@ -1839,3 +1839,9 @@ var window = {
     // window.onerror
     onerror: null
 };
+
+// Keep the legacy monolithic compatibility bundle aligned with the split
+// WidgetBridge prelude: browser global aliases share one Window object.
+globalThis.window = window;
+globalThis.document = document;
+globalThis.self = window;

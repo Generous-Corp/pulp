@@ -1550,17 +1550,18 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
     if (materialized_composition) {
-        ir.root.style.width = static_cast<float>(
-            crop_to_surface ? surface_width : logical_width);
-        ir.root.style.height = static_cast<float>(
-            crop_to_surface ? surface_height : logical_height);
+        // The visible authority is the COMPLETE accepted Chromium frame. Its
+        // coordinate space is therefore the capture viewport, even when the
+        // authored panel occupies a smaller primary-surface rect inside it.
+        // Cropping this root and translating the full-frame image into that
+        // crop looks plausible but can never compare to the accepted host
+        // frame: it discards the gutters and shifts every pixel. The live
+        // behavior plane separately consumes browser_authored_frame_* below.
+        ir.root.style.width = static_cast<float>(logical_width);
+        ir.root.style.height = static_cast<float>(logical_height);
         ir.root.style.overflow = "hidden";
         ir.root.style.position = "relative";
 
-        const float layer_dx =
-            static_cast<float>(crop_to_surface ? -surface_left : 0.0);
-        const float layer_dy =
-            static_cast<float>(crop_to_surface ? -surface_top : 0.0);
         const auto append_layer = [&](const std::string& name,
                                       const std::string& anchor,
                                       const std::string& asset_id,
@@ -1594,14 +1595,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
         append_layer(
             "Accepted Chromium frame", "browser:paint-authority", reference_id,
-            layer_dx, layer_dy, static_cast<float>(logical_width),
+            0.0f, 0.0f, static_cast<float>(logical_width),
             static_cast<float>(logical_height), true);
         for (std::size_t i = 0; i < captured_canvas_layers.size(); ++i) {
             const auto& canvas = captured_canvas_layers[i];
             append_layer(
                 "Browser canvas " + std::to_string(i + 1),
                 "browser:canvas:" + std::to_string(i), canvas.asset_id,
-                layer_dx + canvas.left, layer_dy + canvas.top, canvas.width,
+                canvas.left, canvas.top, canvas.width,
                 canvas.height, false);
         }
         ir.root.attributes["materialized_canvas_layers"] =

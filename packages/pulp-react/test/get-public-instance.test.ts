@@ -70,6 +70,77 @@ describe('getPublicInstance returns DOM-shim Element', () => {
         expect((inst._dom as Record<string, unknown>).id).toBe('k1');
     });
 
+    it('preserves imported semantic attributes on the public DOM shim', () => {
+        const attributes = new Map<string, string>();
+        g.Element = function (this: Record<string, unknown>) {
+            this.setAttribute = (name: string, value: unknown) => {
+                attributes.set(name, String(value));
+            };
+            this.removeAttribute = (name: string) => attributes.delete(name);
+        };
+        const create = PulpHostConfig.createInstance!;
+        const inst = create(
+            'button',
+            {
+                id: 'settings',
+                'data-spectr-settings-open': true,
+                'aria-label': 'Settings',
+                title: 'Settings',
+            } as Record<string, unknown>,
+            {} as unknown as Parameters<typeof create>[2],
+            {} as unknown as Parameters<typeof create>[3],
+            null,
+        ) as Record<string, unknown>;
+        expect(attributes.get('data-spectr-settings-open')).toBe('');
+        expect(attributes.get('aria-label')).toBe('Settings');
+        expect(attributes.get('title')).toBe('Settings');
+
+        const commit = PulpHostConfig.commitUpdate!;
+        commit(
+            inst as unknown as Parameters<typeof commit>[0],
+            true,
+            'button',
+            { 'aria-label': 'Settings', title: 'Settings' },
+            { 'aria-label': 'Preferences', 'data-spectr-settings-open': false },
+            null,
+        );
+        expect(attributes.get('aria-label')).toBe('Preferences');
+        expect(attributes.has('title')).toBe(false);
+        expect(attributes.has('data-spectr-settings-open')).toBe(false);
+    });
+
+    it('keeps DOM shim ancestry aligned without rematerializing widgets', () => {
+        const create = PulpHostConfig.createInstance!;
+        g.Element = function (this: Record<string, unknown>) {
+            this._children = [];
+            this._parentElement = null;
+            this.setAttribute = () => {};
+            this.removeAttribute = () => {};
+        };
+        const root = { rootId: 'root', nextId: 0 } as unknown as
+            Parameters<typeof create>[2];
+        const parent = create('div', { id: 'menu-root' }, root, {}, null) as
+            Record<string, unknown>;
+        const child = create('div', { id: 'menu-options' }, root, {}, null) as
+            Record<string, unknown>;
+        const parentDom = parent._dom as Record<string, unknown>;
+        const childDom = child._dom as Record<string, unknown>;
+
+        PulpHostConfig.appendInitialChild!(
+            parent as unknown as Parameters<NonNullable<typeof PulpHostConfig.appendInitialChild>>[0],
+            child as unknown as Parameters<NonNullable<typeof PulpHostConfig.appendInitialChild>>[1],
+        );
+        expect(childDom._parentElement).toBe(parentDom);
+        expect(parentDom._children).toEqual([childDom]);
+
+        PulpHostConfig.removeChild!(
+            parent as unknown as Parameters<NonNullable<typeof PulpHostConfig.removeChild>>[0],
+            child as unknown as Parameters<NonNullable<typeof PulpHostConfig.removeChild>>[1],
+        );
+        expect(childDom._parentElement).toBeNull();
+        expect(parentDom._children).toEqual([]);
+    });
+
     it('createInstance survives when global Element is missing (test sandbox)', () => {
         delete g.Element;
         const create = PulpHostConfig.createInstance!;

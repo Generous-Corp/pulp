@@ -495,6 +495,49 @@ TEST_CASE("materialized browser import keeps accepted Chromium paint authoritati
           "reference:browser-chrome");
 }
 
+TEST_CASE("materialized paint keeps the full host frame around an authored panel",
+          "[import-design][browser-capture][ir][materialized][coordinates]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto chrome = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("browser-chrome.png", chrome);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_chrome_asset(
+        std::move(capture), pulp::runtime::sha256_hex(chrome));
+    capture = with_reference_member(std::move(capture),
+        R"JSON("authored_frame":{"x":40,"y":30,"width":576,"height":179})JSON");
+    capture = with_primary_surface(std::move(capture),
+        R"JSON({"left":40,"top":30,"width":576,"height":179})JSON");
+    temp.write("capture.json", capture);
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html",
+         .materialized_canvas_composition = true});
+    REQUIRE(result);
+    const auto& root = result.design_ir->root;
+    CHECK(root.style.width == 956.0f);
+    CHECK(root.style.height == 636.0f);
+    REQUIRE(root.children.size() == 2);
+    CHECK(root.children[0].style.left == 0.0f);
+    CHECK(root.children[0].style.top == 0.0f);
+    CHECK(root.children[0].style.width == 956.0f);
+    CHECK(root.children[0].style.height == 636.0f);
+    CHECK(root.children[1].style.left == 16.0f);
+    CHECK(root.children[1].style.top == 24.0f);
+    CHECK(std::stod(root.attributes.at("browser_authored_frame_x")) ==
+          Catch::Approx(40.0));
+    CHECK(std::stod(root.attributes.at("browser_authored_frame_width")) ==
+          Catch::Approx(576.0));
+}
+
 TEST_CASE("browser capture rejects a tampered canvas snapshot asset",
           "[import-design][browser-capture][ir][canvas]") {
     TempCapture temp;
