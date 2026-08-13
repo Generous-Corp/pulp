@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260812-pr7415-release-standalone-host-matrix",
+  "created_at": "2026-08-12T20:48:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record the standalone control-host release artifact matrix and packaging correction without transferring implementation authority.",
+  "tests": [
+    "python3 tools/scripts/test_package_cli.py (24 tests)",
+    "python3 tools/scripts/test_release_artifact_contents.py (46 tests; selected-source digest, relocated verifier, canonical manifest, stale manifest, and host-binding tamper coverage)",
+    "python3 tools/scripts/test_release_workflow_test_step.py (85 tests)",
+    "cargo test --manifest-path experimental/pulp-rs/Cargo.toml --lib install::tests (current-floor closure rejection and pre-floor broker-only compatibility)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

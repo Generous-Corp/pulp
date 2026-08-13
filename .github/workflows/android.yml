@@ -144,10 +144,10 @@ jobs:
           retention-days: 7
 
   # Emulator test — only on macOS (KVM not available on GitHub Windows runners).
-  # This is a native-init smoke: boots a headless arm64-v8a emulator, installs
-  # the arm64-only debug APK, launches PulpActivity, and greps logcat for the
-  # JNI_OnLoad marker. Full GPU/rendering validation is out of scope here
-  # (tracked under #77).
+  # This boots a headless arm64-v8a emulator, exercises the BLE-MIDI registry
+  # lifecycle through the production JNI/Kotlin bridge, installs the arm64-only
+  # debug APK, launches PulpActivity, and greps logcat for the JNI_OnLoad marker.
+  # Full GPU/rendering validation is out of scope here (tracked under #77).
   #
   # Re-gated 2026-04 after #530 (re-enable attempt) proved a third failure
   # mode beyond the two originally documented in #487:
@@ -217,6 +217,10 @@ jobs:
             [ "$BOOT" = "1" ] && echo "Emulator booted" && break
             sleep 2
           done
+
+      - name: Verify BLE-MIDI registry lifecycle
+        working-directory: android
+        run: ./gradlew --no-daemon --max-workers=2 :app:connectedBleMidiValidationAndroidTest
 
       - name: Install and launch
         run: |

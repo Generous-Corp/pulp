@@ -442,6 +442,15 @@
         ".agents/skills/pulp-web-demo/**"
       ]
     },
+    "pulp-vellum-change-routing": {
+      "paths": [
+        ".agents/skills/pulp-vellum-change-routing/**",
+        ".github/vellum-ownership.json",
+        ".github/workflows/vellum-routing-contract.yml",
+        "tools/scripts/generate_vellum_ownership_projection.py",
+        "tools/scripts/vellum_freeze_check.py"
+      ]
+    },
     "screenshot": {
       "paths": [
         "core/view/src/screenshot*.cpp",

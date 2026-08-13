@@ -1,10 +1,14 @@
 package com.pulp
 
 import android.app.Application
+import android.app.Activity
+import android.app.Application.ActivityLifecycleCallbacks
+import android.os.Bundle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.pulp.midi.PulpBluetoothMidi
 import com.pulp.midi.PulpMidiManager
 
 class PulpApplication : Application(), LifecycleEventObserver {
@@ -33,8 +37,29 @@ class PulpApplication : Application(), LifecycleEventObserver {
             } catch (e: Throwable) {
                 android.util.Log.e(LOG_TAG, "PulpMidiManager init failed: ${e.message}")
             }
+            try {
+                bluetoothMidi = PulpBluetoothMidi(this)
+            } catch (e: Throwable) {
+                android.util.Log.e(LOG_TAG, "PulpBluetoothMidi init failed: ${e.message}")
+            }
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) {
+                bluetoothMidi?.onActivityResumed(activity)
+            }
+
+            override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) {
+                bluetoothMidi?.onActivityPaused(activity)
+            }
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) {
+                bluetoothMidi?.onActivityPaused(activity)
+            }
+        })
     }
 
     companion object {
@@ -42,6 +67,8 @@ class PulpApplication : Application(), LifecycleEventObserver {
         var nativeLoaded = false
             private set
         var midiManager: PulpMidiManager? = null
+            private set
+        var bluetoothMidi: PulpBluetoothMidi? = null
             private set
     }
 

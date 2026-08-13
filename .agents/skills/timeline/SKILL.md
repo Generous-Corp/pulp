@@ -690,6 +690,24 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 - Gesture phases form one serialized session state machine: `Begin` opens a
   writer/group, only matching `Update`/`End` may follow, and other writers plus
   undo/redo receive `GestureState` until the group closes.
+- Use `timeline_editor::EditGestureIdentityAllocator` for construction-safe
+  continuous editor input. It owns one group and one opaque pending ticket,
+  binds tickets to the real session/writer provenance, lowers the issued phase
+  internally, and derives transitions only from its own call to
+  `DocumentSession::submit()`. Validation/lowering errors preserve the ticket;
+  an actual submission consumes it while a rejected transaction preserves the
+  confirmed state for a fresh-ID retry. Keep it on one control thread and route
+  every submission for its writer/group through it; concurrent direct
+  same-group submission is outside the contract. If a pending ticket is
+  abandoned without submission, discard that allocator instance.
+- A cached successful Begin is not necessarily the current publication. The
+  allocator checks the exact `CommitResult` with
+  `DocumentSession::is_current_publication()` and, on mismatch, asks the session
+  whether its opaque writer/group still owns the authoritative open gesture.
+  An intervening Update keeps the allocator Open so End/Cancel remains
+  possible; an intervening End/Cancel returns it to AwaitingBegin. Never scan
+  the journal, reconstruct this from numeric writer IDs, or accept
+  caller-declared acknowledgement state.
 - Project identity lookup is a persistent AVL directory. Deletion tombstones
   IDs forever; inverse insertion may reactivate the exact identity and parent
   chain. Never scan the whole project or reuse an ID to implement undo.
@@ -769,10 +787,10 @@ that *removes* a modifier-bearing note — the dropped modifier is gone from the
 content the inverse reduces against, so no filter over live state can recover it.
 Lanes need no such treatment: they never leave the clip.
 
-### Choosing between the two note-set commands
+### Choosing between the note-set commands
 
-`SetNoteEvents` and `ReplaceNoteContent` both rewrite note values, and the
-difference is what each one gates on.
+`SetNoteEvents`, `InsertNotes`, `RemoveNotes`, and `ReplaceNoteContent` rewrite
+note content, and the difference is what each one gates on.
 
 - **`SetNoteEvents` names a subset and cannot change the note set.**
   `replacement[i]` must name the same note as `expected[i]`, so the reduction
@@ -780,15 +798,24 @@ difference is what each one gates on.
   resizes, or retunes notes that already exist — a drag, a nudge, a velocity
   sweep. It carries only the notes under the gesture, so its journal cost tracks
   the selection rather than the clip.
+- **`InsertNotes` adds an identity-bearing subset.** Every note identity must be
+  available. Its optional modifier payload may reference only notes inserted by
+  that same command; reducer-built undo uses it to restore complete authored
+  behavior after a removal.
+- **`RemoveNotes` removes a subset under an exact whole-note CAS.** Each expected
+  note must match the current note with the same identity in every field. The
+  reducer captures attached modifiers in the generated `InsertNotes` inverse,
+  preserves controller lanes and the clip modifier seed, and tombstones only
+  the removed note identities.
 - **`ReplaceNoteContent` gates on the clip's entire current note array** and is
-  the only one of the two that can add or remove a note. Its `expected` is
-  rejected unless it equals the whole note set, so a one-note edit in a
-  10,000-note clip still costs 10,000 notes twice over.
+  the legacy whole-set replacement. Its `expected` is rejected unless it equals
+  the whole note set, so a one-note edit in a 10,000-note clip still costs
+  10,000 notes twice over.
 
-Both emit exactly one command per transaction regardless of how many notes they
-touch. `JournalLimits::max_commands` is a **count** ceiling, so a per-note command
-shape would exhaust it far sooner than the byte ceiling it would relieve — which
-is why neither of these is singular.
+All four emit exactly one command per transaction regardless of how many notes
+they touch. `JournalLimits::max_commands` is a **count** ceiling, so a per-note
+command shape would exhaust it far sooner than the byte ceiling it would
+relieve — which is why the subset commands are plural.
 
 ### A whole-content note edit is affordable per gesture, not per frame
 

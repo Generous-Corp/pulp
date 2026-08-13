@@ -197,14 +197,48 @@ elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     # pulp::platform carries the DBus client (system-bus BlueZ access) and the
     # ALSA MidiSystem's registry merge. PUBLIC include dirs come transitively.
     target_link_libraries(pulp-midi PRIVATE pulp::platform)
-# Android MIDI wired via PulpAndroid.cmake → pulp_wire_android_sources()
-# BLE MIDI on Android: BluetoothLeScanner + BluetoothGatt notification
-# via the existing JNI bridge — scaffold only; the stub central is
-# linked in until the Java half lands in pulp-android-bridge.
+# Android MIDI wired via PulpAndroid.cmake → pulp_wire_android_sources().
+# BLE MIDI uses Android's MidiManager Bluetooth transport through the Kotlin
+# bridge and publishes connected ports into BleMidiPortRegistry.
 elseif(ANDROID)
     target_sources(pulp-midi PRIVATE
-        src/ble_midi_stub.cpp
+        platform/android/ble_midi_android.cpp
     )
+    add_library(pulp-android-ble-midi-validation SHARED EXCLUDE_FROM_ALL
+        platform/android/ble_midi_android.cpp
+        src/ble_midi_registry.cpp
+    )
+    set_target_properties(pulp-android-ble-midi-validation PROPERTIES
+        OUTPUT_NAME "pulp_ble_midi_validation")
+    target_compile_definitions(pulp-android-ble-midi-validation PRIVATE
+        PULP_ANDROID_BLE_VALIDATION_LIBRARY=1)
+    target_include_directories(pulp-android-ble-midi-validation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/core/platform/include
+        ${CMAKE_SOURCE_DIR}/core/runtime/include
+        ${choc_SOURCE_DIR}
+    )
+    target_link_libraries(pulp-android-ble-midi-validation PRIVATE log)
+    foreach(_pulp_android_ble_jni_symbol IN ITEMS
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeInstallBridge
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnPeripheralFound
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnConnected
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnConnectionFailed
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnDisconnected
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnScanStopped
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeOnMidiReceived
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeBeginRegistryValidation
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeConnectRegistryValidation
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeAttachRegistryValidationInput
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeRegistryValidationReceived
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeSendRegistryValidationOutput
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeDisconnectRegistryValidation
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeRegistryFlags
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeRegistryEventCounts
+        Java_com_pulp_midi_PulpBluetoothMidi_nativeRegistryValidationIsScanning)
+        target_link_options(pulp-midi INTERFACE
+            "-Wl,--undefined=${_pulp_android_ble_jni_symbol}")
+    endforeach()
 else()
     target_sources(pulp-midi PRIVATE src/placeholder.cpp src/ble_midi_stub.cpp)
     file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp

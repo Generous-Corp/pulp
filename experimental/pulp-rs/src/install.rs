@@ -305,16 +305,15 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     let standalone_host_path = root.join(control_standalone_host_basename());
     let standalone_manifest_path = root.join(control_standalone_manifest_basename());
     let standalone_runtime_path = root.join(control_standalone_runtime_basename());
-    let standalone_payload_count = [
-        standalone_host_path.exists(),
-        standalone_manifest_path.exists(),
-        standalone_runtime_path.exists(),
-    ]
-    .into_iter()
-    .filter(|present| *present)
-    .count();
-    if (standalone_payload_count != 0 && standalone_payload_count != 3)
-        || (standalone_payload_count == 3 && new_control_broker.is_none())
+    let has_standalone_host = standalone_host_path.exists();
+    let has_standalone_manifest = standalone_manifest_path.exists();
+    let has_standalone_runtime = standalone_runtime_path.exists();
+    let has_standalone_payload = has_standalone_host || has_standalone_manifest;
+    if has_standalone_payload
+        && !(has_standalone_host
+            && has_standalone_manifest
+            && has_standalone_runtime
+            && new_control_broker.is_some())
     {
         return Err(CliError::Other(
             "control broker release payload must contain Standalone host, capability manifest, and runtime library together"
@@ -328,15 +327,9 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         new_cpp,
         new_mcp,
         new_control_broker,
-        new_control_standalone_host: standalone_host_path
-            .exists()
-            .then_some(standalone_host_path),
-        new_control_standalone_manifest: standalone_manifest_path
-            .exists()
-            .then_some(standalone_manifest_path),
-        new_control_standalone_runtime: standalone_runtime_path
-            .exists()
-            .then_some(standalone_runtime_path),
+        new_control_standalone_host: has_standalone_payload.then_some(standalone_host_path),
+        new_control_standalone_manifest: has_standalone_payload.then_some(standalone_manifest_path),
+        new_control_standalone_runtime: has_standalone_payload.then_some(standalone_runtime_path),
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
     })
@@ -811,6 +804,19 @@ fn install_control_broker_path_with_version_probe(
         return Err(CliError::Other(format!(
             "staged control broker release {candidate_version} does not match installer plan {}",
             plan.version
+        )));
+    }
+    let candidate = crate::parse::SemverCompat::parse(&candidate_version);
+    let standalone_floor =
+        crate::parse::SemverCompat::parse(crate::build_info::control_standalone_host_floor());
+    if !candidate.comparable || !standalone_floor.comparable {
+        return Err(CliError::Other(
+            "could not compare staged control broker release with Standalone host floor".to_owned(),
+        ));
+    }
+    if candidate.cmp_triple(&standalone_floor) != std::cmp::Ordering::Less && companions.is_none() {
+        return Err(CliError::Other(format!(
+            "control broker release {candidate_version} requires the complete Standalone runtime closure"
         )));
     }
     let installed_version = if existed {

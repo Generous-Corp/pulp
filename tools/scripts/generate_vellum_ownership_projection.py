@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,11 @@ from typing import Iterable
 DEFAULT_MANIFEST = Path("docs/contracts/vellum-initial-cut-manifest.json")
 DEFAULT_OUTPUT = Path(".github/vellum-ownership.json")
 EVENT_DIRECTORY = Path(".github/vellum-change-events")
+ROOT = Path(__file__).resolve().parents[2]
+ROUTING_EVIDENCE_PATH = (
+    ROOT
+    / ".agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py"
+)
 FRAMEWORK_REPOSITORY = "Generous-Corp/vellum"
 FREEZE_OWNER = "@danielraffel"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -49,6 +55,17 @@ NEUTRAL_IDENTIFIERS = frozenset({"figma_plugin"})
 
 class ProjectionError(RuntimeError):
     """The cut cannot be represented as an exact ownership projection."""
+
+
+def _routing_evidence_module():
+    spec = importlib.util.spec_from_file_location(
+        "pulp_vellum_routing_evidence", ROUTING_EVIDENCE_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise ProjectionError("Vellum routing evidence validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_manifest(path: Path) -> dict[str, object]:
@@ -441,17 +458,36 @@ def verify_projection(
     expected_projection: dict[str, object] | None = None,
 ) -> None:
     projection = normalize_prepared_v1(projection)
+    comparison_projection = projection
+    if projection.get("schema_version") == 3:
+        if set(projection) != {
+            "schema_version", "framework_repository", "freeze_owner", "activation",
+            "slices", "expansions",
+        }:
+            raise ProjectionError("schema-v3 ownership projection has unknown fields")
+        if not isinstance(projection.get("expansions"), list) or not projection["expansions"]:
+            raise ProjectionError("schema-v3 ownership projection lacks exact-route expansions")
+        routing = _routing_evidence_module()
+        try:
+            routing.validate_projection(projection, require_expansion=True)
+        except routing.RoutingError as error:
+            raise ProjectionError(
+                f"schema-v3 ownership projection has invalid exact-route expansion: {error}"
+            ) from error
+        comparison_projection = json.loads(json.dumps(projection))
+        comparison_projection.pop("expansions")
+        comparison_projection["schema_version"] = 2
     expected = expected_projection
     if expected is None:
         expected = build_projection(manifest)
-        activation = projection.get("activation")
+        activation = comparison_projection.get("activation")
         if isinstance(activation, dict) and activation.get("state") == "active":
             event_id = activation.get("initial_transition_event")
             if not isinstance(event_id, str) or not EVENT_ID_RE.fullmatch(event_id):
                 raise ProjectionError("active projection lacks a valid initial transition event")
             event_path = repo / EVENT_DIRECTORY / f"{event_id}.json"
             expected = activate_projection(expected, load_activation_event(event_path))
-    if projection != expected:
+    if comparison_projection != expected:
         raise ProjectionError("ownership projection is stale; regenerate it from the cut manifest")
 
     manifest_paths = {

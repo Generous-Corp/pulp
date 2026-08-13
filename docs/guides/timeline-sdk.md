@@ -300,6 +300,27 @@ The cookbook provides the compile-backed
 [compile/publish/render](timeline-cookbook.md#compile-publish-and-render)
 recipes for that ownership flow.
 
+For continuous editor input, create one
+`timeline_editor::EditGestureIdentityAllocator` from the session's move-only
+`WriterToken`. The allocator owns one undo group, issues opaque move-only
+tickets, lowers their phase and identity internally, and calls
+`DocumentSession::submit()` itself. Pre-submit validation and lowering failures
+leave the ticket retryable; an actual session submission consumes it, and only
+the session's returned result may advance the allocator lifecycle.
+Use it on one control thread and route every submission for its writer/group
+through it; do not race it with direct same-group session submissions. If a
+pending ticket is abandoned without submission, discard that allocator.
+
+Idempotent submission can return a cached success after a newer gesture
+transaction has already published. The allocator therefore validates the
+cached result with `DocumentSession::is_current_publication()`. If a cached
+Begin is stale, it asks the session whether the exact opaque writer/group still
+owns the authoritative open gesture: a later Update leaves the allocator Open
+so End or Cancel remains issuable; a later End or Cancel leaves it
+AwaitingBegin. Callers receive
+`SubmissionResultMismatch` with the exact cached `CommitResult` and must not
+declare or infer the lifecycle themselves.
+
 ### Audio clip time-conform intent
 
 `Clip::time_conform()` records how authored media is intended to adapt when a

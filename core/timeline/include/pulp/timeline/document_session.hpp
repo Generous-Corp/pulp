@@ -15,7 +15,7 @@ namespace pulp::timeline {
 namespace detail {
 class DocumentSessionPreviewAccess;
 class WriterTokenTestAccess;
-}
+} // namespace detail
 
 /// Resource ceilings for one mutable document session.
 ///
@@ -37,6 +37,33 @@ struct SessionLimits {
 /// Exhaustion produces an invalid ID rather than wrapping.
 class WriterToken {
   public:
+    /// Opaque identity of one writer authority within one document session.
+    ///
+    /// This copyable value supports equality checks only. It does not expose the
+    /// session nonce and does not authorize submission or ID allocation.
+    class Provenance {
+      public:
+        /// Constructs an invalid provenance value.
+        constexpr Provenance() noexcept = default;
+
+        /// Returns whether this value identifies a writer authority.
+        constexpr bool valid() const noexcept {
+            return writer_.valid() && owner_nonce_ != 0;
+        }
+
+        /// Compares both the session and writer identity without exposing either.
+        constexpr bool operator==(const Provenance&) const noexcept = default;
+
+      private:
+        friend class WriterToken;
+        friend class DocumentSession;
+        constexpr Provenance(WriterId writer, std::uint64_t owner_nonce) noexcept
+            : writer_(writer), owner_nonce_(owner_nonce) {}
+
+        WriterId writer_;
+        std::uint64_t owner_nonce_ = 0;
+    };
+
     /// Constructs an invalid token that cannot authorize submissions.
     WriterToken() = default;
     WriterToken(const WriterToken&) = delete;
@@ -49,6 +76,10 @@ class WriterToken {
     /// Returns the writer identity carried by this token.
     WriterId id() const noexcept {
         return id_;
+    }
+    /// Returns an opaque fingerprint that remains stable when this token moves.
+    [[nodiscard]] Provenance provenance() const noexcept {
+        return Provenance(id_, owner_nonce_);
     }
     /// Allocates the next transaction ID, or an invalid ID after exhaustion.
     TransactionId allocate_transaction_id() noexcept;
@@ -130,6 +161,15 @@ class DocumentSession {
     std::shared_ptr<const Project> snapshot() const noexcept;
     /// Returns the revision paired with the currently published snapshot.
     DocumentRevision revision() const noexcept;
+    /// Reports whether result is the session's exact current publication.
+    ///
+    /// Snapshot identity and revision are compared from one atomic observation.
+    bool is_current_publication(const CommitResult& result) const noexcept;
+    /// Reports whether provenance/group owns the session's current open gesture.
+    ///
+    /// This control-thread query reads the authoritative session lifecycle under
+    /// the writer lock. It retains neither the provenance nor submission authority.
+    bool is_gesture_open(WriterToken::Provenance provenance, UndoGroupId group) const noexcept;
     /// Applies and, when configured, durably journals one transaction.
     ///
     /// The token must belong to this session and match the transaction writer.
