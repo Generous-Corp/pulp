@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260813-pr7476-release-sdk-clean-provenance",
+  "created_at": "2026-08-13T18:56:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record clean official SDK source-provenance packaging without transferring implementation authority.",
+  "tests": [
+    "release provenance and workflow focused suite (113 tests)",
+    "local pre-push CTest suite (18881 tests)",
+    "gpt-5.6-sol medium autoreview (no findings)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
