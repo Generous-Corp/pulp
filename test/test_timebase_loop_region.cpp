@@ -1,10 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstdint>
+#include <limits>
 #include <type_traits>
+#include <utility>
 
 #include <pulp/playback/transport.hpp>
+#include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timebase/loop_region.hpp>
+#include <pulp/timeline_editor/loop_range.hpp>
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
+#include <pulp/timeline_editor/snap_grid.hpp>
 
 using namespace pulp;
 
@@ -19,6 +26,11 @@ constexpr std::int64_t quarters(std::int64_t count) {
 /// because there is nothing left to convert between.
 constexpr timebase::TickDuration loop_length(const timebase::LoopRegion& loop) {
     return timebase::TickDuration{loop.enabled ? loop.end.value - loop.start.value : 0};
+}
+
+template <typename T, typename E> T take(runtime::Result<T, E> result) {
+    REQUIRE(result);
+    return std::move(result).value();
 }
 
 } // namespace
@@ -86,4 +98,92 @@ TEST_CASE("Loop regions order, not merely compare", "[timebase]") {
                                             timebase::TickPosition{quarters(4)}};
     static_assert(disabled < earlier);
     REQUIRE(disabled < earlier);
+}
+
+TEST_CASE("Loop range edits canonicalize already-snapped endpoints",
+          "[timebase][timeline-editor][loop-range]") {
+    using timeline_editor::loop_region_from_snapped_endpoints;
+
+    const auto forward = loop_region_from_snapped_endpoints(
+        timebase::TickPosition{-quarters(3)}, timebase::TickPosition{quarters(2)});
+    REQUIRE(forward);
+    CHECK(*forward == timebase::LoopRegion{true, {-quarters(3)}, {quarters(2)}});
+
+    const auto reverse = loop_region_from_snapped_endpoints(
+        timebase::TickPosition{quarters(2)}, timebase::TickPosition{-quarters(3)});
+    REQUIRE(reverse);
+    CHECK(*reverse == *forward);
+
+    const auto negative_reverse = loop_region_from_snapped_endpoints(
+        timebase::TickPosition{-quarters(1)}, timebase::TickPosition{-quarters(4)});
+    REQUIRE(negative_reverse);
+    CHECK(*negative_reverse == timebase::LoopRegion{true, {-quarters(4)}, {-quarters(1)}});
+
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    const auto rails = loop_region_from_snapped_endpoints(timebase::TickPosition{maximum},
+                                                         timebase::TickPosition{minimum});
+    REQUIRE(rails);
+    CHECK(*rails == timebase::LoopRegion{true, {minimum}, {maximum}});
+}
+
+TEST_CASE("Loop range edits preserve the caller's snap result and reject collapse",
+          "[timebase][timeline-editor][loop-range][snap-grid]") {
+    const std::array meter_points{timebase::MeterPoint{{0}, {4, 4}}};
+    const auto meter = take(timebase::CompiledMeterMap::compile(meter_points));
+    const auto grid = take(timeline_editor::SnapGrid::create(
+        timebase::TickDuration{timebase::kTicksPerQuarter / 2}));
+
+    const auto midpoint = timebase::TickPosition{timebase::kTicksPerQuarter / 4};
+    const auto tied_later = grid.snap(meter, midpoint, timeline_editor::SnapDirection::Nearest);
+    REQUIRE(tied_later == timebase::TickPosition{timebase::kTicksPerQuarter / 2});
+
+    const auto tied_range = timeline_editor::loop_region_from_snapped_endpoints(
+        timebase::TickPosition{0}, tied_later);
+    REQUIRE(tied_range);
+    CHECK(tied_range->end == tied_later);
+
+    const auto snapped_first = grid.snap(meter, timebase::TickPosition{1});
+    const auto snapped_second = grid.snap(meter, timebase::TickPosition{2});
+    REQUIRE(snapped_first == snapped_second);
+    const auto collapsed =
+        timeline_editor::loop_region_from_snapped_endpoints(snapped_first, snapped_second);
+    REQUIRE_FALSE(collapsed);
+    CHECK(collapsed.error() == timeline_editor::LoopRangeError::CollapsedSpan);
+}
+
+TEST_CASE("Loop enable edits preserve both authored bounds",
+          "[timebase][timeline-editor][loop-range]") {
+    const auto active = timeline_editor::loop_region_from_snapped_endpoints(
+        timebase::TickPosition{-quarters(2)}, timebase::TickPosition{quarters(5)});
+    REQUIRE(active);
+
+    const auto disabled = timeline_editor::with_loop_enabled(*active, false);
+    CHECK_FALSE(disabled.enabled);
+    CHECK(disabled.start == active->start);
+    CHECK(disabled.end == active->end);
+
+    const auto reenabled = timeline_editor::with_loop_enabled(disabled, true);
+    CHECK(reenabled == *active);
+}
+
+TEST_CASE("A canonical editor loop candidate is consumed by the transport unchanged",
+          "[timebase][timeline-editor][playback][loop-range]") {
+    const std::array tempo_points{timebase::TempoPoint{{0}, 120.0}};
+    const auto tempo = take(timebase::CompiledTempoMap::compile(
+        tempo_points, timebase::RationalRate{48'000, 1}));
+    const auto candidate = timeline_editor::loop_region_from_snapped_endpoints(
+        timebase::TickPosition{quarters(4)}, timebase::TickPosition{quarters(8)});
+    REQUIRE(candidate);
+
+    playback::MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    playback::MasterTransport transport;
+    REQUIRE(transport.prepare(tempo, config) == playback::TransportError::None);
+    REQUIRE(transport.set_loop(*candidate) == playback::TransportError::None);
+
+    playback::TransportSnapshot snapshot;
+    REQUIRE(transport.begin_block(64, snapshot) == playback::TransportError::None);
+    CHECK(snapshot.loop == *candidate);
+    CHECK(transport.playhead().loop == *candidate);
 }
