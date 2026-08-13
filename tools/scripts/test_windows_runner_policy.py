@@ -336,19 +336,20 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_only_required_macos(self) -> None:
-        """Advisory hosted legs must not sit in the path every merge takes.
+    def test_merge_group_matrix_keeps_macos_and_linux_but_drops_windows(self) -> None:
+        """Merge groups retain the eligible Linux safety signal, not Windows.
 
         A merge-group leg runs per queued entry, so Windows there is the single
-        largest consumer of hosted minutes while gating nothing — `windows` is
-        advisory, and only `macos` plus the version/skill and Vellum checks are
-        required. Linux has already reported on the PR head; broader coverage
-        remains in the nightly cross-platform suite.
+        largest consumer of hosted minutes while gating nothing. The local-Linux
+        policy deliberately retains Linux here: an active operator lease may
+        route this unprivileged leg to the disposable Mac Pro pool, while the
+        exact hosted fallback keeps the merge group safe when that lease is
+        absent. Broader Windows coverage remains in the nightly suite.
         """
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
         self.assertIn("macos", keys)
-        self.assertNotIn("linux", keys)
+        self.assertIn("linux", keys)
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.
