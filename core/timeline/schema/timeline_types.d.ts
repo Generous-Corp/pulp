@@ -99,6 +99,15 @@ export interface PulpTimelineCommandInsertMarker {
   sequence_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_notes` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertNotes {
+  clip_id: number | string;
+  modifiers: readonly unknown[];
+  notes: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.insert_region` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertRegion {
   region: PulpTimelineRegion;
@@ -187,6 +196,14 @@ export interface PulpTimelineCommandRemoveClip {
 export interface PulpTimelineCommandRemoveMarker {
   marker_id: number | string;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_notes` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveNotes {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.remove_region` — domain Command, schema version 1. */
@@ -549,6 +566,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_automation_lane"
   | "pulp.timeline.command.insert_clip"
   | "pulp.timeline.command.insert_marker"
+  | "pulp.timeline.command.insert_notes"
   | "pulp.timeline.command.insert_region"
   | "pulp.timeline.command.insert_scene"
   | "pulp.timeline.command.insert_sequence"
@@ -562,6 +580,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_automation_lane"
   | "pulp.timeline.command.remove_clip"
   | "pulp.timeline.command.remove_marker"
+  | "pulp.timeline.command.remove_notes"
   | "pulp.timeline.command.remove_region"
   | "pulp.timeline.command.remove_scene"
   | "pulp.timeline.command.remove_sequence"
@@ -619,6 +638,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
+  "pulp.timeline.command.insert_notes": PulpTimelineCommandInsertNotes;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
   "pulp.timeline.command.insert_scene": PulpTimelineCommandInsertScene;
   "pulp.timeline.command.insert_sequence": PulpTimelineCommandInsertSequence;
@@ -632,6 +652,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
+  "pulp.timeline.command.remove_notes": PulpTimelineCommandRemoveNotes;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
   "pulp.timeline.command.remove_scene": PulpTimelineCommandRemoveScene;
   "pulp.timeline.command.remove_sequence": PulpTimelineCommandRemoveSequence;
