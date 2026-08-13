@@ -2,6 +2,8 @@
 
 #include <pulp/audio/device.hpp>
 
+#include "../core/audio/platform/win/wasapi_io_timing.hpp"
+
 #include <atomic>
 #include <condition_variable>
 #include <limits>
@@ -190,6 +192,152 @@ TEST_CASE("latency composition rejects unspecified timing authority") {
     timing.timestamp_source = AudioTimingSource::device_clock;
     CHECK(make_latency_snapshot(timing, 4, 48000.0).has_value());
 }
+
+TEST_CASE("WASAPI timing reconstructs the reported render maximum exactly",
+          "[audio][timing][wasapi]") {
+    win::WasapiTimingValues values{};
+    values.stream_latency_100ns = 100'000;
+    values.endpoint_buffer_frames = 128;
+    values.sample_rate_hz = 48'000;
+    values.direction = win::WasapiTimingDirection::render;
+
+    const auto timing = win::make_wasapi_audio_io_timing(values, 17, 1);
+    REQUIRE(timing.has_value());
+    CHECK(timing->output_latency_frames == 352);
+    CHECK(timing->output_safety_offset_frames == 0);
+    CHECK_FALSE(timing->input_latency_frames.has_value());
+    CHECK(timing->timestamp_source == AudioTimingSource::os_estimate);
+
+    const auto snapshot = make_latency_snapshot(*timing, 13, 48'000.0);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->output_scheduling_offset_frames == 493);
+}
+
+TEST_CASE("WASAPI timing publishes only the represented capture direction",
+          "[audio][timing][wasapi]") {
+    win::WasapiTimingValues values{};
+    values.stream_latency_100ns = 100'000;
+    values.endpoint_buffer_frames = 128;
+    values.sample_rate_hz = 48'000;
+    values.direction = win::WasapiTimingDirection::capture;
+
+    const auto timing = win::make_wasapi_audio_io_timing(values, 19, 1);
+    REQUIRE(timing.has_value());
+    CHECK(timing->input_latency_frames == 352);
+    CHECK(timing->input_safety_offset_frames == 0);
+    CHECK_FALSE(timing->output_latency_frames.has_value());
+
+    const auto snapshot = make_latency_snapshot(*timing, 13, 48'000.0);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->input_placement_offset_frames == 480);
+    CHECK_FALSE(snapshot->output_scheduling_offset_frames.has_value());
+}
+
+TEST_CASE("WASAPI timing preserves zero residual and rounds maximums upward",
+          "[audio][timing][wasapi]") {
+    win::WasapiTimingValues values{};
+    values.stream_latency_100ns = 100'000;
+    values.endpoint_buffer_frames = 480;
+    values.sample_rate_hz = 48'000;
+
+    const auto exact = win::make_wasapi_audio_io_timing(values, 23, 1);
+    REQUIRE(exact.has_value());
+    REQUIRE(exact->output_latency_frames.has_value());
+    CHECK(*exact->output_latency_frames == 0);
+
+    CHECK(win::wasapi_duration_to_frames(1, 44'100) == 1);
+    CHECK(win::wasapi_duration_to_frames(100'000, 48'000) == 480);
+}
+
+TEST_CASE("WASAPI timing fails closed on incomplete or inconsistent reports",
+          "[audio][timing][wasapi]") {
+    win::WasapiTimingValues values{};
+    values.endpoint_buffer_frames = 128;
+    values.sample_rate_hz = 48'000;
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 29, 1));
+
+    values.stream_latency_100ns = 10'000;
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 29, 1));
+
+    values.stream_latency_100ns = std::numeric_limits<std::uint64_t>::max();
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 29, 1));
+
+    values.stream_latency_100ns = 100'000;
+    values.sample_rate_hz = 0;
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 29, 1));
+    values.sample_rate_hz = 48'000;
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 0, 1));
+    CHECK_FALSE(win::make_wasapi_audio_io_timing(values, 29, 0));
+}
+
+TEST_CASE("WASAPI timing publication fails closed after route invalidation",
+          "[audio][timing][wasapi]") {
+    AudioIoTiming timing{};
+    timing.output_latency_frames = 352;
+    timing.route_instance_token = 31;
+    timing.calibration_generation = 1;
+
+    win::WasapiTimingPublication publication;
+    publication.publish(timing);
+    REQUIRE(publication.read().has_value());
+    CHECK(publication.read()->route_instance_token == 31);
+
+    publication.invalidate();
+    CHECK_FALSE(publication.read().has_value());
+}
+
+TEST_CASE("WASAPI route invalidation notifies once per opened route",
+          "[audio][timing][wasapi]") {
+    win::WasapiRouteInvalidationGate gate;
+    CHECK_FALSE(gate.take_notification());
+    gate.mark_pending();
+    CHECK(gate.take_notification());
+    CHECK_FALSE(gate.take_notification());
+    gate.mark_pending();
+    CHECK_FALSE(gate.take_notification());
+
+    gate.reset();
+    gate.mark_pending();
+    CHECK(gate.take_notification());
+    CHECK_FALSE(gate.take_notification());
+}
+
+#if defined(_WIN32)
+TEST_CASE("WASAPI classifies every terminal route result",
+          "[audio][timing][wasapi]") {
+    CHECK(win::wasapi_result_invalidates_route(
+        AUDCLNT_E_DEVICE_INVALIDATED));
+    CHECK(win::wasapi_result_invalidates_route(
+        AUDCLNT_E_RESOURCES_INVALIDATED));
+    CHECK(win::wasapi_result_invalidates_route(
+        AUDCLNT_E_SERVICE_NOT_RUNNING));
+    CHECK_FALSE(win::wasapi_result_invalidates_route(E_FAIL));
+}
+
+TEST_CASE("WASAPI reports initialized default-output timing", "[audio][timing][wasapi]") {
+    auto system = create_audio_system();
+    REQUIRE(system);
+    const auto output = system->default_output_device();
+    if (output.id.empty())
+        SKIP("WASAPI has no default output device");
+
+    auto device = system->create_device(output.id);
+    REQUIRE(device);
+    DeviceConfig config{};
+    config.device_id = output.id;
+    config.output_channels = 2;
+    REQUIRE(device->open(config));
+    const auto timing = query_audio_io_timing(*device);
+    device->close();
+
+    if (!timing)
+        SKIP("WASAPI endpoint did not publish representable stream timing");
+    CHECK(timing->output_latency_frames.has_value());
+    CHECK(timing->output_safety_offset_frames == 0);
+    CHECK(timing->io_buffer_frames.has_value());
+    CHECK(timing->route_instance_token != 0);
+}
+#endif
 
 #if defined(__APPLE__)
 TEST_CASE("CoreAudio timing assembly preserves exact property presence",

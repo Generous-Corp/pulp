@@ -14,8 +14,8 @@
 namespace pulp::runtime {
 
 /// Build configuration ("Debug", "Release", "RelWithDebInfo", ...).
-/// Whatever CMake's @c CMAKE_BUILD_TYPE was at configure time; empty
-/// for multi-config generators that pick the config at build time.
+/// The configuration selected for this build, including multi-config
+/// generators that choose it after configure time.
 inline constexpr std::string_view kBuildType   = "@PULP_BUILD_TYPE@";
 
 /// ISO 8601 UTC timestamp of the CMake configure step that produced
@@ -26,8 +26,8 @@ inline constexpr std::string_view kBuildIso8601 = "@PULP_BUILD_ISO8601@";
 /// the source tree is not a git checkout (e.g. distribution tarball).
 inline constexpr std::string_view kGitSha      = "@PULP_GIT_SHA@";
 
-/// True when the working tree had uncommitted changes at configure
-/// time. Renders as " (dirty)" in a typical stamp string.
+/// True when tracked source files had uncommitted changes at configure
+/// time. Untracked configure/build inputs do not mark the source dirty.
 inline constexpr bool kGitDirty                = @PULP_GIT_DIRTY@;
 
 /// Pulp SDK version (from the root CMakeLists.txt `project(...)`).
