@@ -5980,17 +5980,23 @@ but a `runs-on` expression cannot validate RFC 3339 expiry and a hosted resolver
 would recreate their queue bottleneck. Do not route them locally until the
 consumer can fail closed on expiry before assignment. `Vellum trusted freeze`,
 release, signing, deployment, and `pull_request_target` must never consume the
-generic selector. The checked-in `health_lease_*` profile fields require
+generic selector. The checked-in `merge_group.linux` lane's `health_lease_*`
+profile fields require
 Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
 release); Shipyard 0.83.0 ignores them. Keep the selector unset until that
 producer is installed and scheduled. The producer must read `main`'s live
 `max_entries_to_build` and require unreserved idle capacity for that entire
 declared admission burst; the TTL is not an atomic reservation. Pulp currently
-declares five while the disposable fleet has two runners, so automatic
-merge-group Linux routing intentionally remains disarmed. When that lease path
+declares five while the two legacy generic runners lack the protected opt-in
+label, leaving zero exact-label matches; even two protected runners would remain
+insufficient. Automatic merge-group Linux routing intentionally remains
+disarmed. When that lease path
 is inactive, the merge-group Linux selector is exactly `ubuntu-latest` even if
 `PULP_DEFAULT_RUNNER_PROVIDER=namespace`; global Namespace routing remains an
 explicit dispatch/PR policy and cannot bypass the automatic lease boundary.
+The separate `pr.linux` profile lane remains `github-only`; do not put this
+trusted lease tuple under the PR context, which Shipyard rejects and which would
+misrepresent the workflow's pull-request routing boundary.
 
 Facts worth keeping (measured):
 

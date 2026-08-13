@@ -147,7 +147,12 @@ def test_profile_covers_full_merge_queue_admission_burst() -> None:
     profile = tomllib.loads(
         (REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml").read_text()
     )
-    lane = profile["repo"]["Generous-Corp/pulp"]["pr"]["linux"]
+    repo_profile = profile["repo"]["Generous-Corp/pulp"]
+    assert repo_profile["pr"]["linux"] == {
+        "strategy": "github-only",
+        "targets": ["github.linux-x64"],
+    }
+    lane = repo_profile["merge_group"]["linux"]
     assert lane["health_lease_merge_queue_branch"] == "main"
     assert lane["health_lease_admission_burst"] == 5
     assert lane["health_lease_admission_burst"] > 2, (

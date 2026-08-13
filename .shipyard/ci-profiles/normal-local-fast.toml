@@ -13,7 +13,7 @@
 # Shipyard/agents can explain or apply the same policy from the Pulp checkout.
 
 name = "normal-local-fast"
-description = "Fast PRs on disposable local Mac Pro Linux plus local ARM64 VMs; hosted fallback."
+description = "Hosted PR Linux; lease-gated disposable Mac Pro Linux for merge groups; local ARM64 VMs with hosted fallback."
 
 [repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
@@ -21,6 +21,10 @@ targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.linux]
+strategy = "github-only"
+targets = ["github.linux-x64"]
+
+[repo."Generous-Corp/pulp".merge_group.linux]
 strategy = "ordered-fallback"
 targets = ["macpro.linux-x64-vm", "github.linux-x64"]
 github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
@@ -29,9 +33,10 @@ health_lease_ttl_seconds = 300
 health_lease_events = ["merge_group"]
 health_lease_runner_name_prefix = "pulp-ci-ephemeral-"
 health_lease_merge_queue_branch = "main"
-# Must cover the live ruleset's max_entries_to_build. With the current five-job
-# burst and only two Mac Pro Linux runners, the producer deliberately clears the
-# lease, leaving merge-group Linux hosted.
+# Must cover the live ruleset's max_entries_to_build. The two legacy Mac Pro
+# Linux runners lack the protected opt-in label, so the exact protected pool
+# currently has zero matching runners; either count is below this five-job
+# burst and the producer deliberately clears the lease.
 health_lease_admission_burst = 5
 
 [repo."Generous-Corp/pulp".pr.windows]
