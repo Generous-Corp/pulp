@@ -41,7 +41,12 @@ def parser_from(job: str) -> str:
 
 def run_parser(script: str, pages: object) -> subprocess.CompletedProcess[str]:
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as fixture:
-        json.dump(pages, fixture)
+        if isinstance(pages, list):
+            for page in pages:
+                json.dump(page, fixture)
+                fixture.write("\n")
+        else:
+            json.dump(pages, fixture)
         fixture.flush()
         return subprocess.run(
             [sys.executable, "-c", script, fixture.name],
@@ -77,9 +82,10 @@ for name, job in aliases.items():
         f"{name} must not let advisory matrix conclusions determine macos",
     )
     require(
-        "gh api --paginate --slurp" in job
+        "gh api --paginate" in job
+        and "--slurp" not in job
         and "filter=latest&per_page=100" in job,
-        f"{name} must read every latest-attempt jobs page from this run",
+        f"{name} must read every page without requiring new-gh-only --slurp",
     )
     require(
         "for attempt in 1 2 3" in job,
@@ -114,7 +120,10 @@ parser = next(iter(parsers.values()))
 
 success = run_parser(
     parser,
-    [{"jobs": [{"name": "macOS (ARM64) [local]", "conclusion": "success"}]}],
+    [
+        {"jobs": [{"name": "Linux (x64)", "conclusion": "success"}]},
+        {"jobs": [{"name": "macOS (ARM64) [local]", "conclusion": "success"}]},
+    ],
 )
 require(success.returncode == 0 and success.stdout.strip() == "success", success.stderr)
 
@@ -137,7 +146,8 @@ for invalid in (
             ]
         }
     ],
-    {"jobs": [{"name": "macOS (ARM64) [local]", "conclusion": "success"}]},
+    [],
+    [[{"name": "macOS (ARM64) [local]", "conclusion": "success"}]],
 ):
     result = run_parser(parser, invalid)
     require(result.returncode != 0, f"parser accepted invalid payload: {invalid!r}")
