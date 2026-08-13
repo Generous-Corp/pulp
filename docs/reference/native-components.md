@@ -196,6 +196,16 @@ separate distribution step. **iOS / AUv3 / sandboxed targets do not load node
 packs at all** — `core/host` is compiled out there, and native components are
 static-bundled and signed with the app.
 
+Generated devices also pass a platform-and-origin policy before executable
+bytes are opened. Declarative graphs are portable. Desktop may load a trusted
+native pack; Android admits native code only when it was bundled with the app
+and rejects runtime-downloaded native packs; iOS rejects native packs and admits
+declarative or interpreted artifacts; web admits declarative, interpreted, and
+WebAssembly artifacts within browser limits. Generated UI is available only on
+desktop and web and must run in a separate-origin frame. Every platform admits
+frozen audio plus its recipe as the universal materialized fallback, so a
+project can play without admitting its generator.
+
 ## Honest tradeoff
 
 A language-neutral native component seam is more build/CI surface (Cargo + CMake +
