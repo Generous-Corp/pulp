@@ -116,9 +116,6 @@ bool JackDevice::open(const DeviceConfig& config) {
     // Update config with JACK's actual sample rate and buffer size
     config_.sample_rate = static_cast<double>(jack_get_sample_rate(client_));
     config_.buffer_size = static_cast<int>(jack_get_buffer_size(client_));
-    route_instance_token_.store(
-        detail::next_linux_audio_route_instance_token(), std::memory_order_release);
-
     runtime::log_info("JACK: connected as '{}' at {} Hz, buffer {} frames, {} out / {} in",
         client_name_, config_.sample_rate, config_.buffer_size,
         out_channels, in_channels);
@@ -140,6 +137,12 @@ void JackDevice::close() {
 
 bool JackDevice::start(AudioCallback callback) {
     if (!client_) return false;
+    invalidate_audio_io_timing();
+    staged_latency_modes_ = 0;
+    staged_input_timing_ = false;
+    staged_output_timing_ = false;
+    route_instance_token_.store(
+        detail::next_linux_audio_route_instance_token(), std::memory_order_release);
     callback_ = std::move(callback);
     sample_position_ = 0;
 
@@ -147,6 +150,8 @@ bool JackDevice::start(AudioCallback callback) {
     int err = jack_activate(client_);
     if (err != 0) {
         runtime::log_error("JACK: could not activate client (error {})", err);
+        callback_ = nullptr;
+        invalidate_audio_io_timing();
         return false;
     }
 
@@ -194,6 +199,10 @@ void JackDevice::stop() {
     }
 
     callback_ = nullptr;
+    invalidate_audio_io_timing();
+    staged_latency_modes_ = 0;
+    staged_input_timing_ = false;
+    staged_output_timing_ = false;
 }
 
 DeviceInfo JackDevice::info() const {
