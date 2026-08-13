@@ -180,12 +180,33 @@
         "Linux",
         "X64",
         "pulp-build-linux-x64",
-        "pulp-host-macpro"
+        "pulp-host-macpro",
+        "pulp-auto-linux-x64"
       ],
       "provisioning": "ephemeral",
         "trusted_workflow_only": true,
       "severity": "advisory",
-      "supervisor": "proxmox-systemd",
+      "supervisor": "proxmox-systemd-trusted",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_PR_SAFE_LINUX_RUNS_ON_JSON",
+      "purpose": "Same-repository pull-request Linux build lane called only through the main-owned pr-safe-linux.yml reusable workflow. Served by one-job disposable Mac Pro VMs in the separate pulp-pr-safe-build runner group; forks, privileged events, missing or expired leases, disabled routing, and invalid selectors fall back to ubuntu-latest.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro",
+        "pulp-pr-safe-linux-x64"
+      ],
+      "provisioning": "ephemeral",
+      "trusted_workflow_only": true,
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-latest",
+      "supervisor": "proxmox-systemd-pr-safe",
       "hosts": [
         "macpro"
       ]
