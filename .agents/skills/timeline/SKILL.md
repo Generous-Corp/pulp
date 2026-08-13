@@ -1340,9 +1340,9 @@ Consequences worth knowing before you touch this:
   `expected`, and move/resize/velocity carry both with one identity;
   `ValidatedNoteEditIntent::create` rejects malformed or ambiguous shapes, and
   `NoteEditIntentHost` accepts only that wrapper so invalid raw values cannot
-  cross the host seam. There is intentionally no note lowerer until the granular
-  note commands land — do not route these through the O(clip)
-  `ReplaceNoteContent` command as an interim implementation.
+  cross the host seam. `lower_note_edit_intent` maps Insert to `InsertNotes`,
+  Erase to `RemoveNotes`, and move/resize/velocity to `SetNoteEvents`; never
+  regress these subset edits to the O(clip) `ReplaceNoteContent` command.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit
@@ -2153,20 +2153,15 @@ a pixel span; neither decides anything, so handing one over is the same act as h
 Prefer consuming them. The arranger minted its own scalars and left both projections with no
 consumer outside their own test, which is how a capability ends up shipped and unused.
 
-### Note editing is a whole-content replacement, so the gesture shape is part of the design
+### Note editing is granular, and a continuous gesture owns one undo group
 
-A note edit lowers to `ReplaceNoteContent`, which carries both note arrays. That makes the gesture
-bracket a design decision rather than a detail:
-
-- **Commit on release** — one `GesturePhase::Single` intent per edit. The session closes it on
-  admission and it becomes evictable, so a session takes any number of them.
-- **A continuous `Begin`/`Update`/.../`End` drag** coalesces into a group that stays open, and an
-  open group is evictable by nothing, so it dies partway through with `ConflictCode::UndoFull`.
-
-`lower_note_edit_intent` therefore refuses a non-Single phase with
-`NoteLoweringError::ContinuousGestureUnsupported` instead of emitting a transaction that fails
-mid-gesture. Serving a continuous drag needs granular note commands, not a different lowering of
-this one.
+`lower_note_edit_intent` carries only the note subset a gesture changes. Insert lowers to
+`InsertNotes`, erase to `RemoveNotes`, and move/resize/velocity to `SetNoteEvents`. A
+`GesturePhase::Single` edit remains a closed commit-on-release transaction. A continuous
+`Begin`/`Update`/.../`End` stream preserves those exact phases and must reuse one valid
+writer-owned `UndoGroupId`; the session then undoes and redoes the complete drag as one group.
+This avoids the old O(clip) `ReplaceNoteContent` charge on every update while keeping exact
+optimistic-value semantics at note granularity.
 
 The lowering takes the clip's **current note array as a parameter** rather than looking a project
 up. That keeps it pure for the same reason the clip lowering is pure, and it turns a stale view into

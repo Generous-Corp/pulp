@@ -11,15 +11,21 @@ add_library(pulp::runtime ALIAS pulp-runtime)
 # consumer can `#include <pulp/runtime/build_info.hpp>`.
 set(_pulp_build_info_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_pulp_build_info_path
-    "${_pulp_build_info_dir}/pulp/runtime/build_info.hpp")
+    "${_pulp_build_info_dir}/$<CONFIG>/pulp/runtime/build_info.hpp")
+set(_pulp_build_info_configured
+    "${_pulp_build_info_dir}/build_info.hpp.configured")
 
 string(TIMESTAMP PULP_BUILD_ISO8601 "%Y-%m-%dT%H:%M:%SZ" UTC)
-set(PULP_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+# $<CONFIG> resolves at generation time for both single- and multi-config
+# generators, so an installed Release header records the configuration that
+# produced it instead of the configure-time generator default.
+set(PULP_BUILD_TYPE "$<CONFIG>")
 set(PULP_VERSION "${PROJECT_VERSION}")
 
-# Best-effort git short SHA + dirty-tree probe. Empty when the source
+# Best-effort git short SHA + tracked-change probe. Empty when the source
 # tree isn't a git checkout (distribution tarball) — the generated
-# header documents that case.
+# header documents that case. Untracked configure/build inputs do not
+# change the identity of an otherwise clean source commit.
 set(PULP_GIT_SHA "")
 set(PULP_GIT_DIRTY "false")
 find_package(Git QUIET)
@@ -29,13 +35,8 @@ if(GIT_FOUND AND EXISTS "${PULP_ROOT_DIR}/.git")
         OUTPUT_VARIABLE PULP_GIT_SHA
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" status --porcelain
-        OUTPUT_VARIABLE _pulp_git_porcelain
-        ERROR_QUIET)
-    if(NOT "${_pulp_git_porcelain}" STREQUAL "")
-        set(PULP_GIT_DIRTY "true")
-    endif()
+    include("${PULP_ROOT_DIR}/tools/cmake/PulpGitState.cmake")
+    pulp_git_tracked_dirty("${PULP_ROOT_DIR}" PULP_GIT_DIRTY)
 endif()
 
 # Compose a single ready-to-display label so the running app can just
@@ -63,8 +64,11 @@ string(APPEND PULP_BUILD_STAMP ", ${PULP_BUILD_ISO8601})")
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/pulp/runtime/build_info.hpp.in"
-    "${_pulp_build_info_path}"
+    "${_pulp_build_info_configured}"
     @ONLY)
+file(GENERATE
+    OUTPUT "${_pulp_build_info_path}"
+    INPUT "${_pulp_build_info_configured}")
 
 # Install the generated header so consumers using `find_package(Pulp)`
 # after `cmake --install` can `#include <pulp/runtime/build_info.hpp>`
@@ -78,7 +82,7 @@ install(
 target_include_directories(pulp-runtime
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${_pulp_build_info_dir}>
+        $<BUILD_INTERFACE:${_pulp_build_info_dir}/$<CONFIG>>
         $<INSTALL_INTERFACE:include>
 )
 
