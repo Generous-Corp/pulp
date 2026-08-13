@@ -3565,6 +3565,13 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
     # was perfectly buildable.
     wanted = {tag for word, tag in TAG_WORDS.items()
               if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", low)}
+    # A # anchor is intentional and therefore a capability requirement. Plain
+    # words still reach the model as retrieval cues, but should not turn a
+    # musical sentence into a surprise refusal before the model sees it.
+    import intent_context
+    wanted.update(reference.tag for reference in
+                  intent_context.resolve_tag_references(prompt, inv, midx)
+                  if reference.explicit)
     if not wanted:
         return {"ok": True, "missing": {}}
 
@@ -5269,17 +5276,12 @@ def brand_brief(prompt: str, inv: dict, cat: dict, midx: dict,
                        f"{tags}  ({r['mark']})")
         out.append("")
     if exclusive:
-        # NAME THE GAP, DO NOT SUBSTITUTE IN SILENCE. Quietly reaching for
-        # another vendor when the named one has no module for a role is the
-        # same move that produced self-built lookalikes of famous modules.
         out.append(
             f"\n### Only {', '.join(exclusive)}\nThe user asked for this maker "
             f"and no other. Build the patch from the modules above wherever "
             f"you can. Core Audio and Core MIDI are infrastructure and are "
-            f"always allowed. If a role genuinely cannot be filled from them, "
-            f"USE THE CLOSEST INSTALLED ALTERNATIVE AND SAY SO in your reasons "
-            f"— name the role and the maker that filled it instead. Do not "
-            f"substitute in silence, and do not abandon the patch.\n")
+            f"always allowed. Do not substitute another maker: the final patch "
+            f"is validated against this constraint.\n")
     return "\n".join(out) + "\n"
 
 
@@ -5302,6 +5304,12 @@ def retry_note(prompt: str, cat: dict, last: bool) -> str:
     named = brand_mentions(prompt, cat)
     if not named:
         return ""
+    exclusive = [brand for brand, state in named.items() if state["exclusive"]]
+    if exclusive:
+        return ("\n\nThe request says only " + ", ".join(exclusive) +
+                ". Keep that closed on every attempt: Core I/O is allowed, "
+                "but another maker is not a fallback. Fix the routing or end "
+                "with an honest unfinished patch rather than changing makers.")
     who = ", ".join(named)
     if not last:
         return ("\n\nThe request named " + who + ". That still holds. What was "
@@ -6634,10 +6642,15 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     # the model. A model that names its own target and is then graded against
     # that claim learns to name easier targets, so the claim is made outside it.
     import idiom_check
+    import intent_context
     import patch_vocabulary
     idioms = idiom_check.load_idioms()
     claimed = claim_idiom(prompt, idioms)
     quality_contract = compile_runtime_quality_contract(prompt)
+    catalogue = catalog()
+    midx = module_index()
+    maker_mentions = brand_mentions(prompt, catalogue)
+    tag_references = intent_context.resolve_tag_references(prompt, inv, midx)
     named = exact_named_module_selection(prompt, inv)
     closed_named = closed_named_module_selection(prompt, named)
     module_idiom_contract = closed_module_idiom_contract(
@@ -6649,10 +6662,21 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         selected.update((module.get("plugin"), module.get("model"))
                         for module in base_patch.get("modules") or []
                         if module.get("plugin") and module.get("model"))
+    exclusive_plugins = {
+        slug for state in maker_mentions.values() if state["exclusive"]
+        for slug in state["slugs"]}
+    exclusive_allowed = {
+        (plugin, model) for plugin, package in inv.items()
+        for model in (package.get("modules") or {})
+        if plugin == "Core" or plugin in exclusive_plugins}
+    allowed_modules = set(closed_named) if closed_named else None
+    if exclusive_plugins:
+        allowed_modules = (exclusive_allowed if allowed_modules is None
+                           else allowed_modules & exclusive_allowed)
     if module_idiom_contract is None:
         module_plan = intent_module_plan(
             prompt, inv, idioms, selected,
-            allowed=closed_named if closed_named else None)
+            allowed=allowed_modules)
     else:
         module_plan = (
             "\n---\n\n## Verified module capability for this structure\n\n"
@@ -6670,7 +6694,12 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     if selected and "AudioInterface2" in (
             inv.get("Core", {}).get("modules") or {}):
         selected.add(("Core", "AudioInterface2"))
-    model_inventory = inventory_subset(inv, selected) if selected else inv
+    if exclusive_plugins:
+        selected &= exclusive_allowed
+        model_inventory = inventory_subset(
+            inv, selected if selected else exclusive_allowed)
+    else:
+        model_inventory = inventory_subset(inv, selected) if selected else inv
     with open(CONTRACT, encoding="utf-8") as source:
         contract = source.read().replace(
             "<!--INVENTORY-->", render_inventory(model_inventory, prefer))
@@ -6741,7 +6770,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     for attempt in range(attempts):
         parts = [contract, module_plan,
                  runtime_quality_contract_prompt(quality_contract),
-                 library_brief(prompt, inv)]
+                 library_brief(prompt, inv),
+                 intent_context.render_tag_context(tag_references, model_inventory)]
         if base_patch is not None:
             parts.append(
                 "\n---\n\n## Existing patch to refine\n\n"
@@ -6860,6 +6890,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             patch, errs = prepare_and_lint(patch, inv, base_patch=base_patch)
         except RuntimeError as error:
             errs = [str(error)]
+        errs += intent_context.exclusive_maker_errors(patch, maker_mentions)
+        errs += intent_context.required_tag_errors(patch, inv, tag_references)
         activation_findings = module_activation_contract_errors(patch, inv)
         if activation_findings and base_patch is None:
             import deterministic_repair
