@@ -111,7 +111,8 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             ["merge_group"],
         )
         self.assertIn('health_lease_runner_name_prefix = "pulp-ci-ephemeral-"', table)
-        self.assertEqual(toml_json_value(table, "health_lease_min_idle"), 1)
+        self.assertIn('health_lease_merge_queue_branch = "main"', table)
+        self.assertEqual(toml_json_value(table, "health_lease_admission_burst"), 5)
 
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(
