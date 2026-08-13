@@ -20,9 +20,26 @@ Transformer* startup_hook_transformer = nullptr;
 Transformer* publication_hook_transformer = nullptr;
 bool publication_push_rejected = false;
 bool publication_request_rejected = false;
+bool publication_finish_latched = false;
+bool publication_reset_excluded = false;
+bool finish_reset_excluded = false;
+bool reset_finish_excluded = false;
+bool startup_finish_latched = false;
+bool finish_pull_excluded = false;
+bool reset_pull_excluded = false;
+bool reset_completion_push_rejected = false;
+bool startup_pull_rejected = false;
 void request_reverse_after_startup_cas() {
     REQUIRE(startup_hook_transformer != nullptr);
     REQUIRE(startup_hook_transformer->request_program_slot(1));
+    Transformer::set_startup_hook(nullptr);
+}
+void finish_after_startup_cas() {
+    REQUIRE(startup_hook_transformer != nullptr);
+    std::array<float, 2> output{};
+    startup_pull_rejected = startup_hook_transformer->pull(output.data(), 2) == 0;
+    startup_hook_transformer->finish_input();
+    startup_finish_latched = true;
     Transformer::set_startup_hook(nullptr);
 }
 void probe_publishing_exclusion() {
@@ -31,6 +48,40 @@ void probe_publishing_exclusion() {
     publication_push_rejected = publication_hook_transformer->push(&sample, 1) == 0;
     publication_request_rejected = !publication_hook_transformer->request_program_slot(0);
     Transformer::set_publication_hook(nullptr);
+}
+void finish_during_publication() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    publication_hook_transformer->finish_input();
+    publication_finish_latched = true;
+    Transformer::set_publication_hook(nullptr);
+}
+void reset_during_publication() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    publication_hook_transformer->reset();
+    publication_reset_excluded = true;
+    Transformer::set_publication_hook(nullptr);
+}
+void reset_during_finish() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    std::array<float, 2> output{};
+    finish_pull_excluded = publication_hook_transformer->pull(output.data(), 2) == 0;
+    publication_hook_transformer->reset();
+    finish_reset_excluded = true;
+    Transformer::set_finish_hook(nullptr);
+}
+void finish_during_reset() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    std::array<float, 2> output{};
+    reset_pull_excluded = publication_hook_transformer->pull(output.data(), 2) == 0;
+    publication_hook_transformer->finish_input();
+    reset_finish_excluded = !publication_hook_transformer->drained();
+    Transformer::set_reset_hook(nullptr);
+}
+void push_during_reset_completion() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    const float sample = 1.0f;
+    reset_completion_push_rejected = publication_hook_transformer->push(&sample, 1) == 0;
+    Transformer::set_reset_completion_hook(nullptr);
 }
 
 Transformer::OperationProgram program(Transformer::Operation operation, std::uint8_t repeat = 1) {
@@ -167,7 +218,8 @@ TEST_CASE("waveset transformer validates preparation and publishes owned program
     REQUIRE(transformer.prepare(1000.0, {4, 8, 2.0}));
     REQUIRE(transformer.prepared());
     REQUIRE_FALSE(transformer.prepare(2000.0, {2, 4, 1.0}));
-    REQUIRE(transformer.latency_samples() == 64);
+    REQUIRE(transformer.latency_samples() == 0);
+    REQUIRE(transformer.max_lookahead_samples() == 64);
     REQUIRE(transformer.tail_samples() == 660);
 
     auto temporary = program(Transformer::Operation::Reverse);
@@ -190,25 +242,23 @@ TEST_CASE("waveset CapacityLayout rejects every checked arithmetic overflow stag
     REQUIRE_FALSE(Layout::add(maximum, 1, value));
     REQUIRE_FALSE(Layout::multiply(maximum, 2, value));
 
-    auto makes = [](double sample_rate, std::size_t n, std::size_t m,
-                    double normalize_ratio, std::size_t repeat_limit,
-                    std::size_t rotate_limit, std::size_t slot_count,
+    auto makes = [](double sample_rate, std::size_t n, std::size_t m, double normalize_ratio,
+                    std::size_t repeat_limit, std::size_t rotate_limit, std::size_t slot_count,
                     std::size_t sample_bytes = sizeof(float),
-                    std::size_t held_bytes = sizeof(std::size_t) * 3,
-                    std::size_t token_bytes = 1,
+                    std::size_t held_bytes = sizeof(std::size_t) * 3, std::size_t token_bytes = 1,
                     std::size_t program_bytes = sizeof(std::size_t) * 2,
                     std::size_t step_bytes = 16) {
         Layout layout{};
-        return Layout::make(sample_rate, n, m, normalize_ratio, repeat_limit,
-                            rotate_limit, slot_count, sample_bytes, held_bytes,
-                            token_bytes, program_bytes, step_bytes, layout);
+        return Layout::make(sample_rate, n, m, normalize_ratio, repeat_limit, rotate_limit,
+                            slot_count, sample_bytes, held_bytes, token_bytes, program_bytes,
+                            step_bytes, layout);
     };
     REQUIRE(makes(1000.0, 4, 8, 2.0, 16, 256, 8));
     REQUIRE_FALSE(makes(1000.0, 4, maximum, 1.0, 2, 256, 8)); // repeat M*16
     REQUIRE_FALSE(makes(1000.0, 4, maximum, 2.0, 1, 256, 8)); // Normalize M*R
     REQUIRE_FALSE(makes(std::numeric_limits<double>::max(), 4, 8, 1.0, 1, 256, 8));
-    REQUIRE_FALSE(makes(1.0, maximum, 1, 1.0, 1, 1, 1)); // N+1
-    REQUIRE_FALSE(makes(1.0, maximum / 2, 1, 1.0, 4, 1, 1)); // (N+1)*E / Q
+    REQUIRE_FALSE(makes(1.0, maximum, 1, 1.0, 1, 1, 1));               // N+1
+    REQUIRE_FALSE(makes(1.0, maximum / 2, 1, 1.0, 4, 1, 1));           // (N+1)*E / Q
     REQUIRE_FALSE(makes(1.0, maximum / 2 + 1, 2, 1.0, 1, maximum, 1)); // A/G
     REQUIRE_FALSE(makes(1.0, 2, 1, 1.0, 1, 1, maximum, 1, 1, maximum, 1));
     REQUIRE_FALSE(makes(1.0, 2, 1, 1.0, 1, 2, maximum, 1, 1, 1, 1));
@@ -450,7 +500,8 @@ TEST_CASE("waveset E Q D T reservation produces an exact retryable short write",
           "[signal][waveset][bounds]") {
     Transformer transformer;
     REQUIRE(transformer.prepare(1000.0, {1, 2, 1.0}));
-    REQUIRE(transformer.latency_samples() == 4);
+    REQUIRE(transformer.latency_samples() == 0);
+    REQUIRE(transformer.max_lookahead_samples() == 4);
     REQUIRE(transformer.tail_samples() == 84);
     REQUIRE(transformer.set_program(0, program(Transformer::Operation::Repeat, 16)));
     const std::array<float, 6> input{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
@@ -482,7 +533,8 @@ TEST_CASE("waveset eager pull and reservation progress cannot capacity-deadlock"
           "[signal][waveset][bounds]") {
     Transformer transformer;
     REQUIRE(transformer.prepare(1000.0, {4, 1000, 1.0}));
-    REQUIRE(transformer.latency_samples() == 8000);
+    REQUIRE(transformer.latency_samples() == 0);
+    REQUIRE(transformer.max_lookahead_samples() == 8000);
     REQUIRE(transformer.set_program(0, program(Transformer::Operation::Pass)));
     transformer.set_zero_crossing_polarity(Transformer::ZeroCrossingPolarity::Both);
     std::array<float, 128> alternating{};
@@ -501,7 +553,7 @@ TEST_CASE("waveset eager pull and reservation progress cannot capacity-deadlock"
         if (accepted_total < alternating.size() && pushed == 0)
             REQUIRE(pulled > 0);
     }
-    REQUIRE(accepted_total < static_cast<std::size_t>(transformer.latency_samples()));
+    REQUIRE(accepted_total < static_cast<std::size_t>(transformer.max_lookahead_samples()));
     REQUIRE(pulled_before_latency);
 }
 
@@ -534,7 +586,8 @@ TEST_CASE("waveset Q accounts for unread output held Rotate reservation and spli
     constexpr int f = 20;
     constexpr int q = (n + 1) * e + f;
     REQUIRE(transformer.prepare(1000.0, {n, m, 1.0}));
-    REQUIRE(transformer.latency_samples() == 2 * n * m);
+    REQUIRE(transformer.latency_samples() == 0);
+    REQUIRE(transformer.max_lookahead_samples() == 2 * n * m);
     REQUIRE(transformer.tail_samples() == q);
 
     Transformer::OperationProgram operations;
@@ -624,8 +677,8 @@ TEST_CASE("waveset edited splices use exact clamped shared gain laws", "[signal]
     REQUIRE(repeat_three_output.size() == 16);
     const float inner_high = 134.0f / 27.0f;
     const float inner_low = 109.0f / 27.0f;
-    const std::vector<float> repeat_three_expected{1, 2, 3, 4, 5, inner_high, inner_low, 4, 5,
-                                                   inner_high, inner_low, 4, 5, 6, 7, 8};
+    const std::vector<float> repeat_three_expected{
+        1, 2, 3, 4, 5, inner_high, inner_low, 4, 5, inner_high, inner_low, 4, 5, 6, 7, 8};
     for (std::size_t i = 0; i < repeat_three_output.size(); ++i) {
         if (i == 5 || i == 6 || i == 9 || i == 10) {
             const auto expected = repeat_three_expected[i];
@@ -845,8 +898,8 @@ TEST_CASE("waveset all eight slots switch at forced boundaries with exact retain
     Transformer transformer;
     REQUIRE(transformer.prepare(1000.0, {8, 2, 1.0}));
     for (std::uint8_t slot = 0; slot < Transformer::kMaxProgramSlots; ++slot) {
-        auto temporary = program(Transformer::Operation::Repeat,
-                                 static_cast<std::uint8_t>(slot + 1u));
+        auto temporary =
+            program(Transformer::Operation::Repeat, static_cast<std::uint8_t>(slot + 1u));
         REQUIRE(transformer.set_program(slot, temporary));
         temporary.steps[0].operation = Transformer::Operation::Omit;
     }
@@ -923,6 +976,23 @@ TEST_CASE("waveset startup CAS linearizes a racing request at the next boundary"
     startup_hook_transformer = nullptr;
 }
 
+TEST_CASE("waveset admitted push completes a racing finish request", "[signal][waveset][thread]") {
+    Transformer transformer;
+    REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+    const std::array<float, 2> input{1.0f, 2.0f};
+    startup_hook_transformer = &transformer;
+    startup_finish_latched = startup_pull_rejected = false;
+    Transformer::set_startup_hook(finish_after_startup_cas);
+    REQUIRE(transformer.push(input.data(), 2) == 2);
+    REQUIRE(startup_finish_latched);
+    REQUIRE(startup_pull_rejected);
+    std::array<float, 2> output{};
+    REQUIRE(transformer.pull(output.data(), 2) == 2);
+    REQUIRE(output == input);
+    REQUIRE(transformer.drained());
+    startup_hook_transformer = nullptr;
+}
+
 TEST_CASE("waveset publication excludes startup and failed replacement preserves old bank",
           "[signal][waveset][thread]") {
     Transformer transformer;
@@ -937,6 +1007,102 @@ TEST_CASE("waveset publication excludes startup and failed replacement preserves
     auto malformed = program(Transformer::Operation::Repeat, 0);
     REQUIRE_FALSE(transformer.set_program(0, malformed));
     REQUIRE(drain(transformer, {1.0f, 2.0f}) == std::vector<float>{2.0f, 1.0f});
+    publication_hook_transformer = nullptr;
+}
+
+TEST_CASE("waveset finish and publication have one terminal linearization order",
+          "[signal][waveset][thread]") {
+    const float sample = 1.0f;
+    auto require_terminal = [&](Transformer& transformer) {
+        REQUIRE(transformer.drained());
+        REQUIRE(transformer.push(&sample, 1) == 0);
+        REQUIRE_FALSE(transformer.request_program_slot(0));
+        REQUIRE_FALSE(transformer.set_program(0, program(Transformer::Operation::Pass)));
+    };
+
+    SECTION("finish before publication rejects without bank access") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        transformer.finish_input();
+        require_terminal(transformer);
+    }
+    SECTION("finish during successful publication is completed by the publisher") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        publication_hook_transformer = &transformer;
+        publication_finish_latched = false;
+        Transformer::set_publication_hook(finish_during_publication);
+        REQUIRE(transformer.set_program(1, program(Transformer::Operation::Reverse)));
+        REQUIRE(publication_finish_latched);
+        require_terminal(transformer);
+        publication_hook_transformer = nullptr;
+    }
+    SECTION("finish during failed publication preserves the old bank and EOS") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        REQUIRE(transformer.set_program(0, program(Transformer::Operation::Reverse)));
+        auto malformed = program(Transformer::Operation::Repeat, 0);
+        publication_hook_transformer = &transformer;
+        publication_finish_latched = false;
+        Transformer::set_publication_hook(finish_during_publication);
+        REQUIRE_FALSE(transformer.set_program(0, malformed));
+        REQUIRE(publication_finish_latched);
+        require_terminal(transformer);
+        transformer.reset();
+        REQUIRE(drain(transformer, {1.0f, 2.0f}) == std::vector<float>{2.0f, 1.0f});
+        publication_hook_transformer = nullptr;
+    }
+    SECTION("finish after publication is terminal") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        REQUIRE(transformer.set_program(1, program(Transformer::Operation::Reverse)));
+        transformer.finish_input();
+        require_terminal(transformer);
+    }
+}
+
+TEST_CASE("waveset reset joins the unified lifecycle order", "[signal][waveset][thread]") {
+    SECTION("publication owns the bank until its terminal store") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        publication_hook_transformer = &transformer;
+        publication_reset_excluded = false;
+        Transformer::set_publication_hook(reset_during_publication);
+        REQUIRE(transformer.set_program(1, program(Transformer::Operation::Reverse)));
+        REQUIRE(publication_reset_excluded);
+        REQUIRE(transformer.request_program_slot(1));
+        REQUIRE(drain(transformer, {1.0f, 2.0f}) == std::vector<float>{2.0f, 1.0f});
+    }
+    SECTION("finishing owns processor state until terminal") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        const std::array<float, 2> input{1.0f, 2.0f};
+        REQUIRE(transformer.push(input.data(), 2) == 2);
+        publication_hook_transformer = &transformer;
+        finish_reset_excluded = finish_pull_excluded = false;
+        Transformer::set_finish_hook(reset_during_finish);
+        transformer.finish_input();
+        REQUIRE(finish_reset_excluded);
+        REQUIRE(finish_pull_excluded);
+        std::array<float, 2> output{};
+        REQUIRE(transformer.pull(output.data(), 2) == 2);
+        REQUIRE(output == input);
+        REQUIRE(transformer.drained());
+    }
+    SECTION("reset owns processor state until quiescent") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        publication_hook_transformer = &transformer;
+        reset_finish_excluded = reset_pull_excluded = reset_completion_push_rejected = false;
+        Transformer::set_reset_hook(finish_during_reset);
+        Transformer::set_reset_completion_hook(push_during_reset_completion);
+        transformer.reset();
+        REQUIRE(reset_finish_excluded);
+        REQUIRE(reset_pull_excluded);
+        REQUIRE(reset_completion_push_rejected);
+        REQUIRE_FALSE(transformer.drained());
+        REQUIRE(drain(transformer, {3.0f, 4.0f}) == std::vector<float>{3.0f, 4.0f});
+    }
     publication_hook_transformer = nullptr;
 }
 
@@ -960,8 +1126,8 @@ TEST_CASE("W=N forced Rotate saturation owns and releases each token exactly onc
     std::size_t offset = 0;
     bool saw_backpressure = false;
     while (offset < input.size()) {
-        const int pushed = transformer.push(input.data() + offset,
-                                            static_cast<int>(input.size() - offset));
+        const int pushed =
+            transformer.push(input.data() + offset, static_cast<int>(input.size() - offset));
         offset += static_cast<std::size_t>(pushed);
         const int pulled = transformer.pull(block.data(), static_cast<int>(block.size()));
         output.insert(output.end(), block.begin(), block.begin() + pulled);
@@ -984,7 +1150,8 @@ TEST_CASE("W=N forced Rotate saturation owns and releases each token exactly onc
     Transformer repeat16;
     REQUIRE(repeat16.prepare(1000.0, {1, 2, 1.0}));
     REQUIRE(repeat16.set_program(0, program(Transformer::Operation::Repeat, 16)));
-    REQUIRE(repeat16.latency_samples() == 4);
+    REQUIRE(repeat16.latency_samples() == 0);
+    REQUIRE(repeat16.max_lookahead_samples() == 4);
     REQUIRE(repeat16.tail_samples() == 84);
     REQUIRE(drain(repeat16, {1, 2, 3, 4, 5, 6}).size() == 96);
 }
@@ -1062,8 +1229,8 @@ TEST_CASE("finish matrix drains within T", "[signal][waveset][eos]") {
         REQUIRE(t.push(input.data() + 4, 2) == 2); // first active Omit
         std::array<float, 8> output{};
         REQUIRE(t.pull(output.data(), 8) == 3);
-        REQUIRE(std::equal(output.begin(), output.begin() + 3,
-                           std::array<float, 3>{1, 2, 3}.begin()));
+        REQUIRE(
+            std::equal(output.begin(), output.begin() + 3, std::array<float, 3>{1, 2, 3}.begin()));
         t.finish_input();
         t.finish_input();
         REQUIRE(t.pull(output.data() + 3, 5) == 1);
@@ -1094,7 +1261,8 @@ TEST_CASE("splice expiry exact N", "[signal][waveset][splice]") {
         Transformer t;
         REQUIRE(t.prepare(1000.0, {3, 2, 1.0}));
         Transformer::OperationProgram p;
-        p.steps = {{Transformer::Operation::Pass}, {Transformer::Operation::Omit},
+        p.steps = {{Transformer::Operation::Pass},
+                   {Transformer::Operation::Omit},
                    {Transformer::Operation::Omit}};
         REQUIRE(t.set_program(0, p));
         REQUIRE(t.set_program(1, program(Transformer::Operation::Pass)));
@@ -1107,7 +1275,7 @@ TEST_CASE("splice expiry exact N", "[signal][waveset][splice]") {
     }
 }
 
-TEST_CASE("latency components A and G are reachable", "[signal][waveset][latency]") {
+TEST_CASE("capacity lookahead components A and G remain explicit", "[signal][waveset][latency]") {
     constexpr int n = 4;
     constexpr int m = 3;
     constexpr int wcap = 4;
@@ -1115,7 +1283,8 @@ TEST_CASE("latency components A and G are reachable", "[signal][waveset][latency
     constexpr int g = n * m;
     Transformer rotate;
     REQUIRE(rotate.prepare(1000.0, {n, m, 1.0}));
-    REQUIRE(rotate.latency_samples() == a + g);
+    REQUIRE(rotate.latency_samples() == 0);
+    REQUIRE(rotate.max_lookahead_samples() == a + g);
     Transformer::OperationProgram p;
     p.steps.resize(wcap);
     p.permutation = {0, 1, 2, 3};
@@ -1146,8 +1315,7 @@ TEST_CASE("latency components A and G are reachable", "[signal][waveset][latency
     REQUIRE(omit.request_program_slot(1));
     REQUIRE(omit.push(omission_input.data() + gm, gm) == gm); // switching Pass segment
     REQUIRE(omit.pull(output.data(), 32) == 2 * gm - 2);
-    REQUIRE(std::equal(output.begin(), output.begin() + 2 * gm - 2,
-                       omission_input.begin()));
+    REQUIRE(std::equal(output.begin(), output.begin() + 2 * gm - 2, omission_input.begin()));
     for (int completion = 0; completion < n - 1; ++completion) {
         REQUIRE(omit.push(omission_input.data() + 2 * gm + completion * gm, gm) == gm);
         REQUIRE(omit.pull(output.data(), 32) == 0);
@@ -1169,7 +1337,7 @@ TEST_CASE("waveset live operations are allocation free", "[signal][waveset][rt-s
     bool requested = false;
     bool polarity_set = false, epsilon_set = false, law_set = false, fade_set = false;
     bool ratio_set = false, seed_set = false, prepared = false, drained_state = false;
-    int latency = 0;
+    int latency = 0, max_lookahead = 0;
     std::size_t tail = 0;
     int accepted = 0;
     bool allocated = true;
@@ -1184,6 +1352,7 @@ TEST_CASE("waveset live operations are allocation free", "[signal][waveset][rt-s
         seed_set = transformer.set_coordinate_seed(7);
         prepared = transformer.prepared();
         latency = transformer.latency_samples();
+        max_lookahead = transformer.max_lookahead_samples();
         tail = transformer.tail_samples();
         requested = transformer.request_program_slot(0);
         accepted = transformer.push(input.data(), static_cast<int>(input.size()));
@@ -1202,24 +1371,24 @@ TEST_CASE("waveset live operations are allocation free", "[signal][waveset][rt-s
     REQUIRE(ratio_set);
     REQUIRE(seed_set);
     REQUIRE(prepared);
-    REQUIRE(latency == 64);
+    REQUIRE(latency == 0);
+    REQUIRE(max_lookahead == 64);
     REQUIRE(tail == 660);
     REQUIRE(drained_state);
     REQUIRE(accepted == static_cast<int>(input.size()));
     REQUIRE_FALSE(allocated);
 }
 
-TEST_CASE("RT full public surface every operation at capacity",
-          "[signal][waveset][rt-safety]") {
+TEST_CASE("RT full public surface every operation at capacity", "[signal][waveset][rt-safety]") {
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
     static_assert(noexcept(std::declval<Transformer&>().push(nullptr, 0)));
     static_assert(noexcept(std::declval<Transformer&>().pull(nullptr, 0)));
     static_assert(noexcept(std::declval<Transformer&>().finish_input()));
     static_assert(noexcept(std::declval<Transformer&>().reset()));
-    const std::array operations{Transformer::Operation::Pass, Transformer::Operation::Repeat,
-                                Transformer::Operation::Omit, Transformer::Operation::Reverse,
-                                Transformer::Operation::Normalize,
-                                Transformer::Operation::CoordinateSelect};
+    const std::array operations{
+        Transformer::Operation::Pass,      Transformer::Operation::Repeat,
+        Transformer::Operation::Omit,      Transformer::Operation::Reverse,
+        Transformer::Operation::Normalize, Transformer::Operation::CoordinateSelect};
     for (const auto operation : operations) {
         Transformer transformer;
         REQUIRE(transformer.prepare(1000.0, {8, 8, 2.0}));
@@ -1237,8 +1406,8 @@ TEST_CASE("RT full public surface every operation at capacity",
         bool allocated = true;
         {
             pulp::test::RtAllocationProbe probe;
-            REQUIRE(transformer.set_zero_crossing_polarity(
-                Transformer::ZeroCrossingPolarity::Both));
+            REQUIRE(
+                transformer.set_zero_crossing_polarity(Transformer::ZeroCrossingPolarity::Both));
             REQUIRE(transformer.set_zero_crossing_epsilon(0.0f));
             REQUIRE(transformer.set_crossfade_law(pulp::signal::CrossfadeGainLaw::EqualGain));
             REQUIRE(transformer.set_crossfade_duration_ms(2.0f));
@@ -1246,7 +1415,8 @@ TEST_CASE("RT full public surface every operation at capacity",
             REQUIRE(transformer.set_coordinate_seed(9));
             REQUIRE(transformer.request_program_slot(0));
             REQUIRE(transformer.prepared());
-            REQUIRE(transformer.latency_samples() > 0);
+            REQUIRE(transformer.latency_samples() == 0);
+            REQUIRE(transformer.max_lookahead_samples() > 0);
             REQUIRE(transformer.tail_samples() > 0);
             REQUIRE(transformer.push(input.data(), static_cast<int>(input.size())) > 0);
             (void)transformer.pull(output.data(), static_cast<int>(output.size()));

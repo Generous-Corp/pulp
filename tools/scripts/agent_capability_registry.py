@@ -539,7 +539,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/waveset_transformer.hpp",
-        "fingerprint": "sha256:e1716ee2e10f31369f51ad6e9a3c192eda97fdc9bf5ccd68acff7444c85fe195",
+        "fingerprint": "sha256:319443138854665a82fe774ba8e78ee7af2bfb4c8d8f8b9d70fb016b14197de6",
         "disposition": "unsupported_capability",
         "capability_keys": [],
         "rationale": (
