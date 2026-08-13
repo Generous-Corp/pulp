@@ -112,6 +112,17 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+### Browser-source fidelity is a required dependency, not a skip
+
+Generic agent HTML uses a real browser capture as its source reference before
+Skia/native lowering.  The local ARM runner images deliberately do not retain a
+mutable system browser, so `build.yml` installs the checksum-pinned Chrome for
+Testing archive into the job temp directory and exports `PULP_DESIGN_BROWSER`.
+When a browser-source test is added or changed, keep that bootstrap intact and
+fail on download, checksum, extraction, or executable discovery.  Do **not**
+convert a missing browser into a skipped fidelity test: that would let a PR
+claim source-to-native validation that never occurred.
+
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
 

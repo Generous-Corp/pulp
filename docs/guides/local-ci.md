@@ -9,6 +9,16 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 
 ## Fork routing in YAML is defense in depth, not access control
 
+## Browser-source fidelity on the local ARM gate
+
+The required macOS ARM job installs Pulp's checksum-pinned Chrome for Testing
+archive into its disposable job directory and exports `PULP_DESIGN_BROWSER`.
+This is required for generic HTML source-to-native tests: the browser capture is
+the visual reference for Skia lowering. The local runner image does not need a
+mutable global browser, but the workflow must fail if the pinned archive cannot
+be downloaded, verified, extracted, or executed; a skipped browser comparison
+is not a passing fidelity gate.
+
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
 request whose head branch lives in **another repository**,
