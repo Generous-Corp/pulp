@@ -208,6 +208,84 @@ TEST_CASE("timeline step channel edits persist recompile and deterministically c
     REQUIRE(replayed.right == changed.right);
 }
 
+TEST_CASE("timeline step live recompile adopts without resetting transport") {
+    auto submit_step_four_pitch = [](TimelineStepSequencerProcessor& processor) {
+        state::StepEditCommand command;
+        command.client_sequence = 4;
+        command.transaction_id = 4;
+        command.kind = state::StepEditKind::SetCell;
+        command.payload.set_cell.pattern = 0;
+        command.payload.set_cell.lane = 1;
+        command.payload.set_cell.step = 4;
+        command.payload.set_cell.cell =
+            processor.pattern_snapshot().patterns[0].lanes[1][4];
+        command.payload.set_cell.cell.pitch_offset = 12;
+        return processor.channel().ui_try_submit(command);
+    };
+    auto advance = [](TimelineStepSequencerProcessor& processor,
+                      std::size_t frames) {
+        REQUIRE(frames % 128 == 0);
+        while (frames > 0) {
+            StereoBlock block(128);
+            process_direct(processor, block);
+            frames -= 128;
+        }
+    };
+
+    TimelineStepSequencerProcessor live;
+    TimelineStepSequencerProcessor edited_reference;
+    TimelineStepSequencerProcessor stale_reference;
+    live.prepare(prepare_context());
+    edited_reference.prepare(prepare_context());
+    stale_reference.prepare(prepare_context());
+    REQUIRE(live.engine_prepared());
+    REQUIRE(edited_reference.engine_prepared());
+    REQUIRE(stale_reference.engine_prepared());
+
+    REQUIRE(submit_step_four_pitch(edited_reference));
+    REQUIRE(edited_reference.apply_pending_edits_and_recompile());
+    constexpr std::size_t kFramesBeforeLiveEdit = 23'808;
+    advance(live, kFramesBeforeLiveEdit);
+    advance(edited_reference, kFramesBeforeLiveEdit);
+    advance(stale_reference, kFramesBeforeLiveEdit);
+
+    const auto prior = live.last_transport();
+    REQUIRE(prior.range_count == 1);
+    const auto prior_end = prior.ranges[0].timeline_sample_start.value +
+                           prior.ranges[0].frame_count;
+
+    REQUIRE(submit_step_four_pitch(live));
+    REQUIRE(live.apply_pending_edits_and_recompile());
+    REQUIRE(live.pattern_snapshot().engine_sequence == 1);
+    const auto applied = live.channel().ui_try_pop_applied();
+    REQUIRE(applied);
+    REQUIRE(applied->kind == state::AppliedEditKind::StepRangeChanged);
+    REQUIRE(applied->client_sequence == 4);
+
+    StereoBlock live_immediate(128);
+    StereoBlock edited_immediate(128);
+    StereoBlock stale_immediate(128);
+    process_direct(live, live_immediate);
+    process_direct(edited_reference, edited_immediate);
+    process_direct(stale_reference, stale_immediate);
+    REQUIRE(live.last_transport().range_count == 1);
+    REQUIRE(live.last_transport().ranges[0].timeline_sample_start.value == prior_end);
+    REQUIRE(live_immediate.left == edited_immediate.left);
+    REQUIRE(live_immediate.right == edited_immediate.right);
+
+    StereoBlock live_event(128);
+    StereoBlock edited_event(128);
+    StereoBlock stale_event(128);
+    process_direct(live, live_event);
+    process_direct(edited_reference, edited_event);
+    process_direct(stale_reference, stale_event);
+    REQUIRE(live_event.energy() > 0.0);
+    REQUIRE(live_event.left == edited_event.left);
+    REQUIRE(live_event.right == edited_event.right);
+    REQUIRE(live_event.left != stale_event.left);
+    REQUIRE(live_event.right != stale_event.right);
+}
+
 TEST_CASE("timeline step channel rejects edits outside the persisted active extent") {
     TimelineStepSequencerProcessor processor;
     processor.prepare(prepare_context());
