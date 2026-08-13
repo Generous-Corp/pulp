@@ -487,9 +487,11 @@ together, or the drift check fails. Full rationale:
 
 ## A red `macos` or `linux` alias does not mean tests failed
 
-`macos` and `linux` are **alias checks**: jobs that poll the real lane and mirror
-its outcome. They run no build and produce no build output of their own — a
-`linux` alias log is about 48 lines, and it says so outright:
+`macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
+The required `macos` alias reports after the build matrix is terminal; it does
+not poll while the native build runs. Alias jobs run no build and produce no
+build output of their own — a `linux` alias log is about 48 lines, and it says
+so outright:
 
 ```
 Linux leg conclusion: cancelled
@@ -905,8 +907,8 @@ uses, or the golden warms a cache the real jobs never touch.
      serve the one required check and keep ccache + FetchContent on local disk,
      so a macOS leg on a push burns required-gate capacity to upload nothing.
      `resolve-provider` omits the macOS leg for push events; the aliases and
-     `windows-*-gate` jobs skip too (the `macos` alias polls up to 60 min for a
-     leg that isn't there). Scope saves to
+     `windows-*-gate` jobs skip too (otherwise a terminal reporter would search
+     for a matrix leg that deliberately was not created). Scope saves to
      `runner.environment == 'github-hosted' && runner.os != 'macOS'` — the
      restore side's `runner.os != 'macOS' || …` disjunction is wrong here, it
      re-admits self-hosted non-macOS runners.
@@ -1341,14 +1343,16 @@ uses, or the golden warms a cache the real jobs never touch.
   (or run from a context with no `GIT_DIR`), and never assume `-C` alone
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
-- The required `macos` alias in `.github/workflows/build.yml` mirrors the
-  macOS matrix leg by polling the Actions jobs API. On merge groups it depends
-  on the completed macOS-only build matrix, so it reports in seconds instead of
-  occupying hosted capacity through the native build. The merge-group report
-  uses the short-lived preamble pool so hosted congestion cannot delay a green
-  owned build. Keep the PR-head poll retry-safe:
-  API failures or malformed JSON must log and continue the loop, not trip
-  `set -euo pipefail` before the macOS leg has a chance to report.
+- The required `macos` aliases in `.github/workflows/build.yml` depend on the
+  terminal build matrix, then query only the current run's paginated latest jobs
+  for exactly one macOS matrix leg. Only conclusion `success` is green;
+  missing, duplicate, null, skipped, cancelled, failed, and unknown outcomes
+  fail closed. Keep three short retries for jobs-API transport failures only;
+  malformed JSON and invalid cardinality are verdict failures, not reasons to
+  resume build polling. PR/dispatch runs retain the combined matrix, so advisory
+  legs may delay the reporter but `needs.build.result` must never determine it.
+  The merge-group report uses the short-lived preamble pool and preserves the
+  stable required context name.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
@@ -2881,11 +2885,14 @@ Prefer this over an exclude — it keeps the test enabled everywhere. (Adding a
 shared `RESOURCE_LOCK` does NOT fix it: serializing the audio tests among
 themselves still leaves the other ~8 `-j8` tests starving the RT thread.)
 
-The required `macos` alias should not `need` the whole cross-platform build
-matrix. It should depend only on cheap setup/classification jobs and poll the
-macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
-advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
-protection.
+The required `macos` alias deliberately needs the complete combined build
+matrix on pull-request and manual-dispatch runs. That may delay the reporter
+behind advisory Linux/Windows work, but it removes the false-timeout race where
+a queued macOS leg had not started before a fixed polling window expired. The
+reporter queries the terminal run and derives its verdict only from exactly one
+macOS job's conclusion; advisory failures must never contaminate it through
+`needs.build.result`. Merge groups retain a macOS-only matrix, so their dedicated
+alias reports promptly after the owned leg completes.
 
 **Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
 alias reports its failure promptly, a *flaky* failure on the required leg wedges
@@ -4042,6 +4049,16 @@ smokes can monopolize the self-hosted macOS runner. `tools/scripts/
 test_workflow_build_dirs.py` asserts the label-exclude contract alongside
 the build-directory invariant.
 
+**Capability-history checks need the protected base in shallow checkouts.** A
+depth-1 `pull_request` checkout contains GitHub's synthetic merge commit but not
+its base parent. Before CTest, `build.yml` force-fetches the event-pinned
+`pull_request.base.sha` into `refs/remotes/origin/main`; fetching moving current
+main would compare against a different contract when main advances. Shipyard's
+`workflow_dispatch` payload has no base SHA, so it retains the explicit main
+fetch. `test_workflow_build_dirs.py` pins the workflow wiring and proves the
+missing-base negative control plus the event-pinned repair with local shallow
+repositories.
+
 **macOS builds with the Ninja generator.** `build.yml`'s Configure step
 passes `-G Ninja` on macOS only (Linux/Windows keep their default
 generator). Ninja schedules parallelism better and is faster on the
@@ -5043,6 +5060,134 @@ In all three cases, set `PULP_VIA_SHIPYARD=1` on the direct-push
 command to record the push as supervised AND suppress the warning.
 
 After the obstacle clears, resume `shipyard pr` on the next PR.
+
+### GitHub connectivity triage — prove the failing layer before declaring an outage
+
+A timeout from one client is not evidence that "GitHub is down." GitHub exposes
+independent API, web, Git, authentication, and Actions paths; one can fail while
+the others remain healthy. Before parking publication or telling another agent
+to wait, run this bounded escalation in the same time window. Define this
+portable whole-process timeout first; unlike an SSH connect timeout, it also
+bounds stalls after a connection succeeds:
+
+```bash
+bounded() {
+  python3 - "$@" <<'PY'
+import subprocess
+import sys
+import os
+import signal
+
+seconds = float(sys.argv[1])
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    raise SystemExit(process.wait(timeout=seconds))
+except subprocess.TimeoutExpired:
+    print(f"timed out after {seconds:g}s: {' '.join(sys.argv[2:])}", file=sys.stderr)
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    raise SystemExit(124)
+PY
+}
+```
+
+1. Check GitHub's authoritative status and unresolved incidents:
+
+   ```bash
+   curl --max-time 15 -fsS https://www.githubstatus.com/api/v2/status.json
+   curl --max-time 15 -fsS https://www.githubstatus.com/api/v2/incidents/unresolved.json
+   ```
+
+   A healthy status page does not prove every route works, but it forbids calling
+   a client-local timeout a global outage.
+2. Prefer the Shipyard App identity for GitHub operations:
+
+   ```bash
+   bounded 20 ghapp api repos/Generous-Corp/pulp --jq .default_branch
+   bounded 20 ghapp api repos/Generous-Corp/pulp/pulls/PR --jq '{state,head:.head.sha,merged}'
+   ```
+
+   Try REST through `ghapp api` when GraphQL-backed `ghapp pr view` or `gh pr
+   view` times out. A personal `gh` token failure does not invalidate the App
+   token.
+
+   On a host where Go-based `ghapp` or Shipyard hangs during DNS/TLS while
+   `curl` succeeds, compare the bounded default call with Go's pure resolver:
+
+   ```bash
+   bounded 20 env GODEBUG=netdns=go ghapp api repos/Generous-Corp/pulp --jq .default_branch
+   ```
+
+   If only the pure-Go resolver succeeds, report a host cgo resolver failure,
+   not a GitHub outage. It is safe to wrap that host's `ghapp` and Shipyard
+   launchers with `GODEBUG="${GODEBUG:-netdns=go}"`; preserve an explicit caller
+   override and keep the bounded probes. This exact failure has occurred on the
+   M3 coordinator.
+3. Probe the unauthenticated public REST or web path to separate GitHub reachability
+   from local authentication:
+
+   ```bash
+   curl --max-time 20 -fsS https://api.github.com/repos/Generous-Corp/pulp/pulls/PR
+   ```
+
+   Record only fields actually returned; a partial response or HTML page is not
+   proof of check state or merge completion.
+4. Probe Git independently from API traffic. Try normal SSH first, then HTTPS,
+   and, when port 22 is the failing layer, GitHub's supported SSH-over-443 route:
+
+   ```bash
+   bounded 20 git ls-remote git@github.com:Generous-Corp/pulp.git refs/heads/main
+   bounded 20 git ls-remote https://github.com/Generous-Corp/pulp.git refs/heads/main
+   GIT_SSH_COMMAND='ssh -p 443 -o HostName=ssh.github.com -o ConnectTimeout=10' \
+     bounded 20 git ls-remote git@github.com:Generous-Corp/pulp.git refs/heads/main
+   ```
+
+   Verify the `ssh.github.com:443` host key through normal OpenSSH trust handling;
+   never disable host-key verification. Fetch/`ls-remote` success with a hanging
+   push usually points to a local pre-push gate or write/auth path, not GitHub
+   read availability.
+
+   If the configured SSH agent itself stalls, retry the bounded 443 probe with
+   the host's explicit approved key and `IdentitiesOnly=yes`, for example:
+
+   ```bash
+   GIT_SSH_COMMAND='ssh -p 443 -o HostName=ssh.github.com -o ConnectTimeout=10 -o IdentitiesOnly=yes -i /Users/danielraffel/.ssh/id_rsa' \
+     bounded 20 git ls-remote git@github.com:Generous-Corp/pulp.git refs/heads/main
+   ```
+
+   This separates an agent integration failure from GitHub SSH availability;
+   never copy a host-specific key path into another machine's configuration.
+5. Use Shipyard's durable state before inventing a manual publication path:
+
+   ```bash
+   shipyard ship-state list
+   shipyard ship
+   shipyard rescue PR --rerun-failed
+   ```
+
+   Plain `shipyard ship` automatically resumes its durable state. Use
+   `--resume-from <stage>` only when intentionally selecting a known stage; the
+   pinned Shipyard CLI has no `--resume` flag.
+
+   `shipyard pr` remains the normal create/validate/merge path, and `ghapp pr
+   merge PR --auto` is the server-side merge-on-green backstop. Pulp's merge
+   queue rejects strategy flags such as `--merge` and `--squash`. Do not
+   open a duplicate PR merely because a local watcher or CLI process died.
+6. Inspect local processes when commands "hang." Stale `git fetch`, `git push`,
+   `ssh git-upload-pack`, or `git-receive-pack` children from earlier retries can
+   consume sockets indefinitely. Terminate only the exact processes this session
+   started; never sweep unrelated agents' Git or build processes.
+
+Use explicit per-probe timeouts and back off between retries. Report the boundary
+precisely: API read unavailable, Git read unavailable, branch not pushed, PR not
+created, checks unknown, or merge unverified. Declare a global GitHub outage only
+when the status service reports one; otherwise say which tested routes failed.
+Do not mark a whole program blocked while another independent publication or
+validation route is still available.
 
 ### GraphQL exhaustion fallback
 

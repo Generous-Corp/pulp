@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Negative and exit-propagation tests for run-with-deadline.py."""
 
+import importlib.util
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 RUNNER = Path(__file__).with_name("run-with-deadline.py")
+RUNNER_SPEC = importlib.util.spec_from_file_location("run_with_deadline", RUNNER)
+RUNNER_MODULE = importlib.util.module_from_spec(RUNNER_SPEC)
+RUNNER_SPEC.loader.exec_module(RUNNER_MODULE)
 
 
 def process_is_live(pid):
@@ -24,6 +30,31 @@ def process_is_live(pid):
 
 
 class ProcessDeadlineTests(unittest.TestCase):
+    def test_permission_denied_group_probe_still_escalates(self):
+        process = mock.Mock(pid=123)
+        process.poll.return_value = None
+        killpg_calls = [
+            mock.call(123, signal.SIGTERM),
+            mock.call(123, 0),
+            mock.call(123, signal.SIGKILL),
+        ]
+
+        with (
+            mock.patch.object(
+                RUNNER_MODULE.os,
+                "killpg",
+                side_effect=[None, PermissionError, ProcessLookupError],
+            ) as killpg,
+            mock.patch.object(
+                RUNNER_MODULE.time, "monotonic", side_effect=[10, 10, 11]
+            ),
+            mock.patch.object(RUNNER_MODULE.time, "sleep"),
+        ):
+            RUNNER_MODULE.terminate_group(process, grace_seconds=0.1)
+
+        self.assertEqual(killpg.call_args_list, killpg_calls)
+        process.wait.assert_called_once_with()
+
     def test_exit_code_is_propagated(self):
         result = subprocess.run(
             [

@@ -58,8 +58,9 @@ endif()
 # drawing a piano roll over its own engine does not acquire a transport.
 #
 # No target claims this tier yet. It is the bound a consumer that actually
-# carries the editor would claim, and such a consumer should pair it with
-# REQUIRE timeline timeline_editor — a tier alone cannot say the editor arrived.
+# carries the editor kernel without a concrete view would claim, and such a
+# consumer should pair it with REQUIRE timeline timeline_editor — a tier alone
+# cannot say the editor arrived.
 set(PULP_LINK_FLOOR_TIER_sequencer-editor
     platform runtime music timebase timeline timeline_editor)
 
@@ -75,11 +76,13 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
     platform runtime music timebase audio midi format)
 
-# A loadable sequencer plugin that owns both the document and editor rungs.
-# This is the union of the two bounds above, not a larger application tier: a
-# plugin claiming it still has to name timeline and timeline_editor in REQUIRE.
+# A loadable sequencer plugin that owns the document, editor kernel, and concrete
+# piano-roll view. `timeline_view` intentionally brings the base view and canvas
+# rungs, so they belong in this bound rather than in its claimant's debt. A
+# plugin claiming the tier still names all three feature modules in REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
-    platform runtime music timebase timeline timeline_editor audio midi format)
+    platform runtime music timebase timeline timeline_editor timeline_view
+    canvas view audio midi format)
 
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.
@@ -129,13 +132,12 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
     canvas events graph native-components sample_bank_manifest signal state view)
 
-# The loadable editor proof plugin reaches the same modules by the same routes,
-# being packaged by the same format machinery over the same view stack. It has
-# no `timeline` entry because it REQUIREs timeline and timeline_editor outright
-# and links them directly, so they are a lower bound here rather than debt —
-# which is why the conditional appends below must never name them.
+# The loadable editor proof plugin requires its document, editor, and piano-roll
+# modules as direct lower bounds. The tier includes the view and canvas rungs
+# that the concrete piano roll necessarily reaches. Format packaging contributes
+# the remaining modules by the same routes as the step-sequencer plugin.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    canvas events graph native-components sample_bank_manifest signal state view)
+    events graph native-components sample_bank_manifest signal state)
 
 # Entries whose edge only exists in some configurations, appended under the
 # condition that creates them. Appending rather than exempting is deliberate:

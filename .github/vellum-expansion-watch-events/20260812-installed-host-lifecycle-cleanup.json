@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260812-installed-host-lifecycle-cleanup",
+  "created_at": "2026-08-12T15:50:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Register the installed-host lifecycle regression target in the shared visual-proof test manifest without transferring implementation authority.",
+  "tests": [
+    "Release installed host publishes only after ready and cleans revoked expired restart authority (5 repetitions)",
+    "heartbeat mutex-removal confirm_failure (exit 42)",
+    "installed host joins its heartbeat worker when owner construction fails (100 repetitions)",
+    "installed host state destruction synchronizes heartbeat shutdown (100 repetitions)",
+    "join-removal confirm_failure (abort 134)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

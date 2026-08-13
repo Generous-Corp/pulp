@@ -1,7 +1,8 @@
 if(PULP_BUILD_TESTS)
     add_executable(timeline-plugin-proof-test test_timeline_plugin_proof.cpp)
     target_link_libraries(timeline-plugin-proof-test PRIVATE
-        pulp::format pulp::timeline pulp::timeline-editor pulp::view Catch2::Catch2WithMain)
+        pulp::format pulp::timeline pulp::timeline-editor pulp::timeline-view
+        pulp::view Catch2::Catch2WithMain)
     target_include_directories(timeline-plugin-proof-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(timeline-plugin-proof-test)
 endif()
@@ -17,13 +18,13 @@ pulp_add_plugin(TimelinePluginProof
     MANUFACTURER_CODE "PlpX"
 )
 target_link_libraries(TimelinePluginProof_Core INTERFACE
-    pulp::timeline pulp::timeline-editor pulp::view)
+    pulp::timeline pulp::timeline-editor pulp::timeline-view pulp::view)
 
 if(TARGET TimelinePluginProof_CLAP AND COMMAND pulp_assert_link_floor)
     pulp_report_link_closure(TimelinePluginProof_CLAP)
     pulp_assert_link_floor(TimelinePluginProof_CLAP
         TIER    sequencer-plugin-editor
-        REQUIRE format timeline timeline_editor)
+        REQUIRE format timeline timeline_editor timeline_view)
 endif()
 
 if(PULP_HAS_CLAP AND APPLE)

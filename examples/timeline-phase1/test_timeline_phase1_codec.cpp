@@ -1,5 +1,72 @@
 #include "timeline_phase1_example_test_support.hpp"
 
+namespace {
+
+enum class InvalidStepProject { InactivePatternPadding, SnapshotSchema };
+
+std::optional<timeline::Project>
+make_invalid_step_project(const TimelineStepSequencerProcessor& source,
+                          InvalidStepProject kind) {
+    auto document = std::make_shared<StepPatternDocument>();
+    document->snapshot = source.pattern_snapshot();
+    std::shared_ptr<const void> erased = document;
+    auto registered = source.pattern_registry().create_registered_no_owned_ids(
+        {kStepPatternSchemaName, kStepPatternSchemaVersion}, std::move(erased),
+        2u * 1024u * 1024u);
+    if (!registered)
+        return std::nullopt;
+
+    // Mutate after registration to exercise load-time validation independently
+    // of the registry's construction-time canonicalization checks.
+    if (kind == InvalidStepProject::InactivePatternPadding)
+        document->snapshot.patterns[1].length = 1;
+    else
+        document->snapshot.schema_version = kStepPatternSchemaVersion + 1;
+    return project_with_step_pattern(std::move(registered).value());
+}
+
+std::optional<timeline::Project>
+make_short_loop_project(const TimelineStepSequencerProcessor& source) {
+    auto snapshot = source.pattern_snapshot();
+    snapshot.patterns[snapshot.active_pattern].length = 1;
+    snapshot.patterns[snapshot.active_pattern].lanes[0][0].flags = 0;
+    auto registered = make_registered_step_pattern(snapshot, source.pattern_registry());
+    if (!registered)
+        return std::nullopt;
+    return project_with_step_pattern(std::move(registered).value());
+}
+
+void require_snapshots_equal(const state::Snapshot& actual,
+                             const state::Snapshot& expected) {
+    REQUIRE(actual.schema_version == expected.schema_version);
+    REQUIRE(actual.epoch == expected.epoch);
+    REQUIRE(actual.engine_sequence == expected.engine_sequence);
+    REQUIRE(actual.active_pattern == expected.active_pattern);
+    REQUIRE(actual.active_lane_count == expected.active_lane_count);
+    REQUIRE(actual.active_pattern_count == expected.active_pattern_count);
+    for (std::uint8_t pattern = 0; pattern < state::kPatternCount; ++pattern) {
+        REQUIRE(actual.patterns[pattern].length == expected.patterns[pattern].length);
+        for (std::uint8_t lane = 0; lane < state::kLaneCount; ++lane)
+            for (std::uint8_t step = 0; step < state::kStepCount; ++step)
+                REQUIRE(cells_equal(actual.patterns[pattern].lanes[lane][step],
+                                    expected.patterns[pattern].lanes[lane][step]));
+    }
+}
+
+void require_samples_equal(const std::vector<float>& actual,
+                           const std::vector<float>& expected) {
+    REQUIRE(actual.size() == expected.size());
+    const auto mismatch = std::mismatch(actual.begin(), actual.end(), expected.begin());
+    const auto mismatch_index =
+        static_cast<std::size_t>(std::distance(actual.begin(), mismatch.first));
+    const auto actual_sample = mismatch.first == actual.end() ? 0.0f : *mismatch.first;
+    const auto expected_sample = mismatch.first == actual.end() ? 0.0f : *mismatch.second;
+    CAPTURE(mismatch_index, actual_sample, expected_sample);
+    REQUIRE(mismatch.first == actual.end());
+}
+
+} // namespace
+
 TEST_CASE("timeline step pattern codec is canonical at maximum bounded extent") {
     auto registry = make_step_pattern_registry();
     REQUIRE(registry);
@@ -91,30 +158,71 @@ TEST_CASE("timeline step pattern codec rejects malformed schema counts cells and
     REQUIRE_FALSE(make_registered_step_pattern(inactive_lane,
                                                source.pattern_registry()));
 
-    auto mutable_document = std::make_shared<StepPatternDocument>();
-    mutable_document->snapshot = source.pattern_snapshot();
-    std::shared_ptr<const void> erased = mutable_document;
-    auto registered = source.pattern_registry().create_registered_no_owned_ids(
-        {kStepPatternSchemaName, kStepPatternSchemaVersion}, std::move(erased),
-        2u * 1024u * 1024u);
-    REQUIRE(registered);
-    mutable_document->snapshot.patterns[1].length = 1;
-    auto padded_project = project_with_step_pattern(std::move(registered).value());
+    auto padded_project = make_invalid_step_project(
+        source, InvalidStepProject::InactivePatternPadding);
     REQUIRE(padded_project);
     TimelineStepSequencerProcessor loader;
     loader.prepare(prepare_context());
     REQUIRE_FALSE(loader.load_persistent_project(*padded_project));
 
-    auto schema_document = std::make_shared<StepPatternDocument>();
-    schema_document->snapshot = source.pattern_snapshot();
-    std::shared_ptr<const void> schema_erased = schema_document;
-    auto schema_registered = source.pattern_registry().create_registered_no_owned_ids(
-        {kStepPatternSchemaName, kStepPatternSchemaVersion},
-        std::move(schema_erased), 2u * 1024u * 1024u);
-    REQUIRE(schema_registered);
-    schema_document->snapshot.schema_version = kStepPatternSchemaVersion + 1;
-    auto wrong_schema_project =
-        project_with_step_pattern(std::move(schema_registered).value());
+    auto wrong_schema_project = make_invalid_step_project(
+        source, InvalidStepProject::SnapshotSchema);
     REQUIRE(wrong_schema_project);
     REQUIRE_FALSE(loader.load_persistent_project(*wrong_schema_project));
+}
+
+TEST_CASE("timeline step rejected project loads preserve the live generation") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context(8192));
+    REQUIRE(processor.engine_prepared());
+    REQUIRE(submit_pitch_edit(processor, 12));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.pattern_snapshot().patterns[0].lanes[0][0].pitch_offset == 12);
+
+    const auto pattern_before = processor.pattern_snapshot();
+    const auto channel_before = processor.channel().ui_read_latest_snapshot();
+    const auto resync_before = processor.channel().ui_resync_required_epoch();
+    auto project_before = timeline::serialize_project(*processor.persistent_project(),
+                                                      processor.pattern_registry());
+    REQUIRE(project_before);
+    REQUIRE(processor.set_playing(true) == playback::TransportError::None);
+    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock render_before(128);
+    process_direct(processor, render_before);
+    REQUIRE(render_before.energy() > 0.0);
+    const auto loop_before = processor.last_transport().loop;
+    const auto playing_before = processor.last_transport().is_playing;
+
+    const std::array validation_rejected_projects{
+        make_invalid_step_project(processor,
+                                  InvalidStepProject::InactivePatternPadding),
+        make_invalid_step_project(processor, InvalidStepProject::SnapshotSchema),
+    };
+    const auto require_rejected_load_is_atomic = [&](const auto& rejected_project) {
+        REQUIRE(rejected_project);
+        REQUIRE_FALSE(processor.load_persistent_project(*rejected_project));
+
+        require_snapshots_equal(processor.pattern_snapshot(), pattern_before);
+        auto project_after = timeline::serialize_project(*processor.persistent_project(),
+                                                         processor.pattern_registry());
+        REQUIRE(project_after);
+        REQUIRE(project_after->json == project_before->json);
+        require_snapshots_equal(processor.channel().ui_read_latest_snapshot(),
+                                channel_before);
+        REQUIRE(processor.channel().ui_resync_required_epoch() == resync_before);
+        REQUIRE(processor.engine_prepared());
+
+        REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+        StereoBlock render_after(128);
+        process_direct(processor, render_after);
+        require_samples_equal(render_after.left, render_before.left);
+        require_samples_equal(render_after.right, render_before.right);
+        REQUIRE(processor.last_transport().loop == loop_before);
+        REQUIRE(processor.last_transport().is_playing == playing_before);
+    };
+    for (const auto& invalid : validation_rejected_projects)
+        require_rejected_load_is_atomic(invalid);
+
+    auto short_loop_project = make_short_loop_project(processor);
+    require_rejected_load_is_atomic(short_loop_project);
 }

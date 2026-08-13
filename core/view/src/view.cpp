@@ -310,6 +310,11 @@ void View::simulate_click(Point root_pos, const SimulatedPointer& pointer) {
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
+        coords.emplace_back("button", static_cast<double>(pointer.button));
+        coords.emplace_back("modifiers", static_cast<double>(pointer.modifiers));
+        coords.emplace_back("pointer_id", static_cast<double>(pointer.pointer_id));
+        coords.emplace_back("pointer_type", static_cast<double>(pointer.type));
+        coords.emplace_back("pressure", static_cast<double>(pointer.pressure));
         coords.emplace_back("x", static_cast<double>(root_pos.x));
         coords.emplace_back("y", static_cast<double>(root_pos.y));
         pulp::view::motion::record_simulated_input("click", id, std::move(coords));
@@ -378,9 +383,14 @@ void View::simulate_drag(Point start, Point end, int steps,
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
-        // Recorded coordinates are keyed fields; insertion order is not semantic.
+        // Keep the stable component order documented by the v2 fixture contract.
+        coords.emplace_back("button", static_cast<double>(pointer.button));
         coords.emplace_back("end_x",   static_cast<double>(end.x));
         coords.emplace_back("end_y",   static_cast<double>(end.y));
+        coords.emplace_back("modifiers", static_cast<double>(pointer.modifiers));
+        coords.emplace_back("pointer_id", static_cast<double>(pointer.pointer_id));
+        coords.emplace_back("pointer_type", static_cast<double>(pointer.type));
+        coords.emplace_back("pressure", static_cast<double>(pointer.pressure));
         coords.emplace_back("start_x", static_cast<double>(start.x));
         coords.emplace_back("start_y", static_cast<double>(start.y));
         coords.emplace_back("steps",   static_cast<double>(steps));

@@ -4,6 +4,12 @@
 #include <pulp/format/headless.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <vector>
+
 using namespace pulp::examples;
 using namespace pulp::format;
 
@@ -115,6 +121,69 @@ TEST_CASE("PulpDrums state round-trip", "[examples][drums]") {
 
 namespace {
 
+struct MidiTraceEvent {
+    std::int64_t sample = 0;
+    std::uint8_t channel = 0;
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+
+    bool operator==(const MidiTraceEvent&) const = default;
+};
+
+std::vector<MidiTraceEvent> render_deterministic_trace(std::span<const int> schedule) {
+    constexpr int kSampleRate = 48'000;
+    constexpr int kMaxBlock = 512;
+    constexpr int kTotalSamples = 48'000;
+
+    HeadlessHost host(create_pulp_drums);
+    host.prepare(kSampleRate, kMaxBlock, 2, 2);
+    host.state().set_value(kTempo, 120.0f);
+    host.state().set_value(kSwing, 0.0f);
+    host.state().set_value(kDensity, 1.0f);
+    host.state().set_value(kRandomize, 0.0f);
+    host.state().set_value(kPattern, 0.0f);
+    host.state().set_value(kVelocity, 100.0f);
+
+    std::vector<MidiTraceEvent> trace;
+    std::int64_t absolute_sample = 0;
+    std::size_t schedule_index = 0;
+    while (absolute_sample < kTotalSamples) {
+        const int frames = std::min(
+            schedule[schedule_index % schedule.size()],
+            static_cast<int>(kTotalSamples - absolute_sample));
+        REQUIRE(frames > 0);
+        REQUIRE(frames <= kMaxBlock);
+
+        std::vector<float> input_left(static_cast<std::size_t>(frames), 0.25f);
+        std::vector<float> input_right(static_cast<std::size_t>(frames), -0.5f);
+        std::vector<float> output_left(static_cast<std::size_t>(frames), 123.0f);
+        std::vector<float> output_right(static_cast<std::size_t>(frames), 123.0f);
+        const float* input_channels[] = {input_left.data(), input_right.data()};
+        float* output_channels[] = {output_left.data(), output_right.data()};
+        pulp::audio::BufferView<const float> input(input_channels, 2, frames);
+        pulp::audio::BufferView<float> output(output_channels, 2, frames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+
+        host.process(output, input, midi_in, midi_out);
+        REQUIRE(output_left == input_left);
+        REQUIRE(output_right == input_right);
+
+        for (const auto& event : midi_out) {
+            REQUIRE(event.sample_offset >= 0);
+            REQUIRE(event.sample_offset < frames);
+            REQUIRE(event.is_note_on());
+            trace.push_back({absolute_sample + event.sample_offset,
+                             event.channel(),
+                             event.note(),
+                             event.velocity()});
+        }
+
+        absolute_sample += frames;
+        ++schedule_index;
+    }
+    return trace;
+}
+
 int count_midi_over_duration(HeadlessHost& host, float tempo_bpm,
                              int total_samples, int block_size) {
     host.state().set_value(kTempo, tempo_bpm);
@@ -141,6 +210,30 @@ int count_midi_over_duration(HeadlessHost& host, float tempo_bpm,
 }
 
 }  // namespace
+
+TEST_CASE("PulpDrums golden: MIDI timing is partition invariant",
+          "[examples][drums][golden][partition]") {
+    constexpr std::array fixed_schedule{512};
+    constexpr std::array irregular_schedule{1, 7, 31, 64, 127, 257, 511};
+
+    const auto fixed = render_deterministic_trace(fixed_schedule);
+    const auto irregular = render_deterministic_trace(irregular_schedule);
+
+    constexpr std::array<MidiTraceEvent, 7> expected{
+        MidiTraceEvent{6'000, 9, 36, 100},  MidiTraceEvent{6'000, 9, 42, 100},
+        MidiTraceEvent{18'000, 9, 42, 100}, MidiTraceEvent{30'000, 9, 36, 100},
+        MidiTraceEvent{30'000, 9, 38, 100}, MidiTraceEvent{30'000, 9, 42, 100},
+        MidiTraceEvent{42'000, 9, 42, 100},
+    };
+
+    REQUIRE(fixed.size() == expected.size());
+    REQUIRE(irregular.size() == expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        REQUIRE(fixed[index] == expected[index]);
+        REQUIRE(irregular[index] == expected[index]);
+    }
+    REQUIRE(irregular == fixed);
+}
 
 // Faster tempo ⇒ more steps per fixed wall-clock window, so more MIDI
 // events should land in the same number of samples. If the sequencer
