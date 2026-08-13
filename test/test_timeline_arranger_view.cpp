@@ -160,7 +160,161 @@ CanonicalHistory exercise_device_drag(PointerType pointer_type) {
     return {baseline, edited, undone, redone, std::move(intents)};
 }
 
+Project make_three_track_project() {
+    auto first = Track::create({4}, "first", {make_note_clip({5}, {6}, 0)});
+    auto second = Track::create({7}, "second", {});
+    auto third = Track::create({8}, "third", {});
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(third);
+    std::vector<Track> tracks;
+    tracks.push_back(std::move(first).value());
+    tracks.push_back(std::move(second).value());
+    tracks.push_back(std::move(third).value());
+    auto sequence =
+        Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter}, std::move(tracks));
+    REQUIRE(sequence);
+    ProjectInput input;
+    input.id = {1};
+    input.name = "project";
+    input.next_item_id = 9;
+    input.root_sequence_id = {3};
+    input.sequences.push_back(std::move(sequence).value());
+    auto project = Project::create(std::move(input));
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+std::vector<ItemId> track_order_after_round_trip(const Project& project) {
+    const auto registry = builtin_registry();
+    auto encoded = serialize_project(project, registry);
+    REQUIRE(encoded);
+    auto decoded = deserialize_project(encoded.value().json, registry);
+    REQUIRE(decoded);
+    const auto order = decoded.value().find_sequence({3})->track_order();
+    return {order.begin(), order.end()};
+}
+
+struct TrackReorderHistory {
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+    std::vector<ItemId> reopened_order;
+    std::vector<TrackEditIntent> intents;
+};
+
+TrackReorderHistory exercise_track_header_drag(PointerType pointer_type, pulp::view::Point start,
+                                               pulp::view::Point end) {
+    auto owned = DocumentSession::create(make_three_track_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+
+    const auto baseline = canonical_project(*session->snapshot());
+    ScriptedUiHost<TrackEditIntent> host;
+    ArrangerView view;
+    ScriptedUiHost<EditIntent> clip_host;
+    configure(view, *session->snapshot(), clip_host);
+    view.set_track_edit_host(&host);
+    view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+    pulp::view::View::SimulatedPointer pointer;
+    pointer.type = pointer_type;
+    view.simulate_drag(start, end, 4, pointer);
+
+    const auto intents = host.intents();
+    const auto undo_group = writer.allocate_undo_group_id();
+    REQUIRE(undo_group.valid());
+    for (const auto& intent : intents) {
+        EditIntentIdentity identity;
+        identity.transaction_id = writer.allocate_transaction_id();
+        identity.command_id = writer.allocate_command_id();
+        identity.expected_revision = session->revision();
+        identity.undo_group = undo_group;
+        auto lowered = lower_track_edit_intent(intent, identity);
+        REQUIRE(lowered);
+        REQUIRE(session->submit(writer, std::move(lowered).value()));
+    }
+
+    const auto edited = canonical_project(*session->snapshot());
+    const auto reopened_order = track_order_after_round_trip(*session->snapshot());
+    std::string undone = edited;
+    std::string redone = edited;
+    if (!intents.empty()) {
+        REQUIRE(session->undo(writer));
+        undone = canonical_project(*session->snapshot());
+        REQUIRE(session->redo(writer));
+        redone = canonical_project(*session->snapshot());
+    }
+    return {baseline, edited, undone, redone, reopened_order, intents};
+}
+
+void check_same_track_intent(const TrackEditIntent& left, const TrackEditIntent& right) {
+    CHECK(left.kind == right.kind);
+    CHECK(left.phase == right.phase);
+    CHECK(left.sequence_id == right.sequence_id);
+    CHECK(left.track_id == right.track_id);
+    CHECK(left.expected_before_track_id == right.expected_before_track_id);
+    CHECK(left.replacement_before_track_id == right.replacement_before_track_id);
+}
+
 } // namespace
+
+TEST_CASE("Arranger track-header drags reorder authored tracks for mouse and touch",
+          "[timeline][arranger][parity]") {
+    const pulp::view::Point header_third{60.0f, 100.0f};
+    const pulp::view::Point header_front{60.0f, 0.0f};
+    const auto mouse = exercise_track_header_drag(PointerType::mouse, header_third, header_front);
+    const auto touch = exercise_track_header_drag(PointerType::touch, header_third, header_front);
+
+    REQUIRE(mouse.intents.size() == 1);
+    REQUIRE(touch.intents.size() == 1);
+    check_same_track_intent(mouse.intents.front(), touch.intents.front());
+    CHECK(mouse.intents.front().expected_before_track_id == std::nullopt);
+    CHECK(mouse.intents.front().replacement_before_track_id == std::optional<ItemId>{{4}});
+    CHECK(mouse.reopened_order == std::vector<ItemId>{{8}, {4}, {7}});
+    CHECK(touch.reopened_order == mouse.reopened_order);
+    CHECK(mouse.edited == touch.edited);
+    CHECK(mouse.edited != mouse.baseline);
+    CHECK(mouse.undone == mouse.baseline);
+    CHECK(touch.undone == touch.baseline);
+    CHECK(mouse.redone == mouse.edited);
+    CHECK(touch.redone == touch.edited);
+}
+
+TEST_CASE("Arranger track-header drop below the rows moves a track last", "[timeline][arranger]") {
+    const auto history =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 20.0f}, {60.0f, 160.0f});
+    REQUIRE(history.intents.size() == 1);
+    CHECK(history.intents.front().track_id == ItemId{4});
+    CHECK(history.intents.front().expected_before_track_id == std::optional<ItemId>{{7}});
+    CHECK(history.intents.front().replacement_before_track_id == std::nullopt);
+    CHECK(history.reopened_order == std::vector<ItemId>{{7}, {8}, {4}});
+    CHECK(history.undone == history.baseline);
+    CHECK(history.redone == history.edited);
+}
+
+TEST_CASE("Arranger track-header drop at the authored position emits nothing",
+          "[timeline][arranger]") {
+    const auto click =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 20.0f}, {60.0f, 20.0f});
+    CHECK(click.intents.empty());
+    CHECK(click.edited == click.baseline);
+
+    const auto horizontal_jitter =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 30.0f}, {61.0f, 30.0f});
+    CHECK(horizontal_jitter.intents.empty());
+    CHECK(horizontal_jitter.edited == horizontal_jitter.baseline);
+
+    const auto history =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 60.0f}, {60.0f, 40.0f});
+    CHECK(history.intents.empty());
+    CHECK(history.edited == history.baseline);
+    CHECK(history.reopened_order == std::vector<ItemId>{{4}, {7}, {8}});
+}
 
 TEST_CASE("Arranger mouse and touch drags share one exact undoable document edit",
           "[timeline][arranger][parity]") {

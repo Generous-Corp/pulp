@@ -1,9 +1,11 @@
 #include <pulp/timeline_view/arranger_view.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/timeline_editor/track_header_projection.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <variant>
 
@@ -53,8 +55,9 @@ ArrangerView::ArrangerView() = default;
 void ArrangerView::set_project(const Project* project, ItemId sequence_id) {
     project_ = project;
     sequence_id_ = sequence_id;
-    // A project swap invalidates anything a live drag believed about a clip.
+    // A project swap invalidates anything a live drag believed about the document.
     drag_.reset();
+    header_drag_.reset();
 }
 
 void ArrangerView::set_layout(const ArrangerLayout& layout) {
@@ -63,6 +66,10 @@ void ArrangerView::set_layout(const ArrangerLayout& layout) {
 
 void ArrangerView::set_host(timeline_editor::EditIntentHost* host) {
     host_ = host;
+}
+
+void ArrangerView::set_track_edit_host(timeline_editor::TrackEditIntentHost* host) {
+    track_edit_host_ = host;
 }
 
 void ArrangerView::set_hit_metrics(const view::HitMetrics& metrics) {
@@ -182,10 +189,29 @@ void ArrangerView::paint(canvas::Canvas& canvas) {
 
 void ArrangerView::on_mouse_down(view::Point position) {
     drag_.reset();
+    header_drag_.reset();
     std::size_t row = 0;
     const auto* track = track_at(position, row);
-    if (!track || position.x < layout_.lane_left_px)
+    if (!track)
         return;
+
+    if (position.x < layout_.lane_left_px) {
+        const auto* seq = sequence();
+        if (!seq)
+            return;
+        const auto order = seq->track_order();
+        const auto placed = std::find(order.begin(), order.end(), track->id());
+        if (placed == order.end())
+            return;
+        HeaderDrag drag;
+        drag.track_id = track->id();
+        drag.pointer_down_y = position.y;
+        drag.grab_offset_y = position.y - layout_.y_for_track_index(row);
+        if (std::next(placed) != order.end())
+            drag.expected_before_track_id = *std::next(placed);
+        header_drag_ = drag;
+        return;
+    }
 
     if (const auto* clip = clip_at(*track, position)) {
         Drag drag;
@@ -225,6 +251,10 @@ void ArrangerView::on_mouse_down(view::Point position) {
 }
 
 void ArrangerView::on_mouse_drag(view::Point position) {
+    if (header_drag_) {
+        header_drag_->moved = header_drag_->moved || position.y != header_drag_->pointer_down_y;
+        return;
+    }
     if (!drag_)
         return;
     const auto target =
@@ -242,6 +272,31 @@ void ArrangerView::on_mouse_drag(view::Point position) {
 }
 
 void ArrangerView::on_mouse_up(view::Point position) {
+    if (header_drag_) {
+        const auto* seq = sequence();
+        if (seq && header_drag_->moved) {
+            const auto order = seq->track_order();
+            const auto projection = timeline_editor::TrackHeaderProjection::create(
+                order, 0.0f, layout_.track_height_px);
+            if (projection) {
+                const auto dragged_header_top = position.y - header_drag_->grab_offset_y;
+                const auto destination = projection.value().before_track_for_drop(
+                    dragged_header_top, header_drag_->track_id);
+                if (destination && destination.value() != header_drag_->expected_before_track_id) {
+                    timeline_editor::TrackEditIntent intent;
+                    intent.kind = timeline_editor::TrackEditIntentKind::Reorder;
+                    intent.phase = GesturePhase::Single;
+                    intent.sequence_id = sequence_id_;
+                    intent.track_id = header_drag_->track_id;
+                    intent.expected_before_track_id = header_drag_->expected_before_track_id;
+                    intent.replacement_before_track_id = destination.value();
+                    submit(intent);
+                }
+            }
+        }
+        header_drag_.reset();
+        return;
+    }
     if (!drag_)
         return;
     const auto target =
@@ -259,6 +314,7 @@ void ArrangerView::on_mouse_up(view::Point position) {
 }
 
 void ArrangerView::on_mouse_cancel(view::Point) {
+    header_drag_.reset();
     if (!drag_)
         return;
     if (drag_->opened) {
@@ -285,6 +341,11 @@ void ArrangerView::emit_move(const Drag& drag, GesturePhase phase,
 void ArrangerView::submit(const timeline_editor::EditIntent& intent) {
     if (host_)
         host_->submit_intent(intent);
+}
+
+void ArrangerView::submit(const timeline_editor::TrackEditIntent& intent) {
+    if (track_edit_host_)
+        track_edit_host_->submit_intent(intent);
 }
 
 } // namespace pulp::timeline_view
