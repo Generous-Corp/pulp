@@ -23,6 +23,7 @@ jobs:
     # Linux group. Fork PRs and an unset selector fall back to hosted Linux.
     runs-on: >-
       ${{
+        github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
         (github.event_name == 'merge_group' ||
          github.event_name == 'workflow_dispatch' ||
          (github.event_name == 'pull_request' &&

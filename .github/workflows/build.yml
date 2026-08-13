@@ -117,6 +117,7 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -184,6 +185,7 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
           # PR_HEAD_REPO means this is not a pull request at all.
           _pr_head_repo = (os.environ.get("PR_HEAD_REPO") or "").strip()
@@ -510,9 +512,16 @@ jobs:
           local_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
+          trusted_local_linux_workflow = (
+              WORKFLOW_REF
+              == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
+          )
           trusted_local_linux_event = (
-              EVENT_NAME == "merge_group"
-              or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
+              trusted_local_linux_workflow
+              and (
+                  EVENT_NAME == "merge_group"
+                  or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
+              )
           )
           if (
               not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()

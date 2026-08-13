@@ -174,7 +174,7 @@
     },
     {
       "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
-      "purpose": "Linux build lane for build.yml's `Linux (x64)` leg, preferred for same-repository pull requests and protected merge groups through the restricted pulp-trusted-build runner group, with hosted fallback when the selector is unset. Served by ephemeral Proxmox VMs on macpro. Fork pull requests remain hosted. NATIVE x86_64 — the job is an x64 build, so the earlier ARM64/Tart plan for this lane would have changed its architecture rather than relocating it. Clones come from the `pulp-linux-golden` template (deps + prebuilt Skia + warm ccache baked in) and are destroyed per job.",
+      "purpose": "Linux build lane for build.yml's `Linux (x64)` leg, preferred for protected main workflow refs and merge-group jobs through the restricted pulp-trusted-build runner group, with hosted fallback for PR workflow revisions, forks, and an unset selector. Served by ephemeral Proxmox VMs on macpro. NATIVE x86_64 — the job is an x64 build, so the earlier ARM64/Tart plan for this lane would have changed its architecture rather than relocating it. Clones come from the `pulp-linux-golden` template (deps + prebuilt Skia + warm ccache baked in) and are destroyed per job.",
       "expect": [
         "self-hosted",
         "Linux",
