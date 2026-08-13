@@ -393,20 +393,26 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("Windows omitted by operator request", body)
 
     def test_required_macos_reporter_pools_match_wait_behavior(self) -> None:
-        """Only the merge-group polling reporter occupies preamble capacity.
+        """No merge-group reporter occupies preamble for the build duration.
 
         The PR reporter starts after the matrix is terminal and uses a dedicated
-        alias pool. The merge-group reporter waits alongside macOS on preamble,
-        so its explicit two-runner capacity contract must remain visible.
+        alias pool. Native merge groups report from the real macOS leg, while
+        the skip/failure fallback uses preamble only for one bounded step.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
         self.assertIn("ubuntu-latest", runs_on)
         self.assertNotIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
 
-        merge_runs_on = self.workflow["jobs"]["macos-merge-group"]["runs-on"]
-        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", merge_runs_on)
-        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", fallback["runs-on"])
+        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", fallback["runs-on"])
+        fallback_body = "\n".join(
+            step.get("run", "") for step in fallback["steps"]
+        )
+        self.assertNotIn("gh api", fallback_body)
+        self.assertNotIn("while true", fallback_body)
+        self.assertNotIn("sleep 10", fallback_body)
 
     def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
         """Advisory results may delay but cannot determine required macOS."""
@@ -426,23 +432,40 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         pr_alias = self.workflow["jobs"]["macos"]
         self.assertIn("macos-pr-unused", pr_alias["name"])
 
-        merge_alias = self.workflow["jobs"]["macos-merge-group"]
-        self.assertIn("macos-merge-unused", merge_alias["name"])
-        self.assertIn("'macos'", merge_alias["name"])
-        self.assertNotIn("build", merge_alias["needs"])
-        self.assertIn("resolve-provider", merge_alias["needs"])
-        self.assertIn("classify", merge_alias["needs"])
-        merge_body = "\n".join(
-            step.get("run", "") for step in merge_alias["steps"]
+        matrix_name = self.workflow["jobs"]["build"]["name"]
+        self.assertIn("github.event_name == 'merge_group'", matrix_name)
+        self.assertIn("matrix.key == 'macos'", matrix_name)
+        self.assertIn("'macos'", matrix_name)
+
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertIn("macos-merge-unused", fallback["name"])
+        self.assertIn("'macos'", fallback["name"])
+        self.assertNotIn("build", fallback["needs"])
+        self.assertIn("resolve-provider", fallback["needs"])
+        self.assertIn("classify", fallback["needs"])
+        fallback_condition = " ".join(fallback["if"].split())
+        self.assertIn(
+            "needs.resolve-provider.result != 'success'", fallback_condition
         )
-        self.assertIn("macOS leg not terminal yet", merge_body)
-        self.assertIn("without depending on Linux", merge_body)
-        self.assertIn("keep at least two reporter-capable runners online", read(WORKFLOWS / "build.yml"))
-        self.assertIn("did not materialize after 12 polls", merge_body)
-        merge_condition = " ".join(merge_alias["if"].split())
+        self.assertIn("needs.classify.result != 'success'", fallback_condition)
+        self.assertIn(
+            "needs.classify.outputs.native_build_required != 'true'",
+            fallback_condition,
+        )
+
+    def test_merge_group_macos_does_not_serialize_or_cancel_queue_entries(self) -> None:
+        """Five queue entries keep independent runs and direct macOS checks."""
+        concurrency = self.workflow["concurrency"]
+        self.assertEqual(concurrency["group"], "build-${{ github.ref }}")
         self.assertEqual(
-            merge_condition, "always() && github.event_name == 'merge_group'"
+            concurrency["cancel-in-progress"],
+            "${{ github.event_name != 'push' }}",
         )
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertNotIn("concurrency", fallback)
+        guide = read(REPO_ROOT / "docs" / "guides" / "local-ci.md")
+        self.assertIn("five-entry merge queue", guide)
+        self.assertIn("two active preamble runners", guide)
 
     def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
         for name in ("linux", "windows"):

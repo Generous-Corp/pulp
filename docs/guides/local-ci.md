@@ -909,41 +909,42 @@ branch when a Windows-touching change needs proof before merge.
 Windows are absent on `merge_group`, Windows remains reachable through
 `workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## The required macOS alias follows macOS, not advisory Linux
+## The required macOS context follows macOS, not advisory Linux
 
-Branch protection requires the stable `macos` alias so local/overflow provider
+Branch protection requires the stable `macos` context so local/overflow provider
 changes cannot rename the gate. The PR/manual reporter still starts after the
-combined build matrix is terminal. The merge-group reporter instead starts
-after routing and classification, then polls the current workflow run until the
-one `macOS ...` matrix leg is terminal. It never depends on the combined `build`
-job, so a queued or slow independently routed Linux leg cannot delay the
-required context. Both paths accept only a macOS conclusion of `success`.
-Missing, duplicate, null, skipped, cancelled, failed, and unknown terminal
-conclusions fail closed. Each API read gets three transport attempts; the
-merge-group terminal wait has no fixed poll-count deadline that could expire
-before a real queued or running macOS leg starts. A missing macOS job is a
-different state: after 12 ten-second observations without any matching job, the
-reporter fails closed with an explicit matrix-materialization error instead of
-silently occupying a runner forever.
+combined build matrix is terminal and accepts only the macOS leg's `success`
+conclusion. Missing, duplicate, null, skipped, cancelled, failed, and unknown
+conclusions fail closed, and each API read gets three transport attempts.
 
-The reporters use `gh api --paginate` and decode its concatenated JSON object
-stream directly. Keep that compatibility boundary: some preamble images support
-pagination but do not provide the newer `--slurp` flag. The parser still reads
-every page and rejects an empty response or any non-object page.
+On a native `merge_group`, the real macOS matrix leg is named exactly `macos`
+and therefore owns the required context directly. The independently routed
+Linux leg has a different check and cannot delay or determine that macOS result.
+Routing or classification failures, plus skip-safe groups that intentionally
+create no matrix, use a separate short fallback job: failures report red and
+skip-safe groups report green. The fallback never polls the jobs API.
+If the real macOS leg cannot acquire its JIT runner, the required check remains
+queued and the merge queue's normal check-response timeout applies; no reporter
+holds a preamble slot during that wait.
+
+The PR/manual reporter uses `gh api --paginate` and decodes its concatenated JSON
+object stream directly. Keep that compatibility boundary: some alias images
+support pagination but do not provide the newer `--slurp` flag. The parser still
+reads every page and rejects an empty response or any non-object page.
 
 Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
 Linux or Windows work can therefore delay when the reporter starts, but neither
 `needs.build.result` nor an advisory leg's conclusion determines the required
 macOS verdict. On `merge_group`, the matrix contains the real self-hosted macOS
-leg plus the separately routed Linux leg. The dedicated merge-group reporter
-retains the same stable `macos` check name and observes macOS directly while
-Linux continues independently.
+leg plus the separately routed Linux leg. The macOS leg itself retains the
+stable `macos` check name while Linux continues independently.
 
-The PR alias is the **last job in the run**; the merge-group alias can finish as
-soon as macOS does. Starve either reporter of a runner and its required context
-never posts. A non-terminal run can also hold its `concurrency` group, and
-`build.yml` sets `cancel-in-progress` on that group — so the next push's run can
-sit at status `pending` with **zero jobs** and never dispatch. The pull request
+The PR alias is the **last job in the run**. A native merge group's required
+context is the macOS build job itself, so no terminal reporter needs another
+runner after the build. A non-terminal run can still hold its `concurrency`
+group. Because `build.yml` sets `cancel-in-progress` on that group, the next
+push's run can sit at status `pending` with **zero jobs** and never dispatch.
+The pull request
 is then wedged: no checks, no failure, nothing to re-run. It survives further
 pushes and clears only by cancelling the older run by hand.
 
@@ -957,17 +958,15 @@ ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel
 ```
 
 Reporter runner isolation still matters: the PR/dispatch reporter uses the
-dedicated alias selector, while merge-group and advisory reporters use the
-preamble selector so no bare hosted-runner dependency can hold a run open.
-`tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
-through the toggle and that none is pinned to a bare `ubuntu-latest`.
-The independent merge-group reporter is intentionally long-lived: it occupies
-one preamble slot for roughly the macOS build duration. Keep at least two
-reporter-capable preamble runners online. With the merge queue's two-entry build
-cap, both slots can be occupied by reporters, delaying unrelated classifier or
-resolver preambles until one macOS leg finishes; this is preferred to making
-the required `macos` context depend on the congested hosted pool or on advisory
-Linux terminality.
+dedicated alias selector, while advisory aliases and the skip/failure fallback
+use the preamble selector so no bare hosted-runner dependency can hold a run
+open. The live five-entry merge queue has only two active preamble runners. No
+merge-group reporter may hold either runner for a macOS build's duration: all
+five workflows must be able to drain their short resolver/classifier work. Do
+not serialize the workflows or fallback jobs with a shared Actions concurrency
+group; GitHub retains only one pending member of a group, so later queue entries
+can cancel an earlier pending required check. The per-ref workflow concurrency
+and its no-cancel exception for `push` remain unchanged.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its

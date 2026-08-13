@@ -65,7 +65,6 @@ require(
 
 aliases = {
     "macos": job_body(text, "macos"),
-    "macos-merge-group": job_body(text, "macos-merge-group"),
 }
 for name, job in aliases.items():
     require("if: always()" in job, f"{name} must report after failed dependencies")
@@ -107,20 +106,31 @@ require(
     "classification uncertainty must remain fail-closed",
 )
 require(
-    "github.event_name == 'merge_group'" in aliases["macos-merge-group"],
-    "merge_group must retain the stable macos alias",
+    "github.event_name == 'merge_group' && matrix.key == 'macos' && 'macos'"
+    in job_body(text, "build"),
+    "the real merge-group macOS matrix leg must own the stable macos context",
+)
+fallback = job_body(text, "macos-merge-group-fallback")
+require(
+    "needs: [resolve-provider, classify]" in fallback,
+    "merge-group fallback must not depend on Linux terminality through build",
 )
 require(
-    "needs: [resolve-provider, classify]" in aliases["macos-merge-group"],
-    "merge-group reporter must not depend on Linux terminality through build",
+    "PULP_PREAMBLE_RUNS_ON_JSON" in fallback
+    and "gh api" not in fallback
+    and "while true" not in fallback
+    and "sleep 10" not in fallback,
+    "merge-group fallback must release the shared preamble immediately",
 )
 require(
-    "while true" in aliases["macos-merge-group"]
-    and 'if len(matches) > 1' in aliases["macos-merge-group"]
-    and 'print("__missing__")' in aliases["macos-merge-group"]
-    and 'print("__pending__")' in aliases["macos-merge-group"]
-    and "sleep 10" in aliases["macos-merge-group"],
-    "merge-group reporter must wait for one terminal macOS leg without a fixed poll limit",
+    "needs.resolve-provider.result != 'success'" in fallback
+    and "needs.classify.result != 'success'" in fallback
+    and "needs.classify.outputs.native_build_required != 'true'" in fallback,
+    "merge-group fallback must cover routing/classification failure and skip-safe groups",
+)
+require(
+    "macos-merge-unused" in fallback,
+    "native merge groups must not get a second required macos context",
 )
 
 parsers = {name: parser_from(job) for name, job in aliases.items()}
@@ -159,50 +169,5 @@ for invalid in (
 ):
     result = run_parser(parser, invalid)
     require(result.returncode != 0, f"parser accepted invalid payload: {invalid!r}")
-
-merge_parser = parsers["macos-merge-group"]
-missing = run_parser(merge_parser, [{"jobs": []}])
-require(
-    missing.returncode == 0 and missing.stdout.strip() == "__missing__",
-    missing.stderr,
-)
-require(
-    '"$missing_polls" -ge 12' in aliases["macos-merge-group"]
-    and "did not materialize after 12 polls" in aliases["macos-merge-group"],
-    "a missing matrix job must fail closed on a bounded observable policy",
-)
-
-for jobs in (
-    [{"name": "macOS (ARM64) [local]", "status": "queued", "conclusion": None}],
-    [{"name": "macOS (ARM64) [local]", "status": "in_progress", "conclusion": None}],
-):
-    result = run_parser(merge_parser, [{"jobs": jobs}])
-    require(
-        result.returncode == 0 and result.stdout.strip() == "__pending__",
-        result.stderr,
-    )
-
-for conclusion in ("success", "failure", "cancelled", "skipped", None):
-    result = run_parser(
-        merge_parser,
-        [{
-            "jobs": [{
-                "name": "macOS (ARM64) [local]",
-                "status": "completed",
-                "conclusion": conclusion,
-            }]
-        }],
-    )
-    expected = conclusion if isinstance(conclusion, str) else ""
-    require(result.returncode == 0 and result.stdout.strip() == expected, result.stderr)
-
-duplicate = run_parser(
-    merge_parser,
-    [{"jobs": [
-        {"name": "macOS one", "status": "completed", "conclusion": "success"},
-        {"name": "macOS two", "status": "completed", "conclusion": "success"},
-    ]}],
-)
-require(duplicate.returncode != 0, "merge-group parser accepted duplicate macOS legs")
 
 print("required macos alias contract: ok")

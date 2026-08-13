@@ -777,10 +777,11 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    # All legs named uniformly `<name> [<provider>]`. The required `macos`
-    # check is now provided by the dedicated `macos` alias job below, not by
-    # this matrix leg — so the leg no longer self-names `macos`.
-    name: ${{ format('{0} [{1}]', matrix.name, matrix.provider) }}
+    # On merge_group the real macOS leg owns the required `macos` context
+    # directly. That makes its verdict independent of advisory Linux without a
+    # polling reporter occupying shared preamble capacity for the build's full
+    # duration. Other events retain the stable alias below.
+    name: ${{ github.event_name == 'merge_group' && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -1548,11 +1549,11 @@ jobs:
         run: cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
-  # Stable required `macos` alias. Each event-specific reporter starts only
-  # after its build matrix is terminal, then reads the exact macOS leg from
-  # this workflow run. PR/dispatch runs retain the combined matrix, so advisory
-  # legs may delay the reporter but cannot determine its result. merge_group
-  # retains a separate reporter with the same displayed required-check name.
+  # Stable required `macos` context. PR/dispatch use a terminal alias over the
+  # combined matrix. A native merge_group names its real macOS matrix leg
+  # `macos` directly; a short fallback covers skip-safe and failed preambles.
+  # Advisory Linux can therefore neither determine the verdict nor occupy a
+  # reporter runner while macOS executes.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
   # On a skip-safe PR (classify said no native
@@ -1655,23 +1656,23 @@ jobs:
           echo "macOS leg ${conclusion:-not found} — failing macos gate (required)"
           exit 1
 
-  macos-merge-group:
-    # Symmetric bootstrap: on non-merge events this skipped job must not emit
-    # the required name owned by the polling path above.
-    name: ${{ github.event_name == 'merge_group' && 'macos' || 'macos-merge-unused' }}
+  macos-merge-group-fallback:
+    # Native merge groups get the required name directly from their real macOS
+    # matrix leg. This short fallback owns it only when routing/classification
+    # fails or classification proves no native build is needed. The inactive
+    # copy must use a non-required name to avoid satisfying protection early.
+    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-merge-unused' }}
     needs: [resolve-provider, classify]
-    # This reporter starts beside the build matrix and polls only the macOS leg.
-    # It therefore preserves the required macOS verdict without waiting for an
-    # independently routed Linux leg to become terminal. Use the
-    # reporter-capable preamble pool so a green owned build cannot sit behind
-    # unrelated hosted-Linux congestion. This occupies one preamble slot for
-    # the macOS build duration; keep at least two reporter-capable runners online.
+    # This path does no polling and holds a preamble runner only long enough to
+    # emit the skip-safe or fail-closed verdict.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    if: always() && github.event_name == 'merge_group'
+    if: >-
+      always() && github.event_name == 'merge_group' &&
+      (needs.resolve-provider.result != 'success' ||
+      needs.classify.result != 'success' ||
+      needs.classify.outputs.native_build_required != 'true')
     steps:
-      - name: macOS-only merge-group outcome (required)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Merge-group macOS fallback (required)
         shell: bash
         run: |
           set -euo pipefail
@@ -1687,95 +1688,8 @@ jobs:
             echo "Skip-safe merge group — macos gate ✓"
             exit 0
           fi
-          jobs_json="$(mktemp)"
-          jobs_err="$(mktemp)"
-          trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
-          missing_polls=0
-          while true; do
-            api_ok=false
-            for attempt in 1 2 3; do
-              if gh api --paginate \
-                "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
-                >"$jobs_json" 2>"$jobs_err"; then
-                api_ok=true
-                break
-              fi
-              echo "Jobs API request failed (transport attempt $attempt/3)."
-              cat "$jobs_err"
-              if [ "$attempt" -lt 3 ]; then
-                sleep "$attempt"
-              fi
-            done
-            if [ "$api_ok" != "true" ]; then
-              echo "Jobs API remained unavailable — failing macos gate closed (required)"
-              exit 1
-            fi
-            conclusion=$(
-              cd /tmp
-              python3 - "$jobs_json" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              payload = handle.read()
-          decoder = json.JSONDecoder()
-          pages = []
-          offset = 0
-          while offset < len(payload):
-              while offset < len(payload) and payload[offset].isspace():
-                  offset += 1
-              if offset == len(payload):
-                  break
-              page, offset = decoder.raw_decode(payload, offset)
-              pages.append(page)
-          if not pages or not all(isinstance(page, dict) for page in pages):
-              raise SystemExit("jobs API response did not contain object pages")
-          matches = [
-              job
-              for page in pages
-              if isinstance(page, dict)
-              for job in page.get("jobs", [])
-              if isinstance(job, dict)
-              and job.get("name", "").startswith("macOS")
-          ]
-          if len(matches) > 1:
-              raise SystemExit(
-                  f"expected at most one macOS matrix leg, found {len(matches)}"
-              )
-          if not matches:
-              print("__missing__")
-              raise SystemExit(0)
-          if matches[0].get("status") != "completed":
-              print("__pending__")
-              raise SystemExit(0)
-          conclusion = matches[0].get("conclusion")
-          print(conclusion if isinstance(conclusion, str) else "")
-          PY
-            )
-            if [ "$conclusion" = "__missing__" ]; then
-              missing_polls=$((missing_polls + 1))
-              if [ "$missing_polls" -ge 12 ]; then
-                echo "macOS matrix job did not materialize after 12 polls — failing macos gate closed"
-                exit 1
-              fi
-              echo "macOS matrix job not visible yet ($missing_polls/12)"
-              sleep 10
-              continue
-            fi
-            missing_polls=0
-            if [ "$conclusion" = "__pending__" ]; then
-              echo "macOS leg not terminal yet — waiting without depending on Linux"
-              sleep 10
-              continue
-            fi
-            echo "macOS leg conclusion: ${conclusion:-unknown}"
-            if [ "$conclusion" = "success" ]; then
-              echo "Self-hosted macOS matrix green — macos gate ✓"
-              exit 0
-            fi
-            echo "Self-hosted macOS matrix ${conclusion:-unknown} — failing macos gate"
-            exit 1
-          done
+          echo "native merge group unexpectedly reached fallback — failing macos gate closed"
+          exit 1
 
   linux:
     needs: [build, classify]

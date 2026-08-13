@@ -1356,22 +1356,22 @@ uses, or the golden warms a cache the real jobs never touch.
   (or run from a context with no `GIT_DIR`), and never assume `-C` alone
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
-- The required `macos` aliases in `.github/workflows/build.yml` depend on the
-  terminal build matrix, then query only the current run's paginated latest jobs
-  for exactly one macOS matrix leg. Only conclusion `success` is green;
-  missing, duplicate, null, skipped, cancelled, failed, and unknown outcomes
-  fail closed. Keep three short retries for jobs-API transport failures only;
-  malformed JSON and invalid cardinality are verdict failures, not reasons to
-  resume build polling. PR/dispatch runs retain the combined matrix, so advisory
-  legs may delay the reporter but `needs.build.result` must never determine it.
-  The merge-group report uses the preamble pool and preserves the stable
-  required context name. It occupies one preamble slot for the macOS build
-  duration, so keep at least two reporter-capable runners online; two concurrent
-  queue entries may temporarily consume both. A real queued/running macOS job
-  has no fixed poll deadline, but twelve consecutive polls with no macOS job at
-  all fail closed as a matrix-materialization error. These two reporters use bare
-  `gh api --paginate` and decode the concatenated JSON object stream; do not add
-  `--slurp`, because older preamble images reject that newer flag.
+- The required `macos` context in `.github/workflows/build.yml` has two bounded
+  paths. PR/dispatch runs retain the combined matrix, then their terminal alias
+  queries only the current run's paginated latest jobs for exactly one macOS
+  leg. Only conclusion `success` is green; missing, duplicate, null, skipped,
+  cancelled, failed, and unknown outcomes fail closed. Keep three short retries
+  for jobs-API transport failures only; malformed JSON and invalid cardinality
+  are verdict failures. Native merge groups instead name the real macOS matrix
+  leg exactly `macos`, so advisory Linux cannot delay or determine it and no
+  polling reporter holds scarce preamble capacity. A short preamble fallback
+  reports skip-safe groups green and routing/classification failures red. With a
+  five-entry merge queue and two active preamble runners, never restore a
+  long-lived merge-group reporter or serialize those runs under one Actions
+  concurrency group: a group retains only one pending member and later entries
+  can cancel an earlier required check. The PR reporter uses bare
+  `gh api --paginate` and decodes the concatenated JSON object stream; do not add
+  `--slurp`, because older alias images reject that newer flag.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
@@ -1380,7 +1380,7 @@ uses, or the golden warms a cache the real jobs never touch.
   so wrap each inline invocation with `cd /tmp` first (`/private/tmp` on
   macOS), and use `GITHUB_WORKSPACE` only as an absolute repo-path argument
   afterward. `test_preamble_python_stable_cwd.py` enumerates both
-  `PULP_PREAMBLE_RUNS_ON_JSON` jobs and long-lived polling aliases routed by
+  `PULP_PREAMBLE_RUNS_ON_JSON` jobs and polling aliases routed by
   `PULP_ALIAS_RUNS_ON_JSON`; moving a job between those pools must preserve
   its stable-cwd classification.
 - `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
