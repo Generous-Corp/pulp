@@ -428,8 +428,12 @@ template <typename SampleType = float> class WavesetTransformerT {
     using ResetHook = void (*)();
     static void set_reset_hook(ResetHook hook) noexcept { reset_hook_.store(hook); }
     using ResetCompletionHook = void (*)();
-    static void set_reset_completion_hook(ResetCompletionHook hook) noexcept {
-        reset_completion_hook_.store(hook);
+    static void set_reset_completion_hook(ResetCompletionHook hook) noexcept { reset_completion_hook_.store(hook); }
+    using ControlCompletionHook = void (*)();
+    static void set_control_completion_hook(ControlCompletionHook hook) noexcept { control_completion_hook_.store(hook); }
+    using DrainedSnapshotHook = void (*)();
+    static void set_drained_snapshot_hook(DrainedSnapshotHook hook) noexcept {
+        drained_snapshot_hook_.store(hook);
     }
 #endif
     bool set_coordinate_seed(std::uint64_t seed) noexcept { return update_control([&] { coordinate_seed_.store(seed); }); }
@@ -557,7 +561,8 @@ template <typename SampleType = float> class WavesetTransformerT {
         for (;;) {
             const auto state = control_state(word);
             if (state == State::Unprepared || state == State::Finished || state == State::Draining ||
-                state == State::Faulted || state == State::Finishing || state == State::Resetting)
+                state == State::Observing || state == State::Faulted || state == State::Finishing ||
+                state == State::Resetting)
                 return;
             if (state == State::Publishing || state == State::Pushing || state == State::Pulling ||
                 state == State::Controlling) {
@@ -583,8 +588,26 @@ template <typename SampleType = float> class WavesetTransformerT {
         finish_owned_processing();
     }
     bool drained() const noexcept {
-        return current_state() == State::Finished && splicer_.size() == 0 && capture_size_ == 0 &&
-               held_count_ == 0;
+        auto word = control_.load(std::memory_order_acquire);
+        for (;;) {
+            if (control_state(word) != State::Finished)
+                return false;
+            if (control_.compare_exchange_weak(word, with_state(word, State::Observing),
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire))
+                break;
+        }
+#if defined(PULP_WAVESET_TEST_SEAMS)
+        if (const auto hook = drained_snapshot_hook_.load(std::memory_order_acquire))
+            hook();
+#endif
+        const bool result = splicer_.size() == 0 && capture_size_ == 0 && held_count_ == 0;
+        word = control_.load(std::memory_order_acquire);
+        while (!control_.compare_exchange_weak(word, with_state(word, State::Finished),
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {
+        }
+        return result;
     }
     void reset() noexcept {
         auto word = control_.load(std::memory_order_acquire);
@@ -592,8 +615,7 @@ template <typename SampleType = float> class WavesetTransformerT {
             const auto state = control_state(word);
             if (state == State::Unprepared || state == State::Publishing ||
                 state == State::Pushing || state == State::Pulling || state == State::Draining ||
-                state == State::Controlling || state == State::Finishing ||
-                state == State::Resetting)
+                state == State::Observing || state == State::Controlling || state == State::Finishing || state == State::Resetting)
                 return;
             if (control_.compare_exchange_weak(word, with_state(word, State::Resetting),
                                                std::memory_order_acq_rel,
@@ -617,13 +639,25 @@ template <typename SampleType = float> class WavesetTransformerT {
         control_.store(pack_control(State::Quiescent, active_slot_, configured),
                        std::memory_order_release);
     }
-    int latency_samples() const noexcept { return 0; } // No fixed host-compensation delay.
+    int latency_samples() const noexcept { return 0; }
     int max_lookahead_samples() const noexcept { return prepared() ? max_lookahead_ : 0; }
     std::size_t tail_samples() const noexcept { return prepared() ? tail_ : 0; }
   private:
-    enum class State : std::uint8_t { Unprepared, Quiescent, Publishing, Live, Pushing, Pulling,
-                                      Draining, Controlling, Finishing, Resetting, Finished,
-                                      Faulted };
+    enum class State : std::uint8_t {
+        Unprepared,
+        Quiescent,
+        Publishing,
+        Live,
+        Pushing,
+        Pulling,
+        Draining,
+        Observing,
+        Controlling,
+        Finishing,
+        Resetting,
+        Finished,
+        Faulted,
+    };
     static constexpr std::uint32_t kStateShift = 3;
     static constexpr std::uint32_t kSlotMask = 0x7u;
     static constexpr std::uint32_t kConfiguredShift = 8;
@@ -912,10 +946,13 @@ template <typename SampleType = float> class WavesetTransformerT {
         transition_terminal(State::Faulted);
     }
     void finish_owned_processing() noexcept {
-        if (capture_size_ != 0) finalize_capture(true);
-        if (current_state() == State::Faulted) return;
+        if (capture_size_ != 0)
+            finalize_capture(true);
+        if (current_state() == State::Faulted)
+            return;
         flush_partial_rotate();
-        if (current_state() != State::Faulted) transition_terminal(State::Finished);
+        if (current_state() != State::Faulted)
+            transition_terminal(State::Finished);
     }
     void apply_pending_program() noexcept { apply_program(control_slot(control_.load(std::memory_order_acquire))); }
     void apply_program(std::uint8_t slot) noexcept {
@@ -954,10 +991,14 @@ template <typename SampleType = float> class WavesetTransformerT {
                                                std::memory_order_acquire))
                 break;
         }
-        mutation(); word = control_.load(std::memory_order_acquire);
+        mutation();
+#if defined(PULP_WAVESET_TEST_SEAMS)
+        if (const auto hook = control_completion_hook_.load(std::memory_order_acquire)) hook();
+#endif
+        word = control_.load(std::memory_order_acquire);
         for (;;) {
-            const auto target = control_finish_requested(word) ? State::Finished : source;
-            if (control_.compare_exchange_weak(word, with_state(word, target),
+            if (control_finish_requested(word)) { finish_owned_processing(); return true; }
+            if (control_.compare_exchange_weak(word, with_state(word, source),
                                                std::memory_order_acq_rel,
                                                std::memory_order_acquire)) return true;
         }
@@ -979,7 +1020,7 @@ template <typename SampleType = float> class WavesetTransformerT {
     ChunkInfo previous_chunk_{};
     std::uint8_t active_slot_ = 0;
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
-    std::atomic<std::uint32_t> control_{pack_control(State::Unprepared, 0)};
+    mutable std::atomic<std::uint32_t> control_{pack_control(State::Unprepared, 0)};
     std::atomic<std::uint8_t> polarity_{static_cast<std::uint8_t>(ZeroCrossingPolarity::Rising)};
     std::atomic<SampleType> epsilon_{SampleType{}};
     std::atomic<std::uint8_t> crossfade_law_{
@@ -994,6 +1035,8 @@ template <typename SampleType = float> class WavesetTransformerT {
     inline static std::atomic<FinishHook> finish_hook_{nullptr};
     inline static std::atomic<ResetHook> reset_hook_{nullptr};
     inline static std::atomic<ResetCompletionHook> reset_completion_hook_{nullptr};
+    inline static std::atomic<ControlCompletionHook> control_completion_hook_{nullptr};
+    inline static std::atomic<DrainedSnapshotHook> drained_snapshot_hook_{nullptr};
 #endif
 };
 using WavesetTransformer = WavesetTransformerT<float>; using WavesetTransformer64 = WavesetTransformerT<double>; } // namespace pulp::signal

@@ -29,6 +29,9 @@ bool finish_pull_excluded = false;
 bool reset_pull_excluded = false;
 bool reset_completion_push_rejected = false;
 bool startup_pull_rejected = false;
+bool control_finish_latched = false;
+bool drained_pull_excluded = false;
+bool drained_reset_excluded = false;
 void request_reverse_after_startup_cas() {
     REQUIRE(startup_hook_transformer != nullptr);
     REQUIRE(startup_hook_transformer->request_program_slot(1));
@@ -82,6 +85,25 @@ void push_during_reset_completion() {
     const float sample = 1.0f;
     reset_completion_push_rejected = publication_hook_transformer->push(&sample, 1) == 0;
     Transformer::set_reset_completion_hook(nullptr);
+}
+void finish_during_control_completion() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    publication_hook_transformer->finish_input();
+    control_finish_latched = true;
+    Transformer::set_control_completion_hook(nullptr);
+}
+void pull_during_drained_snapshot() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    float output{};
+    drained_pull_excluded = publication_hook_transformer->pull(&output, 1) == 0;
+    Transformer::set_drained_snapshot_hook(nullptr);
+}
+void reset_during_drained_snapshot() {
+    REQUIRE(publication_hook_transformer != nullptr);
+    publication_hook_transformer->reset();
+    const float sample = 5.0f;
+    drained_reset_excluded = publication_hook_transformer->push(&sample, 1) == 0;
+    Transformer::set_drained_snapshot_hook(nullptr);
 }
 
 Transformer::OperationProgram program(Transformer::Operation operation, std::uint8_t repeat = 1) {
@@ -1102,6 +1124,81 @@ TEST_CASE("waveset reset joins the unified lifecycle order", "[signal][waveset][
         REQUIRE(reset_completion_push_rejected);
         REQUIRE_FALSE(transformer.drained());
         REQUIRE(drain(transformer, {3.0f, 4.0f}) == std::vector<float>{3.0f, 4.0f});
+    }
+    publication_hook_transformer = nullptr;
+}
+
+TEST_CASE("waveset setter completion transfers latched EOS to processor finalization",
+          "[signal][waveset][thread]") {
+    SECTION("buffered capture becomes readable terminal output") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 4, 1.0}));
+        const std::array<float, 2> input{1.0f, 2.0f};
+        REQUIRE(transformer.push(input.data(), 2) == 2);
+        publication_hook_transformer = &transformer;
+        control_finish_latched = false;
+        Transformer::set_control_completion_hook(finish_during_control_completion);
+        REQUIRE(transformer.set_coordinate_seed(7));
+        REQUIRE(control_finish_latched);
+        std::array<float, 2> output{};
+        REQUIRE(transformer.pull(output.data(), 2) == 2);
+        REQUIRE(output == input);
+        REQUIRE(transformer.drained());
+    }
+    SECTION("partial Rotate group is flushed before terminal drain") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        Transformer::OperationProgram rotate;
+        rotate.steps.resize(2);
+        for (auto& step : rotate.steps) step.operation = Transformer::Operation::Rotate;
+        rotate.rotate_window = 2;
+        rotate.permutation = {0, 1};
+        REQUIRE(transformer.set_program(0, rotate));
+        const std::array<float, 2> input{1.0f, 2.0f};
+        REQUIRE(transformer.push(input.data(), 2) == 2);
+        publication_hook_transformer = &transformer;
+        control_finish_latched = false;
+        Transformer::set_control_completion_hook(finish_during_control_completion);
+        REQUIRE(transformer.set_coordinate_seed(9));
+        REQUIRE(control_finish_latched);
+        std::array<float, 2> output{};
+        REQUIRE(transformer.pull(output.data(), 2) == 2);
+        REQUIRE(output == input);
+        REQUIRE(transformer.drained());
+    }
+    publication_hook_transformer = nullptr;
+}
+
+TEST_CASE("waveset drained snapshot serializes Finished pull and reset races",
+          "[signal][waveset][thread]") {
+    SECTION("pull waits until a non-drained snapshot releases ownership") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        const float input = 3.0f;
+        REQUIRE(transformer.push(&input, 1) == 1);
+        transformer.finish_input();
+        publication_hook_transformer = &transformer;
+        drained_pull_excluded = false;
+        Transformer::set_drained_snapshot_hook(pull_during_drained_snapshot);
+        REQUIRE_FALSE(transformer.drained());
+        REQUIRE(drained_pull_excluded);
+        float output{};
+        REQUIRE(transformer.pull(&output, 1) == 1);
+        REQUIRE(output == input);
+        REQUIRE(transformer.drained());
+    }
+    SECTION("reset waits until a drained snapshot releases ownership") {
+        Transformer transformer;
+        REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
+        transformer.finish_input();
+        publication_hook_transformer = &transformer;
+        drained_reset_excluded = false;
+        Transformer::set_drained_snapshot_hook(reset_during_drained_snapshot);
+        REQUIRE(transformer.drained());
+        REQUIRE(drained_reset_excluded);
+        transformer.reset();
+        REQUIRE_FALSE(transformer.drained());
+        REQUIRE(drain(transformer, {4.0f}) == std::vector<float>{4.0f});
     }
     publication_hook_transformer = nullptr;
 }
