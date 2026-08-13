@@ -25,8 +25,10 @@ test("pixels are read with virtual time running again", async () => {
   }]);
 });
 
-test("page settle observes a readiness window after an early plateau", async () => {
-  let samples = 0;
+test("page settle reaches a transition inside its minimum readiness window", async () => {
+  const minimumElapsedMs = 35;
+  const observedVisibility = new Set();
+  let transitionAt;
   const sample = (visible) => JSON.stringify({
     ready: "complete",
     fonts: "loaded",
@@ -40,22 +42,25 @@ test("page settle observes a readiness window after an early plateau", async () 
     async call(method, options) {
       assert.equal(method, "Runtime.evaluate");
       if (options.expression.includes("JSON.stringify({")) {
-        samples += 1;
-        return { result: { value: sample(samples < 5 ? 1 : 2) } };
+        const firstSample = transitionAt === undefined;
+        if (firstSample) transitionAt = Date.now() + 2;
+        const visible = firstSample || Date.now() < transitionAt ? 1 : 2;
+        observedVisibility.add(visible);
+        return { result: { value: sample(visible) } };
       }
       return { result: { value: true } };
     },
   };
 
   const result = await waitForStable(cdp, {
-    stableRounds: 1,
-    maximumRounds: 12,
-    intervalMs: 10,
-    minimumElapsedMs: 35,
+    stableRounds: 2,
+    maximumRounds: 50,
+    intervalMs: 1,
+    minimumElapsedMs,
   });
 
-  assert.ok(result.elapsedMs >= 35);
-  assert.ok(samples >= 4);
+  assert.ok(result.elapsedMs >= minimumElapsedMs);
+  assert.deepEqual([...observedVisibility], [1, 2]);
 });
 
 test("stable screenshot capture uses the settled tail, not an early plateau",
