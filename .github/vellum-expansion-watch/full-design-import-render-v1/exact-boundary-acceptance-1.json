@@ -1,6 +1,6 @@
 {
   "acceptance_id": "full-design-import-render-v1-exact-boundary-acceptance-1",
-  "accepted_at": "2026-08-13T06:30:00Z",
+  "accepted_at": "2026-08-13T07:21:04Z",
   "accepted_by": "@danielraffel",
   "authority_effect": "none",
   "counterpart": {
@@ -24,35 +24,11 @@
   "kind": "full-design-import-render-exact-boundary-acceptance",
   "pulp_repository": "Generous-Corp/pulp",
   "refresh": {
-    "audited_at": "2026-08-13T06:30:00Z",
+    "audited_at": "2026-08-13T07:21:04Z",
     "open_pr_audit_complete": true,
-    "open_pr_rows": [
-      {
-        "disposition": "Pulp counterpart route; retain Pulp ownership until the PR is resolved.",
-        "head_commit": "9f1f426a5fdf6c748cebfa09d0074afd366d4d31",
-        "merge_base_commit": "2b5966b1b4b3690e250003fc5e075668b9a17b7b",
-        "paths": [
-          "external/skia-build/VERSION.md"
-        ],
-        "pull_request": 7312,
-        "repository": "Generous-Corp/pulp",
-        "resolution": "pulp-counterpart"
-      },
-      {
-        "disposition": "Pulp counterpart packaging work; retain Pulp ownership until the PR is resolved.",
-        "head_commit": "185d63aa912d0a5d3c55d54575a1dc5eda959251",
-        "merge_base_commit": "449678ecf272ba00036b38a63de7714c1d0df51d",
-        "paths": [
-          "tools/scripts/package_cli.py",
-          "tools/scripts/test_package_cli.py"
-        ],
-        "pull_request": 7415,
-        "repository": "Generous-Corp/pulp",
-        "resolution": "pulp-counterpart"
-      }
-    ],
+    "open_pr_rows": [],
     "open_vellum_overlap_count": 0,
-    "pulp_main_commit": "ed2090af334ad5a9e6d874bf8d03c00182bd4713"
+    "pulp_main_commit": "b3fe6fd7ecfef4d04776f452bc28805558a798dc"
   },
   "routing_projection": {
     "expansion_id": "full-design-import-render-v1",
@@ -83,7 +59,7 @@
     "router_path": ".agents/skills/pulp-vellum-change-routing/scripts/route_change.py",
     "router_sha256": "7659fb2be23ae16f071165acd8a898af9f57159e52bd50f79975cb62c2fbe2c7",
     "schema_version": 3,
-    "sha256": "c02c332a9cae6006404fc88bb12440490165d0eebf3b8cb1a89bb18bdfc02752"
+    "sha256": "648d637e45afd1335215934f374bf97b7f558c8f9398751c0d3825536e4f1938"
   },
   "schema_version": 1,
   "state": "accepted"
