@@ -457,6 +457,19 @@ DocumentRevision DocumentSession::revision() const noexcept {
     return current().revision;
 }
 
+bool DocumentSession::is_current_publication(const CommitResult& result) const noexcept {
+    const auto state = std::atomic_load_explicit(&impl_->published, std::memory_order_acquire);
+    return result.revision == state->revision && result.snapshot == state->snapshot;
+}
+
+bool DocumentSession::is_gesture_open(WriterToken::Provenance provenance,
+                                      UndoGroupId group) const noexcept {
+    std::lock_guard lock(impl_->mutex);
+    return provenance.owner_nonce_ == impl_->session_nonce && provenance.writer_ == group.writer &&
+           impl_->open_gesture && impl_->open_gesture->writer == provenance.writer_ &&
+           impl_->open_gesture->group == group;
+}
+
 runtime::Result<CommitResult, TransactionError> DocumentSession::submit(WriterToken& writer,
                                                                         Transaction transaction) {
     std::lock_guard lock(impl_->mutex);
