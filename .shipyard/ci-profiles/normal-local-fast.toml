@@ -28,7 +28,11 @@ health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"
 health_lease_ttl_seconds = 300
 health_lease_events = ["merge_group"]
 health_lease_runner_name_prefix = "pulp-ci-ephemeral-"
-health_lease_min_idle = 1
+health_lease_merge_queue_branch = "main"
+# Must cover the live ruleset's max_entries_to_build. With the current five-job
+# burst and only two Mac Pro Linux runners, the producer deliberately clears the
+# lease, leaving merge-group Linux hosted.
+health_lease_admission_burst = 5
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"

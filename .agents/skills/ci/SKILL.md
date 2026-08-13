@@ -5983,7 +5983,11 @@ release, signing, deployment, and `pull_request_target` must never consume the
 generic selector. The checked-in `health_lease_*` profile fields require
 Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
 release); Shipyard 0.83.0 ignores them. Keep the selector unset until that
-producer is installed and scheduled.
+producer is installed and scheduled. The producer must read `main`'s live
+`max_entries_to_build` and require unreserved idle capacity for that entire
+declared admission burst; the TTL is not an atomic reservation. Pulp currently
+declares five while the disposable fleet has two runners, so automatic
+merge-group Linux routing intentionally remains disarmed.
 
 Facts worth keeping (measured):
 

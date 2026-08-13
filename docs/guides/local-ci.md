@@ -188,14 +188,21 @@ receive merge-group code. The pool is native x86_64, which the job requires.
 
 The checked-in `normal-local-fast` profile is the producer contract: it names
 the selector and lease variables, a 300-second TTL, the exact `merge_group`
-event class, the ephemeral runner-name prefix, and one-idle-runner minimum.
+event class, the ephemeral runner-name prefix, `main`, and a five-job admission
+burst matching the live merge queue's `max_entries_to_build`.
 Support for these `health_lease_*` fields requires Shipyard's
 `runner local-linux-lease` producer (Shipyard commit `f3bee74` or a release that
 contains it); Shipyard 0.83.0 accepts but does not act on those fields. The
-producer derives required labels from the profile's first target, issues the
-selector only after a live fleet probe, and clears it when the probe is
-unavailable or unhealthy. Until that producer is installed and scheduled, keep
-the selector unset. `build.yml` consumes the contract automatically only for
+producer derives required labels from the profile's first target, reads the
+live branch rule, and renews the lease only when unreserved idle capacity covers
+the entire admission burst. A TTL is not atomic admission control: every one of
+the five workflows may consume the same snapshot. The current two-runner pool
+therefore cannot satisfy the five-job floor, so the producer deliberately clears
+the lease and merge-group Linux remains hosted. Do not lower the declared burst
+without first lowering and proving the live ruleset setting. The producer bases
+expiry on the post-observation time and clears on unreadable or unhealthy data.
+Until that producer is installed and scheduled, keep the selector unset.
+`build.yml` consumes the contract automatically only for
 merge groups and validates the RFC 3339 expiry before creating its matrix.
 `Vellum freeze` and `Enforce version & skill sync` are otherwise eligible
 unprivileged merge-group jobs, but remain hosted: a `runs-on` expression cannot

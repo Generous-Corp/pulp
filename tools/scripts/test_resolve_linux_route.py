@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -104,6 +105,19 @@ def test_operator_lease_is_short_lived_and_fails_closed() -> None:
     assert not route.operator_lease_active("not-a-time", now)
     assert not route.operator_lease_active("2026-08-13T18:10:00", now)
     assert not route.operator_lease_active("0001-01-01T00:00:00+14:00", now)
+
+
+def test_profile_covers_full_merge_queue_admission_burst() -> None:
+    profile = tomllib.loads(
+        (REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml").read_text()
+    )
+    lane = profile["repo"]["Generous-Corp/pulp"]["pr"]["linux"]
+    assert lane["health_lease_merge_queue_branch"] == "main"
+    assert lane["health_lease_admission_burst"] == 5
+    assert lane["health_lease_admission_burst"] > 2, (
+        "the current two-runner fleet must remain automatically disarmed while "
+        "the live merge queue may materialize five Linux jobs"
+    )
 
 
 def test_reviewed_macpro_selector_is_order_independent_but_exact() -> None:
