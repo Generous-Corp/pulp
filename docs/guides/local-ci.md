@@ -178,9 +178,12 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 `build.yml` runs may route the `Linux (x64)` leg via
 `PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
-host. Same-repository pull requests and protected merge groups now prefer this
-pool when the variable is set; fork pull requests remain on GitHub-hosted
-Linux. The pool is native x86_64, which the job requires: the lane's earlier
+host. Protected main workflow refs, including the protected merge-group path,
+prefer this pool when the variable is set. Pull-request workflow revisions that
+are not the protected `main` workflow ref fall back to GitHub-hosted Linux;
+fork pull requests remain hosted as well. This prevents a PR-controlled
+workflow edit from reaching the restricted group. The pool is native x86_64,
+which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
