@@ -1,6 +1,8 @@
 name: Android Build
 
 on:
+  pull_request:
+  merge_group:
   push:
     branches: [main]
     paths:
@@ -24,7 +26,10 @@ concurrency:
 
 jobs:
   resolve-runners:
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.event_name != 'merge_group' &&
+      (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
     outputs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
@@ -241,4 +246,113 @@ jobs:
 
       - name: Kill emulator
         if: always()
+        run: adb emu kill 2>/dev/null || true
+
+  # This stable required context classifies its dependency closure on every PR
+  # and merge group, then runs the expensive Linux/KVM lane only when affected.
+  # The APK jobs above intentionally remain outside those event types.
+  android-run-fixtures:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Classify fixture dependency changes
+        id: fixture-scope
+        env:
+          PULP_EVENT_NAME: ${{ github.event_name }}
+          PULP_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PULP_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+        run: |
+          if [[ "$PULP_EVENT_NAME" != pull_request && "$PULP_EVENT_NAME" != merge_group ]]; then
+            echo 'affected=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base_sha=$PULP_PR_BASE_SHA
+          [[ "$PULP_EVENT_NAME" == merge_group ]] && base_sha=$PULP_MERGE_GROUP_BASE_SHA
+          test -n "$base_sha"
+          affected=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/android.yml|CMakeLists.txt|\
+              core/*|\
+              test/fixtures/timeline/*|tools/ci/android-fixture-lane.sh|\
+              tools/cmake/*|tools/deps/manifest.json)
+                affected=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only "$base_sha" "$GITHUB_SHA")
+          echo "affected=$affected" >> "$GITHUB_OUTPUT"
+
+      - name: Report unaffected fixture gate
+        if: steps.fixture-scope.outputs.affected != 'true'
+        run: echo 'PASS android-fixture-lane (dependency closure unchanged)'
+
+      - uses: actions/setup-java@v4
+        if: steps.fixture-scope.outputs.affected == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        if: steps.fixture-scope.outputs.affected == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and x86_64 emulator
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: |
+          sdkmanager "ndk;30.0.14904198" "platform-tools" "emulator" \
+            "platforms;android-34" "system-images;android-34;google_apis;x86_64"
+
+      - name: Enable KVM
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: |
+          test -c /dev/kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: Build headless x86_64 fixture runners
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: |
+          cmake -S . -B build-android-fixtures -GNinja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/30.0.14904198/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF
+          cmake --build build-android-fixtures --parallel 2 --target \
+            pulp-fixture-runner pulp-android-fixture-runner
+
+      - name: Create and boot x86_64 emulator
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: |
+          echo no | avdmanager create avd --force --name pulp-fixtures \
+            --package "system-images;android-34;google_apis;x86_64"
+          "$ANDROID_HOME/emulator/emulator" -avd pulp-fixtures -no-window -no-audio \
+            -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
+          adb wait-for-device
+          for _ in $(seq 1 60); do
+            [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] && exit 0
+            sleep 2
+          done
+          echo "emulator did not boot" >&2
+          exit 1
+
+      - name: Execute timeline, journal, and playback fixtures
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: |
+          fixture_runner=$(find build-android-fixtures -type f -name pulp-fixture-runner -perm -111 -print -quit)
+          playback_runner=$(find build-android-fixtures -type f -name pulp-android-fixture-runner -perm -111 -print -quit)
+          tools/ci/android-fixture-lane.sh "$fixture_runner" "$playback_runner" \
+            test/fixtures/timeline
+
+      - name: Stop emulator
+        if: always() && steps.fixture-scope.outputs.affected == 'true'
         run: adb emu kill 2>/dev/null || true
