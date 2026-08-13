@@ -107,6 +107,42 @@ def test_operator_lease_is_short_lived_and_fails_closed() -> None:
     assert not route.operator_lease_active("0001-01-01T00:00:00+14:00", now)
 
 
+def test_merge_group_inactive_leases_ignore_global_namespace_provider() -> None:
+    now = dt.datetime(2026, 8, 13, 18, 0, tzinfo=dt.timezone.utc)
+    for lease in ("", "2026-08-13T17:59:59Z", "not-a-time"):
+        active = route.operator_lease_active(lease, now)
+        assert not active
+        metadata = route.resolve_route(
+            event_name="merge_group",
+            dispatch_selector_json="",
+            configured_selector_json=MAC_PRO_SELECTOR,
+            authorized_selector_json="",
+            resolved_selector_json='"ubuntu-latest"',
+            requested_provider="namespace",
+            local_enabled=active,
+        )
+        assert metadata["linux_route_reason"] == "security-hosted"
+        assert metadata["linux_provider"] == "github-hosted"
+
+
+def test_merge_group_inactive_lease_rejects_namespace_resolution() -> None:
+    for configured in ("", MAC_PRO_SELECTOR):
+        try:
+            route.resolve_route(
+                event_name="merge_group",
+                dispatch_selector_json="",
+                configured_selector_json=configured,
+                authorized_selector_json="",
+                resolved_selector_json='["namespace-profile-generouscorp"]',
+                requested_provider="namespace",
+                local_enabled=False,
+            )
+        except ValueError as error:
+            assert "resolve exactly to ubuntu-latest" in str(error)
+        else:
+            raise AssertionError("inactive automatic route accepted Namespace")
+
+
 def test_profile_covers_full_merge_queue_admission_burst() -> None:
     profile = tomllib.loads(
         (REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml").read_text()
@@ -292,6 +328,10 @@ def test_workflow_keeps_configured_selector_separate_from_event_authorization() 
     assert 'automatic_linux = EVENT_NAME == "merge_group"' in text
     assert "automatic_linux and configured_linux_valid" in text
     assert "PULP_LOCAL_LINUX_LEASE_UNTIL" in text
+    assert "linux_requested_provider = (" in text
+    assert "if automatic_linux and not linux_local_enabled" in text
+    assert '"--requested-provider-env", "LINUX_REQUESTED_PROVIDER"' in text
+    assert '"--requested-provider", linux_requested_provider' in text
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:

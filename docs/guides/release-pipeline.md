@@ -165,11 +165,12 @@ GitHub-hosted. So `github <leg>` is a complete revert and takes effect on the ne
 tag. If the local pool is down, getting back to GitHub is one command.
 
 The lightweight resolver jobs in `release-cli.yml` and `sign-and-release.yml`
-also reuse trusted Linux capacity. They prefer
-`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` selector, and fall back to `ubuntu-latest` when
-both are unset. These workflows accept only a version-tag push or maintainer
-dispatch; pull-request and merge-queue code never reaches this persistent pool.
+may reuse trusted Linux capacity through the dedicated
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON` selector, then fall directly back to
+`ubuntu-latest` when it is unset. They never consume the generic
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` PR/merge-group selector. These workflows accept
+only a version-tag push or maintainer dispatch; pull-request and merge-queue
+code never reaches this persistent pool.
 The artifact-consuming build, smoke, signing, and publication jobs keep their
 separate routing and security boundaries.
 

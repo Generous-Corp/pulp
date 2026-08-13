@@ -205,6 +205,17 @@ def resolve_route(
         raise ValueError(
             "non-dispatch event unexpectedly authorized a Linux selector"
         )
+    elif automatic_local:
+        if resolved != "ubuntu-latest":
+            raise ValueError(
+                "automatic Linux routing without an active local lease must "
+                "resolve exactly to ubuntu-latest"
+            )
+        reason = (
+            "security-hosted"
+            if configured is not None
+            else "unconfigured-hosted"
+        )
     elif configured is not None:
         reason = "security-hosted"
     else:
@@ -219,7 +230,11 @@ def resolve_route(
         "linux_route_reason": reason,
         "linux_provider": provider_for_selector(
             resolved,
-            requested_provider=requested_provider,
+            requested_provider=(
+                "github-hosted"
+                if automatic_local and reason != "local-enabled"
+                else requested_provider
+            ),
             configured_local=configured_local,
             operator_override=dispatch is not None,
         ),

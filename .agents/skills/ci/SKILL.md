@@ -5987,7 +5987,10 @@ producer is installed and scheduled. The producer must read `main`'s live
 `max_entries_to_build` and require unreserved idle capacity for that entire
 declared admission burst; the TTL is not an atomic reservation. Pulp currently
 declares five while the disposable fleet has two runners, so automatic
-merge-group Linux routing intentionally remains disarmed.
+merge-group Linux routing intentionally remains disarmed. When that lease path
+is inactive, the merge-group Linux selector is exactly `ubuntu-latest` even if
+`PULP_DEFAULT_RUNNER_PROVIDER=namespace`; global Namespace routing remains an
+explicit dispatch/PR policy and cannot bypass the automatic lease boundary.
 
 Facts worth keeping (measured):
 

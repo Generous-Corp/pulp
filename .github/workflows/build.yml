@@ -534,7 +534,18 @@ jobs:
               and configured_linux_valid and linux_lease_active
               and authorized_linux_selector == configured_linux_selector
           )
+          # Global provider preferences are for explicit/operator routing. An
+          # automatic merge-group Linux leg has exactly two safe outcomes:
+          # the reviewed local selector under a valid lease, or ubuntu-latest.
+          # Do not let PULP_DEFAULT_RUNNER_PROVIDER=namespace turn an inactive
+          # local lease into an unrelated Namespace route.
+          linux_requested_provider = (
+              "github-hosted"
+              if automatic_linux and not linux_local_enabled
+              else REQUESTED
+          )
           os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = authorized_linux_selector
+          os.environ["LINUX_REQUESTED_PROVIDER"] = linux_requested_provider
           print(
               "resolve-provider: Linux local lease = "
               f"{'enabled' if linux_local_enabled else 'disabled'}; "
@@ -547,6 +558,7 @@ jobs:
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
+              "--requested-provider-env", "LINUX_REQUESTED_PROVIDER",
               "--github-hosted-label", "ubuntu-latest",
               "--explicit-env", "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
@@ -562,7 +574,7 @@ jobs:
                   "--authorized-selector-json",
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
-                  "--requested-provider", REQUESTED,
+                  "--requested-provider", linux_requested_provider,
                   *( ["--local-enabled"] if linux_local_enabled else [] ),
               ],
               check=False,

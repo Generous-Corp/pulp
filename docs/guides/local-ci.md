@@ -180,9 +180,11 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 valid RFC 3339 time no more than 15 minutes in the future. Shipyard renews that
 short lease only while the disposable pool and its exact Mac Pro labels are
 healthy. An absent, malformed, expired, or implausibly distant lease restores
-`ubuntu-latest` before the matrix is created. The workflow token cannot census
-repository runners, so the workflow does not pretend an internal probe can make
-this decision. The protected automatic selector additionally requires
+exactly `ubuntu-latest` before the matrix is created. This automatic fallback
+ignores `PULP_DEFAULT_RUNNER_PROVIDER` and the Namespace Linux selector; those
+remain available to explicit `workflow_dispatch` routing. The workflow token
+cannot census repository runners, so the workflow does not pretend an internal
+probe can make this decision. The protected automatic selector additionally requires
 `pulp-auto-linux-x64`; ordinary Mac Pro runners without that opt-in label cannot
 receive merge-group code. The pool is native x86_64, which the job requires.
 
@@ -1703,6 +1705,8 @@ Important constraints in the current phase:
   # Switch back to GitHub-hosted
   gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "github-hosted"
   ```
+  This global default does not override the automatic merge-group Linux safety
+  path: without its validated local lease, that leg is exactly `ubuntu-latest`.
 - `build` also accepts one-off leg overrides:
   `--linux-runner-selector-json`, `--windows-runner-selector-json`, and
   `--macos-runner-selector-json`; that means you can keep the normal
@@ -1843,7 +1847,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 
 | Variable | Effect | Example |
 |---|---|---|
-| `PULP_DEFAULT_RUNNER_PROVIDER` | Default provider for Linux and Windows legs of `build.yml`. One of `github-hosted` \| `namespace` \| `local`. Falls back to `github-hosted` when unset. | `gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "namespace"` |
+| `PULP_DEFAULT_RUNNER_PROVIDER` | Default provider for Linux and Windows legs of `build.yml`. One of `github-hosted` \| `namespace` \| `local`. Falls back to `github-hosted` when unset. Does not affect automatic merge-group Linux when its protected lease is inactive; that path is exactly `ubuntu-latest`. | `gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "namespace"` |
 
 ### `build.yml` — Linux / Windows / macOS legs
 
