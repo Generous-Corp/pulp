@@ -139,6 +139,18 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.insert_notes": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_notes",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "modifiers", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "notes", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.insert_region": Object.freeze({
     schemaType: "pulp.timeline.command.insert_region",
     domain: "Command",
@@ -266,6 +278,17 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "marker_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_notes": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_notes",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.remove_region": Object.freeze({
@@ -756,6 +779,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.insert_automation_lane",
   "pulp.timeline.command.insert_clip",
   "pulp.timeline.command.insert_marker",
+  "pulp.timeline.command.insert_notes",
   "pulp.timeline.command.insert_region",
   "pulp.timeline.command.insert_scene",
   "pulp.timeline.command.insert_sequence",
@@ -769,6 +793,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_automation_lane",
   "pulp.timeline.command.remove_clip",
   "pulp.timeline.command.remove_marker",
+  "pulp.timeline.command.remove_notes",
   "pulp.timeline.command.remove_region",
   "pulp.timeline.command.remove_scene",
   "pulp.timeline.command.remove_sequence",
