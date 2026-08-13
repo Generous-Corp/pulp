@@ -3,12 +3,14 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/automation_program.hpp>
 #include <pulp/playback/track_automation_program.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/timeline/automation_lane.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -25,6 +27,15 @@ using ViewResult = runtime::Result<ProgramWireView, ProgramWireError>;
 
 constexpr std::uint32_t section_id(ProgramWireSection section) noexcept {
     return static_cast<std::uint32_t>(section);
+}
+
+std::size_t wire_hash(std::uint64_t value, std::size_t mask) noexcept {
+    value ^= value >> 30u;
+    value *= 0xBF58'476D'1CE4'E5B9ull;
+    value ^= value >> 27u;
+    value *= 0x94D0'49BB'1331'11EBull;
+    value ^= value >> 31u;
+    return static_cast<std::size_t>(value) & mask;
 }
 
 /// The known sections, in the ascending id order a canonical payload lays them
@@ -121,6 +132,10 @@ measure(const PlaybackProgram& program,
     counts[ProgramWireSection::Program] = 1;
     counts[ProgramWireSection::TempoPoints] = tempo_points.size();
     counts[ProgramWireSection::Tracks] = program.tracks().size();
+    if (counts[ProgramWireSection::Tracks] > kProgramWireMaximumTracks)
+        return Measured(runtime::Err(
+            Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks),
+                  counts[ProgramWireSection::Tracks]}));
 
     for (const auto& owner : program.tracks()) {
         const auto& track = *owner;
@@ -502,6 +517,10 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     std::array<std::size_t, kSectionCount> offsets{};
     std::array<std::size_t, kSectionCount> lengths{};
     std::uint64_t tiled = 0;
+    std::uint32_t previous_section_id = 0;
+    bool noncanonical_section_order = false;
+    std::uint32_t noncanonical_section_id = 0;
+    std::uint32_t noncanonical_previous_id = 0;
 
     for (std::uint32_t i = 0; i < header.section_count; ++i) {
         ProgramWireSectionEntry entry;
@@ -515,6 +534,12 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
             return ViewResult(runtime::Err(Error{Code::SectionsNotTiled, entry.id, entry.offset}));
         if (entry.offset % kProgramWireAlignment != 0)
             return ViewResult(runtime::Err(Error{Code::SectionMisaligned, entry.id, entry.offset}));
+        if (i != 0 && entry.id <= previous_section_id && !noncanonical_section_order) {
+            noncanonical_section_order = true;
+            noncanonical_section_id = entry.id;
+            noncanonical_previous_id = previous_section_id;
+        }
+        previous_section_id = entry.id;
         tiled = entry.offset + entry.bytes;
 
         std::size_t known = kSectionCount;
@@ -539,6 +564,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     for (std::size_t k = 0; k < kSectionCount; ++k)
         if (!seen[k])
             return ViewResult(runtime::Err(Error{Code::MissingSection, section_id(kSections[k])}));
+    if (noncanonical_section_order)
+        return ViewResult(runtime::Err(Error{Code::NonCanonicalSectionOrder,
+                                             noncanonical_section_id, noncanonical_previous_id}));
 
     const auto count_of = [&](ProgramWireSection section) {
         const auto index = WireCounts::index_of(section);
@@ -620,8 +648,29 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     const auto in_range = [](std::uint32_t first, std::uint32_t count, std::size_t total) {
         return static_cast<std::uint64_t>(first) + count <= total;
     };
+    std::uint64_t clip_cursor = 0;
+    std::uint64_t note_event_cursor = 0;
+    std::uint64_t note_modifier_cursor = 0;
+    std::uint64_t device_cursor = 0;
+    std::uint64_t lane_cursor = 0;
+    std::uint64_t segment_cursor = 0;
+    if (view.tracks_.size() > kProgramWireMaximumTracks)
+        return ViewResult(runtime::Err(
+            Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks),
+                  view.tracks_.size()}));
+    std::array<std::uint64_t, kProgramWireMaximumTracks * 2u> track_ids{};
     for (std::size_t t = 0; t < view.tracks_.size(); ++t) {
         const auto& track = view.tracks_[t];
+        if (track.id == 0 || track.generation == 0)
+            return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                 section_id(ProgramWireSection::Tracks), t}));
+        auto slot = static_cast<std::size_t>(track.id) & (track_ids.size() - 1u);
+        while (track_ids[slot] != 0 && track_ids[slot] != track.id)
+            slot = (slot + 1u) & (track_ids.size() - 1u);
+        if (track_ids[slot] == track.id)
+                return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                     section_id(ProgramWireSection::Tracks), t}));
+        track_ids[slot] = track.id;
         if (!in_range(track.clip_first, track.clip_count, view.clip_ids_.size()) ||
             !in_range(track.note_event_first, track.note_event_count, view.note_events_.size()) ||
             !in_range(track.note_modifier_first, track.note_modifier_count,
@@ -632,18 +681,120 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
                       view.automation_lanes_.size()))
             return ViewResult(runtime::Err(
                 Error{Code::RangeOutOfBounds, section_id(ProgramWireSection::Tracks), t}));
+        if (track.clip_first != clip_cursor || track.note_event_first != note_event_cursor ||
+            track.note_modifier_first != note_modifier_cursor ||
+            track.device_placement_first != device_cursor ||
+            track.automation_lane_first != lane_cursor)
+            return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                 section_id(ProgramWireSection::Tracks), t}));
+        clip_cursor += track.clip_count;
+        note_event_cursor += track.note_event_count;
+        note_modifier_cursor += track.note_modifier_count;
+        device_cursor += track.device_placement_count;
+        lane_cursor += track.automation_lane_count;
+        if (track.device_placement_count > scalars.max_device_placements_per_track ||
+            track.automation_lane_count > scalars.max_lanes_per_track)
+            return ViewResult(runtime::Err(
+                Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks), t}));
         if (track.provider_selected > static_cast<std::uint8_t>(ProviderKind::ExternalInput) ||
             track.state_policy > static_cast<std::uint8_t>(RendererStatePolicy::CarryByItemId) ||
             (track.flags & ~kProgramWireTrackHasAutomationProgram) != 0)
             return ViewResult(
                 runtime::Err(Error{Code::InvalidEnum, section_id(ProgramWireSection::Tracks), t}));
+        if (track.automation_lane_count != 0 &&
+            (track.flags & kProgramWireTrackHasAutomationProgram) == 0)
+            return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                                 section_id(ProgramWireSection::Tracks), t}));
         if ((track.mixer_gain_lane != kProgramWireNoLane &&
              track.mixer_gain_lane >= track.automation_lane_count) ||
             (track.mixer_pan_lane != kProgramWireNoLane &&
              track.mixer_pan_lane >= track.automation_lane_count))
             return ViewResult(runtime::Err(
                 Error{Code::RangeOutOfBounds, section_id(ProgramWireSection::Tracks), t}));
+
+        const auto placements = view.device_placement_ids_for(track);
+        std::array<std::uint64_t, AutomationPlaybackLimits::kMaximumDevicePlacementsPerTrack * 2u>
+            placement_ids{};
+        for (std::size_t placement = 0; placement < placements.size(); ++placement) {
+            if (placements[placement].value == 0)
+                return ViewResult(runtime::Err(
+                    Error{Code::NonCanonicalRangeOwnership,
+                          section_id(ProgramWireSection::DevicePlacementIds), placement}));
+            auto slot = wire_hash(placements[placement].value, placement_ids.size() - 1u);
+            while (placement_ids[slot] != 0 &&
+                   placement_ids[slot] != placements[placement].value)
+                slot = (slot + 1u) & (placement_ids.size() - 1u);
+            if (placement_ids[slot] == placements[placement].value)
+                return ViewResult(runtime::Err(
+                    Error{Code::NonCanonicalRangeOwnership,
+                          section_id(ProgramWireSection::DevicePlacementIds), placement}));
+            placement_ids[slot] = placements[placement].value;
+        }
+
+        std::uint64_t track_points = 0;
+        const auto lanes = view.automation_lanes_for(track);
+        std::array<std::size_t, AutomationPlaybackLimits::kMaximumLanesPerTrack * 2u>
+            target_slots{};
+        for (std::size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {
+            const auto& lane = lanes[lane_index];
+            if (lane.segment_first != segment_cursor)
+                return ViewResult(runtime::Err(Error{
+                    Code::NonCanonicalRangeOwnership,
+                    section_id(ProgramWireSection::AutomationLanes), track.automation_lane_first}));
+            segment_cursor += lane.segment_count;
+            track_points += lane.segment_count;
+            if (lane.segment_count > scalars.max_points_per_lane ||
+                track_points > scalars.max_points_per_track)
+                return ViewResult(runtime::Err(
+                    Error{Code::InvalidLimits, section_id(ProgramWireSection::AutomationLanes),
+                          lane.lane_id}));
+            if (lane.target_kind ==
+                static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)) {
+                const auto found =
+                    std::find_if(placements.begin(), placements.end(),
+                                 [&](const ProgramWireIdRecord& placement) {
+                                     return placement.value == lane.device_placement_id;
+                                 });
+                if (found == placements.end())
+                    return ViewResult(runtime::Err(
+                        Error{Code::AutomationTargetUnresolved,
+                              section_id(ProgramWireSection::AutomationLanes), lane_index}));
+            }
+            const auto target_hash =
+                lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)
+                    ? lane.device_placement_id ^
+                          (static_cast<std::uint64_t>(lane.device_param_id) << 32u)
+                    : 0x8000'0000'0000'0000ull | lane.mixer_parameter;
+            auto target_slot = wire_hash(target_hash, target_slots.size() - 1u);
+            while (target_slots[target_slot] != 0) {
+                const auto& related = lanes[target_slots[target_slot] - 1u];
+                const bool duplicate_device =
+                    lane.target_kind ==
+                        static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter) &&
+                    related.target_kind == lane.target_kind &&
+                    related.device_placement_id == lane.device_placement_id &&
+                    related.device_param_id == lane.device_param_id;
+                const bool duplicate_mixer =
+                    lane.target_kind ==
+                        static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) &&
+                    related.target_kind == lane.target_kind &&
+                    related.mixer_parameter == lane.mixer_parameter;
+                if (duplicate_device || duplicate_mixer)
+                    return ViewResult(runtime::Err(
+                        Error{Code::DuplicateAutomationTarget,
+                              section_id(ProgramWireSection::AutomationLanes), lane_index}));
+                target_slot = (target_slot + 1u) & (target_slots.size() - 1u);
+            }
+            target_slots[target_slot] = lane_index + 1u;
+        }
     }
+    if (clip_cursor != view.clip_ids_.size() || note_event_cursor != view.note_events_.size() ||
+        note_modifier_cursor != view.note_modifiers_.size() ||
+        device_cursor != view.device_placement_ids_.size() ||
+        lane_cursor != view.automation_lanes_.size() ||
+        segment_cursor != view.automation_segments_.size())
+        return ViewResult(runtime::Err(
+            Error{Code::NonCanonicalRangeOwnership, section_id(ProgramWireSection::Tracks)}));
 
     for (std::size_t l = 0; l < view.automation_lanes_.size(); ++l) {
         const auto& lane = view.automation_lanes_[l];
@@ -657,9 +808,19 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (lane.instance_token == 0)
             return ViewResult(runtime::Err(Error{
                 Code::InvalidInstanceToken, section_id(ProgramWireSection::AutomationLanes), l}));
+        if (lane.lane_id == 0 || lane.generation == 0 || !std::isfinite(lane.leading_value))
+            return ViewResult(runtime::Err(
+                Error{Code::MalformedSegment, section_id(ProgramWireSection::AutomationLanes), l}));
         if (lane.target_kind > static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) ||
             lane.evaluation_rate > static_cast<std::uint8_t>(AutomationEvaluationRate::BlockRate) ||
             lane.mixer_parameter > static_cast<std::uint8_t>(timeline::TrackMixerParameter::Pan))
+            return ViewResult(runtime::Err(
+                Error{Code::InvalidEnum, section_id(ProgramWireSection::AutomationLanes), l}));
+        if ((lane.target_kind ==
+                 static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter) &&
+             (lane.device_placement_id == 0 || lane.mixer_parameter != 0)) ||
+            (lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) &&
+             (lane.device_placement_id != 0 || lane.device_param_id != 0)))
             return ViewResult(runtime::Err(
                 Error{Code::InvalidEnum, section_id(ProgramWireSection::AutomationLanes), l}));
     }
@@ -674,9 +835,33 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         // endpoint does not stay local: it reaches every sample the lane feeds.
         if (segment.end_tick < segment.start_tick || segment.end_sample < segment.start_sample ||
             !std::isfinite(segment.start_value) || !std::isfinite(segment.end_value) ||
-            !std::isfinite(segment.curvature))
+            !std::isfinite(segment.curvature) || segment.curvature < -1.0f ||
+            segment.curvature > 1.0f)
             return ViewResult(runtime::Err(Error{
                 Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments), s}));
+    }
+
+    for (const auto& lane : view.automation_lanes_) {
+        const auto segments = view.segments_for(lane);
+        if (segments.empty())
+            continue;
+        for (std::size_t index = 1; index < segments.size(); ++index) {
+            const auto& previous = segments[index - 1u];
+            const auto& current = segments[index];
+            if (previous.end_tick != current.start_tick ||
+                previous.end_sample != current.start_sample ||
+                previous.end_value != current.start_value)
+                return ViewResult(runtime::Err(Error{
+                    Code::MalformedSegment, section_id(ProgramWireSection::AutomationSegments),
+                    lane.segment_first + index}));
+        }
+        const auto& terminal = segments.back();
+        if (terminal.start_tick != terminal.end_tick ||
+            terminal.start_sample != terminal.end_sample ||
+            terminal.start_value != terminal.end_value)
+            return ViewResult(runtime::Err(Error{Code::MalformedSegment,
+                                                 section_id(ProgramWireSection::AutomationSegments),
+                                                 lane.segment_first + lane.segment_count - 1u}));
     }
 
     for (std::size_t n = 0; n < view.note_events_.size(); ++n)
@@ -865,6 +1050,584 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
             return false;
     }
     return true;
+}
+
+namespace {
+
+AutomationProgramSegment read_wire_segment(const void* records, std::size_t index) noexcept {
+    const auto& record = static_cast<const ProgramWireAutomationSegmentRecord*>(records)[index];
+    return {
+        .start_tick = {record.start_tick},
+        .end_tick = {record.end_tick},
+        .start_sample = {record.start_sample},
+        .end_sample = {record.end_sample},
+        .start_value = record.start_value,
+        .end_value = record.end_value,
+        .interpolation = static_cast<timeline::AutomationInterpolation>(record.interpolation),
+        .curvature = record.curvature,
+    };
+}
+
+bool wire_tempo_matches(const ProgramWireView& view, const timebase::CompiledTempoMap& tempo_map,
+                        std::span<const timebase::TempoPoint> points) noexcept {
+    if (tempo_map.sample_rate() != view.sample_rate() || !tempo_map.matches(points) ||
+        points.size() != view.tempo_points().size())
+        return false;
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        const auto& point = points[index];
+        const auto& record = view.tempo_points()[index];
+        if (record.tick != point.tick.value ||
+            record.bpm_bits != std::bit_cast<std::uint64_t>(point.bpm) ||
+            record.curve_to_next != static_cast<std::uint8_t>(point.curve_to_next))
+            return false;
+    }
+    return true;
+}
+
+ProgramWireLaneIdentity lane_identity(const ProgramWireView& view,
+                                      const ProgramWireTrackRecord& track,
+                                      const ProgramWireAutomationLaneRecord& lane) noexcept {
+    return {
+        .producer_epoch = view.producer_epoch(),
+        .program_generation = view.program().generation,
+        .track_id = {track.id},
+        .track_generation = track.generation,
+        .lane_id = {lane.lane_id},
+        .lane_generation = lane.generation,
+        .instance_token = {lane.instance_token},
+    };
+}
+
+ProgramWireLaneState* find_lane_state(std::span<ProgramWireLaneState> states,
+                                      timeline::ItemId track_id,
+                                      timeline::ItemId lane_id) noexcept {
+    for (auto& state : states)
+        if (state.identity.track_id == track_id && state.identity.lane_id == lane_id)
+            return &state;
+    return nullptr;
+}
+
+bool same_cursor_identity(const ProgramWireLaneIdentity& lhs,
+                          const ProgramWireLaneIdentity& rhs) noexcept {
+    return lhs.producer_epoch == rhs.producer_epoch && lhs.track_id == rhs.track_id &&
+           lhs.lane_id == rhs.lane_id && lhs.lane_generation == rhs.lane_generation &&
+           lhs.instance_token == rhs.instance_token;
+}
+
+bool same_publication_identity(const ProgramWireView& lhs, const ProgramWireView& rhs) noexcept {
+    if (lhs.producer_epoch() != rhs.producer_epoch() ||
+        lhs.program().generation != rhs.program().generation ||
+        lhs.tracks().size() != rhs.tracks().size() ||
+        lhs.automation_lanes().size() != rhs.automation_lanes().size())
+        return false;
+    for (std::size_t track_index = 0; track_index < lhs.tracks().size(); ++track_index) {
+        const auto& left_track = lhs.tracks()[track_index];
+        const auto& right_track = rhs.tracks()[track_index];
+        if (left_track.id != right_track.id || left_track.generation != right_track.generation ||
+            left_track.automation_lane_count != right_track.automation_lane_count)
+            return false;
+        const auto left_lanes = lhs.automation_lanes_for(left_track);
+        const auto right_lanes = rhs.automation_lanes_for(right_track);
+        for (std::size_t lane_index = 0; lane_index < left_lanes.size(); ++lane_index) {
+            if (left_lanes[lane_index].lane_id != right_lanes[lane_index].lane_id ||
+                left_lanes[lane_index].generation != right_lanes[lane_index].generation ||
+                left_lanes[lane_index].instance_token != right_lanes[lane_index].instance_token)
+                return false;
+        }
+    }
+    return true;
+}
+
+bool same_capacity_group(const ProgramWireAutomationLaneRecord& lhs,
+                         const ProgramWireAutomationLaneRecord& rhs) noexcept {
+    if (lhs.target_kind != rhs.target_kind)
+        return false;
+    if (lhs.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter))
+        return lhs.device_placement_id == rhs.device_placement_id;
+    return lhs.mixer_parameter == rhs.mixer_parameter;
+}
+
+std::uint64_t wire_selected_rank(std::uint32_t selection, std::uint32_t selected_count,
+                                 std::uint64_t candidate_count) noexcept {
+    if (selected_count <= 1u || candidate_count <= 1u)
+        return candidate_count == 0 ? 0 : candidate_count - 1u;
+    return static_cast<std::uint64_t>(selection) * (candidate_count - 1u) / (selected_count - 1u);
+}
+
+std::optional<ProgramWireError>
+wire_consumer_capacity_error(std::span<const std::byte> bytes, std::size_t track_capacity,
+                             std::size_t lane_capacity, std::size_t byte_capacity) noexcept {
+    constexpr std::uint32_t kMaximumDirectoryEntries = 32;
+    if (bytes.size() > byte_capacity)
+        return ProgramWireError{ProgramWireErrorCode::InvalidLimits, 0, bytes.size()};
+    if (bytes.size() < sizeof(ProgramWireHeader))
+        return std::nullopt;
+    ProgramWireHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    if (header.section_count > kMaximumDirectoryEntries)
+        return ProgramWireError{ProgramWireErrorCode::InvalidLimits, 0, header.section_count};
+    const auto directory_bytes =
+        static_cast<std::uint64_t>(header.section_count) * sizeof(ProgramWireSectionEntry);
+    if (directory_bytes > bytes.size() - sizeof(ProgramWireHeader))
+        return std::nullopt;
+    for (std::uint32_t index = 0; index < header.section_count; ++index) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry,
+                    bytes.data() + sizeof(ProgramWireHeader) +
+                        index * sizeof(ProgramWireSectionEntry),
+                    sizeof(entry));
+        if (entry.id == section_id(ProgramWireSection::Tracks) &&
+            entry.bytes / sizeof(ProgramWireTrackRecord) > track_capacity)
+            return ProgramWireError{ProgramWireErrorCode::InvalidLimits, entry.id,
+                                    entry.bytes / sizeof(ProgramWireTrackRecord)};
+        if (entry.id == section_id(ProgramWireSection::AutomationLanes) &&
+            entry.bytes / sizeof(ProgramWireAutomationLaneRecord) > lane_capacity)
+            return ProgramWireError{ProgramWireErrorCode::InvalidLimits, entry.id,
+                                    entry.bytes / sizeof(ProgramWireAutomationLaneRecord)};
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+ProgramWireAdoptionResult
+ProgramWireAutomationConsumer::adopt(ProgramWireBytePin candidate,
+                                     const timebase::CompiledTempoMap& tempo_map,
+                                     std::span<const timebase::TempoPoint> tempo_points) noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    ProgramWireAdoptionResult result;
+    auto reject = [&](ProgramWireConsumerCode code, ProgramWireError error = {}) {
+        result.code = code;
+        result.adoption = ProgramWireAdoption::Rejected;
+        result.wire_error = error;
+        result.returned_pin = std::move(candidate);
+    };
+
+    if (const auto capacity = wire_consumer_capacity_error(
+            candidate.bytes(), track_capacity_,
+            std::min(lane_state_.size(), active_lanes_.size()), wire_byte_capacity_)) {
+        reject(ProgramWireConsumerCode::StateCapacityExceeded, *capacity);
+        return result;
+    }
+
+    auto decoded = decode_program_wire(candidate.bytes());
+    if (!decoded) {
+        reject(ProgramWireConsumerCode::DecodeRejected, decoded.error());
+        return result;
+    }
+    const auto candidate_view = decoded.value();
+    if (!wire_tempo_matches(candidate_view, tempo_map, tempo_points)) {
+        reject(ProgramWireConsumerCode::TempoMapMismatch, {ProgramWireErrorCode::TempoMapMismatch});
+        return result;
+    }
+    for (std::size_t index = 0; index < candidate_view.automation_segments().size(); ++index) {
+        const auto& segment = candidate_view.automation_segments()[index];
+        if (tempo_map.ticks_to_samples({segment.start_tick}).value != segment.start_sample ||
+            tempo_map.ticks_to_samples({segment.end_tick}).value != segment.end_sample) {
+            reject(ProgramWireConsumerCode::TempoMapMismatch,
+                   {ProgramWireErrorCode::TempoMapMismatch,
+                    static_cast<std::uint32_t>(ProgramWireSection::AutomationSegments), index});
+            return result;
+        }
+    }
+    if (candidate_view.automation_lanes().size() > lane_state_.size() ||
+        candidate_view.automation_lanes().size() > active_lanes_.size()) {
+        reject(ProgramWireConsumerCode::StateCapacityExceeded,
+               {ProgramWireErrorCode::InvalidLimits,
+                static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                candidate_view.automation_lanes().size()});
+        return result;
+    }
+    if (candidate_view.tracks().size() > track_capacity_) {
+        reject(ProgramWireConsumerCode::StateCapacityExceeded,
+               {ProgramWireErrorCode::InvalidLimits,
+                static_cast<std::uint32_t>(ProgramWireSection::Tracks),
+                candidate_view.tracks().size()});
+        return result;
+    }
+    std::array<std::uint64_t, kProgramWireMaximumAutomationLanes * 2u> candidate_lane_ids{};
+    for (std::size_t lane = 0; lane < candidate_view.automation_lanes().size(); ++lane) {
+        const auto lane_id = candidate_view.automation_lanes()[lane].lane_id;
+        auto slot = wire_hash(lane_id, candidate_lane_ids.size() - 1u);
+        while (candidate_lane_ids[slot] != 0 && candidate_lane_ids[slot] != lane_id)
+            slot = (slot + 1u) & (candidate_lane_ids.size() - 1u);
+        if (candidate_lane_ids[slot] == lane_id) {
+            reject(ProgramWireConsumerCode::DecodeRejected,
+                   {ProgramWireErrorCode::NonCanonicalRangeOwnership,
+                    static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes), lane});
+            return result;
+        }
+        candidate_lane_ids[slot] = lane_id;
+    }
+    for (std::size_t index = 0; index < candidate_view.automation_lanes().size(); ++index) {
+        if (candidate_view.automation_lanes()[index].evaluation_rate !=
+            static_cast<std::uint8_t>(AutomationEvaluationRate::SampleAccurate)) {
+            reject(ProgramWireConsumerCode::DecodeRejected,
+                   {ProgramWireErrorCode::InvalidEnum,
+                    static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes), index});
+            return result;
+        }
+    }
+    if (candidate_view.producer_epoch() == lane_high_water_epoch_) {
+        for (const auto& lane : candidate_view.automation_lanes()) {
+            auto slot = wire_hash(lane.lane_id, lane_high_water_.size() - 1u);
+            std::size_t probes = 0;
+            while (lane_high_water_[slot].lane_id.value != 0 &&
+                   lane_high_water_[slot].lane_id.value != lane.lane_id &&
+                   probes < lane_high_water_.size()) {
+                slot = (slot + 1u) & (lane_high_water_.size() - 1u);
+                ++probes;
+            }
+            if (probes == lane_high_water_.size()) {
+                reject(ProgramWireConsumerCode::StateCapacityExceeded,
+                       {ProgramWireErrorCode::InvalidLimits,
+                        static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                        lane.lane_id});
+                return result;
+            }
+            if (lane_high_water_[slot].lane_id.value == lane.lane_id &&
+                lane.generation < lane_high_water_[slot].generation) {
+                reject(ProgramWireConsumerCode::StalePublication,
+                       {ProgramWireErrorCode::StaleLaneGeneration,
+                        static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes),
+                        lane.lane_id});
+                return result;
+            }
+        }
+    }
+
+    if (active_pin_ && candidate_view.producer_epoch() == active_view_.producer_epoch() &&
+        candidate_view.program().generation < active_view_.program().generation) {
+        reject(ProgramWireConsumerCode::StalePublication);
+        return result;
+    }
+    if (active_pin_ && &tempo_map == tempo_map_ &&
+        same_publication_identity(candidate_view, active_view_)) {
+        result.adoption = ProgramWireAdoption::Unchanged;
+        result.returned_pin = std::move(candidate);
+        return result;
+    }
+
+    // The decoder and all capacity checks have completed. From this point the
+    // candidate cannot be rejected, so updating state and transferring pins is
+    // one commit rather than a partially visible adoption.
+    if (candidate_view.producer_epoch() != lane_high_water_epoch_) {
+        lane_high_water_.fill({});
+        lane_high_water_epoch_ = candidate_view.producer_epoch();
+    }
+    for (const auto& lane : candidate_view.automation_lanes()) {
+        auto slot = wire_hash(lane.lane_id, lane_high_water_.size() - 1u);
+        while (lane_high_water_[slot].lane_id.value != 0 &&
+               lane_high_water_[slot].lane_id.value != lane.lane_id)
+            slot = (slot + 1u) & (lane_high_water_.size() - 1u);
+        lane_high_water_[slot] = {{lane.lane_id}, lane.generation};
+    }
+    for (auto& state : lane_state_) {
+        bool still_present = false;
+        for (const auto& track : candidate_view.tracks()) {
+            for (const auto& lane : candidate_view.automation_lanes_for(track)) {
+                if (state.identity.track_id == timeline::ItemId{track.id} &&
+                    state.identity.lane_id == timeline::ItemId{lane.lane_id}) {
+                    still_present = true;
+                    break;
+                }
+            }
+            if (still_present)
+                break;
+        }
+        if (!still_present) {
+            state.cursor.reset();
+            state.identity = {};
+        }
+    }
+    for (const auto& track : candidate_view.tracks()) {
+        for (const auto& lane : candidate_view.automation_lanes_for(track)) {
+            const auto identity = lane_identity(candidate_view, track, lane);
+            auto* state = find_lane_state(lane_state_, identity.track_id, identity.lane_id);
+            if (state == nullptr) {
+                for (auto& slot : lane_state_) {
+                    if (slot.identity.lane_id.value == 0) {
+                        state = &slot;
+                        break;
+                    }
+                }
+            }
+            if (state == nullptr) {
+                // Capacity was preflighted and lane ids are decoder-unique, so
+                // reaching this would mean internal state corruption.
+                std::abort();
+            }
+            if (!same_cursor_identity(state->identity, identity))
+                state->cursor.reset();
+            state->identity = identity;
+        }
+    }
+
+    lane_count_ = 0;
+    group_count_ = 0;
+    groups_.fill({});
+    std::array<std::size_t, kProgramWireMaximumAutomationLanes * 2u> group_slots{};
+    for (const auto& track : candidate_view.tracks()) {
+        for (const auto& lane : candidate_view.automation_lanes_for(track)) {
+            const auto target_hash =
+                lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter)
+                    ? lane.device_placement_id
+                    : 0x8000'0000'0000'0000ull | lane.mixer_parameter;
+            auto slot = wire_hash(track.id ^ target_hash, group_slots.size() - 1u);
+            while (group_slots[slot] != 0) {
+                const auto& previous = active_lanes_[group_slots[slot] - 1u];
+                if (previous.track->id == track.id &&
+                    same_capacity_group(*previous.lane, lane))
+                    break;
+                slot = (slot + 1u) & (group_slots.size() - 1u);
+            }
+            auto group = group_count_;
+            if (group_slots[slot] != 0) {
+                group = active_lanes_[group_slots[slot] - 1u].group_index;
+            } else {
+                group_slots[slot] = lane_count_ + 1u;
+                ++group_count_;
+            }
+            active_lanes_[lane_count_++] = {
+                find_lane_state(lane_state_, {track.id}, {lane.lane_id}), &track, &lane, group};
+            ++groups_[group].lane_count;
+        }
+    }
+    std::size_t group_offset = 0;
+    for (std::size_t group = 0; group < group_count_; ++group) {
+        groups_[group].first_lane = group_offset;
+        group_offset += groups_[group].lane_count;
+        groups_[group].lane_count = 0;
+    }
+    for (std::size_t lane = 0; lane < lane_count_; ++lane) {
+        auto& group = groups_[active_lanes_[lane].group_index];
+        group_lane_indices_[group.first_lane + group.lane_count++] = lane;
+    }
+
+    result.returned_pin = std::move(active_pin_);
+    active_pin_ = std::move(candidate);
+    active_view_ = candidate_view;
+    tempo_map_ = &tempo_map;
+    result.adoption = ProgramWireAdoption::Adopted;
+    return result;
+}
+
+ProgramWireAutomationRenderResult
+ProgramWireAutomationConsumer::render(const TransportSnapshot& transport,
+                                      std::span<ProgramWireAutomationLaneOutput> output) noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    ProgramWireAutomationRenderResult result;
+    if (!active_pin_) {
+        result.code = ProgramWireConsumerCode::MissingProgram;
+        return result;
+    }
+    if (!valid_transport_ranges(transport) || transport.tempo_map != tempo_map_) {
+        result.code = ProgramWireConsumerCode::InvalidTransport;
+        return result;
+    }
+    if (output.size() < lane_count_) {
+        result.code = ProgramWireConsumerCode::OutputCapacityExceeded;
+        return result;
+    }
+
+    const auto limits = active_view_.automation_limits();
+    std::uint64_t total_intersecting = 0;
+    std::size_t output_index = 0;
+    for (std::size_t lane_index = 0; lane_index < lane_count_; ++lane_index) {
+            const auto& active = active_lanes_[lane_index];
+            auto* state = active.state;
+            const auto& lane = *active.lane;
+            state->next_cursor = state->cursor;
+            state->selected_count = 0;
+            state->write_position = 0;
+            state->output_index = output_index++;
+            state->group_coalesced = false;
+            const auto segment_records = active_view_.segments_for(lane);
+            const AutomationProgramView program{
+                lane.generation,
+                {lane.instance_token},
+                {lane.lane_id},
+                *tempo_map_,
+                AutomationSegmentView::from_records(segment_records, read_wire_segment),
+                lane.leading_value};
+            const auto remaining_work = static_cast<std::uint32_t>(
+                limits.max_intersecting_segments_per_block - total_intersecting);
+            state->cursor_result =
+                state->next_cursor.process(program, transport, state->scratch, remaining_work);
+            if (state->cursor_result.code != AutomationCursorCode::Ok &&
+                state->cursor_result.code != AutomationCursorCode::Coalesced) {
+                result.code =
+                    state->cursor_result.code == AutomationCursorCode::InsufficientCapacity
+                        ? ProgramWireConsumerCode::OutputCapacityExceeded
+                        : ProgramWireConsumerCode::CursorRejected;
+                return result;
+            }
+            state->event_count = state->cursor_result.emitted_events;
+            total_intersecting += state->cursor_result.intersecting_segments;
+    }
+
+    const auto walk_group = [&](std::size_t group_index, auto&& visitor) noexcept {
+        const auto& group = groups_[group_index];
+        std::size_t heap_size = 0;
+        for (std::size_t index = 0; index < group.lane_count; ++index) {
+            auto* state = active_lanes_[group_lane_indices_[group.first_lane + index]].state;
+            state->merge_position = 0;
+            if (state->event_count != 0)
+                merge_heap_[heap_size++] = state;
+        }
+        const auto state_less = [](const ProgramWireLaneState* lhs,
+                                   const ProgramWireLaneState* rhs) noexcept {
+            const auto& left = lhs->scratch[lhs->merge_position];
+            const auto& right = rhs->scratch[rhs->merge_position];
+            return left.sample_offset < right.sample_offset ||
+                   (left.sample_offset == right.sample_offset &&
+                    lhs->identity.lane_id < rhs->identity.lane_id);
+        };
+        const auto sift_down = [&](std::size_t root) noexcept {
+            while (true) {
+                const auto left = root * 2u + 1u;
+                if (left >= heap_size)
+                    return;
+                const auto right = left + 1u;
+                auto smallest = left;
+                if (right < heap_size && state_less(merge_heap_[right], merge_heap_[left]))
+                    smallest = right;
+                if (!state_less(merge_heap_[smallest], merge_heap_[root]))
+                    return;
+                std::swap(merge_heap_[root], merge_heap_[smallest]);
+                root = smallest;
+            }
+        };
+        for (auto parent = heap_size / 2u; parent > 0; --parent)
+            sift_down(parent - 1u);
+        while (heap_size != 0) {
+            auto* selected_state = merge_heap_[0];
+            const auto event = selected_state->scratch[selected_state->merge_position++];
+            visitor(*selected_state, event);
+            if (selected_state->merge_position < selected_state->event_count) {
+                sift_down(0);
+            } else {
+                --heap_size;
+                if (heap_size != 0) {
+                    merge_heap_[0] = merge_heap_[heap_size];
+                    sift_down(0);
+                }
+            }
+        }
+    };
+
+    // Count and select at the same per-device boundary as the native track
+    // renderer. Nothing is committed or copied to caller output in this pass.
+    for (std::size_t group_index = 0; group_index < group_count_; ++group_index) {
+            const auto& group = groups_[group_index];
+            std::uint64_t candidate_count = 0;
+            std::uint64_t mandatory_count = 0;
+            bool lane_coalesced = false;
+            for (std::size_t index = 0; index < group.lane_count; ++index) {
+                auto* state = active_lanes_[group_lane_indices_[group.first_lane + index]].state;
+                candidate_count += state->event_count;
+                lane_coalesced =
+                    lane_coalesced || state->cursor_result.code == AutomationCursorCode::Coalesced;
+                for (std::uint32_t event = 0; event < state->event_count; ++event)
+                    mandatory_count +=
+                        state->scratch[event].transition != AutomationTransition::LinearRamp;
+            }
+            if (mandatory_count > limits.max_events_per_device_per_block) {
+                result.code = ProgramWireConsumerCode::OutputCapacityExceeded;
+                return result;
+            }
+            const auto optional_count = candidate_count - mandatory_count;
+            const auto selected_optional = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                optional_count, limits.max_events_per_device_per_block - mandatory_count));
+            const bool group_coalesced =
+                lane_coalesced || candidate_count > limits.max_events_per_device_per_block;
+            std::uint64_t optional_rank = 0;
+            std::uint32_t optional_selection = 0;
+            walk_group(group_index,
+                       [&](ProgramWireLaneState& state, AutomationBlockEvent event) noexcept {
+                           const bool mandatory =
+                               event.transition != AutomationTransition::LinearRamp;
+                           bool selected = mandatory;
+                           if (!mandatory) {
+                               const auto wanted =
+                                   selected_optional == 0
+                                       ? std::numeric_limits<std::uint64_t>::max()
+                                       : wire_selected_rank(optional_selection, selected_optional,
+                                                            optional_count);
+                               selected = optional_selection < selected_optional &&
+                                          optional_rank == wanted;
+                               if (selected)
+                                   ++optional_selection;
+                               ++optional_rank;
+                           }
+                           if (selected)
+                               ++state.selected_count;
+                           state.group_coalesced = group_coalesced;
+                       });
+    }
+    for (const auto& state : lane_state_) {
+        if (state.identity.lane_id.value != 0 &&
+            output[state.output_index].events.size() < state.selected_count) {
+            result.code = ProgramWireConsumerCode::OutputCapacityExceeded;
+            return result;
+        }
+    }
+
+    // Repeat the deterministic selection walk to publish the preflighted
+    // events. Cursors are committed only after every group has succeeded.
+    for (std::size_t group_index = 0; group_index < group_count_; ++group_index) {
+            const auto& group = groups_[group_index];
+            std::uint64_t candidate_count = 0;
+            std::uint64_t mandatory_count = 0;
+            for (std::size_t index = 0; index < group.lane_count; ++index) {
+                const auto* state =
+                    active_lanes_[group_lane_indices_[group.first_lane + index]].state;
+                candidate_count += state->event_count;
+                for (std::uint32_t event = 0; event < state->event_count; ++event)
+                    mandatory_count +=
+                        state->scratch[event].transition != AutomationTransition::LinearRamp;
+            }
+            const auto optional_count = candidate_count - mandatory_count;
+            const auto selected_optional = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                optional_count, limits.max_events_per_device_per_block - mandatory_count));
+            std::uint64_t optional_rank = 0;
+            std::uint32_t optional_selection = 0;
+            walk_group(group_index,
+                       [&](ProgramWireLaneState& state, AutomationBlockEvent event) noexcept {
+                           const bool mandatory =
+                               event.transition != AutomationTransition::LinearRamp;
+                           bool selected = mandatory;
+                           if (!mandatory) {
+                               const auto wanted =
+                                   selected_optional == 0
+                                       ? std::numeric_limits<std::uint64_t>::max()
+                                       : wire_selected_rank(optional_selection, selected_optional,
+                                                            optional_count);
+                               selected = optional_selection < selected_optional &&
+                                          optional_rank == wanted;
+                               if (selected)
+                                   ++optional_selection;
+                               ++optional_rank;
+                           }
+                           if (selected)
+                               output[state.output_index].events[state.write_position++] = event;
+                       });
+    }
+
+    for (std::size_t lane_index = 0; lane_index < lane_count_; ++lane_index) {
+            const auto& active = active_lanes_[lane_index];
+            auto* state = active.state;
+            auto& destination = output[lane_index];
+            destination.track_id = {active.track->id};
+            destination.lane_id = {active.lane->lane_id};
+            destination.result = state->cursor_result;
+            destination.result.emitted_events = state->selected_count;
+            if (state->group_coalesced)
+                destination.result.code = AutomationCursorCode::Coalesced;
+            state->cursor = state->next_cursor;
+            ++result.rendered_lanes;
+    }
+    return result;
 }
 
 } // namespace pulp::playback
