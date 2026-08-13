@@ -18,6 +18,13 @@ pub const fn control_broker_floor() -> &'static str {
     env!("PULP_CONTROL_BROKER_FLOOR")
 }
 
+/// First SDK release whose Darwin CLI archive requires the broker-owned
+/// Standalone host, manifest, and runtime closure.
+#[must_use]
+pub const fn control_standalone_host_floor() -> &'static str {
+    env!("PULP_CONTROL_STANDALONE_HOST_FLOOR")
+}
+
 /// CLI version string, honoring the `PULP_RS_CLI_VERSION` override so
 /// tests can pin a version without rebuilding the binary.
 #[must_use]
@@ -65,5 +72,10 @@ mod tests {
     #[test]
     fn control_broker_floor_is_baked_from_release_matrix() {
         assert_eq!(control_broker_floor(), "0.795.0");
+    }
+
+    #[test]
+    fn control_standalone_host_floor_is_baked_from_release_matrix() {
+        assert_eq!(control_standalone_host_floor(), "0.803.1");
     }
 }

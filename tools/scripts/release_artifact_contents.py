@@ -12,6 +12,7 @@ publication.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -56,6 +57,45 @@ PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
 )
 CONTROL_BROKER_CLI_MEMBER = "pulp-control-broker"
 CONTROL_BROKER_SDK_MEMBER = "pulp-sdk/libexec/pulp/pulp-control-broker"
+CONTROL_STANDALONE_HOST_CLI_MEMBER = "pulp-control-standalone-host"
+CONTROL_STANDALONE_HOST_CLI_MANIFEST = (
+    "pulp-control-standalone-host.inspector-capabilities.json"
+)
+CONTROL_STANDALONE_HOST_SDK_MEMBER = (
+    "pulp-sdk/libexec/pulp/pulp-control-standalone-host"
+)
+CONTROL_STANDALONE_HOST_SDK_MANIFEST = (
+    "pulp-sdk/libexec/pulp/pulp-control-standalone-host.inspector-capabilities.json"
+)
+CONTROL_MANIFEST_PERMISSION_TERMS = (
+    "implemented",
+    "built",
+    "host_available",
+    "activated",
+    "policy_eligible",
+    "client_granted",
+    "session_live",
+)
+CONTROL_STANDALONE_HOST_CAPABILITIES = (
+    "dev.pulp.instance/read@1",
+    "dev.pulp.state/read@1",
+)
+CONTROL_STANDALONE_HOST_MANIFEST_FIELDS = frozenset(
+    {
+        "schema",
+        "schema_version",
+        "profile",
+        "target",
+        "product_name",
+        "bundle_id",
+        "build_id",
+        "registry_digest",
+        "endpoint_included",
+        "unsafe_runtime_eval_acknowledged",
+        "permission_terms",
+        "capabilities",
+    }
+)
 
 
 class ContentError(RuntimeError):
@@ -79,6 +119,18 @@ def control_broker_required(
     return version_tuple(version) >= version_tuple(matrix.control_broker_floor)
 
 
+def control_standalone_host_required(
+    platform: str, matrix: ProductMatrix, version: str | None
+) -> bool:
+    if not platform.startswith("darwin-"):
+        return False
+    if version is None:
+        return matrix.control_standalone_host_floor != "999999.0.0"
+    return version_tuple(version) >= version_tuple(
+        matrix.control_standalone_host_floor
+    )
+
+
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
@@ -86,6 +138,7 @@ class ProductMatrix:
     capability_handoff_floor: str
     inspector_sdk_floor: str
     control_broker_floor: str
+    control_standalone_host_floor: str
     platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]
@@ -124,6 +177,9 @@ class ProductMatrix:
                 control_broker_floor=str(
                     doc.get("control_broker_floor", "999999.0.0")
                 ),
+                control_standalone_host_floor=str(
+                    doc.get("control_standalone_host_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
                 cli_contract_declared=cli_contract_declared,
                 # Matrices versioned before the import-design CLI payload did
@@ -154,6 +210,7 @@ class ProductMatrix:
         version_tuple(matrix.capability_handoff_floor)
         version_tuple(matrix.inspector_sdk_floor)
         version_tuple(matrix.control_broker_floor)
+        version_tuple(matrix.control_standalone_host_floor)
         return matrix
 
 
@@ -275,6 +332,8 @@ def cli_binary_members(
     members = {f"{stem}{suffix}" for stem in stems}
     if control_broker_required(platform, matrix, version):
         members.add(CONTROL_BROKER_CLI_MEMBER)
+    if control_standalone_host_required(platform, matrix, version):
+        members.add(CONTROL_STANDALONE_HOST_CLI_MEMBER)
     return frozenset(members)
 
 
@@ -319,11 +378,14 @@ def cli_members(
     version: str | None = None,
 ) -> frozenset[str]:
     _binaries, resources = effective_cli_contract(matrix, version)
-    return (
+    members = (
         cli_binary_members(platform, matrix, version)
         | resources
         | frozenset({cli_runtime_member(platform)})
     )
+    if control_standalone_host_required(platform, matrix, version):
+        members |= {CONTROL_STANDALONE_HOST_CLI_MANIFEST}
+    return frozenset(members)
 
 
 def sdk_import_design_runtime_members(
@@ -355,6 +417,8 @@ def sdk_binary_members(
         )
         if control_broker_required(platform, matrix, version):
             names.add(CONTROL_BROKER_SDK_MEMBER)
+        if control_standalone_host_required(platform, matrix, version):
+            names.add(CONTROL_STANDALONE_HOST_SDK_MEMBER)
     return frozenset(names)
 
 
@@ -402,6 +466,8 @@ def required_sdk_members(
     )
     if platform.startswith("darwin-"):
         required.update(matrix.darwin_sdk_members)
+        if control_standalone_host_required(platform, matrix, version):
+            required.add(CONTROL_STANDALONE_HOST_SDK_MANIFEST)
     if (
         version is not None
         and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
@@ -451,11 +517,133 @@ def require_executable(archive: Archive, names: frozenset[str]) -> None:
         raise ContentError(f"{archive.path.name}: non-executable shipped binary(s): {bad}")
 
 
+def require_mode(archive: Archive, name: str, expected: int) -> None:
+    if not archive.preserves_modes:
+        return
+    actual = archive.members[name].mode & 0o777
+    if actual != expected:
+        raise ContentError(
+            f"{archive.path.name}: {name} mode is {actual:#05o}, expected {expected:#05o}"
+        )
+
+
+def _control_registry_digest() -> str:
+    checkout = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
+    path = checkout / "inspect/include/pulp/inspect/control_registry_digest.inc"
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContentError(f"could not read frozen control registry digest: {exc}") from exc
+    match = re.search(r'"([0-9a-f]{64})"', contents)
+    if match is None:
+        raise ContentError(f"invalid frozen control registry digest: {path}")
+    return match.group(1)
+
+
+def _canonical_standalone_manifest(document: dict[str, object]) -> bytes:
+    capabilities = ", ".join(
+        json.dumps(value) for value in document["capabilities"]
+    )
+    permission_terms = ", ".join(
+        json.dumps(value) for value in document["permission_terms"]
+    )
+    return (
+        "{\n"
+        f'  "schema": {json.dumps(document["schema"])},\n'
+        f'  "schema_version": {document["schema_version"]},\n'
+        f'  "profile": {json.dumps(document["profile"])},\n'
+        f'  "target": {json.dumps(document["target"])},\n'
+        f'  "product_name": {json.dumps(document["product_name"])},\n'
+        f'  "bundle_id": {json.dumps(document["bundle_id"])},\n'
+        f'  "build_id": {json.dumps(document["build_id"])},\n'
+        f'  "registry_digest": {json.dumps(document["registry_digest"])},\n'
+        f'  "endpoint_included": {str(document["endpoint_included"]).lower()},\n'
+        "  \"unsafe_runtime_eval_acknowledged\": "
+        f'{str(document["unsafe_runtime_eval_acknowledged"]).lower()},\n'
+        f'  "permission_terms": [{permission_terms}],\n'
+        f'  "capabilities": [{capabilities}]\n'
+        "}\n"
+    ).encode()
+
+
+def verify_control_standalone_host(
+    archive: Archive,
+    host_member: str,
+    manifest_member: str,
+    expected_registry_digest: str | None = None,
+) -> None:
+    manifest_bytes = archive.read(manifest_member, limit=64 * 1024)
+    try:
+        document = json.loads(manifest_bytes.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ContentError(
+            f"{archive.path.name}: invalid Standalone host manifest: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest root must be an object"
+        )
+    fields = frozenset(document)
+    if fields != CONTROL_STANDALONE_HOST_MANIFEST_FIELDS:
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest field mismatch; "
+            f"missing={sorted(CONTROL_STANDALONE_HOST_MANIFEST_FIELDS - fields)}, "
+            f"unexpected={sorted(fields - CONTROL_STANDALONE_HOST_MANIFEST_FIELDS)}"
+        )
+    expected = {
+        "schema": "dev.pulp.control/artifact-manifest@1",
+        "schema_version": 1,
+        "profile": "developer-local",
+        "target": "pulp-control-standalone-host",
+        "product_name": "Pulp Control Standalone Host",
+        "bundle_id": "dev.pulp.control-standalone-host",
+        "registry_digest": expected_registry_digest or _control_registry_digest(),
+        "endpoint_included": True,
+        "unsafe_runtime_eval_acknowledged": False,
+        "permission_terms": list(CONTROL_MANIFEST_PERMISSION_TERMS),
+        "capabilities": list(CONTROL_STANDALONE_HOST_CAPABILITIES),
+    }
+    mismatches = {
+        key: (document.get(key), value)
+        for key, value in expected.items()
+        if document.get(key) != value or type(document.get(key)) is not type(value)
+    }
+    build_id = document.get("build_id")
+    if not isinstance(build_id, str) or not re.fullmatch(r"build:[0-9a-f]{32}", build_id):
+        mismatches["build_id"] = (build_id, "build: followed by 32 lowercase hex digits")
+    if mismatches:
+        raise ContentError(
+            f"{archive.path.name}: invalid Standalone host manifest contract: {mismatches}"
+        )
+    if manifest_bytes != _canonical_standalone_manifest(document):
+        raise ContentError(
+            f"{archive.path.name}: Standalone host manifest is not canonical"
+        )
+
+    host_bytes = archive.read(host_member, limit=512 * 1024 * 1024)
+    digest = hashlib.sha256(manifest_bytes).hexdigest().encode()
+    markers = (
+        b"PULP_STANDALONE_COMPONENT_V1",
+        b"PULP_INSPECT_SHIPPING_MANIFEST_V1",
+        b"PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1",
+        b"PULP_CONTROL_MANIFEST_SHA256_" + digest + b"_V1",
+        b"PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1",
+        b"PULP_INSPECT_CAPABILITY_STATE_READ_V1",
+    )
+    missing_markers = [marker.decode() for marker in markers if marker not in host_bytes]
+    if missing_markers:
+        raise ContentError(
+            f"{archive.path.name}: Standalone host/manifest binding mismatch; "
+            f"missing markers={missing_markers}"
+        )
+
+
 def verify_cli_archive(
     path: Path,
     platform: str,
     version: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     with Archive(path) as archive:
         expected = cli_members(platform, matrix, version)
@@ -471,6 +659,15 @@ def verify_cli_archive(
             require_executable(
                 archive, cli_binary_members(platform, matrix, version)
             )
+        if control_standalone_host_required(platform, matrix, version):
+            require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MEMBER, 0o700)
+            require_mode(archive, CONTROL_STANDALONE_HOST_CLI_MANIFEST, 0o600)
+            verify_control_standalone_host(
+                archive,
+                CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+                expected_registry_digest,
+            )
 
 
 def verify_sdk_archive(
@@ -479,6 +676,7 @@ def verify_sdk_archive(
     version: str,
     source_sha: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     with Archive(path) as archive:
         names = set(archive.members)
@@ -493,6 +691,17 @@ def verify_sdk_archive(
             raise ContentError(
                 f"{path.name}: stale pre-floor SDK product: "
                 f"{CONTROL_BROKER_SDK_MEMBER}"
+            )
+        stale_standalone_host = {
+            CONTROL_STANDALONE_HOST_SDK_MEMBER,
+            CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+        } & names
+        if stale_standalone_host and not control_standalone_host_required(
+            platform, matrix, version
+        ):
+            raise ContentError(
+                f"{path.name}: stale pre-floor SDK product(s): "
+                f"{sorted(stale_standalone_host)}"
             )
 
         actual_libraries = installed_pulp_libraries(names, platform)
@@ -610,6 +819,15 @@ def verify_sdk_archive(
                 ) from exc
         if not platform.startswith("windows-"):
             require_executable(archive, sdk_binary_members(platform, matrix, version))
+        if control_standalone_host_required(platform, matrix, version):
+            require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MEMBER, 0o700)
+            require_mode(archive, CONTROL_STANDALONE_HOST_SDK_MANIFEST, 0o600)
+            verify_control_standalone_host(
+                archive,
+                CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+                expected_registry_digest,
+            )
 
         if not platform.startswith("darwin-"):
             apple_only = sorted(
@@ -670,6 +888,7 @@ def verify_platform(
     *,
     native_signatures: bool,
     matrix: ProductMatrix = DEFAULT_MATRIX,
+    expected_registry_digest: str | None = None,
 ) -> None:
     if platform not in matrix.platforms:
         raise ContentError(f"unsupported release platform: {platform}")
@@ -678,8 +897,10 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform, version, matrix)
-    verify_sdk_archive(sdk, platform, version, source_sha, matrix)
+    verify_cli_archive(cli, platform, version, matrix, expected_registry_digest)
+    verify_sdk_archive(
+        sdk, platform, version, source_sha, matrix, expected_registry_digest
+    )
     if native_signatures:
         verify_native_macos_signatures(asset_dir, platform, version, matrix)
 
@@ -695,6 +916,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-sha", required=True, help="Exact 40-character release-tag commit"
     )
     parser.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX_PATH)
+    parser.add_argument(
+        "--control-registry-digest",
+        help="Frozen registry digest from the exact source ref that built the release",
+    )
     parser.add_argument("--native-signatures", action="store_true")
     return parser
 
@@ -719,6 +944,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.source_sha,
                 native_signatures=args.native_signatures,
                 matrix=matrix,
+                expected_registry_digest=args.control_registry_digest,
             )
             print(f"OK: {platform} release archives match the product matrix")
     except (ContentError, OSError, UnicodeError) as exc:

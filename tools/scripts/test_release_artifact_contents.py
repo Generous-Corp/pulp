@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 import re
 import tarfile
 import tempfile
@@ -165,7 +166,47 @@ FIXTURE_HANDOFF_SCHEMA = (
 ).read_bytes()
 
 
+def standalone_manifest_payload() -> bytes:
+    document = {
+        "schema": "dev.pulp.control/artifact-manifest@1",
+        "schema_version": 1,
+        "profile": "developer-local",
+        "target": "pulp-control-standalone-host",
+        "product_name": "Pulp Control Standalone Host",
+        "bundle_id": "dev.pulp.control-standalone-host",
+        "build_id": "build:0123456789abcdef0123456789abcdef",
+        "registry_digest": rac._control_registry_digest(),
+        "endpoint_included": True,
+        "unsafe_runtime_eval_acknowledged": False,
+        "permission_terms": list(rac.CONTROL_MANIFEST_PERMISSION_TERMS),
+        "capabilities": list(rac.CONTROL_STANDALONE_HOST_CAPABILITIES),
+    }
+    return rac._canonical_standalone_manifest(document)
+
+
+def standalone_host_payload() -> bytes:
+    digest = hashlib.sha256(standalone_manifest_payload()).hexdigest()
+    return (
+        "PULP_STANDALONE_COMPONENT_V1\0"
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1\0"
+        "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1\0"
+        f"PULP_CONTROL_MANIFEST_SHA256_{digest}_V1\0"
+        "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1\0"
+        "PULP_INSPECT_CAPABILITY_STATE_READ_V1"
+    ).encode()
+
+
 def member_payload(name: str, platform: str = "linux-x64") -> bytes:
+    if name in {
+        rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+        rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+    }:
+        return standalone_manifest_payload()
+    if name in {
+        rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+        rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+    }:
+        return standalone_host_payload()
     if name == "pulp-sdk/version.txt":
         return f"{VERSION}\n".encode()
     if name == "pulp-sdk/sdk_build_type.txt":
@@ -266,15 +307,26 @@ def write_archive(
             data = member_payload(name, platform)
             info = tarfile.TarInfo(name)
             info.size = len(data)
-            default_mode = (
-                0o755
-                if "/bin/" in name
-                or "/libexec/" in name
-                or name in rac.cli_binary_members(
-                    platform, rac.DEFAULT_MATRIX, VERSION
-                )
-                else 0o644
-            )
+            if name in {
+                rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+            }:
+                default_mode = 0o700
+            elif name in {
+                rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
+                rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+            }:
+                default_mode = 0o600
+            elif (
+                "/bin/" in name
+                or name
+                in rac.cli_binary_members(platform, rac.DEFAULT_MATRIX, VERSION)
+                or name
+                in rac.sdk_binary_members(platform, rac.DEFAULT_MATRIX, VERSION)
+            ):
+                default_mode = 0o755
+            else:
+                default_mode = 0o644
             info.mode = mode_overrides.get(name, default_mode)
             archive.addfile(info, io.BytesIO(data))
 
@@ -299,6 +351,15 @@ def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
 
 
 class ReleaseArtifactContentsTests(unittest.TestCase):
+    def test_relocated_backfill_verifier_resolves_registry_from_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+            os.environ, {"GITHUB_WORKSPACE": str(ROOT)}
+        ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
+            self.assertEqual(
+                rac._control_registry_digest(),
+                "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+            )
+
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
         runtime_manifest = (
             ROOT
@@ -346,6 +407,51 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "pulp-sdk/libexec/pulp/pulp-control-broker",
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "9.8.7"),
         )
+
+    def test_control_standalone_host_contract_is_darwin_only_and_version_floored(self) -> None:
+        for platform in ("darwin-arm64", "darwin-x64"):
+            with self.subTest(platform=platform):
+                cli_before = rac.cli_members(platform, rac.DEFAULT_MATRIX, "0.803.0")
+                cli_at_floor = rac.cli_members(
+                    platform, rac.DEFAULT_MATRIX, "0.803.1"
+                )
+                sdk_at_floor = rac.required_sdk_members(
+                    platform, rac.DEFAULT_MATRIX, "0.803.1"
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER, cli_before
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST, cli_before
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER, cli_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST, cli_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER, sdk_at_floor
+                )
+                self.assertIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST, sdk_at_floor
+                )
+
+        for platform in (
+            "linux-arm64",
+            "linux-x64",
+            "windows-arm64",
+            "windows-x64",
+        ):
+            with self.subTest(platform=platform):
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_CLI_MEMBER,
+                    rac.cli_members(platform, rac.DEFAULT_MATRIX, "9.8.7"),
+                )
+                self.assertNotIn(
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                    rac.required_sdk_members(platform, rac.DEFAULT_MATRIX, "9.8.7"),
+                )
 
     def test_cli_contract_preserves_pre_import_design_releases(self) -> None:
         members = rac.cli_members(
@@ -665,6 +771,120 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     path, "darwin-arm64", VERSION, SOURCE_SHA, matrix
                 )
 
+    def test_negative_control_rejects_pre_floor_sdk_standalone_host(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            matrix = replace(
+                rac.DEFAULT_MATRIX, control_standalone_host_floor="10.0.0"
+            )
+            sdk = set(rac.required_sdk_members("darwin-arm64", matrix, VERSION))
+            sdk.update(
+                {
+                    rac.CONTROL_STANDALONE_HOST_SDK_MEMBER,
+                    rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
+                }
+            )
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            write_archive(path, sdk, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "stale pre-floor"):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA, matrix
+                )
+
+    def test_negative_control_rejects_executable_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            write_archive(
+                path,
+                cli,
+                as_zip=False,
+                platform="darwin-arm64",
+                mode_overrides={rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST: 0o700},
+            )
+
+            with self.assertRaisesRegex(rac.ContentError, "mode is 0o700"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_malformed_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+            with mock.patch(
+                __name__ + ".member_payload",
+                side_effect=lambda name, platform="linux-x64": (
+                    b"{not-json"
+                    if name == rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST
+                    else original_member_payload(name, platform)
+                ),
+            ):
+                write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "invalid Standalone host manifest"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_stale_standalone_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+
+            def stale_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name != rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST:
+                    return original_member_payload(name, platform)
+                document = json.loads(standalone_manifest_payload())
+                document["registry_digest"] = "0" * 64
+                return rac._canonical_standalone_manifest(document)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=stale_payload):
+                write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "manifest contract"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_selected_source_registry_digest_overrides_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.cli_asset_name("darwin-arm64")
+            write_archive(path, cli, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "manifest contract"):
+                rac.verify_cli_archive(
+                    path,
+                    "darwin-arm64",
+                    VERSION,
+                    rac.DEFAULT_MATRIX,
+                    "0" * 64,
+                )
+
+    def test_negative_control_rejects_tampered_standalone_host_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sdk = set(rac.required_sdk_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION))
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            original_member_payload = member_payload
+
+            def tampered_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == rac.CONTROL_STANDALONE_HOST_SDK_MEMBER:
+                    return standalone_host_payload().replace(
+                        b"PULP_CONTROL_MANIFEST_SHA256_", b"TAMPERED_MANIFEST_SHA256_"
+                    )
+                return original_member_payload(name, platform)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=tampered_payload):
+                write_archive(path, sdk, as_zip=False, platform="darwin-arm64")
+
+            with self.assertRaisesRegex(rac.ContentError, "binding mismatch"):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA, rac.DEFAULT_MATRIX
+                )
+
     def test_negative_control_invalid_signature_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -953,12 +1173,16 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["capability_handoff_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
+            del document["control_standalone_host_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
+            self.assertEqual(
+                historical.control_standalone_host_floor, "999999.0.0"
+            )
             self.assertNotIn(
                 "pulp-control-broker",
                 rac.cli_members("darwin-arm64", historical, "0.795.0"),

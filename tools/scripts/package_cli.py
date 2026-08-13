@@ -310,15 +310,18 @@ def main() -> int:
         print(f"FAIL: --control-broker-binary not at {args.control_broker_binary}",
               file=sys.stderr)
         return 2
-    control_payload = (
-        args.control_broker_binary,
+    standalone_payload = (
         args.control_standalone_host_binary,
         args.control_standalone_manifest,
     )
-    if any(path is not None for path in control_payload) and not all(
-            path is not None for path in control_payload):
-        print("FAIL: control broker, Standalone host, and capability manifest "
-              "must be supplied together", file=sys.stderr)
+    if any(path is not None for path in standalone_payload) and not all(
+            path is not None for path in standalone_payload):
+        print("FAIL: Standalone host and capability manifest must be supplied together",
+              file=sys.stderr)
+        return 2
+    if (args.control_standalone_host_binary is not None
+            and args.control_broker_binary is None):
+        print("FAIL: Standalone host requires the control broker", file=sys.stderr)
         return 2
     for flag, path in (
         ("--control-standalone-host-binary", args.control_standalone_host_binary),
@@ -392,6 +395,7 @@ def main() -> int:
             names.append("pulp-control-broker")
             print("bundled: "
                   f"{args.control_broker_binary} -> pulp-control-broker", flush=True)
+        if args.control_standalone_host_binary is not None:
             staged_control_host = stage_binary(
                 args.control_standalone_host_binary,
                 stage,
