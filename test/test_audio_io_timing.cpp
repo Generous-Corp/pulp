@@ -14,6 +14,9 @@
 
 #if defined(__linux__)
 #include "../core/audio/platform/linux/alsa_device.hpp"
+#if defined(PULP_HAS_JACK)
+#include "../core/audio/platform/linux/jack_device.hpp"
+#endif
 #endif
 
 #if defined(__APPLE__)
@@ -328,7 +331,12 @@ TEST_CASE("ALSA timing fails closed on invalid route reports",
           "[audio][timing][alsa]") {
     using namespace linux_platform;
     AlsaTimingValues values{64, 128, 48'000.0, SND_PCM_STREAM_PLAYBACK};
-    CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 1));
+    const auto short_delay = make_alsa_audio_io_timing(values, 47, 1);
+    REQUIRE(short_delay.has_value());
+    CHECK(short_delay->output_latency_frames == 0);
+    const auto snapshot = make_latency_snapshot(*short_delay, 0, 48'000.0);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->output_scheduling_offset_frames == 128);
 
     values.route_delay_frames = -1;
     CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 1));
@@ -339,6 +347,33 @@ TEST_CASE("ALSA timing fails closed on invalid route reports",
     CHECK_FALSE(make_alsa_audio_io_timing(values, 0, 1));
     CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 0));
 }
+
+#if defined(PULP_HAS_JACK)
+TEST_CASE("JACK timing preserves representable directional totals",
+          "[audio][timing][jack]") {
+    using namespace linux_platform;
+    JackTimingValues values{};
+    values.input_total_latency_frames = 256;
+    values.output_total_latency_frames = 384;
+    values.period_frames = 128;
+    values.sample_rate_hz = 48'000.0;
+
+    const auto timing = make_jack_audio_io_timing(values, 53, 2);
+    REQUIRE(timing.has_value());
+    CHECK(timing->input_latency_frames == 128);
+    CHECK(timing->output_latency_frames == 256);
+    CHECK(timing->io_buffer_frames == 128);
+
+    values.input_total_latency_frames = 64;
+    const auto output_only = make_jack_audio_io_timing(values, 53, 3);
+    REQUIRE(output_only.has_value());
+    CHECK_FALSE(output_only->input_latency_frames.has_value());
+    CHECK(output_only->output_latency_frames == 256);
+
+    values.output_total_latency_frames = 127;
+    CHECK_FALSE(make_jack_audio_io_timing(values, 53, 4));
+}
+#endif
 
 TEST_CASE("Linux dispatch publishes ALSA route timing and invalidates it",
           "[audio][timing][alsa][integration]") {
@@ -374,6 +409,7 @@ TEST_CASE("Linux dispatch publishes ALSA route timing and invalidates it",
     CHECK(first->timestamp_source == AudioTimingSource::device_clock);
 
     device.stop();
+    CHECK_FALSE(query_audio_io_timing(device).has_value());
     device.close();
     CHECK_FALSE(query_audio_io_timing(device).has_value());
     REQUIRE(device.open(config));
@@ -418,7 +454,6 @@ TEST_CASE("Linux dispatch publishes connected JACK timing and invalidates it",
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     REQUIRE(timing.has_value());
-    CHECK(timing->input_latency_frames.has_value());
     CHECK(timing->output_latency_frames.has_value());
     CHECK(timing->io_buffer_frames ==
           static_cast<std::uint32_t>(device->buffer_size()));

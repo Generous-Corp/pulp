@@ -4,6 +4,9 @@
 #include <cstring>
 #include <algorithm>
 
+extern "C" int jack_recompute_total_latencies(jack_client_t*)
+    __attribute__((weak));
+
 namespace pulp::audio::linux_platform {
 
 // JACK ports are registered one-per-channel and the device path hard-caps
@@ -26,18 +29,27 @@ make_jack_audio_io_timing(const JackTimingValues& values,
         return std::nullopt;
     }
 
-    const auto residual = [period = values.period_frames](std::uint32_t total) {
-        return total > period ? total - period : 0;
+    const auto residual = [period = values.period_frames](std::uint32_t total)
+        -> std::optional<std::uint32_t> {
+        if (total < period)
+            return std::nullopt;
+        return total - period;
     };
     AudioIoTiming timing{};
     if (values.input_total_latency_frames) {
-        timing.input_latency_frames = residual(*values.input_total_latency_frames);
-        timing.input_safety_offset_frames = 0;
+        if (const auto input = residual(*values.input_total_latency_frames)) {
+            timing.input_latency_frames = *input;
+            timing.input_safety_offset_frames = 0;
+        }
     }
     if (values.output_total_latency_frames) {
-        timing.output_latency_frames = residual(*values.output_total_latency_frames);
-        timing.output_safety_offset_frames = 0;
+        if (const auto output = residual(*values.output_total_latency_frames)) {
+            timing.output_latency_frames = *output;
+            timing.output_safety_offset_frames = 0;
+        }
     }
+    if (!timing.input_latency_frames && !timing.output_latency_frames)
+        return std::nullopt;
     timing.io_buffer_frames = values.period_frames;
     timing.sample_rate_hz = values.sample_rate_hz;
     timing.timestamp_domain = AudioTimestampDomain::device_sample_frames;
@@ -79,7 +91,11 @@ bool JackDevice::open(const DeviceConfig& config) {
     // Set callbacks
     jack_set_process_callback(client_, process_callback, this);
     jack_on_shutdown(client_, shutdown_callback, this);
-    if (jack_set_latency_callback(client_, latency_callback, this) != 0) {
+    const bool latency_api_available =
+        jack_set_latency_callback != nullptr &&
+        jack_recompute_total_latencies != nullptr;
+    if (latency_api_available &&
+        jack_set_latency_callback(client_, latency_callback, this) != 0) {
         runtime::log_error("JACK: could not register latency callback");
         close();
         return false;
@@ -183,7 +199,9 @@ bool JackDevice::start(AudioCallback callback) {
 
     // JACK only defines connected-port latency after graph connections exist.
     // Recompute requests the server-owned latency callbacks for this graph.
-    if (jack_recompute_total_latencies(client_) != 0)
+    if (jack_set_latency_callback != nullptr &&
+        jack_recompute_total_latencies != nullptr &&
+        jack_recompute_total_latencies(client_) != 0)
         invalidate_audio_io_timing();
 
     return true;

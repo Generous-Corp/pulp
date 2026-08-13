@@ -18,10 +18,9 @@ make_alsa_audio_io_timing(const AlsaTimingValues& values,
         return std::nullopt;
     }
 
-    const auto complete_delay = static_cast<std::uint64_t>(values.route_delay_frames);
     const auto period = static_cast<std::uint64_t>(values.period_frames);
-    if (complete_delay < period)
-        return std::nullopt;
+    const auto complete_delay = std::max(
+        static_cast<std::uint64_t>(values.route_delay_frames), period);
     const auto residual = complete_delay - period;
     if (residual > std::numeric_limits<std::uint32_t>::max())
         return std::nullopt;
@@ -168,9 +167,6 @@ bool AlsaDevice::open(const DeviceConfig& config) {
     interleaved_.resize(period_size_ * actual_channels_, 0.0f);
 
     is_open_ = true;
-    route_instance_token_.store(
-        detail::next_linux_audio_route_instance_token(), std::memory_order_release);
-    calibration_generation_.store(1, std::memory_order_release);
     runtime::log_info("ALSA: opened {} '{}' at {} Hz, period {} frames, {} channels",
         stream_ == SND_PCM_STREAM_CAPTURE ? "capture" : "playback",
         device_name_, config_.sample_rate, period_size_, actual_channels_);
@@ -199,18 +195,15 @@ void AlsaDevice::invalidate_audio_io_timing() noexcept {
 std::optional<AudioIoTiming> AlsaDevice::audio_io_timing() const noexcept {
     const auto token = route_instance_token_.load(std::memory_order_acquire);
     auto generation = calibration_generation_.load(std::memory_order_acquire);
-    if (!is_open_ || !pcm_ ||
+    if (!is_open_ || !pcm_ || !is_running_.load(std::memory_order_acquire) ||
         !monotonic_timing_available_.load(std::memory_order_acquire) || token == 0 ||
-        generation == 0 || snd_pcm_state(pcm_) == SND_PCM_STATE_DISCONNECTED) {
+        generation == 0 || snd_pcm_state(pcm_) != SND_PCM_STATE_RUNNING) {
         return std::nullopt;
     }
 
     snd_pcm_sframes_t delay = 0;
     if (snd_pcm_delay(pcm_, &delay) < 0)
         return std::nullopt;
-    if (delay < static_cast<snd_pcm_sframes_t>(period_size_))
-        return std::nullopt;
-
     const auto previous =
         last_reported_delay_frames_.exchange(delay, std::memory_order_acq_rel);
     if (previous >= 0 && previous != delay) {
@@ -234,6 +227,10 @@ bool AlsaDevice::start(AudioCallback callback) {
     if (!is_open_) return false;
     callback_ = std::move(callback);
     sample_position_ = 0;
+    last_reported_delay_frames_.store(-1, std::memory_order_release);
+    calibration_generation_.store(1, std::memory_order_release);
+    route_instance_token_.store(
+        detail::next_linux_audio_route_instance_token(), std::memory_order_release);
 
     is_running_.store(true, std::memory_order_release);
     io_thread_ = std::thread([this] {
@@ -270,6 +267,9 @@ void AlsaDevice::stop() {
     }
 
     callback_ = nullptr;
+    route_instance_token_.store(0, std::memory_order_release);
+    calibration_generation_.store(0, std::memory_order_release);
+    last_reported_delay_frames_.store(-1, std::memory_order_release);
 }
 
 DeviceInfo AlsaDevice::info() const {
