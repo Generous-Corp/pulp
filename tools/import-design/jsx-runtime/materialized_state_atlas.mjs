@@ -17,7 +17,7 @@ function boundedSelector(value) {
 }
 
 export function loadMaterializedStateAtlas(
-  atlasPath, { visualAuthority = 'reference' } = {}) {
+  atlasPath, { visualAuthority = 'reference', runtimeBase = '' } = {}) {
   if (!atlasPath) return [];
   if (visualAuthority !== 'reference' && visualAuthority !== 'native') {
     throw new Error('visual authority must be reference or native');
@@ -36,6 +36,7 @@ export function loadMaterializedStateAtlas(
   }
 
   const atlasRoot = realpathSync(dirname(atlasPath));
+  const portableRoot = runtimeBase ? realpathSync(runtimeBase) : '';
   const ids = new Set();
   return atlas.states.map((state, index) => {
     const id = String(state?.id || '');
@@ -57,6 +58,15 @@ export function loadMaterializedStateAtlas(
       if (imageRelative === '..' || imageRelative.startsWith(`..${sep}`) ||
           isAbsolute(imageRelative) || !statSync(imagePath).isFile()) {
         throw new Error(`state atlas entry ${id} image escapes the atlas directory`);
+      }
+      if (portableRoot) {
+        const portableImage = relative(portableRoot, imagePath);
+        if (portableImage === '..' || portableImage.startsWith(`..${sep}`) ||
+            isAbsolute(portableImage)) {
+          throw new Error(
+            `state atlas entry ${id} image escapes the portable runtime directory`);
+        }
+        imagePath = portableImage.split(sep).join('/');
       }
     }
 

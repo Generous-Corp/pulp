@@ -33,6 +33,17 @@ test('normalizes a captured dropdown or modal state contract', () => {
   }]);
 });
 
+test('emits package-relative state paint for a portable runtime', () => {
+  const { atlasPath } = fixture({
+    schema: 'pulp-materialized-state-atlas-v1',
+    version: 1,
+    states: [{ id: 'settings', image: 'settings.png' }],
+  });
+  assert.equal(loadMaterializedStateAtlas(atlasPath, {
+    runtimeBase: realpathSync(join(atlasPath, '..')),
+  })[0].image, 'settings.png');
+});
+
 test('native visual authority validates behavior without embedding screenshots', () => {
   const { atlasPath } = fixture({
     schema: 'pulp-materialized-state-atlas-v1', version: 1,
@@ -116,4 +127,15 @@ test('reference paint must be a regular file contained by the atlas directory', 
   }] }));
   assert.throws(() => loadMaterializedStateAtlas(escaped.atlasPath),
     /escapes the atlas directory/);
+});
+
+test('portable state paint cannot escape the packaged runtime directory', () => {
+  const { atlasPath } = fixture({
+    schema: 'pulp-materialized-state-atlas-v1', version: 1,
+    states: [{ id: 'settings', image: 'settings.png' }],
+  });
+  const outsideRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-runtime-'));
+  assert.throws(() => loadMaterializedStateAtlas(atlasPath, {
+    runtimeBase: outsideRoot,
+  }), /escapes the portable runtime directory/);
 });

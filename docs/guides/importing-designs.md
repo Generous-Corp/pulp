@@ -66,6 +66,7 @@ node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs \
   --in editor.ir-browser-capture/materialized-document.json \
   --design-ir editor.ir.json \
   --state-atlas editor.ir-browser-capture/captured-states.json \
+  --portable-state-assets \
   --out editor-behavior.js
 
 pulp-screenshot --script editor-behavior.js --design-ir editor.ir.json \
@@ -86,6 +87,10 @@ captured paint is missing fails closed rather than displaying an approximation.
 Do not substitute executable canvas paint for the accepted pixels until that
 paint independently passes the same-frame visual gate. Keep the chrome-only and
 per-canvas captures as diagnostic evidence for that later handoff.
+For an installed app or plug-in, place the atlas and its images beneath the
+runtime output directory and pass `--portable-state-assets`. The transformer
+then embeds package-relative image references and rejects symlinks or paths
+that escape that runtime directory; never ship absolute capture-machine paths.
 
 Local relative assets load from the input folder. External requests are denied
 by default. If the health report identifies a reviewed CDN dependency, retry

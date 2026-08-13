@@ -29,7 +29,8 @@ if (args.includes('--help') || args.includes('-h')) {
   --in <materialized-document.json> --design-ir <panel.ir.json> \\
   [--prelude <product-runtime.js>]... \\
   [--visual-authority reference|native] \\
-  [--state-atlas <captured-states.json>] [--activate-state <id>] \
+  [--state-atlas <captured-states.json>] [--portable-state-assets] \
+  [--activate-state <id>] \
   --out <behavior.js>
 
 Compiles Chromium's captured executable document into an @pulp/react tree.
@@ -67,6 +68,10 @@ if (visualAuthority !== 'reference' && visualAuthority !== 'native') {
 const preludeArgs = values('--prelude').map((path) => resolve(path));
 const stateAtlasArg = args.includes('--state-atlas')
   ? resolve(value('--state-atlas')) : '';
+const portableStateAssets = args.includes('--portable-state-assets');
+if (portableStateAssets && !stateAtlasArg) {
+  throw new Error('--portable-state-assets requires --state-atlas');
+}
 const requestedState = args.includes('--activate-state')
   ? String(value('--activate-state')) : '';
 const productPrelude = preludeArgs
@@ -182,7 +187,10 @@ if (textBindings.length > 4096) {
 for (const binding of textBindings) {
   binding.runtime_font_family = runtimeFamilyForText(fontBindings, binding);
 }
-const stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, { visualAuthority });
+const stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, {
+  visualAuthority,
+  runtimeBase: portableStateAssets ? dirname(output) : '',
+});
 if (requestedState && !stateAtlas.some((state) => state.id === requestedState)) {
   throw new Error(`--activate-state ${requestedState} is not present in the state atlas`);
 }

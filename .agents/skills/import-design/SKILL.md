@@ -6360,6 +6360,7 @@ node "$runtime/materialized-runtime-transform.mjs" \
   --in spectr.ir-browser-capture/materialized-document.json \
   --design-ir spectr.ir.json \
   --state-atlas spectr.ir-browser-capture/captured-states.json \
+  --portable-state-assets \
   --prelude spectr-native-services.js --out behavior.js
 
 pulp-screenshot --script behavior.js --design-ir spectr.ir.json \
@@ -6404,6 +6405,10 @@ interaction fake: invalid activation, a missing captured image, an unknown
 state, or a failed semantic match must fail closed. Validate the home state and
 every accepted atlas state independently against its own same-transaction
 browser frame.
+Installed targets must colocate atlas paints beneath the generated runtime
+directory and use `--portable-state-assets`. This emits package-relative paths
+and rejects any paint that resolves outside the packaged runtime; absolute
+capture-host paths are validation evidence only and must not enter artifacts.
 
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
