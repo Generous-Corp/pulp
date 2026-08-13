@@ -4,8 +4,9 @@
 The build workflow deliberately keeps the configured Mac Pro selector separate
 from the selector authorized for the current event. The organization runner
 group restricts trusted workflow refs to protected default-branch copies, so
-same-repository pull requests and merge groups may use the disposable Mac Pro
-pool. Fork pull requests remain hosted.
+only a caller that has already proved that workflow-ref boundary may use the
+disposable Mac Pro pool. Forks and PR workflow revisions outside that protected
+ref remain hosted.
 
 This helper turns that policy decision into machine-readable metadata and
 fails a dispatch if its configured selector is silently replaced by a hosted
