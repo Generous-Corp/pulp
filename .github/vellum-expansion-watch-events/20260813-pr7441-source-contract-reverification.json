@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260813-pr7441-source-contract-reverification",
+  "created_at": "2026-08-13T00:31:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the scheduled public-source reverification metadata refresh without changing importer behavior or transferring implementation authority.",
+  "tests": [
+    "check-source-contracts --strict",
+    "test_source_contracts",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
