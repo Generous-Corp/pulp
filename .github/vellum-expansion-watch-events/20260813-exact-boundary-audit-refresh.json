@@ -4,7 +4,7 @@
   "event_id": "20260813-exact-boundary-audit-refresh",
   "created_at": "2026-08-13T16:02:12Z",
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
-  "acceptance_sha256": "ef74b4b519e54ce1249f62deb26f3636709f992cbeb684a064a15910a77bee76",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [],
   "rationale": "Record the current-main exact-boundary audit refresh without rewriting the immutable acceptance or transferring authority.",
   "tests": [
