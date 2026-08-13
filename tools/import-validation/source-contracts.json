@@ -162,7 +162,7 @@
       "display_name": "Google Stitch",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-05-14",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -185,14 +185,14 @@
           "url": "https://stitch.withgoogle.com/docs",
           "kind": "docs",
           "proves": "Official Stitch product documentation anchor.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://github.com/google-labs-code/stitch-sdk",
           "kind": "sdk",
           "proves": "SDK exposes generated screen HTML and screenshot artifacts.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         }
       ],
@@ -259,7 +259,7 @@
       "display_name": "DESIGN.md",
       "kind": "system-tokens",
       "trust": "official",
-      "last_verified": "2026-05-14",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -282,14 +282,14 @@
           "url": "https://github.com/google-labs-code/design.md",
           "kind": "spec",
           "proves": "Official DESIGN.md YAML frontmatter plus Markdown design-system shape.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://stitch.withgoogle.com/docs/design-md/specification",
           "kind": "docs",
           "proves": "Stitch-adjacent DESIGN.md specification documentation.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         }
       ],
@@ -347,7 +347,7 @@
       "display_name": "Pencil / OpenPencil",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-05-14",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -370,14 +370,14 @@
           "url": "https://openpencil.dev/programmable/cli/exporting",
           "kind": "docs",
           "proves": "OpenPencil CLI export modes and JSX/Tailwind shape.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://openpencil.dev/programmable/jsx-renderer",
           "kind": "docs",
           "proves": "OpenPencil JSX renderer element vocabulary.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         }
       ],
@@ -432,7 +432,7 @@
       "display_name": "Figma Make",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-05-14",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -455,28 +455,28 @@
           "url": "https://developers.figma.com/docs/code",
           "kind": "docs",
           "proves": "Figma Code / Make React project model.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://developers.figma.com/docs/code/working-with-react",
           "kind": "docs",
           "proves": "Figma Make and Figma Sites use React, JSX, import/export, and App.tsx-style TSX project files.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://developers.figma.com/docs/code-connect/react/",
           "kind": "docs",
           "proves": "Code Connect React files are code-context glue, not executed runtime exports; Pulp intentionally rejects them in the runtime-import parser.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://developers.figma.com/docs/figma-mcp-server/",
           "kind": "docs",
           "proves": "Figma MCP provides design context to AI agents; Pulp models it as input acquisition, not raw runtime parser input.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         }
       ],
@@ -601,7 +601,7 @@
       "display_name": "v0.dev",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-05-14",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -624,21 +624,21 @@
           "url": "https://v0.app/docs/design-systems",
           "kind": "docs",
           "proves": "v0 design-system and React/Tailwind/shadcn default surface.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://ui.shadcn.com/docs/registry",
           "kind": "docs",
           "proves": "shadcn registry shape that Pulp's v0 parser deliberately rejects.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         },
         {
           "url": "https://v0.app/docs/api/platform/mcp",
           "kind": "docs",
           "proves": "v0 MCP server access lets IDE agents create and inspect v0 chats; Pulp models this as acquisition before the constrained TSX parser.",
-          "last_verified": "2026-05-14",
+          "last_verified": "2026-08-12",
           "recheck_interval_days": 90
         }
       ],
