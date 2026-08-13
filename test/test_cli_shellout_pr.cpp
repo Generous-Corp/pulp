@@ -64,11 +64,41 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    ScopedEnvVar git_dir_env("GIT_DIR");
+    ScopedEnvVar git_work_tree_env("GIT_WORK_TREE");
+    ScopedEnvVar git_index_env("GIT_INDEX_FILE");
+    ScopedEnvVar git_object_dir_env("GIT_OBJECT_DIRECTORY");
+    ScopedEnvVar git_common_dir_env("GIT_COMMON_DIR");
+    ScopedEnvVar git_prefix_env("GIT_PREFIX");
+    ScopedEnvVar git_namespace_env("GIT_NAMESPACE");
+    ScopedEnvVar git_quarantine_env("GIT_QUARANTINE_PATH");
     update_disabled.set("1");
+    git_dir_env.unset();
+    git_work_tree_env.unset();
+    git_index_env.unset();
+    git_object_dir_env.unset();
+    git_common_dir_env.unset();
+    git_prefix_env.unset();
+    git_namespace_env.unset();
+    git_quarantine_env.unset();
 
     auto home = unique_temp_dir("pulp-pr-workflow-manual-github");
+    auto project = home / "project";
     fs::create_directories(home);
+    fs::create_directories(project);
+    fs::create_directories(project / "core");
     home_env.set(home.string());
+    write_text(project / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.20)\nproject(CliPrWorkflowProbe)\n");
+
+    auto git_init = exec("git", {"-C", project.string(), "init", "-b", "main"});
+    REQUIRE(git_init.exit_code == 0);
+    REQUIRE(exec("git", {"-C", project.string(), "add", "CMakeLists.txt"})
+                .exit_code == 0);
+    REQUIRE(exec("git", {"-C", project.string(), "-c", "commit.gpgsign=false",
+                          "-c", "user.name=Pulp Test", "-c",
+                          "user.email=pulp-test@example.invalid", "commit", "-m",
+                          "fixture"}).exit_code == 0);
 
     auto manual = run_pulp({"pr", "--workflow=manual", "--base", "origin/main",
                             "--title", "Manual PR Plan"});
@@ -81,8 +111,20 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
     REQUIRE(manual.stdout_output.find("Manual and GitHub workflows do not create Shipyard tracking state")
             != std::string::npos);
 
-    auto github_dry_run = run_pulp({"pr", "--workflow", "github", "--dry-run",
-                                    "--title", "GitHub PR Plan"});
+    auto main_refusal = run_pulp_in_directory(
+        project, {"pr", "--workflow", "github", "--dry-run",
+                  "--title", "GitHub PR Plan"});
+    INFO("main-refusal stderr: " << main_refusal.stderr_output);
+    REQUIRE_FALSE(main_refusal.timed_out);
+    REQUIRE(main_refusal.exit_code == 2);
+    REQUIRE(main_refusal.stderr_output.find("refusing to run on 'main'")
+            != std::string::npos);
+
+    REQUIRE(exec("git", {"-C", project.string(), "branch", "-m",
+                          "feature/cli-pr-workflow-probe"}).exit_code == 0);
+    auto github_dry_run = run_pulp_in_directory(
+        project, {"pr", "--workflow", "github", "--dry-run",
+                  "--title", "GitHub PR Plan"});
     REQUIRE_FALSE(github_dry_run.timed_out);
     REQUIRE(github_dry_run.exit_code == 0);
     REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
