@@ -11,37 +11,62 @@
 
 namespace pulp::music {
 
+/// Stable nonzero identity for a pattern event.
 using PatternEventId = std::uint64_t;
 
+/// Musical role used when development operations preserve or rank events.
 enum class PatternEventRole : std::uint8_t {
+    /// An event that density operations must retain.
     anchor = 0,
+    /// A normal structural event.
     primary,
+    /// A decorative event that may be removed by density operations.
     ornament,
+    /// An event contributed by a regional fill.
     fill,
 };
 
+/// One uniquely identified, quantized event in a development pattern.
 struct PatternEvent {
+    /// Nonzero stable identity of this event.
     PatternEventId id = 0;
+    /// Quantized musical onset of this event.
     timebase::TickPosition onset{};
+    /// Normalized emphasis from 0 through 1000.
     std::uint16_t accent = 1000;
+    /// Role used by deterministic development operations.
     PatternEventRole role = PatternEventRole::primary;
 
     constexpr auto operator<=>(const PatternEvent&) const = default;
 };
 
+/// Error returned by a bounded pattern-development operation.
 enum class PatternDevelopmentError : std::uint8_t {
+    /// The operation succeeded.
     none = 0,
+    /// The resulting pattern would exceed its fixed capacity.
     capacity_exceeded,
+    /// An event identity was zero.
     zero_event_id,
+    /// Two events used the same identity.
     duplicate_event_id,
+    /// Two events used the same onset.
     duplicate_onset,
+    /// An event role was outside PatternEventRole's public values.
     invalid_role,
+    /// An accent was outside the normalized 0 through 1000 range.
     accent_out_of_range,
+    /// A set operation was outside PatternSetOperation's public values.
     invalid_set_operation,
+    /// Two incompatible records occupied the same logical event slot.
     conflicting_event,
+    /// A requested density exceeded the available events.
     density_out_of_range,
+    /// A requested density would remove an anchor event.
     density_below_anchor_count,
+    /// A regional-fill interval was empty or reversed.
     invalid_region,
+    /// A morph amount was outside the normalized 0 through 1000 range.
     morph_amount_out_of_range,
 };
 
@@ -118,20 +143,27 @@ constexpr std::int64_t interpolate_integer(std::int64_t from, std::int64_t to,
 
 } // namespace detail
 
-// Produces a stable nonzero ID from a musical coordinate. Callers remain
-// responsible for choosing distinct coordinates within one pattern.
+/// Produces a stable nonzero ID from a musical coordinate.
+///
+/// Callers remain responsible for choosing distinct coordinates within one
+/// pattern.
 [[nodiscard]] constexpr PatternEventId
 make_pattern_event_id(std::uint64_t seed, timebase::RandomCoordinate coordinate) noexcept {
     const auto value = timebase::coordinate_random(seed, coordinate);
     return value == 0 ? PatternEventId{1} : value;
 }
 
+/// Fixed-capacity, onset-ordered pattern used by deterministic development operations.
 template <std::size_t MaxEvents = 64> class DevelopmentPattern {
   public:
     static_assert(MaxEvents > 0, "DevelopmentPattern capacity must be positive");
     static_assert(MaxEvents <= 64, "Pattern development is bounded to 64 events");
+    /// Maximum number of events this pattern can contain.
     static constexpr std::size_t capacity = MaxEvents;
 
+    /// Replaces the pattern with validated, onset-ordered events.
+    ///
+    /// Leaves this pattern unchanged when validation fails.
     [[nodiscard]] constexpr PatternDevelopmentError
     assign(std::span<const PatternEvent> events) noexcept {
         if (events.size() > MaxEvents)
@@ -147,6 +179,7 @@ template <std::size_t MaxEvents = 64> class DevelopmentPattern {
         return PatternDevelopmentError::none;
     }
 
+    /// Inserts one validated event while preserving onset order.
     [[nodiscard]] constexpr PatternDevelopmentError insert(PatternEvent event) noexcept {
         if (size_ == MaxEvents)
             return PatternDevelopmentError::capacity_exceeded;
@@ -173,19 +206,23 @@ template <std::size_t MaxEvents = 64> class DevelopmentPattern {
         return PatternDevelopmentError::none;
     }
 
+    /// Returns the number of stored events.
     constexpr std::size_t size() const noexcept {
         return size_;
     }
+    /// Reports whether this pattern has no events.
     constexpr bool empty() const noexcept {
         return size_ == 0;
     }
 
+    /// Returns the event at an onset-ordered index, if present.
     [[nodiscard]] constexpr std::optional<PatternEvent> event(std::size_t index) const noexcept {
         if (index >= size_)
             return std::nullopt;
         return events_[index];
     }
 
+    /// Finds an event by stable identity.
     [[nodiscard]] constexpr std::optional<PatternEvent> find_id(PatternEventId id) const noexcept {
         for (std::size_t index = 0; index < size_; ++index)
             if (events_[index].id == id)
@@ -193,6 +230,7 @@ template <std::size_t MaxEvents = 64> class DevelopmentPattern {
         return std::nullopt;
     }
 
+    /// Finds an event by exact onset.
     [[nodiscard]] constexpr std::optional<PatternEvent>
     find_onset(timebase::TickPosition onset) const noexcept {
         for (std::size_t index = 0; index < size_; ++index)
@@ -201,6 +239,7 @@ template <std::size_t MaxEvents = 64> class DevelopmentPattern {
         return std::nullopt;
     }
 
+    /// Returns the number of events whose role is anchor.
     constexpr std::size_t anchor_count() const noexcept {
         std::size_t result = 0;
         for (std::size_t index = 0; index < size_; ++index)
@@ -215,25 +254,36 @@ template <std::size_t MaxEvents = 64> class DevelopmentPattern {
     std::size_t size_ = 0;
 };
 
+/// Pattern-development result that carries either a pattern or a validation error.
 template <std::size_t MaxEvents = 64> struct PatternDevelopmentResult {
+    /// Resulting pattern; empty after conflict and capacity failures.
     DevelopmentPattern<MaxEvents> pattern;
+    /// Validation result for the operation.
     PatternDevelopmentError error = PatternDevelopmentError::none;
 
+    /// Reports whether the operation completed without an error.
     constexpr explicit operator bool() const noexcept {
         return error == PatternDevelopmentError::none;
     }
 };
 
+/// Set operation evaluated using exact event onsets as membership keys.
 enum class PatternSetOperation : std::uint8_t {
+    /// Include the union of both onset sets.
     set_union = 0,
+    /// Include onsets present in both patterns.
     intersection,
+    /// Include onsets present only in the left pattern.
     difference,
+    /// Include onsets present in exactly one pattern.
     symmetric_difference,
 };
 
-// Set membership is defined by exact onset. Intersection and difference retain
-// the left record. Union rejects two different records at one onset so stable
-// IDs and roles are never silently rewritten.
+/// Combines two patterns using exact onset membership.
+///
+/// Intersection and difference retain the left record. Union rejects two
+/// different records at one onset so stable IDs and roles are never silently
+/// rewritten.
 template <std::size_t MaxEvents = 64>
 [[nodiscard]] constexpr PatternDevelopmentResult<MaxEvents>
 pattern_set(const DevelopmentPattern<MaxEvents>& lhs, const DevelopmentPattern<MaxEvents>& rhs,
@@ -286,14 +336,20 @@ pattern_set(const DevelopmentPattern<MaxEvents>& lhs, const DevelopmentPattern<M
     return result;
 }
 
+/// Deterministic request for selecting a target number of pattern onsets.
 struct DensitySelection {
+    /// Number of events to retain, including anchors.
     std::size_t target_onsets = 0;
+    /// Stable random seed used to rank non-anchor events.
     std::uint64_t seed = 0;
+    /// Coordinate namespace used with the seed to rank events.
     timebase::RandomCoordinate coordinate{};
 };
 
-// Anchors are mandatory. Every other event has one coordinate-derived rank, so
-// selecting k events is an exact subset of selecting k+1 with the same recipe.
+/// Selects a deterministic density while retaining every anchor.
+///
+/// Every non-anchor event has one coordinate-derived rank, so selecting k
+/// events is an exact subset of selecting k+1 with the same recipe.
 template <std::size_t MaxEvents = 64>
 [[nodiscard]] constexpr PatternDevelopmentResult<MaxEvents>
 select_pattern_density(const DevelopmentPattern<MaxEvents>& source,
@@ -337,16 +393,24 @@ select_pattern_density(const DevelopmentPattern<MaxEvents>& source,
     return result;
 }
 
+/// Deterministic request for filling an onset interval from candidate events.
 struct RegionalFillSelection {
+    /// Inclusive start of the fill interval.
     timebase::TickPosition begin{};
+    /// Exclusive end of the fill interval.
     timebase::TickPosition end{};
+    /// Number of events to retain inside the interval, including anchors.
     std::size_t target_region_onsets = 0;
+    /// Stable random seed used to rank non-anchor events.
     std::uint64_t seed = 0;
+    /// Coordinate namespace used with the seed to rank events.
     timebase::RandomCoordinate coordinate{};
 };
 
-// Outside [begin,end) the base is byte-identical. Inside it, base anchors are
-// mandatory and the union of base and candidate events is density-selected.
+/// Fills one onset interval while preserving base events outside it exactly.
+///
+/// Inside [begin, end), base anchors are mandatory and the union of base and
+/// candidate events is density-selected.
 template <std::size_t MaxEvents = 64>
 [[nodiscard]] constexpr PatternDevelopmentResult<MaxEvents>
 apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
@@ -465,14 +529,20 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
     return result;
 }
 
+/// Deterministic request for morphing one pattern into another.
 struct PatternMorphSelection {
+    /// Normalized morph amount from 0 (A) through 1000 (B).
     std::uint16_t amount = 0;
+    /// Stable random seed used for unique-event thresholds.
     std::uint64_t seed = 0;
+    /// Coordinate namespace used with the seed for unique-event thresholds.
     timebase::RandomCoordinate coordinate{};
 };
 
-// Shared IDs interpolate exact integer onsets and accents. Events unique to A
-// disappear and events unique to B appear at coordinate-keyed thresholds.
+/// Morphs two patterns while preserving deterministic identity and timing rules.
+///
+/// Shared IDs interpolate exact integer onsets and accents. Events unique to A
+/// disappear and events unique to B appear at coordinate-keyed thresholds.
 template <std::size_t MaxEvents = 64>
 [[nodiscard]] constexpr PatternDevelopmentResult<MaxEvents>
 morph_patterns(const DevelopmentPattern<MaxEvents>& a, const DevelopmentPattern<MaxEvents>& b,
