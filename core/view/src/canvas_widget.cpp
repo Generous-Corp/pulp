@@ -122,6 +122,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
 } // namespace
 
 void CanvasWidget::paint(canvas::Canvas& canvas) {
+    const auto commands = recorded_commands_;
     // Env-gated paint trace. Logged at entry, BEFORE any
     // baseline / save_count snapshots so the line reflects the matrix the
     // parent View::paint_all chain handed us. Format is grep-able:
@@ -137,7 +138,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         const auto& b = bounds();
         const auto m = canvas.current_transform();
         std::map<int, int> type_counts;
-        for (const auto& cmd : commands_) {
+        for (const auto& cmd : commands->commands) {
             ++type_counts[static_cast<int>(cmd.type)];
         }
         std::string summary;
@@ -158,7 +159,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                      static_cast<double>(m.a), static_cast<double>(m.b),
                      static_cast<double>(m.c), static_cast<double>(m.d),
                      static_cast<double>(m.e), static_cast<double>(m.f),
-                     commands_.size(), summary.c_str());
+                     commands->commands.size(), summary.c_str());
         std::fflush(stderr);
     }
 
@@ -278,7 +279,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         return;
     }
 
-    for (auto& cmd : commands_) {
+    for (const auto& cmd : commands->commands) {
         switch (cmd.type) {
         // Shapes
         case CanvasDrawCmd::Type::clear:

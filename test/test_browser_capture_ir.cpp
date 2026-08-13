@@ -446,7 +446,7 @@ TEST_CASE("browser capture accepts an integrity-bound canvas snapshot asset",
     CHECK(result.design_ir->asset_manifest.assets[1].height == 4);
 }
 
-TEST_CASE("materialized browser import keeps accepted Chromium paint authoritative",
+TEST_CASE("materialized browser import keeps accepted Chromium chrome authoritative",
           "[import-design][browser-capture][ir][materialized]") {
     TempCapture temp;
     const auto reference = png_header(1912, 1272);
@@ -474,7 +474,8 @@ TEST_CASE("materialized browser import keeps accepted Chromium paint authoritati
     const auto& authority = result.design_ir->root.children[0];
     CHECK(authority.type == "image");
     CHECK(authority.stable_anchor_id == "browser:paint-authority");
-    CHECK(authority.attributes.at("asset_ref") == "reference:browser");
+    CHECK(authority.attributes.at("asset_ref") ==
+          "reference:browser-chrome");
     CHECK(authority.attributes.at("materialized_role") ==
           "captured-paint-authority");
     CHECK_FALSE(authority.style.opacity.has_value());
@@ -485,11 +486,11 @@ TEST_CASE("materialized browser import keeps accepted Chromium paint authoritati
     CHECK(target.attributes.at("asset_ref") == "canvas:42");
     CHECK(target.attributes.at("materialized_role") ==
           "executable-canvas-target");
-    REQUIRE(target.style.opacity.has_value());
-    CHECK(*target.style.opacity == 0.0f);
+    CHECK_FALSE(target.style.opacity.has_value());
     CHECK_FALSE(target.style.pointer_events.has_value());
     CHECK(result.design_ir->root.attributes.at(
-              "materialized_visual_authority") == "browser:paint-authority");
+              "materialized_visual_authority") ==
+          "browser:chrome+native-canvases");
     CHECK(result.design_ir->root.attributes.at(
               "materialized_chrome_diagnostic_asset") ==
           "reference:browser-chrome");

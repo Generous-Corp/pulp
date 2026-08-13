@@ -555,7 +555,7 @@ function materializedLastDescendantSplit(selector) {
       ++bracketDepth;
     } else if (ch === ']' && bracketDepth > 0) {
       --bracketDepth;
-    } else if (/\s/.test(ch) && bracketDepth === 0) {
+    } else if (/\\s/.test(ch) && bracketDepth === 0) {
       split = index;
     }
   }
@@ -572,7 +572,7 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
   let targetSelector = selector.trim();
   let effectiveAncestor = ancestor || '';
   let directParentSelector = '';
-  const directParts = targetSelector.split(/\s*>\s*/).filter(Boolean);
+  const directParts = targetSelector.split(/\\s*>\\s*/).filter(Boolean);
   if (directParts.length > 1) {
     targetSelector = directParts.pop();
     directParentSelector = directParts.pop();

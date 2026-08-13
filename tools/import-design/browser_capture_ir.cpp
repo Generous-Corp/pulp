@@ -1550,13 +1550,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
     if (materialized_composition) {
-        // The visible authority is the COMPLETE accepted Chromium frame. Its
-        // coordinate space is therefore the capture viewport, even when the
-        // authored panel occupies a smaller primary-surface rect inside it.
-        // Cropping this root and translating the full-frame image into that
-        // crop looks plausible but can never compare to the accepted host
-        // frame: it discards the gutters and shifts every pixel. The live
-        // behavior plane separately consumes browser_authored_frame_* below.
+        // Chromium's canvas-free chrome is the immutable paint authority.
+        // Executable canvas targets are layered over it and share the retained
+        // Canvas2D command streams authored by the materialized React realm.
+        // This keeps the accepted typography/layout pixel-exact without
+        // freezing dynamic analyzer/filter content into a screenshot.
         ir.root.style.width = static_cast<float>(logical_width);
         ir.root.style.height = static_cast<float>(logical_height);
         ir.root.style.overflow = "hidden";
@@ -1576,12 +1574,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             layer.style.width = width;
             layer.style.height = height;
             layer.style.object_fit = "fill";
-            // Chromium's accepted frame stays on screen until an executable
-            // canvas program has independently passed the native parity gate.
-            // The transparent CanvasWidgets above it are nevertheless real
-            // hit-test targets: the materialized behavior runtime binds the
-            // captured controls to these stable anchors immediately.
-            if (!paint_authority) layer.style.opacity = 0.0f;
+            // Chromium's accepted chrome stays on screen. The CanvasWidgets
+            // above it are real executable paint layers: the
+            // materialized behavior runtime shares each live Canvas2D command
+            // stream with its stable DesignIR anchor.
             layer.attributes["asset_ref"] = asset_id;
             layer.attributes["materialized_role"] =
                 paint_authority ? "captured-paint-authority"
@@ -1594,7 +1590,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         };
 
         append_layer(
-            "Accepted Chromium frame", "browser:paint-authority", reference_id,
+            "Accepted Chromium chrome", "browser:paint-authority", *chrome_asset_id,
             0.0f, 0.0f, static_cast<float>(logical_width),
             static_cast<float>(logical_height), true);
         for (std::size_t i = 0; i < captured_canvas_layers.size(); ++i) {
@@ -1608,7 +1604,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         ir.root.attributes["materialized_canvas_layers"] =
             std::to_string(captured_canvas_layers.size());
         ir.root.attributes["materialized_visual_authority"] =
-            "browser:paint-authority";
+            "browser:chrome+native-canvases";
         ir.root.attributes["materialized_chrome_diagnostic_asset"] =
             *chrome_asset_id;
     } else if (native_lowering) {

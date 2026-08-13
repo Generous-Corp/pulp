@@ -346,7 +346,11 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
 
     bridge.load_script("canvasStrokeRect('behavior', 4, 5, 6, 7, '#0ff', 1);");
     REQUIRE(behavior->command_count() == 2);
-    REQUIRE(captured->command_count() == 0);
+    REQUIRE(captured->command_count() == 2);
+    CHECK(&captured->commands() == &behavior->commands());
+    bridge.load_script("canvasClear('behavior'); canvasFillRect('behavior', 8, 9, 10, 11, '#f0f');");
+    REQUIRE(behavior->command_count() == 1);
+    REQUIRE(captured->command_count() == 1);
 
     REQUIRE(captured->on_dom_pointer_event);
     MouseEvent down;

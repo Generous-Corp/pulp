@@ -40,6 +40,12 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source) {
     auto* target_view = unique_anchor(root, anchor, matches);
     if (matches != 1 || !target_view || !source || target_view == source)
         return false;
+    auto* target = dynamic_cast<CanvasWidget*>(target_view);
+    if (!target) return false;
+    // Share the retained Canvas2D program as well as its input callbacks. The
+    // DesignIR canvas is the visible layer; React may remain a transparent
+    // behavior tree while continuously replacing this shared command stream.
+    target->share_recorded_commands_from(*source);
     // Copy the bridge-safe callbacks instead of retaining either the source
     // View or WidgetBridge. The copied closures already carry the shared
     // BridgeCallbackState used by every registered pointer callback, so they

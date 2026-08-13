@@ -235,7 +235,7 @@ public:
         return last_native_paint_backend_;
     }
 
-    void clear_commands() { commands_.clear(); }
+    void clear_commands() { recorded_commands_->commands.clear(); }
     /// NaN / ±Infinity defense at the recording
     /// boundary. JS callers can produce non-finite numerics from any
     /// arithmetic mishap (divide-by-zero on a zero parent rect during a
@@ -260,14 +260,24 @@ public:
         cmd.y3      = sanitize_finite(cmd.y3);
         cmd.extra   = sanitize_finite(cmd.extra);
         for (auto& p : cmd.gradient_positions) p = sanitize_finite(p);
-        commands_.push_back(std::move(cmd));
+        recorded_commands_->commands.push_back(std::move(cmd));
     }
-    size_t command_count() const { return commands_.size(); }
+    size_t command_count() const { return recorded_commands_->commands.size(); }
     /// Accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
     /// clear_commands. Callers must not retain the reference past the next
     /// add_command / clear_commands call.
-    const std::vector<CanvasDrawCmd>& commands() const { return commands_; }
+    const std::vector<CanvasDrawCmd>& commands() const {
+        return recorded_commands_->commands;
+    }
+    /// Make this canvas replay the same retained command stream as `source`.
+    /// The shared stream deliberately outlives either View so a materialized
+    /// DesignIR canvas can remain visible while the hidden React realm that
+    /// authors its Canvas2D program is replaced during reload.
+    void share_recorded_commands_from(CanvasWidget& source) {
+        recorded_commands_ = source.recorded_commands_;
+        request_repaint();
+    }
     bool last_native_gpu_texture_draw_succeeded() const { return last_native_gpu_texture_draw_succeeded_; }
     void set_native_gpu_texture_provider(NativeGpuTextureProvider provider) {
         native_gpu_texture_provider_ = std::move(provider);
@@ -305,7 +315,11 @@ private:
         return std::isfinite(v) ? v : 0.0f;
     }
 
-    std::vector<CanvasDrawCmd> commands_;
+    struct RecordedCommands {
+        std::vector<CanvasDrawCmd> commands;
+    };
+    std::shared_ptr<RecordedCommands> recorded_commands_ =
+        std::make_shared<RecordedCommands>();
     std::shared_ptr<NativeCanvasPainter> native_painter_;
     NativeCanvasBackendRequirement native_backend_requirement_ =
         NativeCanvasBackendRequirement::any;
