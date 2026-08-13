@@ -108,9 +108,31 @@ pulp_add_test_suite(pulp-test-property-panel
 pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 
 # GraphEditorView tests
-pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view pulp::host)
 # GraphEditorView opening a node's plugin editor (first EditorAttachment consumer)
 pulp_add_test_suite(pulp-test-graph-editor-open LIBRARIES pulp::view pulp::host)
+
+# GraphEditorView is deliberately absent from the view-only binary surface.
+# Keep every direct consumer explicit so removing the view-to-host dependency
+# cannot be masked by another target's transitive links.
+foreach(_pulp_graph_editor_target IN ITEMS
+        pulp-test-graph-editor-view
+        pulp-test-graph-editor-open)
+    get_target_property(_pulp_graph_editor_links
+        ${_pulp_graph_editor_target} LINK_LIBRARIES)
+    foreach(_pulp_graph_editor_dependency IN ITEMS pulp::view pulp::host)
+        list(FIND _pulp_graph_editor_links
+            ${_pulp_graph_editor_dependency} _pulp_graph_editor_link_index)
+        if(_pulp_graph_editor_link_index EQUAL -1)
+            message(FATAL_ERROR
+                "${_pulp_graph_editor_target} must link ${_pulp_graph_editor_dependency} directly")
+        endif()
+    endforeach()
+endforeach()
+unset(_pulp_graph_editor_dependency)
+unset(_pulp_graph_editor_link_index)
+unset(_pulp_graph_editor_links)
+unset(_pulp_graph_editor_target)
 
 # Modal overlay + ContextMenu (view-drawn popup menu) tests
 pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)

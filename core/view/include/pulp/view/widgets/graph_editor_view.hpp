@@ -13,6 +13,10 @@
 // declaration on platforms where the host headers are not on the include
 // path — downstream code that conditionally instantiates GraphEditorView
 // must mirror the same guard.
+//
+// GraphEditorView is an opt-in host-backed widget, not part of the view-only
+// link surface. Desktop consumers that instantiate it must link both
+// `pulp::view` and `pulp::host`.
 
 #if defined(__has_include) && __has_include(<pulp/host/signal_graph.hpp>)
 #define PULP_VIEW_HAS_GRAPH_EDITOR_VIEW 1

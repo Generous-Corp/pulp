@@ -97,6 +97,9 @@ needs are already contracts rather than conventions:
   transaction.
 - **`GraphEditorView`** (`pulp::view::widgets`) already renders a `SignalGraph`
   as a draggable, connectable canvas if you want the model and the view together.
+  It is a host-backed, desktop-only opt-in rather than part of the view-only
+  link surface. A CMake consumer must link both targets explicitly:
+  `target_link_libraries(my_app PRIVATE pulp::view pulp::host)`.
 
 ### Embedding a hosted plugin's own editor
 
