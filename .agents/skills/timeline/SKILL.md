@@ -690,6 +690,24 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 - Gesture phases form one serialized session state machine: `Begin` opens a
   writer/group, only matching `Update`/`End` may follow, and other writers plus
   undo/redo receive `GestureState` until the group closes.
+- Use `timeline_editor::EditGestureIdentityAllocator` for construction-safe
+  continuous editor input. It owns one group and one opaque pending ticket,
+  binds tickets to the real session/writer provenance, lowers the issued phase
+  internally, and derives transitions only from its own call to
+  `DocumentSession::submit()`. Validation/lowering errors preserve the ticket;
+  an actual submission consumes it while a rejected transaction preserves the
+  confirmed state for a fresh-ID retry. Keep it on one control thread and route
+  every submission for its writer/group through it; concurrent direct
+  same-group submission is outside the contract. If a pending ticket is
+  abandoned without submission, discard that allocator instance.
+- A cached successful Begin is not necessarily the current publication. The
+  allocator checks the exact `CommitResult` with
+  `DocumentSession::is_current_publication()` and, on mismatch, asks the session
+  whether its opaque writer/group still owns the authoritative open gesture.
+  An intervening Update keeps the allocator Open so End/Cancel remains
+  possible; an intervening End/Cancel returns it to AwaitingBegin. Never scan
+  the journal, reconstruct this from numeric writer IDs, or accept
+  caller-declared acknowledgement state.
 - Project identity lookup is a persistent AVL directory. Deletion tombstones
   IDs forever; inverse insertion may reactivate the exact identity and parent
   chain. Never scan the whole project or reuse an ID to implement undo.

@@ -56,6 +56,7 @@ class WriterToken {
 
       private:
         friend class WriterToken;
+        friend class DocumentSession;
         constexpr Provenance(WriterId writer, std::uint64_t owner_nonce) noexcept
             : writer_(writer), owner_nonce_(owner_nonce) {}
 
@@ -160,6 +161,15 @@ class DocumentSession {
     std::shared_ptr<const Project> snapshot() const noexcept;
     /// Returns the revision paired with the currently published snapshot.
     DocumentRevision revision() const noexcept;
+    /// Reports whether result is the session's exact current publication.
+    ///
+    /// Snapshot identity and revision are compared from one atomic observation.
+    bool is_current_publication(const CommitResult& result) const noexcept;
+    /// Reports whether provenance/group owns the session's current open gesture.
+    ///
+    /// This control-thread query reads the authoritative session lifecycle under
+    /// the writer lock. It retains neither the provenance nor submission authority.
+    bool is_gesture_open(WriterToken::Provenance provenance, UndoGroupId group) const noexcept;
     /// Applies and, when configured, durably journals one transaction.
     ///
     /// The token must belong to this session and match the transaction writer.

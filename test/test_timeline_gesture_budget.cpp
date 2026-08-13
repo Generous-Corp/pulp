@@ -16,6 +16,18 @@ using namespace pulp::timeline;
 using namespace pulp::timeline_editor;
 using namespace timeline_test;
 
+namespace pulp::timeline_editor::detail {
+
+class EditGestureIdentityIssueTestAccess {
+  public:
+    static runtime::Result<timeline::Transaction, timeline::ModelError>
+    lower(const EditGestureIdentityIssue& issue, EditIntent intent) {
+        return issue.lower(std::move(intent));
+    }
+};
+
+} // namespace pulp::timeline_editor::detail
+
 namespace {
 
 // Dense enough that one whole-content replacement is a meaningful charge, small
@@ -415,10 +427,8 @@ TEST_CASE("Gesture submission reconciles an exact direct commit retry",
     auto issue = allocator.issue(writer, session->revision(), GesturePhase::Begin);
     REQUIRE(issue);
     const auto intent = move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter);
-    const EditIntentIdentity issued_identity{TransactionId{writer.id(), 1}, session->revision(),
-                                             CommandId{writer.id(), 1},
-                                             allocator.undo_group()};
-    auto direct_transaction = lower_edit_intent(intent, issued_identity);
+    auto direct_transaction =
+        pulp::timeline_editor::detail::EditGestureIdentityIssueTestAccess::lower(*issue, intent);
     REQUIRE(direct_transaction);
     const auto command = direct_transaction->commands.front().id;
 
@@ -448,11 +458,11 @@ TEST_CASE("Gesture submission rejects a cached Begin after an intervening End",
     REQUIRE(issue);
 
     const auto begin_intent = move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter);
-    const EditIntentIdentity begin_identity{TransactionId{writer.id(), 1}, session->revision(),
-                                            CommandId{writer.id(), 1},
-                                            allocator.undo_group()};
-    auto direct_begin = lower_edit_intent(begin_intent, begin_identity);
+    auto direct_begin =
+        pulp::timeline_editor::detail::EditGestureIdentityIssueTestAccess::lower(*issue,
+                                                                                 begin_intent);
     REQUIRE(direct_begin);
+    const auto begin_command = direct_begin->commands.front().id;
     auto began = session->submit(writer, std::move(*direct_begin));
     REQUIRE(began);
     REQUIRE(began->revision == DocumentRevision{1});
@@ -477,11 +487,67 @@ TEST_CASE("Gesture submission rejects a cached Begin after an intervening End",
     REQUIRE(stale_cached.error().commit_result);
     REQUIRE(stale_cached.error().commit_result->revision == DocumentRevision{1});
     REQUIRE(stale_cached.error().commit_result->applied_commands ==
-            std::vector<CommandId>{CommandId{writer.id(), 1}});
+            std::vector<CommandId>{begin_command});
     REQUIRE(allocator.state() == EditGestureIdentityState::AwaitingBegin);
     REQUIRE_FALSE(allocator.has_pending_identity());
     REQUIRE(session->revision() == DocumentRevision{2});
     REQUIRE(current_clip_start(*session) == 2 * kTicksPerQuarter);
+    REQUIRE(session->undo(writer));
+    REQUIRE(current_clip_start(*session) == 0);
+}
+
+TEST_CASE("Gesture submission reconciles a cached Begin after an intervening Update",
+          "[gesture-identity][submission-authority][cached-success]"
+          "[cached-intervening-update]") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto created = EditGestureIdentityAllocator::create(writer);
+    REQUIRE(created);
+    auto allocator = std::move(created).value();
+    auto issue = allocator.issue(writer, session->revision(), GesturePhase::Begin);
+    REQUIRE(issue);
+
+    const auto begin_intent = move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter);
+    auto direct_begin =
+        pulp::timeline_editor::detail::EditGestureIdentityIssueTestAccess::lower(*issue,
+                                                                                 begin_intent);
+    REQUIRE(direct_begin);
+    const auto begin_command = direct_begin->commands.front().id;
+    auto began = session->submit(writer, std::move(*direct_begin));
+    REQUIRE(began);
+
+    const EditIntentIdentity update_identity{writer.allocate_transaction_id(),
+                                             session->revision(),
+                                             writer.allocate_command_id(),
+                                             allocator.undo_group()};
+    auto direct_update = lower_edit_intent(
+        move_clip_intent(GesturePhase::Update, kTicksPerQuarter, 2 * kTicksPerQuarter),
+        update_identity);
+    REQUIRE(direct_update);
+    auto updated = session->submit(writer, std::move(*direct_update));
+    REQUIRE(updated);
+    REQUIRE(current_clip_start(*session) == 2 * kTicksPerQuarter);
+
+    auto stale_cached = allocator.submit(*session, writer, std::move(*issue), begin_intent);
+    REQUIRE_FALSE(stale_cached);
+    REQUIRE(stale_cached.error().code == EditGestureIdentityError::SubmissionResultMismatch);
+    REQUIRE_FALSE(stale_cached.error().model_error);
+    REQUIRE(stale_cached.error().commit_result);
+    REQUIRE(stale_cached.error().commit_result->revision == began->revision);
+    REQUIRE(stale_cached.error().commit_result->applied_commands ==
+            std::vector<CommandId>{begin_command});
+    REQUIRE(allocator.state() == EditGestureIdentityState::Open);
+    REQUIRE_FALSE(allocator.has_pending_identity());
+
+    auto end_issue = allocator.issue(writer, session->revision(), GesturePhase::End);
+    REQUIRE(end_issue);
+    auto ended = allocator.submit(
+        *session, writer, std::move(*end_issue),
+        move_clip_intent(GesturePhase::End, 2 * kTicksPerQuarter, 3 * kTicksPerQuarter));
+    REQUIRE(ended);
+    REQUIRE(ended->document_result);
+    REQUIRE(ended->state == EditGestureIdentityState::Closed);
+    REQUIRE(current_clip_start(*session) == 3 * kTicksPerQuarter);
     REQUIRE(session->undo(writer));
     REQUIRE(current_clip_start(*session) == 0);
 }

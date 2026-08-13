@@ -13,6 +13,10 @@
 
 namespace pulp::timeline_editor {
 
+namespace detail {
+class EditGestureIdentityIssueTestAccess;
+}
+
 /** @addtogroup timeline_editing
  * @{
  */
@@ -152,22 +156,35 @@ struct EditIntentIdentity {
 
 /// Confirmed lifecycle state of one continuous edit gesture.
 enum class EditGestureIdentityState : std::uint8_t {
+    /// No Begin has been confirmed for this allocator's group.
     AwaitingBegin,
+    /// A Begin or Update is confirmed and End/Cancel may be issued.
     Open,
+    /// End or Cancel committed; this allocator cannot issue again.
     Closed,
+    /// A required writer-local identity sequence was exhausted.
     Exhausted,
 };
 
 /// Why an edit-gesture identity operation was refused.
 enum class EditGestureIdentityError : std::uint8_t {
+    /// The supplied writer carries no valid session authority.
     InvalidWriter,
+    /// The writer does not match the allocator's opaque provenance.
     WriterMismatch,
+    /// The requested phase is illegal for the confirmed lifecycle.
     InvalidPhase,
+    /// The allocator already committed End or Cancel.
     GestureClosed,
+    /// A required writer-local identity sequence was exhausted.
     IdentityExhausted,
+    /// One previously issued identity still awaits submission.
     IdentityPending,
+    /// The issue is consumed, moved-from, foreign, or no longer pending.
     ForeignOrStaleIssue,
+    /// The supplied intent could not be lowered before session submission.
     IntentLoweringFailed,
+    /// A cached success is not the session's current publication.
     SubmissionResultMismatch,
 };
 
@@ -196,6 +213,7 @@ class EditGestureIdentityIssue {
   public:
     EditGestureIdentityIssue(const EditGestureIdentityIssue&) = delete;
     EditGestureIdentityIssue& operator=(const EditGestureIdentityIssue&) = delete;
+    /// Transfers the pending identity and invalidates other.
     EditGestureIdentityIssue(EditGestureIdentityIssue&& other) noexcept
         : identity_(std::exchange(other.identity_, {})),
           phase_(std::exchange(other.phase_, timeline::GesturePhase::Single)),
@@ -209,6 +227,7 @@ class EditGestureIdentityIssue {
 
   private:
     friend class EditGestureIdentityAllocator;
+    friend class detail::EditGestureIdentityIssueTestAccess;
     EditGestureIdentityIssue(EditIntentIdentity identity, timeline::GesturePhase phase,
                              timeline::WriterToken::Provenance provenance) noexcept
         : identity_(std::move(identity)), phase_(phase), provenance_(provenance) {}
@@ -240,6 +259,10 @@ class EditGestureIdentityIssue {
 /// This is control-thread state, not a concurrent reservation in
 /// DocumentSession. The session owns the one-open-gesture rule and is the only
 /// submission authority; the allocator retains neither it nor the WriterToken.
+/// While this allocator lives, callers must serialize every submission for its
+/// writer/group through it; concurrent direct same-group submission is outside
+/// the contract. If a pending issue is abandoned without submission, discard
+/// that allocator instance.
 /// Opaque writer provenance prevents equal numeric ID streams from separate
 /// sessions from being mistaken for one another here. Cancel closes the group
 /// after a successful submission; reverting its applied edits remains the
@@ -265,6 +288,7 @@ class EditGestureIdentityAllocator {
 
     EditGestureIdentityAllocator(const EditGestureIdentityAllocator&) = delete;
     EditGestureIdentityAllocator& operator=(const EditGestureIdentityAllocator&) = delete;
+    /// Transfers allocator lifecycle and invalidates other.
     EditGestureIdentityAllocator(EditGestureIdentityAllocator&& other) noexcept
         : provenance_(std::exchange(other.provenance_, {})),
           undo_group_(std::exchange(other.undo_group_, {})),
@@ -324,7 +348,8 @@ class EditGestureIdentityAllocator {
     /// Protocol or lowering errors touch neither DocumentSession nor the pending
     /// issue. Once DocumentSession is called, both its success and rejection
     /// consume the issue. A success advances only when it is still the session's
-    /// current publication; a stale cached success fails closed.
+    /// current publication; a stale cached Begin reconciles from session-owned
+    /// gesture state before returning the exact mismatch.
     runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>
     submit(timeline::DocumentSession& session, timeline::WriterToken& writer,
            EditGestureIdentityIssue&& issue, EditIntent intent) {
@@ -345,12 +370,15 @@ class EditGestureIdentityAllocator {
         issue.invalidate();
         clear_pending();
         if (document_result) {
-            const auto current = session.current();
             if (document_result->applied_commands.size() != 1 ||
                 document_result->applied_commands.front() != command ||
-                document_result->revision != current.revision ||
-                document_result->snapshot != current.snapshot)
+                !session.is_current_publication(*document_result)) {
+                if (phase == timeline::GesturePhase::Begin)
+                    state_ = session.is_gesture_open(provenance_, undo_group_)
+                                 ? EditGestureIdentityState::Open
+                                 : EditGestureIdentityState::AwaitingBegin;
                 return submission_result_error(std::move(*document_result));
+            }
             state_ = committed_state_after(phase);
         }
         return runtime::Result<EditGestureSubmitOutcome, EditGestureSubmitError>(runtime::Ok(
