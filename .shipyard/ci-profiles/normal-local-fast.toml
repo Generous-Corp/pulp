@@ -13,7 +13,7 @@
 # Shipyard/agents can explain or apply the same policy from the Pulp checkout.
 
 name = "normal-local-fast"
-description = "Fast PRs on local ARM64 VMs; nightly GitHub Intel validation."
+description = "Fast PRs on disposable local Mac Pro Linux plus local ARM64 VMs; hosted fallback."
 
 [repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
@@ -21,8 +21,9 @@ targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.linux]
-strategy = "github-only"
-targets = ["github.linux-x64"]
+strategy = "ordered-fallback"
+targets = ["macpro.linux-x64-vm", "github.linux-x64"]
+github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"

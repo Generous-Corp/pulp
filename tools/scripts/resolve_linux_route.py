@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 ROUTE_REASONS = (
     "explicit-dispatch",
+    "local-capacity",
     "security-hosted",
     "unconfigured-hosted",
 )
@@ -51,6 +52,13 @@ GITHUB_HOSTED_LABELS = frozenset(
         "macos-26-xlarge",
     }
 )
+MAC_PRO_LINUX_LABELS = (
+    "self-hosted",
+    "linux",
+    "x64",
+    "pulp-build-linux-x64",
+    "pulp-host-macpro",
+)
 
 
 def _selector(raw: str, name: str) -> tuple[Any, str]:
@@ -78,6 +86,37 @@ def _normalized_labels(selector: Any) -> list[str]:
 def _is_known_github_hosted(selector: Any) -> bool:
     labels = _normalized_labels(selector)
     return bool(labels) and all(label in GITHUB_HOSTED_LABELS for label in labels)
+
+
+def is_macpro_linux_selector(selector: Any) -> bool:
+    """Return whether *selector* is the reviewed unprivileged Mac Pro lane."""
+    return _normalized_labels(selector) == list(MAC_PRO_LINUX_LABELS)
+
+
+def local_capacity_available(
+    selector: Any, runners: list[dict[str, Any]] | None
+) -> bool:
+    """Check an Actions runner census for one healthy idle matching runner.
+
+    ``None`` means the census was unavailable and is deliberately treated as
+    no capacity by callers.  A JIT supervisor is expected to keep an idle
+    runner registered while it is ready to claim work; a busy or offline
+    runner must never cause a job to be sent to a lane that cannot claim it.
+    """
+    if not is_macpro_linux_selector(selector) or runners is None:
+        return False
+    wanted = set(MAC_PRO_LINUX_LABELS)
+    for runner in runners:
+        if runner.get("status") != "online" or runner.get("busy") is not False:
+            continue
+        labels = {
+            str(label.get("name", "")).strip().lower()
+            for label in runner.get("labels", [])
+            if isinstance(label, dict)
+        }
+        if wanted <= labels:
+            return True
+    return False
 
 
 def provider_for_selector(
@@ -113,6 +152,7 @@ def resolve_route(
     authorized_selector_json: str,
     resolved_selector_json: str,
     requested_provider: str = "github-hosted",
+    local_capacity: bool = False,
 ) -> dict[str, str]:
     """Return Linux route metadata or reject an inconsistent dispatch."""
     dispatch, _ = _selector(
@@ -130,6 +170,7 @@ def resolve_route(
     if resolved is None:
         raise ValueError("resolved Linux selector must not be empty")
 
+    automatic_local = event_name in ("pull_request", "merge_group")
     if event_name == "workflow_dispatch" and (
         dispatch is not None or configured is not None
     ):
@@ -146,6 +187,22 @@ def resolve_route(
                     "workflow_dispatch configured Linux selector unexpectedly "
                     f"resolved to {resolved_json}"
                 )
+    elif automatic_local and authorized is not None:
+        if configured is None or authorized != configured:
+            raise ValueError(
+                "automatic Linux routing must use the configured selector"
+            )
+        if not is_macpro_linux_selector(authorized):
+            raise ValueError(
+                "automatic Linux routing only authorizes the reviewed Mac Pro "
+                "unprivileged selector"
+            )
+        if not local_capacity:
+            raise ValueError(
+                "automatic Linux routing authorized a local selector without "
+                "healthy idle capacity"
+            )
+        reason = "local-capacity"
     elif authorized is not None:
         raise ValueError(
             "non-dispatch event unexpectedly authorized a Linux selector"
@@ -156,9 +213,9 @@ def resolve_route(
         reason = "unconfigured-hosted"
 
     configured_local = (
-        event_name == "workflow_dispatch"
-        and dispatch is None
-        and configured is not None
+        configured is not None
+        and ((event_name == "workflow_dispatch" and dispatch is None)
+             or reason == "local-capacity")
     )
     return {
         "linux_route_reason": reason,
@@ -181,6 +238,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--authorized-selector-json", default="")
     parser.add_argument("--resolved-selector-json", required=True)
     parser.add_argument("--requested-provider", default="github-hosted")
+    parser.add_argument(
+        "--local-capacity",
+        action="store_true",
+        help="authorize the reviewed local selector for automatic events",
+    )
     return parser
 
 
@@ -194,6 +256,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             authorized_selector_json=args.authorized_selector_json,
             resolved_selector_json=args.resolved_selector_json,
             requested_provider=args.requested_provider,
+            local_capacity=args.local_capacity,
         )
     except ValueError as exc:
         print(f"Linux route policy error: {exc}", file=sys.stderr)

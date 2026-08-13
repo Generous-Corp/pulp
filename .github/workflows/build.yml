@@ -21,11 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       runner_provider:
-        # Default is github-hosted: Namespace is drained and no
-        # PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON repo variables are set, so
-        # resolve-provider fails fast on the `namespace` route. The
-        # option is retained only for a future re-enable.
-        description: "Runner provider for Linux/Windows build legs (Namespace is drained — keep github-hosted)"
+        # Default is github-hosted for Windows; Linux may use the reviewed
+        # disposable Mac Pro pool when an idle runner is healthy.
+        description: "Runner provider for Linux/Windows build legs"
         required: false
         default: github-hosted
         type: choice
@@ -102,8 +100,10 @@ jobs:
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro"].
-          # A workflow_dispatch input overrides it. Other events deliberately
-          # authorize neither selector and fall through to GitHub-hosted Linux.
+          # A workflow_dispatch input overrides it. Pull requests and merge
+          # groups may use this exact generic, secret-free selector only when
+          # the preamble sees an online idle matching runner; otherwise they
+          # fall through to GitHub-hosted Linux.
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
           # image. The separate MSVC release-path gate tracks windows-latest,
@@ -111,9 +111,6 @@ jobs:
           # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
           # it is not an Intel Windows replacement. Use a workflow_dispatch input
           # only for explicit one-off experiments.
-          # Until an organization runner group restricts the Mac Pro pool to
-          # trusted workflow refs outside PR-controlled YAML, keep its repo
-          # variable dispatch-only. Public pull_request jobs stay hosted.
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
@@ -222,6 +219,39 @@ jobs:
                   sys.stderr.write(result.stderr)
                   sys.exit(result.returncode)
               return result.stdout
+
+          def local_linux_capacity(selector_json):
+              """Return True only for one online, idle, exact Mac Pro lane."""
+              if not selector_json or IS_FORK_PR:
+                  return False
+              try:
+                  selector = json.loads(selector_json)
+                  wanted = {str(label).strip().lower() for label in selector}
+                  if wanted != {
+                      "self-hosted", "linux", "x64",
+                      "pulp-build-linux-x64", "pulp-host-macpro",
+                  }:
+                      return False
+                  result = subprocess.run(
+                      ["gh", "api", f"repos/{REPOSITORY}/actions/runners?per_page=100"],
+                      check=True, capture_output=True, text=True, timeout=15,
+                  )
+                  runners = json.loads(result.stdout).get("runners", [])
+                  for runner in runners:
+                      if runner.get("status") != "online" or runner.get("busy") is not False:
+                          continue
+                      labels = {
+                          str(label.get("name", "")).strip().lower()
+                          for label in runner.get("labels", [])
+                      }
+                      if wanted <= labels:
+                          return True
+              except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
+                  print(
+                      f"resolve-provider: Linux capacity probe failed; using hosted fallback ({exc})",
+                      file=sys.stderr,
+                  )
+              return False
 
           # ─── macOS overflow routing ──────────────────────────────────────
           # When the local self-hosted Mac runner is saturated, route the
@@ -500,6 +530,28 @@ jobs:
           else:
               macos_provider = "local"
 
+          configured_linux_selector = (
+              os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
+          ).strip()
+          dispatch_linux_selector = (
+              os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR") or ""
+          ).strip()
+          automatic_linux = EVENT_NAME in ("pull_request", "merge_group")
+          linux_capacity = local_linux_capacity(configured_linux_selector)
+          if dispatch_linux_selector:
+              authorized_linux_selector = dispatch_linux_selector
+          elif automatic_linux and linux_capacity:
+              authorized_linux_selector = configured_linux_selector
+          else:
+              authorized_linux_selector = ""
+          os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = authorized_linux_selector
+          print(
+              "resolve-provider: Linux capacity = "
+              f"{'available' if linux_capacity else 'unavailable'}; "
+              f"selector = {authorized_linux_selector or 'ubuntu-latest fallback'}",
+              file=sys.stderr,
+          )
+
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
@@ -519,6 +571,7 @@ jobs:
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
                   "--requested-provider", REQUESTED,
+                  *( ["--local-capacity"] if linux_capacity else [] ),
               ],
               check=False,
               capture_output=True,
@@ -649,21 +702,13 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          if EVENT_NAME != "merge_group":
-              include.append({
-                  "key": "linux",
-                  "name": "Linux (x64)",
-                  "runs_on_json": linux_runs_on,
-                  "provider": linux_provider,
-                  "route_reason": linux_route_reason,
-              })
-          else:
-              print(
-                  "resolve-provider: merge_group — advisory Linux leg omitted; "
-                  "PR-head Linux already reported and the queue requires the "
-                  "real self-hosted macOS build directly",
-                  file=sys.stderr,
-              )
+          include.append({
+              "key": "linux",
+              "name": "Linux (x64)",
+              "runs_on_json": linux_runs_on,
+              "provider": linux_provider,
+              "route_reason": linux_route_reason,
+          })
 
           matrix = {"include": include}
 

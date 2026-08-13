@@ -173,31 +173,34 @@ weaken FileVault or give it any of the required ARM64 gate labels.
 The controller prefers `ghapp` when it is installed and otherwise uses its own
 authenticated rootless `gh`. The job account receives neither client nor token.
 
-## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
+## The local-first Linux x64 lane runs on macpro (Proxmox)
 
-Operator-dispatched `build.yml` runs may route the `Linux (x64)` leg via
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
-Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
-host. Automatic PR runs remain on GitHub-hosted Linux until an organization
-runner group provides the private-pool access boundary. The pool is native
-x86_64, which the job requires: the lane's earlier ARM64/Tart declaration would
-have changed its architecture rather than relocating it, silently deleting the
-only x64 Linux coverage.
+`build.yml` prefers `PULP_LOCAL_LINUX_RUNS_ON_JSON` for the `Linux (x64)` leg
+when the preamble sees an online, idle runner carrying every required Mac Pro
+label. If the census is unavailable or the pool has no idle capacity, it emits
+`ubuntu-latest` before the matrix is created. The pool is native x86_64, which
+the job requires.
 
-That external boundary is a prerequisite, not a workflow TODO: create a
-dedicated organization runner group containing only the Mac Pro ephemeral
-runners, grant it to `Generous-Corp/pulp` only, and restrict workflow access to
-the protected default-branch copy of `.github/workflows/build.yml`. Then prove
-that a pull request changing its own workflow cannot target the group before
-enabling automatic PR or merge-group routing. Repository variables, event-name
-conditions, and tests in this repository are not substitutes for that control.
+The generic pool is limited to unprivileged Linux build/test jobs. The worker is
+a one-job Proxmox clone with no checkout persistence, no guest GitHub credential,
+no writable host mount, and teardown plus runner deregistration on completion.
+Fork pull requests remain hosted. Repository variables and event conditions are
+not used as a secret boundary: signing, deployment, `pull_request_target`, and
+Vellum-secret jobs remain on their reviewed hosted selectors.
+
+The separate `pulp-vellum-trusted-mg` label is intentionally not declared yet.
+The merge-group Vellum job stays on hosted Ubuntu until a separately reviewed
+worker proves short-lived repository-scoped token minting, OIDC/ref/event
+validation, GitHub/Vellum-only egress, audit records, and teardown. This keeps
+the required `Vellum trusted freeze` context unchanged while the generic pool
+is being adopted.
 
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
-matrix provider is derived from the selector that actually resolved. An
-operator dispatch with a configured selector fails instead of silently falling
-back to hosted Linux.
+`explicit-dispatch`, `local-capacity`, `security-hosted`, or
+`unconfigured-hosted`; the Linux matrix provider is derived from the selector
+that actually resolved. An operator dispatch remains explicit; automatic
+routing is fail-closed to hosted Linux when capacity cannot be proven.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
@@ -248,11 +251,11 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; operator-dispatched runs
-then use GitHub-hosted Linux. Automatic PR runs already use GitHub-hosted Linux.
-`runs-on` has no live fallback after a dispatched job is assigned, so if macpro
-is down or its pool is stopped, unset the variable and redispatch rather than
-waiting.
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all new runs use
+GitHub-hosted Linux. The capacity probe is also fail-closed, so a down macpro
+automatically selects the hosted fallback before dispatch. A job already
+assigned to a local runner cannot be moved by changing `runs-on`; cancel and
+redispatch it if the host fails.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
@@ -1803,7 +1806,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch-only Linux x86_64 Proxmox VM pool; automatic PR routing requires the external runner-group boundary above | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local-first unprivileged Linux x86_64 Proxmox VM pool; automatic PR/merge-group routing requires a healthy idle exact-label runner, otherwise `ubuntu-latest` | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the

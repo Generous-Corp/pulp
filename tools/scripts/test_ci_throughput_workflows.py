@@ -96,6 +96,13 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             named_step(linux_job, "Build all examples")["run"],
         )
 
+    def test_shipyard_linux_profile_is_local_first_with_hosted_fallback(self) -> None:
+        profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
+        table = toml_table(profile, 'repo."Generous-Corp/pulp".pr.linux')
+        self.assertIn('strategy = "ordered-fallback"', table)
+        self.assertIn('"macpro.linux-x64-vm", "github.linux-x64"', table)
+        self.assertIn('github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"', table)
+
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(
             step

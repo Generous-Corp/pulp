@@ -14,6 +14,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).parent / "resolve_linux_route.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+VELLUM_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-trusted-gate.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
     '"pulp-host-macpro"]'
@@ -51,6 +52,52 @@ def test_pull_request_exposes_security_hosted_route() -> None:
     assert metadata["linux_provider"] == "github-hosted"
     assert metadata["configured_selector_json"]
     assert metadata["event_authorized_selector_json"] == ""
+
+
+def test_pull_request_prefers_macpro_when_idle_capacity_is_proven() -> None:
+    metadata = route.resolve_route(
+        event_name="pull_request",
+        dispatch_selector_json="",
+        configured_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json=MAC_PRO_SELECTOR,
+        resolved_selector_json=MAC_PRO_SELECTOR,
+        local_capacity=True,
+    )
+    assert metadata["linux_route_reason"] == "local-capacity"
+    assert metadata["linux_provider"] == "local"
+
+
+def test_merge_group_prefers_macpro_when_idle_capacity_is_proven() -> None:
+    metadata = route.resolve_route(
+        event_name="merge_group",
+        dispatch_selector_json="",
+        configured_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json=MAC_PRO_SELECTOR,
+        resolved_selector_json=MAC_PRO_SELECTOR,
+        local_capacity=True,
+    )
+    assert metadata["linux_route_reason"] == "local-capacity"
+
+
+def test_capacity_probe_requires_every_label_and_idle_online_runner() -> None:
+    assert route.local_capacity_available(
+        json.loads(MAC_PRO_SELECTOR),
+        [{
+            "status": "online", "busy": False,
+            "labels": [{"name": label} for label in json.loads(MAC_PRO_SELECTOR)],
+        }],
+    )
+    assert not route.local_capacity_available(
+        json.loads(MAC_PRO_SELECTOR),
+        [{
+            "status": "online", "busy": True,
+            "labels": [{"name": label} for label in json.loads(MAC_PRO_SELECTOR)],
+        }],
+    )
+    assert not route.local_capacity_available(
+        json.loads(MAC_PRO_SELECTOR),
+        [{"status": "online", "busy": False, "labels": [{"name": "Linux"}]}],
+    )
 
 
 def test_unconfigured_event_exposes_hosted_route() -> None:
@@ -169,17 +216,17 @@ def test_configured_dispatch_rejects_hosted_configuration() -> None:
     assert "unexpectedly resolved" in proc.stderr
 
 
-def test_non_dispatch_cannot_authorize_configured_selector() -> None:
+def test_non_dispatch_cannot_authorize_configured_selector_without_capacity() -> None:
     try:
         route.resolve_route(
             event_name="pull_request",
             dispatch_selector_json="",
             configured_selector_json=MAC_PRO_SELECTOR,
             authorized_selector_json=MAC_PRO_SELECTOR,
-            resolved_selector_json=MAC_PRO_SELECTOR,
+            resolved_selector_json='"ubuntu-latest"',
         )
     except ValueError as exc:
-        assert "unexpectedly authorized" in str(exc)
+        assert "healthy idle capacity" in str(exc)
     else:
         raise AssertionError("pull_request accepted the configured private selector")
 
@@ -194,7 +241,7 @@ def test_non_dispatch_cannot_authorize_without_configured_selector() -> None:
             resolved_selector_json=MAC_PRO_SELECTOR,
         )
     except ValueError as exc:
-        assert "unexpectedly authorized" in str(exc)
+        assert "configured selector" in str(exc)
     else:
         raise AssertionError("pull_request accepted an unauthorized selector")
 
@@ -210,7 +257,7 @@ def test_namespace_provider_is_derived_from_resolved_selector() -> None:
     assert metadata["linux_provider"] == "namespace"
 
 
-def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
+def test_workflow_keeps_configured_selector_separate_from_capacity_authorization() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     configured = re.search(
         r"(?m)^\s+CONFIGURED_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
@@ -221,8 +268,7 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     assert configured is not None
     assert authorized is not None
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in configured.group(1)
-    assert "github.event_name == 'workflow_dispatch'" in authorized.group(1)
-    assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in authorized.group(1)
+    assert "inputs.linux_runner_selector_json" in authorized.group(1)
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
@@ -232,6 +278,16 @@ def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
     assert '"route_reason": linux_route_reason' in text
     for reason in route.ROUTE_REASONS:
         assert reason in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_privileged_lanes_stay_hosted_and_trusted_label_is_not_declared() -> None:
+    vellum = VELLUM_WORKFLOW.read_text(encoding="utf-8")
+    assert "pulp-vellum-trusted-mg" not in vellum
+    assert vellum.count("runs-on: ubuntu-latest") >= 2
+    assert "name: Vellum trusted freeze" in vellum
+    for name in ("release-cli.yml", "sign-and-release.yml"):
+        text = (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        assert "PULP_LOCAL_LINUX_RUNS_ON_JSON" not in text
 
 
 def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
