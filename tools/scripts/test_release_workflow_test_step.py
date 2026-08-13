@@ -1328,15 +1328,14 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
         cls.release = yaml.safe_load(cls.release_text)
         cls.sign = yaml.safe_load(cls.sign_text)
 
-    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+    def test_resolvers_use_only_the_privileged_linux_selector_then_hosted_fallback(self) -> None:
         for workflow in (self.release, self.sign):
             with self.subTest(workflow=workflow["name"]):
                 runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
                 dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
-                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
                 fallback = runs_on.index('"ubuntu-latest"')
-                self.assertLess(dedicated, existing)
-                self.assertLess(existing, fallback)
+                self.assertLess(dedicated, fallback)
+                self.assertNotIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", runs_on)
 
     def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
         for text in (self.release_text, self.sign_text):
