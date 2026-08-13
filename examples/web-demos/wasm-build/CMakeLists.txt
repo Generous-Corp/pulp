@@ -24,6 +24,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PULP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 include(${PULP_ROOT}/tools/cmake/PulpWam.cmake)
 
+# Run the installed-SDK registered-content consumer against the exact object
+# closure every WAM plugin links. Keeping the existing consumer as the entry
+# point makes its fixture, seed, exact notes, and committed semantic hash the
+# shared native/WASM oracle without introducing a second source inventory.
+add_executable(pulp-wam-registered-chord-renderer
+    $<TARGET_OBJECTS:pulp-wam-dsp>
+    ${PULP_ROOT}/examples/timeline-sdk-consumer/registered_chord_renderer.cpp)
+target_include_directories(pulp-wam-registered-chord-renderer PRIVATE ${_PULP_WAM_INCLUDES})
+target_compile_definitions(pulp-wam-registered-chord-renderer PRIVATE
+    PULP_WASM=1 PULP_HEADLESS=1 PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
+target_compile_options(pulp-wam-registered-chord-renderer PRIVATE
+    -fno-exceptions -fno-rtti -O2)
+set_target_properties(pulp-wam-registered-chord-renderer PROPERTIES
+    SUFFIX ".js"
+    LINK_FLAGS "-sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=node -O2")
+
 pulp_add_wam_plugin(PulpGain
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_gain_wasm.cpp
     INCLUDES ${PULP_ROOT}/examples/pulp-gain)
