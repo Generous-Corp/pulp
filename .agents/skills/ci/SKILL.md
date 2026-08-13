@@ -637,16 +637,33 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
-The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
+The real boundary is enforced outside PR-controlled YAML. For the Mac Pro,
 that means a dedicated organization runner group containing only its ephemeral
 runners, repository access granted only to `Generous-Corp/pulp`, and workflow
 access restricted to the protected default-branch copy of
-`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
-a PR changing its own workflow cannot target the group before enabling
-automatic PR or merge-group routing. Until that exists, do not add another
-private pool to automatic `pull_request` routing. In particular, the Mac Pro
-Linux pool and example-validation advisory macOS selector remain
-`workflow_dispatch`-only.
+`.github/workflows/build.yml` (or an equivalent trusted dispatcher). The
+current pool uses that boundary for protected main and merge-group work; PR
+workflow revisions remain hosted.
+For the automatic Mac Pro pool, use the supervisor's distinct
+`pulp-auto-linux-x64` label only after its live organization group verifier
+passes. Automatic clones also require an enabled Proxmox firewall and a per-VM
+IP/ARP source filter plus an egress policy that permits DNS to the LAN gateway
+but denies private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations. Policy write, compile, and active-state failures must stop the VM
+before registration.
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+Use a separate organization-capable controller token for organization runner
+group, registration, inventory, and deletion APIs; the repository runner token
+is not that credential.
+A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
+GitHub cannot retarget a queued job, and the required `macos` alias currently
+waits for the whole build matrix. Keep PR and merge-group Linux hosted until
+that dependency is split and an external health controller can unset the
+selector before dispatch; never route `pull_request_target` or secret-bearing
+work to the generic pool.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
