@@ -137,7 +137,9 @@ data = json.load(sys.stdin)
 for runner in data.get("runners", []):
     name = runner.get("name", "")
     if name.startswith(prefix):
-        print(f"{runner.get(\"id\", \"\")}\\t{name}\\t{str(runner.get(\"busy\", False)).lower()}")
+        runner_id = runner.get("id", "")
+        busy = str(runner.get("busy", False)).lower()
+        print(f"{runner_id}\\t{name}\\t{busy}")
 ' "pulp-ci-ephemeral-${VMID}-")
 }
 

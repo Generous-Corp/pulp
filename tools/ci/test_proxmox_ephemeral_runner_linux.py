@@ -61,6 +61,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('name.startswith(prefix)', self.script)
         self.assertIn('if [ "$stale_busy" = true ]', self.script)
         self.assertIn('refusing to reclaim busy stale registration', self.script)
+        self.assertIn('runner_id = runner.get("id", "")', self.script)
 
 
 if __name__ == "__main__":
