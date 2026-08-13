@@ -175,18 +175,33 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 
 ## The local-first Linux x64 lane runs on macpro (Proxmox)
 
-`build.yml` prefers `PULP_LOCAL_LINUX_RUNS_ON_JSON` for the `Linux (x64)` leg
-when the preamble sees an online, idle runner carrying every required Mac Pro
-label. If the census is unavailable or the pool has no idle capacity, it emits
-`ubuntu-latest` before the matrix is created. The pool is native x86_64, which
-the job requires.
+`build.yml` prefers `PULP_LOCAL_LINUX_RUNS_ON_JSON` for the trusted
+`merge_group` `Linux (x64)` leg only while `PULP_LOCAL_LINUX_LEASE_UNTIL` is a
+valid RFC 3339 time no more than 15 minutes in the future. Shipyard renews that
+short lease only while the disposable pool and its exact Mac Pro labels are
+healthy. An absent, malformed, expired, or implausibly distant lease restores
+`ubuntu-latest` before the matrix is created. The workflow token cannot census
+repository runners, so the workflow does not pretend an internal probe can make
+this decision. The pool is native x86_64, which the job requires.
+
+The checked-in `normal-local-fast` profile is the producer contract: it names
+the selector and lease variables, a 300-second TTL, the exact
+`pull_request`/`merge_group` unprivileged event class, the ephemeral runner-name
+prefix, and one-idle-runner minimum. Shipyard derives required labels from the
+profile's first target, renews the lease only after a live fleet probe, and
+clears it when the probe is unavailable or unhealthy. `build.yml` consumes that
+lease automatically only for trusted merge groups; other separately reviewed
+unprivileged workflows may consume the same producer contract within their own
+security boundary.
 
 The generic pool is limited to unprivileged Linux build/test jobs. The worker is
 a one-job Proxmox clone with no checkout persistence, no guest GitHub credential,
 no writable host mount, and teardown plus runner deregistration on completion.
-Fork pull requests remain hosted. Repository variables and event conditions are
-not used as a secret boundary: signing, deployment, `pull_request_target`, and
-Vellum-secret jobs remain on their reviewed hosted selectors.
+All automatic pull requests remain hosted because proposed workflow YAML and
+event conditions are not an access-control boundary. Signing, deployment,
+`pull_request_target`, and Vellum-secret jobs also remain on their reviewed
+hosted selectors. A maintainer can still select the generic lane through an
+explicit `workflow_dispatch` after reviewing the exact ref.
 
 The separate `pulp-vellum-trusted-mg` label is intentionally not declared yet.
 The merge-group Vellum job stays on hosted Ubuntu until a separately reviewed
@@ -197,10 +212,11 @@ is being adopted.
 
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
-`explicit-dispatch`, `local-capacity`, `security-hosted`, or
+`explicit-dispatch`, `local-enabled`, `security-hosted`, or
 `unconfigured-hosted`; the Linux matrix provider is derived from the selector
 that actually resolved. An operator dispatch remains explicit; automatic
-routing is fail-closed to hosted Linux when capacity cannot be proven.
+routing is fail-closed to hosted Linux when the health lease is absent or
+expired. Pull requests never consume the local selector automatically.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
@@ -251,9 +267,10 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all new runs use
-GitHub-hosted Linux. The capacity probe is also fail-closed, so a down macpro
-automatically selects the hosted fallback before dispatch. A job already
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` or stop renewing
+`PULP_LOCAL_LINUX_LEASE_UNTIL`; all new automatic runs use GitHub-hosted Linux.
+Shipyard must renew the lease at less than the 15-minute validity horizon only
+while its runner/fleet probe says the Mac Pro pool is available. A job already
 assigned to a local runner cannot be moved by changing `runs-on`; cancel and
 redispatch it if the host fails.
 
@@ -1806,7 +1823,8 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local-first unprivileged Linux x86_64 Proxmox VM pool; automatic PR/merge-group routing requires a healthy idle exact-label runner, otherwise `ubuntu-latest` | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Selector for the local-first unprivileged Linux x86_64 Proxmox VM pool; automatic use is limited to trusted merge groups with a valid short lease | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_LEASE_UNTIL` | Shipyard-issued RFC 3339 health lease; must be unexpired and at most 15 minutes ahead, otherwise automatic merge-group routing falls back to `ubuntu-latest` | `gh variable set PULP_LOCAL_LINUX_LEASE_UNTIL --body '2026-08-13T18:30:00Z'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the

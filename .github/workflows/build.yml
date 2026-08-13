@@ -22,7 +22,7 @@ on:
     inputs:
       runner_provider:
         # Default is github-hosted for Windows; Linux may use the reviewed
-        # disposable Mac Pro pool when an idle runner is healthy.
+        # disposable Mac Pro pool while its operator health lease is enabled.
         description: "Runner provider for Linux/Windows build legs"
         required: false
         default: github-hosted
@@ -100,10 +100,10 @@ jobs:
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro"].
-          # A workflow_dispatch input overrides it. Pull requests and merge
-          # groups may use this exact generic, secret-free selector only when
-          # the preamble sees an online idle matching runner; otherwise they
-          # fall through to GitHub-hosted Linux.
+          # A workflow_dispatch input overrides it. Trusted merge groups may
+          # use this exact generic, secret-free selector while the separate
+          # short operator lease is valid. Pull requests stay hosted because
+          # proposed workflow YAML is not an access-control boundary.
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
           # image. The separate MSVC release-path gate tracks windows-latest,
@@ -114,6 +114,7 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          CONFIGURED_LINUX_LEASE_UNTIL: ${{ vars.PULP_LOCAL_LINUX_LEASE_UNTIL || '' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -205,8 +206,13 @@ jobs:
                   WORKSPACE / "tools" / "scripts" / "resolve_linux_route.py"
               ),
           ]
+          sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
+          from resolve_linux_route import (
+              is_macpro_linux_selector,
+              operator_lease_active,
+          )
+          # Existing macOS overflow probes use this repository coordinate.
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
-
           def run(args):
               result = subprocess.run(
                   RESOLVER + args,
@@ -219,39 +225,6 @@ jobs:
                   sys.stderr.write(result.stderr)
                   sys.exit(result.returncode)
               return result.stdout
-
-          def local_linux_capacity(selector_json):
-              """Return True only for one online, idle, exact Mac Pro lane."""
-              if not selector_json or IS_FORK_PR:
-                  return False
-              try:
-                  selector = json.loads(selector_json)
-                  wanted = {str(label).strip().lower() for label in selector}
-                  if wanted != {
-                      "self-hosted", "linux", "x64",
-                      "pulp-build-linux-x64", "pulp-host-macpro",
-                  }:
-                      return False
-                  result = subprocess.run(
-                      ["gh", "api", f"repos/{REPOSITORY}/actions/runners?per_page=100"],
-                      check=True, capture_output=True, text=True, timeout=15,
-                  )
-                  runners = json.loads(result.stdout).get("runners", [])
-                  for runner in runners:
-                      if runner.get("status") != "online" or runner.get("busy") is not False:
-                          continue
-                      labels = {
-                          str(label.get("name", "")).strip().lower()
-                          for label in runner.get("labels", [])
-                      }
-                      if wanted <= labels:
-                          return True
-              except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
-                  print(
-                      f"resolve-provider: Linux capacity probe failed; using hosted fallback ({exc})",
-                      file=sys.stderr,
-                  )
-              return False
 
           # ─── macOS overflow routing ──────────────────────────────────────
           # When the local self-hosted Mac runner is saturated, route the
@@ -536,18 +509,37 @@ jobs:
           dispatch_linux_selector = (
               os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR") or ""
           ).strip()
-          automatic_linux = EVENT_NAME in ("pull_request", "merge_group")
-          linux_capacity = local_linux_capacity(configured_linux_selector)
+          automatic_linux = EVENT_NAME == "merge_group"
+          linux_lease_until = (
+              os.environ.get("CONFIGURED_LINUX_LEASE_UNTIL") or ""
+          ).strip()
+          linux_lease_active = operator_lease_active(linux_lease_until)
+          try:
+              configured_linux_value = json.loads(configured_linux_selector)
+          except (json.JSONDecodeError, TypeError):
+              configured_linux_value = None
+          configured_linux_valid = is_macpro_linux_selector(
+              configured_linux_value
+          )
           if dispatch_linux_selector:
               authorized_linux_selector = dispatch_linux_selector
-          elif automatic_linux and linux_capacity:
+          elif EVENT_NAME == "workflow_dispatch" and configured_linux_selector:
+              authorized_linux_selector = configured_linux_selector
+          elif automatic_linux and configured_linux_valid and linux_lease_active:
               authorized_linux_selector = configured_linux_selector
           else:
               authorized_linux_selector = ""
+          linux_local_enabled = bool(
+              automatic_linux
+              and configured_linux_valid and linux_lease_active
+              and authorized_linux_selector == configured_linux_selector
+          )
           os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = authorized_linux_selector
           print(
-              "resolve-provider: Linux capacity = "
-              f"{'available' if linux_capacity else 'unavailable'}; "
+              "resolve-provider: Linux local lease = "
+              f"{'enabled' if linux_local_enabled else 'disabled'}; "
+              f"selector_valid = {configured_linux_valid}; "
+              f"expires = {linux_lease_until or '(unset)'}; "
               f"selector = {authorized_linux_selector or 'ubuntu-latest fallback'}",
               file=sys.stderr,
           )
@@ -571,7 +563,7 @@ jobs:
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
                   "--requested-provider", REQUESTED,
-                  *( ["--local-capacity"] if linux_capacity else [] ),
+                  *( ["--local-enabled"] if linux_local_enabled else [] ),
               ],
               check=False,
               capture_output=True,

@@ -174,7 +174,7 @@
     },
     {
       "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
-      "purpose": "Local-first Linux build lane for build.yml's `Linux (x64)` leg, served by disposable Proxmox VMs on macpro when an online idle runner is proven; otherwise the workflow falls back to ubuntu-latest. NATIVE x86_64 — the job is an x64 build. Clones come from the `pulp-linux-golden` template and are destroyed per job.",
+      "purpose": "Selector for build.yml's trusted merge-group `Linux (x64)` leg, served by disposable Proxmox VMs on macpro only while Shipyard's separate short RFC 3339 health lease is valid; otherwise ubuntu-latest. Automatic pull requests remain hosted. NATIVE x86_64 — the job is an x64 build. Clones come from the `pulp-linux-golden` template and are destroyed per job.",
       "expect": [
         "self-hosted",
         "Linux",

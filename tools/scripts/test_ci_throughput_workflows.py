@@ -102,6 +102,16 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
         self.assertIn('strategy = "ordered-fallback"', table)
         self.assertIn('"macpro.linux-x64-vm", "github.linux-x64"', table)
         self.assertIn('github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"', table)
+        self.assertIn(
+            'health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"', table
+        )
+        self.assertEqual(toml_json_value(table, "health_lease_ttl_seconds"), 300)
+        self.assertEqual(
+            toml_json_value(table, "health_lease_events"),
+            ["pull_request", "merge_group"],
+        )
+        self.assertIn('health_lease_runner_name_prefix = "pulp-ci-ephemeral-"', table)
+        self.assertEqual(toml_json_value(table, "health_lease_min_idle"), 1)
 
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(

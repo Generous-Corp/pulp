@@ -2,9 +2,9 @@
 """Describe and enforce the Build-and-Test Linux runner route.
 
 The build workflow deliberately keeps the configured Mac Pro selector separate
-from the selector authorized for the current event. Pull-request workflow YAML
-is contributor-controlled, so the configured private selector is authorized
-only for ``workflow_dispatch`` until an external runner-group boundary exists.
+from the selector authorized for the current event. Setting the repository
+variable is an operator health lease: Shipyard enables it only while the
+reviewed disposable pool is healthy, and unsetting it restores hosted fallback.
 
 This helper turns that policy decision into machine-readable metadata and
 fails a dispatch if its configured selector is silently replaced by a hosted
@@ -14,6 +14,7 @@ fallback. It prints one compact JSON object on stdout.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 import sys
@@ -22,7 +23,7 @@ from typing import Any, Optional
 
 ROUTE_REASONS = (
     "explicit-dispatch",
-    "local-capacity",
+    "local-enabled",
     "security-hosted",
     "unconfigured-hosted",
 )
@@ -59,6 +60,7 @@ MAC_PRO_LINUX_LABELS = (
     "pulp-build-linux-x64",
     "pulp-host-macpro",
 )
+MAX_LEASE_HORIZON = dt.timedelta(minutes=15)
 
 
 def _selector(raw: str, name: str) -> tuple[Any, str]:
@@ -90,33 +92,28 @@ def _is_known_github_hosted(selector: Any) -> bool:
 
 def is_macpro_linux_selector(selector: Any) -> bool:
     """Return whether *selector* is the reviewed unprivileged Mac Pro lane."""
-    return _normalized_labels(selector) == list(MAC_PRO_LINUX_LABELS)
+    labels = _normalized_labels(selector)
+    return (
+        len(labels) == len(MAC_PRO_LINUX_LABELS)
+        and set(labels) == set(MAC_PRO_LINUX_LABELS)
+    )
 
 
-def local_capacity_available(
-    selector: Any, runners: list[dict[str, Any]] | None
-) -> bool:
-    """Check an Actions runner census for one healthy idle matching runner.
-
-    ``None`` means the census was unavailable and is deliberately treated as
-    no capacity by callers.  A JIT supervisor is expected to keep an idle
-    runner registered while it is ready to claim work; a busy or offline
-    runner must never cause a job to be sent to a lane that cannot claim it.
-    """
-    if not is_macpro_linux_selector(selector) or runners is None:
+def operator_lease_active(raw: str, now: dt.datetime | None = None) -> bool:
+    """Accept a short, unexpired RFC 3339 lease issued by runner operations."""
+    raw = raw.strip()
+    if not raw:
         return False
-    wanted = set(MAC_PRO_LINUX_LABELS)
-    for runner in runners:
-        if runner.get("status") != "online" or runner.get("busy") is not False:
-            continue
-        labels = {
-            str(label.get("name", "")).strip().lower()
-            for label in runner.get("labels", [])
-            if isinstance(label, dict)
-        }
-        if wanted <= labels:
-            return True
-    return False
+    try:
+        expires = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if expires.tzinfo is None:
+            return False
+        current = now or dt.datetime.now(dt.timezone.utc)
+        current = current.astimezone(dt.timezone.utc)
+        expires = expires.astimezone(dt.timezone.utc)
+    except (ValueError, OverflowError):
+        return False
+    return current < expires <= current + MAX_LEASE_HORIZON
 
 
 def provider_for_selector(
@@ -152,7 +149,7 @@ def resolve_route(
     authorized_selector_json: str,
     resolved_selector_json: str,
     requested_provider: str = "github-hosted",
-    local_capacity: bool = False,
+    local_enabled: bool = False,
 ) -> dict[str, str]:
     """Return Linux route metadata or reject an inconsistent dispatch."""
     dispatch, _ = _selector(
@@ -170,7 +167,7 @@ def resolve_route(
     if resolved is None:
         raise ValueError("resolved Linux selector must not be empty")
 
-    automatic_local = event_name in ("pull_request", "merge_group")
+    automatic_local = event_name == "merge_group"
     if event_name == "workflow_dispatch" and (
         dispatch is not None or configured is not None
     ):
@@ -197,12 +194,12 @@ def resolve_route(
                 "automatic Linux routing only authorizes the reviewed Mac Pro "
                 "unprivileged selector"
             )
-        if not local_capacity:
+        if not local_enabled:
             raise ValueError(
                 "automatic Linux routing authorized a local selector without "
-                "healthy idle capacity"
+                "the operator health lease"
             )
-        reason = "local-capacity"
+        reason = "local-enabled"
     elif authorized is not None:
         raise ValueError(
             "non-dispatch event unexpectedly authorized a Linux selector"
@@ -215,7 +212,7 @@ def resolve_route(
     configured_local = (
         configured is not None
         and ((event_name == "workflow_dispatch" and dispatch is None)
-             or reason == "local-capacity")
+             or reason == "local-enabled")
     )
     return {
         "linux_route_reason": reason,
@@ -239,9 +236,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resolved-selector-json", required=True)
     parser.add_argument("--requested-provider", default="github-hosted")
     parser.add_argument(
-        "--local-capacity",
+        "--local-enabled",
         action="store_true",
-        help="authorize the reviewed local selector for automatic events",
+        help="pass the workflow's single validated lease snapshot",
     )
     return parser
 
@@ -256,7 +253,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             authorized_selector_json=args.authorized_selector_json,
             resolved_selector_json=args.resolved_selector_json,
             requested_provider=args.requested_provider,
-            local_capacity=args.local_capacity,
+            local_enabled=args.local_enabled,
         )
     except ValueError as exc:
         print(f"Linux route policy error: {exc}", file=sys.stderr)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import datetime as dt
 import json
 import re
 import subprocess
@@ -54,50 +55,29 @@ def test_pull_request_exposes_security_hosted_route() -> None:
     assert metadata["event_authorized_selector_json"] == ""
 
 
-def test_pull_request_prefers_macpro_when_idle_capacity_is_proven() -> None:
+def test_pull_request_stays_hosted_even_when_operator_lease_is_enabled() -> None:
     metadata = route.resolve_route(
         event_name="pull_request",
         dispatch_selector_json="",
         configured_selector_json=MAC_PRO_SELECTOR,
-        authorized_selector_json=MAC_PRO_SELECTOR,
-        resolved_selector_json=MAC_PRO_SELECTOR,
-        local_capacity=True,
+        authorized_selector_json="",
+        resolved_selector_json='"ubuntu-latest"',
+        local_enabled=True,
     )
-    assert metadata["linux_route_reason"] == "local-capacity"
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_route_reason"] == "security-hosted"
+    assert metadata["linux_provider"] == "github-hosted"
 
 
-def test_merge_group_prefers_macpro_when_idle_capacity_is_proven() -> None:
+def test_merge_group_prefers_macpro_when_operator_lease_is_enabled() -> None:
     metadata = route.resolve_route(
         event_name="merge_group",
         dispatch_selector_json="",
         configured_selector_json=MAC_PRO_SELECTOR,
         authorized_selector_json=MAC_PRO_SELECTOR,
         resolved_selector_json=MAC_PRO_SELECTOR,
-        local_capacity=True,
+        local_enabled=True,
     )
-    assert metadata["linux_route_reason"] == "local-capacity"
-
-
-def test_capacity_probe_requires_every_label_and_idle_online_runner() -> None:
-    assert route.local_capacity_available(
-        json.loads(MAC_PRO_SELECTOR),
-        [{
-            "status": "online", "busy": False,
-            "labels": [{"name": label} for label in json.loads(MAC_PRO_SELECTOR)],
-        }],
-    )
-    assert not route.local_capacity_available(
-        json.loads(MAC_PRO_SELECTOR),
-        [{
-            "status": "online", "busy": True,
-            "labels": [{"name": label} for label in json.loads(MAC_PRO_SELECTOR)],
-        }],
-    )
-    assert not route.local_capacity_available(
-        json.loads(MAC_PRO_SELECTOR),
-        [{"status": "online", "busy": False, "labels": [{"name": "Linux"}]}],
-    )
+    assert metadata["linux_route_reason"] == "local-enabled"
 
 
 def test_unconfigured_event_exposes_hosted_route() -> None:
@@ -110,6 +90,24 @@ def test_unconfigured_event_exposes_hosted_route() -> None:
     )
     assert metadata["linux_route_reason"] == "unconfigured-hosted"
     assert metadata["linux_provider"] == "github-hosted"
+
+
+def test_operator_lease_is_short_lived_and_fails_closed() -> None:
+    now = dt.datetime(2026, 8, 13, 18, 0, tzinfo=dt.timezone.utc)
+    assert route.operator_lease_active("2026-08-13T18:10:00Z", now)
+    assert not route.operator_lease_active("2026-08-13T17:59:59Z", now)
+    assert not route.operator_lease_active("2026-08-13T18:16:00Z", now)
+    assert not route.operator_lease_active("not-a-time", now)
+    assert not route.operator_lease_active("2026-08-13T18:10:00", now)
+    assert not route.operator_lease_active("0001-01-01T00:00:00+14:00", now)
+
+
+def test_reviewed_macpro_selector_is_order_independent_but_exact() -> None:
+    labels = json.loads(MAC_PRO_SELECTOR)
+    assert route.is_macpro_linux_selector(labels)
+    assert route.is_macpro_linux_selector(list(reversed(labels)))
+    assert not route.is_macpro_linux_selector(labels + [labels[-1]])
+    assert not route.is_macpro_linux_selector(labels[:-1])
 
 
 def test_dispatch_override_can_explicitly_select_hosted() -> None:
@@ -216,25 +214,26 @@ def test_configured_dispatch_rejects_hosted_configuration() -> None:
     assert "unexpectedly resolved" in proc.stderr
 
 
-def test_non_dispatch_cannot_authorize_configured_selector_without_capacity() -> None:
+def test_non_dispatch_cannot_authorize_configured_selector_without_operator_lease() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request",
+            event_name="merge_group",
             dispatch_selector_json="",
             configured_selector_json=MAC_PRO_SELECTOR,
             authorized_selector_json=MAC_PRO_SELECTOR,
             resolved_selector_json='"ubuntu-latest"',
+            local_enabled=False,
         )
     except ValueError as exc:
-        assert "healthy idle capacity" in str(exc)
+        assert "operator health lease" in str(exc)
     else:
-        raise AssertionError("pull_request accepted the configured private selector")
+        raise AssertionError("merge_group accepted an expired local lease")
 
 
 def test_non_dispatch_cannot_authorize_without_configured_selector() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request",
+            event_name="merge_group",
             dispatch_selector_json="",
             configured_selector_json="",
             authorized_selector_json=MAC_PRO_SELECTOR,
@@ -243,7 +242,7 @@ def test_non_dispatch_cannot_authorize_without_configured_selector() -> None:
     except ValueError as exc:
         assert "configured selector" in str(exc)
     else:
-        raise AssertionError("pull_request accepted an unauthorized selector")
+        raise AssertionError("merge_group accepted an unauthorized selector")
 
 
 def test_namespace_provider_is_derived_from_resolved_selector() -> None:
@@ -257,7 +256,7 @@ def test_namespace_provider_is_derived_from_resolved_selector() -> None:
     assert metadata["linux_provider"] == "namespace"
 
 
-def test_workflow_keeps_configured_selector_separate_from_capacity_authorization() -> None:
+def test_workflow_keeps_configured_selector_separate_from_event_authorization() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     configured = re.search(
         r"(?m)^\s+CONFIGURED_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
@@ -269,6 +268,12 @@ def test_workflow_keeps_configured_selector_separate_from_capacity_authorization
     assert authorized is not None
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in configured.group(1)
     assert "inputs.linux_runner_selector_json" in authorized.group(1)
+    assert "def local_linux_capacity" not in text
+    assert 'REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")' in text
+    assert 'EVENT_NAME == "workflow_dispatch" and configured_linux_selector' in text
+    assert 'automatic_linux = EVENT_NAME == "merge_group"' in text
+    assert "automatic_linux and configured_linux_valid" in text
+    assert "PULP_LOCAL_LINUX_LEASE_UNTIL" in text
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
