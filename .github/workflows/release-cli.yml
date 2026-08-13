@@ -1362,9 +1362,11 @@ jobs:
             echo "--- $ART $CMD ---"
             set +e
             if [ "$ART" = "pulp-control-standalone-host" ]; then
-              # The installed host has no diagnostic CLI. Give it an explicit
-              # non-socket stdin so the clean-runner contract is deterministic:
-              # initialization must reach the missing-bootstrap exit 65.
+              # The installed host has no diagnostic CLI. With explicit
+              # non-socket stdin it starts in dormant mode until a broker
+              # supplies bootstrap state. Prove that it remains live briefly,
+              # then require it to honor bounded termination. Exit 65 remains
+              # valid for hosts that reject bootstrap during initialization.
               python3 - "$BIN" /tmp/$ART-smoke.out /tmp/$ART-smoke.err <<'PY'
           import pathlib
           import subprocess
@@ -1379,11 +1381,18 @@ jobs:
               try:
                   return_code = process.wait(timeout=5)
               except subprocess.TimeoutExpired:
-                  process.kill()
-                  process.wait()
-                  raise SystemExit("standalone host did not reject missing bootstrap")
-          if return_code != 65:
-              raise SystemExit(return_code)
+                  process.terminate()
+                  try:
+                      process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+                      raise SystemExit("standalone host ignored termination")
+              else:
+                  if return_code != 65:
+                      raise SystemExit(
+                          return_code or "standalone host exited before bootstrap"
+                      )
           PY
             else
               "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err

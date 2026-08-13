@@ -422,6 +422,12 @@ CLI/SDK assets need to be rebuilt with the current release pipeline.
   backfilling the current newest release after the automatic tag-triggered run
   failed before publishing.
 
+The macOS artifact smoke launches the bundled standalone control host with
+non-socket stdin. That is the host's dormant, no-session mode: the smoke proves
+the process stays live for a bounded interval and then honors termination. An
+early exit is accepted only for the host's bootstrap-rejection status (65);
+other early exits and a host that ignores termination fail the release.
+
 ## Worked example — the v0.101.x SDK saga
 
 May 15, 2026. Five sequential releases (v0.101.0 through v0.101.4) tagged but

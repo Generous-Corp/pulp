@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260813-pr7462-release-standalone-host-smoke",
+  "created_at": "2026-08-13T12:17:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record the corrected standalone control-host release smoke behavior without transferring implementation authority.",
+  "tests": [
+    "python3 tools/scripts/test_release_workflow_test_step.py (89 tests)",
+    "pre-push diff-coverage build (18465 tests)",
+    "darwin-arm64 and darwin-x64 release artifact dormant-host probes",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
