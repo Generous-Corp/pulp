@@ -117,8 +117,8 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "agent-capabilities", "ci", "cli-maintenance", "code-comments", "content",
             "friction-report", "handoff", "installable-tools", "intel-canary",
             "kits", "packages", "pr-batching", "pr-review-sweep",
-            "prototype-loop", "pulp-web-demo", "tart-ci", "update-demos",
-            "upgrade", "video-proof",
+            "prototype-loop", "pulp-vellum-change-routing", "pulp-web-demo",
+            "tart-ci", "update-demos", "upgrade", "video-proof",
         },
         "excluded": {
             "aax", "ara", "audio-harness", "audio-headless-debug", "auv2",
