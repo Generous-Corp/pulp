@@ -6,7 +6,7 @@
 
 namespace pulp::audio {
 
-#if !defined(__APPLE__) || TARGET_OS_IPHONE
+#if (!defined(__APPLE__) || TARGET_OS_IPHONE) && !defined(_WIN32)
 std::optional<AudioIoTiming> query_audio_io_timing(
     const AudioDevice&) noexcept {
     return std::nullopt;
