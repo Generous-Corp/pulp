@@ -1281,7 +1281,16 @@ uses, or the golden warms a cache the real jobs never touch.
   `release-cli.yml` stamps `sdk-provenance.json` only after proving the clean
   source checkout, exact `v<version>` tag commit, Release build, platform, and
   disabled audio-probe/inspector features. The downloaded-asset finalizer binds
-  every marker back to that exact tag SHA and archive platform before publish.
+  every marker back to that exact tag SHA and archive platform before publish,
+  and parses the installed `include/pulp/runtime/build_info.hpp` to reject dirty
+  or non-Release metadata and a version/short-SHA inconsistent with the marker.
+  Build-info dirt means tracked source changes; untracked configure/build inputs
+  do not change the identity of an otherwise clean release checkout.
+  Manual-backfill compatibility helpers live under `RUNNER_TEMP`, outside the
+  tagged checkout, because older tags' build-info probes include untracked files.
+  The Linux dependency action is the exception because local actions must be
+  checkout-relative; record only files materialized for an old tag and remove
+  those exact files immediately after the action runs, before CMake configures.
   Keep the marker stamp, `PulpSdkProvenance.cmake` fail-closed consumer cache,
   archive verifier, and Forge preflight in lockstep. A manual marker-era
   `source_ref` substitution is forbidden; evaluate its floor from the trusted

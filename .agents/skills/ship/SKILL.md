@@ -984,7 +984,15 @@ release tag commit and archive platform, with a clean Release source, audio
 probes disabled, and the inspector SDK component set according to
 `inspector_sdk_floor`. `release-cli.yml`
 stamps the selected install prefix, and its downloaded-asset finalizer
-re-verifies the exact tag SHA/platform before publication. Marker-era manual
+re-verifies the exact tag SHA/platform and parses the installed
+`include/pulp/runtime/build_info.hpp` before publication. Dirty/non-Release
+build metadata, or a build-info version/short-SHA inconsistent with the marker,
+fails closed. Untracked configure/build inputs are excluded from the dirty bit;
+tracked source changes are not. Manual-backfill compatibility helpers must stay
+under `RUNNER_TEMP`, outside historical tagged checkouts whose older probes count
+untracked files as dirt. Checkout-relative Linux dependency-action files are
+recorded when materialized and removed immediately after use, before configure.
+Marker-era manual
 backfills must build the tag itself; `source_ref` substitution is reserved for
 pre-marker history.
 
