@@ -1650,10 +1650,10 @@ jobs:
     needs: [resolve-provider, classify]
     # This reporter starts beside the build matrix and polls only the macOS leg.
     # It therefore preserves the required macOS verdict without waiting for an
-    # independently routed Linux leg to become terminal. Use the short-lived
-    # preamble pool so a green owned build cannot sit behind unrelated
-    # hosted-Linux congestion. This occupies one preamble slot for the macOS
-    # build duration; keep at least two reporter-capable runners online.
+    # independently routed Linux leg to become terminal. Use the
+    # reporter-capable preamble pool so a green owned build cannot sit behind
+    # unrelated hosted-Linux congestion. This occupies one preamble slot for
+    # the macOS build duration; keep at least two reporter-capable runners online.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: always() && github.event_name == 'merge_group'
     steps:

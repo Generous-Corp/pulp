@@ -392,11 +392,12 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("inputs.run_windows", body)
         self.assertIn("Windows omitted by operator request", body)
 
-    def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
-        """The terminal required alias must leave classifiers runnable.
+    def test_required_macos_reporter_pools_match_wait_behavior(self) -> None:
+        """Only the merge-group polling reporter occupies preamble capacity.
 
-        The reporter starts after the matrix is terminal, but a dedicated alias
-        pool still keeps report traffic independent of preamble capacity.
+        The PR reporter starts after the matrix is terminal and uses a dedicated
+        alias pool. The merge-group reporter waits alongside macOS on preamble,
+        so its explicit two-runner capacity contract must remain visible.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
