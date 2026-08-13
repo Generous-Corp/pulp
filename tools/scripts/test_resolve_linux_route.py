@@ -15,7 +15,9 @@ from pathlib import Path
 SCRIPT = Path(__file__).parent / "resolve_linux_route.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
-VELLUM_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-trusted-gate.yml"
+VELLUM_TRUSTED_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-trusted-gate.yml"
+VELLUM_FREEZE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
+VERSION_SKILL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
     '"pulp-host-macpro"]'
@@ -286,13 +288,38 @@ def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
 
 
 def test_privileged_lanes_stay_hosted_and_trusted_label_is_not_declared() -> None:
-    vellum = VELLUM_WORKFLOW.read_text(encoding="utf-8")
+    vellum = VELLUM_TRUSTED_WORKFLOW.read_text(encoding="utf-8")
     assert "pulp-vellum-trusted-mg" not in vellum
     assert vellum.count("runs-on: ubuntu-latest") >= 2
     assert "name: Vellum trusted freeze" in vellum
     for name in ("release-cli.yml", "sign-and-release.yml"):
         text = (REPO_ROOT / ".github" / "workflows" / name).read_text()
         assert "PULP_LOCAL_LINUX_RUNS_ON_JSON" not in text
+
+
+def test_small_unprivileged_gates_stay_hosted_without_an_expiry_resolver() -> None:
+    for workflow in (VELLUM_FREEZE_WORKFLOW, VERSION_SKILL_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        runs_on = re.search(r"(?m)^\s+runs-on:\s*(.+)$", text)
+        assert runs_on is not None
+        assert runs_on.group(1) == "ubuntu-latest"
+        assert "PULP_LOCAL_LINUX_RUNS_ON_JSON" not in text
+        assert "PULP_LOCAL_LINUX_LEASE_UNTIL" not in text
+
+
+def test_unprivileged_gate_triggers_and_public_names_are_preserved() -> None:
+    expected = (
+        (VELLUM_FREEZE_WORKFLOW, "name: Vellum freeze"),
+        (VERSION_SKILL_WORKFLOW, "name: Enforce version & skill sync"),
+    )
+    for workflow, public_name in expected:
+        text = workflow.read_text(encoding="utf-8")
+        trigger_block = text.split("jobs:", 1)[0]
+        assert "pull_request:" in trigger_block
+        assert "merge_group:" in trigger_block
+        assert "workflow_dispatch:" in trigger_block
+        assert public_name in text
+    assert "permissions:\n  contents: read" in VELLUM_FREEZE_WORKFLOW.read_text()
 
 
 def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:

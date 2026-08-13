@@ -5957,13 +5957,23 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 local pool is down, `github <leg>` is a full revert in one command.
 
 The lightweight resolver jobs for `release-cli.yml` and
-`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
-without moving artifact builds or publication there. Their selector priority is
-`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
-`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
-to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
-pinned to the repository default branch; never expose the persistent pool to
-`pull_request` or `merge_group` code through this fallback.
+`sign-and-release.yml` may use an independently reviewed release-control Linux
+pool without moving artifact builds or publication there. Their selector
+priority is `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`.
+Never fall through to the generic `PULP_LOCAL_LINUX_RUNS_ON_JSON` selector:
+release and signing are privileged control planes. Keep resolver policy
+checkouts pinned to the repository default branch.
+
+The unprivileged `Vellum freeze` and `Enforce version & skill sync` jobs remain
+hosted even on `merge_group`. They are otherwise eligible for generic Linux,
+but a `runs-on` expression cannot validate RFC 3339 expiry and a hosted resolver
+would recreate their queue bottleneck. Do not route them locally until the
+consumer can fail closed on expiry before assignment. `Vellum trusted freeze`,
+release, signing, deployment, and `pull_request_target` must never consume the
+generic selector. The checked-in `health_lease_*` profile fields require
+Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
+release); Shipyard 0.83.0 ignores them. Keep the selector unset until that
+producer is installed and scheduled.
 
 Facts worth keeping (measured):
 

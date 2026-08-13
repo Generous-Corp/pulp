@@ -108,7 +108,7 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
         self.assertEqual(toml_json_value(table, "health_lease_ttl_seconds"), 300)
         self.assertEqual(
             toml_json_value(table, "health_lease_events"),
-            ["pull_request", "merge_group"],
+            ["merge_group"],
         )
         self.assertIn('health_lease_runner_name_prefix = "pulp-ci-ephemeral-"', table)
         self.assertEqual(toml_json_value(table, "health_lease_min_idle"), 1)

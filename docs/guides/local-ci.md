@@ -185,14 +185,22 @@ repository runners, so the workflow does not pretend an internal probe can make
 this decision. The pool is native x86_64, which the job requires.
 
 The checked-in `normal-local-fast` profile is the producer contract: it names
-the selector and lease variables, a 300-second TTL, the exact
-`pull_request`/`merge_group` unprivileged event class, the ephemeral runner-name
-prefix, and one-idle-runner minimum. Shipyard derives required labels from the
-profile's first target, renews the lease only after a live fleet probe, and
-clears it when the probe is unavailable or unhealthy. `build.yml` consumes that
-lease automatically only for trusted merge groups; other separately reviewed
-unprivileged workflows may consume the same producer contract within their own
-security boundary.
+the selector and lease variables, a 300-second TTL, the exact `merge_group`
+event class, the ephemeral runner-name prefix, and one-idle-runner minimum.
+Support for these `health_lease_*` fields requires Shipyard's
+`runner local-linux-lease` producer (Shipyard commit `f3bee74` or a release that
+contains it); Shipyard 0.83.0 accepts but does not act on those fields. The
+producer derives required labels from the profile's first target, issues the
+selector only after a live fleet probe, and clears it when the probe is
+unavailable or unhealthy. Until that producer is installed and scheduled, keep
+the selector unset. `build.yml` consumes the contract automatically only for
+merge groups and validates the RFC 3339 expiry before creating its matrix.
+`Vellum freeze` and `Enforce version & skill sync` are otherwise eligible
+unprivileged merge-group jobs, but remain hosted: a `runs-on` expression cannot
+validate timestamp expiry, while a hosted pre-dispatch resolver would recreate
+the queue bottleneck these jobs are meant to avoid. Do not route them locally
+until a consumer can fail closed on expiry before runner assignment. Their PR
+and manual runs must remain hosted in every design.
 
 The generic pool is limited to unprivileged Linux build/test jobs. The worker is
 a one-job Proxmox clone with no checkout persistence, no guest GitHub credential,

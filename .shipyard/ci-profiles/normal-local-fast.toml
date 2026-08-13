@@ -26,7 +26,7 @@ targets = ["macpro.linux-x64-vm", "github.linux-x64"]
 github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"
 health_lease_ttl_seconds = 300
-health_lease_events = ["pull_request", "merge_group"]
+health_lease_events = ["merge_group"]
 health_lease_runner_name_prefix = "pulp-ci-ephemeral-"
 health_lease_min_idle = 1
 
