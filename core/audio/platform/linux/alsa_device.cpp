@@ -3,8 +3,48 @@
 
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::audio::linux_platform {
+
+std::optional<AudioIoTiming>
+make_alsa_audio_io_timing(const AlsaTimingValues& values,
+                          std::uint64_t route_instance_token,
+                          std::uint64_t calibration_generation) noexcept {
+    if (values.route_delay_frames < 0 || values.period_frames == 0 ||
+        values.period_frames > std::numeric_limits<std::uint32_t>::max() ||
+        !is_supported_audio_sample_rate(values.sample_rate_hz) ||
+        route_instance_token == 0 || calibration_generation == 0) {
+        return std::nullopt;
+    }
+
+    const auto complete_delay = static_cast<std::uint64_t>(values.route_delay_frames);
+    const auto period = static_cast<std::uint64_t>(values.period_frames);
+    if (complete_delay < period)
+        return std::nullopt;
+    const auto residual = complete_delay - period;
+    if (residual > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
+
+    AudioIoTiming timing{};
+    if (values.direction == SND_PCM_STREAM_CAPTURE) {
+        timing.input_latency_frames = static_cast<std::uint32_t>(residual);
+        timing.input_safety_offset_frames = 0;
+    } else if (values.direction == SND_PCM_STREAM_PLAYBACK) {
+        timing.output_latency_frames = static_cast<std::uint32_t>(residual);
+        timing.output_safety_offset_frames = 0;
+    } else {
+        return std::nullopt;
+    }
+    timing.io_buffer_frames = static_cast<std::uint32_t>(period);
+    timing.sample_rate_hz = values.sample_rate_hz;
+    timing.timestamp_domain = AudioTimestampDomain::monotonic_host_time;
+    timing.timestamp_source = AudioTimingSource::device_clock;
+    timing.confidence = AudioTimingConfidence::reported;
+    timing.route_instance_token = route_instance_token;
+    timing.calibration_generation = calibration_generation;
+    return timing;
+}
 
 // ── AlsaDevice ───────────────────────────────────────────────────────────
 
@@ -20,6 +60,7 @@ AlsaDevice::~AlsaDevice() {
 }
 
 bool AlsaDevice::open(const DeviceConfig& config) {
+    invalidate_audio_io_timing();
     config_ = config;
 
     int err = snd_pcm_open(&pcm_, device_name_.c_str(), stream_, 0);
@@ -106,6 +147,17 @@ bool AlsaDevice::open(const DeviceConfig& config) {
         return false;
     }
 
+    snd_pcm_sw_params_t* sw_params = nullptr;
+    snd_pcm_sw_params_alloca(&sw_params);
+    monotonic_timing_available_.store(
+        snd_pcm_sw_params_current(pcm_, sw_params) >= 0 &&
+        snd_pcm_sw_params_set_tstamp_mode(
+            pcm_, sw_params, SND_PCM_TSTAMP_ENABLE) >= 0 &&
+        snd_pcm_sw_params_set_tstamp_type(
+            pcm_, sw_params, SND_PCM_TSTAMP_TYPE_MONOTONIC) >= 0 &&
+        snd_pcm_sw_params(pcm_, sw_params) >= 0,
+        std::memory_order_release);
+
     // Pre-allocate buffers
     channel_buffers_.resize(actual_channels_);
     channel_ptrs_.resize(actual_channels_);
@@ -116,6 +168,9 @@ bool AlsaDevice::open(const DeviceConfig& config) {
     interleaved_.resize(period_size_ * actual_channels_, 0.0f);
 
     is_open_ = true;
+    route_instance_token_.store(
+        detail::next_linux_audio_route_instance_token(), std::memory_order_release);
+    calibration_generation_.store(1, std::memory_order_release);
     runtime::log_info("ALSA: opened {} '{}' at {} Hz, period {} frames, {} channels",
         stream_ == SND_PCM_STREAM_CAPTURE ? "capture" : "playback",
         device_name_, config_.sample_rate, period_size_, actual_channels_);
@@ -123,6 +178,7 @@ bool AlsaDevice::open(const DeviceConfig& config) {
 }
 
 void AlsaDevice::close() {
+    invalidate_audio_io_timing();
     if (pcm_) {
         snd_pcm_close(pcm_);
         pcm_ = nullptr;
@@ -131,6 +187,47 @@ void AlsaDevice::close() {
     channel_ptrs_.clear();
     interleaved_.clear();
     is_open_ = false;
+}
+
+void AlsaDevice::invalidate_audio_io_timing() noexcept {
+    route_instance_token_.store(0, std::memory_order_release);
+    calibration_generation_.store(0, std::memory_order_release);
+    last_reported_delay_frames_.store(-1, std::memory_order_release);
+    monotonic_timing_available_.store(false, std::memory_order_release);
+}
+
+std::optional<AudioIoTiming> AlsaDevice::audio_io_timing() const noexcept {
+    const auto token = route_instance_token_.load(std::memory_order_acquire);
+    auto generation = calibration_generation_.load(std::memory_order_acquire);
+    if (!is_open_ || !pcm_ ||
+        !monotonic_timing_available_.load(std::memory_order_acquire) || token == 0 ||
+        generation == 0 || snd_pcm_state(pcm_) == SND_PCM_STATE_DISCONNECTED) {
+        return std::nullopt;
+    }
+
+    snd_pcm_sframes_t delay = 0;
+    if (snd_pcm_delay(pcm_, &delay) < 0)
+        return std::nullopt;
+    if (delay < static_cast<snd_pcm_sframes_t>(period_size_))
+        return std::nullopt;
+
+    const auto previous =
+        last_reported_delay_frames_.exchange(delay, std::memory_order_acq_rel);
+    if (previous >= 0 && previous != delay) {
+        const auto next = next_calibration_generation(generation);
+        if (!next) {
+            calibration_generation_.store(0, std::memory_order_release);
+            return std::nullopt;
+        }
+        generation = *next;
+        calibration_generation_.store(generation, std::memory_order_release);
+    }
+    if (route_instance_token_.load(std::memory_order_acquire) != token ||
+        calibration_generation_.load(std::memory_order_acquire) != generation) {
+        return std::nullopt;
+    }
+    return make_alsa_audio_io_timing(
+        {delay, period_size_, config_.sample_rate, stream_}, token, generation);
 }
 
 bool AlsaDevice::start(AudioCallback callback) {
@@ -239,6 +336,7 @@ void AlsaDevice::render_thread_func() {
             frames = snd_pcm_recover(pcm_, static_cast<int>(frames), 1);
             if (frames < 0) {
                 runtime::log_error("ALSA: write failed: {}", snd_strerror(static_cast<int>(frames)));
+                invalidate_audio_io_timing();
                 break;
             }
         }
@@ -265,6 +363,7 @@ void AlsaDevice::capture_thread_func() {
             if (frames < 0) {
                 runtime::log_error("ALSA: read failed: {}",
                     snd_strerror(static_cast<int>(frames)));
+                invalidate_audio_io_timing();
                 break;
             }
             continue;
