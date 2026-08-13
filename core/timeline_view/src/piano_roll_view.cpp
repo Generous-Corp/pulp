@@ -48,12 +48,40 @@ constexpr timebase::TickPosition note_end(const NoteEvent& note) noexcept {
 
 PianoRollView::PianoRollView() = default;
 
+PianoRollPitchRuler::PianoRollPitchRuler() {
+    set_orientation(view::MidiKeyboard::Orientation::vertical_chromatic_rows);
+    set_show_note_names(true);
+}
+
+void PianoRollPitchRuler::set_pitch_projection(
+    const timeline_editor::PitchProjection& projection) {
+    set_range(projection.lowest_pitch(), projection.highest_pitch());
+    const auto frame = bounds();
+    const auto pixels = projection.pixels();
+    set_bounds({frame.x, pixels.origin, frame.width, pixels.extent});
+    request_repaint();
+}
+
 void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId track_id,
                              ItemId clip_id) {
     project_ = project;
     sequence_id_ = sequence_id;
     track_id_ = track_id;
     clip_id_ = clip_id;
+    const auto all = notes();
+    note_interval_max_end_.assign(all.empty() ? 0 : all.size() * 4, {});
+    const auto build_interval_index = [&](auto&& self, std::size_t node, std::size_t begin,
+                                          std::size_t end) -> timebase::TickPosition {
+        if (end - begin == 1)
+            return note_interval_max_end_[node] = note_end(all[begin]);
+        const auto middle = begin + (end - begin) / 2;
+        const auto left_end = self(self, node * 2 + 1, begin, middle);
+        const auto right_end = self(self, node * 2 + 2, middle, end);
+        return note_interval_max_end_[node] =
+                   timebase::TickPosition{std::max(left_end.value, right_end.value)};
+    };
+    if (!all.empty())
+        build_interval_index(build_interval_index, 0, 0, all.size());
     // A rebind invalidates anything a live gesture believed about a note.
     drag_.reset();
 }
@@ -210,6 +238,7 @@ void PianoRollView::emit(timeline_editor::NoteEditIntentKind kind,
 
 void PianoRollView::paint(canvas::Canvas& canvas) {
     painted_note_count_ = 0;
+    visited_candidate_count_ = 0;
     if (!layout_)
         return;
     const auto local = bounds();
@@ -228,22 +257,14 @@ void PianoRollView::paint(canvas::Canvas& canvas) {
 
     const auto visible_start = layout_->time.visible_start();
     const auto visible_end = layout_->time.visible_end();
+    const auto all = notes();
     canvas.set_fill_color(kNoteFill);
-    for (const auto& note : notes()) {
-        // Notes are in canonical (start, id) order, so once a note starts at or
-        // after the visible end no later note can overlap the viewport and the
-        // scan is done. The leading half stays a linear skip on purpose: a long
-        // note starting arbitrarily early can still overlap, and bounding that
-        // scan needs a maximum-duration the content does not carry. Culling
-        // CORRECTNESS is what this renderer is asserted on; the early break is
-        // what keeps a dense clip from costing more than the notes near it.
-        if (note.start.value >= visible_end.value)
-            break;
-        if (note_end(note).value <= visible_start.value)
-            continue;
+
+    const auto paint_candidate = [&](const NoteEvent& note) {
+        ++visited_candidate_count_;
         if (note.pitch < layout_->pitch.lowest_pitch() ||
             note.pitch > layout_->pitch.highest_pitch())
-            continue;
+            return;
 
         const float left = layout_->time.x_at(note.start);
         const float right = layout_->time.x_at(note_end(note));
@@ -251,11 +272,27 @@ void PianoRollView::paint(canvas::Canvas& canvas) {
         const float visible_left = std::max(left, 0.0f);
         const float visible_right = std::min(right, local.width);
         if (visible_right <= visible_left)
-            continue;
+            return;
         canvas.fill_rect(visible_left, centre - row_height * 0.5f, visible_right - visible_left,
                          row_height);
         ++painted_note_count_;
-    }
+    };
+
+    const auto paint_overlapping_range = [&](auto&& self, std::size_t node, std::size_t begin,
+                                              std::size_t end) -> void {
+        if (note_interval_max_end_[node].value <= visible_start.value ||
+            all[begin].start.value >= visible_end.value)
+            return;
+        if (end - begin == 1) {
+            paint_candidate(all[begin]);
+            return;
+        }
+        const auto middle = begin + (end - begin) / 2;
+        self(self, node * 2 + 1, begin, middle);
+        self(self, node * 2 + 2, middle, end);
+    };
+    if (!all.empty())
+        paint_overlapping_range(paint_overlapping_range, 0, 0, all.size());
 }
 
 void PianoRollView::on_mouse_down(view::Point position) {

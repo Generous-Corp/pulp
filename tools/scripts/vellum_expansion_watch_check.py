@@ -17,6 +17,9 @@ from typing import Any
 
 WATCH_ROOT = pathlib.Path(".github/vellum-expansion-watch")
 ACCEPTANCE_PATH = WATCH_ROOT / "full-design-import-render-v1/acceptance.json"
+EXACT_BOUNDARY_ACCEPTANCE_PATH = WATCH_ROOT / (
+    "full-design-import-render-v1/exact-boundary-acceptance-1.json"
+)
 README_PATH = WATCH_ROOT / "README.md"
 EVENT_ROOT = pathlib.Path(".github/vellum-expansion-watch-events")
 EXPECTED_ACCEPTANCE_SHA256 = "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd"
@@ -407,6 +410,9 @@ def load_acceptance(root: pathlib.Path) -> tuple[dict[str, list[str]] | None, by
         README_PATH.relative_to(WATCH_ROOT).as_posix(),
         ACCEPTANCE_PATH.relative_to(WATCH_ROOT).as_posix(),
     }
+    exact_relative = EXACT_BOUNDARY_ACCEPTANCE_PATH.relative_to(WATCH_ROOT).as_posix()
+    if exact_relative in files:
+        expected.add(exact_relative)
     if files != expected:
         raise WatchError(
             f"{WATCH_ROOT}: artifact set differs; expected={sorted(expected)} "

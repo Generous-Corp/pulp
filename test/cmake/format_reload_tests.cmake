@@ -21,6 +21,9 @@ pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
 # Keeping the codec tests host-independent lets every CI lane validate
 # timestamp/running-status handling without Bluetooth hardware.
 pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-android-ble-midi-registry
+    SOURCES test_android_ble_midi_registry.cpp
+    LIBRARIES pulp::midi)
 
 # UmpSession + UmpEndpoint + VirtualUmpEndpoint headless tests for the
 # cross-platform session + virtual-endpoint

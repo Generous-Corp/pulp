@@ -21,6 +21,9 @@
 // not on the include path there. `__has_include` lets downstream code
 // include this header unconditionally and key feature presence on the
 // `PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL` macro defined below.
+// PluginManagerPanel is an opt-in host-backed widget, not part of the
+// view-only link surface. Desktop consumers that instantiate it must link
+// both `pulp::view` and `pulp::host`.
 #if defined(__has_include) && __has_include(<pulp/host/scanner.hpp>)
 #define PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL 1
 

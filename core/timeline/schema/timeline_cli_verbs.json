@@ -433,6 +433,49 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "modifiers",
+          "required": true,
+          "schema_field": "modifiers",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "notes",
+          "required": true,
+          "schema_field": "notes",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-notes",
+      "schema_type": "pulp.timeline.command.insert_notes",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "Object",
           "name": "region",
           "ref": "pulp.timeline.region",
@@ -804,6 +847,42 @@
       ],
       "name": "timeline:command:remove-marker",
       "schema_type": "pulp.timeline.command.remove_marker",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-notes",
+      "schema_type": "pulp.timeline.command.remove_notes",
       "version": 1
     },
     {

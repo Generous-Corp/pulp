@@ -6,6 +6,7 @@
 
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline_editor/edit_intent.hpp>
+#include <pulp/timeline_editor/track_edit_intent.hpp>
 #include <pulp/view/hit_metrics.hpp>
 #include <pulp/view/view.hpp>
 
@@ -38,6 +39,8 @@ struct ArrangerLayout {
     float track_height_px = 64.0f;
     /// Clip lanes begin here; `[0, lane_left_px)` is the track-header column.
     float lane_left_px = 0.0f;
+    /// Height reserved above the track rows for the musical ruler.
+    float ruler_height_px = 24.0f;
 
     /// Lane-space x of a document tick. Values left of `lane_left_px` are
     /// returned unclamped so a partially scrolled-out clip keeps a truthful
@@ -62,8 +65,8 @@ enum class ArrangerRefusal : std::uint8_t {
 /// Arranger canvas over a `timeline::Project`.
 ///
 /// Holds nothing durable: the project is borrowed for painting and hit
-/// testing, and every edit leaves as a `timeline_editor::EditIntent` submitted
-/// to a host. The view never builds a `timeline::Command`, never owns a
+/// testing, and every edit leaves as a clip or track intent submitted to its
+/// matching host. The view never builds a `timeline::Command`, never owns a
 /// revision, and never learns what applies its intents.
 class ArrangerView : public view::View {
   public:
@@ -73,6 +76,11 @@ class ArrangerView : public view::View {
     /// document's id domain, which a view does not own. Returning `nullopt`
     /// declines the gesture, which is what a read-only arranger does.
     using ClipFactory = std::function<std::optional<timeline::Clip>(timebase::TickPosition start)>;
+    /// Builds the complete value for a create-track gesture.
+    ///
+    /// The caller owns identity allocation and naming because the arranger
+    /// borrows the document and has no authority over either domain.
+    using TrackFactory = std::function<std::optional<timeline::Track>()>;
 
     ArrangerView();
 
@@ -83,11 +91,23 @@ class ArrangerView : public view::View {
     /// Where emitted intents go. Null leaves the view fully interactive and
     /// silent, which is what a detached or read-only arranger is.
     void set_host(timeline_editor::EditIntentHost* host);
+    /// Where track-header reorder intents go. This is separate from the clip
+    /// host because track arrangement and clip editing are distinct document
+    /// vocabularies.
+    /// @param host The receiving host, or null to detach the track-edit channel.
+    void set_track_edit_host(timeline_editor::TrackEditIntentHost* host);
+    /// Where reorder and create-track intents go. When set, this supersedes the
+    /// reorder-only host so both operations share one ordered channel.
+    /// @param host The receiving host, or null to detach the arrangement channel.
+    void set_track_arrangement_host(timeline_editor::TrackArrangementIntentHost* host);
     /// Pointer geometry, resolved once per gesture rather than per hit test.
     void set_hit_metrics(const view::HitMetrics& metrics);
     /// Enables the create-clip gesture. Unset, a click on empty lane space
     /// does nothing.
     void set_clip_factory(ClipFactory factory);
+    /// Enables track creation from the first empty header row. The created
+    /// track is appended to the authored order. Unset, that row does nothing.
+    void set_track_factory(TrackFactory factory);
 
     const ArrangerLayout& layout() const noexcept { return layout_; }
 
@@ -102,7 +122,9 @@ class ArrangerView : public view::View {
 
     /// Whether a drag is mid-flight. Undo and redo are rejected by a session
     /// while a gesture is open, so a host greys them out on this.
-    bool gesture_open() const noexcept { return drag_.has_value(); }
+    bool gesture_open() const noexcept {
+        return drag_.has_value() || header_drag_.has_value() || track_create_press_.has_value();
+    }
 
     // ── View ─────────────────────────────────────────────────────────────
 
@@ -133,6 +155,23 @@ class ArrangerView : public view::View {
         bool opened = false;
     };
 
+    /// One track-header drag in flight.
+    struct HeaderDrag {
+        timeline::ItemId track_id;
+        float pointer_down_y = 0.0f;
+        float grab_offset_y = 0.0f;
+        bool moved = false;
+        /// Authored position at pointer-down, used as MoveTrack's optimistic
+        /// gate and to suppress a drop that resolves to the same position.
+        std::optional<timeline::ItemId> expected_before_track_id;
+    };
+
+    /// A press in the first empty header row awaiting click confirmation.
+    struct TrackCreatePress {
+        view::Point pointer_down{};
+        bool moved = false;
+    };
+
     const timeline::Sequence* sequence() const;
     const timeline::Track* track_at(view::Point position, std::size_t& index_out) const;
     /// Clip under a lane-space point, resolved against the pointer tolerance.
@@ -141,14 +180,21 @@ class ArrangerView : public view::View {
     void emit_move(const Drag& drag, timeline::GesturePhase phase,
                    timeline::MusicalTimeRange replacement);
     void submit(const timeline_editor::EditIntent& intent);
+    void submit(const timeline_editor::TrackEditIntent& intent);
+    void submit(const timeline_editor::TrackCreateIntent& intent);
 
     const timeline::Project* project_ = nullptr;
     timeline::ItemId sequence_id_{};
     ArrangerLayout layout_{};
     timeline_editor::EditIntentHost* host_ = nullptr;
+    timeline_editor::TrackEditIntentHost* track_edit_host_ = nullptr;
+    timeline_editor::TrackArrangementIntentHost* track_arrangement_host_ = nullptr;
     view::HitMetrics metrics_ = view::HitMetrics::for_pointer(view::PointerType::mouse);
     ClipFactory clip_factory_;
+    TrackFactory track_factory_;
     std::optional<Drag> drag_;
+    std::optional<HeaderDrag> header_drag_;
+    std::optional<TrackCreatePress> track_create_press_;
     std::vector<ArrangerRefusal> refusals_;
 };
 

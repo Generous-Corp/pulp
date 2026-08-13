@@ -4455,6 +4455,14 @@ by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf
 - `Vellum freeze` — `.github/workflows/vellum-freeze-check.yml`
 - `Vellum trusted freeze` — status posted by `.github/workflows/vellum-trusted-gate.yml`
 
+`vellum-routing-contract` is a separate evidence-producing check. It executes
+the closed repository-qualified Pulp/Vellum router suite on relevant PRs and on
+every push to `main`. Once `.github/vellum-ownership.json` contains an accepted
+exact-route expansion, the push-main run uploads the tiny, digest-bound
+`pulp-vellum-routing-contract-execution` artifact consumed by Vellum's release
+verifier. A green PR run is not a substitute: release evidence requires the
+exact Pulp merge commit, a `push` event on `main`, and the matching run receipt.
+
 **`linux` and `windows` are NOT required** — they are advisory GitHub-hosted
 lanes. Verify the live list rather than trusting any doc, and read the right
 surface:

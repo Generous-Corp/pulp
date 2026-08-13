@@ -522,6 +522,40 @@ class MainTests(unittest.TestCase):
                     0o600,
                 )
 
+    def test_main_preserves_broker_only_historical_darwin_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            broker = root / "pulp-control-broker-built"
+            wgpu = root / "libwgpu_native.dylib"
+            for path in (pulp, broker, wgpu):
+                path.write_text(path.name, encoding="utf-8")
+            out = root / "pulp-darwin-arm64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_macos"):
+                    with mock.patch.object(pc, "resign_macos"):
+                        with argv(
+                            [
+                                "package_cli.py",
+                                "--binary", str(pulp),
+                                "--control-broker-binary", str(broker),
+                                "--build-dir", str(root / "build"),
+                                "--platform", "darwin-arm64",
+                                "--out", str(out),
+                            ]
+                        ):
+                            rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            with tarfile.open(out, "r:gz") as tar:
+                names = set(tar.getnames())
+            self.assertIn("pulp-control-broker", names)
+            self.assertNotIn("pulp-control-standalone-host", names)
+            self.assertNotIn(
+                "pulp-control-standalone-host.inspector-capabilities.json", names
+            )
+
     def test_main_rejects_control_broker_on_non_darwin_archive(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)

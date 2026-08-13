@@ -10,8 +10,21 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
+#endif
 
 using namespace pulp::timeline;
 using namespace pulp::timeline_editor;
@@ -36,6 +49,7 @@ ArrangerLayout unit_layout() {
     layout.px_per_tick = 1.0;
     layout.track_height_px = 40.0f;
     layout.lane_left_px = 120.0f;
+    layout.ruler_height_px = 0.0f;
     return layout;
 }
 
@@ -160,7 +174,447 @@ CanonicalHistory exercise_device_drag(PointerType pointer_type) {
     return {baseline, edited, undone, redone, std::move(intents)};
 }
 
+Project make_three_track_project() {
+    auto first = Track::create({4}, "first", {make_note_clip({5}, {6}, 0)});
+    auto second = Track::create({7}, "second", {});
+    auto third = Track::create({8}, "third", {});
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(third);
+    std::vector<Track> tracks;
+    tracks.push_back(std::move(first).value());
+    tracks.push_back(std::move(second).value());
+    tracks.push_back(std::move(third).value());
+    auto sequence =
+        Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter}, std::move(tracks));
+    REQUIRE(sequence);
+    ProjectInput input;
+    input.id = {1};
+    input.name = "project";
+    input.next_item_id = 9;
+    input.root_sequence_id = {3};
+    input.sequences.push_back(std::move(sequence).value());
+    auto project = Project::create(std::move(input));
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+std::vector<ItemId> track_order_after_round_trip(const Project& project) {
+    const auto registry = builtin_registry();
+    auto encoded = serialize_project(project, registry);
+    REQUIRE(encoded);
+    auto decoded = deserialize_project(encoded.value().json, registry);
+    REQUIRE(decoded);
+    const auto order = decoded.value().find_sequence({3})->track_order();
+    return {order.begin(), order.end()};
+}
+
+struct TrackReorderHistory {
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+    std::vector<ItemId> reopened_order;
+    std::vector<TrackEditIntent> intents;
+};
+
+TrackReorderHistory exercise_track_header_drag(PointerType pointer_type, pulp::view::Point start,
+                                               pulp::view::Point end,
+                                               float ruler_height_px = 0.0f) {
+    auto owned = DocumentSession::create(make_three_track_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+
+    const auto baseline = canonical_project(*session->snapshot());
+    ScriptedUiHost<TrackEditIntent> host;
+    ArrangerView view;
+    ScriptedUiHost<EditIntent> clip_host;
+    configure(view, *session->snapshot(), clip_host);
+    auto layout = unit_layout();
+    layout.ruler_height_px = ruler_height_px;
+    view.set_layout(layout);
+    view.set_track_edit_host(&host);
+    view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+
+    pulp::view::View::SimulatedPointer pointer;
+    pointer.type = pointer_type;
+    view.simulate_drag(start, end, 4, pointer);
+
+    const auto intents = host.intents();
+    const auto undo_group = writer.allocate_undo_group_id();
+    REQUIRE(undo_group.valid());
+    for (const auto& intent : intents) {
+        EditIntentIdentity identity;
+        identity.transaction_id = writer.allocate_transaction_id();
+        identity.command_id = writer.allocate_command_id();
+        identity.expected_revision = session->revision();
+        identity.undo_group = undo_group;
+        auto lowered = lower_track_edit_intent(intent, identity);
+        REQUIRE(lowered);
+        REQUIRE(session->submit(writer, std::move(lowered).value()));
+    }
+
+    const auto edited = canonical_project(*session->snapshot());
+    const auto reopened_order = track_order_after_round_trip(*session->snapshot());
+    std::string undone = edited;
+    std::string redone = edited;
+    if (!intents.empty()) {
+        REQUIRE(session->undo(writer));
+        undone = canonical_project(*session->snapshot());
+        REQUIRE(session->redo(writer));
+        redone = canonical_project(*session->snapshot());
+    }
+    return {baseline, edited, undone, redone, reopened_order, intents};
+}
+
+void check_same_track_intent(const TrackEditIntent& left, const TrackEditIntent& right) {
+    CHECK(left.kind == right.kind);
+    CHECK(left.phase == right.phase);
+    CHECK(left.sequence_id == right.sequence_id);
+    CHECK(left.track_id == right.track_id);
+    CHECK(left.expected_before_track_id == right.expected_before_track_id);
+    CHECK(left.replacement_before_track_id == right.replacement_before_track_id);
+}
+
+Project make_authored_track_project() {
+    auto first = Track::create({4}, "first", {});
+    auto second = Track::create({7}, "second", {});
+    auto third = Track::create({8}, "third", {});
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(third);
+
+    SequenceInput sequence_input;
+    sequence_input.id = {3};
+    sequence_input.name = "sequence";
+    sequence_input.musical_duration = TickDuration{8 * kTicksPerQuarter};
+    sequence_input.tracks.push_back(std::move(first).value());
+    sequence_input.tracks.push_back(std::move(second).value());
+    sequence_input.tracks.push_back(std::move(third).value());
+    sequence_input.track_order = {{8}, {4}, {7}};
+    auto sequence = Sequence::create(std::move(sequence_input));
+    REQUIRE(sequence);
+
+    ProjectInput project_input;
+    project_input.id = {1};
+    project_input.name = "project";
+    project_input.next_item_id = 9;
+    project_input.root_sequence_id = {3};
+    project_input.sequences.push_back(std::move(sequence).value());
+    auto project = Project::create(std::move(project_input));
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+class SessionArrangementHost final : public TrackArrangementIntentHost {
+  public:
+    SessionArrangementHost(DocumentSession& session, WriterToken& writer)
+        : session_(session), writer_(writer), pinned_(session.snapshot()) {}
+
+    void bind(ArrangerView& view) {
+        view_ = &view;
+        view_->set_project(pinned_.get(), {3});
+    }
+
+    UiPlayhead playhead() const noexcept override { return {}; }
+    AuditionResult begin_audition(const AuditionRequest&) noexcept override { return {}; }
+    void end_audition(AuditionHandle) noexcept override {}
+
+    IntentResult submit_intent(const TrackArrangementIntent& intent) noexcept override {
+        intents_.push_back(intent);
+        EditIntentIdentity identity;
+        identity.transaction_id = writer_.allocate_transaction_id();
+        identity.command_id = writer_.allocate_command_id();
+        identity.expected_revision = session_.revision();
+        auto lowered = lower_track_arrangement_intent(intent, identity);
+        if (!lowered || !session_.submit(writer_, std::move(lowered).value()))
+            return {IntentStatus::Rejected, 0};
+
+        pinned_ = session_.snapshot();
+        if (view_)
+            view_->set_project(pinned_.get(), {3});
+        return {IntentStatus::Accepted, ++accepted_sequence_};
+    }
+
+    const std::vector<TrackArrangementIntent>& intents() const noexcept { return intents_; }
+
+  private:
+    DocumentSession& session_;
+    WriterToken& writer_;
+    std::shared_ptr<const Project> pinned_;
+    ArrangerView* view_ = nullptr;
+    std::uint64_t accepted_sequence_ = 0;
+    std::vector<TrackArrangementIntent> intents_;
+};
+
+struct TrackCreateHistory {
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+    std::vector<ItemId> baseline_order;
+    std::vector<ItemId> reopened_order;
+    std::vector<ItemId> undone_order;
+    std::vector<ItemId> redone_order;
+    bool undone_contains_created_track = false;
+    std::vector<TrackArrangementIntent> intents;
+};
+
+TrackCreateHistory exercise_track_creation(PointerType pointer_type) {
+    auto owned = DocumentSession::create(make_authored_track_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+
+    const auto baseline = canonical_project(*session->snapshot());
+    const auto baseline_order = track_order_after_round_trip(*session->snapshot());
+    ScriptedUiHost<EditIntent> clip_host;
+    ArrangerView view;
+    configure(view, *session->snapshot(), clip_host);
+    auto layout = unit_layout();
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_hit_metrics(HitMetrics::for_pointer(pointer_type));
+    view.set_track_factory([]() { return Track::create({9}, "created", {}).value(); });
+
+    SessionArrangementHost host(*session, writer);
+    host.bind(view);
+    view.set_track_arrangement_host(&host);
+
+    pulp::view::View::SimulatedPointer pointer;
+    pointer.type = pointer_type;
+    const float empty_header_y =
+        layout.ruler_height_px + 3.0f * layout.track_height_px + layout.track_height_px * 0.5f;
+    view.simulate_click({layout.lane_left_px * 0.5f, empty_header_y}, pointer);
+
+    const auto edited = canonical_project(*session->snapshot());
+    const auto reopened_order = track_order_after_round_trip(*session->snapshot());
+    std::string undone = edited;
+    std::string redone = edited;
+    auto undone_order = reopened_order;
+    auto redone_order = reopened_order;
+    bool undone_contains_created_track = true;
+    if (!host.intents().empty()) {
+        REQUIRE(session->undo(writer));
+        undone = canonical_project(*session->snapshot());
+        undone_order = track_order_after_round_trip(*session->snapshot());
+        const auto* undone_sequence = session->snapshot()->find_sequence({3});
+        REQUIRE(undone_sequence);
+        undone_contains_created_track = undone_sequence->find_track({9}) != nullptr;
+        REQUIRE(session->redo(writer));
+        redone = canonical_project(*session->snapshot());
+        redone_order = track_order_after_round_trip(*session->snapshot());
+    }
+    return {baseline,
+            edited,
+            undone,
+            redone,
+            baseline_order,
+            reopened_order,
+            undone_order,
+            redone_order,
+            undone_contains_created_track,
+            host.intents()};
+}
+
+#ifdef PULP_HAS_SKIA
+struct PixelFrame {
+    std::vector<std::uint8_t> rgba;
+    int width = 0;
+    int height = 0;
+
+    std::array<std::uint8_t, 4> pixel(int x, int y) const {
+        const auto offset = static_cast<std::size_t>((y * width + x) * 4);
+        return {rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]};
+    }
+};
+
+PixelFrame render_pixels(ArrangerView& view, int width, int height) {
+    const auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType,
+                                        kUnpremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+    view.paint(canvas);
+
+    PixelFrame frame;
+    frame.width = width;
+    frame.height = height;
+    frame.rgba.resize(static_cast<std::size_t>(width * height * 4));
+    REQUIRE(surface->readPixels(info, frame.rgba.data(), static_cast<std::size_t>(width * 4),
+                                0, 0));
+    return frame;
+}
+
+bool pixel_near(const std::array<std::uint8_t, 4>& actual,
+                const std::array<std::uint8_t, 4>& expected,
+                int tolerance = 4) {
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        if (std::abs(static_cast<int>(actual[i]) - static_cast<int>(expected[i])) > tolerance)
+            return false;
+    }
+    return true;
+}
+#endif
+
 } // namespace
+
+TEST_CASE("Arranger track-header drags reorder authored tracks for mouse and touch",
+          "[timeline][arranger][parity]") {
+    const pulp::view::Point header_third{60.0f, 100.0f};
+    const pulp::view::Point header_front{60.0f, 0.0f};
+    const auto mouse = exercise_track_header_drag(PointerType::mouse, header_third, header_front);
+    const auto touch = exercise_track_header_drag(PointerType::touch, header_third, header_front);
+
+    REQUIRE(mouse.intents.size() == 1);
+    REQUIRE(touch.intents.size() == 1);
+    check_same_track_intent(mouse.intents.front(), touch.intents.front());
+    CHECK(mouse.intents.front().expected_before_track_id == std::nullopt);
+    CHECK(mouse.intents.front().replacement_before_track_id == std::optional<ItemId>{{4}});
+    CHECK(mouse.reopened_order == std::vector<ItemId>{{8}, {4}, {7}});
+    CHECK(touch.reopened_order == mouse.reopened_order);
+    CHECK(mouse.edited == touch.edited);
+    CHECK(mouse.edited != mouse.baseline);
+    CHECK(mouse.undone == mouse.baseline);
+    CHECK(touch.undone == touch.baseline);
+    CHECK(mouse.redone == mouse.edited);
+    CHECK(touch.redone == touch.edited);
+}
+
+TEST_CASE("Arranger ruler offset preserves track-header reorder", "[timeline][arranger]") {
+    constexpr float ruler_height = 24.0f;
+    const auto history = exercise_track_header_drag(
+        PointerType::mouse, {60.0f, ruler_height + 100.0f},
+        {60.0f, ruler_height}, ruler_height);
+
+    REQUIRE(history.intents.size() == 1);
+    CHECK(history.reopened_order == std::vector<ItemId>{{8}, {4}, {7}});
+    CHECK(history.undone == history.baseline);
+    CHECK(history.redone == history.edited);
+}
+
+TEST_CASE("Arranger track-header drop below the rows moves a track last", "[timeline][arranger]") {
+    const auto history =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 20.0f}, {60.0f, 160.0f});
+    REQUIRE(history.intents.size() == 1);
+    CHECK(history.intents.front().track_id == ItemId{4});
+    CHECK(history.intents.front().expected_before_track_id == std::optional<ItemId>{{7}});
+    CHECK(history.intents.front().replacement_before_track_id == std::nullopt);
+    CHECK(history.reopened_order == std::vector<ItemId>{{7}, {8}, {4}});
+    CHECK(history.undone == history.baseline);
+    CHECK(history.redone == history.edited);
+}
+
+TEST_CASE("Arranger track-header drop at the authored position emits nothing",
+          "[timeline][arranger]") {
+    const auto click =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 20.0f}, {60.0f, 20.0f});
+    CHECK(click.intents.empty());
+    CHECK(click.edited == click.baseline);
+
+    const auto horizontal_jitter =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 30.0f}, {61.0f, 30.0f});
+    CHECK(horizontal_jitter.intents.empty());
+    CHECK(horizontal_jitter.edited == horizontal_jitter.baseline);
+
+    const auto history =
+        exercise_track_header_drag(PointerType::mouse, {60.0f, 60.0f}, {60.0f, 40.0f});
+    CHECK(history.intents.empty());
+    CHECK(history.edited == history.baseline);
+    CHECK(history.reopened_order == std::vector<ItemId>{{4}, {7}, {8}});
+}
+
+TEST_CASE("Arranger empty-header clicks create one durable track for mouse and touch",
+          "[timeline][arranger][parity]") {
+    const auto mouse = exercise_track_creation(PointerType::mouse);
+    const auto touch = exercise_track_creation(PointerType::touch);
+
+    REQUIRE(mouse.intents.size() == 1);
+    REQUIRE(touch.intents.size() == 1);
+    const auto* mouse_create = std::get_if<TrackCreateIntent>(&mouse.intents.front());
+    const auto* touch_create = std::get_if<TrackCreateIntent>(&touch.intents.front());
+    REQUIRE(mouse_create);
+    REQUIRE(touch_create);
+    CHECK(mouse_create->sequence_id == ItemId{3});
+    CHECK(mouse_create->track.id() == ItemId{9});
+    CHECK(mouse_create->track.name() == "created");
+    CHECK(mouse_create->before_track_id == std::nullopt);
+    CHECK(touch_create->sequence_id == mouse_create->sequence_id);
+    CHECK(touch_create->track.id() == mouse_create->track.id());
+    CHECK(touch_create->track.name() == mouse_create->track.name());
+    CHECK(touch_create->before_track_id == mouse_create->before_track_id);
+
+    const std::vector<ItemId> expected_order{{8}, {4}, {7}, {9}};
+    CHECK(mouse.reopened_order == expected_order);
+    CHECK(touch.reopened_order == expected_order);
+    CHECK(mouse.edited == touch.edited);
+    CHECK(mouse.edited != mouse.baseline);
+    CHECK(mouse.undone_order == mouse.baseline_order);
+    CHECK(touch.undone_order == touch.baseline_order);
+    CHECK_FALSE(mouse.undone_contains_created_track);
+    CHECK_FALSE(touch.undone_contains_created_track);
+    CHECK(mouse.redone == mouse.edited);
+    CHECK(touch.redone == touch.edited);
+    CHECK(mouse.redone_order == expected_order);
+    CHECK(touch.redone_order == expected_order);
+}
+
+TEST_CASE("Arranger empty-header drags and cancellations do not create tracks",
+          "[timeline][arranger][pointer]") {
+    const auto project = make_authored_track_project();
+    ScriptedUiHost<EditIntent> clip_host;
+    ScriptedUiHost<TrackArrangementIntent> arrangement_host;
+    ArrangerView view;
+    configure(view, project, clip_host);
+    auto layout = unit_layout();
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_track_arrangement_host(&arrangement_host);
+    view.set_track_factory([]() { return Track::create({9}, "created", {}).value(); });
+
+    const float empty_header_y =
+        layout.ruler_height_px + 3.0f * layout.track_height_px + 20.0f;
+    pulp::view::View::SimulatedPointer touch;
+    touch.type = PointerType::touch;
+    view.simulate_drag({60.0f, empty_header_y}, {70.0f, empty_header_y + 10.0f}, 4,
+                       touch);
+    CHECK(arrangement_host.intents().empty());
+
+    view.on_mouse_down({60.0f, empty_header_y});
+    REQUIRE(view.gesture_open());
+    view.on_mouse_cancel({60.0f, empty_header_y});
+    CHECK_FALSE(view.gesture_open());
+    CHECK(arrangement_host.intents().empty());
+}
+
+TEST_CASE("Arranger empty-header release must match the press without drag callbacks",
+          "[timeline][arranger][pointer]") {
+    const auto project = make_authored_track_project();
+    ScriptedUiHost<EditIntent> clip_host;
+    ScriptedUiHost<TrackArrangementIntent> arrangement_host;
+    ArrangerView view;
+    configure(view, project, clip_host);
+    auto layout = unit_layout();
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_track_arrangement_host(&arrangement_host);
+    view.set_track_factory([]() { return Track::create({9}, "created", {}).value(); });
+
+    const float empty_header_y =
+        layout.ruler_height_px + 3.0f * layout.track_height_px + 20.0f;
+    view.on_mouse_down({60.0f, empty_header_y});
+    REQUIRE(view.gesture_open());
+    view.on_mouse_up({61.0f, empty_header_y});
+
+    CHECK_FALSE(view.gesture_open());
+    CHECK(arrangement_host.intents().empty());
+}
 
 TEST_CASE("Arranger mouse and touch drags share one exact undoable document edit",
           "[timeline][arranger][parity]") {
@@ -353,6 +807,125 @@ TEST_CASE("Arranger paints a lane and a clip rectangle at their projected geomet
             found = true;
     }
     REQUIRE(found);
+}
+
+TEST_CASE("Arranger Skia pixels distinguish the ruler grid and clips",
+          "[timeline][arranger][render]") {
+#ifndef PULP_HAS_SKIA
+    SKIP("Skia raster backend unavailable");
+#else
+    constexpr int width = 750;
+    constexpr int height = 80;
+    const auto project = make_project();
+    ScriptedUiHost<EditIntent> host;
+    ArrangerView view;
+    configure(view, project, host);
+
+    auto layout = unit_layout();
+    layout.px_per_tick = 1.0 / 5040.0;
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_bounds({0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)});
+
+    const auto pixels = render_pixels(view, width, height);
+    const auto require_pixel = [&](int x, int y, std::array<std::uint8_t, 4> expected) {
+        const auto actual = pixels.pixel(x, y);
+        INFO("pixel (" << x << ", " << y << ") = " << static_cast<int>(actual[0]) << ", "
+                        << static_cast<int>(actual[1]) << ", "
+                        << static_cast<int>(actual[2]) << ", "
+                        << static_cast<int>(actual[3]));
+        REQUIRE(pixel_near(actual, expected));
+    };
+
+    require_pixel(200, 10, {20, 23, 28, 255});
+    require_pixel(120, 10, {122, 128, 140, 255});
+    require_pixel(260, 10, {41, 43, 50, 255});
+    require_pixel(400, 44, {45, 47, 54, 255});
+    require_pixel(180, 44, {77, 140, 217, 255});
+#endif
+}
+
+TEST_CASE("Arranger sizes grid output for every visible bar", "[timeline][arranger][render]") {
+    constexpr float width = 240.0f;
+    constexpr float lane_width = 120.0f;
+    constexpr std::int64_t visible_bars = 9000;
+    const auto project = make_project();
+    ScriptedUiHost<EditIntent> host;
+    ArrangerView view;
+    configure(view, project, host);
+
+    auto layout = unit_layout();
+    layout.px_per_tick =
+        lane_width / static_cast<double>(visible_bars * 4 * kTicksPerQuarter);
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_bounds({0.0f, 0.0f, width, 80.0f});
+
+    RecordingCanvas canvas;
+    view.paint(canvas);
+    std::vector<DrawCommand> grid_lines;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::fill_rect && command.f[1] == 0.0f &&
+            command.f[2] == 2.0f && command.f[3] == 80.0f)
+            grid_lines.push_back(command);
+    }
+    REQUIRE(grid_lines.size() == static_cast<std::size_t>(visible_bars + 1));
+    CHECK(grid_lines.front().f[0] + grid_lines.front().f[2] * 0.5f ==
+          layout.lane_left_px);
+    CHECK(std::fabs(grid_lines.back().f[0] + grid_lines.back().f[2] * 0.5f - width) <
+          0.001f);
+}
+
+TEST_CASE("Arranger grid uses the clip scale for non-integral visible spans",
+          "[timeline][arranger][render]") {
+    constexpr auto next_bar_tick = 4 * kTicksPerQuarter;
+    constexpr float lane_width = 1.5f;
+    const auto project = make_project();
+    ScriptedUiHost<EditIntent> host;
+    ArrangerView view;
+    configure(view, project, host);
+
+    auto layout = unit_layout();
+    layout.px_per_tick = 1.0;
+    layout.origin_tick = {next_bar_tick - 1};
+    view.set_layout(layout);
+    view.set_bounds({0.0f, 0.0f, layout.lane_left_px + lane_width, 80.0f});
+
+    RecordingCanvas canvas;
+    view.paint(canvas);
+    const float expected_x = layout.x_for_tick({next_bar_tick});
+    bool found_aligned_bar = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != DrawCommand::Type::fill_rect || command.f[1] != 0.0f ||
+            command.f[2] != 2.0f || command.f[3] != 80.0f)
+            continue;
+        const float center_x = command.f[0] + command.f[2] * 0.5f;
+        if (std::fabs(center_x - expected_x) < 0.001f)
+            found_aligned_bar = true;
+    }
+    CHECK(found_aligned_bar);
+}
+
+TEST_CASE("Arranger rejects the first out-of-range visible tick duration",
+          "[timeline][arranger][render]") {
+    const auto project = make_project();
+    ScriptedUiHost<EditIntent> host;
+    ArrangerView view;
+    configure(view, project, host);
+
+    auto layout = unit_layout();
+    layout.px_per_tick = 1.0 / 0x1p63;
+    view.set_layout(layout);
+    view.set_bounds({0.0f, 0.0f, layout.lane_left_px + 1.0f, 80.0f});
+
+    RecordingCanvas canvas;
+    view.paint(canvas);
+    for (const auto& command : canvas.commands()) {
+        const bool full_height_grid =
+            command.type == DrawCommand::Type::fill_rect && command.f[1] == 0.0f &&
+            (command.f[2] == 1.0f || command.f[2] == 2.0f) && command.f[3] == 80.0f;
+        CHECK_FALSE(full_height_grid);
+    }
 }
 
 TEST_CASE("Arranger geometry follows the projection it is handed", "[timeline][arranger]") {

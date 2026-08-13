@@ -240,8 +240,18 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             'selected["control_broker_floor"] = authoritative["control_broker_floor"]',
             self.text,
         )
+        self.assertEqual(
+            self.text.count(
+                'selected["control_standalone_host_floor"] = authoritative['
+            ),
+            2,
+        )
         self.assertIn(
             'PULP_CONTROL_BROKER_FLOOR=$control_broker_floor',
+            self.text,
+        )
+        self.assertIn(
+            'PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor',
             self.text,
         )
         for step_name in (
@@ -551,6 +561,16 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
         )
         self.assertIn("CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)", run_block)
+        self.assertIn(
+            "CLI_ARTIFACTS+=(pulp-control-standalone-host)", run_block
+        )
+        self.assertIn(
+            "pulp-control-standalone-host.inspector-capabilities.json", run_block
+        )
+        self.assertIn("subprocess.TimeoutExpired", run_block)
+        self.assertIn("stdin=subprocess.DEVNULL", run_block)
+        self.assertIn("standalone host did not reject missing bootstrap", run_block)
+        self.assertIn("return_code != 65", run_block)
         self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
         self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
         self.assertIn('pulp-mcp) echo "--version"', run_block)
@@ -986,6 +1006,10 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             run_block,
         )
         self.assertIn(
+            'selected["control_standalone_host_floor"] = authoritative[',
+            run_block,
+        )
+        self.assertIn(
             'for key, value in authoritative["platform_library_stems"].items()',
             run_block,
         )
@@ -995,6 +1019,11 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             run_block,
         )
         self.assertNotIn("selected = authoritative", run_block)
+        self.assertIn(
+            '"${matrix_ref}:inspect/include/pulp/inspect/control_registry_digest.inc"',
+            run_block,
+        )
+        self.assertIn('--control-registry-digest "$control_registry_digest"', run_block)
         self.assertIn('--matrix "$publication_matrix"', run_block)
         self.assertNotIn('--matrix "$matrix"', run_block)
 

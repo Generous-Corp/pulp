@@ -6,10 +6,14 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline_editor/scripted_ui_host.hpp>
 #include <pulp/timeline_view/piano_roll_view.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -39,6 +43,16 @@ constexpr ItemId kClip{5};
 constexpr ItemId kNoteA{10};
 constexpr ItemId kNoteB{11};
 constexpr ItemId kNoteC{12};
+constexpr std::size_t kDenseNoteCount = 10'000;
+
+std::uint64_t fnv1a64(const std::vector<std::uint8_t>& bytes) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
 
 PianoRollLayout layout_over(std::int64_t visible_start, std::int64_t visible_ticks,
                             float pixel_extent) {
@@ -73,6 +87,57 @@ Project make_note_project() {
     REQUIRE(sequence);
     auto project =
         Project::create({{1}, "project", 100, kSequence, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+Project make_dense_note_project(bool include_long_note = false) {
+    constexpr std::int64_t stride = 10;
+    constexpr std::uint64_t first_note_id = 1'000;
+    std::vector<NoteEvent> notes;
+    notes.reserve(kDenseNoteCount + (include_long_note ? 1 : 0));
+    constexpr auto clip_ticks = static_cast<std::int64_t>(kDenseNoteCount) * stride;
+    if (include_long_note)
+        notes.push_back({{first_note_id - 1}, {0}, {clip_ticks}, 1'000, 60, 0});
+    for (std::size_t index = 0; index < kDenseNoteCount; ++index) {
+        notes.push_back({{first_note_id + index},
+                         {static_cast<std::int64_t>(index) * stride},
+                         {4},
+                         1'000,
+                         60,
+                         0});
+    }
+
+    auto content = MidiContent::create(std::move(notes));
+    REQUIRE(content);
+    auto authored = Clip::create(kClip, {0}, {clip_ticks}, std::move(content).value());
+    REQUIRE(authored);
+    auto track = Track::create(kTrack, "track", {std::move(authored).value()});
+    REQUIRE(track);
+    auto sequence = Sequence::create(kSequence, "sequence", TickDuration{clip_ticks},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project = Project::create(
+        {{1}, "project", first_note_id + kDenseNoteCount, kSequence, {},
+         {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+Project make_negative_start_note_project() {
+    auto content = MidiContent::create({
+        NoteEvent{{20}, {-20}, {30}, 1'000, 60, 0},
+    });
+    REQUIRE(content);
+    auto authored = Clip::create(kClip, {0}, {kClipTicks}, std::move(content).value());
+    REQUIRE(authored);
+    auto track = Track::create(kTrack, "track", {std::move(authored).value()});
+    REQUIRE(track);
+    auto sequence = Sequence::create(kSequence, "sequence", TickDuration{kClipTicks},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 21, kSequence, {},
+                                    {std::move(sequence).value()}});
     REQUIRE(project);
     return std::move(project).value();
 }
@@ -409,6 +474,164 @@ TEST_CASE("Piano roll culling admits one more note when the viewport scrolls ont
     };
     CHECK_FALSE(has_rect_at(before, rect->x));
     CHECK(has_rect_at(after, rect->x));
+}
+
+TEST_CASE("Piano roll paint bounds candidate work for ten thousand real notes",
+          "[timeline][piano-roll][culling]") {
+    const auto project = make_dense_note_project();
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    view.set_bounds({0, 0, 40.0f, kRollHeight});
+    view.set_clip(&project, kSequence, kTrack, kClip);
+    view.set_host(&host);
+
+    REQUIRE(view.notes().size() == kDenseNoteCount);
+    const auto has_rect_at = [](const RecordingCanvas& recording, float x) {
+        return std::any_of(recording.commands().begin(), recording.commands().end(),
+                           [x](const DrawCommand& command) {
+                               return command.type == DrawCommand::Type::fill_rect &&
+                                      command.f[0] == x;
+                           });
+    };
+
+    const auto check_viewport = [&](std::int64_t visible_start) {
+        view.set_layout(layout_over(visible_start, 40, 40.0f));
+        RecordingCanvas canvas;
+        view.paint(canvas);
+        CHECK(view.painted_note_count() == 4);
+        CHECK(view.visited_candidate_count() == 4);
+        CHECK(has_rect_at(canvas, 30.0f));
+        CHECK_FALSE(has_rect_at(canvas, 40.0f));
+    };
+
+    check_viewport(0);
+    check_viewport(50'000);
+    check_viewport(99'950);
+
+    view.set_clip(&project, kSequence, kTrack, {999});
+    RecordingCanvas rebound;
+    view.paint(rebound);
+    CHECK(view.painted_note_count() == 0);
+    CHECK(view.visited_candidate_count() == 0);
+}
+
+TEST_CASE("Piano roll pitch ruler shares projection rows and emits audition requests",
+          "[timeline][piano-roll][ruler]") {
+    auto projection =
+        PitchProjection::create(kLowPitch, kHighPitch, PixelSpan{32.0f, kRollHeight});
+    REQUIRE(projection);
+
+    PianoRollPitchRuler ruler;
+    ruler.set_bounds({7.0f, 0.0f, 64.0f, 10.0f});
+    ruler.set_pitch_projection(projection.value());
+
+    CHECK(ruler.orientation() ==
+          pulp::view::MidiKeyboard::Orientation::vertical_chromatic_rows);
+    CHECK(ruler.show_note_names());
+    CHECK(ruler.first_note() == kLowPitch);
+    CHECK(ruler.last_note() == kHighPitch);
+    CHECK(ruler.bounds().x == 7.0f);
+    CHECK(ruler.bounds().y == 32.0f);
+    CHECK(ruler.bounds().width == 64.0f);
+    CHECK(ruler.bounds().height == kRollHeight);
+
+    std::vector<int> note_ons;
+    std::vector<int> note_offs;
+    float velocity = 0.0f;
+    ruler.on_note_on = [&](int note, float requested_velocity) {
+        note_ons.push_back(note);
+        velocity = requested_velocity;
+    };
+    ruler.on_note_off = [&](int note) { note_offs.push_back(note); };
+
+    const float local_c4_y = projection.value().y_at(60) - projection.value().pixels().origin;
+    ruler.simulate_drag({12.0f, local_c4_y},
+                        {12.0f, projection.value().y_at(62) -
+                                    projection.value().pixels().origin},
+                        1);
+
+    REQUIRE(note_ons == std::vector<int>{60, 62});
+    CHECK(note_offs == std::vector<int>{60, 62});
+    CHECK(velocity == 0.8f);
+}
+
+TEST_CASE("Piano roll renders ten thousand notes through Skia within its wall-clock budget",
+          "[timeline][piano-roll][culling][screenshot]") {
+    if (!pulp::view::raw_rgba_render_available()) {
+        SKIP("Skia raster rendering is not available in this build");
+    }
+
+    const auto project = make_dense_note_project();
+    PianoRollView view;
+    view.set_bounds({0.0f, 0.0f, 40.0f, kRollHeight});
+    view.set_clip(&project, kSequence, kTrack, kClip);
+    view.set_layout(layout_over(50'000, 40, 40.0f));
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto png = pulp::view::render_to_png(view, 40, 480, 1.0f,
+                                               pulp::view::ScreenshotBackend::skia);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    REQUIRE_FALSE(png.empty());
+    const auto metadata = pulp::view::inspect_png_metadata(png);
+    REQUIRE(metadata.valid);
+    CHECK(metadata.width == 40);
+    CHECK(metadata.height == 480);
+    CHECK(view.painted_note_count() == 4);
+    CHECK(view.visited_candidate_count() == 4);
+#if defined(NDEBUG)
+    // Keep the Release deadline well above normal raster time so it catches
+    // unbounded work without turning shared-runner scheduling into a failure.
+    CHECK(elapsed < std::chrono::seconds{30});
+#endif
+
+    const auto content = pulp::view::analyze_screenshot_content(png);
+    REQUIRE(content.valid);
+    CHECK(content.unique_colors >= 3);
+    CHECK(content.non_background_coverage > 0.01);
+
+    std::uint32_t rgba_width = 0;
+    std::uint32_t rgba_height = 0;
+    const auto rgba = pulp::view::render_to_rgba(view, 40, 480, 1.0f, &rgba_width,
+                                                  &rgba_height);
+    REQUIRE_FALSE(rgba.empty());
+    CHECK(rgba_width == 40);
+    CHECK(rgba_height == 480);
+    CHECK(fnv1a64(rgba) == 0x4e52bc808038c4a5ULL);
+}
+
+TEST_CASE("Piano roll culling stays bounded with one long note among ten thousand short notes",
+          "[timeline][piano-roll][culling]") {
+    const auto project = make_dense_note_project(true);
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    view.set_bounds({0, 0, 40.0f, kRollHeight});
+    view.set_clip(&project, kSequence, kTrack, kClip);
+    view.set_host(&host);
+    view.set_layout(layout_over(50'000, 40, 40.0f));
+
+    RecordingCanvas canvas;
+    view.paint(canvas);
+
+    CHECK(view.painted_note_count() == 5);
+    CHECK(view.visited_candidate_count() == 5);
+}
+
+TEST_CASE("Piano roll paints a valid negative-start note that crosses tick zero",
+          "[timeline][piano-roll][culling]") {
+    const auto project = make_negative_start_note_project();
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    PianoRollView view;
+    view.set_bounds({0, 0, 10.0f, kRollHeight});
+    view.set_clip(&project, kSequence, kTrack, kClip);
+    view.set_host(&host);
+    view.set_layout(layout_over(0, 10, 10.0f));
+
+    RecordingCanvas canvas;
+    view.paint(canvas);
+
+    CHECK(view.painted_note_count() == 1);
+    CHECK(view.visited_candidate_count() == 1);
 }
 
 TEST_CASE("Piano roll geometry follows the projections it is handed",

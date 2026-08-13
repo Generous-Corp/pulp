@@ -184,25 +184,10 @@ unset(_pulp_view_target)
 target_link_libraries(pulp-view-core PUBLIC
     pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
 )
-# pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
-# third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
-# the link line on iOS surfaces a `long double to_chars` libc++ availability
-# error via `scanner_clap.cpp` → `runtime::log_warn` → `std::format`. The
-# header-only `plugin_manager_panel.hpp` lives in pulp-view and includes
-# `pulp/host/scanner.hpp`, so consumers that instantiate it on desktop still
-# need the symbol — link there. iOS AUv3 .appex bundles never instantiate
-# the panel, so dropping the PUBLIC dep there is safe and unblocks the
-# iOS AUv3 build smoke.
-if(NOT IOS)
-    target_link_libraries(pulp-view-core PUBLIC pulp::host)
-    # graph_editor_view.cpp uses host::SignalGraph / host::Connection / host::GraphNode
-    # directly, so its translation unit only compiles when pulp::host is linked.
-    # iOS skips the source entirely; the header is also iOS-guarded so any
-    # downstream consumer that includes <pulp/view/widgets/graph_editor_view.hpp>
-    # on iOS gets a clean compile-time skip rather than a "file not found" on
-    # <pulp/host/signal_graph.hpp>.
-    target_sources(pulp-view-core PRIVATE src/graph_editor_view.cpp)
-endif()
+# Host-backed view facilities are implemented by pulp-host. Keeping that
+# integration out of both view targets is load-bearing: every plugin format
+# links pulp::view, so a view-to-host edge would make even a plugin that only
+# draws native controls acquire plugin hosting and playback transitively.
 target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.

@@ -1684,6 +1684,24 @@ helper and call `add_plugin_node` directly; the unresolved-fallback
 path is what keeps `.pulpgraph` round-trips honest when a plugin
 binary disappears between sessions.
 
+## Host-backed view link boundary
+
+`pulp::view::widgets::GraphEditorView` is a desktop host-backed widget,
+not part of the view-only link surface. Any target that instantiates it
+must link both dependencies directly:
+
+```cmake
+target_link_libraries(my_graph_editor PRIVATE pulp::view pulp::host)
+```
+
+The header sets `PULP_VIEW_HAS_GRAPH_EDITOR_VIEW` to zero when host
+headers are unavailable. `pulp::view::PluginManagerPanel` has the same
+link requirement because its model uses the host scanner, and exposes
+`PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL` for conditional consumers. Keep
+uses behind the matching macro; do not restore a transitive
+`pulp::view -> pulp::host` dependency to make an unguarded consumer
+compile.
+
 ## NativeHandleVisitor — typed access to a plugin's native handle
 
 Hosts that need to reach a format-specific handle (CLAP note ports,

@@ -120,6 +120,7 @@
 /// adopting realm. AutomationPlaybackLimits is carried, because those ceilings
 /// size the arrays a block render writes into.
 
+#include <pulp/playback/automation_cursor.hpp>
 #include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/program.hpp>
 #include <pulp/runtime/result.hpp>
@@ -128,6 +129,7 @@
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/item_id.hpp>
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -165,6 +167,14 @@ inline constexpr std::uint32_t kProgramWireMagic = 0x5750'4C50u;
 
 /// A track's mixer control that no automation lane supersedes.
 inline constexpr std::uint32_t kProgramWireNoLane = 0xFFFF'FFFFu;
+
+/// Decoder work and fixed scratch remain bounded even for untrusted payloads.
+inline constexpr std::size_t kProgramWireMaximumTracks = 1'024;
+
+/// Total automation lanes one publication consumer can prepare across all
+/// tracks. This is deliberately separate from the carried per-track ceiling;
+/// callers size ProgramWireLaneState storage against this publication bound.
+inline constexpr std::size_t kProgramWireMaximumAutomationLanes = 1'024;
 
 enum class ProgramWireSection : std::uint32_t {
     Program = 1,
@@ -234,6 +244,9 @@ enum class ProgramWireErrorCode : std::uint8_t {
     SectionsNotTiled,
     /// A section's payload offset is not eight-byte aligned.
     SectionMisaligned,
+    /// Known sections must appear in ascending canonical id order. Optional
+    /// unknown sections may be interleaved only in ascending id order.
+    NonCanonicalSectionOrder,
     DuplicateSection,
     /// An unknown section id that the writer did not mark optional.
     UnknownSection,
@@ -247,6 +260,15 @@ enum class ProgramWireErrorCode : std::uint8_t {
     BadSectionCardinality,
     /// A track's `(first, count)` range leaves the section it indexes.
     RangeOutOfBounds,
+    /// Track and lane ranges must exclusively partition their sections in
+    /// canonical track/lane order; aliases and unowned records are rejected.
+    NonCanonicalRangeOwnership,
+    /// A device lane names no placement in its owning track.
+    AutomationTargetUnresolved,
+    /// Two lanes in one track drive the same device parameter or mixer control.
+    DuplicateAutomationTarget,
+    /// A publication from the active producer regresses one lane generation.
+    StaleLaneGeneration,
     /// A record holds a value outside its enumeration.
     InvalidEnum,
     /// A note modifier is not a combination the document model admits — a zero
@@ -683,5 +705,182 @@ decode_program_wire(std::span<const std::byte> bytes) noexcept;
 bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& program,
                           std::span<const timebase::TempoPoint> tempo_points,
                           std::uint64_t producer_epoch) noexcept;
+
+/// A unique lease over immutable publication bytes. Moving the pin transfers
+/// the right to keep the bytes alive; rejected candidates and retired active
+/// publications are returned to the caller in ProgramWireAdoptionResult.
+class ProgramWireBytePin {
+  public:
+    ProgramWireBytePin() = default;
+    explicit ProgramWireBytePin(std::span<const std::byte> bytes,
+                                std::uintptr_t owner_token = 0) noexcept
+        : bytes_(bytes), owner_token_(owner_token) {}
+    ProgramWireBytePin(const ProgramWireBytePin&) = delete;
+    ProgramWireBytePin& operator=(const ProgramWireBytePin&) = delete;
+    ProgramWireBytePin(ProgramWireBytePin&& other) noexcept
+        : bytes_(other.bytes_), owner_token_(other.owner_token_) {
+        other.bytes_ = {};
+        other.owner_token_ = 0;
+    }
+    ProgramWireBytePin& operator=(ProgramWireBytePin&& other) noexcept {
+        if (this != &other) {
+            bytes_ = other.bytes_;
+            owner_token_ = other.owner_token_;
+            other.bytes_ = {};
+            other.owner_token_ = 0;
+        }
+        return *this;
+    }
+
+    std::span<const std::byte> bytes() const noexcept {
+        return bytes_;
+    }
+    std::uintptr_t owner_token() const noexcept {
+        return owner_token_;
+    }
+    explicit operator bool() const noexcept {
+        return !bytes_.empty();
+    }
+
+  private:
+    std::span<const std::byte> bytes_;
+    std::uintptr_t owner_token_ = 0;
+};
+
+enum class ProgramWireConsumerCode : std::uint8_t {
+    Ok,
+    DecodeRejected,
+    TempoMapMismatch,
+    StateCapacityExceeded,
+    StalePublication,
+    MissingProgram,
+    InvalidTransport,
+    OutputCapacityExceeded,
+    CursorRejected,
+};
+
+enum class ProgramWireAdoption : std::uint8_t {
+    Adopted,
+    Unchanged,
+    Rejected,
+};
+
+struct ProgramWireAdoptionResult {
+    ProgramWireConsumerCode code = ProgramWireConsumerCode::Ok;
+    ProgramWireAdoption adoption = ProgramWireAdoption::Unchanged;
+    ProgramWireError wire_error{};
+    /// Candidate on reject/unchanged, or the previous active pin on adoption.
+    ProgramWireBytePin returned_pin;
+};
+
+struct ProgramWireLaneIdentity {
+    std::uint64_t producer_epoch = 0;
+    ProgramGeneration program_generation = 0;
+    timeline::ItemId track_id;
+    ProgramGeneration track_generation = 0;
+    timeline::ItemId lane_id;
+    ProgramGeneration lane_generation = 0;
+    AutomationProgramInstanceToken instance_token;
+    constexpr bool operator==(const ProgramWireLaneIdentity&) const = default;
+};
+
+/// One caller-provided fixed-capacity state slot. A consumer never allocates
+/// lane state and never retains a PlaybackProgram.
+struct ProgramWireLaneState {
+    ProgramWireLaneIdentity identity;
+    AutomationCursor cursor;
+    AutomationCursor next_cursor;
+    std::array<AutomationBlockEvent, AutomationPlaybackLimits::kMaximumEventsPerDevicePerBlock>
+        scratch{};
+    AutomationCursorResult cursor_result;
+    std::uint32_t event_count = 0;
+    std::uint32_t merge_position = 0;
+    std::uint32_t selected_count = 0;
+    std::uint32_t write_position = 0;
+    std::size_t output_index = 0;
+    bool group_coalesced = false;
+};
+
+struct ProgramWireAutomationLaneOutput {
+    timeline::ItemId track_id;
+    timeline::ItemId lane_id;
+    std::span<AutomationBlockEvent> events;
+    AutomationCursorResult result;
+};
+
+struct ProgramWireAutomationRenderResult {
+    ProgramWireConsumerCode code = ProgramWireConsumerCode::Ok;
+    std::uint32_t rendered_lanes = 0;
+};
+
+/// Allocation-free automation consumer over one uniquely pinned wire payload.
+/// Adoption validates the exact prepared tempo-map identity and commits only
+/// after every lane and ceiling has passed. Rendering delegates to the same
+/// AutomationCursor algorithm used by direct PlaybackProgram consumers.
+class ProgramWireAutomationConsumer {
+  public:
+    static constexpr std::size_t kDefaultWireByteCapacity = 16u * 1'024u * 1'024u;
+
+    explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state,
+                                           std::size_t track_capacity,
+                                           std::size_t wire_byte_capacity) noexcept
+        : lane_state_(lane_state), track_capacity_(track_capacity),
+          wire_byte_capacity_(wire_byte_capacity) {}
+    explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state,
+                                           std::size_t track_capacity) noexcept
+        : ProgramWireAutomationConsumer(lane_state, track_capacity,
+                                        kDefaultWireByteCapacity) {}
+    explicit ProgramWireAutomationConsumer(std::span<ProgramWireLaneState> lane_state) noexcept
+        : ProgramWireAutomationConsumer(lane_state, lane_state.size()) {}
+    ProgramWireAutomationConsumer(const ProgramWireAutomationConsumer&) = delete;
+    ProgramWireAutomationConsumer& operator=(const ProgramWireAutomationConsumer&) = delete;
+
+    ProgramWireAdoptionResult adopt(ProgramWireBytePin candidate,
+                                    const timebase::CompiledTempoMap& tempo_map,
+                                    std::span<const timebase::TempoPoint> tempo_points) noexcept;
+    ProgramWireAutomationRenderResult
+    render(const TransportSnapshot& transport,
+           std::span<ProgramWireAutomationLaneOutput> output) noexcept;
+
+    std::span<const std::byte> active_bytes() const noexcept {
+        return active_pin_.bytes();
+    }
+    std::size_t lane_count() const noexcept {
+        return lane_count_;
+    }
+
+  private:
+    struct ActiveLane {
+        ProgramWireLaneState* state = nullptr;
+        const ProgramWireTrackRecord* track = nullptr;
+        const ProgramWireAutomationLaneRecord* lane = nullptr;
+        std::size_t group_index = 0;
+    };
+    struct CapacityGroup {
+        std::size_t first_lane = 0;
+        std::size_t lane_count = 0;
+    };
+    struct LaneHighWater {
+        timeline::ItemId lane_id;
+        ProgramGeneration generation = 0;
+    };
+
+    std::span<ProgramWireLaneState> lane_state_;
+    ProgramWireBytePin active_pin_;
+    ProgramWireView active_view_;
+    const timebase::CompiledTempoMap* tempo_map_ = nullptr;
+    std::size_t lane_count_ = 0;
+    std::size_t track_capacity_ = 0;
+    std::size_t wire_byte_capacity_ = 0;
+    std::array<ActiveLane, kProgramWireMaximumAutomationLanes> active_lanes_{};
+    std::array<CapacityGroup, kProgramWireMaximumAutomationLanes> groups_{};
+    std::array<std::size_t, kProgramWireMaximumAutomationLanes>
+        group_lane_indices_{};
+    std::size_t group_count_ = 0;
+    std::array<LaneHighWater, kProgramWireMaximumAutomationLanes * 2u> lane_high_water_{};
+    std::uint64_t lane_high_water_epoch_ = 0;
+    std::array<ProgramWireLaneState*, kProgramWireMaximumAutomationLanes>
+        merge_heap_{};
+};
 
 } // namespace pulp::playback

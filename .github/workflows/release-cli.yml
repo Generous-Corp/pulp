@@ -555,6 +555,9 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected["control_standalone_host_floor"] = authoritative[
+              "control_standalone_host_floor"
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
@@ -590,6 +593,15 @@ jobs:
           PY
           )"
           echo "PULP_CONTROL_BROKER_FLOOR=$control_broker_floor" >> "$GITHUB_ENV"
+          control_standalone_host_floor="$(python3 - "$release_contract_matrix" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              print(json.load(handle)["control_standalone_host_floor"])
+          PY
+          )"
+          echo "PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor" >> "$GITHUB_ENV"
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -819,6 +831,9 @@ jobs:
           if [ "${RUNNER_OS}" = "macOS" ] \
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             release_bins+=(build/inspect/pulp-control-broker)
+          fi
+          if [ "${RUNNER_OS}" = "macOS" ] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
             release_bins+=(build/inspect/pulp-control-standalone-host)
           fi
           if [ -f build/tools/import-design/pulp-import-design ]; then
@@ -870,6 +885,7 @@ jobs:
         run: |
           import_design_args=()
           control_broker_args=()
+          control_standalone_host_args=()
           if [ -x build/tools/import-design/pulp-import-design ] \
               && [ -d build/tools/import-design/browser_capture-v1 ]; then
             import_design_args=(
@@ -881,6 +897,11 @@ jobs:
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             control_broker_args=(
               --control-broker-binary build/inspect/pulp-control-broker
+            )
+          fi
+          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
+            control_standalone_host_args=(
               --control-standalone-host-binary build/inspect/pulp-control-standalone-host
               --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
             )
@@ -890,6 +911,7 @@ jobs:
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
             "${control_broker_args[@]}" \
+            "${control_standalone_host_args[@]}" \
             "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
@@ -1286,10 +1308,15 @@ jobs:
             case "$1" in
               pulp-mcp) echo "--version" ;;
               pulp-import-design) echo "--help" ;;
+              pulp-control-standalone-host) echo "" ;;
               *)        echo "help" ;;
             esac
           }
           CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)
+          if [ -x /tmp/pulp-smoke/pulp-control-standalone-host ]; then
+            CLI_ARTIFACTS+=(pulp-control-standalone-host)
+            test -s /tmp/pulp-smoke/pulp-control-standalone-host.inspector-capabilities.json
+          fi
           if [ -x /tmp/pulp-smoke/pulp-import-design ]; then
             CLI_ARTIFACTS+=(pulp-import-design)
             test -s /tmp/pulp-smoke/browser_capture/capture.mjs
@@ -1334,7 +1361,33 @@ jobs:
             fi
             echo "--- $ART $CMD ---"
             set +e
-            "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            if [ "$ART" = "pulp-control-standalone-host" ]; then
+              # The installed host has no diagnostic CLI. Give it an explicit
+              # non-socket stdin so the clean-runner contract is deterministic:
+              # initialization must reach the missing-bootstrap exit 65.
+              python3 - "$BIN" /tmp/$ART-smoke.out /tmp/$ART-smoke.err <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+
+          binary, stdout_path, stderr_path = sys.argv[1:]
+          with pathlib.Path(stdout_path).open("wb") as stdout, \
+               pathlib.Path(stderr_path).open("wb") as stderr:
+              process = subprocess.Popen(
+                  [binary], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr
+              )
+              try:
+                  return_code = process.wait(timeout=5)
+              except subprocess.TimeoutExpired:
+                  process.kill()
+                  process.wait()
+                  raise SystemExit("standalone host did not reject missing bootstrap")
+          if return_code != 65:
+              raise SystemExit(return_code)
+          PY
+            else
+              "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            fi
             rc=$?
             set -e
             echo "exit=$rc"
@@ -1754,6 +1807,9 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected["control_standalone_host_floor"] = authoritative[
+              "control_standalone_host_floor"
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
@@ -1763,10 +1819,24 @@ jobs:
               encoding="utf-8",
           )
           PY
+          control_registry_args=()
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' \
+              "${TAG#v}" \
+              "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["control_standalone_host_floor"])' "$publication_matrix")"; then
+            control_registry_digest="$(git show \
+              "${matrix_ref}:inspect/include/pulp/inspect/control_registry_digest.inc" \
+              | python3 -c 'import re,sys; text=sys.stdin.read(); match=re.search(r"[0-9a-f]{64}", text); print(match.group(0) if match else "")')"
+            if [[ ! "$control_registry_digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::selected release source has no valid frozen control registry digest"
+              exit 1
+            fi
+            control_registry_args+=(--control-registry-digest "$control_registry_digest")
+          fi
           python3 tools/scripts/release_artifact_contents.py release-assets \
             --all-platforms --version "${TAG#v}" \
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
-            --matrix "$publication_matrix"
+            --matrix "$publication_matrix" \
+            "${control_registry_args[@]}"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do

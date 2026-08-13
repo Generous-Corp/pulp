@@ -94,6 +94,7 @@ set(_expected_engine_closure
     Pulp::audio
     Pulp::events
     Pulp::midi
+    Pulp::music
     Pulp::platform
     Pulp::playback
     Pulp::runtime
@@ -139,6 +140,7 @@ set(_expected_project_package_closure
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
+    Pulp::music
     Pulp::p256m
     Pulp::platform
     Pulp::project-package
@@ -166,6 +168,7 @@ set(_expected_smf_codec_closure
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
+    Pulp::music
     Pulp::p256m
     Pulp::platform
     Pulp::runtime
@@ -213,6 +216,7 @@ set(_expected_daw_export_closure
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
+    Pulp::music
     Pulp::p256m
     Pulp::platform
     Pulp::runtime
@@ -247,6 +251,7 @@ set(_expected_importer_closure
     Pulp::mbedtls
     Pulp::mbedx509
     Pulp::midi
+    Pulp::music
     Pulp::p256m
     Pulp::platform
     Pulp::runtime
