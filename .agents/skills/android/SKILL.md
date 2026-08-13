@@ -513,6 +513,40 @@ and sends `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebu
 to Codecov. This is a JVM-only lane for `android/app/src/main/kotlin/**`
 and does not replace emulator/device coverage.
 
+### BLE-MIDI central validation
+
+The reference app supports BLE-MIDI central mode on Android 12 (API 31) and
+newer. Starting a scan without Nearby devices permission opens the system
+permission prompt; retry the scan after granting it. `PulpBluetoothMidi` scans
+for the standard BLE-MIDI service and opens
+devices through Android's `MidiManager`; the native bridge registers ordinary
+MIDI byte-stream input and output ports in Pulp's `BleMidiRegistry`. Android,
+not Pulp, owns BLE packet framing. The app requires `BLUETOOTH_SCAN` and
+`BLUETOOTH_CONNECT` Nearby devices permissions. On older Android releases, the
+reference app reports this feature unavailable instead of requesting legacy
+location permission.
+
+With one booted arm64-v8a API 34 AVD or device attached, run the focused
+acceptance test:
+
+```bash
+cd android
+./gradlew --no-daemon --max-workers=2 :app:connectedBleMidiValidationAndroidTest
+```
+
+The `bleMidiValidation` build type packages a small validation library from the
+same production Android bridge and registry sources. Its injected fake
+peripheral must prove discovery, connection, native input/output registration,
+raw MIDI in both directions, and teardown of both ports on disconnect. This
+target deliberately avoids the unrelated full app target closure and does not
+replace a normal APK build.
+
+Before calling physical-device support proven, grant Nearby devices access,
+connect a BLE-MIDI peripheral, confirm the `ble-midi-in:<address>` and
+`ble-midi-out:<address>` registry entries, exercise MIDI in both directions,
+then power off or move the peripheral out of range and confirm both entries are
+removed. Android BLE-MIDI peripheral/advertising mode is out of scope.
+
 ## Critical Gotchas
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.

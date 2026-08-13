@@ -172,6 +172,48 @@ KVM, x86\_64 APK + x86\_64 emulator, or self-hosted nested-HVF), the
 smoke is a local-run validation deliverable. See issue #487 for the
 path-forward discussion.
 
+## BLE-MIDI central
+
+The reference Android app provides BLE-MIDI central support on Android 12
+(API 31) and newer. Starting a scan without Nearby devices permission opens the
+system permission prompt; retry the scan after granting it. The app scans for
+the standard BLE-MIDI service, opens matching devices through Android's
+`MidiManager`, and registers their input and output ports with Pulp's MIDI
+device registry. Android owns BLE-MIDI packet framing; the native registry
+receives and sends ordinary MIDI byte streams.
+
+The focused emulator/device contract uses the same production JNI bridge and
+registry implementation without requiring the full application target:
+
+```bash
+cd android
+./gradlew --no-daemon --max-workers=2 :app:connectedBleMidiValidationAndroidTest
+```
+
+Run it with one fully booted arm64-v8a API 34 AVD or Android device attached.
+The injected fake peripheral proves discovery, connection, input delivery,
+output delivery, and removal of both registry ports after disconnect. The AVD
+does not need audio support. On API 30 and older, the reference app reports the
+BLE-MIDI central as unavailable rather than requesting the legacy location
+permission.
+
+Physical-device acceptance requires an Android 12+ device and a BLE-MIDI
+peripheral:
+
+1. Grant the app's Nearby devices permissions.
+2. Start scanning and confirm the peripheral's address and advertised name.
+3. Connect and confirm `ble-midi-in:<address>` and
+   `ble-midi-out:<address>` appear in the MIDI registry.
+4. Send MIDI from the peripheral and confirm the registered input callback
+   receives the same MIDI bytes.
+5. Send MIDI through the registered output and confirm the peripheral receives
+   it.
+6. Disconnect, power off, or move the peripheral out of range; confirm both
+   registry ports disappear and stale output sends are rejected.
+
+Pulp's Android integration is a BLE-MIDI central. Advertising the Android
+device as a BLE-MIDI peripheral is outside this contract.
+
 ## Deploy to a device
 
 ```bash
