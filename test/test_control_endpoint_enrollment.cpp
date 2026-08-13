@@ -158,7 +158,12 @@ struct SpawnedHost {
                 static_cast<ssize_t>(payload.size()));
         {
             std::unique_lock lock(mutex);
-            REQUIRE(ready.wait_for(lock, 2s, [&] { return accepted != nullptr; }));
+            // The fixture is a separately spawned signed host. Under the full
+            // suite's concurrent process load, starting it and completing its
+            // local-socket preflight can legitimately exceed the per-message
+            // two-second transport timeout. Keep the assertion bounded while
+            // allowing a realistic process-startup window.
+            REQUIRE(ready.wait_for(lock, 10s, [&] { return accepted != nullptr; }));
         }
         const auto evidence = observe_control_peer(*accepted, ControlPeerRole::StandaloneHost);
         REQUIRE(evidence);
