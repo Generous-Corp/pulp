@@ -39,7 +39,18 @@ concurrency:
 
 jobs:
   version-skill-check:
-    runs-on: ubuntu-latest
+    # This job is unprivileged and the organization runner group restricts the
+    # local selector to this workflow's protected default-branch ref. Fork PRs
+    # stay hosted; an unset local selector also falls back to hosted Linux.
+    runs-on: >-
+      ${{
+        (github.event_name == 'merge_group' ||
+         github.event_name == 'workflow_dispatch' ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository)) &&
+        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
+        'ubuntu-latest'
+      }}
     name: Enforce version & skill sync
 
     env:
