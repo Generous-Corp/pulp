@@ -373,6 +373,68 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="audio.realtime-output-probe",
+        domain="audio",
+        summary=(
+            "Prepared realtime-safe output telemetry with optional bounded capture and "
+            "non-realtime snapshot consumption."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "control-or-audio-when-quiescent",
+            "release": "destruction-off-audio",
+        },
+        state_model=(
+            "prepare allocates scalar-summary publication and optional fixed-capacity "
+            "capture storage; each audio callback updates only bounded counters and "
+            "publishes the latest snapshot."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "prepared channel and block limits, output audio blocks, and optional "
+            "capture, silence, and clip-threshold settings"
+        ),
+        output_domain=(
+            "latest output snapshot, release-safe statistics, and optional bounded "
+            "captured output frames"
+        ),
+        units=["linear amplitude", "frames", "hertz", "event count"],
+        latency="zero telemetry latency beyond the next published callback snapshot",
+        tail="optional configured capture history until drained, overwritten, or reset",
+        scheduling=(
+            "analyze_output on one audio producer; latest, statistics, and capture reads "
+            "on one non-realtime consumer"
+        ),
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/audio/audio_probe.hpp",
+                qualified_name="pulp::audio::AudioProbe",
+                target="Pulp::audio",
+                header_fingerprint=(
+                    "sha256:6451a59ef45103ad6816f6278e9a987c3fcc9b1e0d4530ef55975eed530240ad"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::AudioProbe",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "2, 64, 48000.0",
+        }],
+    ),
+    capability(
         key="midi.mpe-voice-tracker",
         contract_version={"major": 2, "minor": 0},
         domain="midi",

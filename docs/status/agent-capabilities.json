@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 25,
+  "manifest_revision": 26,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -17,7 +17,7 @@
     "domains": {
       "audio": {
         "state": "partial",
-        "capabilities": 8
+        "capabilities": 9
       },
       "midi": {
         "state": "partial",
@@ -287,6 +287,67 @@
         }
       },
       "contract_digest": "sha256:9cb9cc93d1fba2405fe1d30e1b8c8ea76f8f3e9b6775697bf2b34540a1e366c9"
+    },
+    {
+      "key": "audio.realtime-output-probe",
+      "domain": "audio",
+      "summary": "Prepared realtime-safe output telemetry with optional bounded capture and non-realtime snapshot consumption.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "control-or-audio-when-quiescent",
+        "release": "destruction-off-audio"
+      },
+      "state_model": "prepare allocates scalar-summary publication and optional fixed-capacity capture storage; each audio callback updates only bounded counters and publishes the latest snapshot.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "prepared channel and block limits, output audio blocks, and optional capture, silence, and clip-threshold settings",
+      "output_domain": "latest output snapshot, release-safe statistics, and optional bounded captured output frames",
+      "units": [
+        "linear amplitude",
+        "frames",
+        "hertz",
+        "event count"
+      ],
+      "latency": "zero telemetry latency beyond the next published callback snapshot",
+      "tail": "optional configured capture history until drained, overwritten, or reset",
+      "scheduling": "analyze_output on one audio producer; latest, statistics, and capture reads on one non-realtime consumer",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/audio/audio_probe.hpp",
+          "qualified_name": "pulp::audio::AudioProbe",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:4c4d6bda2dcf2396d264a475876046d37f21a690ce4696bf2d5a3384d3eaf9db"
     },
     {
       "key": "audio.unison-voice-stack",
@@ -5358,9 +5419,9 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 74,
+    "total": 75,
     "by_domain": {
-      "audio": 8,
+      "audio": 9,
       "midi": 9,
       "music": 7,
       "offline": 0,
