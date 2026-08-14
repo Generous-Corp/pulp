@@ -265,10 +265,38 @@ jobs then use GitHub-hosted Linux. Once a local job has been assigned,
 `runs-on` has no live fallback; expire the affected lease and redispatch rather
 than waiting on an unhealthy pool.
 
-Registration uses a fine-grained PAT at
-`/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
-`Administration: read/write`, minting a single-use registration token per job.
-That host credential never enters a guest. Jobs that call `gh` authenticate with
+Dispatch-only repository registration uses a fine-grained PAT at
+`/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only repository
+`Administration: read/write`. The two automatic organization-group profiles
+instead require `/root/.config/pulp/secrets/gh-org-runner-pat` (also mode 600,
+root) with organization `Self-hosted runners: read/write`. Read access is
+load-bearing: before registration the controller verifies the live group name,
+repository scope, selected protected workflows, and the complete paginated
+runner inventory. Write access mints the one-job registration token and removes
+only a proven offline registration from the same VM slot. Without read access,
+safe registration and stale-runner reclamation must fail closed rather than
+guessing from labels; without write access, the disposable pool cannot register
+or clean up. A GitHub App wrapper such as `ghapp` may supply API authentication,
+but the registration-token request still uses the root-only controller
+credential.
+
+Provision the controller explicitly before enabling either service:
+
+```sh
+install -d -m 700 /root/.config/pulp/secrets
+install -d -m 755 /usr/local/lib/pulp
+install -m 600 /secure/input/gh-org-runner-pat \
+  /root/.config/pulp/secrets/gh-org-runner-pat
+install -m 755 tools/ci/verify_linux_runner_group.py \
+  /usr/local/lib/pulp/verify_linux_runner_group.py
+install -m 644 tools/ci/pulp-ephemeral-pool@.service \
+  /etc/systemd/system/pulp-ephemeral-pool@.service
+install -m 644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
+  /etc/systemd/system/pulp-pr-safe-ephemeral-pool@.service
+systemctl daemon-reload
+```
+
+The host credential never enters a guest. Jobs that call `gh` authenticate with
 the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
 persistent `gh` login in any supported config or credential store.
 ## Routing the Linux advisory lanes to macpro
