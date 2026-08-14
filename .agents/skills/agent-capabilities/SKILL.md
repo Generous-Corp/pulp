@@ -80,6 +80,27 @@ A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
 
+For a fixed-capacity record algebra such as `music.pattern-development`, bind
+the stable record, error, configuration, and result types as well as every
+advertised free function. Each free function needs its own operational probe;
+a type-only row or one aggregate probe cannot establish that installed
+consumers can execute density, fill, set-algebra, ID, and morph operations.
+Keep scheduling, clocks, note ownership, and publication outside this manifest.
+
+For `audio.boundary-diagnostics`, keep the capability explicitly control-thread
+only: it consumes already-published processor or standalone-boundary snapshots
+and optional device counters to produce owned diagnostic text. It must never
+sample a live audio buffer, allocate or format on the audio thread, or become a
+runtime-control operation. Its operational probe constructs
+`BoundaryReportInputs` and invokes `pulp::audio::build_boundary_report` through
+the declared `Pulp::audio` target.
+
+For `audio.realtime-output-probe`, advertise the prepared `AudioProbe` type as
+mixed real-time/control capability only when the probe keeps the audio producer
+bounded and allocation-free. The operational probe must call `prepare` through
+`Pulp::audio`; snapshots, statistics, and optional capture reads stay on the
+non-realtime consumer side.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 33,
+  "inventory_version": 36,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,22 +37,22 @@
     }
   ],
   "counts": {
-    "public_headers": 423,
-    "reviewed_headers": 124,
-    "legacy_unreviewed_headers": 299,
+    "public_headers": 424,
+    "reviewed_headers": 127,
+    "legacy_unreviewed_headers": 297,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 80,
+      "capability_entrypoint": 83,
       "capability_support": 38,
       "infrastructure": 5,
-      "legacy_unreviewed": 299,
+      "legacy_unreviewed": 297,
       "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
         "public_headers": 112,
-        "reviewed_headers": 6,
-        "legacy_unreviewed_headers": 106,
+        "reviewed_headers": 8,
+        "legacy_unreviewed_headers": 104,
         "unsupported_headers": 0
       },
       "midi": {
@@ -62,8 +62,8 @@
         "unsupported_headers": 0
       },
       "music": {
-        "public_headers": 10,
-        "reviewed_headers": 10,
+        "public_headers": 11,
+        "reviewed_headers": 11,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       },
@@ -111,9 +111,11 @@
       "source": "core/audio/include/pulp/audio/audio_boundary_report.hpp",
       "fingerprint": "sha256:45c6b48d154b28a714f220c5f27e5b7f201ea8b3540b6f1fdf2eca44de99307e",
       "include": "pulp/audio/audio_boundary_report.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.boundary-diagnostics"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
@@ -156,9 +158,11 @@
       "source": "core/audio/include/pulp/audio/audio_probe.hpp",
       "fingerprint": "sha256:6451a59ef45103ad6816f6278e9a987c3fcc9b1e0d4530ef55975eed530240ad",
       "include": "pulp/audio/audio_probe.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.realtime-output-probe"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
@@ -1585,7 +1589,7 @@
     {
       "domain": "music",
       "source": "core/music/include/pulp/music/music.hpp",
-      "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
+      "fingerprint": "sha256:4c95583dd9992f762edb2a00191ecd785ba3fac600d5528adf24167ad13a389e",
       "include": "pulp/music/music.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1599,6 +1603,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "music.pattern-generation"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "music",
+      "source": "core/music/include/pulp/music/pattern_development.hpp",
+      "fingerprint": "sha256:20a0f17a8a92cce53b4e607bd8edee713b7d20bacc0fcff0c14e3fcf5400139b",
+      "include": "pulp/music/pattern_development.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "music.pattern-development"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

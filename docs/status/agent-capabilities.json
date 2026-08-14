@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 23,
+  "manifest_revision": 26,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -17,7 +17,7 @@
     "domains": {
       "audio": {
         "state": "partial",
-        "capabilities": 7
+        "capabilities": 9
       },
       "midi": {
         "state": "partial",
@@ -25,7 +25,7 @@
       },
       "music": {
         "state": "partial",
-        "capabilities": 6
+        "capabilities": 7
       },
       "offline": {
         "state": "not_inventoried",
@@ -46,6 +46,67 @@
     }
   },
   "capabilities": [
+    {
+      "key": "audio.boundary-diagnostics",
+      "domain": "audio",
+      "summary": "Deterministic non-realtime diagnosis of processor, standalone-boundary, and device telemetry for reported missing or incorrect audio.",
+      "rt_class": "control",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "none",
+        "process": "control",
+        "reset": "none",
+        "release": "result destruction off audio"
+      },
+      "state_model": "Pure report construction from already-published probe snapshots, optional device counters, and an explicit silence threshold.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "optional processor and standalone-boundary probe snapshots, optional device statistics, and a linear-amplitude silence threshold",
+      "output_domain": "boundary diagnosis and owned stage-by-stage diagnostic text",
+      "units": [
+        "linear amplitude",
+        "frames",
+        "hertz",
+        "event count"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "caller-clocked after probe publication; never on the audio thread",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_function",
+          "include": "pulp/audio/audio_boundary_report.hpp",
+          "qualified_name": "pulp::audio::build_boundary_report",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f054d5baa9c063cfeb7a7b7750abdef55825578138614b569e73da7f4ad8c8ce"
+    },
     {
       "key": "audio.instrument-voice-allocator",
       "contract_version": {
@@ -226,6 +287,67 @@
         }
       },
       "contract_digest": "sha256:9cb9cc93d1fba2405fe1d30e1b8c8ea76f8f3e9b6775697bf2b34540a1e366c9"
+    },
+    {
+      "key": "audio.realtime-output-probe",
+      "domain": "audio",
+      "summary": "Prepared realtime-safe output telemetry with optional bounded capture and non-realtime snapshot consumption.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "control-or-audio-when-quiescent",
+        "release": "destruction-off-audio"
+      },
+      "state_model": "prepare allocates scalar-summary publication and optional fixed-capacity capture storage; each audio callback updates only bounded counters and publishes the latest snapshot.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "prepared channel and block limits, output audio blocks, and optional capture, silence, and clip-threshold settings",
+      "output_domain": "latest output snapshot, release-safe statistics, and optional bounded captured output frames",
+      "units": [
+        "linear amplitude",
+        "frames",
+        "hertz",
+        "event count"
+      ],
+      "latency": "zero telemetry latency beyond the next published callback snapshot",
+      "tail": "optional configured capture history until drained, overwritten, or reset",
+      "scheduling": "analyze_output on one audio producer; latest, statistics, and capture reads on one non-realtime consumer",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/audio/audio_probe.hpp",
+          "qualified_name": "pulp::audio::AudioProbe",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:4c4d6bda2dcf2396d264a475876046d37f21a690ce4696bf2d5a3384d3eaf9db"
     },
     {
       "key": "audio.unison-voice-stack",
@@ -1324,6 +1446,264 @@
         }
       },
       "contract_digest": "sha256:00f53240aa84b6c211c26b55b794b4cd425e0acfd0b2d8ac49cbf7739400a375"
+    },
+    {
+      "key": "music.pattern-development",
+      "domain": "music",
+      "summary": "Fixed-capacity exact-tick event-set development with stable IDs, nested density, regional fills, and deterministic integer A/B morphing.",
+      "rt_class": "any",
+      "lifecycle": {
+        "construction": "any",
+        "prepare": "none",
+        "process": "any",
+        "reset": "value-initialization",
+        "release": "none"
+      },
+      "state_model": "Pure operations over trivially copyable fixed-capacity event records; no hidden state, allocation, scheduler, clock, or note ownership.",
+      "seed_model": "explicit seed plus exact tick, lane, cycle, stream, and stable event ID coordinates",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "up to 64 canonical exact-tick event records per input, onset-set operation, target count, half-open tick region, seed coordinates, and integer morph amount",
+      "output_domain": "up to 64 canonical exact-tick event records or an explicit error",
+      "units": [
+        "ticks",
+        "event count",
+        "integer accent",
+        "integer morph amount",
+        "seed"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure caller-clocked whole-pattern development",
+      "bindings": [
+        {
+          "role": "event-id",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventId",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-role",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventRole",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-record",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEvent",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "error",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentError",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "pattern",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DevelopmentPattern<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "result",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentResult<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-operation",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternSetOperation",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DensitySelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::RegionalFillSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternMorphSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "make-event-id",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::make_pattern_event_id",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-algebra",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::pattern_set<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::select_pattern_density<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::apply_regional_fill<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::morph_patterns<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:d355402017022afb0573ac04dbbb920f126a24405312274c38d4a2847d648aa7"
     },
     {
       "key": "music.pattern-generation",
@@ -5039,11 +5419,11 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 72,
+    "total": 75,
     "by_domain": {
-      "audio": 7,
+      "audio": 9,
       "midi": 9,
-      "music": 6,
+      "music": 7,
       "offline": 0,
       "sequence": 1,
       "signal": 40,
