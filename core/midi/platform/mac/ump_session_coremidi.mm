@@ -59,8 +59,12 @@ public:
         UmpReceiveCallback callback;
     };
 
-    explicit CoreMidiUmpEndpoint(UmpEndpointInfo info)
-        : info_(std::move(info)), callback_state_(std::make_shared<CallbackState>()) {}
+    CoreMidiUmpEndpoint(UmpEndpointInfo info,
+                        std::shared_ptr<std::atomic<uint64_t>> generation)
+        : info_(std::move(info)),
+          callback_state_(std::make_shared<CallbackState>()),
+          generation_(std::move(generation)),
+          generation_at_open_(generation_->load(std::memory_order_acquire)) {}
 
     ~CoreMidiUmpEndpoint() override {
         {
@@ -109,12 +113,19 @@ private:
     MIDIEndpointRef dest_ = 0;
     mutable std::atomic<bool> open_{false};
     std::shared_ptr<CallbackState> callback_state_;
+    std::shared_ptr<std::atomic<uint64_t>> generation_;
+    uint64_t generation_at_open_ = 0;
 };
 
 struct OsState {
     MIDIClientRef client = 0;
     std::mutex mu;
     std::unordered_map<std::string, std::unique_ptr<CoreMidiUmpEndpoint>> endpoints;
+    // Borrowed UmpEndpoint pointers remain valid until session teardown, even
+    // after topology invalidates an open and a same-ID wrapper replaces it.
+    std::vector<std::unique_ptr<CoreMidiUmpEndpoint>> retired;
+    std::shared_ptr<std::atomic<uint64_t>> topology_generation =
+        std::make_shared<std::atomic<uint64_t>>(0);
 };
 
 std::string object_unique_id(MIDIObjectRef object) {
@@ -218,13 +229,7 @@ std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
 
 bool CoreMidiUmpEndpoint::is_open() const noexcept {
     if (!open_.load(std::memory_order_acquire)) return false;
-    const auto groups = endpoint_groups();
-    const auto it = groups.find(info_.id);
-    if (it == groups.end() ||
-        (src_ && it->second.source != src_) ||
-        (dest_ && it->second.destination != dest_) ||
-        (info_.direction.can_receive && !it->second.source) ||
-        (info_.direction.can_send && !it->second.destination)) {
+    if (generation_->load(std::memory_order_acquire) != generation_at_open_) {
         open_.store(false, std::memory_order_release);
         return false;
     }
@@ -267,8 +272,14 @@ bool os_init(const UmpSessionConfig& cfg, void** out_state) {
     CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault,
                                                  cfg.name.c_str(),
                                                  kCFStringEncodingUTF8);
-    OSStatus st = MIDIClientCreate(name ? name : CFSTR("Pulp UMP Session"),
-                                   nullptr, nullptr, &state->client);
+    auto generation = state->topology_generation;
+    OSStatus st = MIDIClientCreateWithBlock(
+        name ? name : CFSTR("Pulp UMP Session"), &state->client,
+        ^(const MIDINotification* notification) {
+            if (notification && notification->messageID == kMIDIMsgSetupChanged) {
+                generation->fetch_add(1, std::memory_order_acq_rel);
+            }
+        });
     if (name) CFRelease(name);
     if (st != noErr) {
         runtime::log_warn("CoreMIDI: UmpSession client create failed ({})",
@@ -286,6 +297,7 @@ void os_shutdown(void* opaque) {
     {
         std::lock_guard<std::mutex> lk(state->mu);
         state->endpoints.clear();
+        state->retired.clear();
     }
     if (state->client) {
         MIDIClientDispose(state->client);
@@ -321,6 +333,7 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
             if (status) *status = UmpOpenStatus::Ok;
             return existing->second.get();
         }
+        state->retired.push_back(std::move(existing->second));
         state->endpoints.erase(existing);
     }
 
@@ -341,7 +354,8 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
 
     // Construct the endpoint up front so the block can retain its fenced
     // callback state. The session owns the endpoint itself.
-    auto ep = std::make_unique<CoreMidiUmpEndpoint>(std::move(info));
+    auto ep = std::make_unique<CoreMidiUmpEndpoint>(
+        std::move(info), state->topology_generation);
     auto callback_state = ep->callback_state();
 
     MIDIPortRef in_port = 0;
@@ -376,6 +390,7 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
                 }
             });
         if (st != noErr || !in_port) {
+            if (in_port) MIDIPortDispose(in_port);
             if (status) *status = UmpOpenStatus::OsError;
             return nullptr;
         }
@@ -392,6 +407,7 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
                                  &out_port);
         if (st != noErr || !out_port) {
             if (in_port) MIDIPortDispose(in_port);
+            if (out_port) MIDIPortDispose(out_port);
             if (status) *status = UmpOpenStatus::OsError;
             return nullptr;
         }

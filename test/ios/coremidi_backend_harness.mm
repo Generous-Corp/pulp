@@ -10,6 +10,7 @@
 #include "../../core/midi/src/ump_session_backend.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -82,11 +83,24 @@ MIDIEventList one_word_event_list(uint32_t word) {
     return list;
 }
 
-MIDIEventList two_word_event_list(uint32_t first, uint32_t second) {
+double host_ticks_to_seconds(MIDITimeStamp ticks) {
+    static const mach_timebase_info_data_t timebase = [] {
+        mach_timebase_info_data_t value{};
+        mach_timebase_info(&value);
+        return value;
+    }();
+    return static_cast<double>(static_cast<long double>(ticks) *
+                               static_cast<long double>(timebase.numer) /
+                               static_cast<long double>(timebase.denom) /
+                               1.0e9L);
+}
+
+MIDIEventList two_word_event_list(uint32_t first, uint32_t second,
+                                  MIDITimeStamp timestamp) {
     MIDIEventList list;
     MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_2_0);
     const uint32_t words[] = {first, second};
-    MIDIEventListAdd(&list, sizeof(list), packet, mach_absolute_time(), 2,
+    MIDIEventListAdd(&list, sizeof(list), packet, timestamp, 2,
                      words);
     return list;
 }
@@ -100,24 +114,37 @@ bool topology_contract_passes() {
         {"202", "multi", "Multi Destination B", false},
         {"301", "pair", "Paired Device", true},
         {"302", "pair", "Paired Device", false},
+        {"401", "source-only", "Source Only", true},
+        {"501", "destination-only", "Destination Only", false},
+        {"601", "", "Unparented Source", true},
+        {"701", "unbalanced", "Unbalanced Source A", true},
+        {"702", "unbalanced", "Unbalanced Source B", true},
+        {"703", "unbalanced", "Unbalanced Destination", false},
     };
     const auto grouped = pulp::midi::group_coremidi_ump_topology(census);
-    if (grouped.size() != 5) return false;
+    if (grouped.size() != 11) return false;
     bool paired = false;
-    std::size_t multi_count = 0;
+    std::size_t independent_count = 0;
     for (const auto& endpoint : grouped) {
         if (endpoint.id == "entity:pair") {
             paired = endpoint.direction.can_receive &&
                      endpoint.direction.can_send;
         } else if (endpoint.id == "101" || endpoint.id == "102") {
-            multi_count += endpoint.direction.can_receive &&
-                           !endpoint.direction.can_send;
+            independent_count += endpoint.direction.can_receive &&
+                                 !endpoint.direction.can_send;
         } else if (endpoint.id == "201" || endpoint.id == "202") {
-            multi_count += !endpoint.direction.can_receive &&
-                           endpoint.direction.can_send;
+            independent_count += !endpoint.direction.can_receive &&
+                                 endpoint.direction.can_send;
+        } else if (endpoint.id == "401" || endpoint.id == "601" ||
+                   endpoint.id == "701" || endpoint.id == "702") {
+            independent_count += endpoint.direction.can_receive &&
+                                 !endpoint.direction.can_send;
+        } else if (endpoint.id == "501" || endpoint.id == "703") {
+            independent_count += !endpoint.direction.can_receive &&
+                                 endpoint.direction.can_send;
         }
     }
-    return paired && multi_count == 4;
+    return paired && independent_count == 10;
 }
 
 int fail(NSString* reason, MIDIEndpointRef source, MIDIEndpointRef destination) {
@@ -201,6 +228,24 @@ int run_harness() {
                     destination);
     }
 
+    auto legacy_word = std::make_shared<std::atomic<uint32_t>>(0);
+    auto legacy_timestamp = std::make_shared<std::atomic<double>>(0.0);
+    auto legacy_input = system->create_input();
+    if (!legacy_input ||
+        !legacy_input->open(source_id,
+            [legacy_word, legacy_timestamp](const pulp::midi::MidiEvent& event) {
+                const auto* bytes = event.data();
+                legacy_word->store((static_cast<uint32_t>(bytes[0]) << 16) |
+                                       (static_cast<uint32_t>(bytes[1]) << 8) |
+                                       static_cast<uint32_t>(bytes[2]),
+                                   std::memory_order_release);
+                legacy_timestamp->store(event.timestamp,
+                                        std::memory_order_release);
+            })) {
+        return fail(@"production legacy CoreMIDI input open failed", source,
+                    destination);
+    }
+
     {
         pulp::midi::UmpSession session({"Pulp iOS UMP Harness", true});
         if (!session.os_backend_active()) {
@@ -254,13 +299,56 @@ int run_harness() {
         // MT 0x2 message detects any private/incorrect size table that skips
         // the second packet instead of using the canonical UMP walker.
         constexpr uint32_t kSourceWord = 0x20903c7f;
-        auto source_events = two_word_event_list(0x60000000, kSourceWord);
+        const MIDITimeStamp source_timestamp = mach_absolute_time();
+        auto source_events = two_word_event_list(0x60000000, kSourceWord,
+                                                 source_timestamp);
         status = MIDIReceivedEventList(source, &source_events);
         if (status != noErr || !wait_until([&] {
                 return received_word->load(std::memory_order_acquire) ==
-                       kSourceWord;
+                           kSourceWord &&
+                       legacy_word->load(std::memory_order_acquire) ==
+                           0x903c7f &&
+                       std::abs(legacy_timestamp->load(
+                                    std::memory_order_acquire) -
+                                host_ticks_to_seconds(source_timestamp)) < 1.0;
             })) {
-            return fail(@"production UMP input event-list delivery failed",
+            return fail(@"canonical UMP walk missed legacy/native delivery",
+                        source, destination);
+        }
+
+        auto callback_generation =
+            std::make_shared<std::atomic<uint32_t>>(0);
+        constexpr uint32_t kGenerationOneWord = 0x20903d01;
+        constexpr uint32_t kGenerationTwoWord = 0x20903e02;
+        input->set_receive_callback(
+            [callback_generation](const pulp::midi::UmpPacket& p, double) {
+                if (p.word_count > 0 && p.words[0] == kGenerationOneWord) {
+                    callback_generation->store(1, std::memory_order_release);
+                }
+            });
+        auto generation_one = one_word_event_list(kGenerationOneWord);
+        if (MIDIReceivedEventList(source, &generation_one) != noErr ||
+            !wait_until([&] {
+                return callback_generation->load(std::memory_order_acquire) ==
+                       1;
+            })) {
+            return fail(@"first UMP callback generation was not observed",
+                        source, destination);
+        }
+        input->set_receive_callback(
+            [callback_generation](const pulp::midi::UmpPacket& p, double) {
+                if (p.word_count > 0 && p.words[0] == kGenerationTwoWord &&
+                    callback_generation->load(std::memory_order_acquire) == 1) {
+                    callback_generation->store(2, std::memory_order_release);
+                }
+            });
+        auto generation_two = one_word_event_list(kGenerationTwoWord);
+        if (MIDIReceivedEventList(source, &generation_two) != noErr ||
+            !wait_until([&] {
+                return callback_generation->load(std::memory_order_acquire) ==
+                       2;
+            })) {
+            return fail(@"replacement UMP callback generation/order failed",
                         source, destination);
         }
 
@@ -326,6 +414,44 @@ int run_harness() {
         if (session.open_endpoint(ump_source_id, &open_status) != nullptr ||
             open_status != pulp::midi::UmpOpenStatus::NotFound) {
             return fail(@"cached UMP open reported success after hot-unplug",
+                        0, 0);
+        }
+        if (input->is_open()) {
+            return fail(@"retired borrowed UMP handle did not stay closed",
+                        0, 0);
+        }
+
+        MIDIEndpointRef replacement_source = 0;
+        status = MIDISourceCreateWithProtocol(
+            client, (__bridge CFStringRef)source_ns, kMIDIProtocol_2_0,
+            &replacement_source);
+        if (status != noErr || !replacement_source ||
+            MIDIObjectSetIntegerProperty(replacement_source,
+                                         kMIDIPropertyUniqueID,
+                                         source_uid) != noErr) {
+            return fail(@"same-ID UMP source recreation failed",
+                        replacement_source, 0);
+        }
+        source = replacement_source;
+        if (!wait_until([&] {
+                const auto endpoints = session.enumerate_endpoints();
+                return find_ump_endpoint(endpoints, source_name,
+                                         true, false) != nullptr;
+            })) {
+            return fail(@"same-ID UMP source was not rediscovered", source, 0);
+        }
+        open_status = pulp::midi::UmpOpenStatus::NotFound;
+        auto* reopened = session.open_endpoint(ump_source_id, &open_status);
+        if (!reopened || reopened == input ||
+            open_status != pulp::midi::UmpOpenStatus::Ok ||
+            !reopened->is_open() || input->is_open()) {
+            return fail(@"same-ID reopen violated borrowed-handle lifetime",
+                        source, 0);
+        }
+        MIDIEndpointDispose(source);
+        source = 0;
+        if (!wait_until([&] { return !reopened->is_open(); })) {
+            return fail(@"same-ID replacement survived second hot-unplug",
                         0, 0);
         }
     }

@@ -336,8 +336,7 @@ write a parallel session abstraction — implement the
 `OsBackendVTable` declared in `core/midi/src/ump_session_backend.hpp`
 and expose an explicit platform registration anchor. On Apple,
 `ump_session.cpp` calls that anchor so static-library linkers retain the
-CoreMIDI translation unit; a translation-unit-local static initialiser is not
-enough. If no platform backend is available, the session reports
+CoreMIDI translation unit. If no platform backend is available, the session reports
 `os_backend_active() == false` and operates virtual-only (this is
 exactly what the test target exercises everywhere).
 

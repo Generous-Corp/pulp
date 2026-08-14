@@ -5,6 +5,7 @@
 #include <pulp/runtime/log.hpp>
 #include <CoreMIDI/CoreMIDI.h>
 #include <TargetConditionals.h>
+#include <mach/mach_time.h>
 
 #include "coremidi_shared_client.h"
 
@@ -19,6 +20,19 @@ bool event_list_api_available() {
     if (@available(macOS 11.0, *)) return true;
 #endif
     return false;
+}
+
+double host_ticks_to_seconds(MIDITimeStamp ticks) {
+    static const mach_timebase_info_data_t timebase = [] {
+        mach_timebase_info_data_t value{};
+        mach_timebase_info(&value);
+        return value;
+    }();
+    if (timebase.denom == 0) return 0.0;
+    return static_cast<double>(static_cast<long double>(ticks) *
+                               static_cast<long double>(timebase.numer) /
+                               static_cast<long double>(timebase.denom) /
+                               1.0e9L);
 }
 
 }  // namespace
@@ -69,40 +83,30 @@ public:
         OSStatus status = MIDIInputPortCreateWithProtocol(client, CFSTR("PulpInput"),
             kMIDIProtocol_1_0, &port_,
             ^(const MIDIEventList* evtlist, void* __nullable) {
-                // Walk UMP messages by their declared word size (MIDI 2.0
-                // spec M2-104-UM) so multi-word packets advance the cursor
-                // as a single message. Otherwise a type-0x04 packet's
-                // second word can be mis-parsed as a new message header.
-                static constexpr uint8_t kWordsByType[16] = {
-                    1, 1, 1, 2, 2, 4, 4, 1,
-                    2, 2, 2, 3, 3, 4, 4, 4
-                };
                 const MIDIEventPacket* packet = &evtlist->packet[0];
                 for (UInt32 i = 0; i < evtlist->numPackets; ++i) {
-                    UInt32 wordIdx = 0;
-                    while (wordIdx < packet->wordCount) {
-                        uint32_t word = packet->words[wordIdx];
-                        uint8_t type = (word >> 28) & 0x0F;
-                        const uint8_t words_in_message = kWordsByType[type];
-                        if (wordIdx + words_in_message > packet->wordCount) break;
-
+                    walk_ump_packet(
+                        packet->words, packet->wordCount,
+                        [&](uint8_t type, const uint32_t* words,
+                            uint32_t word_count) {
+                        const uint32_t word = words[0];
                         if (type == 0x02) {
                             MidiEvent evt;
                             evt.message = choc::midi::ShortMessage(
                                 static_cast<uint8_t>((word >> 16) & 0xFF),
                                 static_cast<uint8_t>((word >> 8) & 0xFF),
                                 static_cast<uint8_t>(word & 0xFF));
-                            evt.timestamp = static_cast<double>(packet->timeStamp) / 1e9;
+                            evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
                             if (this->callback_) this->callback_(evt);
                         } else if (type == 0x04) {
                             UmpPacket p;
                             p.word_count = 2;
                             p.words[0] = word;
-                            p.words[1] = packet->words[wordIdx + 1];
+                            p.words[1] = words[1];
                             MidiEvent evt{};
                             if (ump_to_midi1_event(p, evt)) {
                                 evt.timestamp =
-                                    static_cast<double>(packet->timeStamp) / 1e9;
+                                        host_ticks_to_seconds(packet->timeStamp);
                                 if (this->callback_) this->callback_(evt);
                             }
                         } else if (type == 0x03) {
@@ -113,14 +117,13 @@ public:
                             // sysex spanning callback invocations accumulates
                             // correctly and shares the tested state machine
                             // with the AUv3 adapter.
-                            const uint32_t word1 =
-                                packet->words[wordIdx + 1];
+                            const uint32_t word1 = words[1];
                             struct EmitCtx {
                                 MidiSysexCallback* cb;
                                 double ts_sec;
                             };
                             EmitCtx ctx{&this->sysex_callback_,
-                                        static_cast<double>(packet->timeStamp) / 1e9};
+                                        host_ticks_to_seconds(packet->timeStamp)};
                             auto emit = [](const std::vector<uint8_t>& p,
                                            void* user) {
                                 auto* c = static_cast<EmitCtx*>(user);
@@ -132,8 +135,8 @@ public:
                         // Other UMP types (utility, system, SysEx8,
                         // stream, flex) are ignored by this MIDI 1.0 input
                         // adapter for now.
-                        wordIdx += words_in_message;
-                    }
+                        (void)word_count;
+                    });
                     packet = MIDIEventPacketNext(packet);
                 }
             });

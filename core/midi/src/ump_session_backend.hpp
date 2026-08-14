@@ -29,14 +29,14 @@ struct OsBackendVTable {
 
 namespace pulp::midi {
 
-/// Install or replace the OS backend hook table. Called from the
-/// platform .mm/.cpp file's static initialiser.
+/// Install or replace the OS backend hook table. Called by the platform's
+/// explicit registration anchor.
 void register_ump_os_backend(const ump_os::OsBackendVTable& v);
 
 #if defined(__APPLE__)
 /// Install the CoreMIDI vtable. This explicit anchor is called by
 /// UmpSession so static-library consumers retain the platform translation
-/// unit; a translation-unit-local static registrar is not sufficient.
+/// unit even when no other CoreMIDI UMP symbol is referenced.
 void register_coremidi_ump_backend();
 
 struct CoreMidiUmpTopologyEndpoint {

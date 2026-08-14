@@ -61,8 +61,8 @@ their actual behavior and Apple's current policy.
 - **Hotplug**: CoreMIDI fires a notification callback on the MIDI
   client; Pulp re-enumerates ports on each notification. Not currently
   exposed as a public event — clients poll `enumerate_inputs()`.
-- **Threading**: `MIDIClientCreate` runs the callback on a CoreMIDI thread.
-  Pulp invokes the user callback there, but callback replacement is a
+- **Threading**: the `MIDIInputPortCreateWithProtocol` receive block runs on a
+  CoreMIDI-managed thread. Pulp invokes the user callback there, but callback replacement is a
   control-thread operation: the backend synchronizes and snapshots the
   `std::function`, so this handoff is thread-safe but is not advertised as
   lock-free or allocation-free. Do not treat it as an audio render callback;
