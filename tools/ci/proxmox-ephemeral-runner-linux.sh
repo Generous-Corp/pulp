@@ -163,10 +163,11 @@ cleanup() {
         return
     fi
     # A completed --ephemeral job deregisters itself. During an operator stop,
-    # an idle runner can still be online when the local ssh session exits. Fence
-    # automatic dispatch by removing the exact protected label, then re-read the
-    # runner and delete its registration before powering off the clone. If work
-    # won the race before the label removal, the second busy read preserves it.
+    # an idle runner can still be online, or only transiently offline, when the
+    # local ssh session exits. Fence dispatch by removing the exact protected
+    # label, then re-read the runner and delete its registration before powering
+    # off the clone. If work won the race before the label removal, the second
+    # busy read preserves it.
     if [ -n "${PAT:-}" ]; then
         runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
             "${REGISTRATION_API}/actions/runners?per_page=100" \
@@ -182,8 +183,7 @@ cleanup() {
                 || { log "ERROR: exact runner is busy; leaving clone $VMID for safe recovery"; return; }
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
-            if [ "$runner_status" = online ]; then
-                GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
+            GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
                     "${REGISTRATION_API}/actions/runners/${rid}/labels" \
                     -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
                     || { log "ERROR: cannot fence automatic dispatch; leaving clone $VMID for safe recovery"; return; }
@@ -244,7 +244,6 @@ cleanup() {
                 done
                 [ -z "$runner_lookup" ] || [ "$runner_status" = offline ] \
                     || { log "ERROR: fenced runner stayed online before cleanup deadline; leaving clone $VMID for safe recovery"; return; }
-            fi
             [ -n "$runner_lookup" ] || rid=""
             if [ -z "$rid" ]; then
                 log "runner deregistered itself during fenced shutdown"
