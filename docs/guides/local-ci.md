@@ -173,10 +173,12 @@ weaken FileVault or give it any of the required ARM64 gate labels.
 The controller prefers `ghapp` when it is installed and otherwise uses its own
 authenticated rootless `gh`. The job account receives neither client nor token.
 
-## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
+## The Linux x64 lanes run on macpro (Proxmox)
 
 `build.yml` runs may route the `Linux (x64)` leg via
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` for operator dispatches or
+`PULP_AUTO_LINUX_RUNS_ON_JSON` for protected automatic events to ephemeral
+Proxmox VMs on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
 host. Protected main workflow refs, including the protected merge-group path,
 prefer this pool when the variable is set. Pull-request workflow revisions that
@@ -230,9 +232,9 @@ created, registers at organization scope, and receives the additional
 default group, unavailable API, or invalid group name keeps the slot offline.
 Never put the automatic selector on the older labels alone: doing so can match
 a repository-level runner that lacks the protected-workflow boundary.
-The automatic selector is exactly
+The `PULP_AUTO_LINUX_RUNS_ON_JSON` selector is exactly
 `["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`.
-Until the repository variable has that exact value, protected PR and merge-group
+Until that repository variable has the exact value, protected PR and merge-group
 runs fail closed to hosted Linux.
 
 The automatic pool also requires Proxmox VM-firewall isolation. The protected
@@ -316,12 +318,12 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all eligible events then use
-GitHub-hosted Linux. The resolver also uses the hosted label whenever the local
-selector is absent, so a staged rollout can leave the variable unset until the
-Mac Pro pool is healthy. Once a local job has been assigned, `runs-on` has no
-live fallback; if macpro is down or its pool is stopped, unset the variable and
-redispatch rather than waiting.
+**Rollback:** unset `PULP_AUTO_LINUX_RUNS_ON_JSON` to return protected PR and
+merge-group events to GitHub-hosted Linux. Unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`
+to return operator dispatches and fallback consumers to hosted Linux. Once a
+local job has been assigned, `runs-on` has no live fallback; if macpro is down
+or its pool is stopped, unset the applicable variable and redispatch rather
+than waiting.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
@@ -1896,7 +1898,8 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Automatic Linux x86_64 Proxmox VM pool; the exact selector includes the external runner-group boundary label | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch and release-fallback Linux x86_64 Proxmox VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_AUTO_LINUX_RUNS_ON_JSON` | Protected automatic Linux x86_64 pool; the exact selector includes the external runner-group boundary label | `gh variable set PULP_AUTO_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the

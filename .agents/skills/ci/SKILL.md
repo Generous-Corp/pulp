@@ -657,8 +657,11 @@ before registration.
 The automatic selector must require all six labels exactly:
 `["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`.
 GitHub matches requested labels as a subset, so the older five-label selector
-does not exclude repository-scoped runners. `build.yml` must fail closed to
-hosted Linux when the configured selector omits the automatic-only label.
+does not exclude repository-scoped runners. Keep that dispatch/release selector
+in `PULP_LOCAL_LINUX_RUNS_ON_JSON`; use the six-label
+`PULP_AUTO_LINUX_RUNS_ON_JSON` only in workflows admitted by the restricted
+group. `build.yml` must fail closed to hosted Linux when the automatic selector
+omits the automatic-only label.
 Treat checked-out pull-request source as untrusted even when a protected
 workflow orchestrates it. Runner inventory and cleanup must paginate the full
 organization result set, reclaim only exact slot-scoped offline idle
@@ -2785,16 +2788,17 @@ shipyard run --resume-from build
 ### Linux self-hosted routing (opt-in) and Windows x64 authority
 
 `build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
-configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
-the current event. A `workflow_dispatch` input has highest precedence; without
-one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
-merge-group, and push events deliberately ignore the configured private selector
-and use the provider fallback (GitHub-hosted by default) until the external
-runner-group boundary above exists.
+configured selector and the selector authorized for the current event. A
+`workflow_dispatch` input has highest precedence, then the five-label
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` operator selector. Protected pull-request and
+merge-group events use the separate six-label `PULP_AUTO_LINUX_RUNS_ON_JSON`
+only through the restricted runner group; an unset or invalid automatic
+selector falls back to GitHub-hosted Linux.
 
-The Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`
-and is served by the Proxmox ephemeral pool described in
+The automatic Mac Pro selector is
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`;
+the dispatch/release selector omits the final automatic-only label. Both are
+served by the Proxmox ephemeral pool described in
 `docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
 `explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
 the displayed Linux provider from the selector that actually resolved. A

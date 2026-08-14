@@ -98,12 +98,16 @@ jobs:
         env:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
           # Keep the configured selector distinct from the selector authorized
-          # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
-          # Mac Pro Proxmox pool:
+          # for this event. PULP_AUTO_LINUX_RUNS_ON_JSON configures the
+          # restricted automatic x64 Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro","pulp-auto-linux-x64"].
-          # A workflow_dispatch input overrides it. Same-repository pull_request
-          # and protected merge_group events may use it after the trusted
+          # PULP_LOCAL_LINUX_RUNS_ON_JSON remains the five-label operator and
+          # release selector; keeping it separate prevents workflows outside
+          # the restricted group from targeting an ineligible runner. A
+          # workflow_dispatch input overrides that operator selector.
+          # Same-repository pull_request and protected merge_group events may
+          # use the automatic selector after the trusted
           # workflow-ref boundary is applied below; fork pull requests remain
           # hosted. If no local selector is configured, the resolver falls back
           # to GitHub-hosted Linux.
@@ -117,6 +121,7 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
@@ -509,19 +514,27 @@ jobs:
           # PR, pull_request_target, or a workflow with secrets to generic
           # self-hosted Linux. An unset local selector naturally falls back to
           # ubuntu-latest through resolve_runs_on.py.
-          local_linux_selector = (
+          operator_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
+          automatic_linux_selector = (
+              os.environ.get("AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON") or ""
+          ).strip()
+          configured_linux_selector = (
+              operator_linux_selector
+              if EVENT_NAME == "workflow_dispatch"
+              else automatic_linux_selector
+          )
           automatic_linux_labels = {
               "self-hosted", "linux", "x64", "pulp-build-linux-x64",
               "pulp-host-macpro", "pulp-auto-linux-x64",
           }
           try:
-              parsed_local_linux_selector = json.loads(local_linux_selector)
+              parsed_local_linux_selector = json.loads(automatic_linux_selector)
           except (json.JSONDecodeError, TypeError):
               parsed_local_linux_selector = None
           automatic_local_linux_selector = (
-              local_linux_selector
+              automatic_linux_selector
               if isinstance(parsed_local_linux_selector, list)
               and len(parsed_local_linux_selector) == len(automatic_linux_labels)
               and all(isinstance(label, str) for label in parsed_local_linux_selector)
@@ -552,7 +565,7 @@ jobs:
                   f"{EVENT_NAME}; selector={automatic_local_linux_selector}",
                   file=sys.stderr,
               )
-          elif trusted_local_linux_event and local_linux_selector:
+          elif trusted_local_linux_event and automatic_linux_selector:
               print(
                   "resolve-provider: configured Linux selector lacks the exact "
                   "automatic-pool label contract; using hosted Linux",
@@ -573,7 +586,7 @@ jobs:
                   "--dispatch-selector-json",
                   os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR", ""),
                   "--configured-selector-json",
-                  os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  configured_linux_selector,
                   "--authorized-selector-json",
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
