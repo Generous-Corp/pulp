@@ -214,6 +214,37 @@ the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The scrip
 `GOLDEN=` names the template in use — read it rather than trusting a number written
 down here, since re-baking a warmer golden mints a new id.
 
+### Reuse the Proxmox lane for another repository
+
+The supervisor is repository-agnostic. A new or existing repository must supply
+its own runner credential, exact labels, and (for organization-scoped automatic
+routing) its own restricted runner group. Do not copy Pulp's labels, group, or
+credential into another repository. For a repository-level, no-secret proof:
+
+```bash
+TARTCI_RUNNER_REPO=OWNER/REPO \
+TARTCI_RUNNER_LABELS=self-hosted,Linux,X64,repo-build-linux-x64,repo-host-macpro,repo-pr-safe-linux-x64 \
+TARTCI_RUNNER_PAT_FILE=/root/.config/tartci/secrets/repo-runner-pat \
+TARTCI_RUNNER_NAME_PREFIX=repo-pr-safe-ephemeral \
+TARTCI_PROXMOX_VM_NAME_PREFIX=repo-ci-ephemeral \
+TARTCI_PROXMOX_GOLDEN=9005 \
+/usr/local/sbin/proxmox-ephemeral-runner-linux.sh --once
+```
+
+The credential is host-only and must be root-owned mode `0600`; it is used only
+to mint and revoke the one-job runner registration. It must never be copied
+into the golden or guest. The guest must have no reusable GitHub credentials,
+no writable source/cache mount from the host, and must be destroyed after the
+job. A repository's workflow variable remains hosted until this proof records
+the exact runner assignment, labels, isolation, teardown, and fallback.
+
+For a new project, commit the corresponding `.shipyard/ci-profiles/` target and
+workflow selector first, then use the same profile from every fresh worktree.
+The live runner group, registration credential, health lease, and repository
+variable are administrative state; Shipyard must inspect/reconcile them rather
+than asking each worktree to register a new runner. After the proof, enable the
+repository's local selector with the hosted value retained as rollback.
+
 **Golden + disposable clone.** The golden carries the dependency set, prebuilt
 Skia (`external/skia-build/.../libskia.a`), a warm ccache, the uncredentialed
 `gh` executable used by preamble/alias jobs, and the shared FetchContent
