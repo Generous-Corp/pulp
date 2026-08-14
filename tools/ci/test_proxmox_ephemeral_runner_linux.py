@@ -138,7 +138,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('exact runner is busy; leaving clone $VMID', cleanup)
         self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
         self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
-        self.assertIn('cannot fence automatic dispatch', cleanup)
+        self.assertIn('cannot fence runner dispatch', cleanup)
         self.assertIn('exact runner became busy before dispatch fence', cleanup)
         self.assertIn('a routing label survived dispatch fence', cleanup)
         self.assertIn('pulp-auto-linux-x64', cleanup)
@@ -147,7 +147,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('pulp-host-macpro', cleanup)
         self.assertIn('shutdown label is missing after dispatch fence', cleanup)
         self.assertIn("for fence_probe in 1 2; do", cleanup)
-        self.assertIn('fenced automatic dispatch for idle runner id $rid', cleanup)
+        self.assertIn('fenced dispatch for idle runner id $rid', cleanup)
+        self.assertNotIn('online dispatch runner cannot be fenced', cleanup)
         self.assertIn("shutdown_deadline=$((SECONDS + 120))", cleanup)
         self.assertIn('timeout 20s qm stop "$VMID"', cleanup)
         self.assertIn('fenced runner is busy during shutdown', cleanup)
@@ -175,6 +176,10 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("gh-org-runner-pat", self.script)
         self.assertIn(
             'automatic Linux runner organization PAT is missing', self.script
+        )
+        self.assertNotIn('Authorization: Bearer $PAT', self.script)
+        self.assertIn(
+            'GH_TOKEN="$PAT" "$GH_CLI" api --method POST', self.script
         )
 
     def test_automatic_pool_requires_private_network_isolation(self) -> None:

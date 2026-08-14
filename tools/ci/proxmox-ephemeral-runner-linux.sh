@@ -51,8 +51,6 @@ KEEP=0
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
-[ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
-PAT="$(cat "$PAT_FILE")"
 command -v "$GH_CLI" >/dev/null 2>&1 \
     || die "$GH_CLI is not on PATH"
 
@@ -113,6 +111,9 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
 elif [[ ",$LABELS," == *,pulp-auto-linux-x64,* \
     || ",$LABELS," == *,pulp-pr-safe-linux-x64,* ]]; then
     die "automatic Linux capability labels require a verified organization runner group"
+else
+    [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
+    PAT="$(cat "$PAT_FILE")"
 fi
 
 # ── admission ────────────────────────────────────────────────────────────────
@@ -187,7 +188,8 @@ cleanup() {
     fi
     # A completed --ephemeral job deregisters itself. During an operator stop,
     # an idle runner can still be online when the local ssh session exits. Fence
-    # automatic dispatch by removing the exact protected label, then re-read the
+    # dispatch by replacing every custom routing label with a shutdown fence,
+    # then re-read the
     # runner and delete its registration before powering off the clone. If work
     # won the race before the label removal, the second busy read preserves it.
     if [ -n "${PAT:-}" ]; then
@@ -206,12 +208,10 @@ cleanup() {
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
             if [ "$runner_status" = online ]; then
-                [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ] \
-                    || { log "ERROR: online dispatch runner cannot be fenced; leaving clone $VMID for safe recovery"; return; }
                 GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
                     "${REGISTRATION_API}/actions/runners/${rid}/labels" \
                     -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
-                    || { log "ERROR: cannot fence automatic dispatch; leaving clone $VMID for safe recovery"; return; }
+                    || { log "ERROR: cannot fence runner dispatch; leaving clone $VMID for safe recovery"; return; }
                 for fence_probe in 1 2; do
                     fenced_runner="$(GH_TOKEN="$PAT" "$GH_CLI" api \
                         "${REGISTRATION_API}/actions/runners/${rid}" \
@@ -239,7 +239,7 @@ cleanup() {
                     esac
                     [ "$fence_probe" = 2 ] || sleep 2
                 done
-                log "fenced automatic dispatch for idle runner id $rid"
+                log "fenced dispatch for idle runner id $rid"
                 shutdown_deadline=$((SECONDS + 120))
                 log "stopping fenced clone $VMID before deregistration"
                 timeout 20s qm stop "$VMID" >/dev/null 2>&1 || true
@@ -476,10 +476,10 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 # what makes --ephemeral viable: the runner takes exactly one job, deregisters
 # itself, and the clone is destroyed under it.
 log "minting registration token"
-RT="$(curl -s -X POST \
-    -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
+# Keep the runner-management credential out of process arguments. gh reads it
+# from the child environment and prints only the single-use registration token.
+RT="$(GH_TOKEN="$PAT" "$GH_CLI" api --method POST \
+    "${REGISTRATION_API}/actions/runners/registration-token" --jq .token)"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"

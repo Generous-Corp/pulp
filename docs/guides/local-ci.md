@@ -229,6 +229,18 @@ chmod 0600 /etc/pulp/linux-{trusted,pr-safe}-runner-group.env
 systemctl daemon-reload
 ```
 
+The automatic organization-scoped units use a separate root-only credential at
+`/root/.config/pulp/secrets/gh-org-runner-pat` (or the path named by
+`PULP_LINUX_ORG_PAT_FILE`). Provision it through the host's secret-management
+path, never in a unit file or command argument, and require mode `0600` owned by
+root. Its fine-grained organization permission must grant **Self-hosted
+runners: read and write** so the controller can verify the exact runner group,
+mint one-use organization registration tokens, inspect registrations, fence an
+idle runner, and deregister it. The legacy repository-scoped unit continues to
+use the separate `gh-runner-pat`; neither credential enters a guest. Keep both
+automatic units disabled when the organization credential is absent, expired,
+or awaiting rotation.
+
 Every clone verifies its named policy before creation, registers at
 organization scope, and receives exactly one of `pulp-auto-linux-x64` or
 `pulp-pr-safe-linux-x64`. A wrong name, workflow, repository, label set, prefix,
@@ -350,7 +362,9 @@ than waiting on an unhealthy pool.
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
 `Administration: read/write`, minting a single-use registration token per job.
-That host credential never enters a guest. Jobs that call `gh` authenticate with
+That credential is only for the legacy repository-scoped pool; the automatic
+organization pools use the distinct credential described above. Neither host
+credential enters a guest. Jobs that call `gh` authenticate with
 the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
 persistent `gh` login in any supported config or credential store.
 ## Routing the Linux advisory lanes to macpro
