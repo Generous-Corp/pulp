@@ -59,6 +59,12 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker_canary_workflow.py'
       - 'tools/scripts/shipyard_recovery_dispatch.py'
       - 'tools/scripts/test_shipyard_recovery_dispatch.py'
+      - '.github/workflows/shipyard-recovery-worker.yml'
+      - 'tools/shipyard/recovery.config.toml'
+      - 'tools/shipyard/recovery-result.schema.json'
+      - 'tools/scripts/shipyard_recovery_worker.py'
+      - 'tools/scripts/test_shipyard_recovery_worker.py'
+      - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -106,6 +112,12 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker_canary_workflow.py'
       - 'tools/scripts/shipyard_recovery_dispatch.py'
       - 'tools/scripts/test_shipyard_recovery_dispatch.py'
+      - '.github/workflows/shipyard-recovery-worker.yml'
+      - 'tools/shipyard/recovery.config.toml'
+      - 'tools/shipyard/recovery-result.schema.json'
+      - 'tools/scripts/shipyard_recovery_worker.py'
+      - 'tools/scripts/test_shipyard_recovery_worker.py'
+      - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -201,6 +213,8 @@ jobs:
           python3 tools/scripts/test_shipyard_steward_outbox.py
           python3 tools/scripts/test_shipyard_recovery_worker_canary_workflow.py
           python3 tools/scripts/test_shipyard_recovery_dispatch.py
+          python3 tools/scripts/test_shipyard_recovery_worker.py
+          python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:
