@@ -44,7 +44,7 @@ GROUP_VERIFIER="${TARTCI_RUNNER_GROUP_VERIFIER:-${PULP_LINUX_GROUP_VERIFIER:-/us
 GH_CLI="${TARTCI_GH_CLI:-${PULP_LINUX_GH_CLI:-gh}}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
-AUTOMATIC_NETWORK_ISOLATION=0
+AUTOMATIC_NETWORK_ISOLATION="${TARTCI_RUNNER_NETWORK_ISOLATION:-0}"
 KEEP=0
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
@@ -134,6 +134,18 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
 else
     [ -r "$PAT_FILE" ] || die "no repository runner PAT at $PAT_FILE"
     PAT="$(cat "$PAT_FILE")"
+fi
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
+        || die "$FIREWALL_STATUS_BIN is not on PATH"
+    for tool in iptables-save ip6tables-save ipset ebtables-save; do
+        command -v "$tool" >/dev/null 2>&1 \
+            || die "$tool is required for automatic runner firewall proof"
+    done
+    require_firewall_running \
+        "isolated Linux runners require the Proxmox firewall"
+    [ -d "$FIREWALL_DIR" ] \
+        || die "isolated Linux runner firewall directory is missing"
 fi
 # ── admission ────────────────────────────────────────────────────────────────
 # Ask before taking. A refused job queues on GitHub, which is recoverable; an

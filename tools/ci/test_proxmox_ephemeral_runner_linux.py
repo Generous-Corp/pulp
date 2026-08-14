@@ -30,6 +30,7 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
     def test_isolation_guards_remain_in_the_generic_path(self) -> None:
         for marker in (
             "--ephemeral",
+            "TARTCI_RUNNER_NETWORK_ISOLATION",
             "AUTOMATIC_NETWORK_ISOLATION=1",
             "deregistered runner id",
             "destroying clone",
