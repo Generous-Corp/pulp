@@ -235,6 +235,7 @@ jobs:
             -f pr_number="$pr" \
             -f expected_head="$head" \
             -f assignment_epoch="$epoch" \
+            -f dispatch_attempt="$attempt" \
             -f blocker_fingerprint="$fingerprint" \
             -f publish_status=true; then
             exit 0

@@ -9,6 +9,7 @@ single serialized controller workflow.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any
 CONTEXT = "shipyard/recovery-dispatch"
 RECOVERY_ACTIONS = {"needs_update", "required_failed"}
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+DEFAULT_STALE_PENDING_SECONDS = 60 * 60
 
 
 def _load(path: Path) -> Any:
@@ -49,27 +51,54 @@ def _status_map(raw: Any) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-def _latest_dispatch_status(statuses: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _description_int(status: dict[str, Any], key: str) -> int:
+    match = re.search(rf"\b{re.escape(key)}=(\d+)\b", str(status.get("description") or ""))
+    return int(match.group(1)) if match else 0
+
+
+def _latest_dispatch_status(
+    statuses: list[dict[str, Any]], fingerprint: str
+) -> dict[str, Any] | None:
     matching = [
         status
         for status in statuses
         if str(status.get("context") or "").lower() == CONTEXT
+        and f"fingerprint={fingerprint}" in str(status.get("description") or "")
     ]
     if not matching:
         return None
     return max(
         matching,
         key=lambda status: (
+            _description_int(status, "epoch"),
             str(status.get("created_at") or ""),
             int(status.get("id") or 0),
         ),
     )
 
 
-def _retry_attempt(status: dict[str, Any] | None) -> int | None:
+def _parse_time(value: object) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _retry_attempt(
+    status: dict[str, Any] | None,
+    *,
+    now: datetime,
+    stale_pending_seconds: int,
+) -> int | None:
     if status is None:
         return 1
-    if str(status.get("state") or "").lower() != "error":
+    state = str(status.get("state") or "").lower()
+    if state == "pending":
+        created = _parse_time(status.get("created_at"))
+        if created is None or (now - created).total_seconds() < stale_pending_seconds:
+            return None
+    elif state != "error":
         return None
     match = re.search(r"\battempt=(\d+)\b", str(status.get("description") or ""))
     previous = int(match.group(1)) if match else 1
@@ -91,10 +120,18 @@ def _fingerprint(repo: str, number: int, head: str, decision: dict[str, Any]) ->
 
 
 def build_plan(
-    report: dict[str, Any], statuses_raw: Any, epoch: int
+    report: dict[str, Any],
+    statuses_raw: Any,
+    epoch: int,
+    *,
+    now: datetime | None = None,
+    stale_pending_seconds: int = DEFAULT_STALE_PENDING_SECONDS,
 ) -> dict[str, Any]:
     if epoch <= 0:
         raise ValueError("assignment epoch must be positive")
+    if stale_pending_seconds <= 0:
+        raise ValueError("stale pending threshold must be positive")
+    now = now or datetime.now(timezone.utc)
     statuses = _status_map(statuses_raw)
     candidates: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -117,7 +154,12 @@ def build_plan(
             if not isinstance(number, int) or number <= 0 or not FULL_SHA.fullmatch(head):
                 errors.append(f"{repo} has invalid recovery target")
                 continue
-            attempt = _retry_attempt(_latest_dispatch_status(statuses.get(head, [])))
+            fingerprint = _fingerprint(repo, number, head, decision)
+            attempt = _retry_attempt(
+                _latest_dispatch_status(statuses.get(head, []), fingerprint),
+                now=now,
+                stale_pending_seconds=stale_pending_seconds,
+            )
             if attempt is None:
                 continue
             candidates.append(
@@ -128,7 +170,7 @@ def build_plan(
                     "assignment_epoch": epoch,
                     "dispatch_attempt": attempt,
                     "decision": decision,
-                    "fingerprint": _fingerprint(repo, number, head, decision),
+                    "fingerprint": fingerprint,
                 }
             )
     candidates.sort(key=lambda row: (row["repo"], row["pr_number"]))
@@ -146,9 +188,20 @@ def main() -> int:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--statuses", type=Path, required=True)
     parser.add_argument("--epoch", type=int, required=True)
+    parser.add_argument("--stale-pending-seconds", type=int, default=DEFAULT_STALE_PENDING_SECONDS)
+    parser.add_argument("--now", help="RFC3339 test override")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    plan = build_plan(_load(args.report), _load(args.statuses), args.epoch)
+    now = _parse_time(args.now) if args.now else None
+    if args.now and now is None:
+        raise ValueError("invalid --now timestamp")
+    plan = build_plan(
+        _load(args.report),
+        _load(args.statuses),
+        args.epoch,
+        now=now,
+        stale_pending_seconds=args.stale_pending_seconds,
+    )
     args.output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0 if not plan["errors"] else 1
 

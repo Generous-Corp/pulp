@@ -32,9 +32,12 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
 
     def test_status_mutation_is_explicitly_off_by_default(self) -> None:
         inputs = self.doc["on"]["workflow_dispatch"]["inputs"]
+        self.assertIn("dispatch_attempt", inputs)
         self.assertEqual(inputs["publish_status"]["default"], "false")
         self.assertEqual(inputs["attempt_repair"]["default"], "false")
         self.assertIn("always() && inputs.publish_status", self.text)
+        self.assertIn("context='shipyard/recovery-dispatch'", self.text)
+        self.assertIn("completed attempt=${{ inputs.dispatch_attempt }}", self.text)
 
     def test_admin_secret_exists_only_in_lease_steps(self) -> None:
         steps = self.doc["jobs"]["m5-luna-triage"]["steps"]

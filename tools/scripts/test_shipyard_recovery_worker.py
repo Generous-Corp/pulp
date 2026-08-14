@@ -21,7 +21,7 @@ def pull(*, head=HEAD, state="open", labels=None):
     }
 
 
-def statuses(*, epoch=19, fingerprint=FINGERPRINT, dispatch_state="pending"):
+def statuses(*, epoch=19, attempt=1, fingerprint=FINGERPRINT, dispatch_state="pending"):
     return [
         {
             "id": 1,
@@ -33,7 +33,7 @@ def statuses(*, epoch=19, fingerprint=FINGERPRINT, dispatch_state="pending"):
             "id": 2,
             "context": worker.DISPATCH_CONTEXT,
             "state": dispatch_state,
-            "description": f"epoch={epoch} fingerprint={fingerprint}",
+            "description": f"attempt={attempt} epoch={epoch} fingerprint={fingerprint}",
             "created_at": "2026-08-14T12:01:00Z",
         },
     ]
@@ -43,6 +43,7 @@ class RecoveryWorkerTests(unittest.TestCase):
     def test_accepts_one_exact_head_pending_assignment(self):
         got = worker.validate_assignment(
             pull(), statuses(), expected_head=HEAD, assignment_epoch=19,
+            dispatch_attempt=1,
             fingerprint=FINGERPRINT,
         )
         self.assertEqual(got["head"], HEAD)
@@ -59,6 +60,7 @@ class RecoveryWorkerTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 worker.validate_assignment(
                     value, statuses(), expected_head=HEAD, assignment_epoch=19,
+                    dispatch_attempt=1,
                     fingerprint=FINGERPRINT,
                 )
 
@@ -67,23 +69,44 @@ class RecoveryWorkerTests(unittest.TestCase):
             statuses()[:1],
             statuses(dispatch_state="success"),
             statuses(epoch=20),
+            statuses(attempt=2),
             statuses(fingerprint="c" * 64),
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 worker.validate_assignment(
                     pull(), value, expected_head=HEAD, assignment_epoch=19,
+                    dispatch_attempt=1,
                     fingerprint=FINGERPRINT,
                 )
 
     def test_prompt_is_read_only_and_bounds_untrusted_evidence(self):
         assignment = worker.validate_assignment(
             pull(), statuses(), expected_head=HEAD, assignment_epoch=19,
+            dispatch_attempt=1,
             fingerprint=FINGERPRINT,
         )
         prompt = worker.render_prompt(assignment, "x" * 130_000)
         self.assertIn("Do not edit files", prompt)
         self.assertIn("untrusted context", prompt)
         self.assertLess(len(prompt), 142_000)
+
+    def test_newer_assignment_epoch_wins_over_late_old_terminal_status(self):
+        values = statuses(epoch=20, attempt=2)
+        values.append(
+            {
+                "id": 3,
+                "context": worker.DISPATCH_CONTEXT,
+                "state": "error",
+                "description": f"attempt=1 epoch=19 fingerprint={FINGERPRINT}",
+                "created_at": "2026-08-14T12:02:00Z",
+            }
+        )
+        got = worker.validate_assignment(
+            pull(), values, expected_head=HEAD, assignment_epoch=20,
+            dispatch_attempt=2, fingerprint=FINGERPRINT,
+        )
+        self.assertEqual(got["assignment_epoch"], 20)
+        self.assertEqual(got["dispatch_attempt"], 2)
 
 
 if __name__ == "__main__":

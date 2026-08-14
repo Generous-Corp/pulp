@@ -44,10 +44,16 @@ def _latest(statuses: list[dict[str, Any]], context: str) -> dict[str, Any] | No
     return max(
         matching,
         key=lambda status: (
+            _description_int(status, "epoch") if context == DISPATCH_CONTEXT else 0,
             str(status.get("created_at") or ""),
             int(status.get("id") or 0),
         ),
     )
+
+
+def _description_int(status: dict[str, Any], key: str) -> int:
+    match = re.search(rf"\b{re.escape(key)}=(\d+)\b", str(status.get("description") or ""))
+    return int(match.group(1)) if match else 0
 
 
 def validate_assignment(
@@ -56,6 +62,7 @@ def validate_assignment(
     *,
     expected_head: str,
     assignment_epoch: int,
+    dispatch_attempt: int,
     fingerprint: str,
 ) -> dict[str, Any]:
     expected_head = expected_head.lower()
@@ -64,6 +71,8 @@ def validate_assignment(
         raise ValueError("expected head must be a full lowercase SHA")
     if assignment_epoch <= 0:
         raise ValueError("assignment epoch must be positive")
+    if dispatch_attempt not in (1, 2):
+        raise ValueError("dispatch attempt must be one or two")
     if not FULL_FINGERPRINT.fullmatch(fingerprint):
         raise ValueError("fingerprint must be a full lowercase SHA-256")
     if str(pull.get("state") or "").lower() != "open":
@@ -83,6 +92,8 @@ def validate_assignment(
     description = str(dispatch.get("description") or "")
     if f"epoch={assignment_epoch}" not in description:
         raise ValueError("recovery dispatch epoch does not match")
+    if f"attempt={dispatch_attempt}" not in description:
+        raise ValueError("recovery dispatch attempt does not match")
     if f"fingerprint={fingerprint}" not in description:
         raise ValueError("recovery dispatch fingerprint does not match")
     return {
@@ -92,6 +103,7 @@ def validate_assignment(
         "body": str(pull.get("body") or ""),
         "head": expected_head,
         "assignment_epoch": assignment_epoch,
+        "dispatch_attempt": dispatch_attempt,
         "fingerprint": fingerprint,
         "labels": sorted(_labels(pull)),
     }
@@ -135,6 +147,7 @@ def main() -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--assignment-epoch", type=int, required=True)
+    parser.add_argument("--dispatch-attempt", type=int, required=True)
     parser.add_argument("--fingerprint", required=True)
     parser.add_argument("--assignment-output", type=Path, required=True)
     parser.add_argument("--prompt-output", type=Path, required=True)
@@ -144,6 +157,7 @@ def main() -> int:
         _load(args.statuses),
         expected_head=args.expected_head,
         assignment_epoch=args.assignment_epoch,
+        dispatch_attempt=args.dispatch_attempt,
         fingerprint=args.fingerprint,
     )
     args.assignment_output.write_text(

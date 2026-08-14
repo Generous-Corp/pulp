@@ -17,6 +17,10 @@ on:
         description: 'Positive fenced assignment generation'
         required: true
         type: string
+      dispatch_attempt:
+        description: 'Bounded dispatch attempt (one or two)'
+        required: true
+        type: string
       blocker_fingerprint:
         description: 'Full blocker SHA-256 fingerprint'
         required: true
@@ -71,6 +75,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           ASSIGNMENT_EPOCH: ${{ inputs.assignment_epoch }}
+          DISPATCH_ATTEMPT: ${{ inputs.dispatch_attempt }}
           BLOCKER_FINGERPRINT: ${{ inputs.blocker_fingerprint }}
         run: |
           set -euo pipefail
@@ -91,6 +96,7 @@ jobs:
             --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
             --expected-head "$EXPECTED_HEAD" \
             --assignment-epoch "$ASSIGNMENT_EPOCH" \
+            --dispatch-attempt "$DISPATCH_ATTEMPT" \
             --fingerprint "$BLOCKER_FINGERPRINT" \
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
@@ -139,6 +145,7 @@ jobs:
             --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
             --expected-head "${{ inputs.expected_head }}" \
             --assignment-epoch "${{ inputs.assignment_epoch }}" \
+            --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "${{ inputs.blocker_fingerprint }}" \
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
@@ -470,6 +477,7 @@ jobs:
             --evidence /dev/null \
             --expected-head "$EXPECTED_HEAD" \
             --assignment-epoch "$ASSIGNMENT_EPOCH" \
+            --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "$BLOCKER_FINGERPRINT" \
             --assignment-output /dev/null \
             --prompt-output /dev/null
@@ -537,4 +545,16 @@ jobs:
             -f state="$state" \
             -f context='shipyard/recovery-worker' \
             -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          dispatch_state=success
+          if [ "$state" = error ]; then
+            dispatch_state=error
+          fi
+          dispatch_description="completed attempt=${{ inputs.dispatch_attempt }} epoch=${{ inputs.assignment_epoch }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${{ inputs.expected_head }}" \
+            -f state="$dispatch_state" \
+            -f context='shipyard/recovery-dispatch' \
+            -f description="$dispatch_description" \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
