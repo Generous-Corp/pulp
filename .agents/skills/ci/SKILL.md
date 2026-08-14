@@ -129,6 +129,9 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   `cross-platform-check.yml`, the windows gates) configure with
   `PULP_BUILD_EXAMPLES=OFF`. The path-filtered `example-validation` workflow
   compiles the full examples tree on Linux and macOS for relevant changes;
+  its Linux job is always GitHub-hosted, including `workflow_dispatch`. It must
+  not consume `PULP_LOCAL_LINUX_RUNS_ON_JSON`: that selector belongs to the
+  workflow-restricted trusted merge-group pool and would be unroutable here.
   Shipyard's separate blocking `[validation.default]` temporarily retains
   `PULP_BUILD_EXAMPLES=ON` until that stable context is promoted to required.
   `release-cli.yml` also compiles them at release time. Do not assume a green

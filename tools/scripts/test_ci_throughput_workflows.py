@@ -73,9 +73,11 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
 
     def test_linux_job_builds_the_full_examples_tree(self) -> None:
         linux_job = self.jobs["build-linux"]
-        self.assertIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", linux_job["runs-on"])
-        self.assertIn("github.event_name == 'workflow_dispatch'", linux_job["runs-on"])
-        self.assertIn("ubuntu-latest", linux_job["runs-on"])
+        self.assertEqual(linux_job["runs-on"], "ubuntu-latest")
+        self.assertNotIn(
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+            (ROOT / ".github" / "workflows" / "examples-validation.yml").read_text(),
+        )
         self.assertTrue(
             any(
                 step.get("uses") == "./.github/actions/install-linux-build-deps"

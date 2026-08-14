@@ -178,10 +178,11 @@ jobs:
     name: Build examples (Linux x64)
     needs: changes
     if: needs.changes.outputs.examples == 'true'
-    # Public pull_request workflow code stays hosted. Private Mac Pro routing
-    # is allowed only for operator-dispatched runs until a runner group can
-    # enforce trusted-workflow access outside PR-controlled YAML.
-    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # This workflow is not admitted by either protected Mac Pro runner group.
+    # Keep PR and operator-dispatched example builds hosted until they have a
+    # dedicated workflow-scoped group and selector; the merge-group selector
+    # must never create an unroutable job here.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
