@@ -79,10 +79,22 @@ void VisualizationBridge::process(const float* const* channels,
     const audio::BufferView<const float> block(
         channels, static_cast<std::size_t>(captured_channels),
         static_cast<std::size_t>(num_samples));
+    const auto requested_frames = static_cast<std::uint64_t>(num_samples);
+    // Capture blocks are all-or-nothing. In SPSC use only the consumer can
+    // increase free space after this acquire, so a block that fits here cannot
+    // become partial. A block that does not fit is dropped before any prefix is
+    // published, then the existing generation handshake suspends capture until
+    // poll() flushes and acknowledges the discontinuity.
+    if (capture_.free_frames() < requested_frames) {
+        dropped_capture_frames_.fetch_add(requested_frames,
+                                          std::memory_order_relaxed);
+        discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        return;
+    }
 #ifdef PULP_BENCHMARK
     const double copy_start = render::bench::now_us();
 #endif
-    (void)capture_.write(block, static_cast<std::uint64_t>(num_samples));
+    (void)capture_.write(block, requested_frames);
 #ifdef PULP_BENCHMARK
     if (bench_counters_) {
         bench_counters_->audio_copy_total_us.fetch_add(
@@ -118,21 +130,8 @@ bool VisualizationBridge::poll() {
         return false;
     }
 
-    // A capture overrun is an analysis discontinuity. Discard only the frames
-    // visible at entry (bounded even under continuous production), reset the
-    // STFT/waveform histories, and leave frames accepted during this flush for
-    // the next poll's fresh continuity epoch.
     const auto available_at_entry = capture_.available_frames();
-    // available_frames() acquires the producer cursor. PlanarAudioRingBuffer
-    // publishes a partial-write drop before that cursor, so this following
-    // load cannot miss a drop associated with any frame in the entry snapshot.
-    const auto dropped = capture_.stats().dropped_write_frames;
-    if (dropped != observed_dropped_frames_) {
-        (void)capture_.drain(available_at_entry);
-        observed_dropped_frames_ = dropped;
-        reset_analysis_continuity();
-        return false;
-    }
+    const auto dropped = dropped_capture_frames_.load(std::memory_order_acquire);
 
     const auto entry_frames = config_.max_frames_per_poll > 0
         ? std::min<std::uint64_t>(

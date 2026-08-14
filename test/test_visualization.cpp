@@ -641,13 +641,13 @@ TEST_CASE("VisualizationBridge overflow starts a fresh continuity epoch",
     const auto spectrum = bridge.peek_spectrum();
     REQUIRE(spectrum.epoch == 2);
     REQUIRE(spectrum.sequence_number == 1);
-    REQUIRE(spectrum.dropped_frames == 128);
+    REQUIRE(spectrum.dropped_frames == 256);
     REQUIRE(std::abs(peak_bin(spectrum) - 31) <= 1);
 
     const auto waveform = bridge.peek_waveform();
     REQUIRE(waveform.epoch == 2);
     REQUIRE(waveform.sequence_number == 1);
-    REQUIRE(waveform.dropped_frames == 128);
+    REQUIRE(waveform.dropped_frames == 256);
 }
 
 TEST_CASE("VisualizationBridge poll returns while producer continuously refills",

@@ -164,7 +164,7 @@ public:
                 + ch * static_cast<std::size_t>(consumer_chunk_frames_);
         }
 
-        observed_dropped_frames_ = 0;
+        dropped_capture_frames_.store(0, std::memory_order_relaxed);
         discontinuity_generation_.store(0, std::memory_order_relaxed);
         acknowledged_discontinuity_.store(0, std::memory_order_relaxed);
         observed_discontinuity_ = 0;
@@ -243,7 +243,7 @@ public:
         meter_.reset();
         waveform_pos_ = 0;
         std::fill(waveform_ring_.begin(), waveform_ring_.end(), 0.0f);
-        observed_dropped_frames_ = 0;
+        dropped_capture_frames_.store(0, std::memory_order_relaxed);
         discontinuity_generation_.store(0, std::memory_order_relaxed);
         acknowledged_discontinuity_.store(0, std::memory_order_relaxed);
         observed_discontinuity_ = 0;
@@ -284,7 +284,7 @@ private:
     int waveform_length_ = 1024;
     int waveform_pos_ = 0;
 
-    std::uint64_t observed_dropped_frames_ = 0; // poll owner only
+    std::atomic<std::uint64_t> dropped_capture_frames_{0};
     // A rejected producer block creates a time discontinuity. Capture remains
     // suspended until poll() flushes the old continuity and acknowledges it,
     // so post-gap audio can never be concatenated with the old STFT history.

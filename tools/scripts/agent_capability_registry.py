@@ -109,7 +109,7 @@ EXPORTS = [
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/audio/planar_audio_ring_buffer.hpp",
-        "fingerprint": "sha256:d37d18f7cd5637a4b14a49c394f05c35042c073b5872791aee1d8af6ea62810e",
+        "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
