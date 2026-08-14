@@ -122,8 +122,11 @@ bool VisualizationBridge::poll() {
     // visible at entry (bounded even under continuous production), reset the
     // STFT/waveform histories, and leave frames accepted during this flush for
     // the next poll's fresh continuity epoch.
-    const auto dropped = capture_.stats().dropped_write_frames;
     const auto available_at_entry = capture_.available_frames();
+    // available_frames() acquires the producer cursor. PlanarAudioRingBuffer
+    // publishes a partial-write drop before that cursor, so this following
+    // load cannot miss a drop associated with any frame in the entry snapshot.
+    const auto dropped = capture_.stats().dropped_write_frames;
     if (dropped != observed_dropped_frames_) {
         (void)capture_.drain(available_at_entry);
         observed_dropped_frames_ = dropped;

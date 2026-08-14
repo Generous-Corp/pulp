@@ -342,7 +342,7 @@ Read the migration body for the replacement signature. If the change is
 a deprecation (old API still works, emits a warning), flag that —
 teams may want to migrate at their own pace.
 
-#### VisualizationBridge polling ownership (0.804.0)
+#### VisualizationBridge polling ownership (0.807.0)
 
 `VisualizationBridge::process()` no longer performs FFT/waveform analysis or
 publishes those snapshots. When upgrading a consumer that reads spectrum or

@@ -108,6 +108,16 @@ EXPORTS = [
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/audio/planar_audio_ring_buffer.hpp",
+        "fingerprint": "sha256:d37d18f7cd5637a4b14a49c394f05c35042c073b5872791aee1d8af6ea62810e",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Lock-free SPSC sample transport and overrun accounting used by realtime "
+            "capture paths; it is bounded infrastructure rather than a generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/audio/audio_probe.hpp",
         "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
         "disposition": "infrastructure",
