@@ -256,6 +256,8 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" not in authorized.group(1)
     assert '"pulp-auto-linux-x64"' in text
     assert "automatic_local_linux_selector" in text
+    assert "parseable_automatic_linux_selector" in text
+    assert "isinstance(parsed_local_linux_selector, (str, list))" in text
     assert "configured Linux selector lacks the exact" in text
     trusted_dispatcher = PR_SAFE_WORKFLOW.read_text(encoding="utf-8")
     assert (

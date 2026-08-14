@@ -520,11 +520,6 @@ jobs:
           automatic_linux_selector = (
               os.environ.get("AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
-          configured_linux_selector = (
-              operator_linux_selector
-              if EVENT_NAME == "workflow_dispatch"
-              else automatic_linux_selector
-          )
           automatic_linux_labels = {
               "self-hosted", "linux", "x64", "pulp-build-linux-x64",
               "pulp-host-macpro", "pulp-auto-linux-x64",
@@ -533,6 +528,16 @@ jobs:
               parsed_local_linux_selector = json.loads(automatic_linux_selector)
           except (json.JSONDecodeError, TypeError):
               parsed_local_linux_selector = None
+          parseable_automatic_linux_selector = (
+              automatic_linux_selector
+              if isinstance(parsed_local_linux_selector, (str, list))
+              else ""
+          )
+          configured_linux_selector = (
+              operator_linux_selector
+              if EVENT_NAME == "workflow_dispatch"
+              else parseable_automatic_linux_selector
+          )
           automatic_local_linux_selector = (
               automatic_linux_selector
               if isinstance(parsed_local_linux_selector, list)
