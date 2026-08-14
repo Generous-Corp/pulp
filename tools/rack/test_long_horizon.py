@@ -89,7 +89,7 @@ def layer_patch(two_sources: bool) -> dict:
 
 
 def check_long_horizon_contract() -> tuple[int, int]:
-    bad, ran = 0, 33
+    bad, ran = 0, 35
     contract = evolving_drone_contract()
     if contract != P.RuntimeQualityContract(
             sustained=True, no_obvious_sequence=True,
@@ -116,6 +116,15 @@ def check_long_horizon_contract() -> tuple[int, int]:
         print(f"  WRONG  direct/no-duration evolution escaped runtime proof: {direct}")
     else:
         print("  ok     direct evolving language gets a bounded 60-second proof")
+
+    never_repeat = P.compile_runtime_quality_contract(
+        "An ambient generative drone that never repeats")
+    if not never_repeat.sustained or not never_repeat.nonrepeating or \
+            P.runtime_quality_seconds(never_repeat) != 60.0:
+        bad += 1
+        print(f"  WRONG  never-repeat promise escaped a measured contract: {never_repeat}")
+    else:
+        print("  ok     never-repeat language requires entropy and real-DSP qualification")
 
     if P.generation_attempt_count(
             saved_response=False, claimed_gating=True,
@@ -328,6 +337,26 @@ def check_long_horizon_contract() -> tuple[int, int]:
         print(f"  WRONG  independent source-path proof confused stereo with layers: {one}, {two}")
     else:
         print("  ok     layers require independent source-to-output paths")
+
+    periodic_errors = P.runtime_quality_static_errors(
+        layer_patch(False), layer_inventory(), never_repeat)
+    entropy_patch = layer_patch(False)
+    entropy_patch["modules"].insert(
+        1, {"id": 9, "plugin": "Test", "model": "Random"})
+    entropy_patch["cables"].insert(0, {
+        "outputModuleId": 9, "outputId": 0,
+        "inputModuleId": 1, "inputId": 0})
+    entropy_inventory = layer_inventory()
+    entropy_inventory["Test"]["modules"]["Random"] = {
+        "name": "Random voltage", "tags": ["Random"]}
+    entropy_errors = P.runtime_quality_static_errors(
+        entropy_patch, entropy_inventory, never_repeat)
+    if not any("never repeats" in error for error in periodic_errors) or entropy_errors:
+        bad += 1
+        print(f"  WRONG  entropy topology proof misclassified periodic/connected patches: "
+              f"{periodic_errors}, {entropy_errors}")
+    else:
+        print("  ok     never-repeat rejects periodic-only routes and accepts connected entropy")
 
     mixed = layer_patch(True)
     mixed["modules"].insert(2, {"id": 3, "plugin": "Test", "model": "Mix"})
