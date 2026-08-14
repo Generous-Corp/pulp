@@ -50,6 +50,11 @@ def test_expired_or_malformed_lease_falls_back() -> None:
     assert _resolve(lease_until="not-a-time")["use_reusable"] is False
 
 
+def test_implausibly_distant_lease_falls_back() -> None:
+    now = datetime(2026, 8, 13, 12, tzinfo=timezone.utc)
+    assert _resolve(lease_until=(now + timedelta(minutes=16)).isoformat())["use_reusable"] is False
+
+
 def test_wrong_event_selector_or_disabled_route_falls_back() -> None:
     assert _resolve(event_name="pull_request_target")["use_reusable"] is False
     assert _resolve(event_name="merge_group")["use_reusable"] is False
@@ -68,6 +73,11 @@ def test_reusable_workflow_is_read_only_and_validates_pr_identity() -> None:
     assert "github.event.pull_request.head.sha" in text
     assert "pulp-pr-safe-linux-x64" in text
     assert "pulp-auto-linux-x64" not in text
+    assert "runs-on: ubuntu-latest" in text
+    assert "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED" in text
+    assert "PULP_PR_SAFE_LINUX_LEASE_UNTIL" in text
+    assert "needs.admission.outputs.admitted == 'true'" in text
+    assert 'raise SystemExit("PR-safe admission denied:' in text
 
 
 def test_build_calls_only_the_main_owned_reusable_workflow() -> None:

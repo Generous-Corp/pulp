@@ -103,6 +103,9 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn("pulp-pr-safe-linux-x64", self.pr_safe_wrapper)
         self.assertNotIn("pulp-auto-linux-x64", self.pr_safe_wrapper)
+        for wrapper in (self.trusted_wrapper, self.pr_safe_wrapper):
+            self.assertIn('exec "$SCRIPT_DIR/pulp-ephemeral-runner.sh"', wrapper)
+            self.assertNotIn('exec "$SCRIPT_DIR/proxmox-ephemeral-runner-linux.sh"', wrapper)
 
     def test_slot_identity_is_stable_but_registration_name_is_per_boot(self) -> None:
         self.assertIn('RUNNER_SLOT_ID="${RUNNER_NAME_PREFIX}-${VMID}"', self.script)

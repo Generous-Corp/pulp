@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+MAX_LEASE_HORIZON_SECONDS = 15 * 60
+
 PR_SAFE_SELECTOR = [
     "self-hosted",
     "Linux",
@@ -37,7 +39,8 @@ def _lease_is_live(raw: str, now: datetime) -> bool:
         return False
     if expiry.tzinfo is None:
         return False
-    return expiry.astimezone(timezone.utc) > now.astimezone(timezone.utc)
+    remaining = expiry.astimezone(timezone.utc) - now.astimezone(timezone.utc)
+    return 0 < remaining.total_seconds() <= MAX_LEASE_HORIZON_SECONDS
 
 
 def resolve(

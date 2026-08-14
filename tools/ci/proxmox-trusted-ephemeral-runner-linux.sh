@@ -6,4 +6,4 @@ LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro,pulp-auto-li
 export PULP_RUNNER_LABELS="$LABELS"
 export PULP_RUNNER_NAME_PREFIX="pulp-ci-ephemeral"
 export PULP_LINUX_RUNNER_GROUP_POLICY="trusted"
-exec "$SCRIPT_DIR/proxmox-ephemeral-runner-linux.sh" "$@"
+exec "$SCRIPT_DIR/pulp-ephemeral-runner.sh" "$@"

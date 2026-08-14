@@ -17,8 +17,81 @@ permissions:
   contents: read
 
 jobs:
+  admission:
+    name: Validate PR-safe Linux admission
+    runs-on: ubuntu-latest
+    outputs:
+      admitted: ${{ steps.validate.outputs.admitted }}
+    steps:
+      - id: validate
+        name: Validate protected route state
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          EXPECTED_REPOSITORY: Generous-Corp/pulp
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          SELECTOR_JSON: ${{ inputs.runner_selector_json }}
+          CONFIGURED_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
+          LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
+          ROUTE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          expected_selector = [
+              "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
+              "pulp-host-macpro", "pulp-pr-safe-linux-x64",
+          ]
+
+          def selector(name):
+              try:
+                  value = json.loads(os.environ.get(name, ""))
+              except json.JSONDecodeError:
+                  return None
+              return value if value == expected_selector else None
+
+          def lease_is_live():
+              try:
+                  expiry = datetime.fromisoformat(
+                      os.environ.get("LEASE_UNTIL", "").replace("Z", "+00:00")
+                  )
+              except ValueError:
+                  return False
+              if expiry.tzinfo is None:
+                  return False
+              remaining = expiry.astimezone(timezone.utc) - datetime.now(timezone.utc)
+              return 0 < remaining.total_seconds() <= 15 * 60
+
+          checks = {
+              "event": os.environ.get("EVENT_NAME") == "pull_request",
+              "repository": os.environ.get("REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
+              "same repository": os.environ.get("PR_HEAD_REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
+              "head SHA": os.environ.get("SOURCE_SHA") == os.environ.get("PR_HEAD_SHA"),
+              "base SHA": os.environ.get("BASE_SHA") == os.environ.get("PR_BASE_SHA"),
+              "enabled": os.environ.get("ROUTE_ENABLED", "").strip().lower() == "true",
+              "caller selector": selector("SELECTOR_JSON") is not None,
+              "configured selector": selector("CONFIGURED_SELECTOR_JSON") is not None,
+              "lease": lease_is_live(),
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"admitted={'false' if failed else 'true'}\n")
+          if failed:
+              raise SystemExit("PR-safe admission denied: " + ", ".join(failed))
+          PY
+
   linux:
     name: Linux (x64) [local-pr-safe]
+    needs: admission
+    if: needs.admission.outputs.admitted == 'true'
     runs-on: ${{ fromJSON(inputs.runner_selector_json) }}
     timeout-minutes: 60
     env:
