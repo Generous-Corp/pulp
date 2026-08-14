@@ -37,8 +37,18 @@
     },
     {
       "path": "core/host/src/timeline_graph_binding.cpp",
-      "max_loc": 978,
-      "note": "Timeline-to-SignalGraph binding hotspot; subsequent sequencer integration must decompose before growing it"
+      "max_loc": 424,
+      "note": "Timeline binding lifecycle, realtime processing, and public query shell; candidate construction and route reconciliation belong in their focused units"
+    },
+    {
+      "path": "core/host/src/timeline_graph_binding_candidate.cpp",
+      "max_loc": 400,
+      "note": "Timeline binding candidate construction and atomic publication; route validation and edge reconciliation belong in timeline_graph_binding_routes.cpp"
+    },
+    {
+      "path": "core/host/src/timeline_graph_binding_routes.cpp",
+      "max_loc": 225,
+      "note": "Timeline binding route validation and mixer-edge reconciliation helpers"
     },
     {
       "path": "core/playback/src/program_compiler.cpp",

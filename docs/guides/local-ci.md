@@ -175,22 +175,24 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 
 ## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
 
-Operator-dispatched `build.yml` runs may route the `Linux (x64)` leg via
+`build.yml` runs may route the `Linux (x64)` leg via
 `PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
-host. Automatic PR runs remain on GitHub-hosted Linux until an organization
-runner group provides the private-pool access boundary. The pool is native
-x86_64, which the job requires: the lane's earlier ARM64/Tart declaration would
-have changed its architecture rather than relocating it, silently deleting the
-only x64 Linux coverage.
+host. Protected main workflow refs, including the protected merge-group path,
+prefer this pool when the variable is set. Pull-request workflow revisions that
+are not the protected `main` workflow ref fall back to GitHub-hosted Linux;
+fork pull requests remain hosted as well. This prevents a PR-controlled
+workflow edit from reaching the restricted group. The pool is native x86_64,
+which the job requires: the lane's earlier
+ARM64/Tart declaration would have changed its architecture rather than
+relocating it, silently deleting the only x64 Linux coverage.
 
-That external boundary is a prerequisite, not a workflow TODO: create a
-dedicated organization runner group containing only the Mac Pro ephemeral
-runners, grant it to `Generous-Corp/pulp` only, and restrict workflow access to
-the protected default-branch copy of `.github/workflows/build.yml`. Then prove
-that a pull request changing its own workflow cannot target the group before
-enabling automatic PR or merge-group routing. Repository variables, event-name
-conditions, and tests in this repository are not substitutes for that control.
+The external boundary is live: organization runner group `pulp-trusted-build`
+contains only `Generous-Corp/pulp` and permits only protected default-branch
+workflow refs for the trusted local jobs. The event-name and fork checks in the
+workflows are defense in depth, not the security boundary. Secret-bearing jobs
+and every `pull_request_target` workflow remain hosted or on their dedicated
+trusted path; they never use the generic Mac Pro labels.
 
 The supervisor supports that migration without weakening the existing pool.
 Leave `/etc/pulp/linux-runner-group.env` absent for repository registration and
@@ -301,11 +303,12 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; operator-dispatched runs
-then use GitHub-hosted Linux. Automatic PR runs already use GitHub-hosted Linux.
-`runs-on` has no live fallback after a dispatched job is assigned, so if macpro
-is down or its pool is stopped, unset the variable and redispatch rather than
-waiting.
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all eligible events then use
+GitHub-hosted Linux. The resolver also uses the hosted label whenever the local
+selector is absent, so a staged rollout can leave the variable unset until the
+Mac Pro pool is healthy. Once a local job has been assigned, `runs-on` has no
+live fallback; if macpro is down or its pool is stopped, unset the variable and
+redispatch rather than waiting.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only

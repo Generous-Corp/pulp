@@ -53,6 +53,30 @@ def test_pull_request_exposes_security_hosted_route() -> None:
     assert metadata["event_authorized_selector_json"] == ""
 
 
+def test_same_repository_pull_request_can_use_trusted_local_route() -> None:
+    metadata = route.resolve_route(
+        event_name="pull_request",
+        dispatch_selector_json="",
+        configured_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json=MAC_PRO_SELECTOR,
+        resolved_selector_json=MAC_PRO_SELECTOR,
+    )
+    assert metadata["linux_route_reason"] == "trusted-local"
+    assert metadata["linux_provider"] == "local"
+
+
+def test_merge_group_can_use_trusted_local_route() -> None:
+    metadata = route.resolve_route(
+        event_name="merge_group",
+        dispatch_selector_json="",
+        configured_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json=MAC_PRO_SELECTOR,
+        resolved_selector_json=MAC_PRO_SELECTOR,
+    )
+    assert metadata["linux_route_reason"] == "trusted-local"
+    assert metadata["linux_provider"] == "local"
+
+
 def test_unconfigured_event_exposes_hosted_route() -> None:
     metadata = route.resolve_route(
         event_name="workflow_dispatch",
@@ -172,7 +196,7 @@ def test_configured_dispatch_rejects_hosted_configuration() -> None:
 def test_non_dispatch_cannot_authorize_configured_selector() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request",
+            event_name="pull_request_target",
             dispatch_selector_json="",
             configured_selector_json=MAC_PRO_SELECTOR,
             authorized_selector_json=MAC_PRO_SELECTOR,
@@ -187,7 +211,7 @@ def test_non_dispatch_cannot_authorize_configured_selector() -> None:
 def test_non_dispatch_cannot_authorize_without_configured_selector() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request",
+            event_name="pull_request_target",
             dispatch_selector_json="",
             configured_selector_json="",
             authorized_selector_json=MAC_PRO_SELECTOR,

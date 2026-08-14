@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless the disposable Linux runner group has trusted scope."""
+"""Fail closed unless the trusted Linux runner group has the exact scope."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ import subprocess
 import sys
 
 
+TRUSTED_WORKFLOWS = (
+    ".github/workflows/build.yml",
+    ".github/workflows/vellum-freeze-check.yml",
+    ".github/workflows/version-skill-check.yml",
+)
+
+
 def api_json(gh: str, path: str) -> dict:
     result = subprocess.run([gh, "api", path], capture_output=True, text=True)
     if result.returncode != 0:
@@ -18,7 +25,7 @@ def api_json(gh: str, path: str) -> dict:
 
 
 def validate_policy(group: dict, repositories: dict, repo: str) -> list[str]:
-    expected = repo + "/.github/workflows/build.yml@refs/heads/main"
+    expected = [f"{repo}/{workflow}@refs/heads/main" for workflow in TRUSTED_WORKFLOWS]
     failures = []
     if not re.fullmatch(r"[A-Za-z0-9_.:-]+", group.get("name", "")):
         failures.append("group name must be nonempty and shell-safe")
@@ -30,8 +37,8 @@ def validate_policy(group: dict, repositories: dict, repo: str) -> list[str]:
         failures.append("group must explicitly allow its selected public repository")
     if group.get("restricted_to_workflows") is not True:
         failures.append("group must be restricted to selected workflows")
-    if group.get("selected_workflows") != [expected]:
-        failures.append("group must select only " + expected)
+    if group.get("selected_workflows") != expected:
+        failures.append("group must select exactly the trusted Pulp workflows")
     names = [item.get("full_name") for item in repositories.get("repositories", [])]
     if repositories.get("total_count") != 1 or names != [repo]:
         failures.append("group must contain only repository " + repo)

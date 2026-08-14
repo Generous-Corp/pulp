@@ -1257,16 +1257,16 @@ def check_brand_targeting() -> tuple:
             print("  ok     'all modules from X' brings everything and a bare "
                   "mention does not")
 
-        # ── an unsatisfiable exclusive request names the gap ─────────────────
+        # ── an exclusive request stays closed ────────────────────────────────
         ran += 1
         only = P.brand_brief("only CV funk", inv, BRAND_CAT, BRAND_MIDX)
-        if "SAY SO" not in only or "Do not substitute in silence" not in only:
+        if "final patch is validated against this constraint" not in only or \
+                "Do not substitute another maker" not in only:
             bad += 1
-            print("  WRONG  an exclusive request does not tell the model to "
-                  "name a gap it cannot fill, which is the quiet substitution "
-                  "that produced lookalike modules")
+            print("  WRONG  an exclusive request is not stated as a closed "
+                  "maker constraint")
         else:
-            print("  ok     an exclusive request is told to name its gaps")
+            print("  ok     an exclusive request says other makers are forbidden")
 
         # ── availability is marked, and nothing unowned is offered ───────────
         ran += 1
@@ -4250,6 +4250,10 @@ def main():
     beh_bad, beh_ran = test_affordances.check_behaviour_drives_the_check()
     reg_bad, reg_ran = test_affordances.check_registered_before_the_skip()
     aff_bad += reg_bad; aff_ran += reg_ran
+    import test_intent_context
+    intent_bad, intent_ran = test_intent_context.check_tag_context()
+    maker_bad, maker_ran = test_intent_context.check_exclusive_maker()
+    intent_bad += maker_bad; intent_ran += maker_ran
     acq_bad += (lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad +
                 output_bad + ship_bad + ver_bad)
     acq_ran += (lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran +
@@ -4259,10 +4263,10 @@ def main():
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
     acq_bad += (vp_bad + mel_bad + domain_bad + beh_bad + aff_bad +
-                activation_bad + horizon_bad + repair_bad +
+                activation_bad + horizon_bad + repair_bad + intent_bad +
                 ln_bad + rl_bad + ip_bad + rp_bad + sf_bad + hand_bad)
     acq_ran += (vp_ran + mel_ran + domain_ran + beh_ran + aff_ran +
-                activation_ran + horizon_ran + repair_ran +
+                activation_ran + horizon_ran + repair_ran + intent_ran +
                 ln_ran + rl_ran + ip_ran + rp_ran + sf_ran + hand_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
