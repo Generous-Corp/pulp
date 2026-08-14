@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 24,
+  "manifest_revision": 25,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -17,7 +17,7 @@
     "domains": {
       "audio": {
         "state": "partial",
-        "capabilities": 7
+        "capabilities": 8
       },
       "midi": {
         "state": "partial",
@@ -46,6 +46,67 @@
     }
   },
   "capabilities": [
+    {
+      "key": "audio.boundary-diagnostics",
+      "domain": "audio",
+      "summary": "Deterministic non-realtime diagnosis of processor, standalone-boundary, and device telemetry for reported missing or incorrect audio.",
+      "rt_class": "control",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "none",
+        "process": "control",
+        "reset": "none",
+        "release": "result destruction off audio"
+      },
+      "state_model": "Pure report construction from already-published probe snapshots, optional device counters, and an explicit silence threshold.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "optional processor and standalone-boundary probe snapshots, optional device statistics, and a linear-amplitude silence threshold",
+      "output_domain": "boundary diagnosis and owned stage-by-stage diagnostic text",
+      "units": [
+        "linear amplitude",
+        "frames",
+        "hertz",
+        "event count"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "caller-clocked after probe publication; never on the audio thread",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_function",
+          "include": "pulp/audio/audio_boundary_report.hpp",
+          "qualified_name": "pulp::audio::build_boundary_report",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f054d5baa9c063cfeb7a7b7750abdef55825578138614b569e73da7f4ad8c8ce"
+    },
     {
       "key": "audio.instrument-voice-allocator",
       "contract_version": {
@@ -5297,9 +5358,9 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 73,
+    "total": 74,
     "by_domain": {
-      "audio": 7,
+      "audio": 8,
       "midi": 9,
       "music": 7,
       "offline": 0,

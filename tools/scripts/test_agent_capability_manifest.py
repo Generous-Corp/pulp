@@ -628,7 +628,11 @@ def exercise_evolution(canonical: dict) -> int:
 
     stronger_previous = copy.deepcopy(canonical)
     stronger_previous["manifest_revision"] -= 1
-    row = stronger_previous["capabilities"][0]
+    row = next(
+        item
+        for item in stronger_previous["capabilities"]
+        if item["key"] == "audio.instrument-voice-allocator"
+    )
     row["contract_version"] = {"major": 1, "minor": 0}
     row["determinism"]["repeatability"] = "not_promised"
     refresh_digest(row)

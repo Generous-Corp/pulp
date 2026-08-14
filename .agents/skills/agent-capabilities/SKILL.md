@@ -87,6 +87,14 @@ a type-only row or one aggregate probe cannot establish that installed
 consumers can execute density, fill, set-algebra, ID, and morph operations.
 Keep scheduling, clocks, note ownership, and publication outside this manifest.
 
+For `audio.boundary-diagnostics`, keep the capability explicitly control-thread
+only: it consumes already-published processor or standalone-boundary snapshots
+and optional device counters to produce owned diagnostic text. It must never
+sample a live audio buffer, allocate or format on the audio thread, or become a
+runtime-control operation. Its operational probe constructs
+`BoundaryReportInputs` and invokes `pulp::audio::build_boundary_report` through
+the declared `Pulp::audio` target.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,

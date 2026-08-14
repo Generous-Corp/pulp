@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 34,
+  "inventory_version": 35,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,21 +38,21 @@
   ],
   "counts": {
     "public_headers": 424,
-    "reviewed_headers": 125,
-    "legacy_unreviewed_headers": 299,
+    "reviewed_headers": 126,
+    "legacy_unreviewed_headers": 298,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 81,
+      "capability_entrypoint": 82,
       "capability_support": 38,
       "infrastructure": 5,
-      "legacy_unreviewed": 299,
+      "legacy_unreviewed": 298,
       "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
         "public_headers": 112,
-        "reviewed_headers": 6,
-        "legacy_unreviewed_headers": 106,
+        "reviewed_headers": 7,
+        "legacy_unreviewed_headers": 105,
         "unsupported_headers": 0
       },
       "midi": {
@@ -111,9 +111,11 @@
       "source": "core/audio/include/pulp/audio/audio_boundary_report.hpp",
       "fingerprint": "sha256:45c6b48d154b28a714f220c5f27e5b7f201ea8b3540b6f1fdf2eca44de99307e",
       "include": "pulp/audio/audio_boundary_report.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.boundary-diagnostics"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
