@@ -418,6 +418,38 @@ TEST_CASE("AudioSourcePlayer: set_source(nullptr) releases the prior source",
     REQUIRE(src.release_calls == 1);
 }
 
+TEST_CASE("AudioSourcePlayer: replacing a prepared source transfers lifecycle",
+          "[audio][source-player][lifecycle]") {
+    ConstantSource first(0.25f, 1000, 1);
+    ConstantSource replacement(0.75f, 1000, 1);
+    AudioSourcePlayer player;
+    Buffer<float> buf(1, 32);
+
+    player.set_source(&first);
+    player.audio_callback(buf.view(), 32, 48000.0);
+    REQUIRE(first.prepare_calls == 1);
+    REQUIRE(first.release_calls == 0);
+    REQUIRE(first.block_calls == 1);
+
+    player.set_source(&replacement);
+    REQUIRE(first.release_calls == 1);
+    REQUIRE(replacement.prepare_calls == 0);
+
+    player.audio_callback(buf.view(), 32, 48000.0);
+    REQUIRE(replacement.prepare_calls == 1);
+    REQUIRE(replacement.last_block_size == 32);
+    REQUIRE(replacement.last_sample_rate == 48000.0);
+    REQUIRE(replacement.block_calls == 1);
+    REQUIRE(first.block_calls == 1);
+    for (float sample : buf.channel(0))
+        REQUIRE_THAT(sample, WithinAbs(0.75f, 1e-6f));
+
+    player.audio_callback(buf.view(), 32, 48000.0);
+    REQUIRE(replacement.prepare_calls == 1);
+    REQUIRE(replacement.block_calls == 2);
+    REQUIRE(first.release_calls == 1);
+}
+
 TEST_CASE("AudioSourcePlayer: release() works without nulling source",
           "[audio][source-player]") {
     ConstantSource src(1.0f, 100, 1);
