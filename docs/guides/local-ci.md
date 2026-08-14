@@ -408,7 +408,7 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.4`, which
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.91.3`, which
 provides it, so no separate binary is needed.
 
 ```bash
@@ -598,6 +598,40 @@ shipyard runner fleet-status --repo Generous-Corp/pulp --json
 The same report calls out Tart disk-floor and ccache-size admission failures and
 merge-group Linux jobs left on `ubuntu-latest` while online self-hosted Linux x64
 capacity is idle.
+
+### Reconcile `offline_busy` before recovering anything
+
+Shipyard v0.91.3 reports `offline_busy` when GitHub says a self-hosted runner is
+both offline and busy. That contradiction is a diagnostic signal, not authority
+to cancel a job or delete a VM. Capture two bounded snapshots separated by the
+configured TartCI stale-observation threshold; do not substitute an arbitrary
+short sleep or runner-name match:
+
+```bash
+shipyard runner status --repo Generous-Corp/pulp --runner-id <runner_id> --json
+tartci observe macos --json
+tartci doctor --reap --json
+tartci leases status --json
+ghapp api repos/Generous-Corp/pulp/actions/jobs/<job_id>
+ps -Ao pid,ppid,etime,command | rg '<runner_name>|<job_id>|<run_id>'
+```
+
+For each snapshot, record the exact runner ID and name, job and run IDs, last
+heartbeat/observation time, Tart VM identity, TartCI lease, supervisor state,
+and matching host process tree. Preserve the job whenever any ownership signal
+is live, changes between snapshots, or cannot be read. Current TartCI
+deliberately reports this as `problems: ["offline_busy_runner:<name>"]` with
+runner action `offline_busy_wait_for_github`; `doctor --reap` does not infer
+orphanhood or auto-delete the registration. Therefore the current result never
+authorizes cancellation/removal, even when both snapshots lack a matching VM,
+lease, supervisor, or process: preserve the job and escalate because missing or
+unreadable telemetry is not machine-checked proof. A future TartCI version may
+add an explicit orphan classification only after it binds those facts to the
+same runner/job across the configured threshold; update this runbook and pin
+that version before using the classification for narrow recovery. Never
+bulk-reap, reset a shared runner name, or cancel a healthy protected-queue job.
+After any separately authorized recovery, require a fresh disposable dispatch
+and teardown proof before declaring the lane healthy again.
 
 ```bash
 # What would happen, without touching anything:

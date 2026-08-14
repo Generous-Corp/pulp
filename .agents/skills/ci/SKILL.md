@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.91.3`,
 which provides it, so the pinned binary is sufficient. That pin also makes
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
@@ -2418,6 +2418,30 @@ skill; examples/config-only diffs still need a `Version-Bump: skip` trailer unde
 a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
+
+#### v0.91.3 is the fleet floor for protected closure
+
+Keep the checked-in pin, the post-tag workflow pin, and every installed
+M1/M3/M5 binary on v0.91.3 together. This release line preserves the
+queue-admission and PR-close guards, rejects unproved local x64 targets, and
+bounds retry waits without losing transient failure metadata. The practical
+value is one closure contract everywhere: Shipyard validates exact heads, but
+GitHub's protected merge queue owns the final Pulp mutation. A host on an older
+binary can otherwise finish valid tests while following obsolete direct-merge
+semantics and invalidate a precomputed queue lineage.
+
+Fleet observation also needs runner inventory visibility. The Shipyard GitHub
+App therefore needs Actions/runner read access (organization runner-group read
+access for protected groups, plus the existing repository runner
+administration used for ephemeral registration). Without that read access it
+cannot distinguish unavailable capacity from an idle or stale registration,
+prove group/label placement, or safely decide whether hosted fallback must
+remain active. This is read-side admission evidence, not permission to bypass
+the merge queue. v0.91.3 surfaces GitHub's contradictory `offline + busy`
+state as `offline_busy`; require the bounded VM/lease/supervisor/job ownership
+audit, but preserve and escalate because current TartCI does not emit a
+machine-checked orphan verdict. The symptom alone never authorizes a
+cancellation or registration removal.
 
 #### Shipyard cannot merge under a merge queue — it errors, and that is expected
 
