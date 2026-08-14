@@ -30,6 +30,13 @@ struct PixelRect {
     int h = 0;
 };
 
+struct RadialPointer {
+    double angle = 0.0;
+    double r_in = 0.0;
+    double r_out = 0.0;
+    double width = 0.0;
+};
+
 std::optional<PixelRect> parse_pixel_rect(const std::string& text) {
     PixelRect rect;
     int* fields[4] = {&rect.x, &rect.y, &rect.w, &rect.h};
@@ -59,6 +66,20 @@ std::optional<std::string> attribute(const IRNode& node, const char* key) {
     const auto it = node.attributes.find(key);
     if (it == node.attributes.end() || it->second.empty()) return std::nullopt;
     return it->second;
+}
+
+std::optional<double> numeric_attribute(const IRNode& node, const char* key) {
+    const auto text = attribute(node, key);
+    if (!text) return std::nullopt;
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(*text, &consumed);
+        if (consumed != text->size() || !std::isfinite(value))
+            return std::nullopt;
+        return value;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 ImportPngImage crop(const ImportPngImage& source, const PixelRect& rect) {
@@ -101,7 +122,8 @@ ImportPngImage crop(const ImportPngImage& source, const PixelRect& rect) {
 /// Samples that land outside the crop, or back inside the pointer itself, are
 /// dropped; a pixel with too few surviving samples is left alone rather than
 /// guessed at from one reading.
-void erase_declared_pointer(ImportPngImage& image, const PixelRect& pointer) {
+void erase_declared_pointer(ImportPngImage& image, const PixelRect& pointer,
+                            const std::optional<RadialPointer>& radial) {
     const ImportPngImage source = image;
     const double centre_x = image.width * 0.5;
     const double centre_y = image.height * 0.5;
@@ -117,11 +139,24 @@ void erase_declared_pointer(ImportPngImage& image, const PixelRect& pointer) {
     const int y1 = std::min(image.height, pointer.y + pointer.h);
 
     const auto inside_pointer = [&](int x, int y) {
+        if (radial) {
+            const double dx = x + 0.5 - centre_x;
+            const double dy = y + 0.5 - centre_y;
+            const double ux = std::cos(radial->angle);
+            const double uy = std::sin(radial->angle);
+            const double along = dx * ux + dy * uy;
+            const double across = std::abs(dx * uy - dy * ux);
+            // One pixel includes the transformed rectangle's antialias fringe.
+            return along >= radial->r_in - 1.0 &&
+                   along <= radial->r_out + 1.0 &&
+                   across <= radial->width * 0.5 + 1.0;
+        }
         return x >= x0 && x < x1 && y >= y0 && y < y1;
     };
 
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
+            if (!inside_pointer(x, y)) continue;
             const double dx = x + 0.5 - centre_x;
             const double dy = y + 0.5 - centre_y;
             const double radius = std::sqrt(dx * dx + dy * dy);
@@ -406,7 +441,19 @@ int apply_browser_capture_control_sprites(
             indicator_rect->y - body_rect.y,
             indicator_rect->w, indicator_rect->h};
         if (is_knob) {
-            erase_declared_pointer(body, local_indicator);
+            std::optional<RadialPointer> radial;
+            const auto angle = numeric_attribute(
+                *node, "knob_ind_capture_angle_rad");
+            const auto r_in = numeric_attribute(*node, "knob_ind_r_in");
+            const auto r_out = numeric_attribute(*node, "knob_ind_r_out");
+            const auto width = numeric_attribute(*node, "knob_ind_w");
+            if (angle && r_in && r_out && width) {
+                const double half =
+                    std::min(body.width, body.height) * 0.5;
+                radial = RadialPointer{
+                    *angle, *r_in * half, *r_out * half, *width * half};
+            }
+            erase_declared_pointer(body, local_indicator, radial);
         } else {
             const bool static_track_declared =
                 attribute(*node, "browser_fader_static_track_declared").has_value();
@@ -498,6 +545,7 @@ int apply_browser_capture_control_sprites(
         node->attributes.erase("browser_sprite_crop_px");
         node->attributes.erase("browser_sprite_indicator_px");
         node->attributes.erase("browser_fader_static_track_declared");
+        node->attributes.erase("knob_ind_capture_angle_rad");
         ++skinned;
     }
     return skinned;

@@ -538,6 +538,46 @@ TEST_CASE("an undeclared control is left exactly as it was",
     CHECK_FALSE(fs::exists(temp.root / "sprites"));
 }
 
+TEST_CASE("a rotated pointer erases its oriented footprint, not its bounding box",
+          "[import-design][browser-capture][knob][indicator][erase]") {
+    TempDirectory temp;
+    const auto panel = synthetic_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    auto knob = declared_knob();
+    // The 16x16 painted client rect is only the axis-aligned footprint. The
+    // authored shape itself is a narrow vertical pointer inside that box.
+    knob.attributes["knob_ind_capture_angle_rad"] = "-1.5707963";
+    knob.attributes["knob_ind_w"] = "0.04";
+    ir.root.children.push_back(std::move(knob));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    const auto& lowered = ir.root.children.front();
+    CHECK(lowered.attributes.count("knob_ind_capture_angle_rad") == 0);
+    const auto sprite = read_png(lowered.attributes.at("asset_path"));
+    REQUIRE(sprite.valid());
+
+    // A corner inside the client rect but outside the pointer remains exactly
+    // authored. The old axis-aligned erase rewrote this pixel and produced a
+    // visible speckled wedge beside a thick rotated pointer.
+    const auto* corner = pixel_at(
+        sprite, kDotLeft - kDialLeft, kDotTop - kDialTop);
+    CHECK(corner[0] == kDotRed);
+    CHECK(corner[1] == 30);
+
+    // The actual narrow radial stroke is still removed.
+    const auto* centre = pixel_at(
+        sprite, kDialSize / 2,
+        kDotTop + kDotSize / 2 - kDialTop);
+    CHECK(centre[0] != kDotRed);
+}
+
 TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
           "[import-design][browser-capture][fader][indicator][movement]") {
     TempDirectory temp;
@@ -980,6 +1020,13 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     // Calibration translates the entire arc; it must not shorten or freeze
     // it. End-to-end movement remains exactly the standard 270 degrees.
     REQUIRE(angles.size() == 5);
+    // This is the painted geometry, after IR materialization and the Knob
+    // paint path: the midpoint lands on the standard midpoint angle plus the
+    // captured calibration phase. Keeping this assertion beside the sweep
+    // catches a consumer that accepts the phase field but fails to paint it.
+    const float midpoint_angle = -1.5707963f + 0.4f;
+    CHECK(std::remainder(angles[2] - midpoint_angle, 6.2831853f) ==
+          Catch::Approx(0.0f).margin(0.001f));
     CHECK(angles.back() - angles.front() ==
           Catch::Approx(4.712389f).margin(0.001f));
     // Every frame is a distinct position — no two values share a pointer.

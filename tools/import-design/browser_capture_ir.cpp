@@ -787,6 +787,12 @@ int lower_semantic_controls(const fs::path& path,
                         std::to_string(pointer->r_out);
                     control.attributes["knob_ind_w"] =
                         std::to_string(pointer->width);
+                    // Temporary sprite-pass geometry: unlike the painted
+                    // client rect below, this is the pointer's radial axis.
+                    // The cleaner uses it to erase only the oriented authored
+                    // pointer rather than its much larger axis-aligned bbox.
+                    control.attributes["knob_ind_capture_angle_rad"] =
+                        std::to_string(pointer->angle_rad);
                     // Preserve the authored angular phase at the declared
                     // value. Runtime still sweeps the full normal 270-degree
                     // arc; this offset only calibrates that arc so its initial
