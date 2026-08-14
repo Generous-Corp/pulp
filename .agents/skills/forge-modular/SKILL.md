@@ -1296,3 +1296,13 @@ no lines at all, so the deadline has to be a timer that kills the process.
 `ask_model()` still accepts plain text on stdout: most checks here stub the CLI
 with a script that prints an answer, and making each one imitate a stream to
 test the code AROUND the model would be work for nothing.
+
+Codex failures are not confined to `item.completed` error items. Current Codex
+emits a top-level `{"type":"error","message":...}` followed by a
+`turn.failed` event whose nested `error.message` repeats the same diagnosis.
+Capture all three forms, deduplicate identical messages, and only promote them
+to stderr when the process failed or produced no answer. Otherwise a real quota
+or authentication refusal becomes the useless `exited non-zero and said
+nothing`, while naively appending both current events prints the same failure
+twice. Pin both the current paired-event shape and the older item form in the
+stream regression.
