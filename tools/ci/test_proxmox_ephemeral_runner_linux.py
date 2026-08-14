@@ -17,6 +17,7 @@ TRUSTED_WRAPPER = ROOT / "tools" / "ci" / "proxmox-trusted-ephemeral-runner-linu
 PR_SAFE_WRAPPER = ROOT / "tools" / "ci" / "proxmox-pr-safe-ephemeral-runner-linux.sh"
 TRUSTED_SERVICE = ROOT / "tools" / "ci" / "pulp-trusted-ephemeral-pool@.service"
 PR_SAFE_SERVICE = ROOT / "tools" / "ci" / "pulp-pr-safe-ephemeral-pool@.service"
+QUALITY_TESTS = ROOT / "test" / "cmake" / "quality_tests.cmake"
 
 
 class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
@@ -28,6 +29,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         cls.pr_safe_wrapper = PR_SAFE_WRAPPER.read_text(encoding="utf-8")
         cls.trusted_service = TRUSTED_SERVICE.read_text(encoding="utf-8")
         cls.pr_safe_service = PR_SAFE_SERVICE.read_text(encoding="utf-8")
+        cls.quality_tests = QUALITY_TESTS.read_text(encoding="utf-8")
 
     def test_shell_is_syntactically_valid(self) -> None:
         for script in (SCRIPT, TRUSTED_WRAPPER, PR_SAFE_WRAPPER):
@@ -35,6 +37,12 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 ["/bin/bash", "-n", str(script)], capture_output=True, text=True
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_linux_supervisor_selftest_is_not_registered_on_macos(self) -> None:
+        marker = 'if(CMAKE_SYSTEM_NAME STREQUAL "Linux")'
+        self.assertIn(marker, self.quality_tests)
+        linux_block = self.quality_tests.split(marker, 1)[1].split("endif()", 1)[0]
+        self.assertIn("proxmox-ephemeral-linux-runner-selftest", linux_block)
 
     def test_repository_registration_remains_the_default(self) -> None:
         self.assertIn('REGISTRATION_API="repos/${REPO}"', self.script)
