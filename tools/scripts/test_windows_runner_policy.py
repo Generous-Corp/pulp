@@ -377,19 +377,32 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
+    def test_merge_group_matrix_delegates_linux_to_protected_workflow(self) -> None:
         """Advisory hosted legs must not sit in the path every merge takes.
 
         A merge-group leg runs per queued entry, so Windows there is the single
         largest consumer of hosted minutes while gating nothing — `windows` is
         advisory, and only `macos` plus the version/skill and Vellum checks are
-        required. Linux remains advisory and uses the protected disposable Mac
-        Pro pool when configured, with the hosted resolver fallback.
+        required. Linux remains advisory, but its disposable Mac Pro route must
+        be selected only by the protected default-branch reusable workflow. The
+        queued revision cannot place that selector in its own build matrix.
         """
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
         self.assertIn("macos", keys)
-        self.assertIn("linux", keys)
+        self.assertNotIn("linux", keys)
+
+        trusted = self.workflow["jobs"]["trusted_merge_linux"]
+        self.assertEqual(
+            trusted["uses"],
+            "Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main",
+        )
+        self.assertEqual(trusted["with"]["route_kind"], "trusted")
+        self.assertEqual(trusted["with"]["merge_sha"], "${{ github.sha }}")
+        self.assertIn(
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+            trusted["with"]["runner_selector_json"],
+        )
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.
@@ -476,11 +489,30 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
             merge_condition, "always() && github.event_name == 'merge_group'"
         )
 
-    def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
+    def test_pr_advisory_aliases_do_not_run_on_merge_groups(self) -> None:
         for name in ("linux", "windows"):
             with self.subTest(job=name):
                 condition = " ".join(self.workflow["jobs"][name]["if"].split())
                 self.assertIn("github.event_name != 'merge_group'", condition)
+
+    def test_merge_group_linux_alias_waits_for_protected_result(self) -> None:
+        pr_alias = self.workflow["jobs"]["linux"]
+        self.assertIn("linux-pr-unused", pr_alias["name"])
+
+        merge_alias = self.workflow["jobs"]["linux-merge-group"]
+        self.assertIn("linux-merge-unused", merge_alias["name"])
+        self.assertIn("'linux'", merge_alias["name"])
+        self.assertEqual(
+            merge_alias["needs"], ["classify", "trusted_merge_linux"]
+        )
+        self.assertEqual(
+            " ".join(merge_alias["if"].split()),
+            "always() && github.event_name == 'merge_group'",
+        )
+        body = "\n".join(
+            step.get("run", "") for step in merge_alias["steps"]
+        )
+        self.assertIn("needs.trusted_merge_linux.result", body)
 
 
 class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):

@@ -515,38 +515,13 @@ jobs:
           else:
               macos_provider = "local"
 
-          # The organization runner group `pulp-trusted-build` is selected to
-          # this repository and only allows protected default-branch workflow
-          # refs. That is the access boundary for the disposable Mac Pro pool;
-          # event-name checks remain defense in depth. Never authorize a fork
-          # PR, pull_request_target, or a workflow with secrets to generic
-          # self-hosted Linux. An unset local selector naturally falls back to
-          # ubuntu-latest through resolve_runs_on.py.
-          local_linux_selector = (
-              os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
-          ).strip()
-          trusted_local_linux_workflow = (
-              WORKFLOW_REF
-              == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
-          )
-          trusted_local_linux_event = (
-              trusted_local_linux_workflow
-              and (
-                  EVENT_NAME == "merge_group"
-                  or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
-              )
-          )
-          if (
-              not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()
-              and trusted_local_linux_event
-              and local_linux_selector
-          ):
-              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = local_linux_selector
-              print(
-                  "resolve-provider: trusted local Linux route enabled for "
-                  f"{EVENT_NAME}; selector={local_linux_selector}",
-                  file=sys.stderr,
-              )
+          # Pull-request and merge-group revisions of this file are untrusted
+          # routing inputs. They must never select the protected Mac Pro pool
+          # directly. The jobs below call pr-safe-linux.yml@main instead; that
+          # default-branch workflow is the runner-group allowlisted boundary and
+          # revalidates the event, exact SHA, selector, and short lease before it
+          # checks anything out. Explicit workflow_dispatch remains the only
+          # direct local-Linux override handled by this matrix resolver.
 
           pr_safe_result = subprocess.run(
               PR_SAFE_LINUX_ROUTE_RESOLVER + [
@@ -723,7 +698,11 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          if not pr_safe_linux:
+          # A merge group uses the protected default-branch reusable workflow
+          # below. Do not also spend a GitHub-hosted Linux slot in this
+          # PR-controlled matrix; the reusable workflow itself falls back to
+          # ubuntu-latest when protected admission is not live.
+          if not pr_safe_linux and EVENT_NAME != "merge_group":
               include.append({
                   "key": "linux",
                   "name": "Linux (x64)",
@@ -805,7 +784,26 @@ jobs:
     with:
       source_sha: ${{ github.event.pull_request.head.sha }}
       base_sha: ${{ github.event.pull_request.base.sha }}
+      merge_sha: ${{ github.sha }}
       runner_selector_json: ${{ needs.resolve-provider.outputs.pr_safe_linux_selector_json }}
+    permissions:
+      contents: read
+
+  # Merge-queue Linux executes through the protected default-branch workflow,
+  # never through this queued revision. The runner group allows only that
+  # reusable workflow, whose trusted route verifies github.sha, the exact
+  # capability selector, and the bounded operator lease before admission. A
+  # denied or expired admission safely falls back to GitHub-hosted Linux.
+  trusted_merge_linux:
+    needs: [classify]
+    if: >-
+      github.event_name == 'merge_group' &&
+      needs.classify.outputs.native_build_required == 'true'
+    uses: Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main
+    with:
+      route_kind: trusted
+      merge_sha: ${{ github.sha }}
+      runner_selector_json: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"' }}
     permissions:
       contents: read
 
@@ -1790,6 +1788,7 @@ jobs:
           exit 1
 
   linux:
+    name: ${{ github.event_name == 'merge_group' && 'linux-pr-unused' || 'linux' }}
     needs: [build, classify, resolve-provider, pr_safe_linux]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
@@ -1844,6 +1843,33 @@ jobs:
           # platform:linux + affects-only:non-macos label set (see
           # CLAUDE.md > Platform-focus policy when added).
           echo "Linux leg ${conclusion:-not found} — failing linux alias (advisory only; not required)"
+          exit 1
+
+  linux-merge-group:
+    name: ${{ github.event_name == 'merge_group' && 'linux' || 'linux-merge-unused' }}
+    needs: [classify, trusted_merge_linux]
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    if: always() && github.event_name == 'merge_group'
+    steps:
+      - name: Protected merge-group Linux outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.classify.result }}" != "success" ]; then
+            echo "classify did not succeed — failing linux gate closed"
+            exit 1
+          fi
+          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
+            echo "Skip-safe merge group — linux gate ✓"
+            exit 0
+          fi
+          result="${{ needs.trusted_merge_linux.result }}"
+          echo "Protected merge-group Linux result: $result"
+          if [ "$result" = "success" ]; then
+            echo "Protected merge-group Linux green — linux gate ✓"
+            exit 0
+          fi
+          echo "Protected merge-group Linux $result — failing linux gate"
           exit 1
 
   windows:

@@ -57,7 +57,7 @@ def test_wrong_event_selector_or_disabled_route_falls_back() -> None:
     assert _resolve(enabled="false")["use_reusable"] is False
 
 
-def test_reusable_workflow_is_read_only_and_validates_pr_identity() -> None:
+def test_reusable_workflow_is_read_only_and_validates_both_route_classes() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_call:" in text
     assert "contents: read" in text
@@ -67,7 +67,9 @@ def test_reusable_workflow_is_read_only_and_validates_pr_identity() -> None:
     assert "github.event.pull_request.head.repo.full_name" in text
     assert "github.event.pull_request.head.sha" in text
     assert "pulp-pr-safe-linux-x64" in text
-    assert "pulp-auto-linux-x64" not in text
+    assert 'route_kind == "trusted"' in text
+    assert 'EVENT_NAME") == "merge_group"' in text
+    assert "pulp-auto-linux-x64" in text
 
 
 def test_build_calls_only_the_main_owned_reusable_workflow() -> None:
@@ -76,6 +78,9 @@ def test_build_calls_only_the_main_owned_reusable_workflow() -> None:
     assert "PULP_PR_SAFE_LINUX_LEASE_UNTIL" in text
     assert "PULP_PR_SAFE_LINUX_RUNS_ON_JSON" in text
     assert "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED" in text
+    assert "route_kind: trusted" in text
+    assert text.count("merge_sha: ${{ github.sha }}") == 2
+    assert "trusted local Linux route enabled" not in text
 
 
 def main() -> int:
