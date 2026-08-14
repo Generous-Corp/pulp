@@ -179,6 +179,7 @@ jobs:
             python3 - <<'PY'
           import json
           import os
+          import re
           import subprocess
           import sys
           from pathlib import Path
@@ -512,9 +513,23 @@ jobs:
           local_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
+          main_linux_workflow_ref = (
+              f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
+          )
+          merge_queue_linux_workflow_ref = re.fullmatch(
+              re.escape(
+                  f"{_this_repo}/.github/workflows/build.yml@refs/heads/"
+                  "gh-readonly-queue/main/"
+              )
+              + r"pr-[1-9][0-9]*-[0-9a-f]{40}",
+              WORKFLOW_REF,
+          )
           trusted_local_linux_workflow = (
-              WORKFLOW_REF
-              == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
+              WORKFLOW_REF == main_linux_workflow_ref
+              or (
+                  EVENT_NAME == "merge_group"
+                  and merge_queue_linux_workflow_ref is not None
+              )
           )
           trusted_local_linux_event = (
               trusted_local_linux_workflow

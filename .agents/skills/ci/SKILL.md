@@ -637,16 +637,16 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
-The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
-that means a dedicated organization runner group containing only its ephemeral
-runners, repository access granted only to `Generous-Corp/pulp`, and workflow
-access restricted to the protected default-branch copy of
-`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
-a PR changing its own workflow cannot target the group before enabling
-automatic PR or merge-group routing. Until that exists, do not add another
-private pool to automatic `pull_request` routing. In particular, the Mac Pro
-Linux pool and example-validation advisory macOS selector remain
-`workflow_dispatch`-only.
+The real boundary is enforced outside PR-controlled YAML. The Mac Pro's
+dedicated organization runner group contains only its ephemeral runners, is
+available only to `Generous-Corp/pulp`, and restricts workflow access to the
+protected default-branch `build.yml`. Protected `merge_group` runs may use that
+pool only when `github.workflow_ref` exactly matches the synthetic
+`gh-readonly-queue/main/pr-<number>-<40-hex-sha>` form. Ordinary PR refs,
+alternate queue bases, malformed refs, `pull_request_target`, and secret-bearing
+work remain hosted or on their dedicated trusted path. Same-repository PR-safe
+routing is a separate protected reusable-workflow lane; do not weaken this
+merge-group boundary to make PR-controlled YAML local.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
@@ -2757,21 +2757,21 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
-### Linux self-hosted routing (opt-in) and Windows x64 authority
+### Linux self-hosted routing and Windows x64 authority
 
 `build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
 configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
-the current event. A `workflow_dispatch` input has highest precedence; without
-one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
-merge-group, and push events deliberately ignore the configured private selector
-and use the provider fallback (GitHub-hosted by default) until the external
-runner-group boundary above exists.
+the current event. A `workflow_dispatch` input has highest precedence. Protected
+main and exact protected merge-group workflow refs may authorize the configured
+Mac Pro selector; PR-controlled refs, forks, push, privileged events, and
+malformed queue refs use the provider fallback (GitHub-hosted by default).
 
 The Mac Pro selector is
 `["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
 and is served by the Proxmox ephemeral pool described in
 `docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
+`explicit-dispatch`, `trusted-local`, `security-hosted`, or
+`unconfigured-hosted`, and derives
 the displayed Linux provider from the selector that actually resolved. A
 dispatch using the configured selector fails loudly if it resolves hosted; a
 successfully assigned self-hosted job still has no live capacity fallback.

@@ -249,6 +249,15 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in authorized.group(1)
 
 
+def test_workflow_accepts_only_main_merge_queue_refs_for_trusted_linux() -> None:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    assert 'EVENT_NAME == "merge_group"' in text
+    assert '"gh-readonly-queue/main/"' in text
+    assert r'r"pr-[1-9][0-9]*-[0-9a-f]{40}"' in text
+    assert "merge_queue_linux_workflow_ref is not None" in text
+    assert "gh-readonly-queue/release/" not in text
+
+
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     assert "linux_route_reason: ${{ steps.resolve.outputs.linux_route_reason }}" in text

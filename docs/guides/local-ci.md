@@ -187,6 +187,11 @@ which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
+On `merge_group`, `github.workflow_ref` names the synthetic protected ref, not
+literal `refs/heads/main`. The trusted route accepts only the exact
+`gh-readonly-queue/main/pr-<number>-<40-hex-sha>` form for `build.yml`; other
+bases, malformed refs, ordinary PR refs, and privileged events stay hosted.
+
 The external boundary is live: organization runner group `pulp-trusted-build`
 contains only `Generous-Corp/pulp` and permits only protected default-branch
 workflow refs for the trusted local jobs. The event-name and fork checks in the
