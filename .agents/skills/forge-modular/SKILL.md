@@ -256,6 +256,17 @@ back with its VCA level at zero. If you add a field to a manifest that the
 model should reason about, it has to reach `render_inventory` or it may as well
 not exist.
 
+In a long-lived DAW host, never cache Rack's plugin directories at Python
+import time. The directory may be created by the bundled-pack installer or a
+Rack launch after the generator was loaded. Resolve it at the point of use;
+when `RACK_PLUGIN_DIR` is set, treat that one sandbox-visible directory as the
+authoritative install and scan destination.
+
+“Only” or “exclusively” naming a maker is an output contract, not merely prompt
+copy. Preflight must prove at least one named-maker module is installed, and
+the retained patch may contain only those maker plugin slugs plus Rack's Core
+infrastructure. Reporting a substitution does not satisfy an exclusive request.
+
 ## Rendering a view in a test, when the view places itself
 
 Two of these cost three attempts each, and both produce an EMPTY frame that

@@ -33,6 +33,14 @@ bool file_dialog_open_file_via_backend(const std::string& title,
                                        const std::vector<FileFilter>& filters,
                                        const std::string& default_path,
                                        std::optional<std::string>& out);
+bool file_dialog_save_copy_via_backend(
+    const std::string& source_path,
+    const std::string& title,
+    const std::vector<FileFilter>& filters,
+    const std::string& default_path,
+    const std::string& default_name,
+    std::optional<std::string>& out,
+    std::string* error);
 }
 
 std::optional<std::string> FileDialog::open_file(
@@ -112,6 +120,60 @@ std::optional<std::string> FileDialog::save_file(
     }
 }
 
+std::optional<std::string> FileDialog::save_copy(
+    const std::string& source_path,
+    const std::string& title,
+    const std::vector<FileFilter>& filters,
+    const std::string& default_path,
+    const std::string& default_name,
+    std::string* error) {
+    if (error) error->clear();
+    std::optional<std::string> via_backend;
+    if (detail::file_dialog_save_copy_via_backend(
+            source_path, title, filters, default_path, default_name,
+            via_backend, error)) {
+        return via_backend;
+    }
+    @autoreleasepool {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
+        auto types = make_content_types(filters);
+        if (types) [panel setAllowedContentTypes:types];
+        if (!default_path.empty())
+            [panel setDirectoryURL:[NSURL fileURLWithPath:
+                [NSString stringWithUTF8String:default_path.c_str()]]];
+        if (!default_name.empty())
+            [panel setNameFieldStringValue:
+                [NSString stringWithUTF8String:default_name.c_str()]];
+        if ([panel runModal] != NSModalResponseOK) return std::nullopt;
+
+        NSURL* destination = [panel URL];
+        NSURL* source = [NSURL fileURLWithPath:
+            [NSString stringWithUTF8String:source_path.c_str()]];
+        const BOOL scoped = [destination startAccessingSecurityScopedResource];
+        NSError* copy_error = nil;
+        NSData* bytes = [NSData dataWithContentsOfURL:source
+                                             options:NSDataReadingMappedIfSafe
+                                               error:&copy_error];
+        BOOL wrote = bytes != nil;
+        if (wrote) {
+            wrote = [bytes writeToURL:destination
+                              options:NSDataWritingAtomic
+                                error:&copy_error];
+        }
+        if (scoped) [destination stopAccessingSecurityScopedResource];
+        if (!wrote) {
+            if (error) {
+                NSString* detail = [copy_error localizedDescription];
+                *error = detail ? std::string([detail UTF8String])
+                                : std::string("the copy was not written");
+            }
+            return std::nullopt;
+        }
+        return std::string([[destination path] UTF8String]);
+    }
+}
+
 std::optional<std::string> FileDialog::choose_folder(
     const std::string& title,
     const std::string& default_path) {
@@ -139,6 +201,7 @@ namespace pulp::platform {
 std::optional<std::string> FileDialog::open_file(const std::string&, const std::vector<FileFilter>&, const std::string&) { return std::nullopt; }
 std::vector<std::string> FileDialog::open_files(const std::string&, const std::vector<FileFilter>&, const std::string&) { return {}; }
 std::optional<std::string> FileDialog::save_file(const std::string&, const std::vector<FileFilter>&, const std::string&, const std::string&) { return std::nullopt; }
+std::optional<std::string> FileDialog::save_copy(const std::string&, const std::string&, const std::vector<FileFilter>&, const std::string&, const std::string&, std::string*) { return std::nullopt; }
 std::optional<std::string> FileDialog::choose_folder(const std::string&, const std::string&) { return std::nullopt; }
 }
 
