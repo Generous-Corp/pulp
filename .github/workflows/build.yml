@@ -537,6 +537,9 @@ jobs:
           configured_linux_valid = is_macpro_linux_selector(
               configured_linux_value
           )
+          route_configured_linux_selector = (
+              configured_linux_selector if configured_linux_valid else ""
+          )
           dispatch_linux_value = None
           if dispatch_linux_selector:
               try:
@@ -630,7 +633,7 @@ jobs:
                   "--dispatch-selector-json",
                   os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR", ""),
                   "--configured-selector-json",
-                  os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  route_configured_linux_selector,
                   "--authorized-selector-json",
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
@@ -1799,7 +1802,7 @@ jobs:
           exit 1
 
   linux:
-    needs: [build, classify, resolve-provider, pr_safe_linux]
+    needs: [build, classify, resolve-provider, pr_safe_linux, trusted_linux]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
     # shared hosted pool can be starved of a runner indefinitely. Because it is
@@ -1812,7 +1815,10 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
+    if: >-
+      always() && github.event_name != 'push' &&
+      (github.event_name != 'merge_group' ||
+      needs.resolve-provider.outputs.trusted_linux == 'true')
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -1836,6 +1842,16 @@ jobs:
               exit 0
             fi
             echo "PR-safe Linux leg $result — failing linux alias"
+            exit 1
+          fi
+          if [ "${{ needs.resolve-provider.outputs.trusted_linux }}" = "true" ]; then
+            result="${{ needs.trusted_linux.result }}"
+            echo "Trusted reusable Linux result: $result"
+            if [ "$result" = "success" ]; then
+              echo "Trusted Linux leg green — linux gate ✓"
+              exit 0
+            fi
+            echo "Trusted Linux leg $result — failing linux alias"
             exit 1
           fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \

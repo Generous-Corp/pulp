@@ -346,6 +346,25 @@ def test_workflow_keeps_configured_selector_separate_from_event_authorization() 
     assert "automatic_linux and not linux_local_enabled" in text
     assert '"--requested-provider-env", "LINUX_REQUESTED_PROVIDER"' in text
     assert '"--requested-provider", linux_requested_provider' in text
+    assert "route_configured_linux_selector = (" in text
+    assert "configured_linux_selector if configured_linux_valid else \"\"" in text
+    assert (
+        '"--configured-selector-json",\n'
+        "                  route_configured_linux_selector," in text
+    )
+
+
+def test_trusted_reusable_linux_reports_through_stable_alias() -> None:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    linux_job = text.split("\n  linux:\n", 1)[1].split("\n  windows:\n", 1)[0]
+    assert (
+        "needs: [build, classify, resolve-provider, pr_safe_linux, trusted_linux]"
+        in linux_job
+    )
+    assert "needs.resolve-provider.outputs.trusted_linux == 'true'" in linux_job
+    assert 'result="${{ needs.trusted_linux.result }}"' in linux_job
+    assert 'if [ "$result" = "success" ]' in linux_job
+    assert "Trusted Linux leg $result — failing linux alias" in linux_job
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
