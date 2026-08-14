@@ -11,6 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools" / "ci" / "proxmox-ephemeral-runner-linux.sh"
 SERVICE = ROOT / "tools" / "ci" / "pulp-ephemeral-pool@.service"
+GUIDE = ROOT / "docs" / "guides" / "local-ci.md"
 
 
 class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
@@ -18,6 +19,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = SCRIPT.read_text(encoding="utf-8")
         cls.service = SERVICE.read_text(encoding="utf-8")
+        cls.guide = GUIDE.read_text(encoding="utf-8")
 
     def test_shell_is_syntactically_valid(self) -> None:
         result = subprocess.run(
@@ -117,6 +119,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn(
             'automatic Linux runner organization PAT is missing', self.script
         )
+        self.assertIn("apt-get install -y gh", self.guide)
 
     def test_automatic_pool_requires_private_network_isolation(self) -> None:
         self.assertIn(

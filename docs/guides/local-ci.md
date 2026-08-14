@@ -195,6 +195,15 @@ and every `pull_request_target` workflow remain hosted or on their dedicated
 trusted path; they never use the generic Mac Pro labels.
 
 The supervisor supports that migration without weakening the existing pool.
+Before replacing the supervisor on an existing Proxmox host, install the
+GitHub CLI used for paginated runner inventory and lifecycle calls:
+
+```sh
+apt-get update
+apt-get install -y gh
+command -v gh
+```
+
 Leave `/etc/pulp/linux-runner-group.env` absent for repository registration and
 dispatch-only use. For an automatic pool, install
 `tools/ci/verify_linux_runner_group.py` as
