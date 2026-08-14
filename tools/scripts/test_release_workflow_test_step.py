@@ -1338,6 +1338,12 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
                 fallback = runs_on.index('"ubuntu-latest"')
                 self.assertLess(dedicated, fallback)
                 self.assertNotIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", runs_on)
+                self.assertIn(
+                    '["self-hosted","Linux","X64","pulp-host-macpro",'
+                    '"pulp-release-control-linux-x64"]',
+                    runs_on,
+                )
+                self.assertIn("github.ref == vars.PULP_RELEASE_CONTROL_REF", runs_on)
 
     def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
         for text in (self.release_text, self.sign_text):
@@ -1345,6 +1351,11 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
                 trigger_block = text.split("\n# Never cancel", 1)[0]
                 self.assertNotIn("pull_request:", trigger_block)
                 self.assertNotIn("merge_group:", trigger_block)
+
+    def test_manual_release_repair_stays_on_hosted_linux(self) -> None:
+        runs_on = self.release["jobs"]["resolve-macos-runner"]["runs-on"]
+        self.assertIn("github.event_name == 'push'", runs_on)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", runs_on)
 
     def test_operator_references_forbid_the_generic_linux_selector(self) -> None:
         for path in (RELEASE_PIPELINE_DOC, SHIP_SKILL):

@@ -21,6 +21,11 @@ EXPECTED = [
 PR_SAFE_EXPECTED = [
     f"{REPO}/.github/workflows/pr-safe-linux.yml@refs/heads/main",
 ]
+RELEASE_REF = "refs/tags/v0.806.1"
+RELEASE_EXPECTED = [
+    f"{REPO}/.github/workflows/release-cli.yml@{RELEASE_REF}",
+    f"{REPO}/.github/workflows/sign-and-release.yml@{RELEASE_REF}",
+]
 
 
 def valid_group() -> dict:
@@ -77,6 +82,66 @@ class VerifyLinuxRunnerGroupTests(unittest.TestCase):
         )
         self.assertTrue(
             MODULE.validate_policy(valid_group(), valid_repositories(), REPO, "pr-safe")
+        )
+
+    def test_exact_release_control_scope_passes(self) -> None:
+        group = valid_group()
+        group["name"] = "pulp-release-control"
+        group["selected_workflows"] = RELEASE_EXPECTED
+        self.assertEqual(
+            MODULE.validate_policy(
+                group, valid_repositories(), REPO, "release-control", RELEASE_REF
+            ),
+            [],
+        )
+
+    def test_release_control_requires_an_exact_semver_tag(self) -> None:
+        group = valid_group()
+        group["name"] = "pulp-release-control"
+        group["selected_workflows"] = RELEASE_EXPECTED
+        for bad_ref in (
+            None,
+            "refs/heads/main",
+            "refs/tags/v*",
+            "v0.806.1",
+            "refs/tags/v01.2.3",
+            "refs/tags/v1.02.3",
+            "refs/tags/v1.2.03",
+            "refs/tags/v1.2.3-alpha..1",
+            "refs/tags/v1.2.3-alpha.01",
+        ):
+            self.assertTrue(
+                MODULE.validate_policy(
+                    group, valid_repositories(), REPO, "release-control", bad_ref
+                )
+            )
+
+    def test_release_control_accepts_complete_semver_tag_forms(self) -> None:
+        for workflow_ref in (
+            "refs/tags/v0.806.1",
+            "refs/tags/v1.2.3-alpha.1",
+            "refs/tags/v1.2.3-alpha-1+build.5",
+        ):
+            self.assertTrue(MODULE.valid_release_tag_ref(workflow_ref))
+
+    def test_release_control_rejects_extra_or_wrong_tag_workflows(self) -> None:
+        group = valid_group()
+        group["name"] = "pulp-release-control"
+        group["selected_workflows"] = RELEASE_EXPECTED + [
+            f"{REPO}/.github/workflows/build.yml@{RELEASE_REF}"
+        ]
+        self.assertTrue(
+            MODULE.validate_policy(
+                group, valid_repositories(), REPO, "release-control", RELEASE_REF
+            )
+        )
+        group["selected_workflows"] = [
+            item.replace("v0.806.1", "v0.806.0") for item in RELEASE_EXPECTED
+        ]
+        self.assertTrue(
+            MODULE.validate_policy(
+                group, valid_repositories(), REPO, "release-control", RELEASE_REF
+            )
         )
 
 

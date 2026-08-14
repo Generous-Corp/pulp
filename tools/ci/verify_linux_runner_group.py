@@ -19,7 +19,35 @@ POLICIES = {
         "name": "pulp-pr-safe-build",
         "workflows": (".github/workflows/pr-safe-linux.yml",),
     },
+    "release-control": {
+        "name": "pulp-release-control",
+        "workflows": (
+            ".github/workflows/release-cli.yml",
+            ".github/workflows/sign-and-release.yml",
+        ),
+    },
 }
+
+RELEASE_TAG_REF = re.compile(
+    r"refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+
+
+def valid_release_tag_ref(workflow_ref: str | None) -> bool:
+    if workflow_ref is None:
+        return False
+    match = RELEASE_TAG_REF.fullmatch(workflow_ref)
+    if match is None:
+        return False
+    prerelease = match.group(4)
+    if prerelease is None:
+        return True
+    return all(
+        not (identifier.isdigit() and len(identifier) > 1 and identifier[0] == "0")
+        for identifier in prerelease.split(".")
+    )
 
 
 def api_json(gh: str, path: str) -> dict:
@@ -30,11 +58,23 @@ def api_json(gh: str, path: str) -> dict:
 
 
 def validate_policy(
-    group: dict, repositories: dict, repo: str, policy: str = "trusted"
+    group: dict,
+    repositories: dict,
+    repo: str,
+    policy: str = "trusted",
+    workflow_ref: str | None = None,
 ) -> list[str]:
     expected_policy = POLICIES[policy]
+    if policy == "release-control":
+        if not valid_release_tag_ref(workflow_ref):
+            return ["release-control policy requires an exact semantic-version tag ref"]
+        selected_ref = workflow_ref
+    else:
+        if workflow_ref is not None:
+            return [f"{policy} policy does not accept a workflow ref override"]
+        selected_ref = "refs/heads/main"
     expected = [
-        f"{repo}/{workflow}@refs/heads/main"
+        f"{repo}/{workflow}@{selected_ref}"
         for workflow in expected_policy["workflows"]
     ]
     failures = []
@@ -65,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--group-id", required=True)
     parser.add_argument("--policy", choices=sorted(POLICIES), default="trusted")
+    parser.add_argument("--workflow-ref")
     args = parser.parse_args(argv)
     owner, separator, _ = args.repo.partition("/")
     if not separator or not args.group_id.isdigit():
@@ -77,7 +118,9 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, json.JSONDecodeError) as error:
         print(f"cannot verify runner group policy: {error}", file=sys.stderr)
         return 1
-    failures = validate_policy(group, repositories, args.repo, args.policy)
+    failures = validate_policy(
+        group, repositories, args.repo, args.policy, args.workflow_ref
+    )
     if failures:
         for failure in failures:
             print("runner group policy error: " + failure, file=sys.stderr)

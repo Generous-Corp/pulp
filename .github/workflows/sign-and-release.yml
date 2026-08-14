@@ -34,7 +34,7 @@ jobs:
     # through its dedicated release-control selector. Unset that variable to
     # fall directly to GitHub-hosted Ubuntu; the generic PR Linux selector is
     # never consumed by signing or deployment control.
-    runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(github.ref == vars.PULP_RELEASE_CONTROL_REF && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON == '["self-hosted","Linux","X64","pulp-host-macpro","pulp-release-control-linux-x64"]' && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
     steps:

@@ -628,6 +628,7 @@ OTHER_SUPERVISORS = {
     "proxmox-systemd": CI / "proxmox-ephemeral-runner-linux.sh",
     "proxmox-systemd-trusted": CI / "proxmox-trusted-ephemeral-runner-linux.sh",
     "proxmox-systemd-pr-safe": CI / "proxmox-pr-safe-ephemeral-runner-linux.sh",
+    "proxmox-systemd-release-control": CI / "proxmox-release-control-ephemeral-runner-linux.sh",
     "native-intel-launchd": CI / "native-intel-runner.sh",
 }
 

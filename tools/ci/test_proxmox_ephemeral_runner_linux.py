@@ -16,8 +16,10 @@ SCRIPT = ROOT / "tools" / "ci" / "proxmox-ephemeral-runner-linux.sh"
 SERVICE = ROOT / "tools" / "ci" / "pulp-ephemeral-pool@.service"
 TRUSTED_WRAPPER = ROOT / "tools" / "ci" / "proxmox-trusted-ephemeral-runner-linux.sh"
 PR_SAFE_WRAPPER = ROOT / "tools" / "ci" / "proxmox-pr-safe-ephemeral-runner-linux.sh"
+RELEASE_CONTROL_WRAPPER = ROOT / "tools" / "ci" / "proxmox-release-control-ephemeral-runner-linux.sh"
 TRUSTED_SERVICE = ROOT / "tools" / "ci" / "pulp-trusted-ephemeral-pool@.service"
 PR_SAFE_SERVICE = ROOT / "tools" / "ci" / "pulp-pr-safe-ephemeral-pool@.service"
+RELEASE_CONTROL_SERVICE = ROOT / "tools" / "ci" / "pulp-release-control-ephemeral-pool@.service"
 QUALITY_TESTS = ROOT / "test" / "cmake" / "quality_tests.cmake"
 
 
@@ -28,12 +30,14 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         cls.service = SERVICE.read_text(encoding="utf-8")
         cls.trusted_wrapper = TRUSTED_WRAPPER.read_text(encoding="utf-8")
         cls.pr_safe_wrapper = PR_SAFE_WRAPPER.read_text(encoding="utf-8")
+        cls.release_control_wrapper = RELEASE_CONTROL_WRAPPER.read_text(encoding="utf-8")
         cls.trusted_service = TRUSTED_SERVICE.read_text(encoding="utf-8")
         cls.pr_safe_service = PR_SAFE_SERVICE.read_text(encoding="utf-8")
+        cls.release_control_service = RELEASE_CONTROL_SERVICE.read_text(encoding="utf-8")
         cls.quality_tests = QUALITY_TESTS.read_text(encoding="utf-8")
 
     def test_shell_is_syntactically_valid(self) -> None:
-        for script in (SCRIPT, TRUSTED_WRAPPER, PR_SAFE_WRAPPER):
+        for script in (SCRIPT, TRUSTED_WRAPPER, PR_SAFE_WRAPPER, RELEASE_CONTROL_WRAPPER):
             result = subprocess.run(
                 ["/bin/bash", "-n", str(script)], capture_output=True, text=True
             )
@@ -53,7 +57,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
     def test_org_registration_requires_the_fail_closed_verifier(self) -> None:
         self.assertIn('REGISTRATION_API="orgs/${ORG}"', self.script)
         self.assertIn('RUNNER_URL="https://github.com/${ORG}"', self.script)
-        self.assertIn('--gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID"', self.script)
+        self.assertIn('--gh "$GH_CLI" --repo "$REPO"', self.script)
+        self.assertIn('--group-id "$RUNNER_GROUP_ID" --policy "$RUNNER_GROUP_POLICY"', self.script)
         self.assertIn('--policy "$RUNNER_GROUP_POLICY"', self.script)
         self.assertIn('automatic Linux runner group policy is not fail-closed', self.script)
         self.assertIn('EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"', self.script)
@@ -61,6 +66,15 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('runner labels do not match the exact policy', self.script)
         self.assertIn('runner name prefix does not match the exact policy', self.script)
         self.assertIn('RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"', self.script)
+        self.assertIn(
+            "release-control runner requires a tag-shaped workflow ref",
+            self.script,
+        )
+        self.assertNotIn("semantic-version tag ref", self.script)
+        self.assertIn(
+            'GROUP_VERIFY_ARGS+=(--workflow-ref "$RELEASE_WORKFLOW_REF")',
+            self.script,
+        )
 
     def test_automatic_capabilities_require_an_org_group(self) -> None:
         self.assertIn(
@@ -69,6 +83,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn('*,pulp-auto-linux-x64,*', self.script)
         self.assertIn('*,pulp-pr-safe-linux-x64,*', self.script)
+        self.assertIn('*,pulp-release-control-linux-x64,*', self.script)
 
     def test_all_registration_lifecycle_calls_follow_the_selected_scope(self) -> None:
         self.assertGreaterEqual(self.script.count("${REGISTRATION_API}/actions/runners"), 3)
@@ -99,14 +114,31 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertNotIn("EnvironmentFile=-", self.trusted_service)
         self.assertNotIn("EnvironmentFile=-", self.pr_safe_service)
+        self.assertIn(
+            "EnvironmentFile=/etc/pulp/linux-release-control-runner-group.env",
+            self.release_control_service,
+        )
+        self.assertIn(
+            "ExecStart=/usr/local/sbin/pulp-release-control-ephemeral-runner.sh",
+            self.release_control_service,
+        )
+        self.assertNotIn("EnvironmentFile=-", self.release_control_service)
+        self.assertIn("Restart=on-failure", self.release_control_service)
+        self.assertNotIn("Restart=always", self.release_control_service)
         documentation = (
             "Documentation=https://github.com/Generous-Corp/pulp/blob/main/"
             "docs/guides/local-ci.md"
         )
-        for service in (self.service, self.trusted_service, self.pr_safe_service):
+        for service in (
+            self.service,
+            self.trusted_service,
+            self.pr_safe_service,
+            self.release_control_service,
+        ):
             self.assertIn(documentation, service)
         self.assertIn("User=root", self.trusted_service)
         self.assertIn("User=root", self.pr_safe_service)
+        self.assertIn("User=root", self.release_control_service)
 
     def test_wrappers_select_exact_disjoint_policies(self) -> None:
         self.assertIn('PULP_LINUX_RUNNER_GROUP_POLICY="trusted"', self.trusted_wrapper)
@@ -120,7 +152,22 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn("pulp-pr-safe-linux-x64", self.pr_safe_wrapper)
         self.assertNotIn("pulp-auto-linux-x64", self.pr_safe_wrapper)
-        for wrapper in (self.trusted_wrapper, self.pr_safe_wrapper):
+        self.assertIn(
+            'PULP_LINUX_RUNNER_GROUP_POLICY="release-control"',
+            self.release_control_wrapper,
+        )
+        self.assertIn(
+            'PULP_RUNNER_NAME_PREFIX="pulp-release-control-ephemeral"',
+            self.release_control_wrapper,
+        )
+        self.assertIn("pulp-release-control-linux-x64", self.release_control_wrapper)
+        self.assertNotIn("pulp-auto-linux-x64", self.release_control_wrapper)
+        self.assertNotIn("pulp-pr-safe-linux-x64", self.release_control_wrapper)
+        for wrapper in (
+            self.trusted_wrapper,
+            self.pr_safe_wrapper,
+            self.release_control_wrapper,
+        ):
             self.assertIn('exec "$SCRIPT_DIR/pulp-ephemeral-runner.sh"', wrapper)
             self.assertNotIn('exec "$SCRIPT_DIR/proxmox-ephemeral-runner-linux.sh"', wrapper)
 
@@ -131,6 +178,26 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.script,
         )
         self.assertIn("slot ${RUNNER_SLOT_ID}", self.script)
+
+    def test_vmid_lock_covers_clone_attachment_and_firewall_proof(self) -> None:
+        allocation = self.script.split("# ── claim a clone id", 1)[1].split(
+            "# ── wait for the guest", 1
+        )[0]
+        self.assertLess(allocation.index('qm clone "$GOLDEN"'), allocation.index('qm start "$VMID"'))
+        self.assertLess(
+            allocation.index('automatic runner firewall rules are not installed'),
+            allocation.rindex("flock -u 9"),
+        )
+        self.assertIn(
+            '--description "pulp-runner-generation=${RUNNER_NAME}"', allocation
+        )
+        self.assertLess(
+            allocation.index('--description "pulp-runner-generation=${RUNNER_NAME}"'),
+            allocation.rindex("flock -u 9"),
+        )
+        self.assertIn('exec 8>"$HOST_NETWORK_LOCK"', allocation)
+        self.assertLess(allocation.index('flock -w 30 8'), allocation.index('flock -w 300 9'))
+        self.assertGreater(allocation.rindex("flock -u 8"), allocation.index('qm start "$VMID"'))
 
     def test_stale_reclamation_is_slot_scoped_and_busy_safe(self) -> None:
         self.assertIn("reclaim_stale_slot_runners", self.script)
@@ -271,18 +338,21 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("for fence_probe in 1 2; do", helper)
         self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
         self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
-        self.assertIn(
-            'destroy_clone_and_firewall_policy "$vmid" '
-            '"${FIREWALL_DIR}/${vmid}.fw"',
-            helper,
-        )
+        self.assertIn('exec 9>"$VMID_LOCK"', helper)
+        self.assertIn('flock -w 300 9', helper)
+        self.assertIn("description: pulp-runner-generation=", helper)
+        self.assertIn('[ "$clone_generation" = "$runner_name" ]', helper)
+        self.assertIn("belongs to a different clone generation", helper)
+        self.assertIn("deferred cleanup found clone $vmid already absent", helper)
         self.assertIn(
             'die "cannot determine deferred-cleanup clone status"', helper
         )
         self.assertLess(
             helper.index('true) sleep 15; continue'),
-            helper.index('destroy_clone_and_firewall_policy "$vmid"'),
+            helper.index('exec 9>"$VMID_LOCK"'),
         )
+        self.assertLess(helper.index('flock -w 300 9'), helper.index('qm stop "$vmid"'))
+        self.assertLess(helper.index('qm stop "$vmid"'), helper.index('qm destroy "$vmid"'))
 
     def test_vmid_reuse_cannot_race_firewall_policy_removal(self) -> None:
         destroy_helper = self.script[
@@ -309,8 +379,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertEqual(
             self.script.count("destroy_clone_and_firewall_policy "),
-            2,
-            "normal and deferred cleanup must share the locked destroy helper",
+            1,
+            "normal cleanup must use the locked destroy helper",
         )
 
     def test_deferred_cleanup_keeps_firewall_when_vm_status_is_unknown(self) -> None:
@@ -341,12 +411,14 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "set -u\n"
                 "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
+                "flock() { :; }\n"
                 "configure_github_auth() { :; }\n"
                 "github_api() { :; }\n"
                 f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
                 f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
                 "GITHUB_AUTH_MODE='token-file'\n"
                 f"FIREWALL_DIR='{tmp}'\n"
+                f"VMID_LOCK='{tmp}/vmid.lock'\n"
                 + helper
                 + "\ndeferred_cleanup 200 pulp-pr-safe-ephemeral-200-test orgs/Generous-Corp\n",
                 encoding="utf-8",
@@ -361,9 +433,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 timeout=25,
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn(
-                "cannot determine deferred-cleanup clone status", result.stdout
-            )
+            self.assertIn("cannot inspect VM inventory", result.stdout)
             self.assertTrue(firewall.exists())
             self.assertFalse(destroyed.exists())
 
@@ -579,6 +649,16 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertNotIn("--token", registration)
         self.assertNotIn("${RT}", registration)
 
+    def test_runner_transport_failure_restarts_one_job_service(self) -> None:
+        run_block = self.script.split('log "waiting for one job', 1)[1]
+        self.assertIn("if ! ssh -o BatchMode=yes", run_block)
+        self.assertIn("runner transport failed before one-job completion", run_block)
+        self.assertLess(
+            run_block.index("runner transport failed before one-job completion"),
+            run_block.index('log "job finished on $VMID"'),
+        )
+        self.assertIn("Restart=on-failure", self.release_control_service)
+
     def test_automatic_pool_can_use_the_root_owned_github_app_helper(self) -> None:
         self.assertIn(
             'GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"',
@@ -639,6 +719,13 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn(
             'isolated bridge ${NETWORK_BRIDGE} must own only ${GUEST_IPV4_GATEWAY}/30',
+            self.script,
+        )
+        self.assertIn('sysctl -n net.ipv4.ip_forward', self.script)
+        self.assertIn('automatic runner requires IPv4 forwarding', self.script)
+        self.assertIn('nat_rules="$(iptables-save -t nat)"', self.script)
+        self.assertIn(
+            'automatic runner requires exactly one source-scoped NAT rule for ${NETWORK_BRIDGE}',
             self.script,
         )
         self.assertIn('[ "$isolated_attachment" = 1 ]', self.script)

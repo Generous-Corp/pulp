@@ -101,6 +101,24 @@
       "hosts": []
     },
     {
+      "variable": "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
+      "purpose": "Exact-tag-only release-cli and sign-and-release resolver lane on disposable Mac Pro Linux VMs. The workflow expression accepts only this byte-exact selector; unset or malformed values fall back hosted.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-host-macpro",
+        "pulp-release-control-linux-x64"
+      ],
+      "unset_fallback": "ubuntu-latest",
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "supervisor": "proxmox-systemd-release-control",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
       "variable": "PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON",
       "purpose": "release-cli Intel/universal macOS build lane.",
       "expect": [

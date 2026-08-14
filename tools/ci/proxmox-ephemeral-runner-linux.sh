@@ -36,9 +36,11 @@ MEM_MB=8192
 REPO="Generous-Corp/pulp"
 ORG="${REPO%%/*}"
 BASE_LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
+RELEASE_CONTROL_LABELS="self-hosted,Linux,X64,pulp-host-macpro,pulp-release-control-linux-x64"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
 RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
 RUNNER_GROUP_POLICY="${PULP_LINUX_RUNNER_GROUP_POLICY:-trusted}"
+RELEASE_WORKFLOW_REF="${PULP_LINUX_RELEASE_WORKFLOW_REF:-}"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
 ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
 GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"
@@ -49,6 +51,7 @@ GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
 VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock
+HOST_NETWORK_LOCK=/var/lock/pulp-ci-host-network.lock
 AUTOMATIC_NETWORK_ISOLATION=0
 GITHUB_API_READY=0
 PAT=""
@@ -197,7 +200,7 @@ deferred_cleanup() {
                 { [ "$status" = online ] || [ "$status" = offline ]; } \
                     || die "invalid deferred-cleanup fenced runner status"
                 case ",$labels," in
-                    *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
+                    *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-release-control-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
                         die "routing label survived deferred-cleanup fence"
                         ;;
                 esac
@@ -212,17 +215,6 @@ deferred_cleanup() {
     done
     [ "$SECONDS" -lt "$deadline" ] \
         || die "deferred cleanup timed out while runner remained busy"
-
-    local vm_status
-    timeout 20s qm stop "$vmid" >/dev/null 2>&1 || true
-    for _ in $(seq 1 60); do
-        vm_status="$(qm status "$vmid" 2>/dev/null)" \
-            || die "cannot determine deferred-cleanup clone status"
-        [ "$vm_status" = "status: stopped" ] && break
-        sleep 2
-    done
-    [ "$vm_status" = "status: stopped" ] \
-        || die "deferred-cleanup clone did not stop"
 
     runners_tsv="$(github_api --paginate \
         "${registration_api}/actions/runners?per_page=100" \
@@ -240,8 +232,42 @@ deferred_cleanup() {
             "${registration_api}/actions/runners/${rid}" \
             || die "cannot deregister deferred-cleanup runner"
     fi
-    destroy_clone_and_firewall_policy "$vmid" "${FIREWALL_DIR}/${vmid}.fw" \
-        || die "cannot atomically destroy deferred-cleanup clone and firewall policy"
+    # Bind cleanup to this exact clone generation. A transient systemd cleanup
+    # unit may restart after the old VM has gone; without the allocation lock
+    # and generation proof, that retry could stop a successor that reused the
+    # numeric VMID.
+    exec 9>"$VMID_LOCK" || die "cannot open the deferred-cleanup VMID lock"
+    flock -w 300 9 || die "timed out waiting for the deferred-cleanup VMID lock"
+    vm_inventory="$(qm list 2>/dev/null)" \
+        || die "cannot inspect VM inventory during deferred cleanup"
+    if ! awk -v vmid="$vmid" 'NR > 1 && $1 == vmid { found=1 } END { exit !found }' \
+        <<<"$vm_inventory"; then
+        rm -f -- "${FIREWALL_DIR}/${vmid}.fw" \
+            || die "cannot remove already-absent clone firewall policy"
+        flock -u 9 || die "cannot release the deferred-cleanup VMID lock"
+        log "deferred cleanup found clone $vmid already absent"
+        return
+    fi
+    clone_generation="$(qm config "$vmid" 2>/dev/null \
+        | sed -n 's/^description: pulp-runner-generation=//p')" \
+        || die "cannot inspect deferred-cleanup clone generation"
+    [ "$clone_generation" = "$runner_name" ] \
+        || die "deferred-cleanup VMID $vmid belongs to a different clone generation"
+    local vm_status
+    timeout 20s qm stop "$vmid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+        vm_status="$(qm status "$vmid" 2>/dev/null)" \
+            || die "cannot determine deferred-cleanup clone status"
+        [ "$vm_status" = "status: stopped" ] && break
+        sleep 2
+    done
+    [ "$vm_status" = "status: stopped" ] \
+        || die "deferred-cleanup clone did not stop"
+    qm destroy "$vmid" --purge >/dev/null \
+        || die "cannot destroy deferred-cleanup clone"
+    rm -f -- "${FIREWALL_DIR}/${vmid}.fw" \
+        || die "cannot remove deferred-cleanup firewall policy"
+    flock -u 9 || die "cannot release the deferred-cleanup VMID lock"
     log "deferred cleanup completed for clone $vmid"
 }
 
@@ -271,14 +297,21 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -r "$GROUP_VERIFIER" ] \
         || die "runner-group verifier is missing at $GROUP_VERIFIER"
     configure_github_auth organization "$ORG_PAT_FILE"
-    GROUP_NAME="$(verify_runner_group \
-        --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID" \
-        --policy "$RUNNER_GROUP_POLICY")" \
+    GROUP_VERIFY_ARGS=(--gh "$GH_CLI" --repo "$REPO" \
+        --group-id "$RUNNER_GROUP_ID" --policy "$RUNNER_GROUP_POLICY")
+    if [ "$RUNNER_GROUP_POLICY" = release-control ]; then
+        [[ "$RELEASE_WORKFLOW_REF" =~ ^refs/tags/v[A-Za-z0-9.+-]+$ ]] \
+            || die "release-control runner requires a tag-shaped workflow ref"
+        GROUP_VERIFY_ARGS+=(--workflow-ref "$RELEASE_WORKFLOW_REF")
+    elif [ -n "$RELEASE_WORKFLOW_REF" ]; then
+        die "$RUNNER_GROUP_POLICY runner forbids a release workflow ref"
+    fi
+    GROUP_NAME="$(verify_runner_group "${GROUP_VERIFY_ARGS[@]}")" \
         || die "automatic Linux runner group policy is not fail-closed"
     [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
     command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
         || die "$FIREWALL_STATUS_BIN is not on PATH"
-    for tool in timeout ip iptables-save ip6tables-save ipset ebtables-save; do
+    for tool in timeout ip sysctl iptables iptables-save ip6tables-save ipset ebtables-save; do
         command -v "$tool" >/dev/null 2>&1 \
             || die "$tool is required for automatic runner firewall proof"
     done
@@ -300,6 +333,10 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
             EXPECTED_LABELS="${BASE_LABELS},pulp-pr-safe-linux-x64"
             EXPECTED_PREFIX="pulp-pr-safe-ephemeral"
             ;;
+        release-control)
+            EXPECTED_LABELS="$RELEASE_CONTROL_LABELS"
+            EXPECTED_PREFIX="pulp-release-control-ephemeral"
+            ;;
         *) die "unsupported automatic Linux runner-group policy" ;;
     esac
     [ "$LABELS" = "$EXPECTED_LABELS" ] \
@@ -308,7 +345,8 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         || die "$RUNNER_GROUP_POLICY runner name prefix does not match the exact policy"
     AUTOMATIC_NETWORK_ISOLATION=1
 elif [[ ",$LABELS," == *,pulp-auto-linux-x64,* \
-    || ",$LABELS," == *,pulp-pr-safe-linux-x64,* ]]; then
+    || ",$LABELS," == *,pulp-pr-safe-linux-x64,* \
+    || ",$LABELS," == *,pulp-release-control-linux-x64,* ]]; then
     die "automatic Linux capability labels require a verified organization runner group"
 else
     configure_github_auth repository "$PAT_FILE"
@@ -329,6 +367,13 @@ fi
 # destroys 200 out from under the winner, whose `qm start` finds no config file.
 # Observed, not theoretical.
 LOCK="$VMID_LOCK"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    # Match the host setup helper's lock order: network first, VMID second.
+    # Holding both through attachment makes its empty-bridge rollback proof
+    # mutually exclusive with this clone's topology admission.
+    exec 8>"$HOST_NETWORK_LOCK" || die "cannot open the host-network lock"
+    flock -w 30 8 || die "timed out waiting for the host-network lock"
+fi
 exec 9>"$LOCK" || die "cannot open $LOCK"
 flock -w 300 9 || die "timed out waiting for the VMID lock"
 
@@ -366,6 +411,18 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         | awk '{ print $4 }')"
     [ "$bridge_ipv4" = "${GUEST_IPV4_GATEWAY}/30" ] \
         || die "isolated bridge ${NETWORK_BRIDGE} must own only ${GUEST_IPV4_GATEWAY}/30"
+    [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null)" = 1 ] \
+        || die "automatic runner requires IPv4 forwarding"
+    nat_rules="$(iptables-save -t nat)" \
+        || die "cannot inspect automatic runner NAT policy"
+    nat_count="$(grep -Fc -- \
+        "-s ${GUEST_IPV4_PREFIX}.${VMID}.0/30 -o vmbr0 -m comment --comment \"pulp-ci-isolation:${NETWORK_BRIDGE}\" -j MASQUERADE" \
+        <<<"$nat_rules")" || {
+            nat_status=$?
+            [ "$nat_status" = 1 ] || die "cannot count automatic runner NAT policy"
+        }
+    [ "$nat_count" = 1 ] \
+        || die "automatic runner requires exactly one source-scoped NAT rule for ${NETWORK_BRIDGE}"
 fi
 # The slot identity is stable for operations and metrics.  The GitHub
 # registration name is intentionally unique per boot; the decisions contract
@@ -475,7 +532,7 @@ cleanup() {
                     { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                         || { log "ERROR: exact runner has invalid fenced status; leaving clone $VMID for safe recovery"; return; }
                     case ",$runner_labels," in
-                        *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
+                        *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-release-control-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
                             log "ERROR: a routing label survived dispatch fence; leaving clone $VMID for safe recovery"
                             return
                             ;;
@@ -559,9 +616,10 @@ fi
 # and the pool silently becomes persistent runners that leak VMIDs.
 CLONED=1
 
-# The id is now committed to disk (200.conf exists), so no other slot can pick
-# it. Safe to release before the slow boot/register/run phase.
-flock -u 9
+# Keep the allocation lock until the clone is attached and its active firewall
+# policy is proved. The host-network rollback takes this same lock before its
+# empty-bridge proof, so it cannot tear down a bridge between clone allocation
+# and attachment.
 NET0="virtio=${GUEST_MAC},bridge=${NETWORK_BRIDGE}"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     CONTROLLER_IPV4="$(ip -4 route get "$GUEST_IP" 2>/dev/null \
@@ -620,6 +678,7 @@ EOF
 fi
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
     --cpuunits 50 --balloon 0 --onboot 0 \
+    --description "pulp-runner-generation=${RUNNER_NAME}" \
     --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_DNS_SERVER" >/dev/null \
@@ -705,6 +764,10 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     [ "$firewall_active" = 1 ] \
         || die "automatic runner firewall rules are not installed"
 fi
+flock -u 9
+[ "$AUTOMATIC_NETWORK_ISOLATION" != 1 ] \
+    || flock -u 8 \
+    || die "cannot release the host-network lock"
 
 # ── wait for the guest ───────────────────────────────────────────────────────
 for _ in $(seq 1 45); do
@@ -769,6 +832,8 @@ printf '%s\n' "$RT" | ssh -o BatchMode=yes "ci@$GUEST_IP" "
 # ── run exactly one job ──────────────────────────────────────────────────────
 # run.sh exits once the single job completes, because of --ephemeral.
 log "waiting for one job (runner exits when done)"
-ssh -o BatchMode=yes "ci@$GUEST_IP" 'cd ~/actions-runner && ./run.sh' 2>&1 \
-    | sed 's/^/    /'
+if ! ssh -o BatchMode=yes "ci@$GUEST_IP" \
+    'cd ~/actions-runner && ./run.sh' 2>&1 | sed 's/^/    /'; then
+    die "runner transport failed before one-job completion"
+fi
 log "job finished on $VMID"

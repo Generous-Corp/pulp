@@ -278,6 +278,8 @@ if(Python3_Interpreter_FOUND)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
+        add_test(NAME proxmox-ci-host-network-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_configure_proxmox_ci_network.py")
     endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the

@@ -205,7 +205,7 @@ Both `pulp-trusted-build` and `pulp-pr-safe-build` permit only
 selector, lease, and runner capability for each group. Never share their
 capability labels, runner-name namespaces, health leases, or group ids.
 
-Install the common supervisor, both policy wrappers, the verifier, and the two
+Install the common supervisor, the policy wrappers, the verifier, and the three
 fail-closed systemd templates. The group environment files are mandatory for
 the automatic units; a missing file leaves that pool offline:
 
@@ -216,11 +216,15 @@ install -o root -g root -m 0755 tools/ci/proxmox-trusted-ephemeral-runner-linux.
   /usr/local/sbin/pulp-trusted-ephemeral-runner.sh
 install -o root -g root -m 0755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh \
   /usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-release-control-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-release-control-ephemeral-runner.sh
 install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
 install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
   /etc/systemd/system/
 install -o root -g root -m 0644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -o root -g root -m 0644 tools/ci/pulp-release-control-ephemeral-pool@.service \
   /etc/systemd/system/
 install -d -o root -g root -m 0755 /etc/pulp
 printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nPULP_LINUX_GH_CLI=/usr/local/bin/ghapp\n' "$TRUSTED_GROUP_ID" \
@@ -230,6 +234,56 @@ printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nP
 chmod 0600 /etc/pulp/linux-{trusted,pr-safe}-runner-group.env
 systemctl daemon-reload
 ```
+
+Release control uses a third, dedicated group and is deliberately configured
+per tag. GitHub runner-group workflow restrictions must pin a branch, tag, or
+full SHA and apply only to jobs directly defined in the selected workflow, so
+the tag-triggered resolver jobs cannot safely reuse either main-only group.
+Create `pulp-release-control` with only this repository and exactly these two
+workflow entries for the release being served (replace the example tag):
+
+```text
+Generous-Corp/pulp/.github/workflows/release-cli.yml@refs/tags/v0.806.1
+Generous-Corp/pulp/.github/workflows/sign-and-release.yml@refs/tags/v0.806.1
+```
+
+Then install a root-only environment containing the dedicated group id, App
+authentication, and the same exact tag ref:
+
+```sh
+printf '%s\n' \
+  "PULP_LINUX_RUNNER_GROUP_ID=$RELEASE_CONTROL_GROUP_ID" \
+  'PULP_LINUX_GITHUB_AUTH_MODE=app-helper' \
+  'PULP_LINUX_GH_CLI=/usr/local/bin/ghapp' \
+  'PULP_LINUX_RELEASE_WORKFLOW_REF=refs/tags/v0.806.1' \
+  > /etc/pulp/linux-release-control-runner-group.env
+chmod 0600 /etc/pulp/linux-release-control-runner-group.env
+```
+
+The release-control wrapper has a disjoint runner name and capability label,
+and its verifier rejects a branch, wildcard tag, non-SemVer or mismatched tag,
+extra workflow, or either existing group. Start two one-job slots and set
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON` to the exact dedicated labels only
+after both are online and idle:
+
+```sh
+systemctl start pulp-release-control-ephemeral-pool@{1,2}.service
+gh variable set PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON \
+  --repo Generous-Corp/pulp \
+  --body '["self-hosted","Linux","X64","pulp-host-macpro","pulp-release-control-linux-x64"]'
+gh variable set PULP_RELEASE_CONTROL_REF \
+  --repo Generous-Corp/pulp --body 'refs/tags/v0.806.1'
+```
+
+One slot serves each tag workflow; a successful slot does not restart. A job already assigned to
+`ubuntu-latest` cannot be retargeted; do not redispatch an in-flight release.
+Manual `workflow_dispatch` repairs deliberately ignore this selector and stay
+hosted because their workflow ref is `main`, not the admitted immutable tag.
+After both resolver jobs finish, unset the selector, stop the unit, confirm the
+runner and clone are gone, delete both `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`
+and `PULP_RELEASE_CONTROL_REF`, remove the tag workflows from the group, and
+remove the environment file. Never leave a release tag admitted for the next
+release.
 
 The Mac Pro automatic organization-scoped units use its existing root-owned
 `/usr/local/bin/ghapp` helper by setting
@@ -277,6 +331,46 @@ all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
 destinations are denied; public IPv4 egress remains available for source and
 dependency downloads. Do not enable the automatic slots on a flat bridged LAN
 without that policy.
+
+Configure that host boundary with the checked-in helper. Start with its
+read-only plan; it refuses an unexpected existing bridge, managed-file drift,
+a non-Proxmox host, or a host whose main interfaces file does not source
+`interfaces.d`:
+
+```sh
+install -o root -g root -m 0755 tools/ci/configure-proxmox-ci-network.sh \
+  /usr/local/sbin/configure-proxmox-ci-network
+/usr/local/sbin/configure-proxmox-ci-network --dry-run
+```
+
+After reviewing the exact plan locally and while retaining an independent
+console path to the Proxmox host, apply and verify it:
+
+```sh
+/usr/local/sbin/configure-proxmox-ci-network --apply
+/usr/local/sbin/configure-proxmox-ci-network --verify
+```
+
+The helper installs only `/etc/network/interfaces.d/pulp-ci-isolation` and
+`/etc/sysctl.d/99-pulp-ci-isolation.conf`; it activates only the three new
+bridges and adds one source-scoped `MASQUERADE` rule per `/30`. It does not run
+`ifreload`, bring `vmbr0` down, or rewrite `/etc/network/interfaces`. Apply and
+rollback both compare the live `vmbr0` address and default route before and
+after. The rollback refuses to proceed while a bridge has an attached guest or
+if either managed file has drifted, removes only its tagged NAT rules and
+bridges, and restores the pre-apply forwarding value recorded in root-only
+state. Apply and rollback take the runner supervisor's VMID allocation lock for
+the whole topology transition, so a clone cannot attach between the idle proof
+and bridge teardown. A completed rollback is safe to repeat:
+
+```sh
+/usr/local/sbin/configure-proxmox-ci-network --rollback
+```
+
+Keep the automatic runner services disabled until `--verify`, the exact runner
+group proof, and the GitHub authentication preflight all succeed. A dry run is
+not topology proof, and this helper does not authorize a PR job or runner-group
+workflow on its own.
 
 Runner-group verification is necessary but not sufficient for required CI.
 GitHub Actions has no queued-job timeout that can retarget `runs-on` to hosted
