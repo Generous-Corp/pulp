@@ -77,7 +77,7 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
     command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
         || die "$FIREWALL_STATUS_BIN is not on PATH"
-    for tool in iptables-save ip6tables-save ipset ebtables-save; do
+    for tool in timeout iptables-save ip6tables-save ipset ebtables-save; do
         command -v "$tool" >/dev/null 2>&1 \
             || die "$tool is required for automatic runner firewall proof"
     done
@@ -162,10 +162,11 @@ cleanup() {
         log "--keep set: leaving VM $VMID up for inspection"
         return
     fi
-    # Deregister BEFORE destroying. A completed --ephemeral job deregisters
-    # itself, but an interrupted run (kill, reboot, governor abort) would
-    # otherwise leave an offline ghost runner that GitHub still schedules to —
-    # jobs then queue against a VM that no longer exists.
+    # A completed --ephemeral job deregisters itself. During an operator stop,
+    # an idle runner can still be online when the local ssh session exits. Fence
+    # automatic dispatch by removing the exact protected label, then re-read the
+    # runner and delete its registration before powering off the clone. If work
+    # won the race before the label removal, the second busy read preserves it.
     if [ -n "${PAT:-}" ]; then
         runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
             "${REGISTRATION_API}/actions/runners?per_page=100" \
@@ -177,14 +178,85 @@ cleanup() {
             [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
                 || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
             IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
-            [ "$runner_busy" = false ] && [ "$runner_status" = offline ] \
-                || { log "ERROR: exact runner is not offline and idle; leaving clone $VMID for safe recovery"; return; }
-            if ! GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+            [ "$runner_busy" = false ] \
+                || { log "ERROR: exact runner is busy; leaving clone $VMID for safe recovery"; return; }
+            { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
+                || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
+            if [ "$runner_status" = online ]; then
+                [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ] \
+                    || { log "ERROR: online dispatch runner cannot be fenced; leaving clone $VMID for safe recovery"; return; }
+                GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
+                    "${REGISTRATION_API}/actions/runners/${rid}/labels" \
+                    -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
+                    || { log "ERROR: cannot fence automatic dispatch; leaving clone $VMID for safe recovery"; return; }
+                for fence_probe in 1 2; do
+                    fenced_runner="$(GH_TOKEN="$PAT" "$GH_CLI" api \
+                        "${REGISTRATION_API}/actions/runners/${rid}" \
+                        --jq '[.name,.busy,.status,([.labels[].name] | join(","))] | @tsv')" \
+                        || { log "ERROR: cannot verify dispatch fence; leaving clone $VMID for safe recovery"; return; }
+                    IFS=$'\t' read -r fenced_name runner_busy runner_status runner_labels <<< "$fenced_runner"
+                    [ "$fenced_name" = "$RUNNER_NAME" ] \
+                        || { log "ERROR: dispatch fence resolved the wrong runner; leaving clone $VMID for safe recovery"; return; }
+                    [ "$runner_busy" = false ] \
+                        || { log "ERROR: exact runner became busy before dispatch fence; leaving clone $VMID for safe recovery"; return; }
+                    { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
+                        || { log "ERROR: exact runner has invalid fenced status; leaving clone $VMID for safe recovery"; return; }
+                    case ",$runner_labels," in
+                        *,pulp-auto-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
+                            log "ERROR: a routing label survived dispatch fence; leaving clone $VMID for safe recovery"
+                            return
+                            ;;
+                    esac
+                    case ",$runner_labels," in
+                        *,pulp-shutdown-fenced,*) ;;
+                        *)
+                            log "ERROR: shutdown label is missing after dispatch fence; leaving clone $VMID for safe recovery"
+                            return
+                            ;;
+                    esac
+                    [ "$fence_probe" = 2 ] || sleep 2
+                done
+                log "fenced automatic dispatch for idle runner id $rid"
+                shutdown_deadline=$((SECONDS + 120))
+                log "stopping fenced clone $VMID before deregistration"
+                timeout 20s qm stop "$VMID" >/dev/null 2>&1 || true
+                while [ "$SECONDS" -lt "$shutdown_deadline" ]; do
+                    [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break
+                    sleep 2
+                done
+                [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] \
+                    || { log "ERROR: fenced clone $VMID did not stop; leaving it for safe recovery"; return; }
+                while [ "$SECONDS" -lt "$shutdown_deadline" ]; do
+                    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+                        "${REGISTRATION_API}/actions/runners?per_page=100" \
+                        --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+                        || { log "ERROR: cannot confirm fenced runner shutdown; leaving clone $VMID for safe recovery"; return; }
+                    runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+                        -v name="$RUNNER_NAME" '$2 == name')"
+                    [ -n "$runner_lookup" ] || break
+                    [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+                        || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
+                    IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
+                    [ "$runner_busy" = false ] \
+                        || { log "ERROR: fenced runner is busy during shutdown; leaving clone $VMID for safe recovery"; return; }
+                    [ "$runner_status" = offline ] && break
+                    [ "$runner_status" = online ] \
+                        || { log "ERROR: fenced runner has invalid shutdown status; leaving clone $VMID for safe recovery"; return; }
+                    sleep 2
+                done
+                [ -z "$runner_lookup" ] || [ "$runner_status" = offline ] \
+                    || { log "ERROR: fenced runner stayed online before cleanup deadline; leaving clone $VMID for safe recovery"; return; }
+            fi
+            [ -n "$runner_lookup" ] || rid=""
+            if [ -z "$rid" ]; then
+                log "runner deregistered itself during fenced shutdown"
+            elif ! GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
                 "${REGISTRATION_API}/actions/runners/${rid}"; then
                 log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
                 return
+            else
+                log "deregistered runner id $rid"
             fi
-            log "deregistered runner id $rid"
         fi
     fi
     log "destroying clone $VMID"
@@ -272,7 +344,19 @@ qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     "$FIREWALL_STATUS_BIN" compile >/dev/null \
         || die "automatic runner firewall policy does not compile"
-    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
+    # Installing a new VM policy briefly reports enabled/running with pending
+    # changes while pve-firewall applies the compiled rules.  Do not mistake
+    # that expected transition for a disabled firewall, but remain bounded and
+    # fail closed unless the final active state arrives.
+    firewall_policy_active=0
+    for _ in $(seq 1 15); do
+        if [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ]; then
+            firewall_policy_active=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$firewall_policy_active" = 1 ] \
         || die "automatic runner firewall policy is not active"
 fi
 qm start "$VMID" >/dev/null || die "start failed"
@@ -296,8 +380,16 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
             grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
                 || { all_ipv4_drops=0; break; }
         done
+        # ip6tables-save normalizes an all-address destination by omitting
+        # "-d ::/0" on this Proxmox release.  Accept either serialization, but
+        # still require an unconditional DROP in this VM's outbound chain.
+        ipv6_drop_installed=0
+        if grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            || grep -Fxq -- "-A tap${VMID}i0-OUT -j DROP" <<< "$vm6_out_rules"; then
+            ipv6_drop_installed=1
+        fi
         if [ "$all_ipv4_drops" = 1 ] \
-            && grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            && [ "$ipv6_drop_installed" = 1 ] \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
             && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then

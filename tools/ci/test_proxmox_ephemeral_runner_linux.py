@@ -72,6 +72,40 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertNotIn("runner lookup exceeded one API page", self.script)
 
+    def test_shutdown_fences_only_idle_runner_before_deregistration(self) -> None:
+        cleanup = self.script[
+            self.script.index("cleanup() {") : self.script.index("trap cleanup EXIT")
+        ]
+        self.assertIn('exact runner is busy; leaving clone $VMID', cleanup)
+        self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
+        self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
+        self.assertIn('cannot fence automatic dispatch', cleanup)
+        self.assertIn('exact runner became busy before dispatch fence', cleanup)
+        self.assertIn('a routing label survived dispatch fence', cleanup)
+        self.assertIn('pulp-auto-linux-x64', cleanup)
+        self.assertIn('pulp-build-linux-x64', cleanup)
+        self.assertIn('pulp-host-macpro', cleanup)
+        self.assertIn('shutdown label is missing after dispatch fence', cleanup)
+        self.assertIn("for fence_probe in 1 2; do", cleanup)
+        self.assertIn('fenced automatic dispatch for idle runner id $rid', cleanup)
+        self.assertIn("shutdown_deadline=$((SECONDS + 120))", cleanup)
+        self.assertIn('timeout 20s qm stop "$VMID"', cleanup)
+        self.assertIn('fenced runner is busy during shutdown', cleanup)
+        self.assertIn('fenced runner stayed online before cleanup deadline', cleanup)
+        self.assertIn('runner deregistered itself during fenced shutdown', cleanup)
+        self.assertLess(
+            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}/labels"'),
+            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}"'),
+        )
+        self.assertLess(
+            cleanup.index('"${REGISTRATION_API}/actions/runners/${rid}"'),
+            cleanup.index('qm stop "$VMID"'),
+        )
+        self.assertLess(
+            cleanup.index('qm stop "$VMID"'),
+            cleanup.rindex('[ "$runner_status" = offline ]'),
+        )
+
     def test_controller_dependencies_and_org_credential_are_fail_closed(self) -> None:
         self.assertIn('command -v "$GH_CLI"', self.script)
         self.assertLess(
@@ -94,12 +128,27 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('cannot write automatic runner firewall policy', self.script)
         self.assertIn('cannot install automatic runner firewall policy', self.script)
         self.assertIn('"$FIREWALL_STATUS_BIN" compile', self.script)
+        self.assertIn("firewall_policy_active=0", self.script)
+        self.assertIn('[ "$firewall_policy_active" = 1 ]', self.script)
+        self.assertIn(
+            '"$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running"',
+            self.script,
+        )
+        self.assertGreater(
+            self.script.index("firewall_policy_active=0"),
+            self.script.index('"$FIREWALL_STATUS_BIN" compile'),
+        )
         self.assertIn('automatic runner firewall policy is not active', self.script)
         self.assertIn('automatic runner firewall rules are not installed', self.script)
         self.assertIn('iptables-save', self.script)
         self.assertIn('ip6tables-save', self.script)
         self.assertIn('ebtables-save', self.script)
         self.assertIn('ipset test "PVEFW-${VMID}-ipfilter-net0-v4"', self.script)
+        self.assertIn("ipv6_drop_installed=0", self.script)
+        self.assertIn(
+            'grep -Fxq -- "-A tap${VMID}i0-OUT -j DROP"', self.script
+        )
+        self.assertIn('[ "$ipv6_drop_installed" = 1 ]', self.script)
         self.assertIn('--arp-ip-src ${GUEST_IP} -j RETURN', self.script)
         self.assertIn('-A tap${VMID}i0-OUT-ARP -j DROP', self.script)
         self.assertNotIn('chmod 600 "$VM_FIREWALL_TMP"', self.script)
