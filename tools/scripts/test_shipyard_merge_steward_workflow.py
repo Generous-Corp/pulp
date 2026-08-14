@@ -145,6 +145,19 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("no explicitly enrolled recovery worker", self.text)
         self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)
 
+    def test_stale_merge_group_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
+        self.assertIn("shipyard_merge_queue_run_cleanup.py", self.text)
+        self.assertIn("actions/runs?event=merge_group&per_page=100", self.text)
+        self.assertIn("--limit 20", self.text)
+        self.assertIn("merge-group-cleanup-plan.json", self.text)
+        self.assertIn(".candidates[]", self.text)
+        self.assertIn("head ${head} is current again", self.text)
+        self.assertIn(".event == \"merge_group\"", self.text)
+        self.assertIn(".head_sha == $head", self.text)
+        self.assertIn("actions/runs/${run_id}/cancel", self.text)
+        self.assertIn("inputs.apply && steps.merge_group_cleanup_plan.outcome", self.text)
+        self.assertIn("steps.merge_group_cleanup_apply.outcome", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

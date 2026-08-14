@@ -94,6 +94,97 @@ jobs:
           assert status["mutation_machine"] == "github-actions"
           PY
 
+      - name: Collect current merge queue and workflow runs
+        id: merge_group_cleanup_census
+        if: always() && steps.configure.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY%%/*}
+          name=${GITHUB_REPOSITORY#*/}
+          # GraphQL variables are literal in the single-quoted query.
+          # shellcheck disable=SC2016
+          gh api graphql \
+            -F owner="$owner" \
+            -F name="$name" \
+            -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue(branch:"main"){entries(first:100){nodes{headCommit{oid}}}}}}' \
+            > merge-queue.json
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/runs?event=merge_group&per_page=100" \
+            | jq '[.[].workflow_runs[]]' \
+            > merge-group-runs.json
+
+      - name: Plan bounded stale merge-group cleanup
+        id: merge_group_cleanup_plan
+        if: always() && steps.merge_group_cleanup_census.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/shipyard_merge_queue_run_cleanup.py \
+            --queue merge-queue.json \
+            --runs merge-group-runs.json \
+            --limit 20 \
+            --output merge-group-cleanup-plan.json
+          jq . merge-group-cleanup-plan.json
+
+      - name: Cancel bounded stale merge-group runs
+        id: merge_group_cleanup_apply
+        if: inputs.apply && steps.merge_group_cleanup_plan.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY%%/*}
+          name=${GITHUB_REPOSITORY#*/}
+          jq -c '.candidates[]' merge-group-cleanup-plan.json |
+          while IFS= read -r candidate; do
+            run_id=$(jq -r '.run_id' <<<"$candidate")
+            head=$(jq -r '.head_sha' <<<"$candidate")
+
+            # Revalidate the complete current queue immediately before each
+            # cancellation. A rebuilt head that is current again is preserved.
+            # GraphQL variables are literal in the single-quoted query.
+            # shellcheck disable=SC2016
+            gh api graphql \
+              -F owner="$owner" \
+              -F name="$name" \
+              -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue(branch:"main"){entries(first:100){nodes{headCommit{oid}}}}}}' \
+              > "$RUNNER_TEMP/live-merge-queue.json"
+            if jq -e --arg head "$head" \
+              '[.data.repository.mergeQueue.entries.nodes[].headCommit.oid // empty] | index($head) != null' \
+              "$RUNNER_TEMP/live-merge-queue.json" >/dev/null; then
+              echo "preserving run ${run_id}: head ${head} is current again"
+              continue
+            fi
+
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+              > "$RUNNER_TEMP/merge-group-run.json"
+            jq -e \
+              --argjson run_id "$run_id" \
+              --arg head "$head" \
+              '.id == $run_id and .event == "merge_group" and .head_sha == $head' \
+              "$RUNNER_TEMP/merge-group-run.json" >/dev/null
+            status=$(jq -r '.status' "$RUNNER_TEMP/merge-group-run.json")
+            if [ "$status" = completed ]; then
+              echo "preserving run ${run_id}: already completed"
+              continue
+            fi
+            case "$status" in
+              in_progress|pending|queued|requested|waiting) ;;
+              *) echo "refusing unexpected run status: $status" >&2; exit 1 ;;
+            esac
+            if ! gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel"; then
+              status=$(gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                --jq '.status')
+              [ "$status" = completed ] || exit 1
+            fi
+          done
+
       - name: Reconcile managed PRs
         id: reconcile
         if: always() && steps.install.outcome == 'success' && steps.configure.outcome == 'success'
@@ -375,6 +466,9 @@ jobs:
             recovery-plan.json
             recovery-runners.json
             recovery-worker.json
+            merge-queue.json
+            merge-group-runs.json
+            merge-group-cleanup-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
           if-no-files-found: warn
@@ -386,6 +480,11 @@ jobs:
           set -euo pipefail
           [ "${{ steps.install.outcome }}" = success ]
           [ "${{ steps.configure.outcome }}" = success ]
+          [ "${{ steps.merge_group_cleanup_census.outcome }}" = success ]
+          [ "${{ steps.merge_group_cleanup_plan.outcome }}" = success ]
+          if [ "${{ inputs.apply }}" = true ]; then
+            [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]
+          fi
           [ "${{ steps.pull_facts.outcome }}" = success ]
           [ "${{ steps.outbox.outcome }}" = success ]
           [ "${{ steps.sync_outbox.outcome }}" = success ]
