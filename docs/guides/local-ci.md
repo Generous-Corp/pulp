@@ -1721,6 +1721,30 @@ Both paths satisfy the branch-protection-required `macos` /
 advisory `linux` / advisory `windows` alias gates because the alias
 jobs read each matrix leg's outcome via the GitHub API.
 
+### iOS library compile gate
+
+The macOS matrix leg also configures Pulp with the Xcode generator and builds
+`pulp-timebase`, `pulp-timeline`, `pulp-playback`, `pulp-sequence`, and
+both SMF libraries (`pulp-smf-interop` and `pulp-smf-interchange`) as arm64
+static libraries for both `iphonesimulator` and `iphoneos`. The gate uses the
+repository's iOS 16.3 libc++ floor, matching the AUv3 and host-app helpers.
+This is compile coverage only: it does not run iOS tests, build an app or AUv3,
+or pull `core/host` into the mobile graph. GPU rendering, examples, and tests
+stay disabled so the gate exercises the dependency boundary needed by the
+sequencer libraries.
+
+Run the same gate locally on a Mac with both SDKs installed:
+
+```bash
+bash test/cmake/test_ios_compile_gate.sh "$PWD" "$PWD/build-ios-compile-gate"
+```
+
+The script uses Pulp's platform-wide FetchContent source cache, so fresh
+worktrees reuse dependency checkouts while keeping simulator and device build
+products separate. The existing `test_ios_source_syntax.sh` sweep runs after
+the real builds as the cheap, locally callable fallback for iOS-specific
+translation units.
+
 ### Tagging a new test as slow
 
 Add `LABELS slow` either to a single test's `set_tests_properties`, or
