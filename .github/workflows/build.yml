@@ -88,6 +88,9 @@ jobs:
       linux_route_reason: ${{ steps.resolve.outputs.linux_route_reason }}
       linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
+      pr_safe_linux: ${{ steps.resolve.outputs.pr_safe_linux }}
+      pr_safe_linux_selector_json: ${{ steps.resolve.outputs.pr_safe_linux_selector_json }}
+      pr_safe_linux_reason: ${{ steps.resolve.outputs.pr_safe_linux_reason }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -117,6 +120,9 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          PR_SAFE_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
+          PR_SAFE_LINUX_LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
+          PR_SAFE_LINUX_REUSABLE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
@@ -208,6 +214,13 @@ jobs:
               "python3",
               str(
                   WORKSPACE / "tools" / "scripts" / "resolve_linux_route.py"
+              ),
+          ]
+          PR_SAFE_LINUX_ROUTE_RESOLVER = [
+              "python3",
+              str(
+                  WORKSPACE / "tools" / "scripts"
+                  / "resolve_pr_safe_linux_route.py"
               ),
           ]
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
@@ -535,6 +548,32 @@ jobs:
                   file=sys.stderr,
               )
 
+          pr_safe_result = subprocess.run(
+              PR_SAFE_LINUX_ROUTE_RESOLVER + [
+                  "--event-name", EVENT_NAME,
+                  "--repository", _this_repo,
+                  "--pr-head-repository", _pr_head_repo,
+                  "--selector-json",
+                  os.environ.get("PR_SAFE_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  "--lease-until",
+                  os.environ.get("PR_SAFE_LINUX_LEASE_UNTIL", ""),
+                  "--enabled",
+                  os.environ.get("PR_SAFE_LINUX_REUSABLE_ENABLED", "false"),
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          pr_safe_route = json.loads(pr_safe_result.stdout)
+          pr_safe_linux = bool(pr_safe_route["use_reusable"])
+          pr_safe_linux_selector = str(pr_safe_route["selector_json"])
+          pr_safe_linux_reason = str(pr_safe_route["reason"])
+          print(
+              "resolve-provider: PR-safe Linux "
+              f"enabled={pr_safe_linux}; reason={pr_safe_linux_reason}",
+              file=sys.stderr,
+          )
+
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
@@ -684,13 +723,14 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          include.append({
-              "key": "linux",
-              "name": "Linux (x64)",
-              "runs_on_json": linux_runs_on,
-              "provider": linux_provider,
-              "route_reason": linux_route_reason,
-          })
+          if not pr_safe_linux:
+              include.append({
+                  "key": "linux",
+                  "name": "Linux (x64)",
+                  "runs_on_json": linux_runs_on,
+                  "provider": linux_provider,
+                  "route_reason": linux_route_reason,
+              })
 
           matrix = {"include": include}
 
@@ -707,6 +747,11 @@ jobs:
                   "linux_event_authorized_selector_json="
                   f"{linux_route['event_authorized_selector_json']}\n"
               )
+              handle.write(f"pr_safe_linux={str(pr_safe_linux).lower()}\n")
+              handle.write(
+                  f"pr_safe_linux_selector_json={pr_safe_linux_selector}\n"
+              )
+              handle.write(f"pr_safe_linux_reason={pr_safe_linux_reason}\n")
           PY
           )
 
@@ -743,6 +788,26 @@ jobs:
           set -euo pipefail
           base="$(python3 tools/scripts/resolve_classify_base.py)"
           python3 tools/scripts/classify_changes.py --mode=diff --base "$base"
+
+  # This job calls the protected default-branch copy of the reusable workflow.
+  # The PR-safe runner group grants access only to that workflow, never to this
+  # PR-controlled build.yml revision. The called workflow validates the event,
+  # same-repository head, exact SHAs, and exact capability selector again before
+  # checkout. The route remains inert until its short lease and explicit enable
+  # variable are both present.
+  pr_safe_linux:
+    needs: [resolve-provider, classify]
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.native_build_required == 'true' &&
+      needs.resolve-provider.outputs.pr_safe_linux == 'true'
+    uses: Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha }}
+      base_sha: ${{ github.event.pull_request.base.sha }}
+      runner_selector_json: ${{ needs.resolve-provider.outputs.pr_safe_linux_selector_json }}
+    permissions:
+      contents: read
 
   build:
     needs: [resolve-provider, classify]
@@ -1725,7 +1790,7 @@ jobs:
           exit 1
 
   linux:
-    needs: [build, classify]
+    needs: [build, classify, resolve-provider, pr_safe_linux]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
     # shared hosted pool can be starved of a runner indefinitely. Because it is
@@ -1753,6 +1818,16 @@ jobs:
           if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
             echo "Skip-safe PR — no C++/Swift build input changed. linux gate ✓ (no native build)"
             exit 0
+          fi
+          if [ "${{ needs.resolve-provider.outputs.pr_safe_linux }}" = "true" ]; then
+            result="${{ needs.pr_safe_linux.result }}"
+            echo "PR-safe reusable Linux result: $result"
+            if [ "$result" = "success" ]; then
+              echo "PR-safe Linux leg green — linux gate ✓"
+              exit 0
+            fi
+            echo "PR-safe Linux leg $result — failing linux alias"
+            exit 1
           fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | startswith("Linux")) | .conclusion' | head -1)

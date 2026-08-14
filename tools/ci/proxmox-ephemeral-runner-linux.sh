@@ -31,7 +31,8 @@ GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
-LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
+LABELS="${PULP_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
+RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
 KEEP=0
@@ -73,7 +74,7 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
-RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
+RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
 
 cleanup() {
     # Guard: only tear down a VM this invocation actually created. Without this,

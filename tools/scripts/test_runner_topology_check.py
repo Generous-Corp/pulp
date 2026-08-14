@@ -626,6 +626,8 @@ SUPERVISORS = {
 # differently, since there is no plist to read the invocation out of.
 OTHER_SUPERVISORS = {
     "proxmox-systemd": CI / "proxmox-ephemeral-runner-linux.sh",
+    "proxmox-systemd-trusted": CI / "proxmox-trusted-ephemeral-runner-linux.sh",
+    "proxmox-systemd-pr-safe": CI / "proxmox-pr-safe-ephemeral-runner-linux.sh",
     "native-intel-launchd": CI / "native-intel-runner.sh",
 }
 

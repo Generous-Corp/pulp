@@ -263,6 +263,8 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    add_test(NAME pr-safe-linux-route-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_resolve_pr_safe_linux_route.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     if(UNIX)

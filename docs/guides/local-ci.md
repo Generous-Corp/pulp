@@ -173,26 +173,29 @@ weaken FileVault or give it any of the required ARM64 gate labels.
 The controller prefers `ghapp` when it is installed and otherwise uses its own
 authenticated rootless `gh`. The job account receives neither client nor token.
 
-## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
+## Disposable Linux x64 lanes run on macpro (Proxmox)
 
-`build.yml` runs may route the `Linux (x64)` leg via
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
+`build.yml` routes eligible Linux work to two isolated ephemeral Proxmox pools
+on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
-host. Protected main workflow refs, including the protected merge-group path,
-prefer this pool when the variable is set. Pull-request workflow revisions that
-are not the protected `main` workflow ref fall back to GitHub-hosted Linux;
-fork pull requests remain hosted as well. This prevents a PR-controlled
-workflow edit from reaching the restricted group. The pool is native x86_64,
+host. Protected merge-group jobs use `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the
+`pulp-auto-linux-x64` capability. Same-repository pull requests may use
+`PULP_PR_SAFE_LINUX_RUNS_ON_JSON` and `pulp-pr-safe-linux-x64`, but only through
+the protected `pr-safe-linux.yml@main` reusable workflow, while its independent
+short health lease and enable variable are live. Forks, privileged events,
+missing capacity, invalid selectors, and expired leases use `ubuntu-latest`.
+The pool is native x86_64,
 which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
-The external boundary is live: organization runner group `pulp-trusted-build`
-contains only `Generous-Corp/pulp` and permits only protected default-branch
-workflow refs for the trusted local jobs. The event-name and fork checks in the
-workflows are defense in depth, not the security boundary. Secret-bearing jobs
-and every `pull_request_target` workflow remain hosted or on their dedicated
-trusted path; they never use the generic Mac Pro labels.
+The trusted `pulp-trusted-build` group and PR-safe `pulp-pr-safe-build` group
+must remain separate. Each is repository-scoped and restricted to its exact
+default-branch workflow. A PR-safe worker must be one-job disposable, carry no
+host credential or secret, expose no writable host mount, and be destroyed
+after completion. Event, repository, SHA, selector, and lease checks are
+defense in depth. Secret-bearing jobs and every `pull_request_target`, signing,
+deployment, and release workflow remain hosted or on a dedicated trusted path.
 
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
@@ -250,12 +253,12 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all eligible events then use
-GitHub-hosted Linux. The resolver also uses the hosted label whenever the local
-selector is absent, so a staged rollout can leave the variable unset until the
-Mac Pro pool is healthy. Once a local job has been assigned, `runs-on` has no
-live fallback; if macpro is down or its pool is stopped, unset the variable and
-redispatch rather than waiting.
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` for the merge-group lane.
+For PRs, set `PULP_PR_SAFE_LINUX_REUSABLE_ENABLED=false` and unset
+`PULP_PR_SAFE_LINUX_LEASE_UNTIL` and `PULP_PR_SAFE_LINUX_RUNS_ON_JSON`. Eligible
+jobs then use GitHub-hosted Linux. Once a local job has been assigned,
+`runs-on` has no live fallback; expire the affected lease and redispatch rather
+than waiting on an unhealthy pool.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
