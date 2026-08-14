@@ -2,6 +2,7 @@
 """Regression contract for the centralized Shipyard merge steward."""
 
 from pathlib import Path
+import tomllib
 import unittest
 
 import yaml
@@ -9,6 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "shipyard-merge-steward.yml"
+SHIPYARD_PIN = ROOT / "tools" / "shipyard.toml"
 
 
 class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
@@ -56,6 +58,15 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("mutation_machine = \"github-actions\"", self.text)
         self.assertIn("shipyard runner tag --set github-actions", self.text)
         self.assertIn('status["authority_matches"] is True', self.text)
+
+    def test_pinned_shipyard_preserves_steward_safety_floor(self) -> None:
+        version = tomllib.loads(SHIPYARD_PIN.read_text(encoding="utf-8"))["shipyard"]["version"]
+        parts = tuple(int(part) for part in version.removeprefix("v").split("."))
+        self.assertGreaterEqual(
+            parts,
+            (0, 88, 0),
+            "merge steward requires Shipyard v0.88.0 exact-head handoff semantics",
+        )
 
     def test_evidence_ledger_is_restored_and_artifacts_are_bounded(self) -> None:
         steps = self.doc["jobs"]["reconcile"]["steps"]
