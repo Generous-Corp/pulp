@@ -183,6 +183,25 @@ class SanitizerCadenceTests(unittest.TestCase):
             condition,
         )
 
+    def test_memory_sanitizers_skip_non_sanitizer_ios_builds(self) -> None:
+        for job_name, display_name in (("asan", "ASan"), ("ubsan", "UBSan")):
+            with self.subTest(job=job_name):
+                script = named_step(
+                    self.workflow["jobs"][job_name],
+                    f"Test with {display_name}",
+                )["run"]
+                self.assertIn("cmake-ios-auv3-configure", script)
+                self.assertIn("cmake-ios-hostapp-links", script)
+
+    def test_asan_skips_optimized_fdn_stability_certification(self) -> None:
+        script = named_step(
+            self.workflow["jobs"]["asan"], "Test with ASan"
+        )["run"]
+        self.assertIn(
+            "fdn reverb stays bounded and decaying for every parameter vector",
+            script,
+        )
+
 
 class ShipyardTopologyContractTests(unittest.TestCase):
     def test_required_shipyard_macos_validation_keeps_examples_until_promotion(self) -> None:
