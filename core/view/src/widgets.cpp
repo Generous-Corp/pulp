@@ -501,7 +501,7 @@ void Knob::paint(canvas::Canvas& canvas) {
                 // the disc PNG — so here we just draw the design's own rotating
                 // pointer over the now-clean disc.
                 draw_knob_captured_pointer(canvas, cx, cy, r_in, r_out, w,
-                                           ind_color_, value_);
+                                           ind_color_, value_, ind_phase_rad_);
             } else {
                 draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
             }

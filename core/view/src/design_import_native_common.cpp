@@ -2004,7 +2004,9 @@ void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
         Color color = Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
         if (auto hex = attr(node, "knob_ind_color"))
             if (auto parsed = parse_any_css_color(*hex)) color = *parsed;
-        knob.set_captured_indicator(r_in, *r_out, w, color);
+        knob.set_captured_indicator(
+            r_in, *r_out, w, color,
+            attr_float(node, "knob_ind_phase_rad").value_or(0.0f));
     }
 }
 

@@ -237,6 +237,7 @@ struct DeclaredPointer {
     float r_in = 0.0f;
     float r_out = 0.0f;
     float width = 0.0f;
+    float angle_rad = 0.0f;
 };
 
 /// The pointer's box, as the capture recorded it.
@@ -351,6 +352,7 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
     out.r_out = static_cast<float>((distance + along) / half);
     out.width = static_cast<float>((2.0 * across) / half);
+    out.angle_rad = static_cast<float>(std::atan2(uy, ux));
     if (!(out.r_out > out.r_in)) return std::nullopt;
     return out;
 }
@@ -785,6 +787,24 @@ int lower_semantic_controls(const fs::path& path,
                         std::to_string(pointer->r_out);
                     control.attributes["knob_ind_w"] =
                         std::to_string(pointer->width);
+                    // Preserve the authored angular phase at the declared
+                    // value. Runtime still sweeps the full normal 270-degree
+                    // arc; this offset only calibrates that arc so its initial
+                    // frame agrees with the browser rather than snapping to a
+                    // generic rest angle on load.
+                    if (const auto value = strict_finite_float(declared_value)) {
+                        constexpr double kPi = 3.14159265358979323846;
+                        const double normalized = std::clamp(
+                            static_cast<double>(*value), 0.0, 1.0);
+                        const double standard_angle =
+                            -kPi * 0.5 + (normalized - 0.5) * kPi * 1.5;
+                        const double phase = std::remainder(
+                            static_cast<double>(pointer->angle_rad) -
+                                standard_angle,
+                            kPi * 2.0);
+                        control.attributes["knob_ind_phase_rad"] =
+                            std::to_string(phase);
+                    }
                     if (const auto color =
                             string_member(candidate, "indicator_color");
                         !color.empty())

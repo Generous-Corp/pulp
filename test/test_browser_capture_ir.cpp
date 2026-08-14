@@ -1013,7 +1013,7 @@ TEST_CASE("a rotated pointer is measured in its own space, not its footprint",
            "transform":[0.788010754,0.615661475,
                         -0.615661475,0.788010754,77.819613,36.824268]},
          "indicator_color":"rgb(255, 255, 255)",
-         "data_pulp":{"param":"turned"}}
+         "data_pulp":{"param":"turned","value":"0.25"}}
       ]
     })JSON");
     temp.write("tokens.json", R"JSON({
@@ -1054,6 +1054,20 @@ TEST_CASE("a rotated pointer is measured in its own space, not its footprint",
     // box was recorded.
     CHECK(std::stof(turned.at("knob_ind_w")) ==
           Catch::Approx(0.08333f).margin(0.001f));
+    // The pointer is rotated 38 degrees from its vertical authored axis, so it
+    // sits at -52 degrees on screen while the standard knob arc would put
+    // value 0.25 at -157.5 degrees. The retained phase makes the
+    // runtime angle land back on the captured direction without changing the
+    // sweep itself.
+    REQUIRE(turned.count("knob_ind_phase_rad") == 1);
+    constexpr float kPi = 3.14159265358979323846f;
+    const float runtime_at_declared =
+        -kPi * 0.5f + (0.25f - 0.5f) * kPi * 1.5f +
+        std::stof(turned.at("knob_ind_phase_rad"));
+    CHECK(std::cos(runtime_at_declared) ==
+          Catch::Approx(std::cos(-52.0f * kPi / 180.0f)).margin(0.001f));
+    CHECK(std::sin(runtime_at_declared) ==
+          Catch::Approx(std::sin(-52.0f * kPi / 180.0f)).margin(0.001f));
 
     // The sprite hand-off keeps the FOOTPRINT, which is the opposite choice and
     // the right one: that pass crops the control out of the flat capture and

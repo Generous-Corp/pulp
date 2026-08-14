@@ -152,6 +152,7 @@ IRNode declared_knob() {
     knob.attributes["knob_ind_r_out"] = "0.845";
     knob.attributes["knob_ind_w"] = "0.168";
     knob.attributes["knob_ind_color"] = "#fa1e1e";
+    knob.attributes["knob_ind_phase_rad"] = "0.4";
     knob.attributes["browser_sprite_crop_px"] =
         std::to_string(kDialLeft) + "," + std::to_string(kDialTop) + "," +
         std::to_string(kDialSize) + "," + std::to_string(kDialSize);
@@ -934,6 +935,7 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     // reads -- no renderer or materializer branch was added for this lane.
     REQUIRE(knob->has_captured_indicator());
     CHECK(knob->captured_indicator_r_out() == Catch::Approx(0.845f));
+    CHECK(knob->captured_indicator_phase_rad() == Catch::Approx(0.4f));
 
     // Paint in the box the design gave it. Set explicitly rather than left to
     // whatever a layout pass happens to produce, so the geometry asserted below
@@ -944,6 +946,7 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     const float centre = logical_half;
 
     std::vector<Segment> frames;
+    std::vector<float> angles;
     float previous_angle = 0.0f;
     for (const float value : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
         const auto segment = pointer_segment(*knob, value);
@@ -971,8 +974,14 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
             (segment.y1 - centre) * (segment.y1 - centre));
         CHECK(radius == Catch::Approx(0.845f * logical_half).margin(0.01f));
         previous_angle = unwrapped;
+        angles.push_back(unwrapped);
         frames.push_back(segment);
     }
+    // Calibration translates the entire arc; it must not shorten or freeze
+    // it. End-to-end movement remains exactly the standard 270 degrees.
+    REQUIRE(angles.size() == 5);
+    CHECK(angles.back() - angles.front() ==
+          Catch::Approx(4.712389f).margin(0.001f));
     // Every frame is a distinct position — no two values share a pointer.
     for (std::size_t i = 0; i + 1 < frames.size(); ++i)
         for (std::size_t j = i + 1; j < frames.size(); ++j)
@@ -1012,6 +1021,7 @@ TEST_CASE("the producer's pointer reaches the scripted path too",
     REQUIRE(js.find("setKnobSpriteStrip('Cutoff") != std::string::npos);
     REQUIRE(js.find("setKnobCapturedIndicator('Cutoff") != std::string::npos);
     REQUIRE(js.find("0.845") != std::string::npos);
+    REQUIRE(js.find("0.4") != std::string::npos);
     // Hex, because the bridge parses hex only and quietly substitutes
     // near-white for anything else -- a colour that survives the materializer
     // can still be dropped here.
