@@ -1,5 +1,31 @@
 # Self-hosted GitHub Actions runner setup
 
+## Disposable Proxmox Linux pool for another repository
+
+For an x86_64 Linux lane on the Mac Pro, use the repository-agnostic
+`tools/ci/proxmox-ephemeral-runner-linux.sh` with the JIT runner API. Do not
+copy Pulp's labels, runner group, or credential. Create one root-owned mode
+`0600` environment file per repository/slot under
+`/etc/pulp/proxmox-runner/`, install
+`tools/ci/proxmox-ephemeral-pool@.service` as
+`/etc/systemd/system/proxmox-ephemeral-pool@.service`, and enable the desired
+instances:
+
+```bash
+install -d -m 700 /etc/pulp/proxmox-runner
+install -m 644 tools/ci/proxmox-ephemeral-pool@.service \
+  /etc/systemd/system/proxmox-ephemeral-pool@.service
+systemctl daemon-reload
+systemctl enable --now proxmox-ephemeral-pool@repo-1.service
+```
+
+The env file must define `TARTCI_RUNNER_REPO`, exact repository labels,
+`TARTCI_RUNNER_PAT_FILE`, a stable name/VM prefix, and a disjoint VMID/IP
+range. The PAT stays on the host; the provider requests a single-use
+`generate-jitconfig` response, transfers it over stdin, runs one job, and
+destroys the clone. Keep the repository variable hosted until a real dispatch
+proves assignment and teardown; retain hosted as the rollback value.
+
 This guide covers setting up a Mac (or any machine) as a persistent
 Pulp CI runner. The payoff is getting sanitizer + build jobs off
 GitHub-hosted runners onto your own hardware — usually 4-8× faster,

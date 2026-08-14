@@ -7,6 +7,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("proxmox-ephemeral-runner-linux.sh")
+SERVICE = Path(__file__).with_name("proxmox-ephemeral-pool@.service")
 
 
 class ProxmoxRunnerContractTests(unittest.TestCase):
@@ -49,6 +50,12 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         self.assertNotIn("registration-token", self.text)
         self.assertNotIn("config.sh --unattended", self.text)
         self.assertIn("guest IP ${GUEST_IP} is already assigned", self.text)
+
+    def test_systemd_profile_is_repository_agnostic(self) -> None:
+        service = SERVICE.read_text()
+        self.assertIn("/etc/pulp/proxmox-runner/%i.env", service)
+        self.assertIn("proxmox-ephemeral-runner-linux.sh --once", service)
+        self.assertNotIn("pulp-ephemeral-runner.sh", service)
 
 
 if __name__ == "__main__":
