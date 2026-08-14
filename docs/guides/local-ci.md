@@ -187,12 +187,15 @@ which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
-The external boundary is live: organization runner group `pulp-trusted-build`
-contains only `Generous-Corp/pulp` and permits only protected default-branch
-workflow refs for the trusted local jobs. The event-name and fork checks in the
-workflows are defense in depth, not the security boundary. Secret-bearing jobs
-and every `pull_request_target` workflow remain hosted or on their dedicated
-trusted path; they never use the generic Mac Pro labels.
+The external boundary is live for the already-authorized protected refs:
+organization runner group `pulp-trusted-build` contains only
+`Generous-Corp/pulp` and permits only protected default-branch workflow refs for
+the trusted local jobs. The event-name and fork checks in the workflows are
+defense in depth, not the security boundary. Secret-bearing jobs and every
+`pull_request_target` workflow remain hosted or on their dedicated trusted
+path; they never use the generic Mac Pro labels. A contributor-branch proof was
+not added to this group: the separate disposable proof-group authority is not
+available, so the production group remains unchanged.
 
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
@@ -210,7 +213,8 @@ were capability/image-specific (no usable browser/Node capture path, no
 headless visual path, and filesystem/cache-contract cases), so this is not a
 dispatch proof. Do not enable the selector or broaden the trusted runner group
 until a replacement golden passes the real dispatch and teardown proof. The
-hosted Linux check on PR #7521 remains the fallback and is green.
+hosted Linux selector remains the configured fallback; the current PR head is
+queued, so no current green result is claimed here.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
@@ -595,12 +599,15 @@ Nothing about it is required: a public cloner runs `install-shipyard.sh` once
 and never thinks about this again. It exists for the local Macs.
 
 v0.81.0 also gives the fleet watchdog an expected-host inventory independent of
-ephemeral runner names. Pulp declares the MacPro and Mac Mini active in
-`.shipyard/config.toml`; absence or insufficient online matches produces
-`expected_host_unavailable`. The planned MacBook Air is declared with
-`active = false`, so it remains visible without claiming capacity. Matching uses
-stable label subsets (`pulp-host-macpro`, `pulp-host-macmini`, and architecture),
-never a JIT runner identity. Inspect the combined view with:
+ephemeral runner names. Pulp declares the MacPro and Mac Mini as expected
+inventory in `.shipyard/config.toml`; absence or insufficient online matches
+produces `expected_host_unavailable`. An expected host is not activation or
+dispatch proof: the Mac Pro currently has online disposable capacity, while the
+Mac mini still needs its repository-scoped runner and real dispatch/teardown
+proof. The planned MacBook Air is declared with `active = false`, so it remains
+visible without claiming capacity. Matching uses stable label subsets
+(`pulp-host-macpro`, `pulp-host-macmini`, and architecture), never a JIT runner
+identity. Inspect the combined view with:
 
 ```bash
 shipyard runner fleet-status --repo Generous-Corp/pulp --json
