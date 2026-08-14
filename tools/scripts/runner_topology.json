@@ -58,6 +58,32 @@
       "severity": "required"
     },
     {
+      "variable": "PULP_ALIAS_RUNS_ON_JSON",
+      "purpose": "Optional build alias executor; hosted Ubuntu is the safe fallback until a dedicated alias pool is live.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-preamble"
+      ],
+      "unset_fallback": [
+        "ubuntu-latest"
+      ],
+      "provisioning": "persistent",
+      "severity": "advisory",
+      "hosts": [
+        "pulp-preamble-m3",
+        "pulp-preamble-m5"
+      ]
+    },
+    {
+      "variable": "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
+      "purpose": "Release-control Linux executor; hosted Ubuntu is the safe fallback.",
+      "expect": "ubuntu-latest",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
+    },
+    {
       "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
       "purpose": "Cheap preamble/probe legs that gate the heavier build jobs.",
       "expect": [
@@ -67,7 +93,10 @@
         "pulp-preamble"
       ],
       "provisioning": "persistent",
-      "severity": "required",
+      "severity": "advisory",
+      "unset_fallback": [
+        "ubuntu-latest"
+      ],
       "hosts": [
         "pulp-studio-01",
         "pulp-studio-02",
@@ -77,8 +106,10 @@
     },
     {
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
-      "purpose": "macOS build overflow is deliberately disabled. The `local-only` sentinel keeps saturated required work on the fast local JIT pool; unsetting the variable would re-enable the hosted macos-15 fallback.",
-      "expect": "local-only",
+      "purpose": "macOS build overflow uses the GitHub-hosted macos-15 fallback while local capacity is absent or saturated; local routing is enabled only after a live runner proof.",
+      "expect": [
+        "macos-15"
+      ],
       "unset_fallback": [
         "macos-15"
       ],
@@ -98,16 +129,14 @@
       ],
       "provisioning": "ephemeral",
       "severity": "required",
+      "unset_fallback": "macos-15",
       "hosts": []
     },
     {
       "variable": "PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON",
       "purpose": "release-cli Intel/universal macOS build lane.",
       "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-build-vm-release"
+        "macos-15"
       ],
       "provisioning": "ephemeral",
       "severity": "required",

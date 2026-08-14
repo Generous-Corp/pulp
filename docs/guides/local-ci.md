@@ -1047,9 +1047,8 @@ python3 tools/scripts/runner_topology_check.py --mode=hint
 
 **Read the live variable, not this page's defaults.** A routing var describes
 reality; `build.yml`'s `||` fallback is only what happens when the var is unset.
-The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
-`["macos-15"]`, while the live variable is the `local-only` sentinel and
-disables overflow. Confirm before reasoning about a route:
+The live variable and hosted fallback currently use `macos-15` while local
+capacity is being proven. Confirm before reasoning about a route:
 
 ```bash
 gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
@@ -1829,7 +1828,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON --body '["namespace-profile-generouscorp-windows"]'` |
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Hosted `macos-15` fallback while local capacity is absent or saturated; a reviewed local selector may replace it after proof. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'` |
 | `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch-only Linux x86_64 Proxmox VM pool; automatic PR routing requires the external runner-group boundary above | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
