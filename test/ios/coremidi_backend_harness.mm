@@ -440,12 +440,51 @@ int run_harness() {
                         destination);
         }
         const MIDIEndpointRef retired_source = source;
+
+        std::atomic<bool> keep_sending{true};
+        std::atomic<uint32_t> sender_attempts{0};
+        std::vector<std::thread> senders;
+        for (int sender = 0; sender < 4; ++sender) {
+            senders.emplace_back([&] {
+                for (int attempt = 0;
+                     attempt < 200000 &&
+                     keep_sending.load(std::memory_order_acquire);
+                     ++attempt) {
+                    output->send(packet);
+                    sender_attempts.fetch_add(1, std::memory_order_acq_rel);
+                }
+            });
+        }
+        if (!wait_until([&] {
+                return sender_attempts.load(std::memory_order_acquire) >= 100;
+            })) {
+            keep_sending.store(false, std::memory_order_release);
+            for (auto& sender : senders) sender.join();
+            return fail(@"concurrent UMP sender stress did not start",
+                        retired_source, destination);
+        }
         MIDIEndpointDispose(destination);
         destination = 0;
         if (!wait_until([&] {
                 return !input->is_open() && !output->is_open();
-            }) || output->send(packet)) {
+            })) {
+            keep_sending.store(false, std::memory_order_release);
+            for (auto& sender : senders) sender.join();
             return fail(@"cached UMP endpoint survived topology change",
+                        retired_source, 0);
+        }
+        open_status = pulp::midi::UmpOpenStatus::Ok;
+        if (session.open_endpoint(ump_destination_id, &open_status) != nullptr ||
+            open_status != pulp::midi::UmpOpenStatus::NotFound) {
+            keep_sending.store(false, std::memory_order_release);
+            for (auto& sender : senders) sender.join();
+            return fail(@"concurrent UMP sender retirement stayed open",
+                        retired_source, 0);
+        }
+        keep_sending.store(false, std::memory_order_release);
+        for (auto& sender : senders) sender.join();
+        if (output->send(packet)) {
+            return fail(@"retired UMP sender accepted a packet",
                         retired_source, 0);
         }
         open_status = pulp::midi::UmpOpenStatus::Ok;

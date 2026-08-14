@@ -77,9 +77,10 @@ public:
             callback_state_->active = false;
             callback_state_->callback = nullptr;
         }
-        closing_.store(true, std::memory_order_release);
+        begin_closing();
         open_.store(false, std::memory_order_release);
-        while (active_senders_.load(std::memory_order_acquire) != 0) {
+        while ((sender_state_.load(std::memory_order_acquire) &
+                kSenderCountMask) != 0) {
             std::this_thread::yield();
         }
         const auto in_port = in_port_.exchange(0, std::memory_order_acq_rel);
@@ -119,7 +120,7 @@ public:
         src_.store(src, std::memory_order_relaxed);
         out_port_.store(out_port, std::memory_order_relaxed);
         dest_.store(dest, std::memory_order_relaxed);
-        closing_.store(false, std::memory_order_release);
+        sender_state_.store(0, std::memory_order_release);
         open_.store(true, std::memory_order_release);
     }
 
@@ -129,6 +130,30 @@ public:
     }
 
 private:
+    static constexpr uint32_t kClosingBit = uint32_t{1} << 31;
+    static constexpr uint32_t kSenderCountMask = kClosingBit - 1;
+
+    bool acquire_sender() noexcept {
+        uint32_t state = sender_state_.load(std::memory_order_acquire);
+        while ((state & kClosingBit) == 0) {
+            if ((state & kSenderCountMask) == kSenderCountMask) return false;
+            if (sender_state_.compare_exchange_weak(
+                    state, state + 1, std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void begin_closing() const noexcept {
+        uint32_t state = sender_state_.load(std::memory_order_acquire);
+        while ((state & kClosingBit) == 0 &&
+               !sender_state_.compare_exchange_weak(
+                   state, state | kClosingBit, std::memory_order_acq_rel,
+                   std::memory_order_acquire)) {}
+    }
+
     UmpEndpointInfo info_;
     static_assert(std::atomic<MIDIPortRef>::is_always_lock_free);
     static_assert(std::atomic<MIDIEndpointRef>::is_always_lock_free);
@@ -138,8 +163,9 @@ private:
     std::atomic<MIDIPortRef> out_port_{0};
     std::atomic<MIDIEndpointRef> dest_{0};
     mutable std::atomic<bool> open_{false};
-    mutable std::atomic<bool> closing_{false};
-    std::atomic<uint32_t> active_senders_{0};
+    // One CAS domain closes admission and counts in-flight senders, so
+    // teardown cannot observe zero between a separate gate check/increment.
+    mutable std::atomic<uint32_t> sender_state_{0};
     std::shared_ptr<CallbackState> callback_state_;
     std::shared_ptr<std::atomic<uint64_t>> generation_;
     uint64_t generation_at_open_ = 0;
@@ -256,10 +282,10 @@ std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
 }
 
 bool CoreMidiUmpEndpoint::is_open() const noexcept {
-    if (closing_.load(std::memory_order_acquire) ||
+    if ((sender_state_.load(std::memory_order_acquire) & kClosingBit) != 0 ||
         !open_.load(std::memory_order_acquire)) return false;
     if (generation_->load(std::memory_order_acquire) != generation_at_open_) {
-        closing_.store(true, std::memory_order_release);
+        begin_closing();
         open_.store(false, std::memory_order_release);
         return false;
     }
@@ -268,16 +294,12 @@ bool CoreMidiUmpEndpoint::is_open() const noexcept {
 
 bool CoreMidiUmpEndpoint::send(const UmpPacket& packet) noexcept {
     if (packet.word_count < 1 || packet.word_count > 4) return false;
-    if (!info_.direction.can_send ||
-        closing_.load(std::memory_order_acquire)) {
-        return false;
-    }
-    active_senders_.fetch_add(1, std::memory_order_acq_rel);
+    if (!info_.direction.can_send || !acquire_sender()) return false;
     struct SenderGuard {
-        std::atomic<uint32_t>& count;
-        ~SenderGuard() { count.fetch_sub(1, std::memory_order_acq_rel); }
-    } guard{active_senders_};
-    if (closing_.load(std::memory_order_acquire) || !is_open()) return false;
+        std::atomic<uint32_t>& state;
+        ~SenderGuard() { state.fetch_sub(1, std::memory_order_acq_rel); }
+    } guard{sender_state_};
+    if (!is_open()) return false;
     const auto out_port = out_port_.load(std::memory_order_acquire);
     const auto dest = dest_.load(std::memory_order_acquire);
     if (!out_port || !dest) return false;
