@@ -220,7 +220,9 @@ bool VisualizationBridge::poll() {
         WaveformData wd;
         wd.num_samples = waveform_length_;
         wd.num_channels = source_channels;
+        wd.epoch = epoch_;
         wd.sequence_number = ++waveform_sequence_;
+        wd.dropped_frames = dropped;
         for (int i = 0; i < waveform_length_; ++i) {
             wd.samples[i] = waveform_ring_[(waveform_pos_ + i) % waveform_length_];
         }

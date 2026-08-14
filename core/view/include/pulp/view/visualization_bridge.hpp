@@ -59,7 +59,9 @@ struct WaveformData {
     std::array<float, kMaxSamples> samples{};
     int num_samples = 0;
     int num_channels = 0; // source layout; samples contain first channel only
+    std::uint64_t epoch = 0;
     std::uint64_t sequence_number = 0;
+    std::uint64_t dropped_frames = 0;
 };
 
 /// Configuration for the visualization bridge.

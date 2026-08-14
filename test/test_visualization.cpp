@@ -403,6 +403,9 @@ TEST_CASE("VisualizationBridge publishes waveform", "[view][vizbridge]") {
 
     const auto& wf = bridge.read_waveform();
     REQUIRE(wf.num_samples == 128);
+    REQUIRE(wf.epoch == 1);
+    REQUIRE(wf.sequence_number == 1);
+    REQUIRE(wf.dropped_frames == 0);
 
     // Waveform should contain the last 128 samples of the ramp
     // (values from 128/256=0.5 to 255/256≈1.0)
@@ -640,6 +643,11 @@ TEST_CASE("VisualizationBridge overflow starts a fresh continuity epoch",
     REQUIRE(spectrum.sequence_number == 1);
     REQUIRE(spectrum.dropped_frames == 128);
     REQUIRE(std::abs(peak_bin(spectrum) - 31) <= 1);
+
+    const auto waveform = bridge.peek_waveform();
+    REQUIRE(waveform.epoch == 2);
+    REQUIRE(waveform.sequence_number == 1);
+    REQUIRE(waveform.dropped_frames == 128);
 }
 
 TEST_CASE("VisualizationBridge poll returns while producer continuously refills",
