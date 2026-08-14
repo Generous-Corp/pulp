@@ -63,9 +63,11 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Actions caches are recoverable evidence, not a durable transactional
-      # store. Keep this first pilot to queue enrollment, whose GitHub mutation
-      # is exact-head guarded, externally observable, and idempotent. Durable
-      # remote ledger storage is required before enabling reruns or cancellation.
+      # store. Keep this first pilot to exact-head queue enrollment and bounded
+      # cleanup of workflow runs whose heads are provably no longer current.
+      # Those GitHub mutations are revalidated, externally observable, and
+      # idempotent. Durable remote ledger storage is required before enabling
+      # reruns or capacity preemption.
       - name: Restore steward evidence ledger
         uses: actions/cache/restore@v4
         with:
@@ -112,10 +114,13 @@ jobs:
             -F name="$name" \
             -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue(branch:"main"){entries(first:100){nodes{headCommit{oid}}}}}}' \
             > merge-queue.json
-          gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/actions/runs?event=merge_group&per_page=100" \
-            | jq '[.[].workflow_runs[]]' \
-            > merge-group-runs.json
+          {
+            for status in in_progress pending queued requested waiting; do
+              gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/actions/runs?event=merge_group&status=${status}&per_page=100" \
+                --jq '.workflow_runs[]'
+            done
+          } | jq -s 'unique_by(.id)' > merge-group-runs.json
 
       - name: Plan bounded stale merge-group cleanup
         id: merge_group_cleanup_plan
@@ -169,6 +174,89 @@ jobs:
               '.id == $run_id and .event == "merge_group" and .head_sha == $head' \
               "$RUNNER_TEMP/merge-group-run.json" >/dev/null
             status=$(jq -r '.status' "$RUNNER_TEMP/merge-group-run.json")
+            if [ "$status" = completed ]; then
+              echo "preserving run ${run_id}: already completed"
+              continue
+            fi
+            case "$status" in
+              in_progress|pending|queued|requested|waiting) ;;
+              *) echo "refusing unexpected run status: $status" >&2; exit 1 ;;
+            esac
+            if ! gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel"; then
+              status=$(gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                --jq '.status')
+              [ "$status" = completed ] || exit 1
+            fi
+          done
+
+      - name: Collect open PR heads and pull-request workflow runs
+        id: pull_request_cleanup_census
+        if: always() && steps.configure.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            | jq '[.[][]]' \
+            > pull-request-open-heads.json
+          {
+            for status in in_progress pending queued requested waiting; do
+              gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/actions/runs?event=pull_request&status=${status}&per_page=100" \
+                --jq '.workflow_runs[]'
+            done
+          } | jq -s 'unique_by(.id)' > pull-request-runs.json
+
+      - name: Plan bounded superseded pull-request cleanup
+        id: pull_request_cleanup_plan
+        if: always() && steps.pull_request_cleanup_census.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/shipyard_pull_request_run_cleanup.py \
+            --pulls pull-request-open-heads.json \
+            --runs pull-request-runs.json \
+            --limit 20 \
+            --output pull-request-cleanup-plan.json
+          jq . pull-request-cleanup-plan.json
+
+      - name: Cancel bounded superseded pull-request runs
+        id: pull_request_cleanup_apply
+        if: inputs.apply && steps.pull_request_cleanup_plan.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          jq -c '.candidates[]' pull-request-cleanup-plan.json |
+          while IFS= read -r candidate; do
+            run_id=$(jq -r '.run_id' <<<"$candidate")
+            head=$(jq -r '.head_sha' <<<"$candidate")
+
+            # Re-read every open PR immediately before cancellation. A head
+            # that became current again, including on a different PR, wins.
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+              > "$RUNNER_TEMP/live-open-pr-pages.json"
+            if jq -e --arg head "$head" \
+              '[.[][] | .head.sha] | index($head) != null' \
+              "$RUNNER_TEMP/live-open-pr-pages.json" >/dev/null; then
+              echo "preserving run ${run_id}: PR head ${head} is current again"
+              continue
+            fi
+
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+              > "$RUNNER_TEMP/pull-request-run.json"
+            jq -e \
+              --argjson run_id "$run_id" \
+              --arg head "$head" \
+              '.id == $run_id and .event == "pull_request" and .head_sha == $head' \
+              "$RUNNER_TEMP/pull-request-run.json" >/dev/null
+            status=$(jq -r '.status' "$RUNNER_TEMP/pull-request-run.json")
             if [ "$status" = completed ]; then
               echo "preserving run ${run_id}: already completed"
               continue
@@ -470,6 +558,9 @@ jobs:
             merge-queue.json
             merge-group-runs.json
             merge-group-cleanup-plan.json
+            pull-request-open-heads.json
+            pull-request-runs.json
+            pull-request-cleanup-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
           if-no-files-found: warn
@@ -483,8 +574,11 @@ jobs:
           [ "${{ steps.configure.outcome }}" = success ]
           [ "${{ steps.merge_group_cleanup_census.outcome }}" = success ]
           [ "${{ steps.merge_group_cleanup_plan.outcome }}" = success ]
+          [ "${{ steps.pull_request_cleanup_census.outcome }}" = success ]
+          [ "${{ steps.pull_request_cleanup_plan.outcome }}" = success ]
           if [ "${{ inputs.apply }}" = true ]; then
             [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]
+            [ "${{ steps.pull_request_cleanup_apply.outcome }}" = success ]
           fi
           [ "${{ steps.pull_facts.outcome }}" = success ]
           [ "${{ steps.outbox.outcome }}" = success ]
