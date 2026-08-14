@@ -4908,6 +4908,13 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
     answer, plain, characters, thinking = [], [], 0, 0
     protocol_errors = []
     codex_diagnostics = []
+
+    def record_codex_diagnostic(message):
+        if isinstance(message, str):
+            message = message.strip()
+            if message and message not in codex_diagnostics:
+                codex_diagnostics.append(message)
+
     try:
         for raw in proc.stdout:
             line = raw.rstrip("\n")
@@ -4928,14 +4935,19 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
             kind = event.get("type")
             if protocol == "codex":
                 item = event.get("item") or {}
-                if (kind == "item.completed" and
+                if kind == "error":
+                    record_codex_diagnostic(event.get("message"))
+                elif kind == "turn.failed":
+                    failure = event.get("error") or {}
+                    if isinstance(failure, dict):
+                        record_codex_diagnostic(failure.get("message"))
+                elif (kind == "item.completed" and
                         item.get("type") in ("agent_message", "reasoning")):
                     characters += len(item.get("text") or "")
                 elif (kind == "item.completed" and
                         item.get("type") == "error"):
-                    message = item.get("message") or item.get("text")
-                    if isinstance(message, str) and message.strip():
-                        codex_diagnostics.append(message.strip())
+                    record_codex_diagnostic(
+                        item.get("message") or item.get("text"))
             elif kind == "stream_event":
                 delta = (event.get("event") or {}).get("delta") or {}
                 text = delta.get("text") or ""

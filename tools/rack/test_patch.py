@@ -2658,6 +2658,12 @@ elif mode == "error-event":
     print(json.dumps({"type": "item.completed", "item": {
         "type": "error", "message": "model quota exhausted"}}))
     raise SystemExit(9)
+elif mode == "top-level-error":
+    message = "You've hit your usage limit. Try again tomorrow."
+    print(json.dumps({"type": "error", "message": message}))
+    print(json.dumps({"type": "turn.failed", "error": {
+        "message": message}}))
+    raise SystemExit(9)
 elif mode == "warning-success":
     print(json.dumps({"type": "item.completed", "item": {
         "type": "error", "message": "skill budget warning"}}))
@@ -2746,6 +2752,22 @@ else:
               f"{code} {text!r} {why!r}")
     else:
         print("  ok     a failing Codex error event becomes diagnostics")
+
+    os.environ["FAKE_CODEX_MODE"] = "top-level-error"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if (code != 9 or text or "usage limit" not in why or
+            why.count("usage limit") != 1):
+        bad += 1
+        print(f"  WRONG  top-level Codex failure events were lost or duplicated: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     top-level Codex failures become one diagnostic")
 
     os.environ["FAKE_CODEX_MODE"] = "warning-success"
     try:
