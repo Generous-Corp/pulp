@@ -264,17 +264,46 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("for fence_probe in 1 2; do", helper)
         self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
         self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
-        self.assertIn('qm destroy "$vmid" --purge', helper)
+        self.assertIn(
+            'destroy_clone_and_firewall_policy "$vmid" '
+            '"${FIREWALL_DIR}/${vmid}.fw"',
+            helper,
+        )
         self.assertIn(
             'die "cannot determine deferred-cleanup clone status"', helper
         )
         self.assertLess(
-            helper.index('qm destroy "$vmid" --purge'),
-            helper.index('rm -f "${FIREWALL_DIR}/${vmid}.fw"'),
+            helper.index('true) sleep 15; continue'),
+            helper.index('destroy_clone_and_firewall_policy "$vmid"'),
+        )
+
+    def test_vmid_reuse_cannot_race_firewall_policy_removal(self) -> None:
+        destroy_helper = self.script[
+            self.script.index("destroy_clone_and_firewall_policy() {") :
+            self.script.index("deferred_cleanup() {")
+        ]
+        self.assertIn('VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock', self.script)
+        self.assertIn('exec 9>"$VMID_LOCK"', destroy_helper)
+        self.assertIn('flock -w 300 9', destroy_helper)
+        self.assertIn('qm destroy "$vmid" --purge', destroy_helper)
+        self.assertIn('rm -f -- "$firewall_file"', destroy_helper)
+        self.assertIn('flock -u 9', destroy_helper)
+        self.assertLess(
+            destroy_helper.index('flock -w 300 9'),
+            destroy_helper.index('qm destroy "$vmid" --purge'),
         )
         self.assertLess(
-            helper.index('true) sleep 15; continue'),
-            helper.index('qm destroy "$vmid" --purge'),
+            destroy_helper.index('qm destroy "$vmid" --purge'),
+            destroy_helper.index('rm -f -- "$firewall_file"'),
+        )
+        self.assertLess(
+            destroy_helper.index('rm -f -- "$firewall_file"'),
+            destroy_helper.index('flock -u 9'),
+        )
+        self.assertEqual(
+            self.script.count("destroy_clone_and_firewall_policy "),
+            2,
+            "normal and deferred cleanup must share the locked destroy helper",
         )
 
     def test_deferred_cleanup_keeps_firewall_when_vm_status_is_unknown(self) -> None:
@@ -692,7 +721,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "::/0",
         ):
             self.assertIn(f"OUT DROP -dest {subnet}", self.script)
-        self.assertIn('rm -f "$VM_FIREWALL_FILE"', self.script)
+        self.assertIn('rm -f -- "$firewall_file"', self.script)
 
 
 if __name__ == "__main__":

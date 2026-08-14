@@ -48,6 +48,7 @@ GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_ru
 GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
+VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock
 AUTOMATIC_NETWORK_ISOLATION=0
 GITHUB_API_READY=0
 PAT=""
@@ -116,6 +117,24 @@ verify_runner_group() {
             -u GITHUB_ENTERPRISE_TOKEN HOME=/root \
             python3 "$GROUP_VERIFIER" "$@"
     fi
+}
+
+destroy_clone_and_firewall_policy() {
+    local vmid="$1" firewall_file="$2" result=0
+    [[ "$vmid" =~ ^20[0-2]$ ]] || return 1
+    exec 9>"$VMID_LOCK" || return 1
+    flock -w 300 9 || return 1
+    # The allocation path holds this same lock while selecting and cloning a
+    # free VMID. Keep it through policy removal so a successor cannot claim the
+    # destroyed VMID, install its own firewall, and have this predecessor delete
+    # that new policy after the successor's active-rule proof.
+    if qm destroy "$vmid" --purge >/dev/null; then
+        rm -f -- "$firewall_file" || result=1
+    else
+        result=1
+    fi
+    flock -u 9 || result=1
+    return "$result"
 }
 
 deferred_cleanup() {
@@ -221,9 +240,8 @@ deferred_cleanup() {
             "${registration_api}/actions/runners/${rid}" \
             || die "cannot deregister deferred-cleanup runner"
     fi
-    qm destroy "$vmid" --purge >/dev/null \
-        || die "cannot destroy deferred-cleanup clone"
-    rm -f "${FIREWALL_DIR}/${vmid}.fw"
+    destroy_clone_and_firewall_policy "$vmid" "${FIREWALL_DIR}/${vmid}.fw" \
+        || die "cannot atomically destroy deferred-cleanup clone and firewall policy"
     log "deferred cleanup completed for clone $vmid"
 }
 
@@ -310,7 +328,7 @@ fi
 # "200 is free" in the same instant; one clones it and the other's cleanup then
 # destroys 200 out from under the winner, whose `qm start` finds no config file.
 # Observed, not theoretical.
-LOCK=/var/lock/pulp-ephemeral-vmid.lock
+LOCK="$VMID_LOCK"
 exec 9>"$LOCK" || die "cannot open $LOCK"
 flock -w 300 9 || die "timed out waiting for the VMID lock"
 
@@ -517,10 +535,11 @@ cleanup() {
     log "destroying clone $VMID"
     qm stop "$VMID" >/dev/null 2>&1 || true
     for _ in $(seq 1 24); do [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break; sleep 5; done
-    if qm destroy "$VMID" --purge >/dev/null 2>&1; then
-        [ -n "${VM_FIREWALL_FILE:-}" ] && rm -f "$VM_FIREWALL_FILE"
+    if destroy_clone_and_firewall_policy \
+        "$VMID" "${VM_FIREWALL_FILE:-${FIREWALL_DIR}/${VMID}.fw}"; then
+        :
     else
-        log "WARN: destroy of $VMID failed — check manually"
+        log "WARN: atomic destroy/policy cleanup of $VMID failed — check manually"
     fi
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
