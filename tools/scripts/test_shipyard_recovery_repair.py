@@ -1,3 +1,5 @@
+from pathlib import Path
+import tempfile
 import unittest
 
 import shipyard_recovery_repair as repair
@@ -41,6 +43,18 @@ class RecoveryRepairTests(unittest.TestCase):
         ):
             with self.subTest(paths=paths), self.assertRaises(ValueError):
                 repair.validate_changed_paths(paths)
+
+    def test_patch_size_is_nonzero_and_bounded(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "repair.patch"
+            path.write_bytes(b"diff --git a/a b/a\n")
+            repair.validate_patch(path)
+            path.write_bytes(b"")
+            with self.assertRaises(ValueError):
+                repair.validate_patch(path)
+            path.write_bytes(b"x" * (repair.MAX_PATCH_BYTES + 1))
+            with self.assertRaises(ValueError):
+                repair.validate_patch(path)
 
 
 if __name__ == "__main__":

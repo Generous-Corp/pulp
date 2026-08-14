@@ -10,6 +10,7 @@ from typing import Any
 
 
 MAX_CHANGED_FILES = 80
+MAX_PATCH_BYTES = 2_000_000
 FORBIDDEN_PREFIXES = (
     ".github/workflows/shipyard-merge-steward",
     ".github/workflows/shipyard-recovery-worker",
@@ -85,6 +86,14 @@ def validate_changed_paths(paths: list[str]) -> list[str]:
     return normalized
 
 
+def validate_patch(path: Path) -> None:
+    size = path.stat().st_size
+    if size <= 0:
+        raise ValueError("repair patch is empty")
+    if size > MAX_PATCH_BYTES:
+        raise ValueError(f"repair patch exceeds {MAX_PATCH_BYTES} bytes")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assignment", type=Path, required=True)
@@ -92,9 +101,12 @@ def main() -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--prompt-output", type=Path, required=True)
     parser.add_argument("--changed-paths", type=Path)
+    parser.add_argument("--patch", type=Path)
     args = parser.parse_args()
     if args.changed_paths:
         validate_changed_paths(args.changed_paths.read_text(encoding="utf-8").splitlines())
+        if args.patch:
+            validate_patch(args.patch)
         return 0
     args.prompt_output.write_text(
         render_prompt(
