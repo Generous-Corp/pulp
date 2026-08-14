@@ -294,10 +294,14 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     VM_FIREWALL_TMP="$(mktemp)" \
         || die "cannot allocate automatic runner firewall policy"
     umask 077
+    # The guest has a static IPv4 identity. Permit only ARP and untagged IPv4
+    # at layer 2, so IPv6, VLAN encapsulation, and every other EtherType hit the
+    # generated protocol chain's terminal DROP before reaching the flat LAN.
     if ! cat > "$VM_FIREWALL_TMP" <<EOF
 [OPTIONS]
 enable: 1
 ipfilter: 1
+layer2_protocols: ARP,IPv4
 policy_in: ACCEPT
 policy_out: ACCEPT
 
@@ -375,6 +379,7 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         vm_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$iptables_rules" || true)"
         vm6_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$ip6tables_rules" || true)"
         vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
+        vm_l2_rules="$(grep -F -- "-A tap${VMID}i0-OUT-PROTO " <<< "$ebtables_rules" || true)"
         all_ipv4_drops=1
         for subnet in "${blocked_ipv4[@]}"; do
             grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
@@ -392,6 +397,11 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
             && [ "$ipv6_drop_installed" = 1 ] \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO" <<< "$ebtables_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p ARP -j RETURN" <<< "$vm_l2_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv4 -j RETURN" <<< "$vm_l2_rules" \
+            && ! grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv6 -j RETURN" <<< "$vm_l2_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -j DROP" <<< "$vm_l2_rules" \
             && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then
             firewall_active=1
             break

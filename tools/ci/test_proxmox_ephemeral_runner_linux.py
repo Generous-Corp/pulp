@@ -123,6 +123,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn('NET0="${NET0},firewall=1"', self.script)
         self.assertIn("ipfilter: 1", self.script)
+        self.assertIn("layer2_protocols: ARP,IPv4", self.script)
         self.assertIn("[IPSET ipfilter-net0]", self.script)
         self.assertIn("${GUEST_IP}", self.script)
         self.assertIn('cannot write automatic runner firewall policy', self.script)
@@ -151,6 +152,14 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('[ "$ipv6_drop_installed" = 1 ]', self.script)
         self.assertIn('--arp-ip-src ${GUEST_IP} -j RETURN', self.script)
         self.assertIn('-A tap${VMID}i0-OUT-ARP -j DROP', self.script)
+        self.assertIn('-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO', self.script)
+        self.assertIn('-A tap${VMID}i0-OUT-PROTO -p ARP -j RETURN', self.script)
+        self.assertIn('-A tap${VMID}i0-OUT-PROTO -p IPv4 -j RETURN', self.script)
+        self.assertIn(
+            '! grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv6 -j RETURN"',
+            self.script,
+        )
+        self.assertIn('-A tap${VMID}i0-OUT-PROTO -j DROP', self.script)
         self.assertNotIn('chmod 600 "$VM_FIREWALL_TMP"', self.script)
         self.assertGreater(
             self.script.index('qm set "$VMID"'),
