@@ -384,11 +384,16 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_deferred_cleanup_rejects_insecure_credential_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
-            token = pathlib.Path(raw_tmp) / "org-token"
+            tmp = pathlib.Path(raw_tmp)
+            token = tmp / "org-token"
             token.write_text("test-token", encoding="utf-8")
             token.chmod(0o644)
+            fake_gh = tmp / "gh"
+            fake_gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_gh.chmod(0o755)
             env = os.environ.copy()
             env["PULP_LINUX_ORG_PAT_FILE"] = str(token)
+            env["PULP_LINUX_GH_CLI"] = str(fake_gh)
             result = subprocess.run(
                 [
                     "/bin/bash",
