@@ -112,6 +112,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_controller_dependencies_and_org_credential_are_fail_closed(self) -> None:
         self.assertIn('command -v "$GH_CLI"', self.script)
+        self.assertIn('RT="$(GH_TOKEN="$PAT" "$GH_CLI" api --method POST', self.script)
+        self.assertNotIn('Authorization: Bearer $PAT', self.script)
         self.assertLess(
             self.script.index('command -v "$GH_CLI"'),
             self.script.index("# ── admission"),

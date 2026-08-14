@@ -450,10 +450,8 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 # what makes --ephemeral viable: the runner takes exactly one job, deregisters
 # itself, and the clone is destroyed under it.
 log "minting registration token"
-RT="$(curl -s -X POST \
-    -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
+RT="$(GH_TOKEN="$PAT" "$GH_CLI" api --method POST \
+    "${REGISTRATION_API}/actions/runners/registration-token" --jq '.token')"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
