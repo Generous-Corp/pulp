@@ -573,6 +573,16 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("NETWORK_BRIDGE=vmbr0", self.script)
         self.assertIn("LEGACY_GUEST_IPV4_PREFIX=192.168.86", self.script)
         self.assertIn("LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1", self.script)
+        self.assertIn("AUTOMATIC_GUEST_DNS_SERVER=1.1.1.1", self.script)
+        self.assertIn("GUEST_IPV4_PREFIX_LENGTH=30", self.script)
+        self.assertIn("GUEST_IPV4_PREFIX_LENGTH=24", self.script)
+        self.assertIn('GUEST_DNS_SERVER="$AUTOMATIC_GUEST_DNS_SERVER"', self.script)
+        self.assertIn('GUEST_DNS_SERVER="$LEGACY_GUEST_IPV4_GATEWAY"', self.script)
+        self.assertIn(
+            '--ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}"',
+            self.script,
+        )
+        self.assertIn('--nameserver "$GUEST_DNS_SERVER"', self.script)
         self.assertLess(
             self.script.index('if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then\n    NETWORK_BRIDGE='),
             self.script.index('NETWORK_BRIDGE=vmbr0'),
@@ -654,7 +664,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.script.index("# ── wait for the guest"),
         )
         self.assertIn(
-            "OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53",
+            "OUT ACCEPT -dest ${GUEST_DNS_SERVER} -p udp -dport 53",
             self.script,
         )
         for subnet in (

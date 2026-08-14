@@ -259,6 +259,9 @@ supervisor requires one dedicated no-uplink bridge per slot (`vmbr-ci200` throug
 `vmbr-ci202`), with only the slot's `/30` controller address and no attached
 port before clone start. The host routes and NATs public IPv4 from those
 point-to-point networks; they never join `vmbr0` or another LAN/VLAN bridge.
+Automatic guests use the verified `/30` prefix and the explicit public
+`1.1.1.1` resolver; legacy repository-scoped guests retain their existing
+`vmbr0` `/24` address and LAN resolver.
 The supervisor verifies that topology before and after start, requires
 `pve-firewall status` to report `enabled/running`, enables the firewall on that
 clone's NIC, installs an exact-address IP/ARP source filter,

@@ -26,6 +26,7 @@ GOLDEN=9005
 CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/102
 CLONE_MAX=202
 GUEST_IPV4_PREFIX=10.240
+AUTOMATIC_GUEST_DNS_SERVER=1.1.1.1
 ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
 LEGACY_GUEST_IPV4_PREFIX=192.168.86
 LEGACY_GUEST_IPV4_FIRST_OCTET=251
@@ -327,10 +328,14 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
     GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
     GUEST_IPV4_GATEWAY="${GUEST_IPV4_PREFIX}.${VMID}.1"
+    GUEST_IPV4_PREFIX_LENGTH=30
+    GUEST_DNS_SERVER="$AUTOMATIC_GUEST_DNS_SERVER"
 else
     NETWORK_BRIDGE=vmbr0
     GUEST_IP="${LEGACY_GUEST_IPV4_PREFIX}.$((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
     GUEST_IPV4_GATEWAY="$LEGACY_GUEST_IPV4_GATEWAY"
+    GUEST_IPV4_PREFIX_LENGTH=24
+    GUEST_DNS_SERVER="$LEGACY_GUEST_IPV4_GATEWAY"
 fi
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
@@ -564,8 +569,8 @@ ${GUEST_IP}
 
 [RULES]
 IN ACCEPT -source ${CONTROLLER_IPV4} -p tcp -dport 22
-OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53
-OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p tcp -dport 53
+OUT ACCEPT -dest ${GUEST_DNS_SERVER} -p udp -dport 53
+OUT ACCEPT -dest ${GUEST_DNS_SERVER} -p tcp -dport 53
 OUT DROP -dest 0.0.0.0/8
 OUT DROP -dest 10.0.0.0/8
 OUT DROP -dest 100.64.0.0/10
@@ -597,8 +602,8 @@ fi
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
     --cpuunits 50 --balloon 0 --onboot 0 \
     --net0 "$NET0" \
-    --ipconfig0 "ip=${GUEST_IP}/24,gw=${GUEST_IPV4_GATEWAY}" \
-    --nameserver "$GUEST_IPV4_GATEWAY" >/dev/null \
+    --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
+    --nameserver "$GUEST_DNS_SERVER" >/dev/null \
     || die "failed to apply deterministic network identity to clone $VMID"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     "$FIREWALL_STATUS_BIN" compile >/dev/null \
