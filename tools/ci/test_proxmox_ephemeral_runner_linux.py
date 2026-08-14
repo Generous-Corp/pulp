@@ -128,6 +128,16 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('cannot install automatic runner firewall policy', self.script)
         self.assertIn('"$FIREWALL_STATUS_BIN" compile', self.script)
         self.assertIn('automatic runner firewall policy is not active', self.script)
+        self.assertIn(
+            'require_firewall_running "automatic runner firewall policy is not active" 10',
+            self.script,
+        )
+        self.assertLess(
+            self.script.index(
+                'require_firewall_running "automatic runner firewall policy is not active" 10'
+            ),
+            self.script.index('qm start "$VMID"'),
+        )
         self.assertIn('automatic runner firewall rules are not installed', self.script)
         self.assertIn(
             '^-A tap${VMID}i0-OUT( -d ::/0)? -j DROP$', self.script

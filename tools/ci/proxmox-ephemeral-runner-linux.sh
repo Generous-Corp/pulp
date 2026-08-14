@@ -49,6 +49,16 @@ KEEP=0
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+require_firewall_running() {
+    local context="$1" attempts="${2:-1}" actual="empty"
+    local attempt
+    for attempt in $(seq 1 "$attempts"); do
+        actual="$("$FIREWALL_STATUS_BIN" status 2>&1)" || actual="query failed"
+        [ "$actual" = "Status: enabled/running" ] && return 0
+        [ "$attempt" = "$attempts" ] || sleep 1
+    done
+    die "$context (reported after ${attempts} attempt(s): ${actual:-empty})"
+}
 
 PAT=""
 command -v "$GH_CLI" >/dev/null 2>&1 \
@@ -94,8 +104,8 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         command -v "$tool" >/dev/null 2>&1 \
             || die "$tool is required for automatic runner firewall proof"
     done
-    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
-        || die "automatic Linux runners require the Proxmox firewall"
+    require_firewall_running \
+        "automatic Linux runners require the Proxmox firewall"
     [ -d "$FIREWALL_DIR" ] \
         || die "automatic Linux runner firewall directory is missing"
     REGISTRATION_API="orgs/${ORG}"
@@ -284,8 +294,10 @@ qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     "$FIREWALL_STATUS_BIN" compile >/dev/null \
         || die "automatic runner firewall policy does not compile"
-    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
-        || die "automatic runner firewall policy is not active"
+    # Compiling a newly-created per-VM policy can briefly report pending state
+    # while the firewall daemon consumes the cluster filesystem update. Bound
+    # that convergence window; starting the guest still remains fail-closed.
+    require_firewall_running "automatic runner firewall policy is not active" 10
 fi
 qm start "$VMID" >/dev/null || die "start failed"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
