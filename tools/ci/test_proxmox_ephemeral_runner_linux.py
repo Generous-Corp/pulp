@@ -201,11 +201,130 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('legacy_credential="${4:-}"', helper)
         self.assertIn("invalid legacy deferred-cleanup credential path", helper)
         self.assertIn("labels[]=pulp-shutdown-fenced", helper)
+        self.assertIn("for fence_probe in 1 2; do", helper)
+        self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
+        self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
         self.assertIn('qm destroy "$vmid" --purge', helper)
+        self.assertIn(
+            'die "cannot determine deferred-cleanup clone status"', helper
+        )
+        self.assertLess(
+            helper.index('qm destroy "$vmid" --purge'),
+            helper.index('rm -f "${FIREWALL_DIR}/${vmid}.fw"'),
+        )
         self.assertLess(
             helper.index('true) sleep 15; continue'),
             helper.index('qm destroy "$vmid" --purge'),
         )
+
+    def test_deferred_cleanup_keeps_firewall_when_vm_status_is_unknown(self) -> None:
+        helper = self.script[
+            self.script.index("deferred_cleanup() {") : self.script.index(
+                'if [ "${1:-}" = "--deferred-cleanup" ]'
+            )
+        ]
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            firewall = tmp / "200.fw"
+            firewall.write_text("protected", encoding="utf-8")
+            destroyed = tmp / "destroyed"
+            fake_qm = tmp / "qm"
+            fake_qm.write_text(
+                "#!/usr/bin/env bash\n"
+                "case \"$1\" in\n"
+                "  stop) exit 0 ;;\n"
+                "  status) exit 1 ;;\n"
+                f"  destroy) : > '{destroyed}'; exit 0 ;;\n"
+                "  *) exit 1 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            fake_qm.chmod(0o755)
+            harness = tmp / "harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -u\n"
+                "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
+                "configure_github_auth() { :; }\n"
+                "github_api() { :; }\n"
+                f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
+                f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
+                "GITHUB_AUTH_MODE='token-file'\n"
+                f"FIREWALL_DIR='{tmp}'\n"
+                + helper
+                + "\ndeferred_cleanup 200 pulp-pr-safe-ephemeral-200-test orgs/Generous-Corp\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(harness)],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "cannot determine deferred-cleanup clone status", result.stdout
+            )
+            self.assertTrue(firewall.exists())
+            self.assertFalse(destroyed.exists())
+
+    def test_deferred_cleanup_preserves_job_that_wins_fence_race(self) -> None:
+        helper = self.script[
+            self.script.index("deferred_cleanup() {") : self.script.index(
+                'if [ "${1:-}" = "--deferred-cleanup" ]'
+            )
+        ]
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            firewall = tmp / "200.fw"
+            firewall.write_text("protected", encoding="utf-8")
+            qm_called = tmp / "qm-called"
+            fake_qm = tmp / "qm"
+            fake_qm.write_text(
+                "#!/usr/bin/env bash\n"
+                f": > '{qm_called}'\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_qm.chmod(0o755)
+            harness = tmp / "harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -u\n"
+                "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
+                "configure_github_auth() { :; }\n"
+                "github_api() {\n"
+                "  if [ \"${1:-}\" = --paginate ]; then\n"
+                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\tonline\\n'\n"
+                "  elif [ \"${1:-}\" = --method ]; then\n"
+                "    :\n"
+                "  else\n"
+                "    printf 'pulp-pr-safe-ephemeral-200-test\\ttrue\\tonline\\tpulp-shutdown-fenced\\n'\n"
+                "  fi\n"
+                "}\n"
+                f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
+                f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
+                "GITHUB_AUTH_MODE='token-file'\n"
+                f"FIREWALL_DIR='{tmp}'\n"
+                + helper
+                + "\ndeferred_cleanup 200 pulp-pr-safe-ephemeral-200-test orgs/Generous-Corp\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(harness)],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "deferred-cleanup runner became busy before dispatch fence",
+                result.stdout,
+            )
+            self.assertTrue(firewall.exists())
+            self.assertFalse(qm_called.exists())
 
     def test_deferred_cleanup_rejects_insecure_credential_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

@@ -162,31 +162,45 @@ deferred_cleanup() {
                 "${registration_api}/actions/runners/${rid}/labels" \
                 -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
                 || die "cannot fence deferred-cleanup runner"
-            labels="$(github_api \
-                "${registration_api}/actions/runners/${rid}" \
-                --jq '[.labels[].name] | join(",")')" \
-                || die "cannot verify deferred-cleanup fence"
-            case ",$labels," in
-                *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
-                    die "routing label survived deferred-cleanup fence"
-                    ;;
-            esac
+            for fence_probe in 1 2; do
+                fenced_runner="$(github_api \
+                    "${registration_api}/actions/runners/${rid}" \
+                    --jq '[.name,.busy,.status,([.labels[].name] | join(","))] | @tsv')" \
+                    || die "cannot verify deferred-cleanup fence"
+                IFS=$'\t' read -r fenced_name busy status labels <<< "$fenced_runner"
+                [ "$fenced_name" = "$runner_name" ] \
+                    || die "deferred-cleanup fence resolved the wrong runner"
+                [ "$busy" = false ] \
+                    || die "deferred-cleanup runner became busy before dispatch fence"
+                { [ "$status" = online ] || [ "$status" = offline ]; } \
+                    || die "invalid deferred-cleanup fenced runner status"
+                case ",$labels," in
+                    *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
+                        die "routing label survived deferred-cleanup fence"
+                        ;;
+                esac
+                case ",$labels," in
+                    *,pulp-shutdown-fenced,*) ;;
+                    *) die "shutdown label is missing after deferred-cleanup fence" ;;
+                esac
+                [ "$fence_probe" = 2 ] || sleep 2
+            done
         fi
         break
     done
     [ "$SECONDS" -lt "$deadline" ] \
         || die "deferred cleanup timed out while runner remained busy"
 
+    local vm_status
     timeout 20s qm stop "$vmid" >/dev/null 2>&1 || true
     for _ in $(seq 1 60); do
-        qm status "$vmid" >/dev/null 2>&1 || break
-        [ "$(qm status "$vmid" 2>/dev/null)" = "status: stopped" ] && break
+        vm_status="$(qm status "$vmid" 2>/dev/null)" \
+            || die "cannot determine deferred-cleanup clone status"
+        [ "$vm_status" = "status: stopped" ] && break
         sleep 2
     done
-    if qm status "$vmid" >/dev/null 2>&1; then
-        [ "$(qm status "$vmid" 2>/dev/null)" = "status: stopped" ] \
-            || die "deferred-cleanup clone did not stop"
-    fi
+    [ "$vm_status" = "status: stopped" ] \
+        || die "deferred-cleanup clone did not stop"
 
     runners_tsv="$(github_api --paginate \
         "${registration_api}/actions/runners?per_page=100" \
@@ -204,10 +218,8 @@ deferred_cleanup() {
             "${registration_api}/actions/runners/${rid}" \
             || die "cannot deregister deferred-cleanup runner"
     fi
-    if qm status "$vmid" >/dev/null 2>&1; then
-        qm destroy "$vmid" --purge >/dev/null \
-            || die "cannot destroy deferred-cleanup clone"
-    fi
+    qm destroy "$vmid" --purge >/dev/null \
+        || die "cannot destroy deferred-cleanup clone"
     rm -f "${FIREWALL_DIR}/${vmid}.fw"
     log "deferred cleanup completed for clone $vmid"
 }
