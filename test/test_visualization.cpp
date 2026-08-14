@@ -57,6 +57,26 @@ SpectrumData analyze_stereo(const std::vector<float>& left,
 
 // ── VisualizationBridge Tests ───────────────────────────────────────────────
 
+TEST_CASE("VisualizationConfig preserves positional aggregate initialization",
+          "[view][vizbridge][config]") {
+    const VisualizationConfig cfg{
+        2048, 512, WindowFunction::Type::blackman, 0.25f,
+        6, 96000.0f, false, 4096, 16384, 1024, -96.0f};
+
+    REQUIRE(cfg.fft_size == 2048);
+    REQUIRE(cfg.hop_size == 512);
+    REQUIRE(cfg.window == WindowFunction::Type::blackman);
+    REQUIRE(cfg.window_param == 0.25f);
+    REQUIRE(cfg.num_channels == 6);
+    REQUIRE(cfg.sample_rate == 96000.0f);
+    REQUIRE_FALSE(cfg.capture_waveform);
+    REQUIRE(cfg.waveform_length == 4096);
+    REQUIRE(cfg.capture_buffer_frames == 16384);
+    REQUIRE(cfg.max_frames_per_poll == 1024);
+    REQUIRE(cfg.spectrum_floor_db == -96.0f);
+    REQUIRE(cfg.max_callback_frames == 4096);
+}
+
 TEST_CASE("VisualizationBridge configure and process", "[view][vizbridge]") {
     VisualizationBridge bridge;
 

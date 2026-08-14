@@ -82,12 +82,6 @@ struct VisualizationConfig {
     bool capture_waveform = true;
     int waveform_length = 1024; // samples to capture per snapshot
 
-    // Largest frame count the host can deliver in one audio callback. The
-    // automatic capture capacity and any smaller explicit capacity are raised
-    // to this bound so a valid callback can always be published atomically.
-    // Set this to the host's offline/variable-block maximum before configure().
-    int max_callback_frames = 4096;
-
     // Audio frames retained between non-RT polls. Zero selects an automatic
     // capacity of at least four FFT windows and max_callback_frames. When the
     // consumer falls behind, new frames are dropped and the cumulative count
@@ -101,6 +95,12 @@ struct VisualizationConfig {
 
     // dB value published for silence and used as the finite lower bound.
     float spectrum_floor_db = -120.0f;
+
+    // Largest frame count the host can deliver in one audio callback. The
+    // automatic capture capacity and any smaller explicit capacity are raised
+    // to this bound so a valid callback can always be published atomically.
+    // Set this to the host's offline/variable-block maximum before configure().
+    int max_callback_frames = 4096;
 };
 
 /// Central visualization bridge: a fixed multichannel audio tap plus a
