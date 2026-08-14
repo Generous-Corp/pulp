@@ -6,13 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Reuse only root-owned credential and controller paths. These fixed settings
-# keep PR-safe slots out of the trusted group and runner-name namespace.
+# Reuse only root-owned credential and controller paths. The profile wrapper
+# exports its identity after systemd constructs this environment, so legacy
+# identity values cannot move a PR-safe slot into the trusted pool.
 EnvironmentFile=-/etc/pulp/linux-runner-group.env
-Environment=PULP_LINUX_RUNNER_GROUP_ID=5
-Environment=PULP_LINUX_RUNNER_GROUP_PROFILE=pr-safe
-Environment=PULP_RUNNER_NAME_PREFIX=pulp-pr-safe-ephemeral
-ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh
+ExecStart=/usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh
 Restart=always
 RestartSec=30
 RestartPreventExitStatus=

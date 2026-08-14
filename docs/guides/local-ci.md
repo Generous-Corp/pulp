@@ -289,6 +289,12 @@ install -m 600 /secure/input/gh-org-runner-pat \
   /root/.config/pulp/secrets/gh-org-runner-pat
 install -m 755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
+install -m 755 tools/ci/proxmox-ephemeral-runner-linux.sh \
+  /usr/local/sbin/proxmox-ephemeral-runner-linux.sh
+install -m 755 tools/ci/proxmox-trusted-ephemeral-runner-linux.sh \
+  /usr/local/sbin/proxmox-trusted-ephemeral-runner-linux.sh
+install -m 755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh \
+  /usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh
 install -m 644 tools/ci/pulp-ephemeral-pool@.service \
   /etc/systemd/system/pulp-ephemeral-pool@.service
 install -m 644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
@@ -296,7 +302,10 @@ install -m 644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
 systemctl daemon-reload
 ```
 
-The host credential never enters a guest. Jobs that call `gh` authenticate with
+The profile wrappers export their identity immediately before launching the
+shared supervisor, so a legacy shared environment file cannot move a slot into
+the other runner group. The host credential never enters a guest. Jobs that
+call `gh` authenticate with
 the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
 persistent `gh` login in any supported config or credential store.
 ## Routing the Linux advisory lanes to macpro

@@ -35,6 +35,10 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('REGISTRATION_API="repos/${REPO}"', self.script)
         self.assertIn('RUNNER_URL="https://github.com/${REPO}"', self.script)
         self.assertIn('RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"', self.script)
+        self.assertGreater(
+            self.script.index('else\n    [ -r "$PAT_FILE" ]'),
+            self.script.index('if [ -n "$RUNNER_GROUP_ID" ]'),
+        )
 
     def test_org_registration_requires_the_fail_closed_verifier(self) -> None:
         self.assertIn('REGISTRATION_API="orgs/${ORG}"', self.script)
@@ -62,21 +66,15 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("User=root", self.service)
 
     def test_systemd_can_run_both_profiles_concurrently(self) -> None:
-        self.assertIn("PULP_LINUX_RUNNER_GROUP_ID=3", self.service)
-        self.assertIn("PULP_LINUX_RUNNER_GROUP_PROFILE=trusted", self.service)
-        self.assertIn("PULP_RUNNER_NAME_PREFIX=pulp-auto-ephemeral", self.service)
-        self.assertIn("PULP_LINUX_RUNNER_GROUP_ID=5", self.pr_safe_service)
-        self.assertIn("PULP_LINUX_RUNNER_GROUP_PROFILE=pr-safe", self.pr_safe_service)
-        self.assertIn(
-            "PULP_RUNNER_NAME_PREFIX=pulp-pr-safe-ephemeral", self.pr_safe_service
-        )
         self.assertEqual(
-            self.service.count("ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh"),
+            self.service.count(
+                "ExecStart=/usr/local/sbin/proxmox-trusted-ephemeral-runner-linux.sh"
+            ),
             1,
         )
         self.assertEqual(
             self.pr_safe_service.count(
-                "ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh"
+                "ExecStart=/usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh"
             ),
             1,
         )
@@ -129,6 +127,9 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('"$FIREWALL_STATUS_BIN" compile', self.script)
         self.assertIn('automatic runner firewall policy is not active', self.script)
         self.assertIn('automatic runner firewall rules are not installed', self.script)
+        self.assertIn(
+            '^-A tap${VMID}i0-OUT( -d ::/0)? -j DROP$', self.script
+        )
         self.assertIn('iptables-save', self.script)
         self.assertIn('ip6tables-save', self.script)
         self.assertIn('ebtables-save', self.script)

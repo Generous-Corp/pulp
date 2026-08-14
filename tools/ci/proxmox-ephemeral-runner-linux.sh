@@ -50,8 +50,7 @@ KEEP=0
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
-[ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
-PAT="$(cat "$PAT_FILE")"
+PAT=""
 command -v "$GH_CLI" >/dev/null 2>&1 \
     || die "$GH_CLI is not on PATH"
 
@@ -103,6 +102,9 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     RUNNER_URL="https://github.com/${ORG}"
     RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
     AUTOMATIC_NETWORK_ISOLATION=1
+else
+    [ -r "$PAT_FILE" ] || die "no repository runner PAT at $PAT_FILE"
+    PAT="$(cat "$PAT_FILE")"
 fi
 # ── admission ────────────────────────────────────────────────────────────────
 # Ask before taking. A refused job queues on GitHub, which is recoverable; an
@@ -307,7 +309,7 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
                 || { all_ipv4_drops=0; break; }
         done
         if [ "$all_ipv4_drops" = 1 ] \
-            && grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            && grep -Eq -- "^-A tap${VMID}i0-OUT( -d ::/0)? -j DROP$" <<< "$vm6_out_rules" \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
             && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then

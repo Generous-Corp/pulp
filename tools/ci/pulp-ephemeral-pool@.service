@@ -6,16 +6,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Shared root-owned credential and controller paths. The unit's fixed profile
-# settings below deliberately override any legacy profile values in this file.
+# Shared root-owned credential and controller paths. The profile wrapper exports
+# its identity after systemd constructs this environment, so legacy identity
+# values in the shared file cannot move a slot into the other pool.
 EnvironmentFile=-/etc/pulp/linux-runner-group.env
-Environment=PULP_LINUX_RUNNER_GROUP_ID=3
-Environment=PULP_LINUX_RUNNER_GROUP_PROFILE=trusted
-Environment=PULP_RUNNER_NAME_PREFIX=pulp-auto-ephemeral
 # One job per invocation: the runner is --ephemeral, so run.sh exits when the job
 # completes and the clone is destroyed on the way out. systemd restarts us, which
 # provisions a fresh clone for the next job. That loop IS the pool.
-ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh
+ExecStart=/usr/local/sbin/proxmox-trusted-ephemeral-runner-linux.sh
 Restart=always
 # 30s between jobs: long enough that a persistent failure (bad golden, revoked
 # PAT) backs off visibly in the journal instead of spinning, short enough that a
