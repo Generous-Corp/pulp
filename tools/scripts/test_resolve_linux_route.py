@@ -4,19 +4,24 @@
 from __future__ import annotations
 
 import importlib.util
+import datetime as dt
 import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).parent / "resolve_linux_route.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+VELLUM_TRUSTED_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-trusted-gate.yml"
+VELLUM_FREEZE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
+VERSION_SKILL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
-    '"pulp-host-macpro"]'
+    '"pulp-host-macpro","pulp-auto-linux-x64"]'
 )
 
 _SPEC = importlib.util.spec_from_file_location("linux_route_under_test", SCRIPT)
@@ -35,7 +40,9 @@ def test_dispatch_uses_configured_self_hosted_selector() -> None:
     )
     assert metadata["linux_route_reason"] == "explicit-dispatch"
     assert metadata["linux_provider"] == "local"
-    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-host-macpro"
+    labels = json.loads(metadata["configured_selector_json"])
+    assert "pulp-host-macpro" in labels
+    assert labels[-1] == "pulp-auto-linux-x64"
     assert metadata["event_authorized_selector_json"] == metadata["configured_selector_json"]
 
 
@@ -53,28 +60,29 @@ def test_pull_request_exposes_security_hosted_route() -> None:
     assert metadata["event_authorized_selector_json"] == ""
 
 
-def test_same_repository_pull_request_can_use_trusted_local_route() -> None:
+def test_pull_request_stays_hosted_even_when_operator_lease_is_enabled() -> None:
     metadata = route.resolve_route(
         event_name="pull_request",
         dispatch_selector_json="",
         configured_selector_json=MAC_PRO_SELECTOR,
-        authorized_selector_json=MAC_PRO_SELECTOR,
-        resolved_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json="",
+        resolved_selector_json='"ubuntu-latest"',
+        local_enabled=True,
     )
-    assert metadata["linux_route_reason"] == "trusted-local"
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_route_reason"] == "security-hosted"
+    assert metadata["linux_provider"] == "github-hosted"
 
 
-def test_merge_group_can_use_trusted_local_route() -> None:
+def test_merge_group_prefers_macpro_when_operator_lease_is_enabled() -> None:
     metadata = route.resolve_route(
         event_name="merge_group",
         dispatch_selector_json="",
         configured_selector_json=MAC_PRO_SELECTOR,
         authorized_selector_json=MAC_PRO_SELECTOR,
         resolved_selector_json=MAC_PRO_SELECTOR,
+        local_enabled=True,
     )
-    assert metadata["linux_route_reason"] == "trusted-local"
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_route_reason"] == "local-enabled"
 
 
 def test_unconfigured_event_exposes_hosted_route() -> None:
@@ -87,6 +95,84 @@ def test_unconfigured_event_exposes_hosted_route() -> None:
     )
     assert metadata["linux_route_reason"] == "unconfigured-hosted"
     assert metadata["linux_provider"] == "github-hosted"
+
+
+def test_operator_lease_is_short_lived_and_fails_closed() -> None:
+    now = dt.datetime(2026, 8, 13, 18, 0, tzinfo=dt.timezone.utc)
+    assert route.operator_lease_active("2026-08-13T18:10:00Z", now)
+    assert not route.operator_lease_active("2026-08-13T17:59:59Z", now)
+    assert not route.operator_lease_active("2026-08-13T18:16:00Z", now)
+    assert not route.operator_lease_active("not-a-time", now)
+    assert not route.operator_lease_active("2026-08-13T18:10:00", now)
+    assert not route.operator_lease_active("0001-01-01T00:00:00+14:00", now)
+
+
+def test_merge_group_inactive_leases_ignore_global_namespace_provider() -> None:
+    now = dt.datetime(2026, 8, 13, 18, 0, tzinfo=dt.timezone.utc)
+    for lease in ("", "2026-08-13T17:59:59Z", "not-a-time"):
+        active = route.operator_lease_active(lease, now)
+        assert not active
+        metadata = route.resolve_route(
+            event_name="merge_group",
+            dispatch_selector_json="",
+            configured_selector_json=MAC_PRO_SELECTOR,
+            authorized_selector_json="",
+            resolved_selector_json='"ubuntu-latest"',
+            requested_provider="namespace",
+            local_enabled=active,
+        )
+        assert metadata["linux_route_reason"] == "security-hosted"
+        assert metadata["linux_provider"] == "github-hosted"
+
+
+def test_merge_group_inactive_lease_rejects_namespace_resolution() -> None:
+    for configured in ("", MAC_PRO_SELECTOR):
+        try:
+            route.resolve_route(
+                event_name="merge_group",
+                dispatch_selector_json="",
+                configured_selector_json=configured,
+                authorized_selector_json="",
+                resolved_selector_json='["namespace-profile-generouscorp"]',
+                requested_provider="namespace",
+                local_enabled=False,
+            )
+        except ValueError as error:
+            assert "resolve exactly to ubuntu-latest" in str(error)
+        else:
+            raise AssertionError("inactive automatic route accepted Namespace")
+
+
+def test_profile_covers_full_merge_queue_admission_burst() -> None:
+    profile = tomllib.loads(
+        (REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml").read_text()
+    )
+    repo_profile = profile["repo"]["Generous-Corp/pulp"]
+    pr_lane = repo_profile["pr"]["linux"]
+    assert pr_lane["strategy"] == "leased-ordered-fallback"
+    assert pr_lane["targets"] == [
+        "macpro.linux-x64-pr-safe-vm",
+        "github.linux-x64",
+    ]
+    assert pr_lane["health_lease_events"] == ["pull_request"]
+    assert pr_lane["health_lease_runner_name_prefix"] == "pulp-pr-safe-ephemeral-"
+    assert pr_lane["health_lease_admission_burst"] == 2
+    assert pr_lane["enable_variable"] == "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED"
+    lane = repo_profile["merge_group"]["linux"]
+    assert lane["health_lease_merge_queue_branch"] == "main"
+    assert lane["health_lease_admission_burst"] == 5
+    assert lane["health_lease_admission_burst"] > 2, (
+        "the current two-runner fleet must remain automatically disarmed while "
+        "the live merge queue may materialize five Linux jobs"
+    )
+
+
+def test_reviewed_macpro_selector_is_order_independent_but_exact() -> None:
+    labels = json.loads(MAC_PRO_SELECTOR)
+    assert route.is_macpro_linux_selector(labels)
+    assert route.is_macpro_linux_selector(list(reversed(labels)))
+    assert not route.is_macpro_linux_selector(labels + [labels[-1]])
+    assert not route.is_macpro_linux_selector(labels[:-1])
 
 
 def test_dispatch_override_can_explicitly_select_hosted() -> None:
@@ -193,34 +279,35 @@ def test_configured_dispatch_rejects_hosted_configuration() -> None:
     assert "unexpectedly resolved" in proc.stderr
 
 
-def test_non_dispatch_cannot_authorize_configured_selector() -> None:
+def test_non_dispatch_cannot_authorize_configured_selector_without_operator_lease() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request_target",
+            event_name="merge_group",
             dispatch_selector_json="",
             configured_selector_json=MAC_PRO_SELECTOR,
             authorized_selector_json=MAC_PRO_SELECTOR,
-            resolved_selector_json=MAC_PRO_SELECTOR,
+            resolved_selector_json='"ubuntu-latest"',
+            local_enabled=False,
         )
     except ValueError as exc:
-        assert "unexpectedly authorized" in str(exc)
+        assert "operator health lease" in str(exc)
     else:
-        raise AssertionError("pull_request accepted the configured private selector")
+        raise AssertionError("merge_group accepted an expired local lease")
 
 
 def test_non_dispatch_cannot_authorize_without_configured_selector() -> None:
     try:
         route.resolve_route(
-            event_name="pull_request_target",
+            event_name="merge_group",
             dispatch_selector_json="",
             configured_selector_json="",
             authorized_selector_json=MAC_PRO_SELECTOR,
             resolved_selector_json=MAC_PRO_SELECTOR,
         )
     except ValueError as exc:
-        assert "unexpectedly authorized" in str(exc)
+        assert "configured selector" in str(exc)
     else:
-        raise AssertionError("pull_request accepted an unauthorized selector")
+        raise AssertionError("merge_group accepted an unauthorized selector")
 
 
 def test_namespace_provider_is_derived_from_resolved_selector() -> None:
@@ -234,7 +321,7 @@ def test_namespace_provider_is_derived_from_resolved_selector() -> None:
     assert metadata["linux_provider"] == "namespace"
 
 
-def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
+def test_workflow_keeps_configured_selector_separate_from_event_authorization() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     configured = re.search(
         r"(?m)^\s+CONFIGURED_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
@@ -245,8 +332,17 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     assert configured is not None
     assert authorized is not None
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in configured.group(1)
-    assert "github.event_name == 'workflow_dispatch'" in authorized.group(1)
-    assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in authorized.group(1)
+    assert "inputs.linux_runner_selector_json" in authorized.group(1)
+    assert "def local_linux_capacity" not in text
+    assert 'REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")' in text
+    assert 'EVENT_NAME == "workflow_dispatch" and configured_linux_selector' in text
+    assert 'automatic_linux = EVENT_NAME == "merge_group"' in text
+    assert "automatic_linux and configured_linux_valid" in text
+    assert "PULP_LOCAL_LINUX_LEASE_UNTIL" in text
+    assert "linux_requested_provider = (" in text
+    assert "if automatic_linux and not linux_local_enabled" in text
+    assert '"--requested-provider-env", "LINUX_REQUESTED_PROVIDER"' in text
+    assert '"--requested-provider", linux_requested_provider' in text
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
@@ -256,6 +352,41 @@ def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
     assert '"route_reason": linux_route_reason' in text
     for reason in route.ROUTE_REASONS:
         assert reason in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_privileged_lanes_stay_hosted_and_trusted_label_is_not_declared() -> None:
+    vellum = VELLUM_TRUSTED_WORKFLOW.read_text(encoding="utf-8")
+    assert "pulp-vellum-trusted-mg" not in vellum
+    assert vellum.count("runs-on: ubuntu-latest") >= 2
+    assert "name: Vellum trusted freeze" in vellum
+    for name in ("release-cli.yml", "sign-and-release.yml"):
+        text = (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        assert "PULP_LOCAL_LINUX_RUNS_ON_JSON" not in text
+
+
+def test_small_unprivileged_gates_stay_hosted_without_an_expiry_resolver() -> None:
+    for workflow in (VELLUM_FREEZE_WORKFLOW, VERSION_SKILL_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        runs_on = re.search(r"(?m)^\s+runs-on:\s*(.+)$", text)
+        assert runs_on is not None
+        assert runs_on.group(1) == "ubuntu-latest"
+        assert "PULP_LOCAL_LINUX_RUNS_ON_JSON" not in text
+        assert "PULP_LOCAL_LINUX_LEASE_UNTIL" not in text
+
+
+def test_unprivileged_gate_triggers_and_public_names_are_preserved() -> None:
+    expected = (
+        (VELLUM_FREEZE_WORKFLOW, "name: Vellum freeze"),
+        (VERSION_SKILL_WORKFLOW, "name: Enforce version & skill sync"),
+    )
+    for workflow, public_name in expected:
+        text = workflow.read_text(encoding="utf-8")
+        trigger_block = text.split("jobs:", 1)[0]
+        assert "pull_request:" in trigger_block
+        assert "merge_group:" in trigger_block
+        assert "workflow_dispatch:" in trigger_block
+        assert public_name in text
+    assert "permissions:\n  contents: read" in VELLUM_FREEZE_WORKFLOW.read_text()
 
 
 def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:

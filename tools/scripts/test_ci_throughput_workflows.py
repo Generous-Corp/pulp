@@ -96,6 +96,33 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             named_step(linux_job, "Build all examples")["run"],
         )
 
+    def test_shipyard_pr_linux_profile_uses_independent_pr_safe_lease(self) -> None:
+        profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
+        table = toml_table(profile, 'repo."Generous-Corp/pulp".pr.linux')
+        self.assertIn('strategy = "leased-ordered-fallback"', table)
+        self.assertIn('"macpro.linux-x64-pr-safe-vm", "github.linux-x64"', table)
+        self.assertIn('health_lease_events = ["pull_request"]', table)
+        self.assertIn('health_lease_runner_name_prefix = "pulp-pr-safe-ephemeral-"', table)
+        self.assertEqual(toml_json_value(table, "health_lease_admission_burst"), 2)
+
+    def test_shipyard_merge_group_linux_profile_is_local_first_with_hosted_fallback(self) -> None:
+        profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
+        table = toml_table(profile, 'repo."Generous-Corp/pulp".merge_group.linux')
+        self.assertIn('strategy = "leased-ordered-fallback"', table)
+        self.assertIn('"macpro.linux-x64-trusted-vm", "github.linux-x64"', table)
+        self.assertIn('github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"', table)
+        self.assertIn(
+            'health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"', table
+        )
+        self.assertEqual(toml_json_value(table, "health_lease_ttl_seconds"), 300)
+        self.assertEqual(
+            toml_json_value(table, "health_lease_events"),
+            ["merge_group"],
+        )
+        self.assertIn('health_lease_runner_name_prefix = "pulp-ci-ephemeral-"', table)
+        self.assertIn('health_lease_merge_queue_branch = "main"', table)
+        self.assertEqual(toml_json_value(table, "health_lease_admission_burst"), 5)
+
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(
             step

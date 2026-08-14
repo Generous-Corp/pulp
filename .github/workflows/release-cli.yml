@@ -97,9 +97,10 @@ jobs:
     name: Resolve macOS runner — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     # This is trusted release control-plane work: the workflow is reachable only
     # from a version-tag push or a maintainer dispatch, never pull_request or
-    # merge_group. Reuse the existing MacPro Linux/X64 pool when configured, but
-    # preserve ubuntu-latest as the zero-configuration rollback.
-    runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # merge_group. The dedicated release-control selector may target the trusted
+    # MacPro Linux/X64 pool; when it is unset, fall directly to ubuntu-latest.
+    # Release control is privileged and never reads the generic PR Linux selector.
+    runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       # Kept for the Namespace-profile step below, which still asks "did the macOS
       # leg resolve to a Namespace runner?".

@@ -58,6 +58,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
 RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
+RELEASE_PIPELINE_DOC = REPO_ROOT / "docs" / "guides" / "release-pipeline.md"
+SHIP_SKILL = REPO_ROOT / ".agents" / "skills" / "ship" / "SKILL.md"
 RELEASE_DRY_RUN = REPO_ROOT / ".github" / "workflows" / "release-dry-run.yml"
 RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
@@ -1328,15 +1330,14 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
         cls.release = yaml.safe_load(cls.release_text)
         cls.sign = yaml.safe_load(cls.sign_text)
 
-    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+    def test_resolvers_use_only_the_privileged_linux_selector_then_hosted_fallback(self) -> None:
         for workflow in (self.release, self.sign):
             with self.subTest(workflow=workflow["name"]):
                 runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
                 dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
-                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
                 fallback = runs_on.index('"ubuntu-latest"')
-                self.assertLess(dedicated, existing)
-                self.assertLess(existing, fallback)
+                self.assertLess(dedicated, fallback)
+                self.assertNotIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", runs_on)
 
     def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
         for text in (self.release_text, self.sign_text):
@@ -1344,6 +1345,21 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
                 trigger_block = text.split("\n# Never cancel", 1)[0]
                 self.assertNotIn("pull_request:", trigger_block)
                 self.assertNotIn("merge_group:", trigger_block)
+
+    def test_operator_references_forbid_the_generic_linux_selector(self) -> None:
+        for path in (RELEASE_PIPELINE_DOC, SHIP_SKILL):
+            text = path.read_text(encoding="utf-8")
+            normalized = " ".join(text.split())
+            with self.subTest(path=path):
+                self.assertIn("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON", text)
+                self.assertRegex(
+                    normalized,
+                    r"PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON.{0,160}ubuntu-latest",
+                )
+                self.assertRegex(
+                    normalized,
+                    r"never.{0,80}PULP_LOCAL_LINUX_RUNS_ON_JSON",
+                )
 
     def test_release_resolver_checks_out_trusted_main_control_code(self) -> None:
         steps = self.release["jobs"]["resolve-macos-runner"]["steps"]

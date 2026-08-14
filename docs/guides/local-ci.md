@@ -256,9 +256,37 @@ dispatch is the hosted fallback; it cannot rescue an already assigned job.
 Secret-bearing and `pull_request_target` jobs remain ineligible regardless of
 runner health.
 
+### Lease admission contracts
+
+The checked-in `normal-local-fast` profile defines two independent Shipyard
+0.87.3-or-newer producer contracts. The PR-safe lane uses
+`PULP_PR_SAFE_LINUX_LEASE_UNTIL`, the exact `pull_request` event class, the
+`pulp-pr-safe-ephemeral-` runner-name prefix, `main`, and an admission burst of
+two. The trusted lane uses `PULP_LOCAL_LINUX_LEASE_UNTIL`, the exact
+`merge_group` event class, the `pulp-ci-ephemeral-` prefix, `main`, and a burst
+of five matching the live merge queue's `max_entries_to_build`. Both use a
+300-second TTL.
+
+The producer derives required labels from the profile target, reads live
+capacity and reservations, and renews only when unreserved idle capacity covers
+the full declared burst. An absent, malformed, expired, or implausibly distant
+lease restores exactly `ubuntu-latest` before matrix creation. The current
+two-slot fleet cannot arm the trusted lane for the five-entry merge queue, so merge-group Linux
+deliberately remains hosted. Same-repository PRs may use the two-slot PR-safe
+lane only through the main-owned reusable workflow; fork PRs remain hosted.
+`Vellum freeze` and `Enforce version & skill sync` remain hosted because their
+direct `runs-on` expressions cannot safely validate lease expiry.
+
+The required merge-group `macos` conclusion comes directly from the native
+matrix leg. Its bounded fallback does not wait for the build or reserve one of
+the two active preamble runners for the macOS build duration. Do not add shared
+workflow or job concurrency: GitHub retains only one pending member, which can
+cancel required checks across the five-entry merge queue.
+
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
+`explicit-dispatch`, `local-enabled`, `security-hosted`, or
+`unconfigured-hosted`; the Linux
 matrix provider is derived from the selector that actually resolved. An
 operator dispatch with a configured selector fails instead of silently falling
 back to hosted Linux.

@@ -65,18 +65,9 @@ require(
 
 aliases = {
     "macos": job_body(text, "macos"),
-    "macos-merge-group": job_body(text, "macos-merge-group"),
 }
 for name, job in aliases.items():
-    require(
-        "needs: [build, classify]" in job,
-        f"{name} must wait for the terminal build matrix and classification",
-    )
     require("if: always()" in job, f"{name} must report after failed dependencies")
-    require(
-        "max_attempts" not in job and "sleep 10" not in job,
-        f"{name} must not race runner assignment with a polling deadline",
-    )
     require(
         "needs.build.result" not in job,
         f"{name} must not let advisory matrix conclusions determine macos",
@@ -92,8 +83,8 @@ for name, job in aliases.items():
         f"{name} must make exactly three bounded transport attempts",
     )
     require(
-        'startswith("macOS")' in job and "if len(matches) != 1" in job,
-        f"{name} must accept exactly one macOS matrix leg",
+        'startswith("macOS")' in job,
+        f"{name} must select only the macOS matrix leg",
     )
     require(
         'if [ "$conclusion" = "success" ]' in job,
@@ -103,20 +94,47 @@ for name, job in aliases.items():
 
 require("Skip-safe PR" in aliases["macos"], "native skip must remain green")
 require(
+    "needs: [build, classify]" in aliases["macos"],
+    "PR reporter must wait for the terminal combined matrix",
+)
+require(
+    "if len(matches) != 1" in aliases["macos"],
+    "terminal PR reporter must accept exactly one macOS leg",
+)
+require(
     "classify job did not succeed" in aliases["macos"],
     "classification uncertainty must remain fail-closed",
 )
 require(
-    "github.event_name == 'merge_group'" in aliases["macos-merge-group"],
-    "merge_group must retain the stable macos alias",
+    "github.event_name == 'merge_group' && matrix.key == 'macos' && 'macos'"
+    in job_body(text, "build"),
+    "the real merge-group macOS matrix leg must own the stable macos context",
+)
+fallback = job_body(text, "macos-merge-group-fallback")
+require(
+    "needs: [resolve-provider, classify]" in fallback,
+    "merge-group fallback must not depend on Linux terminality through build",
+)
+require(
+    "PULP_PREAMBLE_RUNS_ON_JSON" in fallback
+    and "gh api" not in fallback
+    and "while true" not in fallback
+    and "sleep 10" not in fallback,
+    "merge-group fallback must release the shared preamble immediately",
+)
+require(
+    "needs.resolve-provider.result != 'success'" in fallback
+    and "needs.classify.result != 'success'" in fallback
+    and "needs.classify.outputs.native_build_required != 'true'" in fallback,
+    "merge-group fallback must cover routing/classification failure and skip-safe groups",
+)
+require(
+    "macos-merge-unused" in fallback,
+    "native merge groups must not get a second required macos context",
 )
 
 parsers = {name: parser_from(job) for name, job in aliases.items()}
-require(
-    len(set(parsers.values())) == 1,
-    "PR and merge-group aliases must interpret jobs identically",
-)
-parser = next(iter(parsers.values()))
+parser = parsers["macos"]
 
 success = run_parser(
     parser,

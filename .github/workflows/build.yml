@@ -21,11 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       runner_provider:
-        # Default is github-hosted: Namespace is drained and no
-        # PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON repo variables are set, so
-        # resolve-provider fails fast on the `namespace` route. The
-        # option is retained only for a future re-enable.
-        description: "Runner provider for Linux/Windows build legs (Namespace is drained — keep github-hosted)"
+        # Default is github-hosted for Windows; Linux may use the reviewed
+        # disposable Mac Pro pool while its operator health lease is enabled.
+        description: "Runner provider for Linux/Windows build legs"
         required: false
         default: github-hosted
         type: choice
@@ -104,12 +102,12 @@ jobs:
           # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
-          #       "pulp-host-macpro"].
-          # A workflow_dispatch input overrides it. Same-repository pull_request
-          # and protected merge_group events may use it after the trusted
-          # workflow-ref boundary is applied below; fork pull requests remain
-          # hosted. If no local selector is configured, the resolver falls back
-          # to GitHub-hosted Linux.
+          #       "pulp-host-macpro","pulp-auto-linux-x64"].
+          # A workflow_dispatch input overrides it. Trusted merge groups may
+          # use this exact generic, secret-free selector while the separate
+          # short operator lease is valid. Pull requests stay hosted because
+          # proposed workflow YAML is not an access-control boundary; the
+          # separate main-owned PR-safe reusable workflow handles eligible PRs.
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
           # image. The separate MSVC release-path gate tracks windows-latest,
@@ -120,10 +118,10 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          CONFIGURED_LINUX_LEASE_UNTIL: ${{ vars.PULP_LOCAL_LINUX_LEASE_UNTIL || '' }}
           PR_SAFE_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
           PR_SAFE_LINUX_LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
           PR_SAFE_LINUX_REUSABLE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
-          WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -191,7 +189,6 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
-          WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
           # PR_HEAD_REPO means this is not a pull request at all.
           _pr_head_repo = (os.environ.get("PR_HEAD_REPO") or "").strip()
@@ -223,8 +220,13 @@ jobs:
                   / "resolve_pr_safe_linux_route.py"
               ),
           ]
+          sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
+          from resolve_linux_route import (
+              is_macpro_linux_selector,
+              operator_lease_active,
+          )
+          # Existing macOS overflow probes use this repository coordinate.
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
-
           def run(args):
               result = subprocess.run(
                   RESOLVER + args,
@@ -515,38 +517,57 @@ jobs:
           else:
               macos_provider = "local"
 
-          # The organization runner group `pulp-trusted-build` is selected to
-          # this repository and only allows protected default-branch workflow
-          # refs. That is the access boundary for the disposable Mac Pro pool;
-          # event-name checks remain defense in depth. Never authorize a fork
-          # PR, pull_request_target, or a workflow with secrets to generic
-          # self-hosted Linux. An unset local selector naturally falls back to
-          # ubuntu-latest through resolve_runs_on.py.
-          local_linux_selector = (
+          configured_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
-          trusted_local_linux_workflow = (
-              WORKFLOW_REF
-              == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
+          dispatch_linux_selector = (
+              os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR") or ""
+          ).strip()
+          automatic_linux = EVENT_NAME == "merge_group"
+          linux_lease_until = (
+              os.environ.get("CONFIGURED_LINUX_LEASE_UNTIL") or ""
+          ).strip()
+          linux_lease_active = operator_lease_active(linux_lease_until)
+          try:
+              configured_linux_value = json.loads(configured_linux_selector)
+          except (json.JSONDecodeError, TypeError):
+              configured_linux_value = None
+          configured_linux_valid = is_macpro_linux_selector(
+              configured_linux_value
           )
-          trusted_local_linux_event = (
-              trusted_local_linux_workflow
-              and (
-                  EVENT_NAME == "merge_group"
-                  or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
-              )
+          if dispatch_linux_selector:
+              authorized_linux_selector = dispatch_linux_selector
+          elif EVENT_NAME == "workflow_dispatch" and configured_linux_selector:
+              authorized_linux_selector = configured_linux_selector
+          elif automatic_linux and configured_linux_valid and linux_lease_active:
+              authorized_linux_selector = configured_linux_selector
+          else:
+              authorized_linux_selector = ""
+          linux_local_enabled = bool(
+              automatic_linux
+              and configured_linux_valid and linux_lease_active
+              and authorized_linux_selector == configured_linux_selector
           )
-          if (
-              not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()
-              and trusted_local_linux_event
-              and local_linux_selector
-          ):
-              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = local_linux_selector
-              print(
-                  "resolve-provider: trusted local Linux route enabled for "
-                  f"{EVENT_NAME}; selector={local_linux_selector}",
-                  file=sys.stderr,
-              )
+          # Global provider preferences are for explicit/operator routing. An
+          # automatic merge-group Linux leg has exactly two safe outcomes:
+          # the reviewed local selector under a valid lease, or ubuntu-latest.
+          # Do not let PULP_DEFAULT_RUNNER_PROVIDER=namespace turn an inactive
+          # local lease into an unrelated Namespace route.
+          linux_requested_provider = (
+              "github-hosted"
+              if automatic_linux and not linux_local_enabled
+              else REQUESTED
+          )
+          os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = authorized_linux_selector
+          os.environ["LINUX_REQUESTED_PROVIDER"] = linux_requested_provider
+          print(
+              "resolve-provider: Linux local lease = "
+              f"{'enabled' if linux_local_enabled else 'disabled'}; "
+              f"selector_valid = {configured_linux_valid}; "
+              f"expires = {linux_lease_until or '(unset)'}; "
+              f"selector = {authorized_linux_selector or 'ubuntu-latest fallback'}",
+              file=sys.stderr,
+          )
 
           pr_safe_result = subprocess.run(
               PR_SAFE_LINUX_ROUTE_RESOLVER + [
@@ -577,6 +598,7 @@ jobs:
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
+              "--requested-provider-env", "LINUX_REQUESTED_PROVIDER",
               "--github-hosted-label", "ubuntu-latest",
               "--explicit-env", "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
@@ -592,7 +614,8 @@ jobs:
                   "--authorized-selector-json",
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
-                  "--requested-provider", REQUESTED,
+                  "--requested-provider", linux_requested_provider,
+                  *( ["--local-enabled"] if linux_local_enabled else [] ),
               ],
               check=False,
               capture_output=True,
@@ -820,10 +843,11 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    # All legs named uniformly `<name> [<provider>]`. The required `macos`
-    # check is now provided by the dedicated `macos` alias job below, not by
-    # this matrix leg — so the leg no longer self-names `macos`.
-    name: ${{ format('{0} [{1}]', matrix.name, matrix.provider) }}
+    # On merge_group the real macOS leg owns the required `macos` context
+    # directly. That makes its verdict independent of advisory Linux without a
+    # polling reporter occupying shared preamble capacity for the build's full
+    # duration. Other events retain the stable alias below.
+    name: ${{ github.event_name == 'merge_group' && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -1591,11 +1615,11 @@ jobs:
         run: cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
-  # Stable required `macos` alias. Each event-specific reporter starts only
-  # after its build matrix is terminal, then reads the exact macOS leg from
-  # this workflow run. PR/dispatch runs retain the combined matrix, so advisory
-  # legs may delay the reporter but cannot determine its result. merge_group
-  # retains a separate reporter with the same displayed required-check name.
+  # Stable required `macos` context. PR/dispatch use a terminal alias over the
+  # combined matrix. A native merge_group names its real macOS matrix leg
+  # `macos` directly; a short fallback covers skip-safe and failed preambles.
+  # Advisory Linux can therefore neither determine the verdict nor occupy a
+  # reporter runner while macOS executes.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
   # On a skip-safe PR (classify said no native
@@ -1698,23 +1722,30 @@ jobs:
           echo "macOS leg ${conclusion:-not found} — failing macos gate (required)"
           exit 1
 
-  macos-merge-group:
-    # Symmetric bootstrap: on non-merge events this skipped job must not emit
-    # the required name owned by the polling path above.
-    name: ${{ github.event_name == 'merge_group' && 'macos' || 'macos-merge-unused' }}
-    needs: [build, classify]
-    # This path does not poll: the macOS-only build is terminal before it
-    # starts. Use the short-lived preamble pool so a green owned build cannot
-    # sit behind unrelated hosted-Linux congestion.
+  macos-merge-group-fallback:
+    # Native merge groups get the required name directly from their real macOS
+    # matrix leg. This short fallback owns it only when routing/classification
+    # fails or classification proves no native build is needed. The inactive
+    # copy must use a non-required name to avoid satisfying protection early.
+    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-merge-unused' }}
+    needs: [resolve-provider, classify]
+    # This path does no polling and holds a preamble runner only long enough to
+    # emit the skip-safe or fail-closed verdict.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    if: always() && github.event_name == 'merge_group'
+    if: >-
+      always() && github.event_name == 'merge_group' &&
+      (needs.resolve-provider.result != 'success' ||
+      needs.classify.result != 'success' ||
+      needs.classify.outputs.native_build_required != 'true')
     steps:
-      - name: macOS-only merge-group outcome (required)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Merge-group macOS fallback (required)
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
+            echo "resolve-provider did not succeed — failing macos gate closed"
+            exit 1
+          fi
           if [ "${{ needs.classify.result }}" != "success" ]; then
             echo "classify did not succeed — failing macos gate closed"
             exit 1
@@ -1723,69 +1754,7 @@ jobs:
             echo "Skip-safe merge group — macos gate ✓"
             exit 0
           fi
-          jobs_json="$(mktemp)"
-          jobs_err="$(mktemp)"
-          trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
-          api_ok=false
-          for attempt in 1 2 3; do
-            if gh api --paginate \
-              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
-              >"$jobs_json" 2>"$jobs_err"; then
-              api_ok=true
-              break
-            fi
-            echo "Jobs API request failed (transport attempt $attempt/3)."
-            cat "$jobs_err"
-            if [ "$attempt" -lt 3 ]; then
-              sleep "$attempt"
-            fi
-          done
-          if [ "$api_ok" != "true" ]; then
-            echo "Jobs API remained unavailable — failing macos gate closed (required)"
-            exit 1
-          fi
-          conclusion=$(
-            cd /tmp
-            python3 - "$jobs_json" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              payload = handle.read()
-          decoder = json.JSONDecoder()
-          pages = []
-          offset = 0
-          while offset < len(payload):
-              while offset < len(payload) and payload[offset].isspace():
-                  offset += 1
-              if offset == len(payload):
-                  break
-              page, offset = decoder.raw_decode(payload, offset)
-              pages.append(page)
-          if not pages or not all(isinstance(page, dict) for page in pages):
-              raise SystemExit("jobs API response did not contain object pages")
-          matches = [
-              job
-              for page in pages
-              if isinstance(page, dict)
-              for job in page.get("jobs", [])
-              if isinstance(job, dict)
-              and job.get("name", "").startswith("macOS")
-          ]
-          if len(matches) != 1:
-              raise SystemExit(
-                  f"expected exactly one macOS matrix leg, found {len(matches)}"
-              )
-          conclusion = matches[0].get("conclusion")
-          print(conclusion if isinstance(conclusion, str) else "")
-          PY
-          )
-          echo "macOS leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "Self-hosted macOS-only matrix green — macos gate ✓"
-            exit 0
-          fi
-          echo "Self-hosted macOS-only matrix ${conclusion:-unknown} — failing macos gate"
+          echo "native merge group unexpectedly reached fallback — failing macos gate closed"
           exit 1
 
   linux:
