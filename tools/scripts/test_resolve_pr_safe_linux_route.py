@@ -71,6 +71,8 @@ def test_reusable_workflow_is_read_only_and_validates_pr_identity() -> None:
     assert "secrets: inherit" not in text
     assert "github.event.pull_request.head.repo.full_name" in text
     assert "github.event.pull_request.head.sha" in text
+    assert '"merge SHA": os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")' in text
+    assert "ref: ${{ inputs.merge_sha }}" in text
     assert "pulp-pr-safe-linux-x64" in text
     assert "pulp-auto-linux-x64" not in text
     assert "runs-on: ubuntu-latest" in text
@@ -89,6 +91,7 @@ def test_build_calls_only_the_main_owned_reusable_workflow() -> None:
     assert "PULP_PR_SAFE_LINUX_LEASE_UNTIL" in text
     assert "PULP_PR_SAFE_LINUX_RUNS_ON_JSON" in text
     assert "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED" in text
+    assert "merge_sha: ${{ github.sha }}" in text
 
 
 def main() -> int:

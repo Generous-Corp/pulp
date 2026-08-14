@@ -2800,7 +2800,9 @@ capability cannot receive automatic work. `resolve-provider` authorizes the
 trusted selector only for `merge_group` while its short RFC 3339 lease is valid;
 the separate main-owned reusable workflow validates repository variables,
 lease horizon, exact selector, event identity, and SHAs on hosted Linux before
-the PR-safe selector is used. If that protected admission recheck rejects a
+the PR-safe selector is used. The called workflow checks out the event's
+synthetic merge SHA, preserving the ordinary Linux gate's head-plus-base
+integration coverage. If that protected admission recheck rejects a
 lease that expired after the caller's snapshot, the reusable workflow runs its
 Linux proof on `ubuntu-latest` instead of dropping the Linux leg. It emits
 `linux_route_reason` as

@@ -288,6 +288,9 @@ deliberately remains hosted. Same-repository PRs may use the two-slot PR-safe
 lane only through the main-owned reusable workflow; fork PRs remain hosted.
 `Vellum freeze` and `Enforce version & skill sync` remain hosted because their
 direct `runs-on` expressions cannot safely validate lease expiry.
+The PR-safe workflow validates the pinned head, base, and event merge SHAs, then
+checks out the synthetic merge commit so local execution preserves the normal
+pull-request Linux gate's integration coverage.
 
 The required merge-group `macos` conclusion comes directly from the native
 matrix leg. Its bounded fallback does not wait for the build or reserve one of

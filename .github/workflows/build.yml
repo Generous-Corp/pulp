@@ -828,6 +828,7 @@ jobs:
     with:
       source_sha: ${{ github.event.pull_request.head.sha }}
       base_sha: ${{ github.event.pull_request.base.sha }}
+      merge_sha: ${{ github.sha }}
       runner_selector_json: ${{ needs.resolve-provider.outputs.pr_safe_linux_selector_json }}
     permissions:
       contents: read
