@@ -35,6 +35,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -76,17 +77,20 @@ public:
             callback_state_->active = false;
             callback_state_->callback = nullptr;
         }
+        closing_.store(true, std::memory_order_release);
         open_.store(false, std::memory_order_release);
-        std::lock_guard<std::mutex> lk(ports_mu_);
-        if (in_port_) {
-            if (src_) MIDIPortDisconnectSource(in_port_, src_);
-            MIDIPortDispose(in_port_);
+        while (active_senders_.load(std::memory_order_acquire) != 0) {
+            std::this_thread::yield();
         }
-        if (out_port_) MIDIPortDispose(out_port_);
-        in_port_ = 0;
-        src_ = 0;
-        out_port_ = 0;
-        dest_ = 0;
+        const auto in_port = in_port_.exchange(0, std::memory_order_acq_rel);
+        const auto src = src_.exchange(0, std::memory_order_acq_rel);
+        const auto out_port = out_port_.exchange(0, std::memory_order_acq_rel);
+        dest_.store(0, std::memory_order_release);
+        if (in_port) {
+            if (src) MIDIPortDisconnectSource(in_port, src);
+            MIDIPortDispose(in_port);
+        }
+        if (out_port) MIDIPortDispose(out_port);
     }
 
     const UmpEndpointInfo& info() const noexcept override { return info_; }
@@ -98,7 +102,7 @@ public:
         }
     }
 
-    bool send(const UmpPacket& packet) override;
+    bool send(const UmpPacket& packet) noexcept override;
 
     bool is_open() const noexcept override;
 
@@ -111,22 +115,31 @@ public:
     // CoreMIDI handles after construction.
     void set_ports(MIDIPortRef in_port, MIDIEndpointRef src,
                    MIDIPortRef out_port, MIDIEndpointRef dest) {
-        std::lock_guard<std::mutex> lk(ports_mu_);
-        in_port_ = in_port;
-        src_ = src;
-        out_port_ = out_port;
-        dest_ = dest;
+        in_port_.store(in_port, std::memory_order_relaxed);
+        src_.store(src, std::memory_order_relaxed);
+        out_port_.store(out_port, std::memory_order_relaxed);
+        dest_.store(dest, std::memory_order_relaxed);
+        closing_.store(false, std::memory_order_release);
         open_.store(true, std::memory_order_release);
+    }
+
+    bool matches(MIDIEndpointRef src, MIDIEndpointRef dest) const noexcept {
+        return src_.load(std::memory_order_acquire) == src &&
+               dest_.load(std::memory_order_acquire) == dest;
     }
 
 private:
     UmpEndpointInfo info_;
-    std::mutex ports_mu_;
-    MIDIPortRef in_port_ = 0;
-    MIDIEndpointRef src_ = 0;
-    MIDIPortRef out_port_ = 0;
-    MIDIEndpointRef dest_ = 0;
+    static_assert(std::atomic<MIDIPortRef>::is_always_lock_free);
+    static_assert(std::atomic<MIDIEndpointRef>::is_always_lock_free);
+    static_assert(std::atomic<uint32_t>::is_always_lock_free);
+    std::atomic<MIDIPortRef> in_port_{0};
+    std::atomic<MIDIEndpointRef> src_{0};
+    std::atomic<MIDIPortRef> out_port_{0};
+    std::atomic<MIDIEndpointRef> dest_{0};
     mutable std::atomic<bool> open_{false};
+    mutable std::atomic<bool> closing_{false};
+    std::atomic<uint32_t> active_senders_{0};
     std::shared_ptr<CallbackState> callback_state_;
     std::shared_ptr<std::atomic<uint64_t>> generation_;
     uint64_t generation_at_open_ = 0;
@@ -243,27 +256,38 @@ std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
 }
 
 bool CoreMidiUmpEndpoint::is_open() const noexcept {
-    if (!open_.load(std::memory_order_acquire)) return false;
+    if (closing_.load(std::memory_order_acquire) ||
+        !open_.load(std::memory_order_acquire)) return false;
     if (generation_->load(std::memory_order_acquire) != generation_at_open_) {
+        closing_.store(true, std::memory_order_release);
         open_.store(false, std::memory_order_release);
         return false;
     }
     return true;
 }
 
-bool CoreMidiUmpEndpoint::send(const UmpPacket& packet) {
+bool CoreMidiUmpEndpoint::send(const UmpPacket& packet) noexcept {
     if (packet.word_count < 1 || packet.word_count > 4) return false;
-    std::lock_guard<std::mutex> lk(ports_mu_);
-    if (!info_.direction.can_send || !dest_ || !out_port_ || !is_open()) {
+    if (!info_.direction.can_send ||
+        closing_.load(std::memory_order_acquire)) {
         return false;
     }
+    active_senders_.fetch_add(1, std::memory_order_acq_rel);
+    struct SenderGuard {
+        std::atomic<uint32_t>& count;
+        ~SenderGuard() { count.fetch_sub(1, std::memory_order_acq_rel); }
+    } guard{active_senders_};
+    if (closing_.load(std::memory_order_acquire) || !is_open()) return false;
+    const auto out_port = out_port_.load(std::memory_order_acquire);
+    const auto dest = dest_.load(std::memory_order_acquire);
+    if (!out_port || !dest) return false;
     MIDIEventList list;
     MIDIEventPacket* mep = MIDIEventListInit(&list, kMIDIProtocol_2_0);
     mep = MIDIEventListAdd(&list, sizeof(list), mep, 0,
                            static_cast<ByteCount>(packet.word_count),
                            packet.words.data());
     if (!mep) return false;
-    const OSStatus status = MIDISendEventList(out_port_, dest_, &list);
+    const OSStatus status = MIDISendEventList(out_port, dest, &list);
     if (status != noErr) open_.store(false, std::memory_order_release);
     return status == noErr;
 }
@@ -366,9 +390,13 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
     // creation followed by an unlocked insertion lets concurrent callers
     // replace the first unique_ptr and invalidate its borrowed pointer.
     std::lock_guard<std::mutex> state_lock(state->mu);
+    auto groups = endpoint_groups();
+    auto group_it = groups.find(id);
     auto existing = state->endpoints.find(id);
     if (existing != state->endpoints.end()) {
-        if (existing->second->is_open()) {
+        if (group_it != groups.end() && existing->second->is_open() &&
+            existing->second->matches(group_it->second.source,
+                                      group_it->second.destination)) {
             if (status) *status = UmpOpenStatus::Ok;
             return existing->second.get();
         }
@@ -377,8 +405,6 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
         state->endpoints.erase(existing);
     }
 
-    auto groups = endpoint_groups();
-    auto group_it = groups.find(id);
     if (group_it == groups.end()) {
         if (status) *status = UmpOpenStatus::NotFound;
         return nullptr;

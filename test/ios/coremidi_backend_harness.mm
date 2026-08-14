@@ -417,24 +417,46 @@ int run_harness() {
                 }
             });
 
-        MIDIEndpointDispose(source);
-        source = 0;
+        const SInt32 retired_uid_candidates[] = {
+            static_cast<SInt32>(static_cast<uint32_t>(source_uid) ^
+                               0x40000000u),
+            static_cast<SInt32>(static_cast<uint32_t>(source_uid) ^
+                               0x20000000u),
+            static_cast<SInt32>(static_cast<uint32_t>(source_uid) ^
+                               0x10000000u),
+        };
+        SInt32 retired_uid = 0;
+        for (const auto candidate : retired_uid_candidates) {
+            if (candidate != 0 && candidate != source_uid &&
+                candidate != destination_uid &&
+                MIDIObjectSetIntegerProperty(source, kMIDIPropertyUniqueID,
+                                             candidate) == noErr) {
+                retired_uid = candidate;
+                break;
+            }
+        }
+        if (retired_uid == 0) {
+            return fail(@"old UMP source UID reassignment failed", source,
+                        destination);
+        }
+        const MIDIEndpointRef retired_source = source;
         MIDIEndpointDispose(destination);
         destination = 0;
         if (!wait_until([&] {
                 return !input->is_open() && !output->is_open();
             }) || output->send(packet)) {
-            return fail(@"cached UMP endpoint survived hot-unplug", 0, 0);
+            return fail(@"cached UMP endpoint survived topology change",
+                        retired_source, 0);
         }
         open_status = pulp::midi::UmpOpenStatus::Ok;
         if (session.open_endpoint(ump_source_id, &open_status) != nullptr ||
             open_status != pulp::midi::UmpOpenStatus::NotFound) {
-            return fail(@"cached UMP open reported success after hot-unplug",
-                        0, 0);
+            return fail(@"cached UMP open reported stale identity success",
+                        retired_source, 0);
         }
         if (input->is_open()) {
             return fail(@"retired borrowed UMP handle did not stay closed",
-                        0, 0);
+                        retired_source, 0);
         }
 
         MIDIEndpointRef replacement_source = 0;
@@ -446,7 +468,7 @@ int run_harness() {
                                          kMIDIPropertyUniqueID,
                                          source_uid) != noErr) {
             return fail(@"same-ID UMP source recreation failed",
-                        replacement_source, 0);
+                        retired_source, replacement_source);
         }
         source = replacement_source;
         if (!wait_until([&] {
@@ -454,7 +476,8 @@ int run_harness() {
                 return find_ump_endpoint(endpoints, source_name,
                                          true, false) != nullptr;
             })) {
-            return fail(@"same-ID UMP source was not rediscovered", source, 0);
+            return fail(@"same-ID UMP source was not rediscovered",
+                        retired_source, source);
         }
         open_status = pulp::midi::UmpOpenStatus::NotFound;
         auto* reopened = session.open_endpoint(ump_source_id, &open_status);
@@ -462,7 +485,7 @@ int run_harness() {
             open_status != pulp::midi::UmpOpenStatus::Ok ||
             !reopened->is_open() || input->is_open()) {
             return fail(@"same-ID reopen violated borrowed-handle lifetime",
-                        source, 0);
+                        retired_source, source);
         }
         auto reopened_callback_count =
             std::make_shared<std::atomic<uint32_t>>(0);
@@ -474,13 +497,21 @@ int run_harness() {
                 }
             });
         auto reopened_event = one_word_event_list(kReopenedSourceWord);
+        if (MIDIReceivedEventList(retired_source, &reopened_event) != noErr) {
+            return fail(@"retired UMP source delivery setup failed",
+                        retired_source, source);
+        }
+        for (int drain = 0; drain < 5; ++drain) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        }
         if (MIDIReceivedEventList(source, &reopened_event) != noErr ||
             !wait_until([&] {
                 return reopened_callback_count->load(
                            std::memory_order_acquire) == 1;
             })) {
             return fail(@"same-ID replacement callback delivery failed",
-                        source, 0);
+                        retired_source, source);
         }
         for (int drain = 0; drain < 5; ++drain) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
@@ -489,8 +520,9 @@ int run_harness() {
         if (retired_callback_count->load(std::memory_order_acquire) != 0 ||
             reopened_callback_count->load(std::memory_order_acquire) != 1) {
             return fail(@"same-ID reopen left duplicate live callbacks",
-                        source, 0);
+                        retired_source, source);
         }
+        MIDIEndpointDispose(retired_source);
         MIDIEndpointDispose(source);
         source = 0;
         if (!wait_until([&] { return !reopened->is_open(); })) {
