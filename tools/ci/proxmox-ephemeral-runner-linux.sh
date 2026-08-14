@@ -467,18 +467,67 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" \
 rm -f "$JIT_CONFIG_FILE" "$JIT_RESPONSE_FILE"
 JIT_CONFIG_FILE=""
 JIT_RESPONSE_FILE=""
-registration_output="$(ssh -o BatchMode=yes "ci@$GUEST_IP" "
+RUNNER_OUTPUT_FILE="$(mktemp)" || die "could not allocate runner output file"
+ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     trap 'rm -f ${JIT_GUEST_FILE}' EXIT
     encoded_jit_config=\$(cat ${JIT_GUEST_FILE})
     ./run.sh --jitconfig \"\${encoded_jit_config}\"
-")" || {
-    printf '%s\n' "$registration_output" | sed 's/[Jj][Ii][Tt].*/JIT output=<redacted>/g' >&2
-    die "JIT runner startup failed"
-}
+" >"$RUNNER_OUTPUT_FILE" 2>&1 &
+RUNNER_PID=$!
+
+# A JIT process existing in the guest is not proof that GitHub can dispatch to
+# it. Poll the exact registration while the run.sh child is starting, and fail
+# closed if it never becomes visible. Without this bounded admission check a
+# broker/network failure leaves a VM and supervisor alive while the repository
+# reports zero runners, falsely consuming local capacity and hiding the real
+# fallback path.
+RUNNER_READY_TIMEOUT_SECONDS="${TARTCI_RUNNER_READY_TIMEOUT_SECONDS:-120}"
+RUNNER_READY=0
+for _ in $(seq 1 "$((RUNNER_READY_TIMEOUT_SECONDS / 2))"); do
+    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        --jq '.runners[] | [.id,.name,.status,.busy] | @tsv' 2>/dev/null)" \
+        || runners_tsv=""
+    runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+        -v name="$RUNNER_NAME" '$2 == name')"
+    if [ -n "$runner_lookup" ]; then
+        IFS=$'\t' read -r _ready_id _ready_name ready_status ready_busy \
+            <<< "$runner_lookup"
+        if [ "$ready_status" = online ]; then
+            RUNNER_READY=1
+            log "JIT runner ${RUNNER_NAME} is visible to GitHub (${ready_status}, busy=${ready_busy})"
+            break
+        fi
+    fi
+    if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
+        break
+    fi
+    sleep 2
+done
+if [ "$RUNNER_READY" != 1 ]; then
+    kill "$RUNNER_PID" 2>/dev/null || true
+    wait "$RUNNER_PID" 2>/dev/null || true
+    printf '%s\n' "$(tail -40 "$RUNNER_OUTPUT_FILE" 2>/dev/null)" \
+        | sed -E 's/(token|authorization|credentials|jitconfig)[^ ]*/\1=<redacted>/Ig' >&2
+    rm -f "$RUNNER_OUTPUT_FILE"
+    die "JIT runner ${RUNNER_NAME} never became visible to GitHub"
+fi
+
+wait "$RUNNER_PID"
+runner_exit=$?
+registration_output="$(cat "$RUNNER_OUTPUT_FILE")"
+rm -f "$RUNNER_OUTPUT_FILE"
+if [ "$runner_exit" -ne 0 ]; then
+    printf '%s\n' "$registration_output" \
+        | sed -E 's/(token|authorization|credentials|jitconfig)[^ ]*/\1=<redacted>/Ig' >&2
+    die "JIT runner exited with status $runner_exit"
+fi
 
 # ── run exactly one job ──────────────────────────────────────────────────────
 # run.sh exits once the single JIT job completes.
 log "waiting for one job (runner exits when done)"
-printf '%s\n' "$registration_output" | sed 's/^/    /'
+printf '%s\n' "$registration_output" \
+    | sed -E 's/(token|authorization|credentials|jitconfig)[^ ]*/\1=<redacted>/Ig' \
+    | sed 's/^/    /'
 log "job finished on $VMID"

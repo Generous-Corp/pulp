@@ -51,6 +51,13 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         self.assertNotIn("config.sh --unattended", self.text)
         self.assertIn("guest IP ${GUEST_IP} is already assigned", self.text)
 
+    def test_jit_runner_requires_github_visible_readiness(self) -> None:
+        self.assertIn("TARTCI_RUNNER_READY_TIMEOUT_SECONDS", self.text)
+        self.assertIn("never became visible to GitHub", self.text)
+        self.assertIn('ready_status" = online', self.text)
+        self.assertIn('kill "$RUNNER_PID"', self.text)
+        self.assertIn('wait "$RUNNER_PID"', self.text)
+
     def test_systemd_profile_is_repository_agnostic(self) -> None:
         service = SERVICE.read_text()
         self.assertIn("/etc/pulp/proxmox-runner/%i.env", service)
