@@ -102,8 +102,11 @@ jobs:
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro"].
-          # A workflow_dispatch input overrides it. Other events deliberately
-          # authorize neither selector and fall through to GitHub-hosted Linux.
+          # A workflow_dispatch input overrides it. Same-repository pull_request
+          # and protected merge_group events may use it after the trusted
+          # workflow-ref boundary is applied below; fork pull requests remain
+          # hosted. If no local selector is configured, the resolver falls back
+          # to GitHub-hosted Linux.
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
           # image. The separate MSVC release-path gate tracks windows-latest,
@@ -111,12 +114,10 @@ jobs:
           # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
           # it is not an Intel Windows replacement. Use a workflow_dispatch input
           # only for explicit one-off experiments.
-          # Until an organization runner group restricts the Mac Pro pool to
-          # trusted workflow refs outside PR-controlled YAML, keep its repo
-          # variable dispatch-only. Public pull_request jobs stay hosted.
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -184,6 +185,7 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
           # PR_HEAD_REPO means this is not a pull request at all.
           _pr_head_repo = (os.environ.get("PR_HEAD_REPO") or "").strip()
@@ -500,6 +502,39 @@ jobs:
           else:
               macos_provider = "local"
 
+          # The organization runner group `pulp-trusted-build` is selected to
+          # this repository and only allows protected default-branch workflow
+          # refs. That is the access boundary for the disposable Mac Pro pool;
+          # event-name checks remain defense in depth. Never authorize a fork
+          # PR, pull_request_target, or a workflow with secrets to generic
+          # self-hosted Linux. An unset local selector naturally falls back to
+          # ubuntu-latest through resolve_runs_on.py.
+          local_linux_selector = (
+              os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
+          ).strip()
+          trusted_local_linux_workflow = (
+              WORKFLOW_REF
+              == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
+          )
+          trusted_local_linux_event = (
+              trusted_local_linux_workflow
+              and (
+                  EVENT_NAME == "merge_group"
+                  or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
+              )
+          )
+          if (
+              not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()
+              and trusted_local_linux_event
+              and local_linux_selector
+          ):
+              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = local_linux_selector
+              print(
+                  "resolve-provider: trusted local Linux route enabled for "
+                  f"{EVENT_NAME}; selector={local_linux_selector}",
+                  file=sys.stderr,
+              )
+
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
@@ -649,21 +684,13 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          if EVENT_NAME != "merge_group":
-              include.append({
-                  "key": "linux",
-                  "name": "Linux (x64)",
-                  "runs_on_json": linux_runs_on,
-                  "provider": linux_provider,
-                  "route_reason": linux_route_reason,
-              })
-          else:
-              print(
-                  "resolve-provider: merge_group — advisory Linux leg omitted; "
-                  "PR-head Linux already reported and the queue requires the "
-                  "real self-hosted macOS build directly",
-                  file=sys.stderr,
-              )
+          include.append({
+              "key": "linux",
+              "name": "Linux (x64)",
+              "runs_on_json": linux_runs_on,
+              "provider": linux_provider,
+              "route_reason": linux_route_reason,
+          })
 
           matrix = {"include": include}
 
@@ -1090,7 +1117,8 @@ jobs:
         shell: bash
         run: |
           if [ "${RUNNER_OS}" = "macOS" ]; then
-            bash test/cmake/test_ios_source_syntax.sh "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"
+            bash test/cmake/test_ios_compile_gate.sh \
+              "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
           fi
           # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro
           # VM without claiming an entire shared Studio host. Keep this literal:

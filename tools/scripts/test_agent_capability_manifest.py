@@ -375,6 +375,29 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     )
     checks += 1
 
+    pattern_development = next(
+        row for row in manifest.EXPORTS if row["key"] == "music.pattern-development"
+    )
+    rendered_pattern_probes = manifest.render_link_probes(pattern_development)
+    assert len(rendered_pattern_probes) == len(pattern_development["bindings"])
+    for operation in (
+        "make_pattern_event_id",
+        "pattern_set<64>",
+        "select_pattern_density<64>",
+        "apply_regional_fill<64>",
+        "morph_patterns<64>",
+    ):
+        assert any(operation in probe for probe in rendered_pattern_probes)
+    checks += 1
+
+    missing_pattern_probe = copy.deepcopy(pattern_development)
+    missing_pattern_probe["_link_probes"] = missing_pattern_probe["_link_probes"][:-1]
+    expect_problem(
+        manifest._link_probe_problems(missing_pattern_probe),
+        "advertised bindings lack operational probes",
+    )
+    checks += 1
+
     return checks
 
 

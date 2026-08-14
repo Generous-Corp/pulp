@@ -171,6 +171,10 @@ LINK_CLOSURE_DEBT = {
 # verify_engine_consumers() rejects an entry with no reason and an entry that no
 # longer links an engine module, so the list cannot quietly outlive its subject.
 ENGINE_CONSUMERS = {
+    "music": "Header-only musical value vocabulary. It consumes timebase for "
+             "quantized onset coordinates and deterministic coordinate-based "
+             "pattern development, without becoming part of the timeline "
+             "document/playback ladder.",
     "midi": "MIDI transformation utilities consume timebase for prepared tempo "
             "maps and sample-domain scheduling. They remain an event-processing "
             "layer, not a rung in the timeline document/playback ladder.",
