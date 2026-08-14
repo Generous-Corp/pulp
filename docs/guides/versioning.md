@@ -438,14 +438,20 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.90.2 — leased runners and queue ownership are load-bearing
 
-v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
-enqueue mutation boundary, including the cross-repository runner steward. Pulp
-can therefore run a small native GitHub stacked-PR pilot without allowing an
-unattended steward tick to send one layer through the legacy unstacked queue
-path. Shipyard remains observe-only for formal stacks until it durably models
-GitHub's asynchronous stack-merge request and completion lifecycle.
+v0.90.2 is Pulp's current operational floor. It includes the v0.87 fail-closed
+trusted and PR-safe local-Linux lease producers with bounded GitHub observation
+and mutation calls, the v0.88 exact-head steward handoff, and the v0.90 atomic
+steward ownership transfer. Pulp's leased profiles depend on that producer
+generation; an older binary must not advertise either protected Linux pool as
+healthy or assume merge-queue ownership.
+
+v0.83.0 is historical context, not the current baseline. It added fail-closed
+formal-stack inspection to every Shipyard merge or enqueue mutation boundary,
+including the cross-repository runner steward. That prevented an unattended
+steward tick from sending one layer through the legacy unstacked queue path
+while Shipyard remained observe-only for formal stacks.
 
 v0.81.4 preserves v0.81.3's attached supervised PR push and regenerates Pulp's
 SSH-signing setup from `release.post_tag_hook.ssh_signing_setup_script`, so a
