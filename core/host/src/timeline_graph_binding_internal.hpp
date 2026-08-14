@@ -230,6 +230,18 @@ struct detail::TimelineGraphPreparedCandidate {
 
 namespace detail::timeline_graph_binding {
 
+TimelineGraphAdmission validate_timeline_graph_routes(
+    const SignalGraph& graph, const playback::PlaybackProgram& program,
+    std::span<const TimelineTrackGraphRoute> ordered, const TimelineGraphBindingConfig& config,
+    std::vector<NodeId>& claimed_device_nodes,
+    std::vector<std::vector<TimelineAutomationRouteMetadata>>& route_metadata);
+
+TimelineGraphAdmission
+reconcile_track_connections(const std::unique_ptr<SignalGraph::PreparedTopologyEdit>& edit,
+                            const std::shared_ptr<TimelineGraphBoundTrack>& track,
+                            const TimelineTrackGraphRoute& route,
+                            const TimelineGraphBindingConfig& config);
+
 inline TimelineGraphAdmission admit_candidate(const SignalGraph& graph,
                                               std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections) {

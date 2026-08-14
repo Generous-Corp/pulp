@@ -1,5 +1,111 @@
 #include "timeline_phase1_example_test_support.hpp"
 
+TEST_CASE("timeline step pattern switching adopts audible state and persists") {
+    TimelineStepSequencerProcessor author;
+    author.prepare(prepare_context());
+    auto pattern_zero = author.pattern_snapshot();
+    pattern_zero.active_pattern_count = 2;
+    pattern_zero.patterns[1] = pattern_zero.patterns[0];
+    pattern_zero.patterns[1].lanes[0][0].pitch_offset = 12;
+
+    auto pattern_one = pattern_zero;
+    pattern_one.active_pattern = 1;
+
+    TimelineStepSequencerProcessor live;
+    TimelineStepSequencerProcessor expected;
+    TimelineStepSequencerProcessor stale;
+    for (auto* processor : {&live, &expected, &stale})
+        processor->prepare(prepare_context());
+    const auto load = [](TimelineStepSequencerProcessor& processor,
+                         const state::Snapshot& snapshot) {
+        auto content = make_registered_step_pattern(snapshot, processor.pattern_registry());
+        REQUIRE(content);
+        auto project = project_with_step_pattern(std::move(content).value());
+        REQUIRE(project);
+        REQUIRE(processor.load_persistent_project(project.value()));
+    };
+    load(live, pattern_zero);
+    load(expected, pattern_one);
+    load(stale, pattern_zero);
+
+    state::StepEditCommand switch_to_one;
+    switch_to_one.client_sequence = 101;
+    switch_to_one.transaction_id = 201;
+    switch_to_one.kind = state::StepEditKind::SwitchPattern;
+    switch_to_one.payload.switch_pattern.pattern = 1;
+    REQUIRE(live.channel().ui_try_submit(switch_to_one));
+    REQUIRE(live.apply_pending_edits_and_recompile());
+    const auto applied = live.channel().ui_try_pop_applied();
+    REQUIRE(applied);
+    REQUIRE(applied->kind == state::AppliedEditKind::ActivePatternChanged);
+    REQUIRE(applied->client_sequence == 101);
+    REQUIRE(applied->transaction_id == 201);
+    REQUIRE(applied->engine_sequence == 2);
+    REQUIRE(applied->snapshot_epoch == 2);
+    REQUIRE(applied->dirty.kind == state::DirtyKind::FullSnapshot);
+    REQUIRE(applied->payload.active_pattern.pattern == 1);
+    REQUIRE(live.pattern_snapshot().active_pattern == 1);
+
+    const auto* live_clip = live.persistent_project()
+                                ->find_sequence({3})->find_track({4})->find_clip({5});
+    REQUIRE(live_clip);
+    const auto* live_content =
+        std::get_if<timeline::RegisteredContent>(&live_clip->content());
+    REQUIRE(live_content);
+    const auto live_document = live_content->value_as<StepPatternDocument>();
+    REQUIRE(live_document);
+    REQUIRE(live_document->snapshot.active_pattern == 1);
+
+    for (auto* processor : {&live, &expected, &stale})
+        REQUIRE(processor->seek_samples(0) == playback::TransportError::None);
+    StereoBlock live_one(128);
+    StereoBlock expected_one(128);
+    StereoBlock stale_zero(128);
+    process_direct(live, live_one);
+    process_direct(expected, expected_one);
+    process_direct(stale, stale_zero);
+    REQUIRE(live_one.energy() > 0.0);
+    REQUIRE(live_one.left == expected_one.left);
+    REQUIRE(live_one.right == expected_one.right);
+    REQUIRE(live_one.left != stale_zero.left);
+    REQUIRE(live.channel().ui_read_playhead().active_pattern == 1);
+
+    auto serialized =
+        timeline::serialize_project(*live.persistent_project(), live.pattern_registry());
+    REQUIRE(serialized);
+    TimelineStepSequencerProcessor restored;
+    restored.prepare(prepare_context());
+    auto deserialized = timeline::deserialize_project(serialized.value().json,
+                                                      restored.pattern_registry());
+    REQUIRE(deserialized);
+    REQUIRE(restored.load_persistent_project(deserialized.value()));
+    REQUIRE(restored.pattern_snapshot().active_pattern == 1);
+    REQUIRE(restored.seek_samples(0) == playback::TransportError::None);
+    StereoBlock restored_one(128);
+    process_direct(restored, restored_one);
+    REQUIRE(restored_one.left == expected_one.left);
+    REQUIRE(restored_one.right == expected_one.right);
+
+    auto switch_to_zero = switch_to_one;
+    switch_to_zero.client_sequence = 102;
+    switch_to_zero.transaction_id = 202;
+    switch_to_zero.payload.switch_pattern.pattern = 0;
+    REQUIRE(live.channel().ui_try_submit(switch_to_zero));
+    REQUIRE(live.apply_pending_edits_and_recompile());
+    const auto switched_back = live.channel().ui_try_pop_applied();
+    REQUIRE(switched_back);
+    REQUIRE(switched_back->kind == state::AppliedEditKind::ActivePatternChanged);
+    REQUIRE(switched_back->engine_sequence == 3);
+    REQUIRE(switched_back->snapshot_epoch == 2);
+    REQUIRE(switched_back->payload.active_pattern.pattern == 0);
+    REQUIRE(live.pattern_snapshot().active_pattern == 0);
+    REQUIRE(live.seek_samples(0) == playback::TransportError::None);
+    StereoBlock live_zero(128);
+    process_direct(live, live_zero);
+    REQUIRE(live_zero.left == stale_zero.left);
+    REQUIRE(live_zero.right == stale_zero.right);
+}
+
 TEST_CASE("timeline step mixed batch rolls back document program and render") {
     TimelineStepSequencerProcessor processor;
     processor.prepare(prepare_context());
