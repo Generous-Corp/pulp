@@ -50,7 +50,7 @@
     { "id": "automation.track-pan", "detect": "model", "summary": "An automation lane targeting a track's pan." },
 
     { "id": "device.placement", "detect": "model", "summary": "A device occupying a slot in a track's chain, by identity." },
-    { "id": "device.payload", "detect": "format", "summary": "A device's type and saved parameter state." },
+    { "id": "device.payload", "detect": "model", "summary": "A device's type and saved parameter state." },
     { "id": "effect.timewarp", "detect": "format", "summary": "An effect that remaps time rather than processing content." },
 
     { "id": "take.lane", "detect": "model", "summary": "An alternate recording lane holding takes alongside the arrangement." },

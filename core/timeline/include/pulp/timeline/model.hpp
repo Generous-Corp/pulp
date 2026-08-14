@@ -153,6 +153,17 @@ class Track {
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
     /// Returns a snapshot without the identified automation lane.
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    /// Inserts a typed device declaration at an authored position; empty appends.
+    runtime::Result<Track, ModelError>
+    insert_device(DevicePlacement placement,
+                  std::optional<ItemId> before_device_id = std::nullopt) const;
+    /// Removes a device declaration; attached automation/modulation refuses.
+    runtime::Result<Track, ModelError> erase_device(ItemId id) const;
+    /// Moves a device in authored order; empty selects the final position.
+    runtime::Result<Track, ModelError>
+    move_device(ItemId id, std::optional<ItemId> before_device_id) const;
+    /// Replaces one declaration without changing its placement identity.
+    runtime::Result<Track, ModelError> replace_device(DevicePlacement replacement) const;
     /// Returns a snapshot with a validated take lane inserted.
     runtime::Result<Track, ModelError> insert_take_lane(TakeLane lane) const;
     /// Removes a take lane unless it is currently selected.
@@ -244,6 +255,8 @@ class Track {
     friend class Sequence;
     struct Data;
     bool shares_compile_structure_with(const Track& other) const noexcept;
+    runtime::Result<Track, ModelError>
+    with_device_chain(std::vector<DevicePlacement> device_chain) const;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };

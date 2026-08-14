@@ -44,6 +44,10 @@ template <typename T>
 inline constexpr bool is_track_command_type = claimed_by<T, InsertTrack, RemoveTrack, MoveTrack>;
 
 template <typename T>
+inline constexpr bool is_device_command_type =
+    claimed_by<T, InsertDevice, RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState>;
+
+template <typename T>
 inline constexpr bool is_track_state_command_type =
     claimed_by<T, SetTrackFreeze, SetTrackMixer, SetTrackName>;
 

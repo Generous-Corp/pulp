@@ -2,7 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <limits>
+#include <string>
 #include <utility>
 
 using namespace pulp::timeline;
@@ -19,10 +21,44 @@ Clip make_clip(ItemId id, std::int64_t start = 0) {
 }
 
 Track make_track() {
-    return take(Track::create(TrackInput{.id = {10},
-                                         .name = "track",
-                                         .clips = {make_clip({30})},
-                                         .device_chain = {{{21}}, {{20}}}}));
+    DevicePlacement first{
+        .id = {21},
+        .configuration = {.position = DeviceChainPosition::PreFader,
+                          .slot_kind = DeviceSlotKind::AudioToAudio,
+                          .device_kind = DeviceKind::BuiltIn,
+                          .binding_key = "pulp.test.first"},
+        .state_ref = *ContentHash::from_hex(std::string(64, 'a')),
+    };
+    DevicePlacement second{
+        .id = {20},
+        .configuration = {.position = DeviceChainPosition::PreFader,
+                          .slot_kind = DeviceSlotKind::AudioToAudio,
+                          .device_kind = DeviceKind::External,
+                          .binding_key = "com.example.second",
+                          .bypassed = true,
+                          .wet_dry_bits = std::bit_cast<std::uint32_t>(0.5f)},
+    };
+    return take(Track::create(TrackInput{
+        .id = {10},
+        .name = "track",
+        .clips = {make_clip({30})},
+        .device_chain = {std::move(first), std::move(second)},
+    }));
+}
+
+DevicePlacement device(ItemId id, DeviceSlotKind slot, DeviceChainPosition position,
+                       std::string binding = "pulp.test.device") {
+    return DevicePlacement{
+        .id = id,
+        .configuration = {.position = position,
+                          .slot_kind = slot,
+                          .device_kind = DeviceKind::BuiltIn,
+                          .binding_key = std::move(binding)},
+    };
+}
+
+ContentHash state_hash(char digit) {
+    return *ContentHash::from_hex(std::string(64, digit));
 }
 
 } // namespace
@@ -60,6 +96,81 @@ TEST_CASE("Timeline clip edits retain device chain storage") {
     REQUIRE(original.find_clip({30})->start().value == 0);
 }
 
+TEST_CASE("Timeline typed device chains reject malformed declarations and domain crossings") {
+    const auto valid = Track::create(TrackInput{
+        .id = {10},
+        .name = "typed",
+        .device_chain = {device({20}, DeviceSlotKind::EventToEvent,
+                                DeviceChainPosition::PreFader),
+                         device({21}, DeviceSlotKind::EventToAudio,
+                                DeviceChainPosition::PreFader),
+                         device({22}, DeviceSlotKind::AudioToAudio,
+                                DeviceChainPosition::PostFader)},
+    });
+    REQUIRE(valid);
+
+    auto direct_audio = Track::create(TrackInput{
+        .id = {10},
+        .name = "invalid",
+        .device_chain = {device({20}, DeviceSlotKind::EventToEvent,
+                                DeviceChainPosition::PreFader),
+                         device({21}, DeviceSlotKind::AudioToAudio,
+                                DeviceChainPosition::PreFader)},
+    });
+    REQUIRE_FALSE(direct_audio);
+    REQUIRE(direct_audio.error().code == ModelErrorCode::InvalidIdentityTransition);
+    REQUIRE(direct_audio.error().item == ItemId{21});
+
+    auto post_event = Track::create(TrackInput{
+        .id = {10},
+        .name = "invalid",
+        .device_chain = {device({20}, DeviceSlotKind::EventToAudio,
+                                DeviceChainPosition::PostFader)},
+    });
+    REQUIRE_FALSE(post_event);
+    REQUIRE(post_event.error().code == ModelErrorCode::InvalidIdentityTransition);
+
+    auto malformed = device({20}, DeviceSlotKind::AudioToAudio,
+                            DeviceChainPosition::PreFader);
+    malformed.configuration.device_kind = DeviceKind::Unresolved;
+    REQUIRE_FALSE(Track::create(TrackInput{
+        .id = {10}, .name = "invalid", .device_chain = {malformed}}));
+    malformed.configuration.device_kind = DeviceKind::BuiltIn;
+    malformed.configuration.wet_dry_bits = std::bit_cast<std::uint32_t>(
+        std::numeric_limits<float>::quiet_NaN());
+    REQUIRE_FALSE(Track::create(TrackInput{
+        .id = {10}, .name = "invalid", .device_chain = {malformed}}));
+}
+
+TEST_CASE("Timeline device chain operations preserve authored order and validate replacements") {
+    auto original = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "typed",
+        .device_chain = {device({20}, DeviceSlotKind::EventToAudio,
+                                DeviceChainPosition::PreFader),
+                         device({22}, DeviceSlotKind::AudioToAudio,
+                                DeviceChainPosition::PreFader)},
+    }));
+    auto inserted = take(original.insert_device(
+        device({21}, DeviceSlotKind::AudioToAudio, DeviceChainPosition::PreFader),
+        std::optional<ItemId>{ItemId{22}}));
+    REQUIRE(inserted.device_chain()[0].id == ItemId{20});
+    REQUIRE(inserted.device_chain()[1].id == ItemId{21});
+    REQUIRE(inserted.device_chain()[2].id == ItemId{22});
+
+    auto moved = take(inserted.move_device({21}, std::nullopt));
+    REQUIRE(moved.device_chain()[1].id == ItemId{22});
+    REQUIRE(moved.device_chain()[2].id == ItemId{21});
+    auto replacement = moved.device_chain()[2];
+    replacement.configuration.position = DeviceChainPosition::PostFader;
+    replacement.state_ref = state_hash('a');
+    auto replaced = take(moved.replace_device(replacement));
+    REQUIRE(replaced.device_chain()[2] == replacement);
+    auto erased = take(replaced.erase_device({22}));
+    REQUIRE(erased.device_chain().size() == 2);
+    REQUIRE(erased.device_chain()[1] == replacement);
+}
+
 TEST_CASE("Timeline projects register device placement ownership globally") {
     const auto track = make_track();
     const auto sequence =
@@ -93,6 +204,8 @@ TEST_CASE("Timeline remap treats device placements as owned identities") {
     REQUIRE(remapped.track.device_chain()[0].id == *remapped.ids.find({21}));
     REQUIRE(remapped.track.device_chain()[1].id == *remapped.ids.find({20}));
     REQUIRE(remapped.track.find_clip(*remapped.ids.find({30})) != nullptr);
+    REQUIRE(remapped.track.device_chain()[0].configuration ==
+            original.device_chain()[0].configuration);
     REQUIRE(allocator.next_value() == 104);
 
     const auto sequence =
@@ -106,6 +219,7 @@ TEST_CASE("Timeline remap treats device placements as owned identities") {
     REQUIRE(project_track != nullptr);
     REQUIRE(project_track->device_chain()[0].id == *remapped_project.ids.find({21}));
     REQUIRE(project_track->device_chain()[1].id == *remapped_project.ids.find({20}));
+    REQUIRE(project_track->device_chain()[0].state_ref == original.device_chain()[0].state_ref);
     REQUIRE(remapped_project.project.locate(*remapped_project.ids.find({21}))->kind ==
             ItemKind::DevicePlacement);
     REQUIRE(remapped_project.project.locate(*remapped_project.ids.find({21}))->parent_id ==

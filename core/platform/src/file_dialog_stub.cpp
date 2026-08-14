@@ -11,6 +11,7 @@
 
 #include <pulp/platform/file_dialog.hpp>
 
+#include <filesystem>
 #include <mutex>
 
 // On Linux a real built-in backend exists: the xdg-desktop-portal bridge
@@ -38,14 +39,17 @@ namespace pulp::platform {
 // forces that TU to link (static-lib object files with only static
 // initializers can otherwise be dropped).
 FileDialog::Backend make_linux_portal_backend();
+FileDialog::SaveCopyBackend make_linux_portal_save_copy_backend();
 #elif defined(_WIN32)
 // Defined in platform/win/file_dialog_win.cpp (IFileDialog COM backend).
 FileDialog::Backend make_win_file_dialog_backend();
+FileDialog::SaveCopyBackend make_win_file_dialog_save_copy_backend();
 #endif
 
 namespace {
     std::mutex           g_backend_mu;
     FileDialog::Backend  g_backend;
+    FileDialog::SaveCopyBackend g_save_copy_backend;
     bool                 g_backend_installed = false;
 }
 
@@ -53,6 +57,20 @@ void FileDialog::set_backend(Backend backend) {
     std::lock_guard lock(g_backend_mu);
     g_backend = std::move(backend);
     g_backend_installed = true;
+}
+
+void FileDialog::set_save_copy_backend(SaveCopyBackend backend) {
+    std::lock_guard lock(g_backend_mu);
+    g_save_copy_backend = std::move(backend);
+}
+
+bool FileDialog::has_save_copy_backend() {
+#if defined(__APPLE__) && TARGET_OS_OSX
+    return true;
+#else
+    std::lock_guard lock(g_backend_mu);
+    return static_cast<bool>(g_save_copy_backend);
+#endif
 }
 
 bool FileDialog::install_native_backend() {
@@ -64,15 +82,27 @@ bool FileDialog::install_native_backend() {
     // and Android have no built-in backend yet).
 #if defined(__linux__) && !defined(__ANDROID__)
     std::lock_guard lock(g_backend_mu);
-    if (g_backend_installed) return true;
+    if (g_backend_installed) {
+        if (!g_save_copy_backend)
+            g_save_copy_backend = make_linux_portal_save_copy_backend();
+        return true;
+    }
     if (!DBus::library_available()) return false;
     g_backend = make_linux_portal_backend();
+    if (!g_save_copy_backend)
+        g_save_copy_backend = make_linux_portal_save_copy_backend();
     g_backend_installed = true;
     return true;
 #elif defined(_WIN32)
     std::lock_guard lock(g_backend_mu);
-    if (g_backend_installed) return true;   // leave a host-set backend in place
+    if (g_backend_installed) {
+        if (!g_save_copy_backend)
+            g_save_copy_backend = make_win_file_dialog_save_copy_backend();
+        return true;   // leave a host-set backend in place
+    }
     g_backend = make_win_file_dialog_backend();
+    if (!g_save_copy_backend)
+        g_save_copy_backend = make_win_file_dialog_save_copy_backend();
     g_backend_installed = true;
     return true;
 #else
@@ -83,6 +113,7 @@ bool FileDialog::install_native_backend() {
 void FileDialog::clear_backend() {
     std::lock_guard lock(g_backend_mu);
     g_backend = {};
+    g_save_copy_backend = {};
     g_backend_installed = false;
 }
 
@@ -100,6 +131,25 @@ bool file_dialog_open_file_via_backend(const std::string& title,
     std::lock_guard lock(g_backend_mu);
     if (!g_backend_installed || !g_backend.open_file) return false;
     out = g_backend.open_file(title, filters, default_path);
+    return true;
+}
+
+bool file_dialog_save_copy_via_backend(
+    const std::string& source_path,
+    const std::string& title,
+    const std::vector<FileFilter>& filters,
+    const std::string& default_path,
+    const std::string& default_name,
+    std::optional<std::string>& out,
+    std::string* error) {
+    FileDialog::SaveCopyBackend backend;
+    {
+        std::lock_guard lock(g_backend_mu);
+        backend = g_save_copy_backend;
+    }
+    if (!backend) return false;
+    out = backend(source_path, title, filters, default_path,
+                  default_name, error);
     return true;
 }
 }  // namespace detail
@@ -167,5 +217,26 @@ std::optional<std::string> FileDialog::choose_folder(
 }
 
 #endif // !defined(__APPLE__) || iOS
+
+#if !defined(__APPLE__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+std::optional<std::string> FileDialog::save_copy(
+    const std::string& source_path,
+    const std::string& title,
+    const std::vector<FileFilter>& filters,
+    const std::string& default_path,
+    const std::string& default_name,
+    std::string* error)
+{
+    if (error) error->clear();
+    std::optional<std::string> result;
+    if (detail::file_dialog_save_copy_via_backend(
+            source_path, title, filters, default_path, default_name,
+            result, error)) {
+        return result;
+    }
+    if (error) *error = "no file-save backend is installed";
+    return std::nullopt;
+}
+#endif
 
 } // namespace pulp::platform

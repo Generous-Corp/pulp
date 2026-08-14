@@ -1114,9 +1114,33 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin, 1, 2))
             return false;
-        return require_member(data, "id", StringShape, path + "/data");
+        const auto data_path = path + "/data";
+        if (!require_member(data, "id", StringShape, data_path))
+            return false;
+        if (version == 1)
+            return forbid_members(data,
+                                  {"binding_key", "bypassed", "device_kind", "position",
+                                   "slot_kind", "state_ref", "wet_dry_bits"},
+                                  data_path);
+        if (!require_member(data, "binding_key", StringShape, data_path) ||
+            !require_member(data, "bypassed", BooleanShape, data_path) ||
+            !require_member(data, "device_kind", StringShape, data_path) ||
+            !require_member(data, "position", StringShape, data_path) ||
+            !require_member(data, "slot_kind", StringShape, data_path) ||
+            !require_member(data, "wet_dry_bits", NumberShape, data_path))
+            return false;
+        Span state;
+        bool has_state = false;
+        if (!member(data, "state_ref", state, has_state))
+            return false;
+        if (has_state && !has_shape(state, StringShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, state.begin, 0, 0,
+                      data_path + "/state_ref");
+            return false;
+        }
+        return true;
     }
 
     bool walk_clip(Span value, const std::string& path) {

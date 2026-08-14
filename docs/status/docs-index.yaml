@@ -651,6 +651,11 @@ docs:
     kind: policy
     summary: Standards decision for host-owned plugin scene coordination
 
+  - slug: event-stream-pdc
+    path: policies/event-stream-pdc.md
+    kind: policy
+    summary: Open decision boundary for event-stream plugin delay compensation
+
   - slug: licensing
     path: reference/licensing.md
     kind: reference

@@ -36,6 +36,48 @@ bool id_less(const Clip& lhs, const Clip& rhs) noexcept {
     return lhs.id() < rhs.id();
 }
 
+std::optional<ModelError> validate_device_chain(std::span<const DevicePlacement> devices) {
+    bool post_fader = false;
+    std::optional<DeviceSlotKind> previous;
+    ItemId previous_id;
+    for (const auto& placement : devices) {
+        if (!placement.id.valid())
+            return ModelError{ModelErrorCode::InvalidItemId, placement.id, {}};
+        if (placement.state_ref && !placement.state_ref->valid())
+            return ModelError{ModelErrorCode::InvalidContentHash, placement.id, {}};
+        if (!placement.configuration.valid())
+            return ModelError{ModelErrorCode::InvalidSchemaIdentity, placement.id, {}};
+        const auto position = placement.configuration.position;
+        const auto slot = placement.configuration.slot_kind;
+        if (position == DeviceChainPosition::PostFader) {
+            post_fader = true;
+            if (slot != DeviceSlotKind::AudioToAudio)
+                return ModelError{ModelErrorCode::InvalidIdentityTransition, placement.id,
+                                  previous_id};
+        } else if (post_fader) {
+            return ModelError{ModelErrorCode::InvalidIdentityTransition, placement.id,
+                              previous_id};
+        }
+        if (previous) {
+            const bool previous_outputs_event =
+                *previous == DeviceSlotKind::EventToEvent;
+            const bool previous_outputs_audio =
+                *previous == DeviceSlotKind::EventToAudio ||
+                *previous == DeviceSlotKind::AudioToAudio;
+            const bool next_accepts_event = slot == DeviceSlotKind::EventToEvent ||
+                                            slot == DeviceSlotKind::EventToAudio;
+            const bool next_accepts_audio = slot == DeviceSlotKind::AudioToAudio;
+            if ((previous_outputs_event && next_accepts_audio) ||
+                (previous_outputs_audio && next_accepts_event))
+                return ModelError{ModelErrorCode::InvalidIdentityTransition, placement.id,
+                                  previous_id};
+        }
+        previous = slot;
+        previous_id = placement.id;
+    }
+    return std::nullopt;
+}
+
 template <typename ClipRange>
 std::vector<ItemId> non_automation_ids(ItemId track_id, std::span<const DevicePlacement> devices,
                                        const ClipRange& clips) {
@@ -408,10 +450,10 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
     std::vector<ItemId> device_ids;
     device_ids.reserve(input.device_chain.size());
     for (const auto& placement : input.device_chain) {
-        if (!placement.valid())
-            return fail<Track>(ModelErrorCode::InvalidItemId, placement.id);
         device_ids.push_back(placement.id);
     }
+    if (const auto error = validate_device_chain(input.device_chain))
+        return fail<Track>(error->code, error->item, error->related_item);
     std::sort(device_ids.begin(), device_ids.end());
     if (const auto duplicate = std::adjacent_find(device_ids.begin(), device_ids.end());
         duplicate != device_ids.end())
@@ -689,6 +731,82 @@ runtime::Result<Track, ModelError> Track::erase_automation_lane(ItemId id) const
     next_data.automation_lanes = std::move(storage);
     next_data.automation_owned_ids = std::move(automation_owned_ids);
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError>
+Track::with_device_chain(std::vector<DevicePlacement> device_chain) const {
+    auto input = detail::track_input_of(*this);
+    input.device_chain = std::move(device_chain);
+    auto validated = Track::create(std::move(input));
+    if (!validated)
+        return runtime::Err(validated.error());
+    auto next_data = *data_;
+    next_data.device_chain = validated.value().data_->device_chain;
+    next_data.compile_structure = std::make_shared<const std::uint8_t>(0);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError>
+Track::insert_device(DevicePlacement placement,
+                     std::optional<ItemId> before_device_id) const {
+    if (find_device_placement(placement.id))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, placement.id);
+    auto devices = *data_->device_chain;
+    auto position = devices.end();
+    if (before_device_id) {
+        position = std::find_if(devices.begin(), devices.end(), [&](const auto& candidate) {
+            return candidate.id == *before_device_id;
+        });
+        if (position == devices.end())
+            return fail<Track>(ModelErrorCode::MissingItem, *before_device_id, data_->id);
+    }
+    devices.insert(position, std::move(placement));
+    return with_device_chain(std::move(devices));
+}
+
+runtime::Result<Track, ModelError> Track::erase_device(ItemId id) const {
+    auto devices = *data_->device_chain;
+    const auto found = std::find_if(devices.begin(), devices.end(),
+                                    [id](const auto& candidate) { return candidate.id == id; });
+    if (found == devices.end())
+        return fail<Track>(ModelErrorCode::MissingItem, id, data_->id);
+    devices.erase(found);
+    return with_device_chain(std::move(devices));
+}
+
+runtime::Result<Track, ModelError>
+Track::move_device(ItemId id, std::optional<ItemId> before_device_id) const {
+    if (before_device_id == id)
+        return fail<Track>(ModelErrorCode::InvalidIdentityTransition, id, id);
+    auto devices = *data_->device_chain;
+    const auto found = std::find_if(devices.begin(), devices.end(),
+                                    [id](const auto& candidate) { return candidate.id == id; });
+    if (found == devices.end())
+        return fail<Track>(ModelErrorCode::MissingItem, id, data_->id);
+    auto placement = *found;
+    devices.erase(found);
+    auto position = devices.end();
+    if (before_device_id) {
+        position = std::find_if(devices.begin(), devices.end(), [&](const auto& candidate) {
+            return candidate.id == *before_device_id;
+        });
+        if (position == devices.end())
+            return fail<Track>(ModelErrorCode::MissingItem, *before_device_id, data_->id);
+    }
+    devices.insert(position, std::move(placement));
+    return with_device_chain(std::move(devices));
+}
+
+runtime::Result<Track, ModelError>
+Track::replace_device(DevicePlacement replacement) const {
+    auto devices = *data_->device_chain;
+    const auto found = std::find_if(devices.begin(), devices.end(), [&](const auto& candidate) {
+        return candidate.id == replacement.id;
+    });
+    if (found == devices.end())
+        return fail<Track>(ModelErrorCode::MissingItem, replacement.id, data_->id);
+    *found = std::move(replacement);
+    return with_device_chain(std::move(devices));
 }
 
 runtime::Result<Track, ModelError> Track::insert_take_lane(TakeLane lane) const {

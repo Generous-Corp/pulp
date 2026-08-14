@@ -47,7 +47,7 @@ is not a reason to add a model feature.
 | `automation.track-gain` | yes | An automation lane targeting a track's gain. |
 | `automation.track-pan` | yes | An automation lane targeting a track's pan. |
 | `device.placement` | yes | A device occupying a slot in a track's chain, by identity. |
-| `device.payload` | format-only | A device's type and saved parameter state. |
+| `device.payload` | yes | A device's type and saved parameter state. |
 | `effect.timewarp` | format-only | An effect that remaps time rather than processing content. |
 | `take.lane` | yes | An alternate recording lane holding takes alongside the arrangement. |
 | `take.comp` | yes | A composite assembled by selecting segments across takes. |

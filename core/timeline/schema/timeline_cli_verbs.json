@@ -410,6 +410,43 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "before-device-id",
+          "required": false,
+          "schema_field": "before_device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "placement",
+          "ref": "pulp.timeline.device_placement",
+          "required": true,
+          "schema_field": "placement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-device",
+      "schema_type": "pulp.timeline.command.insert_device",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "Object",
           "name": "marker",
           "ref": "pulp.timeline.marker",
@@ -723,6 +760,49 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "device-id",
+          "required": true,
+          "schema_field": "device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "expected-before-device-id",
+          "required": false,
+          "schema_field": "expected_before_device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "replacement-before-device-id",
+          "required": false,
+          "schema_field": "replacement_before_device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:move-device",
+      "schema_type": "pulp.timeline.command.move_device",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "expected-before-track-id",
           "required": false,
           "schema_field": "expected_before_track_id",
@@ -825,6 +905,35 @@
       ],
       "name": "timeline:command:remove-clip",
       "schema_type": "pulp.timeline.command.remove_clip",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "device-id",
+          "required": true,
+          "schema_field": "device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-device",
+      "schema_type": "pulp.timeline.command.remove_device",
       "version": 1
     },
     {
@@ -1122,6 +1231,49 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "device-id",
+          "required": true,
+          "schema_field": "device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:retarget-device",
+      "schema_type": "pulp.timeline.command.retarget_device",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "expected-lane-id",
           "required": true,
           "schema_field": "expected_lane_id",
@@ -1266,6 +1418,49 @@
       ],
       "name": "timeline:command:set-clip-sequence-ref",
       "schema_type": "pulp.timeline.command.set_clip_sequence_ref",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "device-id",
+          "required": true,
+          "schema_field": "device_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "expected",
+          "required": false,
+          "schema_field": "expected",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "replacement",
+          "required": false,
+          "schema_field": "replacement",
+          "value_type": "string"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-device-state",
+      "schema_type": "pulp.timeline.command.set_device_state",
       "version": 1
     },
     {
@@ -1721,16 +1916,65 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "String",
+          "name": "binding-key",
+          "required": true,
+          "schema_field": "binding_key",
+          "value_type": "string"
+        },
+        {
+          "kind": "Boolean",
+          "name": "bypassed",
+          "required": true,
+          "schema_field": "bypassed",
+          "value_type": "bool"
+        },
+        {
+          "kind": "String",
+          "name": "device-kind",
+          "required": true,
+          "schema_field": "device_kind",
+          "value_type": "string"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
           "schema_field": "id",
           "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "position",
+          "required": true,
+          "schema_field": "position",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "slot-kind",
+          "required": true,
+          "schema_field": "slot_kind",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "state-ref",
+          "required": false,
+          "schema_field": "state_ref",
+          "value_type": "string"
+        },
+        {
+          "kind": "U32",
+          "name": "wet-dry-bits",
+          "required": true,
+          "schema_field": "wet_dry_bits",
+          "value_type": "uint"
         }
       ],
       "name": "timeline:device-placement",
       "schema_type": "pulp.timeline.device_placement",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Document",

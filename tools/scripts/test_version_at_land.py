@@ -495,6 +495,11 @@ class PrRouteTest(unittest.TestCase):
         # A PR was opened and auto-merge armed with --merge (contract: NEVER
         # --squash — squash folds the bump-marker commit and trips auto-release).
         self.assertTrue(fake.did("pr", "create"))
+        create_call = next(
+            call for call in fake.calls if call[:2] == ("pr", "create")
+        )
+        self.assertIn("--label", create_call)
+        self.assertEqual(create_call[create_call.index("--label") + 1], "automation")
         self.assertTrue(fake.did("pr", "merge"))
         self.assertIn("--auto", fake.calls[-1])
         self.assertIn("--merge", fake.calls[-1])
