@@ -95,6 +95,12 @@ runtime-control operation. Its operational probe constructs
 `BoundaryReportInputs` and invokes `pulp::audio::build_boundary_report` through
 the declared `Pulp::audio` target.
 
+For `audio.realtime-output-probe`, advertise the prepared `AudioProbe` type as
+mixed real-time/control capability only when the probe keeps the audio producer
+bounded and allocation-free. The operational probe must call `prepare` through
+`Pulp::audio`; snapshots, statistics, and optional capture reads stay on the
+non-realtime consumer side.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
