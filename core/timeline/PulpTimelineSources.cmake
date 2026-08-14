@@ -12,6 +12,7 @@ function(pulp_resolve_timeline_sources root output)
         command.cpp
         compile_context.cpp
         document_session.cpp
+        device_placement_schema_migrations.cpp
         identity_directory.cpp
         id_remap.cpp
         journal.cpp
@@ -28,6 +29,7 @@ function(pulp_resolve_timeline_sources root output)
         note_content_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp
+        transaction_device_internal.cpp
         transaction_marker_internal.cpp
         transaction_scene_internal.cpp
         transaction_sequence_internal.cpp

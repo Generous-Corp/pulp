@@ -47,6 +47,104 @@ decode_command_bool(const JsonValue& data, std::string_view name, const std::str
     return runtime::Ok(value.value()->boolean);
 }
 
+runtime::Result<DeviceConfiguration, PersistenceError>
+decode_device_configuration(const JsonValue& data, const std::string& path) {
+    auto binding = string_field(data, "binding_key", path);
+    auto bypassed = required(data, "bypassed", path);
+    auto kind = string_field(data, "device_kind", path);
+    auto position = string_field(data, "position", path);
+    auto slot = string_field(data, "slot_kind", path);
+    auto wet = required(data, "wet_dry_bits", path);
+    if (!binding || !bypassed || !kind || !position || !slot || !wet ||
+        bypassed.value()->kind != JsonValue::Kind::Boolean)
+        return fail<DeviceConfiguration>(PersistenceErrorCode::MissingField, path);
+
+    DeviceConfiguration configuration;
+    configuration.binding_key = std::move(binding).value();
+    configuration.bypassed = bypassed.value()->boolean;
+    if (kind.value() == "unresolved")
+        configuration.device_kind = DeviceKind::Unresolved;
+    else if (kind.value() == "built_in")
+        configuration.device_kind = DeviceKind::BuiltIn;
+    else if (kind.value() == "external")
+        configuration.device_kind = DeviceKind::External;
+    else if (kind.value() == "generated")
+        configuration.device_kind = DeviceKind::Generated;
+    else
+        return fail<DeviceConfiguration>(PersistenceErrorCode::InvalidSchema,
+                                         path + "/device_kind");
+    if (position.value() == "pre_fader")
+        configuration.position = DeviceChainPosition::PreFader;
+    else if (position.value() == "post_fader")
+        configuration.position = DeviceChainPosition::PostFader;
+    else
+        return fail<DeviceConfiguration>(PersistenceErrorCode::InvalidSchema,
+                                         path + "/position");
+    if (slot.value() == "event_to_event")
+        configuration.slot_kind = DeviceSlotKind::EventToEvent;
+    else if (slot.value() == "event_to_audio")
+        configuration.slot_kind = DeviceSlotKind::EventToAudio;
+    else if (slot.value() == "audio_to_audio")
+        configuration.slot_kind = DeviceSlotKind::AudioToAudio;
+    else
+        return fail<DeviceConfiguration>(PersistenceErrorCode::InvalidSchema,
+                                         path + "/slot_kind");
+    auto decoded_wet = parse_u32_number(*wet.value(), path + "/wet_dry_bits");
+    if (!decoded_wet)
+        return fail<DeviceConfiguration>(decoded_wet.error().code, decoded_wet.error().path,
+                                         decoded_wet.error().byte_offset);
+    configuration.wet_dry_bits = decoded_wet.value();
+    if (!configuration.valid())
+        return fail<DeviceConfiguration>(PersistenceErrorCode::InvalidSchema, path);
+    return runtime::Ok(std::move(configuration));
+}
+
+runtime::Result<DevicePlacement, PersistenceError>
+decode_command_device_placement(const JsonValue& value, const std::string& path) {
+    auto envelope = data_for_versions(value, "pulp.timeline.device_placement", 1, 2, path);
+    if (!envelope)
+        return fail<DevicePlacement>(envelope.error().code, envelope.error().path,
+                                     envelope.error().byte_offset);
+    auto id = decode_command_item_id(*envelope.value().data, "id", path + "/data");
+    if (!id)
+        return runtime::Err(id.error());
+    DevicePlacement placement{.id = id.value()};
+    if (envelope.value().version == 2) {
+        auto configuration =
+            decode_device_configuration(*envelope.value().data, path + "/data");
+        if (!configuration)
+            return runtime::Err(configuration.error());
+        placement.configuration = std::move(configuration).value();
+        if (const auto* state = envelope.value().data->find("state_ref")) {
+            if (state->kind != JsonValue::Kind::String)
+                return fail<DevicePlacement>(PersistenceErrorCode::UnexpectedType,
+                                             path + "/data/state_ref", state->begin);
+            auto decoded = ContentHash::from_hex(state->scalar);
+            if (!decoded)
+                return fail<DevicePlacement>(PersistenceErrorCode::InvalidSchema,
+                                             path + "/data/state_ref", state->begin);
+            placement.state_ref = *decoded;
+        }
+    }
+    return runtime::Ok(std::move(placement));
+}
+
+runtime::Result<std::optional<ContentHash>, PersistenceError>
+decode_optional_content_hash(const JsonValue& data, std::string_view name,
+                             const std::string& path) {
+    const auto* value = data.find(name);
+    if (!value)
+        return runtime::Ok(std::optional<ContentHash>{});
+    if (value->kind != JsonValue::Kind::String)
+        return fail<std::optional<ContentHash>>(PersistenceErrorCode::UnexpectedType,
+                                                path + "/" + std::string(name), value->begin);
+    auto decoded = ContentHash::from_hex(value->scalar);
+    if (!decoded)
+        return fail<std::optional<ContentHash>>(PersistenceErrorCode::InvalidSchema,
+                                                path + "/" + std::string(name), value->begin);
+    return runtime::Ok(std::optional<ContentHash>{*decoded});
+}
+
 runtime::Result<ClipPlaybackProperties, PersistenceError>
 decode_command_playback_properties(const JsonValue& value, std::string path) {
     auto gain = required(value, "gain_linear_bits", path);
@@ -769,6 +867,69 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return runtime::Err(replacement.error());
         return runtime::Ok(Command(
             MoveTrack{sequence.value(), track.value(), expected.value(), replacement.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_device") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto before = decode_optional_command_item_id(command, "before_device_id", data_path);
+        auto placement = required(command, "placement", data_path);
+        if (!sequence || !track || !before || !placement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_command_device_placement(*placement.value(), data_path + "/placement");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(InsertDevice{sequence.value(), track.value(),
+                                                std::move(decoded).value(), before.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_device") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto device = decode_command_item_id(command, "device_id", data_path);
+        if (!sequence || !track || !device)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveDevice{sequence.value(), track.value(), device.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.move_device") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto device = decode_command_item_id(command, "device_id", data_path);
+        auto expected =
+            decode_optional_command_item_id(command, "expected_before_device_id", data_path);
+        auto replacement =
+            decode_optional_command_item_id(command, "replacement_before_device_id", data_path);
+        if (!sequence || !track || !device || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(MoveDevice{sequence.value(), track.value(), device.value(),
+                                              expected.value(), replacement.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.retarget_device") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto device = decode_command_item_id(command, "device_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !device || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_device_configuration(*expected.value(), data_path + "/expected");
+        auto decoded_replacement =
+            decode_device_configuration(*replacement.value(), data_path + "/replacement");
+        if (!decoded_expected || !decoded_replacement)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path);
+        return runtime::Ok(Command(RetargetDevice{
+            sequence.value(), track.value(), device.value(), std::move(decoded_expected).value(),
+            std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_device_state") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto device = decode_command_item_id(command, "device_id", data_path);
+        auto expected = decode_optional_content_hash(command, "expected", data_path);
+        auto replacement = decode_optional_content_hash(command, "replacement", data_path);
+        if (!sequence || !track || !device || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path);
+        return runtime::Ok(Command(SetDeviceState{sequence.value(), track.value(), device.value(),
+                                                  expected.value(), replacement.value()}));
     }
     if (type.value() == "pulp.timeline.command.insert_sequence") {
         auto sequence = required(command, "sequence", data_path);

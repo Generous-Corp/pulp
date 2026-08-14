@@ -4,6 +4,7 @@
 #include "asset_schema_policy.hpp"
 #include "clip_schema_migrations.hpp"
 #include "clip_schema_policy.hpp"
+#include "device_placement_schema_migrations.hpp"
 #include "note_content_schema_migrations.hpp"
 #include "project_schema_migrations.hpp"
 #include "project_schema_policy.hpp"
@@ -421,8 +422,22 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"parameter_id", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.automation_target.track_mixer", SchemaDomain::Document,
                               {{"parameter", SchemaValueKind::String}}));
-    schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
-                              {{"id", SchemaValueKind::U64String}}));
+    auto device_placement = builtin(
+        "pulp.timeline.device_placement", SchemaDomain::Document,
+        {{"binding_key", SchemaValueKind::String},
+         {"bypassed", SchemaValueKind::Boolean},
+         {"device_kind", SchemaValueKind::String},
+         {"id", SchemaValueKind::U64String},
+         {"position", SchemaValueKind::String},
+         {"slot_kind", SchemaValueKind::String},
+         {"state_ref", SchemaValueKind::String, false},
+         {"wet_dry_bits", SchemaValueKind::U32}},
+        2);
+    device_placement.upgrades.push_back(
+        {1, 2, {}, detail::migrate_device_placement_v1_to_v2});
+    device_placement.downgrades.push_back(
+        {2, 1, {}, detail::migrate_device_placement_v2_to_v1});
+    schemas.push_back(std::move(device_placement));
     schemas.push_back(builtin("pulp.timeline.macro_control", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
@@ -655,6 +670,35 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin("pulp.timeline.command.move_track", SchemaDomain::Command,
                               {{"expected_before_track_id", SchemaValueKind::U64String, false},
                                {"replacement_before_track_id", SchemaValueKind::U64String, false},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.insert_device", SchemaDomain::Command,
+        {{"before_device_id", SchemaValueKind::U64String, false},
+         {"placement", SchemaValueKind::Object, true, "pulp.timeline.device_placement"},
+         {"sequence_id", SchemaValueKind::U64String},
+         {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_device", SchemaDomain::Command,
+                              {{"device_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.move_device", SchemaDomain::Command,
+        {{"device_id", SchemaValueKind::U64String},
+         {"expected_before_device_id", SchemaValueKind::U64String, false},
+         {"replacement_before_device_id", SchemaValueKind::U64String, false},
+         {"sequence_id", SchemaValueKind::U64String},
+         {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.retarget_device", SchemaDomain::Command,
+                              {{"device_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Object},
+                               {"replacement", SchemaValueKind::Object},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_device_state", SchemaDomain::Command,
+                              {{"device_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::String, false},
+                               {"replacement", SchemaValueKind::String, false},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_mixer", SchemaDomain::Command,

@@ -163,7 +163,14 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tuning", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
     };
     static constexpr ExpectedField device_placement_fields[] = {
+        {"binding_key", SchemaValueKind::String},
+        {"bypassed", SchemaValueKind::Boolean},
+        {"device_kind", SchemaValueKind::String},
         {"id", SchemaValueKind::U64String},
+        {"position", SchemaValueKind::String},
+        {"slot_kind", SchemaValueKind::String},
+        {"state_ref", SchemaValueKind::String, false},
+        {"wet_dry_bits", SchemaValueKind::U32},
     };
     static constexpr ExpectedField modulator_fields[] = {
         {"id", SchemaValueKind::U64String},
@@ -255,7 +262,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
          automation_target_fields},
         {SchemaDomain::Document, "pulp.timeline.automation_target.track_mixer",
          track_mixer_target_fields},
-        {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
+        {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.modulator", modulator_fields},
         {SchemaDomain::Document, "pulp.timeline.macro_control", macro_control_fields},
         {SchemaDomain::Document, "pulp.timeline.modulation_route", modulation_route_fields},

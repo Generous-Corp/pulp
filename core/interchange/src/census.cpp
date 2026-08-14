@@ -101,8 +101,11 @@ void record_track(ConceptCensus& out, const timeline::Project& project,
     for (const timeline::Clip& clip : track.clips())
         record_clip(out, project, clip, limits);
 
-    for (const timeline::DevicePlacement& device : track.device_chain())
+    for (const timeline::DevicePlacement& device : track.device_chain()) {
         out.record(Concept::DevicePlacement, device.id, limits);
+        if (device.configuration != timeline::DeviceConfiguration{} || device.state_ref)
+            out.record(Concept::DevicePayload, device.id, limits);
+    }
 
     const timeline::TrackMixer mixer = track.mixer();
     if (mixer.gain_linear != 1.0f)
