@@ -309,6 +309,9 @@ cleanup() {
                     && systemd-run --quiet --collect --unit="$cleanup_unit" \
                         --service-type=oneshot --property=TimeoutStartSec=80min \
                         --property=Restart=on-failure --property=RestartSec=30s \
+                        --setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE" \
+                        --setenv="PULP_LINUX_GH_CLI=$GH_CLI" \
+                        --setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR" \
                         "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
                         "$RUNNER_NAME" "$REGISTRATION_API" "$ACTIVE_PAT_FILE"; then
                     log "runner is busy; delegated clone $VMID to $cleanup_unit"
