@@ -197,6 +197,65 @@ after completion. Event, repository, SHA, selector, and lease checks are
 defense in depth. Secret-bearing jobs and every `pull_request_target`, signing,
 deployment, and release workflow remain hosted or on a dedicated trusted path.
 
+The external boundary is the organization runner group, not the event-name
+guard in PR-controlled YAML. Each group contains only `Generous-Corp/pulp`.
+`pulp-trusted-build` permits the reviewed trusted workflows on `main`, while
+`pulp-pr-safe-build` permits only `pr-safe-linux.yml@main`. Never share their
+capability labels, runner-name namespaces, health leases, or group ids.
+
+Install the common supervisor, both policy wrappers, the verifier, and the two
+fail-closed systemd templates. The group environment files are mandatory for
+the automatic units; a missing file leaves that pool offline:
+
+```sh
+install -o root -g root -m 0755 tools/ci/proxmox-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-trusted-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-trusted-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
+  /usr/local/lib/pulp/verify_linux_runner_group.py
+install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -o root -g root -m 0644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -d -o root -g root -m 0755 /etc/pulp
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$TRUSTED_GROUP_ID" \
+  > /etc/pulp/linux-trusted-runner-group.env
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$PR_SAFE_GROUP_ID" \
+  > /etc/pulp/linux-pr-safe-runner-group.env
+chmod 0600 /etc/pulp/linux-{trusted,pr-safe}-runner-group.env
+systemctl daemon-reload
+```
+
+Every clone verifies its named policy before creation, registers at
+organization scope, and receives exactly one of `pulp-auto-linux-x64` or
+`pulp-pr-safe-linux-x64`. A wrong name, workflow, repository, label set, prefix,
+default group, or unavailable API keeps the slot offline. The generic legacy
+unit remains repository-scoped and cannot carry either automatic capability.
+
+Both automatic pools also require Proxmox VM-firewall isolation. The protected
+workflow controls orchestration, but the checked-out pull-request source and its
+build system remain untrusted. Before an organization-scoped clone starts, the
+supervisor requires `pve-firewall status` to report `enabled/running`, enables
+the firewall on that clone's NIC, installs an exact-address IP/ARP source filter,
+and installs a per-VM egress policy. The generated policy must write, compile,
+enable on the clone NIC, and appear in the active IP, ARP, and egress rules
+before the guest can register. DNS to the LAN gateway is allowed;
+all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations are denied; public IPv4 egress remains available for source and
+dependency downloads. Do not enable the automatic slots on a flat bridged LAN
+without that policy.
+
+Runner-group verification is necessary but not sufficient for required CI.
+GitHub Actions has no queued-job timeout that can retarget `runs-on` to hosted
+capacity. Shipyard therefore renews each short lease only when the full declared
+admission burst is online and idle. Unsetting or expiring the selector before
+dispatch is the hosted fallback; it cannot rescue an already assigned job.
+Secret-bearing and `pull_request_target` jobs remain ineligible regardless of
+runner health.
+
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
 `explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
@@ -237,7 +296,7 @@ first.
 The three clone VMIDs have deterministic network identities: `200..202` map to
 `192.168.86.251..253` and stable locally administered MAC addresses. Do not return
 to random clone MACs. Each short-lived MAC retains a DHCP lease after its VM is
-destroyed, and normal CI volume exhausted the LAN lease pool on 2026-08-02.
+destroyed, and normal CI volume can exhaust the LAN lease pool.
 The GitHub runner registration remains unique per invocation; stable network
 identity must not become a static Actions runner name.
 

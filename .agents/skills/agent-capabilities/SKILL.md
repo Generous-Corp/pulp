@@ -200,6 +200,11 @@ under the build directory.
 The official-SDK handoff self-test separately covers exact identity plus wrong
 source SHA, importer hash, capability hash, and schema-invalid documents.
 
+`test/cmake/quality_tests.cmake` is also the registry for capability-manifest
+and adjacent policy self-tests. When adding a new Python policy test there,
+register the test explicitly in the same change; merely creating a
+`tools/ci/test_*.py` file does not make CTest execute it.
+
 The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST
 inventory may reduce comment/private-detail churn only if its version and

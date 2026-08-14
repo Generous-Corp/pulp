@@ -5,10 +5,19 @@
 #include "../core/audio/platform/win/wasapi_io_timing.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <thread>
+
+#if defined(__linux__)
+#include "../core/audio/platform/linux/alsa_device.hpp"
+#if defined(PULP_HAS_JACK)
+#include "../core/audio/platform/linux/jack_device.hpp"
+#endif
+#endif
 
 #if defined(__APPLE__)
 #include "../core/audio/platform/mac/coreaudio_device.hpp"
@@ -285,6 +294,207 @@ TEST_CASE("WASAPI timing publication fails closed after route invalidation",
     publication.invalidate();
     CHECK_FALSE(publication.read().has_value());
 }
+
+#if defined(__linux__)
+TEST_CASE("ALSA timing reconstructs each complete directional delay once",
+          "[audio][timing][alsa]") {
+    using namespace linux_platform;
+    AlsaTimingValues values{};
+    values.route_delay_frames = 384;
+    values.period_frames = 128;
+    values.sample_rate_hz = 48'000.0;
+    values.direction = SND_PCM_STREAM_PLAYBACK;
+
+    const auto output = make_alsa_audio_io_timing(values, 41, 3);
+    REQUIRE(output.has_value());
+    CHECK(output->output_latency_frames == 256);
+    CHECK(output->output_safety_offset_frames == 0);
+    CHECK_FALSE(output->input_latency_frames.has_value());
+    CHECK(output->io_buffer_frames == 128);
+    CHECK(output->timestamp_domain ==
+          AudioTimestampDomain::monotonic_host_time);
+    CHECK(output->timestamp_source == AudioTimingSource::device_clock);
+
+    const auto snapshot = make_latency_snapshot(*output, 17, 48'000.0);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->output_scheduling_offset_frames == 401);
+
+    values.direction = SND_PCM_STREAM_CAPTURE;
+    const auto input = make_alsa_audio_io_timing(values, 43, 4);
+    REQUIRE(input.has_value());
+    CHECK(input->input_latency_frames == 256);
+    CHECK(input->input_safety_offset_frames == 0);
+    CHECK_FALSE(input->output_latency_frames.has_value());
+}
+
+TEST_CASE("ALSA timing fails closed on invalid route reports",
+          "[audio][timing][alsa]") {
+    using namespace linux_platform;
+    AlsaTimingValues values{64, 128, 48'000.0, SND_PCM_STREAM_PLAYBACK};
+    const auto short_delay = make_alsa_audio_io_timing(values, 47, 1);
+    REQUIRE(short_delay.has_value());
+    CHECK(short_delay->output_latency_frames == 0);
+    const auto snapshot = make_latency_snapshot(*short_delay, 0, 48'000.0);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->output_scheduling_offset_frames == 128);
+
+    values.route_delay_frames = -1;
+    CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 1));
+    values.route_delay_frames = 64;
+    values.period_frames = 0;
+    CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 1));
+    values.period_frames = 128;
+    CHECK_FALSE(make_alsa_audio_io_timing(values, 0, 1));
+    CHECK_FALSE(make_alsa_audio_io_timing(values, 47, 0));
+}
+
+#if defined(PULP_HAS_JACK)
+TEST_CASE("JACK timing preserves representable directional totals",
+          "[audio][timing][jack]") {
+    using namespace linux_platform;
+    JackTimingValues values{};
+    values.input_total_latency_frames = 256;
+    values.output_total_latency_frames = 384;
+    values.period_frames = 128;
+    values.sample_rate_hz = 48'000.0;
+
+    const auto timing = make_jack_audio_io_timing(values, 53, 2);
+    REQUIRE(timing.has_value());
+    CHECK(timing->input_latency_frames == 128);
+    CHECK(timing->output_latency_frames == 256);
+    CHECK(timing->io_buffer_frames == 128);
+
+    values.input_total_latency_frames = 64;
+    const auto output_only = make_jack_audio_io_timing(values, 53, 3);
+    REQUIRE(output_only.has_value());
+    CHECK_FALSE(output_only->input_latency_frames.has_value());
+    CHECK(output_only->output_latency_frames == 256);
+
+    values.output_total_latency_frames = 127;
+    CHECK_FALSE(make_jack_audio_io_timing(values, 53, 4));
+}
+#endif
+
+TEST_CASE("Linux dispatch publishes ALSA route timing and invalidates it",
+          "[audio][timing][alsa][integration]") {
+    using namespace linux_platform;
+    DeviceConfig config{};
+    config.sample_rate = 48'000.0;
+    config.buffer_size = 128;
+    config.output_channels = 2;
+
+    const char* configured_route = std::getenv("PULP_TEST_ALSA_DEVICE");
+    AlsaDevice device(configured_route ? configured_route : "null",
+                      SND_PCM_STREAM_PLAYBACK);
+    REQUIRE(device.open(config));
+    REQUIRE(device.start([](const BufferView<const float>&,
+                            BufferView<float>&,
+                            const CallbackContext&) {}));
+    std::optional<AudioIoTiming> first;
+    for (int attempt = 0; attempt < 100 && !first; ++attempt) {
+        first = query_audio_io_timing(device);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!first) {
+        device.stop();
+        device.close();
+        SKIP("ALSA route did not retain one complete period");
+    }
+    REQUIRE(first.has_value());
+    REQUIRE(first->output_latency_frames.has_value());
+    REQUIRE(first->io_buffer_frames.has_value());
+    CHECK(first->route_instance_token != 0);
+    CHECK(first->calibration_generation != 0);
+    CHECK(first->sample_rate_hz == device.sample_rate());
+    CHECK(first->timestamp_source == AudioTimingSource::device_clock);
+
+    device.stop();
+    CHECK_FALSE(query_audio_io_timing(device).has_value());
+    device.close();
+    CHECK_FALSE(query_audio_io_timing(device).has_value());
+    REQUIRE(device.open(config));
+    REQUIRE(device.start([](const BufferView<const float>&,
+                            BufferView<float>&,
+                            const CallbackContext&) {}));
+    std::optional<AudioIoTiming> reopened;
+    for (int attempt = 0; attempt < 100 && !reopened; ++attempt) {
+        reopened = query_audio_io_timing(device);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(reopened.has_value());
+    CHECK(reopened->route_instance_token != first->route_instance_token);
+    device.stop();
+    device.close();
+}
+
+TEST_CASE("Linux dispatch publishes connected JACK timing and invalidates it",
+          "[audio][timing][jack][integration]") {
+    auto system = create_audio_system();
+    REQUIRE(system);
+    const auto route = system->default_output_device();
+    if (route.id != "jack")
+        SKIP("Pulp did not select a running compiled JACK backend");
+
+#if defined(PULP_HAS_JACK)
+    jack_status_t probe_status{};
+    auto* probe = jack_client_open(
+        "pulp_timing_test_probe", JackNoStartServer, &probe_status);
+    REQUIRE(probe);
+    const char** playback_ports = jack_get_ports(
+        probe, nullptr, nullptr, JackPortIsPhysical | JackPortIsInput);
+    const bool has_physical_playback = playback_ports && playback_ports[0];
+    if (playback_ports)
+        jack_free(playback_ports);
+    jack_client_close(probe);
+    if (!has_physical_playback)
+        SKIP("JACK server exposes no physical playback ports");
+#endif
+
+    DeviceConfig config{};
+    config.sample_rate = 48'000.0;
+    config.buffer_size = 128;
+    config.input_channels = 2;
+    config.output_channels = 2;
+    auto device = system->create_device(route.id);
+    REQUIRE(device);
+    REQUIRE(device->open(config));
+    REQUIRE_FALSE(query_audio_io_timing(*device).has_value());
+    REQUIRE(device->start([](const BufferView<const float>&,
+                             BufferView<float>&,
+                             const CallbackContext&) {}));
+
+    std::optional<AudioIoTiming> timing;
+    for (int attempt = 0; attempt < 100 && !timing; ++attempt) {
+        timing = query_audio_io_timing(*device);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(timing.has_value());
+    CHECK(timing->output_latency_frames.has_value());
+    CHECK(timing->io_buffer_frames ==
+          static_cast<std::uint32_t>(device->buffer_size()));
+    CHECK(timing->route_instance_token != 0);
+    CHECK(timing->timestamp_source == AudioTimingSource::device_clock);
+
+    const auto first_route_token = timing->route_instance_token;
+    device->stop();
+    CHECK_FALSE(query_audio_io_timing(*device).has_value());
+
+    REQUIRE(device->start([](const BufferView<const float>&,
+                             BufferView<float>&,
+                             const CallbackContext&) {}));
+    timing.reset();
+    for (int attempt = 0; attempt < 100 && !timing; ++attempt) {
+        timing = query_audio_io_timing(*device);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(timing.has_value());
+    CHECK(timing->route_instance_token != first_route_token);
+
+    device->stop();
+    CHECK_FALSE(query_audio_io_timing(*device).has_value());
+    device->close();
+}
+#endif
 
 TEST_CASE("WASAPI route invalidation notifies once per opened route",
           "[audio][timing][wasapi]") {

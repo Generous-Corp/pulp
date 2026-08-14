@@ -20,6 +20,9 @@ EXPECTED = [
     f"{REPO}/.github/workflows/vellum-freeze-check.yml@refs/heads/main",
     f"{REPO}/.github/workflows/version-skill-check.yml@refs/heads/main",
 ]
+PR_SAFE_EXPECTED = [
+    f"{REPO}/.github/workflows/pr-safe-linux.yml@refs/heads/main",
+]
 
 
 def valid_group() -> dict:
@@ -58,6 +61,25 @@ class VerifyLinuxRunnerGroupTests(unittest.TestCase):
     def test_wrong_repository_is_not_allowed(self) -> None:
         repositories = {"total_count": 1, "repositories": [{"full_name": "other/repo"}]}
         self.assertTrue(MODULE.validate_policy(valid_group(), repositories, REPO))
+
+    def test_exact_pr_safe_scope_passes(self) -> None:
+        group = valid_group()
+        group["name"] = "pulp-pr-safe-build"
+        group["selected_workflows"] = PR_SAFE_EXPECTED
+        self.assertEqual(
+            MODULE.validate_policy(group, valid_repositories(), REPO, "pr-safe"), []
+        )
+
+    def test_groups_cannot_exchange_names_or_workflows(self) -> None:
+        pr_safe = valid_group()
+        pr_safe["name"] = "pulp-pr-safe-build"
+        pr_safe["selected_workflows"] = PR_SAFE_EXPECTED
+        self.assertTrue(
+            MODULE.validate_policy(pr_safe, valid_repositories(), REPO, "trusted")
+        )
+        self.assertTrue(
+            MODULE.validate_policy(valid_group(), valid_repositories(), REPO, "pr-safe")
+        )
 
 
 if __name__ == "__main__":

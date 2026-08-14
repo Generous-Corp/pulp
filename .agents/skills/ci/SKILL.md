@@ -646,6 +646,25 @@ separate PR-safe pool uses `.github/workflows/pr-safe-linux.yml@main`. Prove tha
 a PR changing its own workflow cannot target the group before enabling
 automatic PR routing. Never share the trusted and PR-safe capability labels,
 runner names, health leases, or runner groups.
+Automatic clones require an enabled Proxmox firewall, exact IPv4/ARP source
+filtering, and an EtherType allowlist limited to ARP and IPv4. Policy write,
+compile, active-state, label, prefix, and group-verification failures must stop
+the VM before registration. Cleanup replaces every routing label with a shutdown
+fence, proves the runner idle twice, stops the clone, and requires the
+registration to become offline before deletion.
+
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+Use an organization-capable controller credential only on the Proxmox host; no
+persistent GitHub credential enters a guest.
+
+A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
+GitHub cannot retarget a queued job. Shipyard must renew each lane's short lease
+only when the complete declared admission burst is online and idle. Never route
+`pull_request_target`, signing, release, deployment, or other secret-bearing work
+to either automatic Linux pool.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.

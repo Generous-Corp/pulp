@@ -63,6 +63,12 @@ double k_weighting_response_db(double frequency, double sample_rate) {
 
 static_assert(std::is_aggregate_v<MultiChannelMeterData>);
 
+TEST_CASE("MultiChannelMeter requires preparation before reporting loudness support",
+          "[signal][meter][loudness]") {
+    MultiChannelMeter meter;
+    REQUIRE_FALSE(meter.loudness_supported());
+}
+
 TEST_CASE("MultiChannelMeterData preserves legacy positional aggregate initialization",
           "[signal][meter][compatibility]") {
     std::array<ChannelLevels, kMaxMeterChannels> channels{};
@@ -491,6 +497,7 @@ TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
 
     MultiChannelMeter meter;
     meter.prepare(sample_rate, 2, roles);
+    REQUIRE(meter.loudness_supported());
     meter.process(channels, 2, static_cast<int>(tone.num_samples()));
 
     REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(-1.518f, 0.015f));
@@ -519,6 +526,119 @@ TEST_CASE("MultiChannelMeter default quad layout uses left and right surrounds",
     REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(expected, 0.02f));
     const float center_lfe_layout = -3.01f + 10.0f * std::log10(3.0f);
     REQUIRE(std::abs(meter.snapshot().lufs_momentary - center_lfe_layout) > 1.5f);
+}
+
+TEST_CASE("MultiChannelMeter rejects layouts without an honest BS.1770 mapping",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    constexpr int frames = sample_rate / 2;
+    std::array<std::vector<float>, 9> audio;
+    std::array<const float*, 9> channels{};
+    for (std::size_t channel = 0; channel < audio.size(); ++channel) {
+        audio[channel].resize(frames);
+        for (int frame = 0; frame < frames; ++frame)
+            audio[channel][static_cast<std::size_t>(frame)] =
+                0.1f * std::sin(2.0f * std::numbers::pi_v<float> * 997.0f
+                                * static_cast<float>(frame) / sample_rate);
+        channels[channel] = audio[channel].data();
+    }
+
+    for (const int unsupported_count : {7, 9}) {
+        MultiChannelMeter meter;
+        meter.prepare(sample_rate, unsupported_count);
+        REQUIRE_FALSE(meter.loudness_supported());
+        meter.process(channels.data(), unsupported_count, frames);
+        REQUIRE(std::isinf(meter.snapshot().lufs_momentary));
+        REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+        REQUIRE(meter.snapshot().channels[0].peak > 0.09f);
+        REQUIRE(meter.snapshot().channels[0].rms > 0.06f);
+    }
+}
+
+TEST_CASE("MultiChannelMeter validates every explicit loudness channel role",
+          "[signal][meter][loudness]") {
+    const LoudnessChannelRole unknown[] = {LoudnessChannelRole::unknown};
+    const LoudnessChannelRole invalid[] = {static_cast<LoudnessChannelRole>(255)};
+    const LoudnessChannelRole lfe_only[] = {LoudnessChannelRole::lfe};
+    for (const auto* roles : {unknown, invalid, lfe_only}) {
+        MultiChannelMeter meter;
+        meter.prepare(48000.0, 1, roles);
+        REQUIRE_FALSE(meter.loudness_supported());
+    }
+    const LoudnessChannelRole explicit_seven[] = {
+        LoudnessChannelRole::left, LoudnessChannelRole::right,
+        LoudnessChannelRole::center, LoudnessChannelRole::lfe,
+        LoudnessChannelRole::left_surround, LoudnessChannelRole::right_surround,
+        LoudnessChannelRole::left_rear_surround};
+    MultiChannelMeter explicit_meter;
+    explicit_meter.prepare(48000.0, 7, explicit_seven);
+    REQUIRE(explicit_meter.loudness_supported());
+
+    std::array<LoudnessChannelRole, 9> explicit_nine{};
+    explicit_nine.fill(LoudnessChannelRole::left);
+    MultiChannelMeter repeated_role_meter;
+    repeated_role_meter.prepare(48000.0, static_cast<int>(explicit_nine.size()),
+                                explicit_nine.data());
+    REQUIRE(repeated_role_meter.loudness_supported());
+    auto tone = pulp::test::audio::make_sine(1, 48000, 997.0f, 48000);
+    std::array<const float*, 9> repeated_channels{};
+    repeated_channels.fill(tone.channel(0).data());
+    repeated_role_meter.process(repeated_channels.data(),
+                                static_cast<int>(repeated_channels.size()), 48000);
+    const float expected = -3.01f + 10.0f * std::log10(9.0f);
+    REQUIRE_THAT(repeated_role_meter.snapshot().lufs_momentary,
+                 WithinAbs(expected, 0.02f));
+
+    std::array<LoudnessChannelRole, kMaxMeterChannels + 1> over_limit_roles{};
+    over_limit_roles.fill(LoudnessChannelRole::left);
+    MultiChannelMeter over_limit_meter;
+    over_limit_meter.prepare(48000.0, static_cast<int>(over_limit_roles.size()),
+                             over_limit_roles.data());
+    REQUIRE_FALSE(over_limit_meter.loudness_supported());
+}
+
+TEST_CASE("MultiChannelMeter keeps level metering safe for unsupported sample rates",
+          "[signal][meter][loudness]") {
+    const float left[] = {0.25f};
+    const float right[] = {-0.5f};
+    const float* channels[] = {left, right};
+
+    for (const double sample_rate : {
+             std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::max()}) {
+        MultiChannelMeter meter;
+        meter.prepare(sample_rate, 2);
+        REQUIRE_FALSE(meter.loudness_supported());
+        meter.process(channels, 2, 1);
+        REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(0.25f, 1e-6f));
+        REQUIRE_THAT(meter.snapshot().channels[1].rms, WithinAbs(0.5f, 1e-6f));
+        REQUIRE(std::isinf(meter.snapshot().lufs_momentary));
+        REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+    }
+}
+
+TEST_CASE("MultiChannelMeter loudness requires the complete prepared layout",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(2, sample_rate, 997.0f, sample_rate, 0.1f);
+    const float* stereo[] = {tone.channel(0).data(), tone.channel(1).data()};
+    const float* mono[] = {tone.channel(0).data()};
+    const float* oversized[] = {
+        tone.channel(0).data(), tone.channel(1).data(), tone.channel(0).data()};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 2);
+    REQUIRE(meter.loudness_supported());
+    meter.process(mono, 1, sample_rate);
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+    REQUIRE(meter.snapshot().channels[0].peak > 0.09f);
+    meter.process(stereo, 2, sample_rate);
+    REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
+    meter.process(oversized, 3, sample_rate);
+    REQUIRE(std::isinf(meter.snapshot().lufs_momentary));
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+    REQUIRE(meter.snapshot().channels[0].peak > 0.09f);
 }
 
 TEST_CASE("MultiChannelMeter loudness is invariant to process block partitioning",

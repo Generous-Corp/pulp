@@ -26,7 +26,11 @@ targets = ["macpro.linux-x64-pr-safe-vm", "github.linux-x64"]
 github_variable = "PULP_PR_SAFE_LINUX_RUNS_ON_JSON"
 health_lease_variable = "PULP_PR_SAFE_LINUX_LEASE_UNTIL"
 enable_variable = "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED"
+health_lease_ttl_seconds = 300
 health_lease_events = ["pull_request"]
+health_lease_runner_name_prefix = "pulp-pr-safe-ephemeral-"
+health_lease_merge_queue_branch = "main"
+health_lease_admission_burst = 2
 ephemeral_required = true
 
 [repo."Generous-Corp/pulp".merge_group.linux]
@@ -34,7 +38,11 @@ strategy = "leased-ordered-fallback"
 targets = ["macpro.linux-x64-trusted-vm", "github.linux-x64"]
 github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"
+health_lease_ttl_seconds = 300
 health_lease_events = ["merge_group"]
+health_lease_runner_name_prefix = "pulp-ci-ephemeral-"
+health_lease_merge_queue_branch = "main"
+health_lease_admission_burst = 5
 ephemeral_required = true
 
 [repo."Generous-Corp/pulp".pr.windows]
@@ -85,7 +93,7 @@ ephemeral = true
 [targets."macpro.linux-x64-trusted-vm"]
 runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro", "pulp-auto-linux-x64"]
 runner_group = "pulp-trusted-build"
-runner_name_prefix = "pulp-auto-ephemeral-"
+runner_name_prefix = "pulp-ci-ephemeral-"
 ephemeral = true
 
 [targets."macstudio.windows-arm64-qemu"]
