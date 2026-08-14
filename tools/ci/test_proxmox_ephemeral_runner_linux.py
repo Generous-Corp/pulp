@@ -570,6 +570,13 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.script,
         )
         self.assertIn('NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"', self.script)
+        self.assertIn("NETWORK_BRIDGE=vmbr0", self.script)
+        self.assertIn("LEGACY_GUEST_IPV4_PREFIX=192.168.86", self.script)
+        self.assertIn("LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1", self.script)
+        self.assertLess(
+            self.script.index('if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then\n    NETWORK_BRIDGE='),
+            self.script.index('NETWORK_BRIDGE=vmbr0'),
+        )
         self.assertIn(
             'automatic runner requires dedicated isolated bridge ${NETWORK_BRIDGE}',
             self.script,

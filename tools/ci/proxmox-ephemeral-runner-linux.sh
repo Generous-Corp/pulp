@@ -27,6 +27,9 @@ CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/1
 CLONE_MAX=202
 GUEST_IPV4_PREFIX=10.240
 ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
+LEGACY_GUEST_IPV4_PREFIX=192.168.86
+LEGACY_GUEST_IPV4_FIRST_OCTET=251
+LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
@@ -320,9 +323,15 @@ done
 # pool was exhausted on 2026-08-02. Keep both network identities deterministic:
 # VMIDs 200..202 map to 192.168.86.251..253 and locally administered MACs.
 SLOT_INDEX=$((VMID - CLONE_BASE))
-NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
-GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
-GUEST_IPV4_GATEWAY="${GUEST_IPV4_PREFIX}.${VMID}.1"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
+    GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
+    GUEST_IPV4_GATEWAY="${GUEST_IPV4_PREFIX}.${VMID}.1"
+else
+    NETWORK_BRIDGE=vmbr0
+    GUEST_IP="${LEGACY_GUEST_IPV4_PREFIX}.$((LEGACY_GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
+    GUEST_IPV4_GATEWAY="$LEGACY_GUEST_IPV4_GATEWAY"
+fi
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     [ -d "/sys/class/net/${NETWORK_BRIDGE}/bridge" ] \
@@ -529,7 +538,7 @@ CLONED=1
 # The id is now committed to disk (200.conf exists), so no other slot can pick
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
-NET0="virtio=${GUEST_MAC},bridge=${NETWORK_BRIDGE:-vmbr0}"
+NET0="virtio=${GUEST_MAC},bridge=${NETWORK_BRIDGE}"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     CONTROLLER_IPV4="$(ip -4 route get "$GUEST_IP" 2>/dev/null \
         | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
