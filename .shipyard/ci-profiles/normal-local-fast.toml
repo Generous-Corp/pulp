@@ -13,7 +13,7 @@
 # Shipyard/agents can explain or apply the same policy from the Pulp checkout.
 
 name = "normal-local-fast"
-description = "Local-first disposable PR and merge-group validation with hosted fallback."
+description = "Local-first disposable merge-group validation with hosted fallback; PR Linux remains hosted."
 
 [repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
@@ -21,17 +21,8 @@ targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.linux]
-strategy = "leased-ordered-fallback"
-targets = ["macpro.linux-x64-pr-safe-vm", "github.linux-x64"]
-github_variable = "PULP_PR_SAFE_LINUX_RUNS_ON_JSON"
-health_lease_variable = "PULP_PR_SAFE_LINUX_LEASE_UNTIL"
-enable_variable = "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED"
-health_lease_ttl_seconds = 300
-health_lease_events = ["pull_request"]
-health_lease_runner_name_prefix = "pulp-pr-safe-ephemeral-"
-health_lease_merge_queue_branch = "main"
-health_lease_admission_burst = 2
-ephemeral_required = true
+strategy = "github-only"
+targets = ["github.linux-x64"]
 
 [repo."Generous-Corp/pulp".merge_group.linux]
 strategy = "leased-ordered-fallback"

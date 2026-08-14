@@ -565,6 +565,25 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn(
             'automatic Linux runners require the Proxmox firewall', self.script
         )
+        self.assertIn(
+            'ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"',
+            self.script,
+        )
+        self.assertIn('NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"', self.script)
+        self.assertIn(
+            'automatic runner requires dedicated isolated bridge ${NETWORK_BRIDGE}',
+            self.script,
+        )
+        self.assertIn(
+            'isolated bridge ${NETWORK_BRIDGE} already has an attached port',
+            self.script,
+        )
+        self.assertIn(
+            'isolated bridge ${NETWORK_BRIDGE} must own only ${GUEST_IPV4_GATEWAY}/30',
+            self.script,
+        )
+        self.assertIn('[ "$isolated_attachment" = 1 ]', self.script)
+        self.assertIn('"fwpr${VMID}p0"', self.script)
         self.assertIn('NET0="${NET0},firewall=1"', self.script)
         self.assertIn("ipfilter: 1", self.script)
         self.assertIn("layer2_protocols: ARP,IPv4", self.script)

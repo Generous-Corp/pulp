@@ -654,8 +654,9 @@ and validates the disjoint selector and lease for that event. Prove that
 a PR changing its own workflow cannot target the group before enabling
 automatic PR routing. Never share the trusted and PR-safe capability labels,
 runner names, health leases, or runner groups.
-Automatic clones require an enabled Proxmox firewall, exact IPv4/ARP source
-filtering, an EtherType allowlist limited to ARP and IPv4, default-deny ingress,
+Automatic clones require a dedicated no-uplink `/30` bridge per VM slot, an
+enabled Proxmox firewall, exact IPv4/ARP source filtering, an EtherType
+allowlist limited to ARP and IPv4, default-deny ingress,
 and one ingress exception for SSH from the exact Proxmox controller address.
 The active-rule proof must verify both IPv4 and IPv6 ingress drops as well as
 that narrow SSH exception. Policy write, compile, active-state, label, prefix,
@@ -675,6 +676,9 @@ GitHub cannot retarget a queued job. Shipyard must renew each lane's short lease
 only when the complete declared admission burst is online and idle. Never route
 `pull_request_target`, signing, release, deployment, or other secret-bearing work
 to either automatic Linux pool.
+PR Linux remains GitHub-hosted even with a live snapshot lease: without an
+atomic per-job capacity reservation, concurrent updates can over-admit a finite
+pool after `runs-on` is irreversible.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.

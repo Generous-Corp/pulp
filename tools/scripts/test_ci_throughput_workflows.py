@@ -98,14 +98,13 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             named_step(linux_job, "Build all examples")["run"],
         )
 
-    def test_shipyard_pr_linux_profile_uses_independent_pr_safe_lease(self) -> None:
+    def test_shipyard_pr_linux_profile_stays_hosted_without_atomic_admission(self) -> None:
         profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
         table = toml_table(profile, 'repo."Generous-Corp/pulp".pr.linux')
-        self.assertIn('strategy = "leased-ordered-fallback"', table)
-        self.assertIn('"macpro.linux-x64-pr-safe-vm", "github.linux-x64"', table)
-        self.assertIn('health_lease_events = ["pull_request"]', table)
-        self.assertIn('health_lease_runner_name_prefix = "pulp-pr-safe-ephemeral-"', table)
-        self.assertEqual(toml_json_value(table, "health_lease_admission_burst"), 2)
+        self.assertIn('strategy = "github-only"', table)
+        self.assertIn('targets = ["github.linux-x64"]', table)
+        self.assertNotIn("health_lease_", table)
+        self.assertNotIn("enable_variable", table)
 
     def test_shipyard_merge_group_linux_profile_is_local_first_with_hosted_fallback(self) -> None:
         profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()

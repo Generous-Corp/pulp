@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select the main-owned PR-safe Linux workflow while its lease is valid."""
+"""Keep PR Linux hosted until admission uses an atomic per-job reservation."""
 
 from __future__ import annotations
 
@@ -67,8 +67,10 @@ def resolve(
     elif not _lease_is_live(lease_until.strip(), now):
         reason = "lease-missing-or-expired"
     else:
-        reason = "pr-safe-local"
-        use_reusable = True
+        # A shared expiry only describes a fleet snapshot. It cannot reserve
+        # one of the finite runners for this particular job, so concurrent PR
+        # updates can over-admit after runs-on has become irreversible.
+        reason = "atomic-admission-unavailable"
     return {
         "use_reusable": use_reusable,
         "reason": reason,

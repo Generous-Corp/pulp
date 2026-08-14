@@ -149,15 +149,10 @@ def test_profile_covers_full_merge_queue_admission_burst() -> None:
     )
     repo_profile = profile["repo"]["Generous-Corp/pulp"]
     pr_lane = repo_profile["pr"]["linux"]
-    assert pr_lane["strategy"] == "leased-ordered-fallback"
-    assert pr_lane["targets"] == [
-        "macpro.linux-x64-pr-safe-vm",
-        "github.linux-x64",
-    ]
-    assert pr_lane["health_lease_events"] == ["pull_request"]
-    assert pr_lane["health_lease_runner_name_prefix"] == "pulp-pr-safe-ephemeral-"
-    assert pr_lane["health_lease_admission_burst"] == 2
-    assert pr_lane["enable_variable"] == "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED"
+    assert pr_lane == {
+        "strategy": "github-only",
+        "targets": ["github.linux-x64"],
+    }
     lane = repo_profile["merge_group"]["linux"]
     assert lane["health_lease_merge_queue_branch"] == "main"
     assert lane["health_lease_admission_burst"] == 5

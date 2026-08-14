@@ -179,11 +179,12 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
 host. Protected merge-group jobs use `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the
-`pulp-auto-linux-x64` capability. Same-repository pull requests may use
-`PULP_PR_SAFE_LINUX_RUNS_ON_JSON` and `pulp-pr-safe-linux-x64`, but only through
-the protected `pr-safe-linux.yml@main` reusable workflow, while its independent
-short health lease and enable variable are live. Forks, privileged events,
-missing capacity, invalid selectors, and expired leases use `ubuntu-latest`.
+`pulp-auto-linux-x64` capability. Pull-request Linux remains on
+`ubuntu-latest`: a shared health-lease timestamp is not an atomic per-job
+reservation, so it cannot safely admit a finite two-runner PR pool. The
+main-owned `pr-safe-linux.yml` path remains dormant scaffolding until Shipyard
+can reserve capacity for each job. Forks, privileged events, missing capacity,
+invalid selectors, and expired leases also use `ubuntu-latest`.
 The pool is native x86_64,
 which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
@@ -251,15 +252,22 @@ organization scope, and receives exactly one of `pulp-auto-linux-x64` or
 default group, or unavailable API keeps the slot offline. The generic legacy
 unit remains repository-scoped and cannot carry either automatic capability.
 
-Both automatic pools also require Proxmox VM-firewall isolation. The protected
+The automatic pool also requires Proxmox VM-firewall isolation. The protected
 workflow controls orchestration, but the checked-out pull-request source and its
 build system remain untrusted. Before an organization-scoped clone starts, the
-supervisor requires `pve-firewall status` to report `enabled/running`, enables
-the firewall on that clone's NIC, installs an exact-address IP/ARP source filter,
+supervisor requires one dedicated no-uplink bridge per slot (`vmbr-ci200` through
+`vmbr-ci202`), with only the slot's `/30` controller address and no attached
+port before clone start. The host routes and NATs public IPv4 from those
+point-to-point networks; they never join `vmbr0` or another LAN/VLAN bridge.
+The supervisor verifies that topology before and after start, requires
+`pve-firewall status` to report `enabled/running`, enables the firewall on that
+clone's NIC, installs an exact-address IP/ARP source filter,
 and installs per-VM ingress and egress policy. Inbound traffic is denied except
 for SSH from the exact Proxmox controller address, so untrusted jobs cannot
 observe LAN broadcast or multicast discovery traffic or expose guest services
-to the LAN. The generated policy must write, compile, enable on the clone NIC,
+to the LAN. ARP is confined to the clone and its Proxmox-side gateway because
+the dedicated bridge has no other peer. The generated policy must write,
+compile, enable on the clone NIC,
 and appear in the active IP, ARP, ingress, and egress rules before the guest can
 register. DNS to the LAN gateway is allowed;
 all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
@@ -277,11 +285,9 @@ runner health.
 
 ### Lease admission contracts
 
-The checked-in `normal-local-fast` profile defines two independent Shipyard
-0.87.3-or-newer producer contracts. The PR-safe lane uses
-`PULP_PR_SAFE_LINUX_LEASE_UNTIL`, the exact `pull_request` event class, the
-`pulp-pr-safe-ephemeral-` runner-name prefix, `main`, and an admission burst of
-two. The trusted lane uses `PULP_LOCAL_LINUX_LEASE_UNTIL`, the exact
+The checked-in `normal-local-fast` profile keeps PR Linux GitHub-only and
+defines one Shipyard 0.87.3-or-newer producer contract. The trusted lane uses
+`PULP_LOCAL_LINUX_LEASE_UNTIL`, the exact
 `merge_group` event class, the `pulp-ci-ephemeral-` prefix, `main`, and a burst
 of five matching the live merge queue's `max_entries_to_build`. Both use a
 300-second TTL.
@@ -291,8 +297,8 @@ capacity and reservations, and renews only when unreserved idle capacity covers
 the full declared burst. An absent, malformed, expired, or implausibly distant
 lease restores exactly `ubuntu-latest` before matrix creation. The current
 two-slot fleet cannot arm the trusted lane for the five-entry merge queue, so merge-group Linux
-deliberately remains hosted. Same-repository PRs may use the two-slot PR-safe
-lane only through the main-owned reusable workflow; fork PRs remain hosted.
+deliberately remains hosted. Same-repository and fork PRs remain hosted until
+an atomic reservation mechanism can bind each admitted job to capacity.
 `Vellum freeze` and `Enforce version & skill sync` remain hosted because their
 direct `runs-on` expressions cannot safely validate lease expiry.
 The PR-safe workflow validates the pinned head, base, and event merge SHAs, then

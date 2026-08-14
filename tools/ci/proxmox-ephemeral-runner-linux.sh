@@ -25,9 +25,8 @@ set -uo pipefail
 GOLDEN=9005
 CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/102
 CLONE_MAX=202
-GUEST_IPV4_PREFIX=192.168.86
-GUEST_IPV4_FIRST_OCTET=251
-GUEST_IPV4_GATEWAY=192.168.86.1
+GUEST_IPV4_PREFIX=10.240
+ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
@@ -321,8 +320,21 @@ done
 # pool was exhausted on 2026-08-02. Keep both network identities deterministic:
 # VMIDs 200..202 map to 192.168.86.251..253 and locally administered MACs.
 SLOT_INDEX=$((VMID - CLONE_BASE))
-GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
+NETWORK_BRIDGE="${ISOLATED_BRIDGE_PREFIX}${VMID}"
+GUEST_IP="${GUEST_IPV4_PREFIX}.${VMID}.2"
+GUEST_IPV4_GATEWAY="${GUEST_IPV4_PREFIX}.${VMID}.1"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    [ -d "/sys/class/net/${NETWORK_BRIDGE}/bridge" ] \
+        || die "automatic runner requires dedicated isolated bridge ${NETWORK_BRIDGE}"
+    bridge_ports=("/sys/class/net/${NETWORK_BRIDGE}/brif/"*)
+    [ ! -e "${bridge_ports[0]}" ] \
+        || die "isolated bridge ${NETWORK_BRIDGE} already has an attached port"
+    bridge_ipv4="$(ip -o -4 addr show dev "$NETWORK_BRIDGE" scope global \
+        | awk '{ print $4 }')"
+    [ "$bridge_ipv4" = "${GUEST_IPV4_GATEWAY}/30" ] \
+        || die "isolated bridge ${NETWORK_BRIDGE} must own only ${GUEST_IPV4_GATEWAY}/30"
+fi
 # The slot identity is stable for operations and metrics.  The GitHub
 # registration name is intentionally unique per boot; the decisions contract
 # forbids static registration names because an interrupted runner can leave a
@@ -517,7 +529,7 @@ CLONED=1
 # The id is now committed to disk (200.conf exists), so no other slot can pick
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
-NET0="virtio=${GUEST_MAC},bridge=vmbr0"
+NET0="virtio=${GUEST_MAC},bridge=${NETWORK_BRIDGE:-vmbr0}"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
     CONTROLLER_IPV4="$(ip -4 route get "$GUEST_IP" 2>/dev/null \
         | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
@@ -616,6 +628,12 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         vm6_in_rules="$(grep -F -- "-A tap${VMID}i0-IN " <<< "$ip6tables_rules" || true)"
         vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
         vm_l2_rules="$(grep -F -- "-A tap${VMID}i0-OUT-PROTO " <<< "$ebtables_rules" || true)"
+        bridge_ports=("/sys/class/net/${NETWORK_BRIDGE}/brif/"*)
+        isolated_attachment=0
+        if [ "${#bridge_ports[@]}" = 1 ] \
+            && [ "${bridge_ports[0]##*/}" = "fwpr${VMID}p0" ]; then
+            isolated_attachment=1
+        fi
         all_ipv4_drops=1
         for subnet in "${blocked_ipv4[@]}"; do
             grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
@@ -631,6 +649,7 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         fi
         if [ "$all_ipv4_drops" = 1 ] \
             && [ "$ipv6_drop_installed" = 1 ] \
+            && [ "$isolated_attachment" = 1 ] \
             && grep -F -- "-s ${CONTROLLER_IPV4}/32" <<< "$vm_in_rules" \
                 | grep -F -- "-p tcp" \
                 | grep -F -- "--dport 22" \

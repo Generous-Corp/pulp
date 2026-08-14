@@ -35,8 +35,13 @@ def _resolve(**overrides):
     return route.resolve(**values)
 
 
-def test_same_repository_pr_with_live_lease_uses_local() -> None:
-    assert _resolve()["use_reusable"] is True
+def test_same_repository_pr_with_live_lease_stays_hosted_without_atomic_admission() -> None:
+    result = _resolve()
+    assert result == {
+        "use_reusable": False,
+        "reason": "atomic-admission-unavailable",
+        "selector_json": "",
+    }
 
 
 def test_fork_never_uses_local() -> None:
