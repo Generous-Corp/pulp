@@ -72,8 +72,8 @@ def test_reusable_workflow_is_read_only_and_validates_both_protected_routes() ->
     assert "secrets: inherit" not in text
     assert "github.event.pull_request.head.repo.full_name" in text
     assert "github.event.pull_request.head.sha" in text
-    assert '"merge SHA": os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")' in text
-    assert "ref: ${{ inputs.merge_sha }}" in text
+    assert 'if os.environ.get("MERGE_SHA"):' in text
+    assert 'checks["merge SHA"] = os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")' in text
     assert "pulp-pr-safe-linux-x64" in text
     assert "pulp-auto-linux-x64" in text
     assert 'route_kind == "pr-safe"' in text
@@ -85,6 +85,8 @@ def test_reusable_workflow_is_read_only_and_validates_both_protected_routes() ->
     assert "inputs.runner_selector_json || '\"ubuntu-latest\"'" in text
     assert "PR-safe admission denied; using hosted Linux" in text
     assert "except (ValueError, OverflowError):" in text
+    assert "default: pr-safe" in text
+    assert "ref: ${{ inputs.merge_sha || inputs.source_sha }}" in text
     assert "AudioInspectorPanel renders a non-empty headless snapshot" in text
     assert "Subtree cache composites a GPU image on the replay frame" in text
 

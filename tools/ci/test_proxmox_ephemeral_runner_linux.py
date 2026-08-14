@@ -6,6 +6,7 @@ from __future__ import annotations
 import pathlib
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -200,6 +201,35 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             helper.index('qm destroy "$vmid" --purge'),
         )
 
+    def test_deferred_cleanup_rejects_insecure_credential_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            token = pathlib.Path(raw_tmp) / "org-token"
+            token.write_text("test-token", encoding="utf-8")
+            token.chmod(0o644)
+            env = os.environ.copy()
+            env["PULP_LINUX_ORG_PAT_FILE"] = str(token)
+            result = subprocess.run(
+                [
+                    "/bin/bash",
+                    str(SCRIPT),
+                    "--deferred-cleanup",
+                    "200",
+                    "pulp-pr-safe-ephemeral-200-test",
+                    "orgs/Generous-Corp",
+                    str(token),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("root-owned mode-0600 regular file", result.stdout)
+
+    @unittest.skipUnless(
+        os.geteuid() == 0 and sys.platform.startswith("linux"),
+        "requires Linux root ownership for the production credential contract",
+    )
     def test_deferred_cleanup_waits_for_busy_runner_then_destroys_clone(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = pathlib.Path(raw_tmp)
@@ -272,8 +302,17 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.script.index("# ── admission"),
         )
         self.assertIn("gh-org-runner-pat", self.script)
+        self.assertIn("credential_file_secure", self.script)
+        self.assertIn("stat -c '%u:%a'", self.script)
+        self.assertIn('[ ! -L "$path" ]', self.script)
+        self.assertIn('[ "$metadata" = "0:600" ]', self.script)
         self.assertIn(
-            'automatic Linux runner organization PAT is missing', self.script
+            'automatic Linux runner organization PAT must be a root-owned mode-0600 regular file',
+            self.script,
+        )
+        self.assertIn(
+            'deferred-cleanup credential must be a root-owned mode-0600 regular file',
+            self.script,
         )
         self.assertNotIn('Authorization: Bearer $PAT', self.script)
         self.assertIn(

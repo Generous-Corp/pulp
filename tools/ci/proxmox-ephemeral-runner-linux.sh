@@ -51,6 +51,13 @@ KEEP=0
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
+credential_file_secure() {
+    local path="$1" metadata
+    [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+    metadata="$(stat -c '%u:%a' -- "$path" 2>/dev/null)" || return 1
+    [ "$metadata" = "0:600" ]
+}
+
 deferred_cleanup() {
     local vmid="$1" runner_name="$2" registration_api="$3" credential_file="$4"
     local token deadline runners_tsv runner_lookup rid _ busy status labels
@@ -64,7 +71,8 @@ deferred_cleanup() {
         "$PAT_FILE"|"$ORG_PAT_FILE") ;;
         *) die "invalid deferred-cleanup credential path" ;;
     esac
-    [ -r "$credential_file" ] || die "deferred-cleanup credential is unavailable"
+    credential_file_secure "$credential_file" \
+        || die "deferred-cleanup credential must be a root-owned mode-0600 regular file"
     command -v "$GH_CLI" >/dev/null 2>&1 || die "$GH_CLI is not on PATH"
     token="$(cat "$credential_file")"
     deadline=$((SECONDS + 4500))
@@ -168,8 +176,8 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         || die "runner group 1 is the default group"
     [ -r "$GROUP_VERIFIER" ] \
         || die "runner-group verifier is missing at $GROUP_VERIFIER"
-    [ -r "$ORG_PAT_FILE" ] \
-        || die "automatic Linux runner organization PAT is missing"
+    credential_file_secure "$ORG_PAT_FILE" \
+        || die "automatic Linux runner organization PAT must be a root-owned mode-0600 regular file"
     PAT="$(cat "$ORG_PAT_FILE")"
     ACTIVE_PAT_FILE="$ORG_PAT_FILE"
     GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
@@ -212,7 +220,8 @@ elif [[ ",$LABELS," == *,pulp-auto-linux-x64,* \
     || ",$LABELS," == *,pulp-pr-safe-linux-x64,* ]]; then
     die "automatic Linux capability labels require a verified organization runner group"
 else
-    [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
+    credential_file_secure "$PAT_FILE" \
+        || die "repository runner PAT must be a root-owned mode-0600 regular file"
     PAT="$(cat "$PAT_FILE")"
 fi
 

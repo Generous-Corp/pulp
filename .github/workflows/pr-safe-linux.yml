@@ -4,7 +4,9 @@ on:
   workflow_call:
     inputs:
       route_kind:
-        required: true
+        description: "Protected route class; defaults for callers on the staged legacy interface"
+        required: false
+        default: pr-safe
         type: string
       source_sha:
         required: false
@@ -13,7 +15,9 @@ on:
         required: false
         type: string
       merge_sha:
-        required: true
+        description: "Proposed merge SHA; legacy callers omit this and retain source_sha checkout"
+        required: false
+        default: ""
         type: string
       runner_selector_json:
         required: true
@@ -71,7 +75,13 @@ jobs:
                   value = json.loads(os.environ.get(name, ""))
               except json.JSONDecodeError:
                   return None
-              return value if value == expected else None
+              if not isinstance(value, list) or not all(
+                  isinstance(item, str) for item in value
+              ):
+                  return None
+              actual = [item.strip().lower() for item in value]
+              wanted = [item.lower() for item in expected]
+              return value if len(actual) == len(wanted) and set(actual) == set(wanted) else None
 
           def lease_is_live(name):
               try:
@@ -88,8 +98,9 @@ jobs:
           route_kind = os.environ.get("ROUTE_KIND")
           checks = {
               "repository": os.environ.get("REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
-              "merge SHA": os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA"),
           }
+          if os.environ.get("MERGE_SHA"):
+              checks["merge SHA"] = os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")
           if route_kind == "pr-safe":
               checks.update({
                   "event": os.environ.get("EVENT_NAME") == "pull_request",
@@ -153,8 +164,25 @@ jobs:
               "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
               "pulp-host-macpro", "pulp-pr-safe-linux-x64",
           ]
+
+          def matches_selector(value, wanted):
+              if not isinstance(value, list) or not all(
+                  isinstance(item, str) for item in value
+              ):
+                  return False
+              actual = [item.strip().lower() for item in value]
+              normalized_wanted = [item.lower() for item in wanted]
+              return (
+                  len(actual) == len(normalized_wanted)
+                  and set(actual) == set(normalized_wanted)
+              )
+
           route_kind = os.environ["ROUTE_KIND"]
-          checks = {"selector": json.loads(os.environ["SELECTOR_JSON"]) == expected}
+          try:
+              selected = json.loads(os.environ["SELECTOR_JSON"])
+          except json.JSONDecodeError:
+              selected = None
+          checks = {"selector": matches_selector(selected, expected)}
           if route_kind == "pr-safe":
               checks.update({
                   "event": os.environ["EVENT_NAME"] == "pull_request",
@@ -166,7 +194,7 @@ jobs:
               expected[-1] = "pulp-auto-linux-x64"
               checks = {
                   "event": os.environ["EVENT_NAME"] == "merge_group",
-                  "selector": json.loads(os.environ["SELECTOR_JSON"]) == expected,
+                  "selector": matches_selector(selected, expected),
               }
           else:
               checks["route kind"] = False
@@ -179,7 +207,7 @@ jobs:
         with:
           # Preserve the ordinary pull_request Linux gate's integration
           # semantics: build GitHub's proposed merge, not the raw PR head.
-          ref: ${{ inputs.merge_sha }}
+          ref: ${{ inputs.merge_sha || inputs.source_sha }}
           fetch-depth: 0
           lfs: false
           clean: true
