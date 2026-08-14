@@ -97,6 +97,9 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
     def test_apply_is_explicit_and_no_model_is_launched(self) -> None:
         workflow_dispatch = self.doc["on"]["workflow_dispatch"]
         self.assertEqual(workflow_dispatch["inputs"]["apply"]["default"], "false")
+        self.assertEqual(
+            workflow_dispatch["inputs"]["dispatch_recovery"]["default"], "false"
+        )
         self.assertIn("args+=(--apply)", self.text)
         lowered = self.text.lower()
         for launcher in ("codex exec", "claude -p", "openai api"):
@@ -121,6 +124,19 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("select(.title ==", self.text)
         self.assertIn("Preserve unhealthy controller result", self.text)
         self.assertIn('steps.reconcile.outputs.exit_code', self.text)
+
+    def test_recovery_dispatch_is_exact_head_deduplicated_and_bounded(self) -> None:
+        self.assertIn("shipyard_recovery_dispatch.py", self.text)
+        self.assertIn("recovery-statuses.json", self.text)
+        self.assertIn(".candidates[0] // empty", self.text)
+        self.assertIn("shipyard/recovery-dispatch", self.text)
+        self.assertIn("state=pending", self.text)
+        self.assertIn("dispatch_failed attempt=${attempt}", self.text)
+        self.assertIn("gh workflow run shipyard-recovery-worker.yml", self.text)
+        self.assertIn("-f expected_head=\"$head\"", self.text)
+        self.assertIn("-f assignment_epoch=\"$epoch\"", self.text)
+        self.assertIn("-f blocker_fingerprint=\"$fingerprint\"", self.text)
+        self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)
 
 
 if __name__ == "__main__":

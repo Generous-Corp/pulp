@@ -11,6 +11,11 @@ on:
         required: true
         default: false
         type: boolean
+      dispatch_recovery:
+        description: 'Dispatch at most one fenced recovery triage assignment'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -159,6 +164,88 @@ jobs:
             --body steward-outbox.md \
             --state steward-outbox.json
 
+      - name: Collect exact-head recovery status facts
+        id: recovery_statuses
+        if: always() && steps.pull_facts.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          pages = json.load(open("open-prs.json", encoding="utf-8"))
+          pulls = [pull for page in pages for pull in (page if isinstance(page, list) else [page])]
+          rows = []
+          for pull in pulls:
+              head = str((pull.get("head") or {}).get("sha") or "").lower()
+              if len(head) != 40:
+                  continue
+              result = subprocess.run(
+                  ["gh", "api", "--paginate", "--slurp", f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{head}/statuses?per_page=100"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              pages = json.loads(result.stdout)
+              rows.append({"head_sha": head, "statuses": [status for page in pages for status in page]})
+          with open("recovery-statuses.json", "w", encoding="utf-8") as handle:
+              json.dump(rows, handle)
+          PY
+
+      - name: Plan deduplicated recovery assignments
+        id: recovery_plan
+        if: always() && steps.recovery_statuses.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/shipyard_recovery_dispatch.py \
+            --report steward-report.json \
+            --statuses recovery-statuses.json \
+            --epoch "$GITHUB_RUN_ID" \
+            --output recovery-plan.json
+
+      - name: Dispatch one fenced recovery assignment
+        id: recovery_dispatch
+        if: inputs.apply && inputs.dispatch_recovery && steps.recovery_plan.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          candidate=$(jq -c '.candidates[0] // empty' recovery-plan.json)
+          [ -n "$candidate" ] || exit 0
+          pr=$(jq -r '.pr_number' <<<"$candidate")
+          head=$(jq -r '.expected_head' <<<"$candidate")
+          epoch=$(jq -r '.assignment_epoch' <<<"$candidate")
+          attempt=$(jq -r '.dispatch_attempt' <<<"$candidate")
+          fingerprint=$(jq -r '.fingerprint' <<<"$candidate")
+          target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
+            -f state=pending \
+            -f context='shipyard/recovery-dispatch' \
+            -f description="pending attempt=${attempt} epoch=${epoch} fingerprint=${fingerprint}" \
+            -f target_url="$target_url"
+          if gh workflow run shipyard-recovery-worker.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr_number="$pr" \
+            -f expected_head="$head" \
+            -f assignment_epoch="$epoch" \
+            -f blocker_fingerprint="$fingerprint" \
+            -f publish_status=true; then
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
+            -f state=error \
+            -f context='shipyard/recovery-dispatch' \
+            -f description="dispatch_failed attempt=${attempt} epoch=${epoch} fingerprint=${fingerprint}" \
+            -f target_url="$target_url"
+          exit 1
+
       - name: Preserve outbox renderer failure
         if: always() && steps.outbox.outcome != 'success'
         shell: bash
@@ -243,6 +330,8 @@ jobs:
             steward-outbox.md
             steward-outbox.json
             open-prs.json
+            recovery-statuses.json
+            recovery-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
           if-no-files-found: warn
@@ -257,4 +346,9 @@ jobs:
           [ "${{ steps.pull_facts.outcome }}" = success ]
           [ "${{ steps.outbox.outcome }}" = success ]
           [ "${{ steps.sync_outbox.outcome }}" = success ]
+          [ "${{ steps.recovery_statuses.outcome }}" = success ]
+          [ "${{ steps.recovery_plan.outcome }}" = success ]
+          if [ "${{ inputs.apply }}" = true ] && [ "${{ inputs.dispatch_recovery }}" = true ]; then
+            [ "${{ steps.recovery_dispatch.outcome }}" = success ]
+          fi
           [ "${{ steps.reconcile.outputs.exit_code }}" = 0 ]
