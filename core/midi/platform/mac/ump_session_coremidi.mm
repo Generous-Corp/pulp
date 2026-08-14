@@ -31,6 +31,7 @@
 
 #include "../../src/ump_session_backend.hpp"
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -80,20 +81,9 @@ public:
         }
     }
 
-    bool send(const UmpPacket& packet) override {
-        if (!info_.direction.can_send || !dest_ || !out_port_) return false;
-        if (packet.word_count < 1 || packet.word_count > 4) return false;
-        MIDIEventList list;
-        MIDIEventPacket* mep = MIDIEventListInit(&list, kMIDIProtocol_2_0);
-        mep = MIDIEventListAdd(&list, sizeof(list), mep, 0,
-                               static_cast<ByteCount>(packet.word_count),
-                               packet.words.data());
-        if (!mep) return false;
-        OSStatus st = MIDISendEventList(out_port_, dest_, &list);
-        return st == noErr;
-    }
+    bool send(const UmpPacket& packet) override;
 
-    bool is_open() const noexcept override { return open_; }
+    bool is_open() const noexcept override;
 
     std::shared_ptr<CallbackState> callback_state() const {
         return callback_state_;
@@ -108,7 +98,7 @@ public:
         src_ = src;
         out_port_ = out_port;
         dest_ = dest;
-        open_ = true;
+        open_.store(true, std::memory_order_release);
     }
 
 private:
@@ -117,7 +107,7 @@ private:
     MIDIEndpointRef src_ = 0;
     MIDIPortRef out_port_ = 0;
     MIDIEndpointRef dest_ = 0;
-    bool open_ = false;
+    mutable std::atomic<bool> open_{false};
     std::shared_ptr<CallbackState> callback_state_;
 };
 
@@ -138,7 +128,7 @@ std::string object_unique_id(MIDIObjectRef object) {
     return std::to_string(unique_id);
 }
 
-std::string topology_id(MIDIEndpointRef endpoint) {
+std::string entity_topology_id(MIDIEndpointRef endpoint) {
     MIDIEntityRef entity = 0;
     if (MIDIEndpointGetEntity(endpoint, &entity) == noErr && entity) {
         if (auto id = object_unique_id(entity); !id.empty()) return id;
@@ -147,9 +137,7 @@ std::string topology_id(MIDIEndpointRef endpoint) {
             if (auto id = object_unique_id(device); !id.empty()) return id;
         }
     }
-    // Virtual endpoints commonly have no entity. They remain independent
-    // one-direction groups, identified by their own unique ID.
-    return object_unique_id(endpoint);
+    return {};
 }
 
 UmpEndpointInfo info_for_endpoint(MIDIEndpointRef ep, bool is_source,
@@ -179,22 +167,18 @@ struct EndpointGroup {
 };
 
 std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
-    std::unordered_map<std::string, EndpointGroup> groups;
+    struct RawEndpoint {
+        CoreMidiUmpTopologyEndpoint topology;
+        MIDIEndpointRef ref = 0;
+    };
+    std::vector<RawEndpoint> raw;
     const auto add = [&](MIDIEndpointRef endpoint, bool is_source) {
-        const auto id = topology_id(endpoint);
-        if (id.empty()) return;
-        auto info = info_for_endpoint(endpoint, is_source, id);
-        auto [it, inserted] = groups.try_emplace(id);
-        auto& group = it->second;
-        if (inserted) group.info = std::move(info);
-        if (is_source) {
-            group.source = endpoint;
-            group.info.direction.can_receive = true;
-        } else {
-            group.destination = endpoint;
-            group.info.direction.can_send = true;
-        }
-        if (group.info.name.empty()) group.info.name = std::move(info.name);
+        const auto endpoint_id = object_unique_id(endpoint);
+        if (endpoint_id.empty()) return;
+        auto info = info_for_endpoint(endpoint, is_source, endpoint_id);
+        raw.push_back({{endpoint_id, entity_topology_id(endpoint),
+                        std::move(info.name), is_source},
+                       endpoint});
     };
 
     for (ItemCount i = 0; i < MIDIGetNumberOfSources(); ++i) {
@@ -203,7 +187,64 @@ std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
     for (ItemCount i = 0; i < MIDIGetNumberOfDestinations(); ++i) {
         add(MIDIGetDestination(i), false);
     }
+
+    std::vector<CoreMidiUmpTopologyEndpoint> topology;
+    topology.reserve(raw.size());
+    for (const auto& endpoint : raw) topology.push_back(endpoint.topology);
+
+    std::unordered_map<std::string, EndpointGroup> groups;
+    for (auto& info : group_coremidi_ump_topology(topology)) {
+        EndpointGroup group;
+        group.info = std::move(info);
+        if (group.info.id.rfind("entity:", 0) == 0) {
+            const auto entity_id = group.info.id.substr(7);
+            for (const auto& endpoint : raw) {
+                if (endpoint.topology.entity_id != entity_id) continue;
+                if (endpoint.topology.is_source) group.source = endpoint.ref;
+                else group.destination = endpoint.ref;
+            }
+        } else {
+            for (const auto& endpoint : raw) {
+                if (endpoint.topology.endpoint_id != group.info.id) continue;
+                if (endpoint.topology.is_source) group.source = endpoint.ref;
+                else group.destination = endpoint.ref;
+                break;
+            }
+        }
+        groups.emplace(group.info.id, std::move(group));
+    }
     return groups;
+}
+
+bool CoreMidiUmpEndpoint::is_open() const noexcept {
+    if (!open_.load(std::memory_order_acquire)) return false;
+    const auto groups = endpoint_groups();
+    const auto it = groups.find(info_.id);
+    if (it == groups.end() ||
+        (src_ && it->second.source != src_) ||
+        (dest_ && it->second.destination != dest_) ||
+        (info_.direction.can_receive && !it->second.source) ||
+        (info_.direction.can_send && !it->second.destination)) {
+        open_.store(false, std::memory_order_release);
+        return false;
+    }
+    return true;
+}
+
+bool CoreMidiUmpEndpoint::send(const UmpPacket& packet) {
+    if (!info_.direction.can_send || !dest_ || !out_port_ || !is_open()) {
+        return false;
+    }
+    if (packet.word_count < 1 || packet.word_count > 4) return false;
+    MIDIEventList list;
+    MIDIEventPacket* mep = MIDIEventListInit(&list, kMIDIProtocol_2_0);
+    mep = MIDIEventListAdd(&list, sizeof(list), mep, 0,
+                           static_cast<ByteCount>(packet.word_count),
+                           packet.words.data());
+    if (!mep) return false;
+    const OSStatus status = MIDISendEventList(out_port_, dest_, &list);
+    if (status != noErr) open_.store(false, std::memory_order_release);
+    return status == noErr;
 }
 
 double host_ticks_to_seconds(MIDITimeStamp ticks) {
@@ -276,8 +317,11 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
     std::lock_guard<std::mutex> state_lock(state->mu);
     auto existing = state->endpoints.find(id);
     if (existing != state->endpoints.end()) {
-        if (status) *status = UmpOpenStatus::Ok;
-        return existing->second.get();
+        if (existing->second->is_open()) {
+            if (status) *status = UmpOpenStatus::Ok;
+            return existing->second.get();
+        }
+        state->endpoints.erase(existing);
     }
 
     auto groups = endpoint_groups();
@@ -306,22 +350,16 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
         OSStatus st = MIDIInputPortCreateWithProtocol(
             state->client, CFSTR("Pulp UMP In"), kMIDIProtocol_2_0, &in_port,
             ^(const MIDIEventList* evtlist, void* /*src_conn*/) {
-                static constexpr uint8_t kWordsByType[16] = {
-                    1, 1, 1, 2, 2, 4, 4, 1,
-                    2, 2, 2, 3, 3, 4, 4, 4
-                };
                 const MIDIEventPacket* packet = &evtlist->packet[0];
                 for (UInt32 i = 0; i < evtlist->numPackets; ++i) {
-                    UInt32 idx = 0;
-                    while (idx < packet->wordCount) {
-                        uint32_t w0 = packet->words[idx];
-                        uint8_t type = (w0 >> 28) & 0x0F;
-                        uint8_t words = kWordsByType[type];
-                        if (idx + words > packet->wordCount) break;
+                    walk_ump_packet(
+                        packet->words, packet->wordCount,
+                        [&](uint8_t, const uint32_t* words,
+                            uint32_t word_count) {
                         UmpPacket p;
-                        p.word_count = static_cast<int>(words);
-                        for (uint8_t k = 0; k < words; ++k) {
-                            p.words[k] = packet->words[idx + k];
+                        p.word_count = static_cast<int>(word_count);
+                        for (uint32_t k = 0; k < word_count; ++k) {
+                            p.words[k] = words[k];
                         }
                         UmpReceiveCallback callback;
                         {
@@ -333,8 +371,7 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
                         if (callback) {
                             callback(p, host_ticks_to_seconds(packet->timeStamp));
                         }
-                        idx += words;
-                    }
+                    });
                     packet = MIDIEventPacketNext(packet);
                 }
             });

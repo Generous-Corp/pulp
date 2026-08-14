@@ -980,8 +980,11 @@ both the Simulator and device SDKs. On the Simulator it creates uniquely named
 virtual CoreMIDI endpoints through the shared client, enumerates via production
 `create_midi_system()`, verifies id/name/direction, requires an active
 production `UmpSession`, opens its CoreMIDI endpoints, proves event-list input
-and output, disposes the endpoints, and requires disappearance. A source-syntax
-check or in-process
+and output, exercises canonical UMP packet walking, disposes the endpoints while
+their production handles are open, and requires stale-handle failure plus
+disappearance. Its topology contract pairs only unambiguous one-source / one-
+destination entities and preserves every endpoint in a multi-endpoint entity.
+A source-syntax check or in-process
 `VirtualUmpEndpoint` does not replace this proof.
 
 ## See Also

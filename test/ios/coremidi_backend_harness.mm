@@ -7,6 +7,7 @@
 #include <pulp/midi/ump_session.hpp>
 
 #include "../../core/midi/platform/mac/coremidi_shared_client.h"
+#include "../../core/midi/src/ump_session_backend.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -81,6 +82,44 @@ MIDIEventList one_word_event_list(uint32_t word) {
     return list;
 }
 
+MIDIEventList two_word_event_list(uint32_t first, uint32_t second) {
+    MIDIEventList list;
+    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_2_0);
+    const uint32_t words[] = {first, second};
+    MIDIEventListAdd(&list, sizeof(list), packet, mach_absolute_time(), 2,
+                     words);
+    return list;
+}
+
+bool topology_contract_passes() {
+    using Endpoint = pulp::midi::CoreMidiUmpTopologyEndpoint;
+    const std::vector<Endpoint> census = {
+        {"101", "multi", "Multi Source A", true},
+        {"102", "multi", "Multi Source B", true},
+        {"201", "multi", "Multi Destination A", false},
+        {"202", "multi", "Multi Destination B", false},
+        {"301", "pair", "Paired Device", true},
+        {"302", "pair", "Paired Device", false},
+    };
+    const auto grouped = pulp::midi::group_coremidi_ump_topology(census);
+    if (grouped.size() != 5) return false;
+    bool paired = false;
+    std::size_t multi_count = 0;
+    for (const auto& endpoint : grouped) {
+        if (endpoint.id == "entity:pair") {
+            paired = endpoint.direction.can_receive &&
+                     endpoint.direction.can_send;
+        } else if (endpoint.id == "101" || endpoint.id == "102") {
+            multi_count += endpoint.direction.can_receive &&
+                           !endpoint.direction.can_send;
+        } else if (endpoint.id == "201" || endpoint.id == "202") {
+            multi_count += !endpoint.direction.can_receive &&
+                           endpoint.direction.can_send;
+        }
+    }
+    return paired && multi_count == 4;
+}
+
 int fail(NSString* reason, MIDIEndpointRef source, MIDIEndpointRef destination) {
     if (source) MIDIEndpointDispose(source);
     if (destination) MIDIEndpointDispose(destination);
@@ -90,6 +129,9 @@ int fail(NSString* reason, MIDIEndpointRef source, MIDIEndpointRef destination) 
 }
 
 int run_harness() {
+    if (!topology_contract_passes()) {
+        return fail(@"production UMP topology census/pairing failed", 0, 0);
+    }
     const MIDIClientRef client = pulp::midi::mac::shared_client();
     if (!client) return fail(@"production shared client unavailable", 0, 0);
     if (pulp::midi::mac::shared_client() != client) {
@@ -208,8 +250,11 @@ int run_harness() {
                         destination);
         }
 
+        // MT 0x6 is a complete one-word message. Following it with a valid
+        // MT 0x2 message detects any private/incorrect size table that skips
+        // the second packet instead of using the canonical UMP walker.
         constexpr uint32_t kSourceWord = 0x20903c7f;
-        auto source_events = one_word_event_list(kSourceWord);
+        auto source_events = two_word_event_list(0x60000000, kSourceWord);
         status = MIDIReceivedEventList(source, &source_events);
         if (status != noErr || !wait_until([&] {
                 return received_word->load(std::memory_order_acquire) ==
@@ -230,12 +275,60 @@ int run_harness() {
             return fail(@"production UMP output event-list delivery failed",
                         source, destination);
         }
-    }
 
-    MIDIEndpointDispose(source);
-    source = 0;
-    MIDIEndpointDispose(destination);
-    destination = 0;
+        // Callback replacement is control-thread synchronized, not an RT API.
+        // Stress concurrent replacement against real CoreMIDI delivery so a
+        // future unsynchronized std::function handoff is detected.
+        received_word->store(0, std::memory_order_release);
+        std::atomic<bool> keep_replacing{true};
+        std::thread replacer([&] {
+            for (int replacement = 0;
+                 replacement < 10000 &&
+                 keep_replacing.load(std::memory_order_acquire);
+                 ++replacement) {
+                input->set_receive_callback(
+                    [received_word](const pulp::midi::UmpPacket& p, double) {
+                        if (p.word_count > 0) {
+                            received_word->store(p.words[0],
+                                                 std::memory_order_release);
+                        }
+                    });
+            }
+        });
+        for (uint32_t i = 1; i <= 64; ++i) {
+            auto event = one_word_event_list(0x20000000 | i);
+            if (MIDIReceivedEventList(source, &event) != noErr) {
+                keep_replacing.store(false, std::memory_order_release);
+                replacer.join();
+                return fail(@"UMP callback replacement stress send failed",
+                            source, destination);
+            }
+        }
+        keep_replacing.store(false, std::memory_order_release);
+        replacer.join();
+        if (!wait_until([&] {
+                return received_word->load(std::memory_order_acquire) != 0;
+            })) {
+            return fail(@"UMP callback replacement stress lost all delivery",
+                        source, destination);
+        }
+
+        MIDIEndpointDispose(source);
+        source = 0;
+        MIDIEndpointDispose(destination);
+        destination = 0;
+        if (!wait_until([&] {
+                return !input->is_open() && !output->is_open();
+            }) || output->send(packet)) {
+            return fail(@"cached UMP endpoint survived hot-unplug", 0, 0);
+        }
+        open_status = pulp::midi::UmpOpenStatus::Ok;
+        if (session.open_endpoint(ump_source_id, &open_status) != nullptr ||
+            open_status != pulp::midi::UmpOpenStatus::NotFound) {
+            return fail(@"cached UMP open reported success after hot-unplug",
+                        0, 0);
+        }
+    }
 
     bool disappeared = wait_until([&] {
         const auto inputs = system->enumerate_inputs();

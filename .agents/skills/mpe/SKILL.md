@@ -344,6 +344,10 @@ exactly what the test target exercises everywhere).
 Lifetime invariant: the Apple input-port block captures shared callback state,
 not the endpoint's raw pointer. Endpoint teardown deactivates that state before
 disposing the port, so a late callback cannot dereference a destroyed object.
+`set_receive_callback()` is a control-thread API. The CoreMIDI delivery path
+synchronizes and snapshots its `std::function`; it is thread-safe, but neither
+lock-free nor guaranteed allocation-free. A callback that feeds audio work must
+immediately publish the packet into its own bounded lock-free queue.
 
 ## Implementation note: where MpeVoiceTracker bodies live
 
