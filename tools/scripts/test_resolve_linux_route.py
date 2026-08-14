@@ -15,6 +15,8 @@ SCRIPT = Path(__file__).parent / "resolve_linux_route.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 PR_SAFE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-safe-linux.yml"
+VELLUM_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
+VERSION_SKILL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
     '"pulp-host-macpro","pulp-auto-linux-x64"]'
@@ -269,6 +271,19 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
         "TRUSTED_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
         not in trusted_dispatcher
     )
+
+
+def test_protected_automatic_workflows_use_restricted_linux_selector() -> None:
+    for workflow in (VELLUM_WORKFLOW, VERSION_SKILL_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        assert "runs-on: >-" in text, workflow
+        expression = text.split("runs-on: >-", 1)[1].split("\n    steps:", 1)[0]
+        assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" in expression, workflow
+        assert "github.event_name == 'workflow_dispatch'" in expression, workflow
+        assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in expression, workflow
+        assert expression.index("github.event_name == 'workflow_dispatch'") < expression.index(
+            "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
+        ), workflow
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
