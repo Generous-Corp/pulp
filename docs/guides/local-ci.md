@@ -191,7 +191,9 @@ relocating it, silently deleting the only x64 Linux coverage.
 
 The external boundary is live: organization runner group `pulp-trusted-build`
 contains only `Generous-Corp/pulp` and permits only protected default-branch
-workflow refs for the trusted local jobs. The event-name and fork checks in the
+workflow refs for the trusted local jobs, including the reusable
+`pr-safe-linux.yml` workflow where its dispatched job is directly defined. The
+event-name and fork checks in the
 workflows are defense in depth, not the security boundary. Secret-bearing jobs
 and every `pull_request_target` workflow remain hosted or on their dedicated
 trusted path; they never use the generic Mac Pro labels.

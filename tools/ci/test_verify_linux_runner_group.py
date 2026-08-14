@@ -17,6 +17,7 @@ SPEC.loader.exec_module(MODULE)
 REPO = "Generous-Corp/pulp"
 EXPECTED = [
     f"{REPO}/.github/workflows/build.yml@refs/heads/main",
+    f"{REPO}/.github/workflows/pr-safe-linux.yml@refs/heads/main",
     f"{REPO}/.github/workflows/vellum-freeze-check.yml@refs/heads/main",
     f"{REPO}/.github/workflows/version-skill-check.yml@refs/heads/main",
 ]
