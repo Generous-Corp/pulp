@@ -24,6 +24,12 @@ class EditGestureIdentityIssueTestAccess {
     lower(const EditGestureIdentityIssue& issue, EditIntent intent) {
         return issue.lower(std::move(intent));
     }
+
+    static runtime::Result<timeline::Transaction, NoteLoweringError>
+    lower(const EditGestureIdentityIssue& issue, ValidatedNoteEditIntent intent,
+          std::span<const timeline::NoteEvent> current_notes) {
+        return issue.lower(std::move(intent), current_notes);
+    }
 };
 
 } // namespace pulp::timeline_editor::detail
@@ -165,6 +171,21 @@ EditIntent move_clip_intent(GesturePhase phase, std::int64_t expected_start,
     intent.expected_range = MusicalTimeRange{{expected_start}, {kTicksPerQuarter}};
     intent.replacement_range = MusicalTimeRange{{replacement_start}, {kTicksPerQuarter}};
     return intent;
+}
+
+ValidatedNoteEditIntent move_note_intent(GesturePhase phase, const NoteEvent& expected,
+                                         const NoteEvent& replacement) {
+    NoteEditIntent intent;
+    intent.kind = NoteEditIntentKind::Move;
+    intent.phase = phase;
+    intent.sequence_id = kSequence;
+    intent.track_id = kTrack;
+    intent.clip_id = kClip;
+    intent.expected = expected;
+    intent.replacement = replacement;
+    auto validated = ValidatedNoteEditIntent::create(std::move(intent));
+    REQUIRE(validated);
+    return std::move(*validated);
 }
 
 std::int64_t current_clip_start(const DocumentSession& session) {
@@ -414,6 +435,103 @@ TEST_CASE("Gesture submission retains its issue after pre-submit failures",
     REQUIRE(submitted->document_result);
     REQUIRE(submitted->state == EditGestureIdentityState::Open);
     REQUIRE_FALSE(allocator.has_pending_identity());
+}
+
+TEST_CASE("Note gesture submission owns exact identities and one undo group",
+          "[gesture-identity][note-intent][undo-group]") {
+    const auto baseline = make_note_project();
+    auto session = std::move(DocumentSession::create(baseline)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto created = EditGestureIdentityAllocator::create(writer);
+    REQUIRE(created);
+    auto allocator = std::move(*created);
+    const auto group = allocator.undo_group();
+
+    NoteEvent expected = clip_notes(*session->snapshot()).back();
+    for (const auto [phase, delta] :
+         std::array<std::pair<GesturePhase, std::uint8_t>, 3>{
+             std::pair{GesturePhase::Begin, std::uint8_t{1}},
+             std::pair{GesturePhase::Update, std::uint8_t{2}},
+             std::pair{GesturePhase::End, std::uint8_t{3}}}) {
+        auto replacement = expected;
+        replacement.pitch = static_cast<std::uint8_t>(replacement.pitch + delta);
+        auto issue = allocator.issue(writer, session->revision(), phase);
+        REQUIRE(issue);
+        auto submitted = allocator.submit(
+            *session, writer, std::move(*issue),
+            move_note_intent(phase, expected, replacement),
+            clip_notes(*session->snapshot()));
+        REQUIRE(submitted);
+        REQUIRE(submitted->document_result);
+        expected = replacement;
+    }
+
+    REQUIRE(allocator.state() == EditGestureIdentityState::Closed);
+    const auto journal = session->journal();
+    REQUIRE(journal.entries().size() == 3);
+    for (std::size_t index = 0; index < journal.entries().size(); ++index) {
+        const auto& transaction = journal.entries()[index].transaction;
+        const std::array phases{GesturePhase::Begin, GesturePhase::Update,
+                                GesturePhase::End};
+        CHECK(transaction.id == TransactionId{writer.id(), index + 1});
+        CHECK(transaction.undo_group == group);
+        CHECK(transaction.gesture_phase == phases[index]);
+        CHECK(transaction.commands.size() == 1);
+        CHECK(transaction.commands.front().id == CommandId{writer.id(), index + 1});
+        REQUIRE(std::holds_alternative<SetNoteEvents>(
+            transaction.commands.front().command));
+        const auto& command =
+            std::get<SetNoteEvents>(transaction.commands.front().command);
+        REQUIRE(command.expected.size() == 1);
+        REQUIRE(command.replacement.size() == 1);
+        CHECK(command.expected.front().id ==
+              ItemId{kFirstNote.value + kNoteCount - 1});
+        CHECK(command.replacement.front().id == command.expected.front().id);
+    }
+
+    const auto edited = *session->snapshot();
+    REQUIRE(session->undo(writer));
+    CHECK(same_project(*session->snapshot(), baseline));
+    REQUIRE(session->redo(writer));
+    CHECK(same_project(*session->snapshot(), edited));
+}
+
+TEST_CASE("Note lowering failure preserves the opaque issue for correction",
+          "[gesture-identity][note-intent][submission-authority]") {
+    auto session = std::move(DocumentSession::create(make_note_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto created = EditGestureIdentityAllocator::create(writer);
+    REQUIRE(created);
+    auto allocator = std::move(*created);
+    auto issue = allocator.issue(writer, session->revision(), GesturePhase::Begin);
+    REQUIRE(issue);
+
+    const auto current = clip_notes(*session->snapshot());
+    auto stale = current.back();
+    ++stale.pitch;
+    auto replacement = stale;
+    ++replacement.pitch;
+    auto refused = allocator.submit(*session, writer, std::move(*issue),
+                                    move_note_intent(GesturePhase::Begin, stale, replacement),
+                                    current);
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == EditGestureIdentityError::IntentLoweringFailed);
+    REQUIRE(refused.error().note_lowering_error);
+    CHECK(*refused.error().note_lowering_error == NoteLoweringError::ExpectedNoteMismatch);
+    CHECK_FALSE(refused.error().model_error);
+    CHECK_FALSE(refused.error().commit_result);
+    CHECK(allocator.has_pending_identity());
+    CHECK(session->revision() == DocumentRevision{});
+
+    replacement = current.back();
+    ++replacement.pitch;
+    auto corrected = allocator.submit(
+        *session, writer, std::move(*issue),
+        move_note_intent(GesturePhase::Begin, current.back(), replacement), current);
+    REQUIRE(corrected);
+    REQUIRE(corrected->document_result);
+    CHECK(corrected->state == EditGestureIdentityState::Open);
+    CHECK_FALSE(allocator.has_pending_identity());
 }
 
 TEST_CASE("Gesture submission reconciles an exact direct commit retry",

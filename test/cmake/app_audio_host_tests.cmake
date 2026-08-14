@@ -122,6 +122,10 @@ pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 
 # Public route-timing contract and control-thread latency composition.
 pulp_add_test_suite(pulp-test-audio-io-timing LIBRARIES pulp::audio)
+if(PULP_JACK_AVAILABLE)
+    target_include_directories(pulp-test-audio-io-timing PRIVATE ${JACK_INCLUDE_DIRS})
+    target_compile_definitions(pulp-test-audio-io-timing PRIVATE PULP_HAS_JACK=1)
+endif()
 
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring

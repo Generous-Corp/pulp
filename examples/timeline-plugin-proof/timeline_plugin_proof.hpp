@@ -129,12 +129,44 @@ class TimelinePluginProofProcessor final : public format::Processor,
         if (session_ && writer_.id().valid()) {
             const auto current = session_->current();
             const auto notes = current_notes(*current.snapshot);
-            const timeline_editor::EditIntentIdentity identity{
-                writer_.allocate_transaction_id(), current.revision,
-                writer_.allocate_command_id(), std::nullopt};
-            auto transaction = timeline_editor::lower_note_edit_intent(intent, notes, identity);
-            if (transaction && session_->submit(writer_, std::move(transaction).value()))
-                result = {timeline_editor::IntentStatus::Accepted, ++intent_sequence_};
+            const auto phase = intent.value().phase;
+            if (phase == timeline::GesturePhase::Single) {
+                if (!gesture_allocator_) {
+                    const timeline_editor::EditIntentIdentity identity{
+                        writer_.allocate_transaction_id(), current.revision,
+                        writer_.allocate_command_id(), std::nullopt};
+                    auto transaction =
+                        timeline_editor::lower_note_edit_intent(intent, notes, identity);
+                    if (transaction && session_->submit(writer_, std::move(*transaction)))
+                        result = {timeline_editor::IntentStatus::Accepted, ++intent_sequence_};
+                }
+            } else {
+                if (phase == timeline::GesturePhase::Begin && !gesture_allocator_) {
+                    auto created = timeline_editor::EditGestureIdentityAllocator::create(writer_);
+                    if (created)
+                        gesture_allocator_.emplace(std::move(*created));
+                }
+                if (gesture_allocator_) {
+                    auto issue = gesture_allocator_->issue(writer_, current.revision, phase);
+                    if (issue) {
+                        auto submitted = gesture_allocator_->submit(
+                            *session_, writer_, std::move(*issue), intent, notes);
+                        if (submitted && submitted->document_result) {
+                            result = {timeline_editor::IntentStatus::Accepted,
+                                      ++intent_sequence_};
+                            if (submitted->state ==
+                                timeline_editor::EditGestureIdentityState::Closed)
+                                gesture_allocator_.reset();
+                        } else {
+                            // A rejected plugin submission is terminal at this host seam.
+                            // The view performs any best-effort restoring Cancel synchronously;
+                            // never retain provenance that it cannot authoritatively resume.
+                            gesture_allocator_.reset();
+                        }
+                    } else
+                        gesture_allocator_.reset();
+                }
+            }
         }
         rebind_views();
         return result;
@@ -200,12 +232,15 @@ class TimelinePluginProofProcessor final : public format::Processor,
 
     static runtime::Result<timeline::Project, timeline::ModelError> make_default_project() {
         const TimelinePluginProofIds ids;
-        auto content = timeline::MidiContent::create({
-            timeline::NoteEvent{ids.first_note, {0}, {kTimelinePluginProofNoteTicks},
-                                1'000, 60, 0},
-            timeline::NoteEvent{ids.second_note, {kTimelinePluginProofSecondNoteStart},
-                                {kTimelinePluginProofNoteTicks}, 1'000, 62, 0},
-        });
+        auto content = timeline::MidiContent::create(
+            {
+                timeline::NoteEvent{ids.first_note, {0}, {kTimelinePluginProofNoteTicks},
+                                    1'000, 60, 0},
+                timeline::NoteEvent{ids.second_note, {kTimelinePluginProofSecondNoteStart},
+                                    {kTimelinePluginProofNoteTicks}, 1'000, 62, 0},
+            },
+            {timeline::NoteModifier{.note_id = ids.second_note, .probability = 1'024}},
+            0xC0FFEE);
         if (!content)
             return runtime::Err(content.error());
         auto clip = timeline::Clip::create(ids.clip, timebase::TickPosition{0},
@@ -244,6 +279,7 @@ class TimelinePluginProofProcessor final : public format::Processor,
         auto candidate_writer = candidate.value()->register_writer();
         if (!candidate_writer)
             return false;
+        gesture_allocator_.reset();
         session_ = std::move(candidate).value();
         writer_ = std::move(candidate_writer).value();
         rebind_views();
@@ -389,6 +425,7 @@ class TimelinePluginProofProcessor final : public format::Processor,
 
     std::unique_ptr<timeline::DocumentSession> session_;
     timeline::WriterToken writer_;
+    std::optional<timeline_editor::EditGestureIdentityAllocator> gesture_allocator_;
     runtime::SeqLock<timeline_editor::UiPlayhead> playhead_;
     std::uint64_t playhead_sequence_ = 0;
     std::atomic<std::uint64_t> intent_sequence_{0};
@@ -412,6 +449,7 @@ inline TimelinePluginProofView::TimelinePluginProofView(
     if (time && pitch)
         piano_roll_->set_layout({std::move(time).value(), std::move(pitch).value(), {1}});
     piano_roll_->set_host(processor_);
+    piano_roll_->set_continuous_gestures(true);
     piano_roll_->set_note_factory([this](timebase::TickPosition start,
                                          std::uint8_t pitch_value)
                                       -> std::optional<timeline::NoteEvent> {

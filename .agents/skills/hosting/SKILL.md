@@ -1365,6 +1365,12 @@ rules:
   latching the program store or looking up the graph's current live snapshot can
   produce a mixed old/new audio block. As with ordinary graph processing, only
   one audio thread may process these mutable execution snapshots at a time.
+  Keep implementation changes on the focused ownership seams:
+  `timeline_graph_binding.cpp` owns lifecycle and realtime processing,
+  `timeline_graph_binding_candidate.cpp` owns candidate assembly and atomic
+  publication, and `timeline_graph_binding_routes.cpp` owns route validation and
+  mixer-edge reconciliation. Do not grow the lifecycle shell with new lowering
+  or routing policy.
 - **Read it, don't reach for it.** Anything that dereferences the snapshot off
   the prepare/release thread must hold a pin for the whole dereference:
   `auto pin = live_slot_.read(); if (auto* cg = pin.get()) { ... }`. That

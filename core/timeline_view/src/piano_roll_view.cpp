@@ -44,6 +44,12 @@ constexpr timebase::TickPosition note_end(const NoteEvent& note) noexcept {
     return timebase::TickPosition{note.start.value + note.duration.value};
 }
 
+constexpr bool same_note(const NoteEvent& left, const NoteEvent& right) noexcept {
+    return left.id == right.id && left.start == right.start && left.duration == right.duration &&
+           left.velocity == right.velocity && left.pitch == right.pitch &&
+           left.channel == right.channel;
+}
+
 } // namespace
 
 PianoRollView::PianoRollView() = default;
@@ -64,6 +70,8 @@ void PianoRollPitchRuler::set_pitch_projection(
 
 void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId track_id,
                              ItemId clip_id) {
+    const bool same_binding = sequence_id_ == sequence_id && track_id_ == track_id &&
+                              clip_id_ == clip_id;
     project_ = project;
     sequence_id_ = sequence_id;
     track_id_ = track_id;
@@ -82,8 +90,23 @@ void PianoRollView::set_clip(const Project* project, ItemId sequence_id, ItemId 
     };
     if (!all.empty())
         build_interval_index(build_interval_index, 0, 0, all.size());
-    // A rebind invalidates anything a live gesture believed about a note.
-    drag_.reset();
+    // A host may synchronously apply an accepted continuous phase and rebind
+    // this view before submit_intent() returns. Preserve only the pre-staged
+    // optimistic value that the rebound snapshot now actually carries; every
+    // other rebind invalidates the gesture as before.
+    if (drag_) {
+        bool preserves_staged_phase = false;
+        if (same_binding && drag_->last_emitted) {
+            const auto rebound = notes();
+            const auto found = std::find_if(rebound.begin(), rebound.end(), [&](const auto& note) {
+                return note.id == drag_->last_emitted->id;
+            });
+            preserves_staged_phase =
+                found != rebound.end() && same_note(*found, *drag_->last_emitted);
+        }
+        if (!preserves_staged_phase)
+            drag_.reset();
+    }
 }
 
 void PianoRollView::set_layout(const PianoRollLayout& layout) {
@@ -207,15 +230,40 @@ bool PianoRollView::admissible(const NoteEvent& note) {
     return true;
 }
 
-void PianoRollView::emit(timeline_editor::NoteEditIntentKind kind,
-                         std::optional<NoteEvent> expected, std::optional<NoteEvent> replacement) {
+std::optional<NoteEvent> PianoRollView::replacement_at(const Drag& drag,
+                                                       view::Point position) const {
+    if (!layout_ || !drag.grabbed || drag.kind == DragKind::Insert)
+        return std::nullopt;
+
+    NoteEvent replacement = *drag.grabbed;
+    if (drag.kind == DragKind::Move) {
+        const auto tick = layout_->time.tick_at(position.x);
+        replacement.start = snapped(clamp_tick(tick.value - drag.grab_offset_ticks));
+        replacement.pitch = layout_->pitch.pitch_at(position.y);
+    } else if (drag.kind == DragKind::Resize) {
+        const auto end = snapped(layout_->time.tick_at(position.x));
+        replacement.duration = timebase::TickDuration{end.value - replacement.start.value};
+    } else {
+        constexpr double kVelocityUnitsPerPixel = 128.0;
+        const auto delta = static_cast<std::int64_t>(
+            std::llround(static_cast<double>(drag.press_y - position.y) *
+                         kVelocityUnitsPerPixel));
+        const auto authored = std::clamp<std::int64_t>(
+            static_cast<std::int64_t>(drag.grabbed->velocity) + delta, 0,
+            std::numeric_limits<std::uint16_t>::max());
+        replacement.velocity = static_cast<std::uint16_t>(authored);
+    }
+    return replacement;
+}
+
+bool PianoRollView::emit(timeline_editor::NoteEditIntentKind kind, GesturePhase phase,
+                         std::optional<NoteEvent> expected,
+                         std::optional<NoteEvent> replacement) {
     if (!host_)
-        return;
+        return false;
     timeline_editor::NoteEditIntent intent;
     intent.kind = kind;
-    // Commit-on-release: one closed edit, never an open bracket. See the class
-    // comment for why this is the shape rather than a limitation.
-    intent.phase = GesturePhase::Single;
+    intent.phase = phase;
     intent.sequence_id = sequence_id_;
     intent.track_id = track_id_;
     intent.clip_id = clip_id_;
@@ -231,9 +279,10 @@ void PianoRollView::emit(timeline_editor::NoteEditIntentKind kind,
     auto validated = timeline_editor::ValidatedNoteEditIntent::create(std::move(intent));
     if (!validated) {
         refusals_.push_back(PianoRollRefusal::InvalidNote);
-        return;
+        return false;
     }
-    host_->submit_intent(validated.value());
+    const auto result = host_->submit_intent(validated.value());
+    return result.status == timeline_editor::IntentStatus::Accepted;
 }
 
 void PianoRollView::paint(canvas::Canvas& canvas) {
@@ -303,10 +352,13 @@ void PianoRollView::on_mouse_down(view::Point position) {
     Drag drag;
     drag.press_tick = layout_->time.tick_at(position.x);
     drag.press_pitch = layout_->pitch.pitch_at(position.y);
+    drag.press_y = position.y;
 
     if (const auto* note = note_at(position)) {
         drag.grabbed = *note;
-        drag.kind = on_trailing_edge(*note, position) ? DragKind::Resize : DragKind::Move;
+        drag.kind = (current_modifiers_ & view::kModShift) != 0
+                        ? DragKind::SetVelocity
+                        : on_trailing_edge(*note, position) ? DragKind::Resize : DragKind::Move;
         drag.grab_offset_ticks = drag.press_tick.value - note->start.value;
         drag_ = drag;
         return;
@@ -319,9 +371,80 @@ void PianoRollView::on_mouse_down(view::Point position) {
     drag_ = drag;
 }
 
-void PianoRollView::on_mouse_drag(view::Point) {
-    // Nothing leaves mid-gesture. The drag is tracked so a release can read the
-    // final position; emitting per frame is the shape this view does not take.
+void PianoRollView::on_mouse_drag(view::Point position) {
+    if (!drag_ || drag_->kind == DragKind::Insert)
+        return;
+    if (!continuous_gestures_)
+        return;
+    if (drag_->release_only)
+        return;
+
+    auto replacement = replacement_at(*drag_, position);
+    if (!replacement || same_note(*replacement, *drag_->grabbed)) {
+        if (replacement)
+            drag_->pending = std::move(replacement);
+        return;
+    }
+    if (!admissible(*replacement)) {
+        drag_->last_refused = std::move(replacement);
+        return;
+    }
+    drag_->last_refused.reset();
+    if (!drag_->pending) {
+        drag_->pending = std::move(replacement);
+        return;
+    }
+    if (same_note(*drag_->pending, *replacement))
+        return;
+
+    const auto kind = drag_->kind == DragKind::Move
+                          ? timeline_editor::NoteEditIntentKind::Move
+                      : drag_->kind == DragKind::Resize
+                          ? timeline_editor::NoteEditIntentKind::Resize
+                          : timeline_editor::NoteEditIntentKind::SetVelocity;
+    const auto phase = drag_->last_emitted ? GesturePhase::Update : GesturePhase::Begin;
+    const auto expected = drag_->last_emitted ? *drag_->last_emitted : *drag_->grabbed;
+    // Returning to the press value is held for End/Cancel. Emitting it as an
+    // Update would leave no changed payload with which to close the bracket.
+    if (same_note(*drag_->pending, *drag_->grabbed)) {
+        drag_->pending = std::move(replacement);
+        return;
+    }
+
+    const auto grabbed = *drag_->grabbed;
+    const auto staged = *drag_->pending;
+    const auto previously_emitted = drag_->last_emitted;
+    const auto before_submission = *drag_;
+    // Stage before crossing the synchronous host seam. set_clip() can then
+    // prove that a reentrant rebind contains exactly the accepted phase.
+    drag_->last_emitted = staged;
+    drag_->pending = replacement;
+    const bool accepted = emit(kind, phase, expected, staged);
+    if (accepted && drag_ && drag_->last_emitted &&
+        same_note(*drag_->last_emitted, staged))
+        return;
+
+    // Begin rejection opened nothing. Keep the legacy release-only path when
+    // the rebound snapshot still carries the grabbed note; this lets hosts
+    // adopt continuous grouping independently without losing existing edits.
+    if (!accepted && !previously_emitted) {
+        const auto current = notes();
+        const auto found = std::find_if(current.begin(), current.end(),
+                                        [&](const auto& note) { return note.id == grabbed.id; });
+        if (found != current.end() && same_note(*found, grabbed)) {
+            drag_ = before_submission;
+            drag_->release_only = true;
+            return;
+        }
+    }
+
+    // A rejected later phase leaves the last accepted group open, so make one
+    // best-effort restoring close before abandoning local gesture state.
+    drag_.reset();
+    if (previously_emitted)
+        emit(kind, GesturePhase::Cancel, *previously_emitted, grabbed);
+    else if (accepted)
+        emit(kind, GesturePhase::Cancel, staged, grabbed);
 }
 
 void PianoRollView::on_mouse_up(view::Point position) {
@@ -329,9 +452,6 @@ void PianoRollView::on_mouse_up(view::Point position) {
         return;
     const auto drag = *drag_;
     drag_.reset();
-
-    const auto release_tick = layout_->time.tick_at(position.x);
-    const auto release_pitch = layout_->pitch.pitch_at(position.y);
 
     if (drag.kind == DragKind::Insert) {
         if (!note_factory_)
@@ -343,51 +463,84 @@ void PianoRollView::on_mouse_up(view::Point position) {
         }
         if (!admissible(*created))
             return;
-        emit(timeline_editor::NoteEditIntentKind::Insert, std::nullopt, std::move(created));
+        emit(timeline_editor::NoteEditIntentKind::Insert, GesturePhase::Single, std::nullopt,
+             std::move(created));
         return;
     }
 
-    NoteEvent replacement = *drag.grabbed;
-    if (drag.kind == DragKind::Move) {
-        replacement.start = snapped(clamp_tick(release_tick.value - drag.grab_offset_ticks));
-        replacement.pitch = release_pitch;
-        // A press that never moved is not an edit. The validated intent would
-        // reject it anyway (Move requires a changed start or pitch), so
-        // returning here keeps a plain click from being recorded as a refusal.
-        if (replacement.start == drag.grabbed->start && replacement.pitch == drag.grabbed->pitch)
+    auto replacement = replacement_at(drag, position);
+    if (!replacement)
+        return;
+    const auto kind = drag.kind == DragKind::Move
+                          ? timeline_editor::NoteEditIntentKind::Move
+                      : drag.kind == DragKind::Resize
+                          ? timeline_editor::NoteEditIntentKind::Resize
+                          : timeline_editor::NoteEditIntentKind::SetVelocity;
+
+    const auto cancel_open = [&]() {
+        if (drag.last_emitted && !same_note(*drag.last_emitted, *drag.grabbed))
+            emit(kind, GesturePhase::Cancel, *drag.last_emitted, *drag.grabbed);
+    };
+    if (same_note(*replacement, *drag.grabbed)) {
+        cancel_open();
+        return;
+    }
+    if (!drag.last_refused || !same_note(*drag.last_refused, *replacement)) {
+        if (!admissible(*replacement)) {
+            cancel_open();
             return;
+        }
     } else {
-        // A trailing edge dragged back past its own note start yields a
-        // non-positive duration. That is not tested for here: `admissible`
-        // below already rejects it, and a second check would be a branch no
-        // gesture can be shown to reach independently of that one.
-        const auto end = snapped(release_tick);
-        replacement.duration = timebase::TickDuration{end.value - drag.grabbed->start.value};
-        if (replacement.duration == drag.grabbed->duration)
-            return;
+        cancel_open();
+        return;
     }
 
-    if (!admissible(replacement))
+    if (!drag.last_emitted) {
+        emit(kind, GesturePhase::Single, *drag.grabbed, std::move(replacement));
         return;
-    emit(drag.kind == DragKind::Move ? timeline_editor::NoteEditIntentKind::Move
-                                     : timeline_editor::NoteEditIntentKind::Resize,
-         drag.grabbed, std::move(replacement));
+    }
+    if (!same_note(*drag.last_emitted, *replacement)) {
+        if (!emit(kind, GesturePhase::End, *drag.last_emitted, *replacement))
+            emit(kind, GesturePhase::Cancel, *drag.last_emitted, *drag.grabbed);
+        return;
+    }
+    // A reversal can release exactly on the last emitted value. If a distinct
+    // pending sample exists, use it as the final Update so End still carries a
+    // valid transform. Otherwise restore rather than strand an open group.
+    if (drag.pending && !same_note(*drag.pending, *drag.last_emitted) &&
+        !same_note(*drag.pending, *drag.grabbed) && admissible(*drag.pending) &&
+        emit(kind, GesturePhase::Update, *drag.last_emitted, *drag.pending)) {
+        if (!emit(kind, GesturePhase::End, *drag.pending, *replacement))
+            emit(kind, GesturePhase::Cancel, *drag.pending, *drag.grabbed);
+    } else {
+        cancel_open();
+    }
 }
 
 void PianoRollView::on_mouse_cancel(view::Point) {
-    // Nothing was emitted, so a cancel has nothing to close or revert. This is
-    // the one place commit-on-release is strictly simpler than a bracket.
+    if (drag_ && drag_->last_emitted && drag_->grabbed &&
+        !same_note(*drag_->last_emitted, *drag_->grabbed)) {
+        const auto kind = drag_->kind == DragKind::Move
+                              ? timeline_editor::NoteEditIntentKind::Move
+                          : drag_->kind == DragKind::Resize
+                              ? timeline_editor::NoteEditIntentKind::Resize
+                              : timeline_editor::NoteEditIntentKind::SetVelocity;
+        emit(kind, GesturePhase::Cancel, *drag_->last_emitted, *drag_->grabbed);
+    }
     drag_.reset();
 }
 
 void PianoRollView::on_mouse_event(const view::MouseEvent& event) {
     view::View::on_mouse_event(event);
+    if (event.isPress())
+        current_modifiers_ = event.modifiers;
     if (!event.is_down || event.button != view::MouseButton::right)
         return;
     if (!layout_ || !content())
         return;
     if (const auto* note = note_at(event.position))
-        emit(timeline_editor::NoteEditIntentKind::Erase, *note, std::nullopt);
+        emit(timeline_editor::NoteEditIntentKind::Erase, GesturePhase::Single, *note,
+             std::nullopt);
 }
 
 } // namespace pulp::timeline_view
