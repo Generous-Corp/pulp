@@ -2559,7 +2559,8 @@ if "FORGE_CODEX_MODEL" in os.environ:
 if "FORGE_CODEX_REASONING_EFFORT" in os.environ:
     fixed += ["-c", 'model_reasoning_effort="' +
              os.environ["FORGE_CODEX_REASONING_EFFORT"] + '"']
-fixed += ["--ephemeral", "--sandbox", "read-only",
+fixed += ["--disable", "apps", "--disable", "plugins",
+         "--disable", "skill_search", "--ephemeral", "--sandbox", "read-only",
          "--ignore-user-config", "--ignore-rules", "--color", "never",
          "--skip-git-repo-check", "--json"]
 if args[:len(fixed)] != fixed or args[-1] != "-" or \
