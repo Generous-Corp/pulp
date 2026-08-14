@@ -669,6 +669,12 @@ registrations, and fail closed for online, busy, duplicate, or unknown states.
 Use a separate organization-capable controller token for organization runner
 group, registration, inventory, and deletion APIs; the repository runner token
 is not that credential.
+Configure group membership per systemd slot with
+`/etc/pulp/linux-runner-group-<slot>.env`, never a shared pool environment.
+Reserve at least one repository-scoped slot for release and operator workflows
+that the restricted group does not admit. Serialize VM destruction and firewall
+policy removal under the same VMID lock so cleanup cannot delete a successor
+clone's policy after id reuse.
 A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
 GitHub cannot retarget a queued job, and the required `macos` alias currently
 waits for the whole build matrix. Keep PR and merge-group Linux hosted until

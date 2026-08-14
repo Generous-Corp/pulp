@@ -46,7 +46,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_group_configuration_is_optional_and_root_managed(self) -> None:
         self.assertIn(
-            "EnvironmentFile=-/etc/pulp/linux-runner-group.env", self.service
+            "EnvironmentFile=-/etc/pulp/linux-runner-group-%i.env", self.service
         )
         self.assertIn("User=root", self.service)
 
@@ -109,6 +109,13 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             cleanup.index('qm stop "$VMID"'),
             cleanup.rindex('[ "$runner_status" = offline ]'),
         )
+        destroy_lock = cleanup.index("flock -w 300 9")
+        destroy = cleanup.index('qm destroy "$VMID" --purge')
+        firewall_remove = cleanup.index('rm -f "$VM_FIREWALL_FILE"')
+        destroy_unlock = cleanup.index("flock -u 9", destroy)
+        self.assertLess(destroy_lock, destroy)
+        self.assertLess(destroy, firewall_remove)
+        self.assertLess(firewall_remove, destroy_unlock)
 
     def test_controller_dependencies_and_org_credential_are_fail_closed(self) -> None:
         self.assertIn('command -v "$GH_CLI"', self.script)

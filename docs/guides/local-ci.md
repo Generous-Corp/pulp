@@ -206,8 +206,8 @@ apt-get install -y gh
 command -v gh
 ```
 
-Leave `/etc/pulp/linux-runner-group.env` absent for repository registration and
-dispatch-only use. For an automatic pool, install
+Leave `/etc/pulp/linux-runner-group-<slot>.env` absent for repository
+registration and dispatch/release use. For one automatic slot, install
 `tools/ci/verify_linux_runner_group.py` as
 `/usr/local/lib/pulp/verify_linux_runner_group.py`. Install a distinct
 organization-capable controller token at
@@ -221,10 +221,14 @@ install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
 install -d -o root -g root -m 0755 /etc/pulp
 printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$RUNNER_GROUP_ID" \
-  > /etc/pulp/linux-runner-group.env
-chmod 0600 /etc/pulp/linux-runner-group.env
+  > /etc/pulp/linux-runner-group-1.env
+chmod 0600 /etc/pulp/linux-runner-group-1.env
 systemctl restart pulp-ephemeral-pool@1
 ```
+
+The systemd template loads the group setting per instance. Keep at least one
+other slot's file absent so repository-scoped release and operator workflows
+retain eligible capacity; never put the group id in a shared pool environment.
 
 With the variable present, every clone verifies the live group before it is
 created, registers at organization scope, and receives the additional

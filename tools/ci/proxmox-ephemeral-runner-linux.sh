@@ -259,6 +259,13 @@ cleanup() {
             fi
         fi
     fi
+    # Keep VMID allocation serialized across destroy and policy removal. Once
+    # `qm destroy` removes the config, another slot can otherwise reuse this id
+    # and install a successor policy before the old cleanup removes the file.
+    if ! flock -w 300 9; then
+        log "ERROR: cannot lock VMID $VMID for destruction; leaving clone for safe recovery"
+        return
+    fi
     log "destroying clone $VMID"
     qm stop "$VMID" >/dev/null 2>&1 || true
     for _ in $(seq 1 24); do [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break; sleep 5; done
@@ -267,6 +274,7 @@ cleanup() {
     else
         log "WARN: destroy of $VMID failed — check manually"
     fi
+    flock -u 9
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
