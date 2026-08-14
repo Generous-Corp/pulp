@@ -1153,3 +1153,8 @@ the seam and binding to this engine specifically.
 (It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
 proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
 adapter work above the row rather than a change to it.)
+
+`music` may consume `timebase` for quantized pattern-development coordinates
+without joining the timeline document/playback ladder. Keep that narrow
+exception in the dependency-floor check's `ENGINE_CONSUMERS` allowlist; do not
+widen playback's floor or make music a playback dependency.

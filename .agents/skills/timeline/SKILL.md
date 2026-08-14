@@ -2703,3 +2703,8 @@ superlinearly in their count: a full-rate 10s wait spent 10s waiting and then
 ~30s in teardown (6663 reprepares), long enough to present as a CTest timeout
 rather than the failure it is. A 1ms pump sleep with a 2s deadline holds the
 whole failing run under 3s.
+
+`music` is an allowed `timebase` consumer for deterministic quantized pattern
+development, but it remains outside the timeline document/playback ladder. Its
+entry belongs in `ENGINE_CONSUMERS` with that narrow reason, not in a broader
+module-floor permission.
