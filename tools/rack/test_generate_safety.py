@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,182 @@ sys.path.insert(0, str(HERE))
 import generate  # noqa: E402
 import patch  # noqa: E402
 import rack_open  # noqa: E402
+
+
+class RackPluginDiscoverySafety(unittest.TestCase):
+    @staticmethod
+    def write_plugin(directory: pathlib.Path, slug: str = "MakerPack") -> None:
+        package = directory / slug
+        package.mkdir(parents=True)
+        (package / "plugin.json").write_text(json.dumps({
+            "slug": slug,
+            "name": "Maker Pack",
+            "brand": "Named Maker",
+            "version": "2.0.0",
+            "modules": [{"slug": "Voice", "name": "Voice"}],
+        }))
+
+    def test_plugin_directory_created_after_import_is_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp) / "home"
+            home.mkdir()
+            with mock.patch.dict(os.environ, {"HOME": str(home)}, clear=False):
+                os.environ.pop("RACK_PLUGIN_DIR", None)
+                self.assertEqual([], patch.rack_plugin_dirs())
+
+                plugin_dir = (home / "Library/Application Support/Rack2" /
+                              f"plugins-{patch.rack_arch()}")
+                self.write_plugin(plugin_dir)
+
+                self.assertEqual([str(plugin_dir)], patch.rack_plugin_dirs())
+                with mock.patch.object(
+                        patch, "_repair_bundled_pack", return_value=False):
+                    inventory = patch.inventory()
+                self.assertIn("Voice", inventory["MakerPack"]["modules"])
+
+    def test_explicit_plugin_directory_is_exclusive_and_installable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            home_plugins = (root / "home/Library/Application Support/Rack2" /
+                            f"plugins-{patch.rack_arch()}")
+            override = root / "host-visible-plugins"
+            self.write_plugin(home_plugins, "IgnoredPack")
+            self.write_plugin(override, "MakerPack")
+            with mock.patch.dict(os.environ, {
+                    "HOME": str(root / "home"),
+                    "RACK_PLUGIN_DIR": str(override),
+            }, clear=False):
+                self.assertEqual(str(override), patch.rack_plugin_dir())
+                self.assertEqual([str(override)], patch.rack_plugin_dirs())
+                self.assertEqual(str(override), generate.plugin_dir())
+                with mock.patch.object(
+                        patch, "_repair_bundled_pack", return_value=False):
+                    inventory = patch.inventory()
+            self.assertIn("MakerPack", inventory)
+            self.assertNotIn("IgnoredPack", inventory)
+
+    def test_bundled_pack_repair_targets_explicit_plugin_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            home = root / "home"
+            app = root / "Forge Modular.app"
+            rack = app / "Contents/Resources/rack"
+            rack.mkdir(parents=True)
+            (rack / "ForgeModular-2.0.0-mac-arm64.vcvplugin").write_bytes(
+                b"pack bytes")
+            placer = app / "Contents/Resources/install_pack.sh"
+            source_placer = (pathlib.Path(__file__).parents[2] /
+                             "examples/forge-modular/install_pack.sh")
+            shutil.copy2(source_placer, placer)
+            placer.chmod(0o755)
+            override = root / "host-visible-plugins"
+            with mock.patch.dict(os.environ, {
+                    "HOME": str(home),
+                    "FORGE_MODULAR_APP": str(app),
+                    "RACK_PLUGIN_DIR": str(override),
+            }, clear=False):
+                self.assertTrue(patch._repair_bundled_pack())
+                self.assertTrue((override /
+                    "ForgeModular-2.0.0-mac-arm64.vcvplugin").is_file())
+                default = (home / "Library/Application Support/Rack2" /
+                           f"plugins-{patch.rack_arch()}")
+                self.assertFalse(default.exists())
+
+    def test_explicit_destination_backs_up_within_its_grant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            app = root / "Forge Modular.app"
+            rack = app / "Contents/Resources/rack"
+            rack.mkdir(parents=True)
+            (rack / "ForgeModular-2.0.0-mac-arm64.vcvplugin").write_bytes(
+                b"pack bytes")
+            placer = pathlib.Path(__file__).parents[2] / \
+                "examples/forge-modular/install_pack.sh"
+            override = root / "host-visible-plugins"
+            unpacked = override / "ForgeModular"
+            unpacked.mkdir(parents=True)
+            (unpacked / "plugin.json").write_text(
+                '{"slug":"ForgeModular","version":"1.0.0"}\n')
+
+            result = __import__("subprocess").run([
+                str(placer), "--source", str(app), "--home", str(root / "home"),
+                "--dest", str(override),
+            ], capture_output=True, text=True)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            backups = override / ".Forge-Modular-replaced-packs"
+            self.assertEqual(1, len(list(backups.glob("ForgeModular-*"))))
+            self.assertFalse((root / ".Forge-Modular-replaced-packs").exists())
+
+
+class ExclusiveMakerSafety(unittest.TestCase):
+    mentions = {
+        "Named Maker": {
+            "slugs": ["MakerPack", "MakerUtilities"],
+            "exhaustive": False,
+            "exclusive": True,
+        },
+    }
+
+    def test_named_maker_modules_and_core_are_the_complete_allowlist(self) -> None:
+        candidate = {"modules": [
+            {"id": 1, "plugin": "MakerPack", "model": "Voice"},
+            {"id": 2, "plugin": "MakerUtilities", "model": "Mixer"},
+            {"id": 3, "plugin": "Core", "model": "AudioInterface2"},
+        ]}
+        self.assertEqual(
+            [], patch.exclusive_maker_errors(candidate, self.mentions))
+
+    def test_prefix_exclusive_multi_maker_list_forms_one_allowlist(self) -> None:
+        catalog = {
+            "Bogaudio": {"brand": "Bogaudio", "arches": ["mac-arm64"]},
+            "Valley": {"brand": "Valley", "arches": ["mac-arm64"]},
+        }
+        mentions = patch.brand_mentions("use only Bogaudio and Valley", catalog)
+        self.assertEqual(
+            {"Bogaudio", "Valley"}, patch.exclusive_maker_plugins(mentions))
+
+    def test_substitution_and_zero_named_modules_are_both_rejected(self) -> None:
+        candidate = {"modules": [
+            {"id": 1, "plugin": "LookalikePack", "model": "Voice"},
+            {"id": 2, "plugin": "Core", "model": "AudioInterface2"},
+        ]}
+        errors = patch.exclusive_maker_errors(candidate, self.mentions)
+        self.assertTrue(any("LookalikePack" in error for error in errors))
+        self.assertTrue(any("at least one module" in error for error in errors))
+
+    def test_malformed_model_shapes_are_retryable_errors(self) -> None:
+        self.assertTrue(patch.exclusive_maker_errors([], self.mentions))
+        self.assertTrue(patch.exclusive_maker_errors(
+            {"modules": "bad"}, self.mentions))
+        self.assertTrue(patch.exclusive_maker_errors(
+            {"modules": ["bad"]}, self.mentions))
+        self.assertTrue(patch.exclusive_maker_errors(
+            {"modules": [{"plugin": []}]}, self.mentions))
+
+    def test_nonexclusive_mention_does_not_restrict_the_patch(self) -> None:
+        mentions = {
+            "Named Maker": {
+                "slugs": ["MakerPack"],
+                "exhaustive": False,
+                "exclusive": False,
+            },
+        }
+        candidate = {"modules": [
+            {"id": 1, "plugin": "LookalikePack", "model": "Voice"},
+        ]}
+        self.assertEqual([], patch.exclusive_maker_errors(candidate, mentions))
+
+    def test_missing_named_maker_inventory_stops_before_generation(self) -> None:
+        empty = {"MakerPack": {"modules": {}}}
+        self.assertTrue(patch.exclusive_maker_inventory_errors(
+            empty, self.mentions))
+        available = {
+            "MakerPack": {"modules": {"Voice": {}}},
+            "Core": {"modules": {"AudioInterface2": {}}},
+        }
+        self.assertEqual([], patch.exclusive_maker_inventory_errors(
+            available, self.mentions))
 
 
 class ToolchainHeaderClosureSafety(unittest.TestCase):
@@ -250,28 +427,91 @@ class RackLaunchSafety(unittest.TestCase):
 
     def test_rack_process_identity_binds_pid_and_start_time(self) -> None:
         app = "/Applications/VCV Rack 2 Pro.app"
+        process = "72076:1786570779.435535"
         with mock.patch.object(
                 rack_open.subprocess, "run",
-                side_effect=[mock.Mock(returncode=0, stdout="72076\n"),
-                             mock.Mock(returncode=0,
-                                       stdout="Sat Aug  8 18:00:00 2026\n")]) as run:
+                return_value=mock.Mock(returncode=0, stdout="72076\n")) as run, \
+                mock.patch.object(
+                    rack_open, "_native_process_identity",
+                    return_value=process) as native_identity:
             self.assertEqual(
-                "72076:Sat Aug  8 18:00:00 2026",
-                rack_open._rack_process_identity(app))
-        self.assertEqual(
+                process, rack_open._rack_process_identity(app))
+        run.assert_called_once_with(
             ["pgrep", "-f",
              r"^/Applications/VCV\ Rack\ 2\ Pro\.app/Contents/MacOS/Rack($| )"],
-            run.call_args_list[0].args[0])
-        self.assertEqual(
-            ["ps", "-o", "lstart=", "-p", "72076"],
-            run.call_args_list[1].args[0])
-        self.assertEqual(1.0, run.call_args_list[0].kwargs["timeout"])
-        self.assertEqual(1.0, run.call_args_list[1].kwargs["timeout"])
+            capture_output=True, text=True, timeout=2.0)
+        native_identity.assert_called_once_with(
+            72076, rack_open._app_binary(app))
 
         with mock.patch.object(
                 rack_open.subprocess, "run",
-                return_value=mock.Mock(returncode=0, stdout="41\n42\n")):
+                return_value=mock.Mock(returncode=0, stdout="41\n42\n")), \
+                mock.patch.object(
+                    rack_open, "_native_process_identity") as native_identity:
             self.assertIsNone(rack_open._rack_process_identity(app))
+        native_identity.assert_not_called()
+
+    def test_native_process_identity_revalidates_binary_and_start_time(self) -> None:
+        pid = 72076
+        binary = "/Applications/VCV Rack 2 Pro.app/Contents/MacOS/Rack"
+        library = mock.Mock()
+
+        def read_path(actual_pid, buffer, _buffer_size):
+            self.assertEqual(pid, actual_pid)
+            buffer.value = os.fsencode(binary)
+            return len(buffer.value)
+
+        def read_info(actual_pid, flavor, argument, buffer, buffer_size):
+            self.assertEqual(pid, actual_pid)
+            self.assertEqual(rack_open._PROC_PIDTBSDINFO, flavor)
+            self.assertEqual(0, argument)
+            self.assertEqual(
+                rack_open.ctypes.sizeof(rack_open._ProcBsdInfo), buffer_size)
+            info = rack_open.ctypes.cast(
+                buffer,
+                rack_open.ctypes.POINTER(rack_open._ProcBsdInfo)).contents
+            info.pbi_pid = pid
+            info.pbi_start_tvsec = 1786570779
+            info.pbi_start_tvusec = 435535
+            return buffer_size
+
+        library.proc_pidpath.side_effect = read_path
+        library.proc_pidinfo.side_effect = read_info
+        self.assertEqual(
+            "72076:1786570779.435535",
+            rack_open._native_process_identity(
+                pid, binary, _library=library))
+        library.proc_pidpath.assert_called_once()
+        library.proc_pidinfo.assert_called_once()
+
+    def test_native_process_identity_rejects_mismatch_or_denied_info(self) -> None:
+        pid = 72076
+        binary = "/Applications/VCV Rack 2 Pro.app/Contents/MacOS/Rack"
+
+        wrong_binary = mock.Mock()
+
+        def read_wrong_path(_pid, buffer, _buffer_size):
+            buffer.value = b"/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack"
+            return len(buffer.value)
+
+        wrong_binary.proc_pidpath.side_effect = read_wrong_path
+        self.assertIsNone(rack_open._native_process_identity(
+            pid, binary, _library=wrong_binary))
+        wrong_binary.proc_pidinfo.assert_not_called()
+
+        denied = mock.Mock()
+
+        def read_expected_path(_pid, buffer, _buffer_size):
+            buffer.value = os.fsencode(binary)
+            return len(buffer.value)
+
+        denied.proc_pidpath.side_effect = read_expected_path
+        denied.proc_pidinfo.return_value = -1
+        self.assertIsNone(rack_open._native_process_identity(
+            pid, binary, _library=denied))
+
+        with mock.patch.object(rack_open, "_load_libproc", return_value=None):
+            self.assertIsNone(rack_open._native_process_identity(pid, binary))
 
     def test_focus_activates_the_exact_app_without_a_document(self) -> None:
         app = "/Applications/VCV Rack 2 Pro.app"
@@ -644,6 +884,18 @@ class RackLaunchSafety(unittest.TestCase):
                 rack_open, "_rack_process_identity",
                 side_effect=["41:Sat Aug  8 18:00:00 2026",
                              "42:Sat Aug  8 18:00:01 2026"]):
+            rack_open._record_verified_open(
+                app, artifact, 1, log, rack_open._file_sha256(artifact))
+            self.assertFalse(rack_open._identity_path(log).exists())
+
+    def test_unavailable_process_identity_does_not_publish_identity_cache(
+            self) -> None:
+        temp, app, artifact, log = self.launch_fixture()
+        pathlib.Path(log).write_text(
+            f"Loading patch {os.path.realpath(artifact)}\n"
+            "Creating module Forge A\n")
+        with temp, mock.patch.object(
+                rack_open, "_rack_process_identity", return_value=None):
             rack_open._record_verified_open(
                 app, artifact, 1, log, rack_open._file_sha256(artifact))
             self.assertFalse(rack_open._identity_path(log).exists())

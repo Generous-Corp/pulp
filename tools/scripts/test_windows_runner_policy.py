@@ -237,6 +237,47 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
         self.assertIn('runs_on_json = "windows-latest"', latest)
 
 
+class ProtectedLinuxFallbackTests(unittest.TestCase):
+    """Rejected protected selectors must reach the literal hosted fallback."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(read(WORKFLOWS / "pr-safe-linux.yml"))
+        cls.admission = cls.workflow["jobs"]["admission"]
+        cls.linux = cls.workflow["jobs"]["linux"]
+
+    def test_admission_rejects_whitespace_altered_labels(self) -> None:
+        script = "\n".join(
+            step.get("run", "") for step in self.admission["steps"]
+        )
+        self.assertIn(
+            "if any(item != item.strip() for item in value):", script
+        )
+
+    def test_rejected_selector_skips_self_hosted_assignment_validation(self) -> None:
+        assignment = next(
+            step
+            for step in self.linux["steps"]
+            if step.get("name") == "Validate same-repository PR assignment"
+        )
+        self.assertEqual(
+            assignment["if"], "needs.admission.outputs.admitted == 'true'"
+        )
+        self.assertIn('|| \'"ubuntu-latest"\'', self.linux["runs-on"])
+
+    def test_denied_legacy_route_checks_out_event_owned_sha(self) -> None:
+        checkout = next(
+            step
+            for step in self.linux["steps"]
+            if step.get("uses") == "actions/checkout@v5"
+        )
+        checkout_ref = " ".join(checkout["with"]["ref"].split())
+        self.assertIn(
+            "needs.admission.outputs.admitted != 'true'", checkout_ref
+        )
+        self.assertIn("github.sha || inputs.source_sha", checkout_ref)
+
+
 class WindowsMergeQueueGatingTests(unittest.TestCase):
     """Windows is gated by the merge queue, never by the PR head.
 

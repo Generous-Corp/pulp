@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <span>
 #include <string>
 #include <vector>
@@ -159,6 +160,34 @@ TEST_CASE("media windows are census-visible only when they select an asset subra
     REQUIRE(owners.size() == 2);
     REQUIRE(owners[0] == ItemId{5});
     REQUIRE(owners[1] == ItemId{6});
+}
+
+TEST_CASE("typed device declarations expose placement separately from authored payload",
+          "[interchange][census][device]") {
+    DevicePlacement identity_only{.id = {10}};
+    DevicePlacement typed{
+        .id = {11},
+        .configuration = {.position = DeviceChainPosition::PreFader,
+                          .slot_kind = DeviceSlotKind::EventToAudio,
+                          .device_kind = DeviceKind::BuiltIn,
+                          .binding_key = "pulp.instrument.basic",
+                          .bypassed = false,
+                          .wet_dry_bits = std::bit_cast<std::uint32_t>(1.0f)},
+        .state_ref = content_hash('c'),
+    };
+    auto track = take_value(Track::create(TrackInput{
+        .id = {3}, .name = "devices", .device_chain = {typed, identity_only}}));
+    auto sequence = take_value(Sequence::create({2}, "root", TickDuration{100}, {track}));
+    const Project project = take_value(
+        Project::create(ProjectInput{{1}, "project", 20, {2}, {}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::DevicePlacement) == 2);
+    REQUIRE(counted.count(Concept::DevicePayload) == 1);
+    const auto owners = counted.owners(Concept::DevicePayload);
+    REQUIRE(owners.size() == 1);
+    REQUIRE(owners[0] == ItemId{11});
+    REQUIRE(concept_detectable_in_model(Concept::DevicePayload));
 }
 
 TEST_CASE("a census bounds the evidence it keeps without understating it", "[interchange]") {

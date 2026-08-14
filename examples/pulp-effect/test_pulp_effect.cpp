@@ -66,6 +66,34 @@ TEST_CASE("PulpEffect lowpass attenuates high frequencies", "[pulpeffect]") {
     REQUIRE(out_rms < in_rms * 0.1f);
 }
 
+TEST_CASE("PulpEffect keeps biquad history isolated per channel",
+          "[pulpeffect][channel-state]") {
+    constexpr std::size_t kFrames = 16;
+
+    format::HeadlessHost host(create_pulp_effect);
+    host.prepare(48000.0, static_cast<int>(kFrames));
+    host.state().set_value(kFrequency, 1000.0f);
+    host.state().set_value(kResonance, 0.707f);
+    host.state().set_value(kFilterType, 0.0f);
+    host.state().set_value(kMix, 100.0f);
+
+    audio::Buffer<float> in(2, kFrames), out(2, kFrames);
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        in.channel(0)[i] = 0.0f;
+        in.channel(1)[i] = 0.0f;
+    }
+    in.channel(0)[0] = 1.0f;
+
+    process_headless(host, in, out);
+
+    float driven_peak = 0.0f;
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        driven_peak = std::max(driven_peak, std::abs(out.channel(0)[i]));
+        REQUIRE(out.channel(1)[i] == 0.0f);
+    }
+    REQUIRE(driven_peak > 0.0f);
+}
+
 TEST_CASE("PulpEffect bypass passes through unmodified", "[pulpeffect]") {
     format::HeadlessHost host(create_pulp_effect);
     host.prepare(48000.0, 512);

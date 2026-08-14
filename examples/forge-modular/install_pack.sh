@@ -6,7 +6,8 @@
 # "the user" is not a path. So the .vcvplugin rides inside the app bundle and
 # something has to move it afterwards. This is that something.
 #
-#   install_pack.sh --source <app bundle or dir> --home <HOME> [--owner uid:gid]
+#   install_pack.sh --source <app bundle or dir> --home <HOME> [--dest <dir>]
+#                   [--owner uid:gid]
 #                   [--dry-run]
 #
 # ONE implementation with two callers, because two would disagree:
@@ -28,12 +29,15 @@ set -uo pipefail
 SOURCE=""
 DEST_HOME=""
 OWNER=""
+DEST_DIR=""
+DEST_EXPLICIT=0
 DRY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --source) SOURCE="${2:-}"; shift 2 ;;
         --home)   DEST_HOME="${2:-}"; shift 2 ;;
+        --dest)   DEST_DIR="${2:-}"; DEST_EXPLICIT=1; shift 2 ;;
         --owner)  OWNER="${2:-}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
         *) echo "install_pack: unknown argument: $1" >&2; exit 2 ;;
@@ -86,7 +90,9 @@ if [ -z "$SLUG" ] || [ -z "$VERSION" ] || [ -z "$PLATFORM" ] || [ "$VERSION" = "
     exit 1
 fi
 
-DEST_DIR="$DEST_HOME/Library/Application Support/Rack2/plugins-$PLATFORM"
+if [ -z "$DEST_DIR" ]; then
+    DEST_DIR="$DEST_HOME/Library/Application Support/Rack2/plugins-$PLATFORM"
+fi
 
 # What is already there, and is it newer than what we carry?
 #
@@ -159,7 +165,14 @@ find "$DEST_DIR" -maxdepth 1 -name "$SLUG-*.vcvplugin" 2>/dev/null \
 # the app has it in exactly this form, and silently destroying it would be the
 # other failure. They get it back under a dated name and are told where.
 if [ -d "$DEST_DIR/$SLUG" ]; then
-    BACKUP_ROOT="$DEST_HOME/Library/Application Support/Forge Modular/replaced-rack-packs"
+    if [ "$DEST_EXPLICIT" -eq 1 ]; then
+        # The override itself may be the only sandbox-granted directory. Keep
+        # the recoverable old pack inside that grant instead of assuming its
+        # parent is writable.
+        BACKUP_ROOT="$DEST_DIR/.Forge-Modular-replaced-packs"
+    else
+        BACKUP_ROOT="$DEST_HOME/Library/Application Support/Forge Modular/replaced-rack-packs"
+    fi
     mkdir -p "$BACKUP_ROOT" || {
         echo "install_pack: could not create $BACKUP_ROOT" >&2; exit 1; }
     ASIDE="$BACKUP_ROOT/$SLUG-$(date +%Y%m%d-%H%M%S)"

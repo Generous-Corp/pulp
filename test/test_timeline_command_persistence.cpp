@@ -65,6 +65,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& sequence = member(project_data, "sequences").array[0];
     const auto& track = member(member(sequence, "data"), "tracks").array[0];
     const auto& track_data = member(track, "data");
+    const auto& device = member(track_data, "device_chain").array[0];
     const auto& clip = member(track_data, "clips").array[0];
     const auto& automation = member(track_data, "automation_lanes").array[0];
     const auto& take_lane = member(track_data, "take_lanes").array[0];
@@ -202,6 +203,20 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope("pulp.timeline.command.remove_notes",
                  R"({"clip_id":"7","expected":[)" + transformed_note +
                      R"(],"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_device",
+                 R"({"before_device_id":"8","placement":)" +
+                     std::string(parsed->raw(device)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_device",
+                 R"({"device_id":"8","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.move_device",
+                 R"({"device_id":"8","expected_before_device_id":"9","replacement_before_device_id":"10","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.retarget_device",
+                 R"({"device_id":"8","expected":{"binding_key":"","bypassed":false,"device_kind":"unresolved","position":"pre_fader","slot_kind":"audio_to_audio","wet_dry_bits":1065353216},"replacement":{"binding_key":"pulp.effect.delay","bypassed":true,"device_kind":"built_in","position":"post_fader","slot_kind":"audio_to_audio","wet_dry_bits":1056964608},"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_device_state",
+                 R"({"device_id":"8","expected":")" + std::string(64, 'd') +
+                     R"(","replacement":")" + std::string(64, 'e') +
+                     R"(","sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -283,6 +298,19 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& remove_notes = std::get<RemoveNotes>(commands[41]);
     REQUIRE(remove_notes.expected.size() == 1);
     REQUIRE(remove_notes.expected[0].pitch == 72);
+    REQUIRE(std::holds_alternative<InsertDevice>(commands[42]));
+    const auto& insert_device = std::get<InsertDevice>(commands[42]);
+    REQUIRE(insert_device.placement.id == ItemId{8});
+    REQUIRE(insert_device.before_device_id == ItemId{8});
+    REQUIRE(std::holds_alternative<RemoveDevice>(commands[43]));
+    REQUIRE(std::get<RemoveDevice>(commands[43]).device_id == ItemId{8});
+    REQUIRE(std::holds_alternative<MoveDevice>(commands[44]));
+    REQUIRE(std::get<MoveDevice>(commands[44]).replacement_before_device_id == ItemId{10});
+    REQUIRE(std::holds_alternative<RetargetDevice>(commands[45]));
+    REQUIRE(std::get<RetargetDevice>(commands[45]).replacement.binding_key ==
+            "pulp.effect.delay");
+    REQUIRE(std::holds_alternative<SetDeviceState>(commands[46]));
+    REQUIRE(std::get<SetDeviceState>(commands[46]).replacement == hash('e'));
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

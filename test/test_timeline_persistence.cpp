@@ -649,6 +649,26 @@ TEST_CASE("Timeline registered encoders cannot exceed the remaining output sink"
     REQUIRE(spy->append_attempts == spy->sink_maximum + 1);
 }
 
+TEST_CASE("Timeline serialization rejects a non-UTF-8 device binding key") {
+    DeviceConfiguration configuration;
+    configuration.device_kind = DeviceKind::BuiltIn;
+    configuration.binding_key = std::string("\xC3\x28", 2);
+    auto track = take(Track::create(TrackInput{
+        .id = {3},
+        .name = "track",
+        .device_chain = {DevicePlacement{.id = {4}, .configuration = configuration}},
+    }));
+    auto sequence = take(Sequence::create({2}, "root", TickDuration{0}, {track}));
+    auto project = take(
+        Project::create(ProjectInput{{1}, "devices", 5, {2}, {}, {sequence}}));
+
+    const auto rejected = serialize_project(project, builtins());
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidUtf8);
+    REQUIRE(rejected.error().path ==
+            "/data/sequences/0/data/tracks/0/data/device_chain/0/data/binding_key");
+}
+
 TEST_CASE("Timeline unknown content is retained byte for byte and marked opaque") {
     std::ifstream fixture_stream(std::string(PULP_TIMELINE_FIXTURE_DIR) +
                                      "/v1/unknown-content-envelope.json",

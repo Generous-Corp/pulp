@@ -61,6 +61,170 @@ TEST_CASE("Timeline commands apply and invert without mutating the source") {
     REQUIRE(revived.error().code == ConflictCode::IdentityNotAvailable);
 }
 
+TEST_CASE("Device chain commands preserve exact order configuration state and undo") {
+    DeviceConfiguration pre;
+    pre.device_kind = DeviceKind::BuiltIn;
+    pre.binding_key = "pulp.effect.first";
+    DeviceConfiguration post = pre;
+    post.position = DeviceChainPosition::PostFader;
+    post.binding_key = "pulp.effect.last";
+
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto insert = session_transaction(
+        writer, session->revision(),
+        {InsertDevice{{3}, {4}, DevicePlacement{.id = {7}, .configuration = pre}},
+         InsertDevice{{3}, {4}, DevicePlacement{.id = {8}, .configuration = pre},
+                      std::optional<ItemId>{ItemId{7}}}});
+    REQUIRE(session->submit(writer, std::move(insert)));
+    {
+        const auto chain = session->snapshot()->find_sequence({3})->find_track({4})->device_chain();
+        REQUIRE(chain.size() == 2);
+        CHECK(chain[0].id == ItemId{8});
+        CHECK(chain[1].id == ItemId{7});
+    }
+
+    auto transform = session_transaction(
+        writer, session->revision(),
+        {MoveDevice{{3}, {4}, {8}, std::optional<ItemId>{ItemId{7}}, std::nullopt},
+         RetargetDevice{{3}, {4}, {8}, pre, post},
+         SetDeviceState{{3}, {4}, {8}, std::nullopt, content_hash('a')}});
+    REQUIRE(session->submit(writer, std::move(transform)));
+    {
+        const auto chain = session->snapshot()->find_sequence({3})->find_track({4})->device_chain();
+        REQUIRE(chain.size() == 2);
+        CHECK(chain[0].id == ItemId{7});
+        CHECK(chain[1].id == ItemId{8});
+        CHECK(chain[1].configuration == post);
+        CHECK(chain[1].state_ref == content_hash('a'));
+    }
+    REQUIRE(session->undo(writer));
+    {
+        const auto chain = session->snapshot()->find_sequence({3})->find_track({4})->device_chain();
+        REQUIRE(chain.size() == 2);
+        CHECK(chain[0].id == ItemId{8});
+        CHECK(chain[1].id == ItemId{7});
+        CHECK(chain[0].configuration == pre);
+        CHECK_FALSE(chain[0].state_ref);
+    }
+    REQUIRE(session->redo(writer));
+    CHECK(session->snapshot()->find_sequence({3})->find_track({4})->device_chain()[1].state_ref ==
+          content_hash('a'));
+
+    auto remove = session_transaction(writer, session->revision(), {RemoveDevice{{3}, {4}, {7}}});
+    REQUIRE(session->submit(writer, std::move(remove)));
+    REQUIRE_FALSE(session->snapshot()->locate({7})->active);
+    REQUIRE(session->undo(writer));
+    CHECK(session->snapshot()->find_sequence({3})->find_track({4})->device_chain()[0].id ==
+          ItemId{7});
+    REQUIRE(session->redo(writer));
+    REQUIRE_FALSE(session->snapshot()->locate({7})->active);
+}
+
+TEST_CASE("Device chain commands refuse stale positions and referenced removals") {
+    DeviceConfiguration configuration;
+    configuration.device_kind = DeviceKind::BuiltIn;
+    configuration.binding_key = "pulp.effect.target";
+    auto inserted = reduce_transaction(
+        make_project(),
+        transaction({1}, 1, 1, {},
+                    {InsertDevice{{3}, {4},
+                                  DevicePlacement{.id = {7},
+                                                  .configuration = configuration}}}));
+    REQUIRE(inserted);
+
+    auto stale = reduce_transaction(
+        inserted->project,
+        transaction({1}, 2, 2, {},
+                    {MoveDevice{{3}, {4}, {7}, std::optional<ItemId>{ItemId{99}},
+                                std::nullopt}}));
+    REQUIRE_FALSE(stale);
+    CHECK(stale.error().code == ConflictCode::ExpectedValueMismatch);
+
+    auto curve = AutomationCurve::create({{{9}, {0}, 0.5f}});
+    REQUIRE(curve);
+    auto lane = AutomationLane::create({8}, DeviceParameterTarget{{7}, 42},
+                                       std::move(curve).value());
+    REQUIRE(lane);
+    auto attached = reduce_transaction(
+        inserted->project,
+        transaction({1}, 3, 3, {},
+                    {InsertAutomationLane{{3}, {4}, std::move(lane).value()}}));
+    REQUIRE(attached);
+    auto rejected = reduce_transaction(
+        attached->project,
+        transaction({1}, 4, 4, {}, {RemoveDevice{{3}, {4}, {7}}}));
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == ConflictCode::ModelInvariant);
+    CHECK(attached->project.find_sequence({3})->find_track({4})->find_device_placement({7}) !=
+          nullptr);
+
+    auto routed_track = Track::create(
+        TrackInput{.id = {4},
+                   .name = "routed",
+                   .device_chain = {
+                       DevicePlacement{.id = {7}, .configuration = configuration}},
+                   .modulators = {Modulator{{8}, ModulatorKind::Lfo, "source"}},
+                   .modulation_routes = {
+                       ModulationRoute{{9},
+                                       {{8}, ModulationSourceKind::Modulator},
+                                       DeviceParameterTarget{{7}, 42},
+                                       0.5f,
+                                       true}}});
+    REQUIRE(routed_track);
+    auto routed_sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                             {std::move(routed_track).value()});
+    REQUIRE(routed_sequence);
+    auto routed_project = Project::create(
+        {{1}, "routed", 10, {3}, {}, {std::move(routed_sequence).value()}});
+    REQUIRE(routed_project);
+    auto route_rejected = reduce_transaction(
+        routed_project.value(),
+        transaction({1}, 1, 1, {}, {RemoveDevice{{3}, {4}, {7}}}));
+    REQUIRE_FALSE(route_rejected);
+    CHECK(route_rejected.error().code == ConflictCode::ModelInvariant);
+    CHECK(routed_project->find_sequence({3})->find_track({4})->find_device_placement({7}) !=
+          nullptr);
+}
+
+TEST_CASE("Device chain command equality and retained size cover authored payloads") {
+    DeviceConfiguration first;
+    first.device_kind = DeviceKind::BuiltIn;
+    first.binding_key = "pulp.effect.first";
+    DeviceConfiguration second = first;
+    second.binding_key = "pulp.effect.second";
+    const auto state = content_hash('a');
+
+    const Command insert = InsertDevice{
+        {3}, {4}, DevicePlacement{.id = {7}, .configuration = first}, ItemId{8}};
+    CHECK(equivalent(insert, insert));
+    CHECK_FALSE(equivalent(
+        insert, Command{InsertDevice{
+                    {3}, {4}, DevicePlacement{.id = {7}, .configuration = second}, ItemId{8}}}));
+    CHECK(retained_size(insert) == sizeof(InsertDevice) + first.binding_key.size());
+
+    const Command remove = RemoveDevice{{3}, {4}, {7}};
+    CHECK(equivalent(remove, remove));
+    CHECK_FALSE(equivalent(remove, Command{RemoveDevice{{3}, {4}, {8}}}));
+
+    const Command move = MoveDevice{{3}, {4}, {7}, ItemId{8}, std::nullopt};
+    CHECK(equivalent(move, move));
+    CHECK_FALSE(equivalent(
+        move, Command{MoveDevice{{3}, {4}, {7}, ItemId{8}, ItemId{9}}}));
+
+    const Command retarget = RetargetDevice{{3}, {4}, {7}, first, second};
+    CHECK(equivalent(retarget, retarget));
+    CHECK_FALSE(equivalent(
+        retarget, Command{RetargetDevice{{3}, {4}, {7}, second, first}}));
+    CHECK(retained_size(retarget) ==
+          sizeof(RetargetDevice) + first.binding_key.size() + second.binding_key.size());
+
+    const Command set_state = SetDeviceState{{3}, {4}, {7}, std::nullopt, state};
+    CHECK(equivalent(set_state, set_state));
+    CHECK_FALSE(equivalent(
+        set_state, Command{SetDeviceState{{3}, {4}, {7}, state, std::nullopt}}));
+}
+
 TEST_CASE("Timeline move and note velocity commands enforce typed preconditions") {
     const auto original = make_project();
     const auto old_range = clip(original).time_range();

@@ -731,12 +731,14 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
             return fail<Track>(PersistenceErrorCode::LimitExceeded, item_path,
                                devices->array[index].begin, device_increment.actual,
                                limits.max_device_placements);
-        auto device_data =
-            data_for(devices->array[index], "pulp.timeline.device_placement", item_path);
-        if (!device_data)
-            return fail<Track>(device_data.error().code, device_data.error().path,
-                               device_data.error().byte_offset);
-        auto device_id = required(*device_data.value(), "id", item_path + "/data");
+        auto device_envelope = data_for_versions(devices->array[index],
+                                                 "pulp.timeline.device_placement", 1, 2,
+                                                 item_path);
+        if (!device_envelope)
+            return fail<Track>(device_envelope.error().code, device_envelope.error().path,
+                               device_envelope.error().byte_offset);
+        const auto* device_data = device_envelope.value().data;
+        auto device_id = required(*device_data, "id", item_path + "/data");
         if (!device_id)
             return fail<Track>(device_id.error().code, device_id.error().path,
                                device_id.error().byte_offset);
@@ -745,7 +747,63 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         if (!decoded_device_id)
             return fail<Track>(decoded_device_id.error().code, decoded_device_id.error().path,
                                decoded_device_id.error().byte_offset);
-        decoded_devices.push_back(DevicePlacement{{decoded_device_id.value()}});
+        DevicePlacement placement{.id = {decoded_device_id.value()}};
+        if (device_envelope.value().version == 2) {
+            auto binding = string_field(*device_data, "binding_key", item_path + "/data");
+            auto bypassed = required(*device_data, "bypassed", item_path + "/data");
+            auto kind = string_field(*device_data, "device_kind", item_path + "/data");
+            auto position = string_field(*device_data, "position", item_path + "/data");
+            auto slot = string_field(*device_data, "slot_kind", item_path + "/data");
+            auto wet = required(*device_data, "wet_dry_bits", item_path + "/data");
+            if (!binding || !bypassed || !kind || !position || !slot || !wet ||
+                bypassed.value()->kind != JsonValue::Kind::Boolean)
+                return fail<Track>(PersistenceErrorCode::MissingField, item_path);
+            placement.configuration.binding_key = std::move(binding).value();
+            placement.configuration.bypassed = bypassed.value()->boolean;
+            if (kind.value() == "unresolved")
+                placement.configuration.device_kind = DeviceKind::Unresolved;
+            else if (kind.value() == "built_in")
+                placement.configuration.device_kind = DeviceKind::BuiltIn;
+            else if (kind.value() == "external")
+                placement.configuration.device_kind = DeviceKind::External;
+            else if (kind.value() == "generated")
+                placement.configuration.device_kind = DeviceKind::Generated;
+            else
+                return fail<Track>(PersistenceErrorCode::InvalidSchema,
+                                   item_path + "/data/device_kind");
+            if (position.value() == "pre_fader")
+                placement.configuration.position = DeviceChainPosition::PreFader;
+            else if (position.value() == "post_fader")
+                placement.configuration.position = DeviceChainPosition::PostFader;
+            else
+                return fail<Track>(PersistenceErrorCode::InvalidSchema,
+                                   item_path + "/data/position");
+            if (slot.value() == "event_to_event")
+                placement.configuration.slot_kind = DeviceSlotKind::EventToEvent;
+            else if (slot.value() == "event_to_audio")
+                placement.configuration.slot_kind = DeviceSlotKind::EventToAudio;
+            else if (slot.value() == "audio_to_audio")
+                placement.configuration.slot_kind = DeviceSlotKind::AudioToAudio;
+            else
+                return fail<Track>(PersistenceErrorCode::InvalidSchema,
+                                   item_path + "/data/slot_kind");
+            auto decoded_wet = parse_u32_number(*wet.value(), item_path + "/data/wet_dry_bits");
+            if (!decoded_wet)
+                return fail<Track>(decoded_wet.error().code, decoded_wet.error().path,
+                                   decoded_wet.error().byte_offset);
+            placement.configuration.wet_dry_bits = decoded_wet.value();
+            if (const auto* state = device_data->find("state_ref")) {
+                if (state->kind != JsonValue::Kind::String)
+                    return fail<Track>(PersistenceErrorCode::InvalidSchema,
+                                       item_path + "/data/state_ref");
+                auto decoded_state = ContentHash::from_hex(state->scalar);
+                if (!decoded_state)
+                    return fail<Track>(PersistenceErrorCode::InvalidSchema,
+                                       item_path + "/data/state_ref");
+                placement.state_ref = *decoded_state;
+            }
+        }
+        decoded_devices.push_back(std::move(placement));
     }
     std::vector<AutomationLane> decoded_automation;
     if (automation) {
