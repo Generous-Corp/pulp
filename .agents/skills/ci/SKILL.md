@@ -2687,6 +2687,27 @@ use no model. A code/test/conflict blocker receives one deduplicated
 `shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
 the recovery dispatcher is a separate exception path.
 
+`shipyard pr` does **not** imply this durable controller handoff. After the PR
+exists and its remote head is final, the submitting agent must run:
+
+```bash
+shipyard runner steward-handoff \
+  --repo Generous-Corp/pulp \
+  --pr "$PR_NUMBER" \
+  --head "$EXACT_REMOTE_HEAD" \
+  --workstream-id "$WORKSTREAM_ID" \
+  --context-url "$DURABLE_CONTEXT_URL" \
+  --apply --json
+```
+
+Then re-read GitHub and verify that the same head has a successful
+`shipyard/steward-handoff` commit status. The managed label by itself is not a
+receipt and is not head-specific. For a small change without a Linear item,
+use a stable PR-scoped workstream ID such as `pulp-pr-7507` and the PR URL as
+the durable context. An agent may stop watching only after this server-owned
+receipt exists; local Shipyard state is never sufficient for cross-machine
+continuation.
+
 Each tick also reconciles one labeled GitHub issue containing every current PR
 exception and control-plane error. The issue is updated in place, closes at
 zero exceptions, and reopens on recurrence. This is the durable, model-free
