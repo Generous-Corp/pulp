@@ -435,6 +435,21 @@ TEST_CASE("Linux dispatch publishes connected JACK timing and invalidates it",
     if (route.id != "jack")
         SKIP("Pulp did not select a running compiled JACK backend");
 
+#if defined(PULP_HAS_JACK)
+    jack_status_t probe_status{};
+    auto* probe = jack_client_open(
+        "pulp_timing_test_probe", JackNoStartServer, &probe_status);
+    REQUIRE(probe);
+    const char** playback_ports = jack_get_ports(
+        probe, nullptr, nullptr, JackPortIsPhysical | JackPortIsInput);
+    const bool has_physical_playback = playback_ports && playback_ports[0];
+    if (playback_ports)
+        jack_free(playback_ports);
+    jack_client_close(probe);
+    if (!has_physical_playback)
+        SKIP("JACK server exposes no physical playback ports");
+#endif
+
     DeviceConfig config{};
     config.sample_rate = 48'000.0;
     config.buffer_size = 128;
