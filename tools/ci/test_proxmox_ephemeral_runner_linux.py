@@ -136,7 +136,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('registration $stale_name is not offline', self.script)
 
     def test_runner_inventory_is_paginated_for_organization_scope(self) -> None:
-        self.assertGreaterEqual(self.script.count('"$GH_CLI" api --paginate'), 2)
+        self.assertGreaterEqual(self.script.count("github_api --paginate"), 2)
         self.assertGreaterEqual(
             self.script.count(".runners[] | [.id,.name,.busy,.status] | @tsv"), 2
         )
@@ -148,8 +148,12 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         ]
         self.assertIn('systemd-run --quiet --collect', cleanup)
         self.assertIn('--service-type=oneshot', cleanup)
+        self.assertIn('--property=User=root', cleanup)
         self.assertIn('--property=Restart=on-failure', cleanup)
         self.assertIn('--setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE"', cleanup)
+        self.assertIn(
+            '--setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE"', cleanup
+        )
         self.assertIn('--setenv="PULP_LINUX_GH_CLI=$GH_CLI"', cleanup)
         self.assertIn('--setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR"', cleanup)
         self.assertIn('--deferred-cleanup "$VMID"', cleanup)
@@ -194,6 +198,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('case "$busy" in', helper)
         self.assertIn("true) sleep 15; continue", helper)
         self.assertIn("deadline=$((SECONDS + 4500))", helper)
+        self.assertIn('legacy_credential="${4:-}"', helper)
+        self.assertIn("invalid legacy deferred-cleanup credential path", helper)
         self.assertIn("labels[]=pulp-shutdown-fenced", helper)
         self.assertIn('qm destroy "$vmid" --purge', helper)
         self.assertLess(
@@ -216,7 +222,6 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                     "200",
                     "pulp-pr-safe-ephemeral-200-test",
                     "orgs/Generous-Corp",
-                    str(token),
                 ],
                 capture_output=True,
                 text=True,
@@ -225,6 +230,33 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("root-owned mode-0600 regular file", result.stdout)
+
+    def test_deferred_cleanup_validates_legacy_fifth_argument(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            token = pathlib.Path(raw_tmp) / "org-token"
+            token.write_text("test-token", encoding="utf-8")
+            token.chmod(0o600)
+            env = os.environ.copy()
+            env["PULP_LINUX_ORG_PAT_FILE"] = str(token)
+            result = subprocess.run(
+                [
+                    "/bin/bash",
+                    str(SCRIPT),
+                    "--deferred-cleanup",
+                    "200",
+                    "pulp-pr-safe-ephemeral-200-test",
+                    "orgs/Generous-Corp",
+                    str(token) + "-wrong",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "invalid legacy deferred-cleanup credential path", result.stdout
+            )
 
     @unittest.skipUnless(
         os.geteuid() == 0 and sys.platform.startswith("linux"),
@@ -284,7 +316,6 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                     "200",
                     "pulp-pr-safe-ephemeral-200-test",
                     "orgs/Generous-Corp",
-                    str(token),
                 ],
                 capture_output=True,
                 text=True,
@@ -307,17 +338,36 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('[ ! -L "$path" ]', self.script)
         self.assertIn('[ "$metadata" = "0:600" ]', self.script)
         self.assertIn(
-            'automatic Linux runner organization PAT must be a root-owned mode-0600 regular file',
-            self.script,
-        )
-        self.assertIn(
-            'deferred-cleanup credential must be a root-owned mode-0600 regular file',
+            '$scope runner credential must be a root-owned mode-0600 regular file',
             self.script,
         )
         self.assertNotIn('Authorization: Bearer $PAT', self.script)
+        self.assertIn('GH_TOKEN="$PAT" "$GH_CLI" api "$@"', self.script)
+        self.assertIn('RT="$(github_api --method POST', self.script)
+
+    def test_automatic_pool_can_use_the_root_owned_github_app_helper(self) -> None:
         self.assertIn(
-            'GH_TOKEN="$PAT" "$GH_CLI" api --method POST', self.script
+            'GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"',
+            self.script,
         )
+        helper = self.script[
+            self.script.index("app_helper_secure() {") : self.script.index(
+                "deferred_cleanup() {"
+            )
+        ]
+        self.assertIn('[ "$path" = /usr/local/bin/ghapp ]', helper)
+        self.assertIn('[ ! -L "$path" ]', helper)
+        self.assertIn("stat -c '%u:%a'", helper)
+        self.assertIn("(mode_value & 8#022) == 0", helper)
+        self.assertIn(
+            'GitHub App helper authentication is restricted to organization runners',
+            helper,
+        )
+        self.assertIn(
+            'env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN', helper
+        )
+        self.assertGreaterEqual(helper.count("HOME=/root"), 2)
+        self.assertNotIn('PAT="$(cat "$credential_file")"', helper.split("app-helper)", 1)[1])
 
     def test_automatic_pool_requires_private_network_isolation(self) -> None:
         self.assertIn(

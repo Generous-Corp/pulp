@@ -2817,9 +2817,13 @@ If a supervisor is interrupted while its exact runner is busy, it delegates the
 VM to a separately scoped transient systemd cleanup unit. That unit waits for
 the job to finish, fences any later idle registration, and then deregisters and
 destroys the clone; do not replace this with immediate teardown or an abandoned
-VM slot. Automatic organization pools use the distinct root-only
-`gh-org-runner-pat`, never the repository pool credential, and the controller
-must pass it through `GH_TOKEN` rather than a command argument.
+VM slot. On the Mac Pro, automatic organization pools use the exact root-owned
+`/usr/local/bin/ghapp` helper and its file-backed GitHub App identity; the
+controller clears ambient token variables and never reads the legacy or an
+exposed PAT in this mode. A distinct root-only mode-`0600`
+`gh-org-runner-pat` remains the `token-file` fallback and must be passed through
+`GH_TOKEN`, never a command argument. Neither auth path may reuse the repository
+pool credential or enter a guest.
 
 Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
 proof during hosted saturation. Its default remains true so ordinary manual

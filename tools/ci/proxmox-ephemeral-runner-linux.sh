@@ -38,6 +38,7 @@ RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
 RUNNER_GROUP_POLICY="${PULP_LINUX_RUNNER_GROUP_POLICY:-trusted}"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
 ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
+GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
 RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
 GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}"
@@ -45,6 +46,8 @@ GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
 AUTOMATIC_NETWORK_ISOLATION=0
+GITHUB_API_READY=0
+PAT=""
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -58,26 +61,84 @@ credential_file_secure() {
     [ "$metadata" = "0:600" ]
 }
 
+app_helper_secure() {
+    local path="$1" metadata owner mode mode_value
+    [ "$path" = /usr/local/bin/ghapp ] || return 1
+    [ -f "$path" ] && [ ! -L "$path" ] && [ -x "$path" ] || return 1
+    metadata="$(stat -c '%u:%a' -- "$path" 2>/dev/null)" || return 1
+    owner="${metadata%%:*}"
+    mode="${metadata#*:}"
+    [ "$owner" = 0 ] && [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    mode_value=$((8#$mode))
+    (( (mode_value & 8#022) == 0 ))
+}
+
+configure_github_auth() {
+    local scope="$1" credential_file="$2"
+    command -v "$GH_CLI" >/dev/null 2>&1 || die "$GH_CLI is not on PATH"
+    case "$GITHUB_AUTH_MODE" in
+        token-file)
+            credential_file_secure "$credential_file" \
+                || die "$scope runner credential must be a root-owned mode-0600 regular file"
+            PAT="$(cat "$credential_file")"
+            [ -n "$PAT" ] || die "$scope runner credential is empty"
+            ;;
+        app-helper)
+            [ "$scope" = organization ] \
+                || die "GitHub App helper authentication is restricted to organization runners"
+            app_helper_secure "$GH_CLI" \
+                || die "organization GitHub App helper must be exact root-owned non-writable /usr/local/bin/ghapp"
+            PAT=""
+            ;;
+        *) die "unsupported PULP_LINUX_GITHUB_AUTH_MODE" ;;
+    esac
+    GITHUB_API_READY=1
+}
+
+github_api() {
+    [ "$GITHUB_API_READY" = 1 ] || die "GitHub API authentication is not configured"
+    if [ "$GITHUB_AUTH_MODE" = token-file ]; then
+        GH_TOKEN="$PAT" "$GH_CLI" api "$@"
+    else
+        env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+            -u GITHUB_ENTERPRISE_TOKEN HOME=/root "$GH_CLI" api "$@"
+    fi
+}
+
+verify_runner_group() {
+    if [ "$GITHUB_AUTH_MODE" = token-file ]; then
+        GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" "$@"
+    else
+        env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+            -u GITHUB_ENTERPRISE_TOKEN HOME=/root \
+            python3 "$GROUP_VERIFIER" "$@"
+    fi
+}
+
 deferred_cleanup() {
-    local vmid="$1" runner_name="$2" registration_api="$3" credential_file="$4"
-    local token deadline runners_tsv runner_lookup rid _ busy status labels
+    local vmid="$1" runner_name="$2" registration_api="$3" legacy_credential="${4:-}"
+    local expected_credential deadline runners_tsv runner_lookup rid _ busy status labels
     [[ "$vmid" =~ ^20[0-2]$ ]] || die "invalid deferred-cleanup VMID"
     [[ "$runner_name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid deferred-cleanup runner name"
     case "$registration_api" in
-        "repos/${REPO}"|"orgs/${ORG}") ;;
+        "repos/${REPO}") expected_credential="$PAT_FILE" ;;
+        "orgs/${ORG}") expected_credential="$ORG_PAT_FILE" ;;
         *) die "invalid deferred-cleanup registration scope" ;;
     esac
-    case "$credential_file" in
-        "$PAT_FILE"|"$ORG_PAT_FILE") ;;
-        *) die "invalid deferred-cleanup credential path" ;;
-    esac
-    credential_file_secure "$credential_file" \
-        || die "deferred-cleanup credential must be a root-owned mode-0600 regular file"
-    command -v "$GH_CLI" >/dev/null 2>&1 || die "$GH_CLI is not on PATH"
-    token="$(cat "$credential_file")"
+    if [ -n "$legacy_credential" ]; then
+        [ "$GITHUB_AUTH_MODE" = token-file ] \
+            || die "legacy deferred-cleanup credential is valid only in token-file mode"
+        [ "$legacy_credential" = "$expected_credential" ] \
+            || die "invalid legacy deferred-cleanup credential path"
+    fi
+    if [ "$registration_api" = "repos/${REPO}" ]; then
+        configure_github_auth repository "$expected_credential"
+    else
+        configure_github_auth organization "$expected_credential"
+    fi
     deadline=$((SECONDS + 4500))
     while [ "$SECONDS" -lt "$deadline" ]; do
-        runners_tsv="$(GH_TOKEN="$token" "$GH_CLI" api --paginate \
+        runners_tsv="$(github_api --paginate \
             "${registration_api}/actions/runners?per_page=100" \
             --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" || {
                 sleep 15
@@ -97,11 +158,11 @@ deferred_cleanup() {
         { [ "$status" = online ] || [ "$status" = offline ]; } \
             || die "invalid deferred-cleanup runner status"
         if [ "$status" = online ]; then
-            GH_TOKEN="$token" "$GH_CLI" api --method PUT \
+            github_api --method PUT \
                 "${registration_api}/actions/runners/${rid}/labels" \
                 -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
                 || die "cannot fence deferred-cleanup runner"
-            labels="$(GH_TOKEN="$token" "$GH_CLI" api \
+            labels="$(github_api \
                 "${registration_api}/actions/runners/${rid}" \
                 --jq '[.labels[].name] | join(",")')" \
                 || die "cannot verify deferred-cleanup fence"
@@ -127,7 +188,7 @@ deferred_cleanup() {
             || die "deferred-cleanup clone did not stop"
     fi
 
-    runners_tsv="$(GH_TOKEN="$token" "$GH_CLI" api --paginate \
+    runners_tsv="$(github_api --paginate \
         "${registration_api}/actions/runners?per_page=100" \
         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
         || die "cannot confirm deferred-cleanup runner shutdown"
@@ -139,7 +200,7 @@ deferred_cleanup() {
         IFS=$'\t' read -r rid _ busy status <<< "$runner_lookup"
         [ "$busy" = false ] && [ "$status" = offline ] \
             || die "deferred-cleanup runner did not become idle and offline"
-        GH_TOKEN="$token" "$GH_CLI" api --method DELETE \
+        github_api --method DELETE \
             "${registration_api}/actions/runners/${rid}" \
             || die "cannot deregister deferred-cleanup runner"
     fi
@@ -152,8 +213,9 @@ deferred_cleanup() {
 }
 
 if [ "${1:-}" = "--deferred-cleanup" ]; then
-    [ "$#" = 5 ] || die "invalid deferred-cleanup arguments"
-    deferred_cleanup "$2" "$3" "$4" "$5"
+    { [ "$#" = 4 ] || [ "$#" = 5 ]; } \
+        || die "invalid deferred-cleanup arguments"
+    deferred_cleanup "$2" "$3" "$4" "${5:-}"
     exit 0
 fi
 
@@ -168,7 +230,6 @@ command -v "$GH_CLI" >/dev/null 2>&1 \
 REGISTRATION_API="repos/${REPO}"
 RUNNER_URL="https://github.com/${REPO}"
 RUNNER_GROUP_ARG=""
-ACTIVE_PAT_FILE="$PAT_FILE"
 if [ -n "$RUNNER_GROUP_ID" ]; then
     [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
         || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
@@ -176,11 +237,8 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         || die "runner group 1 is the default group"
     [ -r "$GROUP_VERIFIER" ] \
         || die "runner-group verifier is missing at $GROUP_VERIFIER"
-    credential_file_secure "$ORG_PAT_FILE" \
-        || die "automatic Linux runner organization PAT must be a root-owned mode-0600 regular file"
-    PAT="$(cat "$ORG_PAT_FILE")"
-    ACTIVE_PAT_FILE="$ORG_PAT_FILE"
-    GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
+    configure_github_auth organization "$ORG_PAT_FILE"
+    GROUP_NAME="$(verify_runner_group \
         --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID" \
         --policy "$RUNNER_GROUP_POLICY")" \
         || die "automatic Linux runner group policy is not fail-closed"
@@ -220,9 +278,7 @@ elif [[ ",$LABELS," == *,pulp-auto-linux-x64,* \
     || ",$LABELS," == *,pulp-pr-safe-linux-x64,* ]]; then
     die "automatic Linux capability labels require a verified organization runner group"
 else
-    credential_file_secure "$PAT_FILE" \
-        || die "repository runner PAT must be a root-owned mode-0600 regular file"
-    PAT="$(cat "$PAT_FILE")"
+    configure_github_auth repository "$PAT_FILE"
 fi
 
 # ── admission ────────────────────────────────────────────────────────────────
@@ -263,9 +319,9 @@ RUNNER_SLOT_ID="${RUNNER_NAME_PREFIX}-${VMID}"
 RUNNER_NAME="${RUNNER_SLOT_ID}-$(cat /proc/sys/kernel/random/uuid)"
 
 reclaim_stale_slot_runners() {
-    [ -n "${PAT:-}" ] || return 0
+    [ "$GITHUB_API_READY" = 1 ] || return 0
     local runners_tsv slot_matches match_count stale_id stale_name stale_busy stale_status
-    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+    runners_tsv="$(github_api --paginate \
         "${REGISTRATION_API}/actions/runners?per_page=100" \
         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
         || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
@@ -280,7 +336,7 @@ reclaim_stale_slot_runners() {
         || die "registration $stale_name is busy or has an invalid busy state"
     [ "$stale_status" = offline ] \
         || die "registration $stale_name is not offline"
-    GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+    github_api --method DELETE \
         "${REGISTRATION_API}/actions/runners/${stale_id}" \
         || die "could not reclaim offline registration $stale_name"
     log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
@@ -301,8 +357,8 @@ cleanup() {
     # then re-read the
     # runner and delete its registration before powering off the clone. If work
     # won the race before the label removal, the second busy read preserves it.
-    if [ -n "${PAT:-}" ]; then
-        runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+    if [ "$GITHUB_API_READY" = 1 ]; then
+        runners_tsv="$(github_api --paginate \
             "${REGISTRATION_API}/actions/runners?per_page=100" \
             --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
             || { log "ERROR: cannot read all runner registrations; leaving clone $VMID for safe recovery"; return; }
@@ -317,12 +373,14 @@ cleanup() {
                 if command -v systemd-run >/dev/null 2>&1 \
                     && systemd-run --quiet --collect --unit="$cleanup_unit" \
                         --service-type=oneshot --property=TimeoutStartSec=80min \
+                        --property=User=root \
                         --property=Restart=on-failure --property=RestartSec=30s \
+                        --setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE" \
                         --setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE" \
                         --setenv="PULP_LINUX_GH_CLI=$GH_CLI" \
                         --setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR" \
                         "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
-                        "$RUNNER_NAME" "$REGISTRATION_API" "$ACTIVE_PAT_FILE"; then
+                        "$RUNNER_NAME" "$REGISTRATION_API"; then
                     log "runner is busy; delegated clone $VMID to $cleanup_unit"
                 else
                     log "ERROR: runner is busy and deferred cleanup could not be scheduled; leaving clone $VMID for safe recovery"
@@ -334,12 +392,12 @@ cleanup() {
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
             if [ "$runner_status" = online ]; then
-                GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
+                github_api --method PUT \
                     "${REGISTRATION_API}/actions/runners/${rid}/labels" \
                     -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
                     || { log "ERROR: cannot fence runner dispatch; leaving clone $VMID for safe recovery"; return; }
                 for fence_probe in 1 2; do
-                    fenced_runner="$(GH_TOKEN="$PAT" "$GH_CLI" api \
+                    fenced_runner="$(github_api \
                         "${REGISTRATION_API}/actions/runners/${rid}" \
                         --jq '[.name,.busy,.status,([.labels[].name] | join(","))] | @tsv')" \
                         || { log "ERROR: cannot verify dispatch fence; leaving clone $VMID for safe recovery"; return; }
@@ -376,7 +434,7 @@ cleanup() {
                 [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] \
                     || { log "ERROR: fenced clone $VMID did not stop; leaving it for safe recovery"; return; }
                 while [ "$SECONDS" -lt "$shutdown_deadline" ]; do
-                    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+                    runners_tsv="$(github_api --paginate \
                         "${REGISTRATION_API}/actions/runners?per_page=100" \
                         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
                         || { log "ERROR: cannot confirm fenced runner shutdown; leaving clone $VMID for safe recovery"; return; }
@@ -399,7 +457,7 @@ cleanup() {
             [ -n "$runner_lookup" ] || rid=""
             if [ -z "$rid" ]; then
                 log "runner deregistered itself during fenced shutdown"
-            elif ! GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+            elif ! github_api --method DELETE \
                 "${REGISTRATION_API}/actions/runners/${rid}"; then
                 log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
                 return
@@ -604,9 +662,9 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 log "minting registration token"
 # Keep the runner-management credential out of process arguments. gh reads it
 # from the child environment and prints only the single-use registration token.
-RT="$(GH_TOKEN="$PAT" "$GH_CLI" api --method POST \
+RT="$(github_api --method POST \
     "${REGISTRATION_API}/actions/runners/registration-token" --jq .token)"
-[ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
+[ -n "$RT" ] || die "could not mint a registration token (GitHub App/PAT permission or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
 ssh -o BatchMode=yes "ci@$GUEST_IP" "

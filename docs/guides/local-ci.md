@@ -222,25 +222,28 @@ install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
 install -o root -g root -m 0644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
   /etc/systemd/system/
 install -d -o root -g root -m 0755 /etc/pulp
-printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$TRUSTED_GROUP_ID" \
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nPULP_LINUX_GH_CLI=/usr/local/bin/ghapp\n' "$TRUSTED_GROUP_ID" \
   > /etc/pulp/linux-trusted-runner-group.env
-printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\n' "$PR_SAFE_GROUP_ID" \
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nPULP_LINUX_GH_CLI=/usr/local/bin/ghapp\n' "$PR_SAFE_GROUP_ID" \
   > /etc/pulp/linux-pr-safe-runner-group.env
 chmod 0600 /etc/pulp/linux-{trusted,pr-safe}-runner-group.env
 systemctl daemon-reload
 ```
 
-The automatic organization-scoped units use a separate root-only credential at
-`/root/.config/pulp/secrets/gh-org-runner-pat` (or the path named by
-`PULP_LINUX_ORG_PAT_FILE`). Provision it through the host's secret-management
-path, never in a unit file or command argument, and require mode `0600` owned by
-root. Its fine-grained organization permission must grant **Self-hosted
-runners: read and write** so the controller can verify the exact runner group,
-mint one-use organization registration tokens, inspect registrations, fence an
-idle runner, and deregister it. The legacy repository-scoped unit continues to
-use the separate `gh-runner-pat`; neither credential enters a guest. Keep both
-automatic units disabled when the organization credential is absent, expired,
-or awaiting rotation.
+The Mac Pro automatic organization-scoped units use its existing root-owned
+`/usr/local/bin/ghapp` helper by setting
+`PULP_LINUX_GITHUB_AUTH_MODE=app-helper`. The controller accepts only that exact
+root-owned, non-symlink, non-group/world-writable path and clears ambient token
+variables before every call; `ghapp` mints a short-lived installation token
+from the host's file-backed GitHub App identity. The App must grant
+**Self-hosted runners: read and write** so the controller can verify the exact
+runner group, mint one-use organization registration tokens, inspect
+registrations, fence an idle runner, and deregister it. A distinct root-owned
+mode-`0600` `gh-org-runner-pat` remains a supported `token-file` fallback, but
+do not use a copied, exposed, expired, or rotation-pending PAT. The legacy
+repository-scoped unit continues to require the separate `gh-runner-pat`;
+neither long-lived credential nor App key enters a guest. Keep an automatic
+unit disabled whenever its selected auth path or group proof is unavailable.
 
 Every clone verifies its named policy before creation, registers at
 organization scope, and receives exactly one of `pulp-auto-linux-x64` or
