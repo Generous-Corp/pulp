@@ -36,9 +36,14 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
             self.assertNotIn(permission, permissions)
 
     def test_mutations_use_repository_scoped_shipyard_app_token(self) -> None:
-        self.assertIn("actions/create-github-app-token@", self.text)
+        self.assertIn(
+            "actions/create-github-app-token@"
+            "bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            self.text,
+        )
         self.assertIn("secrets.SHIPYARD_APP_ID", self.text)
         self.assertIn("secrets.SHIPYARD_APP_PRIVATE_KEY", self.text)
+        self.assertIn("permission-merge-queues: write", self.text)
         self.assertIn("steps.shipyard-app-token.outputs.token", self.text)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.text)
         checkout = self.doc["jobs"]["reconcile"]["steps"][0]
@@ -64,6 +69,11 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("github.run_attempt", restore["with"]["key"])
         self.assertEqual(restore["with"]["key"], save["with"]["key"])
         self.assertIn("--ledger \"$STEWARD_LEDGER\"", self.text)
+        self.assertIn(
+            "name: shipyard-merge-steward-${{ github.run_id }}-"
+            "${{ github.run_attempt }}",
+            self.text,
+        )
         self.assertIn("retention-days: 14", self.text)
 
     def test_apply_is_explicit_and_no_model_is_launched(self) -> None:
