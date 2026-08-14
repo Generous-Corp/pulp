@@ -1431,11 +1431,11 @@ local pool is down, `github <leg>` is a full revert in one command.
 The lightweight resolver jobs for `release-cli.yml` and
 `sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
 without moving artifact builds or publication there. Their selector priority is
-`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
-`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
-to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
-pinned to the repository default branch; never expose the persistent pool to
-`pull_request` or `merge_group` code through this fallback.
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. They never read
+the generic `PULP_LOCAL_LINUX_RUNS_ON_JSON` PR/merge-group selector. Keep this
+routing limited to tag-push or maintainer-dispatch workflows, and keep resolver
+policy checkouts pinned to the repository default branch; never expose the
+persistent pool to `pull_request` or `merge_group` code through this fallback.
 
 Facts worth keeping (measured):
 

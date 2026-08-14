@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard inline Python used by Build-and-Test preamble polling jobs.
+"""Guard inline Python used by Build-and-Test preamble and alias jobs.
 
 The self-hosted preamble can check out Pulp below /Volumes/Workshop. Python's
 stdin mode resolves the current working directory while computing sys.path[0];
@@ -69,8 +69,8 @@ def test_all_preamble_inline_python_uses_stable_cwd() -> None:
         )
 
     _assert(
-        inline_count == 3,
-        f"expected exactly 3 preamble inline Python invocations, found {inline_count}; "
+        inline_count == 2,
+        f"expected exactly 2 preamble inline Python invocations, found {inline_count}; "
         "classify new helpers explicitly",
     )
 

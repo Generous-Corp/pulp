@@ -438,16 +438,23 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.88.0 — exact-head stewardship is load-bearing
+### Why the pin sits at v0.90.2 — leased runners and queue ownership are load-bearing
 
-v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
-is mutable only when its current commit has a successful
-`shipyard/steward-handoff` status and the PR carries `shipyard:managed`.
-Repository-wide discovery still reports older PRs, but classifies them as
-`unmanaged` and never adopts, reruns, cancels, or queues them implicitly.
-Semantic failures are surfaced once through the deduplicated
-`shipyard/steward-recovery` status and `shipyard:needs-agent` label; routine
-reconciliation and native merge-queue admission require no model.
+v0.90.2 is Pulp's current operational floor. It includes the v0.87 fail-closed
+trusted and PR-safe local-Linux lease producers with bounded GitHub observation
+and mutation calls, the v0.88 exact-head steward handoff, and the v0.90 atomic
+steward ownership transfer. Pulp's leased profiles depend on that producer
+generation; an older binary must not advertise either protected Linux pool as
+healthy or assume merge-queue ownership.
+
+The v0.88 handoff contract remains part of that floor. A PR is mutable only
+when its current commit has a successful `shipyard/steward-handoff` status and
+the PR carries `shipyard:managed`. Repository-wide discovery still reports
+older PRs, but classifies them as `unmanaged` and never adopts, reruns, cancels,
+or queues them implicitly. Semantic failures are surfaced once through the
+deduplicated `shipyard/steward-recovery` status and `shipyard:needs-agent`
+label; routine reconciliation and native merge-queue admission require no
+model.
 
 Pulp's first controller rollout is the manual-only GitHub-hosted workflow in
 `.github/workflows/shipyard-merge-steward.yml`. It is serialized per repository
@@ -455,19 +462,18 @@ and restores a small retry ledger, while GitHub statuses and labels remain the
 durable ownership truth. Its mutations use the repository-scoped Shipyard App
 installation token because workflow-token mutations do not emit the downstream
 `merge_group` events required to land. The controller job is restricted to the
-main-branch workflow and does not persist checkout credentials. Do not schedule that workflow until live canaries
-prove unmanaged negative control, exact-head handoff, recovery deduplication,
-recovery clearing on a corrected head, and merge-queue landing without an
-agent wait loop.
+main-branch workflow and does not persist checkout credentials. Do not schedule
+that workflow until live canaries prove unmanaged negative control, exact-head
+handoff, recovery deduplication, recovery clearing on a corrected head, and
+merge-queue landing without an agent wait loop.
 
 ### v0.83.0 floor — fleet health and formal stacks remain load-bearing
 
-v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
-enqueue mutation boundary, including the cross-repository runner steward. Pulp
-can therefore run a small native GitHub stacked-PR pilot without allowing an
-unattended steward tick to send one layer through the legacy unstacked queue
-path. Shipyard remains observe-only for formal stacks until it durably models
-GitHub's asynchronous stack-merge request and completion lifecycle.
+v0.83.0 is historical context, not the current baseline. It added fail-closed
+formal-stack inspection to every Shipyard merge or enqueue mutation boundary,
+including the cross-repository runner steward. That prevented an unattended
+steward tick from sending one layer through the legacy unstacked queue path
+while Shipyard remained observe-only for formal stacks.
 
 v0.81.4 preserves v0.81.3's attached supervised PR push and regenerates Pulp's
 SSH-signing setup from `release.post_tag_hook.ssh_signing_setup_script`, so a

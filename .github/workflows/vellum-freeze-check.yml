@@ -19,18 +19,9 @@ permissions:
 jobs:
   freeze-check:
     name: Vellum freeze
-    # Read-only, unprivileged freeze validation may use the protected local
-    # Linux group. Fork PRs and an unset selector fall back to hosted Linux.
-    runs-on: >-
-      ${{
-        github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
-        (github.event_name == 'merge_group' ||
-         github.event_name == 'workflow_dispatch' ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository)) &&
-        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
-        'ubuntu-latest'
-      }}
+    # Keep this small gate hosted until its runs-on path can validate the
+    # short-lived fleet lease before runner assignment.
+    runs-on: ubuntu-latest
     steps:
       - name: Check out the proposed merge tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

@@ -20,6 +20,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -316,7 +317,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         raise AssertionError("resolve-provider matrix step not found")
 
     def _matrix_keys(
-        self, event_name: str, *, run_windows: bool = True
+        self, event_name: str, *, run_windows: bool = True, trusted_linux: bool = False
     ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
         env = {
@@ -347,6 +348,16 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "NAMESPACE_WINDOWS_RUNS_ON_JSON": "",
             }
         )
+        if trusted_linux:
+            env["CONFIGURED_LINUX_RUNNER_SELECTOR_JSON"] = json.dumps(
+                [
+                    "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
+                    "pulp-host-macpro", "pulp-auto-linux-x64",
+                ]
+            )
+            env["CONFIGURED_LINUX_LEASE_UNTIL"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=5)
+            ).isoformat()
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "github_output"
             output.write_text("", encoding="utf-8")
@@ -377,19 +388,29 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
-        """Advisory hosted legs must not sit in the path every merge takes.
+    def test_merge_group_matrix_keeps_macos_and_protected_linux(self) -> None:
+        """Windows stays out while protected local-first Linux validates the queue.
 
         A merge-group leg runs per queued entry, so Windows there is the single
-        largest consumer of hosted minutes while gating nothing — `windows` is
-        advisory, and only `macos` plus the version/skill and Vellum checks are
-        required. Linux remains advisory and uses the protected disposable Mac
-        Pro pool when configured, with the hosted resolver fallback.
+        largest consumer of hosted minutes while gating nothing. Linux is kept
+        for the health-leased protected Mac Pro route with hosted fallback, and
+        the required macOS reporter must therefore remain independent of its
+        terminal state.
         """
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
+
+    def test_active_trusted_merge_group_uses_main_owned_reusable_linux(self) -> None:
+        keys = self._matrix_keys("merge_group", trusted_linux=True)
+        self.assertEqual(keys, ["macos"])
+        trusted = self.workflow["jobs"]["trusted_linux"]
+        self.assertEqual(
+            trusted["uses"],
+            "Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main",
+        )
+        self.assertEqual(trusted["with"]["route_kind"], "trusted")
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.
@@ -433,20 +454,27 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("inputs.run_windows", body)
         self.assertIn("Windows omitted by operator request", body)
 
-    def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
-        """The terminal required alias must leave classifiers runnable.
+    def test_required_macos_reporter_pools_match_wait_behavior(self) -> None:
+        """No merge-group reporter occupies preamble for the build duration.
 
-        The reporter starts after the matrix is terminal, but a dedicated alias
-        pool still keeps report traffic independent of preamble capacity.
+        The PR reporter starts after the matrix is terminal and uses a dedicated
+        alias pool. Native merge groups report from the real macOS leg, while
+        the skip/failure fallback uses preamble only for one bounded step.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
         self.assertIn("ubuntu-latest", runs_on)
         self.assertNotIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
 
-        merge_runs_on = self.workflow["jobs"]["macos-merge-group"]["runs-on"]
-        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", merge_runs_on)
-        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", fallback["runs-on"])
+        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", fallback["runs-on"])
+        fallback_body = "\n".join(
+            step.get("run", "") for step in fallback["steps"]
+        )
+        self.assertNotIn("gh api", fallback_body)
+        self.assertNotIn("while true", fallback_body)
+        self.assertNotIn("sleep 10", fallback_body)
 
     def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
         """Advisory results may delay but cannot determine required macOS."""
@@ -466,15 +494,40 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         pr_alias = self.workflow["jobs"]["macos"]
         self.assertIn("macos-pr-unused", pr_alias["name"])
 
-        merge_alias = self.workflow["jobs"]["macos-merge-group"]
-        self.assertIn("macos-merge-unused", merge_alias["name"])
-        self.assertIn("'macos'", merge_alias["name"])
-        self.assertIn("build", merge_alias["needs"])
-        self.assertIn("classify", merge_alias["needs"])
-        merge_condition = " ".join(merge_alias["if"].split())
-        self.assertEqual(
-            merge_condition, "always() && github.event_name == 'merge_group'"
+        matrix_name = self.workflow["jobs"]["build"]["name"]
+        self.assertIn("github.event_name == 'merge_group'", matrix_name)
+        self.assertIn("matrix.key == 'macos'", matrix_name)
+        self.assertIn("'macos'", matrix_name)
+
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertIn("macos-merge-unused", fallback["name"])
+        self.assertIn("'macos'", fallback["name"])
+        self.assertNotIn("build", fallback["needs"])
+        self.assertIn("resolve-provider", fallback["needs"])
+        self.assertIn("classify", fallback["needs"])
+        fallback_condition = " ".join(fallback["if"].split())
+        self.assertIn(
+            "needs.resolve-provider.result != 'success'", fallback_condition
         )
+        self.assertIn("needs.classify.result != 'success'", fallback_condition)
+        self.assertIn(
+            "needs.classify.outputs.native_build_required != 'true'",
+            fallback_condition,
+        )
+
+    def test_merge_group_macos_does_not_serialize_or_cancel_queue_entries(self) -> None:
+        """Five queue entries keep independent runs and direct macOS checks."""
+        concurrency = self.workflow["concurrency"]
+        self.assertEqual(concurrency["group"], "build-${{ github.ref }}")
+        self.assertEqual(
+            concurrency["cancel-in-progress"],
+            "${{ github.event_name != 'push' }}",
+        )
+        fallback = self.workflow["jobs"]["macos-merge-group-fallback"]
+        self.assertNotIn("concurrency", fallback)
+        guide = read(REPO_ROOT / "docs" / "guides" / "local-ci.md")
+        self.assertIn("five-entry merge queue", guide)
+        self.assertIn("two active preamble runners", guide)
 
     def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
         for name in ("linux", "windows"):

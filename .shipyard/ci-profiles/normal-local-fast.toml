@@ -13,7 +13,7 @@
 # Shipyard/agents can explain or apply the same policy from the Pulp checkout.
 
 name = "normal-local-fast"
-description = "Fast PRs on local ARM64 VMs; nightly GitHub Intel validation."
+description = "Local-first disposable merge-group validation with hosted fallback; PR Linux remains hosted."
 
 [repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
@@ -23,6 +23,20 @@ github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 [repo."Generous-Corp/pulp".pr.linux]
 strategy = "github-only"
 targets = ["github.linux-x64"]
+
+[repo."Generous-Corp/pulp".merge_group.linux]
+strategy = "leased-ordered-fallback"
+targets = ["macpro.linux-x64-trusted-vm", "github.linux-x64"]
+github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
+health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"
+health_lease_ttl_seconds = 300
+health_lease_events = ["merge_group"]
+health_lease_runner_name_prefix = "pulp-ci-ephemeral-"
+health_lease_merge_queue_branch = "main"
+# Must cover the live ruleset's max_entries_to_build. A smaller protected
+# fleet deliberately leaves the lease absent and keeps merge-group Linux hosted.
+health_lease_admission_burst = 5
+ephemeral_required = true
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"
@@ -63,8 +77,17 @@ runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 [targets."m5.linux-arm64-vm"]
 runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 
-[targets."macpro.linux-x64-vm"]
-runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
+[targets."macpro.linux-x64-pr-safe-vm"]
+runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro", "pulp-pr-safe-linux-x64"]
+runner_group = "pulp-pr-safe-build"
+runner_name_prefix = "pulp-pr-safe-ephemeral-"
+ephemeral = true
+
+[targets."macpro.linux-x64-trusted-vm"]
+runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro", "pulp-auto-linux-x64"]
+runner_group = "pulp-trusted-build"
+runner_name_prefix = "pulp-ci-ephemeral-"
+ephemeral = true
 
 [targets."macstudio.windows-arm64-qemu"]
 runs_on_json = ["self-hosted", "Windows", "ARM64", "pulp-build-windows"]

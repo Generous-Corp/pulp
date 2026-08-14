@@ -4,9 +4,10 @@
 The build workflow deliberately keeps the configured Mac Pro selector separate
 from the selector authorized for the current event. The organization runner
 group restricts trusted workflow refs to protected default-branch copies, so
-only a caller that has already proved that workflow-ref boundary may use the
-disposable Mac Pro pool. Forks and PR workflow revisions outside that protected
-ref remain hosted.
+only protected merge-group orchestration may use this selector. A separate
+main-owned reusable workflow owns the PR-safe lane. Shipyard maintains a short
+operator health lease for each pool; an absent or expired lease restores hosted
+fallback before job dispatch.
 
 This helper turns that policy decision into machine-readable metadata and
 fails a dispatch if its configured selector is silently replaced by a hosted
@@ -16,6 +17,7 @@ fallback. It prints one compact JSON object on stdout.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 import sys
@@ -24,7 +26,7 @@ from typing import Any, Optional
 
 ROUTE_REASONS = (
     "explicit-dispatch",
-    "trusted-local",
+    "local-enabled",
     "security-hosted",
     "unconfigured-hosted",
 )
@@ -54,6 +56,15 @@ GITHUB_HOSTED_LABELS = frozenset(
         "macos-26-xlarge",
     }
 )
+MAC_PRO_LINUX_LABELS = (
+    "self-hosted",
+    "linux",
+    "x64",
+    "pulp-build-linux-x64",
+    "pulp-host-macpro",
+    "pulp-auto-linux-x64",
+)
+MAX_LEASE_HORIZON = dt.timedelta(minutes=15)
 
 
 def _selector(raw: str, name: str) -> tuple[Any, str]:
@@ -81,6 +92,32 @@ def _normalized_labels(selector: Any) -> list[str]:
 def _is_known_github_hosted(selector: Any) -> bool:
     labels = _normalized_labels(selector)
     return bool(labels) and all(label in GITHUB_HOSTED_LABELS for label in labels)
+
+
+def is_macpro_linux_selector(selector: Any) -> bool:
+    """Return whether *selector* is the reviewed unprivileged Mac Pro lane."""
+    labels = _normalized_labels(selector)
+    return (
+        len(labels) == len(MAC_PRO_LINUX_LABELS)
+        and set(labels) == set(MAC_PRO_LINUX_LABELS)
+    )
+
+
+def operator_lease_active(raw: str, now: dt.datetime | None = None) -> bool:
+    """Accept a short, unexpired RFC 3339 lease issued by runner operations."""
+    raw = raw.strip()
+    if not raw:
+        return False
+    try:
+        expires = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if expires.tzinfo is None:
+            return False
+        current = now or dt.datetime.now(dt.timezone.utc)
+        current = current.astimezone(dt.timezone.utc)
+        expires = expires.astimezone(dt.timezone.utc)
+    except (ValueError, OverflowError):
+        return False
+    return current < expires <= current + MAX_LEASE_HORIZON
 
 
 def provider_for_selector(
@@ -116,6 +153,7 @@ def resolve_route(
     authorized_selector_json: str,
     resolved_selector_json: str,
     requested_provider: str = "github-hosted",
+    local_enabled: bool = False,
 ) -> dict[str, str]:
     """Return Linux route metadata or reject an inconsistent dispatch."""
     dispatch, _ = _selector(
@@ -133,46 +171,74 @@ def resolve_route(
     if resolved is None:
         raise ValueError("resolved Linux selector must not be empty")
 
-    if event_name == "workflow_dispatch" and (
-        dispatch is not None or configured is not None
-    ):
-        reason = "explicit-dispatch"
-        expected = dispatch if dispatch is not None else configured
-        if expected is not None and authorized != expected:
-            raise ValueError(
-                "workflow_dispatch authorized selector does not match its "
-                "dispatch override or configured selector"
-            )
-        if dispatch is None and configured is not None:
-            if resolved != configured or _is_known_github_hosted(configured):
+    automatic_local = event_name == "merge_group"
+    if event_name == "workflow_dispatch" and dispatch is not None:
+        if is_macpro_linux_selector(dispatch):
+            if authorized is not None or resolved != "ubuntu-latest":
                 raise ValueError(
-                    "workflow_dispatch configured Linux selector unexpectedly "
-                    f"resolved to {resolved_json}"
+                    "workflow_dispatch cannot directly target the protected "
+                    "Mac Pro selector and must resolve exactly to ubuntu-latest"
                 )
-    elif event_name in ("pull_request", "merge_group") and authorized is not None:
-        reason = "trusted-local"
+            reason = "security-hosted"
+        else:
+            reason = "explicit-dispatch"
+            if authorized != dispatch:
+                raise ValueError(
+                    "workflow_dispatch authorized selector does not match its "
+                    "dispatch override"
+                )
+    elif event_name == "workflow_dispatch":
+        if authorized is not None:
+            raise ValueError(
+                "workflow_dispatch unexpectedly authorized a configured selector"
+            )
+        reason = "security-hosted" if configured is not None else "unconfigured-hosted"
+    elif automatic_local and authorized is not None:
+        if configured is None or authorized != configured:
+            raise ValueError(
+                "automatic Linux routing must use the configured selector"
+            )
+        if not is_macpro_linux_selector(authorized):
+            raise ValueError(
+                "automatic Linux routing only authorizes the reviewed Mac Pro "
+                "unprivileged selector"
+            )
+        if not local_enabled:
+            raise ValueError(
+                "automatic Linux routing authorized a local selector without "
+                "the operator health lease"
+            )
+        reason = "local-enabled"
     elif authorized is not None:
         raise ValueError(
             f"{event_name} unexpectedly authorized a Linux selector"
+        )
+    elif automatic_local:
+        if resolved != "ubuntu-latest":
+            raise ValueError(
+                "automatic Linux routing without an active local lease must "
+                "resolve exactly to ubuntu-latest"
+            )
+        reason = (
+            "security-hosted"
+            if configured is not None
+            else "unconfigured-hosted"
         )
     elif configured is not None:
         reason = "security-hosted"
     else:
         reason = "unconfigured-hosted"
 
-    configured_local = (
-        event_name in ("pull_request", "merge_group")
-        and authorized is not None
-    ) or (
-        event_name == "workflow_dispatch"
-        and dispatch is None
-        and configured is not None
-    )
+    configured_local = configured is not None and reason == "local-enabled"
     return {
         "linux_route_reason": reason,
         "linux_provider": provider_for_selector(
             resolved,
-            requested_provider=requested_provider,
+            requested_provider=(
+                "github-hosted"
+                if automatic_local and reason != "local-enabled"
+                else requested_provider
+            ),
             configured_local=configured_local,
             operator_override=dispatch is not None,
         ),
@@ -189,6 +255,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--authorized-selector-json", default="")
     parser.add_argument("--resolved-selector-json", required=True)
     parser.add_argument("--requested-provider", default="github-hosted")
+    parser.add_argument(
+        "--local-enabled",
+        action="store_true",
+        help="pass the workflow's single validated lease snapshot",
+    )
     return parser
 
 
@@ -202,6 +273,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             authorized_selector_json=args.authorized_selector_json,
             resolved_selector_json=args.resolved_selector_json,
             requested_provider=args.requested_provider,
+            local_enabled=args.local_enabled,
         )
     except ValueError as exc:
         print(f"Linux route policy error: {exc}", file=sys.stderr)

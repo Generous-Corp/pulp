@@ -73,9 +73,11 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
 
     def test_linux_job_builds_the_full_examples_tree(self) -> None:
         linux_job = self.jobs["build-linux"]
-        self.assertIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", linux_job["runs-on"])
-        self.assertIn("github.event_name == 'workflow_dispatch'", linux_job["runs-on"])
-        self.assertIn("ubuntu-latest", linux_job["runs-on"])
+        self.assertEqual(linux_job["runs-on"], "ubuntu-latest")
+        self.assertNotIn(
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+            (ROOT / ".github" / "workflows" / "examples-validation.yml").read_text(),
+        )
         self.assertTrue(
             any(
                 step.get("uses") == "./.github/actions/install-linux-build-deps"
@@ -95,6 +97,32 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             "--target pulp-examples-all",
             named_step(linux_job, "Build all examples")["run"],
         )
+
+    def test_shipyard_pr_linux_profile_stays_hosted_without_atomic_admission(self) -> None:
+        profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
+        table = toml_table(profile, 'repo."Generous-Corp/pulp".pr.linux')
+        self.assertIn('strategy = "github-only"', table)
+        self.assertIn('targets = ["github.linux-x64"]', table)
+        self.assertNotIn("health_lease_", table)
+        self.assertNotIn("enable_variable", table)
+
+    def test_shipyard_merge_group_linux_profile_is_local_first_with_hosted_fallback(self) -> None:
+        profile = (ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml").read_text()
+        table = toml_table(profile, 'repo."Generous-Corp/pulp".merge_group.linux')
+        self.assertIn('strategy = "leased-ordered-fallback"', table)
+        self.assertIn('"macpro.linux-x64-trusted-vm", "github.linux-x64"', table)
+        self.assertIn('github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"', table)
+        self.assertIn(
+            'health_lease_variable = "PULP_LOCAL_LINUX_LEASE_UNTIL"', table
+        )
+        self.assertEqual(toml_json_value(table, "health_lease_ttl_seconds"), 300)
+        self.assertEqual(
+            toml_json_value(table, "health_lease_events"),
+            ["merge_group"],
+        )
+        self.assertIn('health_lease_runner_name_prefix = "pulp-ci-ephemeral-"', table)
+        self.assertIn('health_lease_merge_queue_branch = "main"', table)
+        self.assertEqual(toml_json_value(table, "health_lease_admission_burst"), 5)
 
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(

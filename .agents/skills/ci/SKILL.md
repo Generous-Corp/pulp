@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.90.2`,
 which provides it, so the pinned binary is sufficient. That pin also makes
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
@@ -129,6 +129,9 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   `cross-platform-check.yml`, the windows gates) configure with
   `PULP_BUILD_EXAMPLES=OFF`. The path-filtered `example-validation` workflow
   compiles the full examples tree on Linux and macOS for relevant changes;
+  its Linux job is always GitHub-hosted, including `workflow_dispatch`. It must
+  not consume `PULP_LOCAL_LINUX_RUNS_ON_JSON`: that selector belongs to the
+  workflow-restricted trusted merge-group pool and would be unroutable here.
   Shipyard's separate blocking `[validation.default]` temporarily retains
   `PULP_BUILD_EXAMPLES=ON` until that stable context is promoted to required.
   `release-cli.yml` also compiles them at release time. Do not assume a green
@@ -488,10 +491,14 @@ together, or the drift check fails. Full rationale:
 ## A red `macos` or `linux` alias does not mean tests failed
 
 `macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
-The required `macos` alias reports after the build matrix is terminal; it does
-not poll while the native build runs. Alias jobs run no build and produce no
-build output of their own — a `linux` alias log is about 48 lines, and it says
-so outright:
+The required `macos` alias runs no build and produces no build output of its
+own. On PR/manual runs it reports after the combined matrix is terminal. On
+`merge_group` its dedicated reporter depends only on routing + classification
+and polls the current run's jobs until the one macOS matrix leg is terminal;
+it must not depend on `build`, because that would make the required macOS
+context wait for the independently routed Linux leg. It accepts only macOS
+`success`; missing, duplicate, failed, skipped, cancelled, or null terminal
+state fails closed. A `linux` alias log is about 48 lines, and says so outright:
 
 ```
 Linux leg conclusion: cancelled
@@ -640,13 +647,38 @@ Repo variables also resolve for fork runs.
 The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
 that means a dedicated organization runner group containing only its ephemeral
 runners, repository access granted only to `Generous-Corp/pulp`, and workflow
-access restricted to the protected default-branch copy of
-`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
+access restricted to the protected default-branch workflow assigned to that
+group. Both groups permit only `.github/workflows/pr-safe-linux.yml@main`; its
+protected admission job distinguishes trusted merge-group from PR-safe calls
+and validates the disjoint selector and lease for that event. Prove that
 a PR changing its own workflow cannot target the group before enabling
-automatic PR or merge-group routing. Until that exists, do not add another
-private pool to automatic `pull_request` routing. In particular, the Mac Pro
-Linux pool and example-validation advisory macOS selector remain
-`workflow_dispatch`-only.
+automatic PR routing. Never share the trusted and PR-safe capability labels,
+runner names, health leases, or runner groups.
+Automatic clones require a dedicated no-uplink `/30` bridge per VM slot, an
+enabled Proxmox firewall, exact IPv4/ARP source filtering, an EtherType
+allowlist limited to ARP and IPv4, default-deny ingress,
+and one ingress exception for SSH from the exact Proxmox controller address.
+The active-rule proof must verify both IPv4 and IPv6 ingress drops as well as
+that narrow SSH exception. Policy write, compile, active-state, label, prefix,
+and group-verification failures must stop the VM before registration. Cleanup replaces every routing label with a shutdown
+fence, proves the runner idle twice, stops the clone, and requires the
+registration to become offline before deletion.
+
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+Use an organization-capable controller credential only on the Proxmox host; no
+persistent GitHub credential enters a guest.
+
+A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
+GitHub cannot retarget a queued job. Shipyard must renew each lane's short lease
+only when the complete declared admission burst is online and idle. Never route
+`pull_request_target`, signing, release, deployment, or other secret-bearing work
+to either automatic Linux pool.
+PR Linux remains GitHub-hosted even with a live snapshot lease: without an
+atomic per-job capacity reservation, concurrent updates can over-admit a finite
+pool after `runs-on` is irreversible.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
@@ -1352,18 +1384,22 @@ uses, or the golden warms a cache the real jobs never touch.
   (or run from a context with no `GIT_DIR`), and never assume `-C` alone
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
-- The required `macos` aliases in `.github/workflows/build.yml` depend on the
-  terminal build matrix, then query only the current run's paginated latest jobs
-  for exactly one macOS matrix leg. Only conclusion `success` is green;
-  missing, duplicate, null, skipped, cancelled, failed, and unknown outcomes
-  fail closed. Keep three short retries for jobs-API transport failures only;
-  malformed JSON and invalid cardinality are verdict failures, not reasons to
-  resume build polling. PR/dispatch runs retain the combined matrix, so advisory
-  legs may delay the reporter but `needs.build.result` must never determine it.
-  The merge-group report uses the short-lived preamble pool and preserves the
-  stable required context name. These two reporters intentionally use bare
-  `gh api --paginate` and decode the concatenated JSON object stream; do not add
-  `--slurp`, because older preamble images reject that newer flag.
+- The required `macos` context in `.github/workflows/build.yml` has two bounded
+  paths. PR/dispatch runs retain the combined matrix, then their terminal alias
+  queries only the current run's paginated latest jobs for exactly one macOS
+  leg. Only conclusion `success` is green; missing, duplicate, null, skipped,
+  cancelled, failed, and unknown outcomes fail closed. Keep three short retries
+  for jobs-API transport failures only; malformed JSON and invalid cardinality
+  are verdict failures. Native merge groups instead name the real macOS matrix
+  leg exactly `macos`, so advisory Linux cannot delay or determine it and no
+  polling reporter holds scarce preamble capacity. A short preamble fallback
+  reports skip-safe groups green and routing/classification failures red. With a
+  five-entry merge queue and two active preamble runners, never restore a
+  long-lived merge-group reporter or serialize those runs under one Actions
+  concurrency group: a group retains only one pending member and later entries
+  can cancel an earlier required check. The PR reporter uses bare
+  `gh api --paginate` and decodes the concatenated JSON object stream; do not add
+  `--slurp`, because older alias images reject that newer flag.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
@@ -1372,7 +1408,7 @@ uses, or the golden warms a cache the real jobs never touch.
   so wrap each inline invocation with `cd /tmp` first (`/private/tmp` on
   macOS), and use `GITHUB_WORKSPACE` only as an absolute repo-path argument
   afterward. `test_preamble_python_stable_cwd.py` enumerates both
-  `PULP_PREAMBLE_RUNS_ON_JSON` jobs and long-lived polling aliases routed by
+  `PULP_PREAMBLE_RUNS_ON_JSON` jobs and polling aliases routed by
   `PULP_ALIAS_RUNS_ON_JSON`; moving a job between those pools must preserve
   its stable-cwd classification.
 - `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
@@ -2793,24 +2829,46 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
-### Linux self-hosted routing (opt-in) and Windows x64 authority
+### Linux self-hosted routing and Windows x64 authority
 
-`build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
-configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
-the current event. A `workflow_dispatch` input has highest precedence; without
-one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
-merge-group, and push events deliberately ignore the configured private selector
-and use the provider fallback (GitHub-hosted by default) until the external
-runner-group boundary above exists.
+`build.yml` keeps trusted merge-group and PR-safe Linux routing separate.
+Same-repository pull requests may call the main-owned reusable workflow only
+when the exact PR-safe selector, enable variable, and short health lease are
+valid. Forks, privileged events, malformed selectors, and expired leases remain
+hosted. Merge-group jobs use the distinct trusted selector and group.
 
-The Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
-and is served by the Proxmox ephemeral pool described in
-`docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
-the displayed Linux provider from the selector that actually resolved. A
-dispatch using the configured selector fails loudly if it resolves hosted; a
-successfully assigned self-hosted job still has no live capacity fallback.
+Both Mac Pro selectors start with
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`.
+The trusted lane adds `pulp-auto-linux-x64`; the PR-safe lane adds
+`pulp-pr-safe-linux-x64`. Their one-job VM provisioner wrappers and topology
+contract are reviewed together. Generic Mac Pro runners without either extra
+capability cannot receive automatic work. `resolve-provider` authorizes the
+trusted selector only for `merge_group` while its short RFC 3339 lease is valid;
+the separate main-owned reusable workflow validates repository variables,
+lease horizon, exact selector, event identity, and SHAs on hosted Linux before
+the PR-safe selector is used. The called workflow checks out the event's
+synthetic merge SHA, preserving the ordinary Linux gate's head-plus-base
+integration coverage. If that protected admission recheck rejects a
+lease that expired after the caller's snapshot, the reusable workflow runs its
+Linux proof on `ubuntu-latest` instead of dropping the Linux leg. It emits
+`linux_route_reason` as
+`explicit-dispatch`,
+`local-enabled`, `security-hosted`, or `unconfigured-hosted`, and derives the
+displayed Linux provider from the selector that actually resolved.
+
+A successfully assigned self-hosted job has no live fallback. Shipyard must
+expire or clear each lease before unhealthy capacity can strand new jobs.
+If a supervisor is interrupted while its exact runner is busy, it delegates the
+VM to a separately scoped transient systemd cleanup unit. That unit waits for
+the job to finish, fences any later idle registration, and then deregisters and
+destroys the clone; do not replace this with immediate teardown or an abandoned
+VM slot. On the Mac Pro, automatic organization pools use the exact root-owned
+`/usr/local/bin/ghapp` helper and its file-backed GitHub App identity; the
+controller clears ambient token variables and never reads the legacy or an
+exposed PAT in this mode. A distinct root-only mode-`0600`
+`gh-org-runner-pat` remains the `token-file` fallback and must be passed through
+`GH_TOKEN`, never a command argument. Neither auth path may reuse the repository
+pool credential or enter a guest.
 
 Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
 proof during hosted saturation. Its default remains true so ordinary manual
@@ -5993,13 +6051,38 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 local pool is down, `github <leg>` is a full revert in one command.
 
 The lightweight resolver jobs for `release-cli.yml` and
-`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
-without moving artifact builds or publication there. Their selector priority is
-`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
-`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
-to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
-pinned to the repository default branch; never expose the persistent pool to
-`pull_request` or `merge_group` code through this fallback.
+`sign-and-release.yml` may use an independently reviewed release-control Linux
+pool without moving artifact builds or publication there. Their selector
+priority is `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`.
+Never fall through to the generic `PULP_LOCAL_LINUX_RUNS_ON_JSON` selector:
+release and signing are privileged control planes. Keep resolver policy
+checkouts pinned to the repository default branch.
+
+The unprivileged `Vellum freeze` and `Enforce version & skill sync` jobs remain
+hosted even on `merge_group`. They are otherwise eligible for generic Linux,
+but a `runs-on` expression cannot validate RFC 3339 expiry and a hosted resolver
+would recreate their queue bottleneck. Do not route them locally until the
+consumer can fail closed on expiry before assignment. `Vellum trusted freeze`,
+release, signing, deployment, and `pull_request_target` must never consume the
+generic selector. The checked-in `merge_group.linux` lane's `health_lease_*`
+profile fields require
+Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
+release). Pulp pins Shipyard 0.90.2, which contains the producer and its bounded
+GitHub calls. Keep the selector unset until that pin is installed on the
+controller and the producer is scheduled. The producer must read `main`'s live
+`max_entries_to_build` and require unreserved idle capacity for that entire
+declared admission burst; the TTL is not an atomic reservation. Pulp currently
+declares five while the two legacy generic runners lack the protected opt-in
+label, leaving zero exact-label matches; even two protected runners would remain
+insufficient. Automatic merge-group Linux routing intentionally remains
+disarmed. When that lease path
+is inactive, the merge-group Linux selector is exactly `ubuntu-latest` even if
+`PULP_DEFAULT_RUNNER_PROVIDER=namespace`; global Namespace routing remains an
+explicit dispatch/PR policy and cannot bypass the automatic lease boundary.
+The separate `pr.linux` profile lane uses its own PR-safe lease, capability,
+runner-name prefix, and protected reusable workflow. Never put the trusted
+merge-group lease tuple under the PR context; Shipyard rejects the mismatch and
+it would erase the workflow boundary.
 
 Facts worth keeping (measured):
 

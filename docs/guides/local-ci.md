@@ -173,30 +173,245 @@ weaken FileVault or give it any of the required ARM64 gate labels.
 The controller prefers `ghapp` when it is installed and otherwise uses its own
 authenticated rootless `gh`. The job account receives neither client nor token.
 
-## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
+## Disposable Linux x64 lanes run on macpro (Proxmox)
 
-`build.yml` runs may route the `Linux (x64)` leg via
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
+`build.yml` routes eligible Linux work to two isolated ephemeral Proxmox pools
+on **macpro** — a
 Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
-host. Protected main workflow refs, including the protected merge-group path,
-prefer this pool when the variable is set. Pull-request workflow revisions that
-are not the protected `main` workflow ref fall back to GitHub-hosted Linux;
-fork pull requests remain hosted as well. This prevents a PR-controlled
-workflow edit from reaching the restricted group. The pool is native x86_64,
+host. Protected merge-group jobs use `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the
+`pulp-auto-linux-x64` capability. Pull-request Linux remains on
+`ubuntu-latest`: a shared health-lease timestamp is not an atomic per-job
+reservation, so it cannot safely admit a finite two-runner PR pool. The
+main-owned `pr-safe-linux.yml` path remains dormant scaffolding until Shipyard
+can reserve capacity for each job. Forks, privileged events, missing capacity,
+invalid selectors, and expired leases also use `ubuntu-latest`.
+The pool is native x86_64,
 which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
-The external boundary is live: organization runner group `pulp-trusted-build`
-contains only `Generous-Corp/pulp` and permits only protected default-branch
-workflow refs for the trusted local jobs. The event-name and fork checks in the
-workflows are defense in depth, not the security boundary. Secret-bearing jobs
-and every `pull_request_target` workflow remain hosted or on their dedicated
-trusted path; they never use the generic Mac Pro labels.
+The trusted `pulp-trusted-build` group and PR-safe `pulp-pr-safe-build` group
+must remain separate. Each is repository-scoped and restricted to its exact
+default-branch workflow. A PR-safe worker must be one-job disposable, carry no
+host credential or secret, expose no writable host mount, and be destroyed
+after completion. Event, repository, SHA, selector, and lease checks are
+defense in depth. Secret-bearing jobs and every `pull_request_target`, signing,
+deployment, and release workflow remain hosted or on a dedicated trusted path.
+
+The external boundary is the organization runner group, not the event-name
+guard in PR-controlled YAML. Each group contains only `Generous-Corp/pulp`.
+Both `pulp-trusted-build` and `pulp-pr-safe-build` permit only
+`pr-safe-linux.yml@main`; the protected workflow validates a different event,
+selector, lease, and runner capability for each group. Never share their
+capability labels, runner-name namespaces, health leases, or group ids.
+
+Install the common supervisor, the policy wrappers, the verifier, and the three
+fail-closed systemd templates. The group environment files are mandatory for
+the automatic units; a missing file leaves that pool offline:
+
+```sh
+install -o root -g root -m 0755 tools/ci/proxmox-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-trusted-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-trusted-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/proxmox-release-control-ephemeral-runner-linux.sh \
+  /usr/local/sbin/pulp-release-control-ephemeral-runner.sh
+install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
+  /usr/local/lib/pulp/verify_linux_runner_group.py
+install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -o root -g root -m 0644 tools/ci/pulp-pr-safe-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -o root -g root -m 0644 tools/ci/pulp-release-control-ephemeral-pool@.service \
+  /etc/systemd/system/
+install -d -o root -g root -m 0755 /etc/pulp
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nPULP_LINUX_GH_CLI=/usr/local/bin/ghapp\n' "$TRUSTED_GROUP_ID" \
+  > /etc/pulp/linux-trusted-runner-group.env
+printf 'PULP_LINUX_RUNNER_GROUP_ID=%s\nPULP_LINUX_GITHUB_AUTH_MODE=app-helper\nPULP_LINUX_GH_CLI=/usr/local/bin/ghapp\n' "$PR_SAFE_GROUP_ID" \
+  > /etc/pulp/linux-pr-safe-runner-group.env
+chmod 0600 /etc/pulp/linux-{trusted,pr-safe}-runner-group.env
+systemctl daemon-reload
+```
+
+Release control uses a third, dedicated group and is deliberately configured
+per tag. GitHub runner-group workflow restrictions must pin a branch, tag, or
+full SHA and apply only to jobs directly defined in the selected workflow, so
+the tag-triggered resolver jobs cannot safely reuse either main-only group.
+Create `pulp-release-control` with only this repository and exactly these two
+workflow entries for the release being served (replace the example tag):
+
+```text
+Generous-Corp/pulp/.github/workflows/release-cli.yml@refs/tags/v0.806.1
+Generous-Corp/pulp/.github/workflows/sign-and-release.yml@refs/tags/v0.806.1
+```
+
+Then install a root-only environment containing the dedicated group id, App
+authentication, and the same exact tag ref:
+
+```sh
+printf '%s\n' \
+  "PULP_LINUX_RUNNER_GROUP_ID=$RELEASE_CONTROL_GROUP_ID" \
+  'PULP_LINUX_GITHUB_AUTH_MODE=app-helper' \
+  'PULP_LINUX_GH_CLI=/usr/local/bin/ghapp' \
+  'PULP_LINUX_RELEASE_WORKFLOW_REF=refs/tags/v0.806.1' \
+  > /etc/pulp/linux-release-control-runner-group.env
+chmod 0600 /etc/pulp/linux-release-control-runner-group.env
+```
+
+The release-control wrapper has a disjoint runner name and capability label,
+and its verifier rejects a branch, wildcard tag, non-SemVer or mismatched tag,
+extra workflow, or either existing group. Start two one-job slots and set
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON` to the exact dedicated labels only
+after both are online and idle:
+
+```sh
+systemctl start pulp-release-control-ephemeral-pool@{1,2}.service
+gh variable set PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON \
+  --repo Generous-Corp/pulp \
+  --body '["self-hosted","Linux","X64","pulp-host-macpro","pulp-release-control-linux-x64"]'
+gh variable set PULP_RELEASE_CONTROL_REF \
+  --repo Generous-Corp/pulp --body 'refs/tags/v0.806.1'
+```
+
+One slot serves each tag workflow; a successful slot does not restart. A job already assigned to
+`ubuntu-latest` cannot be retargeted; do not redispatch an in-flight release.
+Manual `workflow_dispatch` repairs deliberately ignore this selector and stay
+hosted because their workflow ref is `main`, not the admitted immutable tag.
+After both resolver jobs finish, unset the selector, stop the unit, confirm the
+runner and clone are gone, delete both `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`
+and `PULP_RELEASE_CONTROL_REF`, remove the tag workflows from the group, and
+remove the environment file. Never leave a release tag admitted for the next
+release.
+
+The Mac Pro automatic organization-scoped units use its existing root-owned
+`/usr/local/bin/ghapp` helper by setting
+`PULP_LINUX_GITHUB_AUTH_MODE=app-helper`. The controller accepts only that exact
+root-owned, non-symlink, non-group/world-writable path and clears ambient token
+variables before every call; `ghapp` mints a short-lived installation token
+from the host's file-backed GitHub App identity. The App must grant
+**Self-hosted runners: read and write** so the controller can verify the exact
+runner group, mint one-use organization registration tokens, inspect
+registrations, fence an idle runner, and deregister it. A distinct root-owned
+mode-`0600` `gh-org-runner-pat` remains a supported `token-file` fallback, but
+do not use a copied, exposed, expired, or rotation-pending PAT. The legacy
+repository-scoped unit continues to require the separate `gh-runner-pat`;
+neither long-lived credential nor App key enters a guest. Keep an automatic
+unit disabled whenever its selected auth path or group proof is unavailable.
+
+Every clone verifies its named policy before creation, registers at
+organization scope, and receives exactly one of `pulp-auto-linux-x64` or
+`pulp-pr-safe-linux-x64`. A wrong name, workflow, repository, label set, prefix,
+default group, or unavailable API keeps the slot offline. The generic legacy
+unit remains repository-scoped and cannot carry either automatic capability.
+
+The automatic pool also requires Proxmox VM-firewall isolation. The protected
+workflow controls orchestration, but the checked-out pull-request source and its
+build system remain untrusted. Before an organization-scoped clone starts, the
+supervisor requires one dedicated no-uplink bridge per slot (`vmbr-ci200` through
+`vmbr-ci202`), with only the slot's `/30` controller address and no attached
+port before clone start. The host routes and NATs public IPv4 from those
+point-to-point networks; they never join `vmbr0` or another LAN/VLAN bridge.
+Automatic guests use the verified `/30` prefix and the explicit public
+`1.1.1.1` resolver; legacy repository-scoped guests retain their existing
+`vmbr0` `/24` address and LAN resolver.
+The supervisor verifies that topology before and after start, requires
+`pve-firewall status` to report `enabled/running`, enables the firewall on that
+clone's NIC, installs an exact-address IP/ARP source filter,
+and installs per-VM ingress and egress policy. Inbound traffic is denied except
+for SSH from the exact Proxmox controller address, so untrusted jobs cannot
+observe LAN broadcast or multicast discovery traffic or expose guest services
+to the LAN. ARP is confined to the clone and its Proxmox-side gateway because
+the dedicated bridge has no other peer. The generated policy must write,
+compile, enable on the clone NIC,
+and appear in the active IP, ARP, ingress, and egress rules before the guest can
+register. DNS to the LAN gateway is allowed;
+all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations are denied; public IPv4 egress remains available for source and
+dependency downloads. Do not enable the automatic slots on a flat bridged LAN
+without that policy.
+
+Configure that host boundary with the checked-in helper. Start with its
+read-only plan; it refuses an unexpected existing bridge, managed-file drift,
+a non-Proxmox host, or a host whose main interfaces file does not source
+`interfaces.d`:
+
+```sh
+install -o root -g root -m 0755 tools/ci/configure-proxmox-ci-network.sh \
+  /usr/local/sbin/configure-proxmox-ci-network
+/usr/local/sbin/configure-proxmox-ci-network --dry-run
+```
+
+After reviewing the exact plan locally and while retaining an independent
+console path to the Proxmox host, apply and verify it:
+
+```sh
+/usr/local/sbin/configure-proxmox-ci-network --apply
+/usr/local/sbin/configure-proxmox-ci-network --verify
+```
+
+The helper installs only `/etc/network/interfaces.d/pulp-ci-isolation` and
+`/etc/sysctl.d/99-pulp-ci-isolation.conf`; it activates only the three new
+bridges and adds one source-scoped `MASQUERADE` rule per `/30`. It does not run
+`ifreload`, bring `vmbr0` down, or rewrite `/etc/network/interfaces`. Apply and
+rollback both compare the live `vmbr0` address and default route before and
+after. The rollback refuses to proceed while a bridge has an attached guest or
+if either managed file has drifted, removes only its tagged NAT rules and
+bridges, and restores the pre-apply forwarding value recorded in root-only
+state. Apply and rollback take the runner supervisor's VMID allocation lock for
+the whole topology transition, so a clone cannot attach between the idle proof
+and bridge teardown. A completed rollback is safe to repeat:
+
+```sh
+/usr/local/sbin/configure-proxmox-ci-network --rollback
+```
+
+Keep the automatic runner services disabled until `--verify`, the exact runner
+group proof, and the GitHub authentication preflight all succeed. A dry run is
+not topology proof, and this helper does not authorize a PR job or runner-group
+workflow on its own.
+
+Runner-group verification is necessary but not sufficient for required CI.
+GitHub Actions has no queued-job timeout that can retarget `runs-on` to hosted
+capacity. Shipyard therefore renews each short lease only when the full declared
+admission burst is online and idle. Unsetting or expiring the selector before
+dispatch is the hosted fallback; it cannot rescue an already assigned job.
+Secret-bearing and `pull_request_target` jobs remain ineligible regardless of
+runner health.
+
+### Lease admission contracts
+
+The checked-in `normal-local-fast` profile keeps PR Linux GitHub-only and
+defines one Shipyard 0.87.3-or-newer producer contract. The trusted lane uses
+`PULP_LOCAL_LINUX_LEASE_UNTIL`, the exact
+`merge_group` event class, the `pulp-ci-ephemeral-` prefix, `main`, and a burst
+of five matching the live merge queue's `max_entries_to_build`. Both use a
+300-second TTL.
+
+The producer derives required labels from the profile target, reads live
+capacity and reservations, and renews only when unreserved idle capacity covers
+the full declared burst. An absent, malformed, expired, or implausibly distant
+lease restores exactly `ubuntu-latest` before matrix creation. The current
+two-slot fleet cannot arm the trusted lane for the five-entry merge queue, so merge-group Linux
+deliberately remains hosted. Same-repository and fork PRs remain hosted until
+an atomic reservation mechanism can bind each admitted job to capacity.
+`Vellum freeze` and `Enforce version & skill sync` remain hosted because their
+direct `runs-on` expressions cannot safely validate lease expiry.
+The PR-safe workflow validates the pinned head, base, and event merge SHAs, then
+checks out the synthetic merge commit so local execution preserves the normal
+pull-request Linux gate's integration coverage.
+
+The required merge-group `macos` conclusion comes directly from the native
+matrix leg. Its bounded fallback does not wait for the build or reserve one of
+the two active preamble runners for the macOS build duration. Do not add shared
+workflow or job concurrency: GitHub retains only one pending member, which can
+cancel required checks across the five-entry merge queue.
 
 `resolve-provider` exposes the configured selector separately from the selector
 authorized for the current event. Its `linux_route_reason` output is one of
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
+`explicit-dispatch`, `local-enabled`, `security-hosted`, or
+`unconfigured-hosted`; the Linux
 matrix provider is derived from the selector that actually resolved. An
 operator dispatch with a configured selector fails instead of silently falling
 back to hosted Linux.
@@ -230,11 +445,17 @@ sets `clean: false` on self-hosted runners.
 Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
 what provisions the next clone. Add a slot by enabling `@3` — but check the governor
 first.
+If a supervisor is stopped while its exact runner is busy, cleanup preserves the
+active job and starts a separate transient systemd cleanup unit. The unit waits
+for the runner to become idle or deregister, fences any surviving idle
+registration, and then destroys the clone. A failed deferred cleanup restarts
+independently, so routine service interruption cannot permanently consume the
+three VMIDs.
 
 The three clone VMIDs have deterministic network identities: `200..202` map to
 `192.168.86.251..253` and stable locally administered MAC addresses. Do not return
 to random clone MACs. Each short-lived MAC retains a DHCP lease after its VM is
-destroyed, and normal CI volume exhausted the LAN lease pool on 2026-08-02.
+destroyed, and normal CI volume can exhaust the LAN lease pool.
 The GitHub runner registration remains unique per invocation; stable network
 identity must not become a static Actions runner name.
 
@@ -250,17 +471,19 @@ identity must not become a static Actions runner name.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; all eligible events then use
-GitHub-hosted Linux. The resolver also uses the hosted label whenever the local
-selector is absent, so a staged rollout can leave the variable unset until the
-Mac Pro pool is healthy. Once a local job has been assigned, `runs-on` has no
-live fallback; if macpro is down or its pool is stopped, unset the variable and
-redispatch rather than waiting.
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` for the merge-group lane.
+For PRs, set `PULP_PR_SAFE_LINUX_REUSABLE_ENABLED=false` and unset
+`PULP_PR_SAFE_LINUX_LEASE_UNTIL` and `PULP_PR_SAFE_LINUX_RUNS_ON_JSON`. Eligible
+jobs then use GitHub-hosted Linux. Once a local job has been assigned,
+`runs-on` has no live fallback; expire the affected lease and redispatch rather
+than waiting on an unhealthy pool.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
 `Administration: read/write`, minting a single-use registration token per job.
-That host credential never enters a guest. Jobs that call `gh` authenticate with
+That credential is only for the legacy repository-scoped pool; the automatic
+organization pools use the distinct credential described above. Neither host
+credential enters a guest. Jobs that call `gh` authenticate with
 the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
 persistent `gh` login in any supported config or credential store.
 ## Routing the Linux advisory lanes to macpro
@@ -1830,7 +2053,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch-only Linux x86_64 Proxmox VM pool; automatic PR routing requires the external runner-group boundary above | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Protected merge-group Linux x86_64 Proxmox pool; only workflows admitted by `pulp-trusted-build` may consume it. Example validation stays hosted, including operator dispatches. | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
