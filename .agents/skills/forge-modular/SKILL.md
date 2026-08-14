@@ -445,6 +445,13 @@ so a Pro launch stays licensed. A directory Rack has never seen has no last
 session to have crashed in: 5 of 5. It also stops the scan clobbering the
 user's autosave, log and open rack.
 
+**The symlink must preserve Rack's architecture-specific layout.** In an
+isolated proof, link `ForgeModular` at
+`plugins-mac-arm64/ForgeModular`, not at the scratch user-directory root.
+Rack ignores a root-level link, then a missing-module dialog can make a launch
+look like a plugin proof unless the log also proves the expected module was
+created. Keep a regression stub that rejects the wrong layout.
+
 **Three ways a launch dies before it reaches the patch**, all of which look
 from the map like a library with nothing in it:
 
