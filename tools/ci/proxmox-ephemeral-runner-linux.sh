@@ -90,7 +90,6 @@ command -v "$GH_CLI" >/dev/null 2>&1 \
 # older repository-level worker during a staged rollout.
 REGISTRATION_API="repos/${REPO}"
 RUNNER_URL="https://github.com/${REPO}"
-RUNNER_GROUP_ARG=""
 if [ -n "$RUNNER_GROUP_ID" ]; then
     [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
         || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
@@ -129,7 +128,6 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
         || die "automatic Linux runner firewall directory is missing"
     REGISTRATION_API="orgs/${ORG}"
     RUNNER_URL="https://github.com/${ORG}"
-    RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
     AUTOMATIC_NETWORK_ISOLATION=1
 else
     [ -r "$PAT_FILE" ] || die "no repository runner PAT at $PAT_FILE"
@@ -218,6 +216,7 @@ reclaim_stale_slot_runners() {
     log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
 }
 cleanup() {
+    rm -f "${JIT_RESPONSE_FILE:-}" "${JIT_CONFIG_FILE:-}"
     # Guard: only tear down a VM this invocation actually created. Without this,
     # a failure before the clone lands makes cleanup destroy whatever now owns
     # that id — which is exactly how the race above corrupted a sibling slot.
@@ -413,37 +412,73 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
 
-# A registration token is minted per job and is single-use by design, which is
-# what makes --ephemeral viable: the runner takes exactly one job, deregisters
-# itself, and the clone is destroyed under it.
-log "minting registration token"
-RT="$(curl -s -X POST \
-    -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
-[ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
+# GitHub's JIT endpoint creates the exact ephemeral runner registration and
+# returns an encoded, single-use configuration. Keep that blob in a mode-600
+# temporary file and transfer it over stdin; unlike config.sh --token, the
+# short-lived credential never appears in the host's or SSH registration
+# command line. The runner takes exactly one job and then deregisters itself.
+log "minting JIT runner configuration"
+JIT_RESPONSE_FILE="$(mktemp)" || die "could not allocate JIT response file"
+JIT_CONFIG_FILE="$(mktemp)" || die "could not allocate JIT config file"
+umask 077
+JIT_PAYLOAD="$(python3 - "$RUNNER_NAME" "$RUNNER_GROUP_ID" "$LABELS" <<'PY'
+import json
+import sys
 
-log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
-TOKEN_FILE=/tmp/tartci-jit-token
+name, group_id, labels = sys.argv[1:]
+payload = {
+    "name": name,
+    "runner_group_id": int(group_id or "1"),
+    "labels": [label for label in labels.split(",") if label],
+    "work_folder": "_work",
+}
+print(json.dumps(payload, separators=(",", ":")))
+PY
+)" || die "could not construct JIT runner request"
+curl -fsS -X POST \
+    -H "Authorization: Bearer $PAT" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/${REGISTRATION_API}/actions/runners/generate-jitconfig" \
+    -d "$JIT_PAYLOAD" >"$JIT_RESPONSE_FILE" \
+    || die "could not mint JIT runner configuration (PAT scope or expiry?)"
+unset JIT_PAYLOAD
+python3 - "$JIT_RESPONSE_FILE" "$JIT_CONFIG_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+response = json.loads(pathlib.Path(sys.argv[1]).read_text())
+encoded = response.get("encoded_jit_config")
+if not isinstance(encoded, str) or not encoded:
+    raise SystemExit("JIT response did not contain encoded_jit_config")
+pathlib.Path(sys.argv[2]).write_text(encoded)
+PY
+if [ "$?" -ne 0 ]; then
+    die "JIT response did not contain a valid encoded configuration"
+fi
+
+log "starting ephemeral JIT runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
+JIT_GUEST_FILE=/tmp/tartci-jit-config
 ssh -o BatchMode=yes "ci@$GUEST_IP" \
-    "umask 077; install -m 600 /dev/stdin ${TOKEN_FILE}" <<<"$RT" \
-    || die "could not transfer the short-lived registration token"
-unset RT
+    "umask 077; install -m 600 /dev/stdin ${JIT_GUEST_FILE}" \
+    <"$JIT_CONFIG_FILE" \
+    || die "could not transfer the short-lived JIT configuration"
+rm -f "$JIT_CONFIG_FILE" "$JIT_RESPONSE_FILE"
+JIT_CONFIG_FILE=""
+JIT_RESPONSE_FILE=""
 registration_output="$(ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
-    trap 'rm -f ${TOKEN_FILE}' EXIT
-    registration_token=\$(cat ${TOKEN_FILE})
-    ./config.sh --unattended --ephemeral --replace \
-      --url ${RUNNER_URL} --token \"\${registration_token}\" ${RUNNER_GROUP_ARG} \
-      --name ${RUNNER_NAME} --labels ${LABELS} --work _work
+    trap 'rm -f ${JIT_GUEST_FILE}' EXIT
+    encoded_jit_config=\$(cat ${JIT_GUEST_FILE})
+    ./run.sh --jitconfig \"\${encoded_jit_config}\"
 ")" || {
-    printf '%s\n' "$registration_output" | sed 's/[Tt]oken[^[:space:]]*/token=<redacted>/g' >&2
-    die "runner registration failed"
+    printf '%s\n' "$registration_output" | sed 's/[Jj][Ii][Tt].*/JIT output=<redacted>/g' >&2
+    die "JIT runner startup failed"
 }
 
 # ── run exactly one job ──────────────────────────────────────────────────────
-# run.sh exits once the single job completes, because of --ephemeral.
+# run.sh exits once the single JIT job completes.
 log "waiting for one job (runner exits when done)"
-ssh -o BatchMode=yes "ci@$GUEST_IP" 'cd ~/actions-runner && ./run.sh' 2>&1 \
-    | sed 's/^/    /'
+printf '%s\n' "$registration_output" | sed 's/^/    /'
 log "job finished on $VMID"

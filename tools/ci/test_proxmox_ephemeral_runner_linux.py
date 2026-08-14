@@ -40,10 +40,14 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.text)
 
-    def test_jit_token_does_not_travel_in_the_ssh_command_line(self) -> None:
+    def test_jit_config_does_not_use_registration_token_path(self) -> None:
+        self.assertIn("actions/runners/generate-jitconfig", self.text)
+        self.assertIn("encoded_jit_config", self.text)
         self.assertIn("install -m 600 /dev/stdin", self.text)
-        self.assertIn("TOKEN_FILE=/tmp/tartci-jit-token", self.text)
-        self.assertNotIn("--token ${RT}", self.text)
+        self.assertIn("JIT_GUEST_FILE=/tmp/tartci-jit-config", self.text)
+        self.assertIn("./run.sh --jitconfig", self.text)
+        self.assertNotIn("registration-token", self.text)
+        self.assertNotIn("config.sh --unattended", self.text)
         self.assertIn("guest IP ${GUEST_IP} is already assigned", self.text)
 
 
