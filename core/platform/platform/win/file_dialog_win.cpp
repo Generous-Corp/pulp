@@ -23,6 +23,7 @@
 #include <shobjidl.h>   // IFileDialog, IFileOpenDialog, IShellItem(Array)
 
 #include <optional>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -78,15 +79,22 @@ std::optional<std::string> item_path(IShellItem* item) {
 std::optional<std::string> run_single(bool save,
                                       const std::string& title,
                                       FILEOPENDIALOGOPTIONS extra,
-                                      const std::string& default_name) {
+                                      const std::string& default_name,
+                                      HRESULT* status = nullptr) {
     ComInit com;
-    if (!com.usable()) return std::nullopt;
+    if (!com.usable()) {
+        if (status) *status = com.hr;
+        return std::nullopt;
+    }
 
     IFileDialog* dlg = nullptr;
     HRESULT hr = save
         ? CoCreateInstance(__uuidof(FileSaveDialog), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg))
         : CoCreateInstance(__uuidof(FileOpenDialog), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg));
-    if (FAILED(hr) || !dlg) return std::nullopt;
+    if (FAILED(hr) || !dlg) {
+        if (status) *status = hr;
+        return std::nullopt;
+    }
 
     std::optional<std::string> result;
     FILEOPENDIALOGOPTIONS opts = 0;
@@ -95,13 +103,15 @@ std::optional<std::string> run_single(bool save,
     if (!title.empty()) dlg->SetTitle(utf8_to_utf16(title).c_str());
     if (!default_name.empty()) dlg->SetFileName(utf8_to_utf16(default_name).c_str());
 
-    if (SUCCEEDED(dlg->Show(nullptr))) {  // S_OK = picked; cancel → non-S_OK
+    hr = dlg->Show(nullptr);
+    if (SUCCEEDED(hr)) {  // S_OK = picked; cancel → non-S_OK
         IShellItem* item = nullptr;
         if (SUCCEEDED(dlg->GetResult(&item)) && item) {
             result = item_path(item);
             item->Release();
         }
     }
+    if (status) *status = hr;
     dlg->Release();
     return result;
 }
@@ -157,13 +167,26 @@ FileDialog::Backend make_win_file_dialog_backend() {
                            const std::string& default_name) -> std::optional<std::string> {
         return run_single(/*save=*/true, title, 0, default_name);
     };
-
     backend.choose_folder = [](const std::string& title,
                                const std::string&) -> std::optional<std::string> {
         return run_single(/*save=*/false, title, FOS_PICKFOLDERS, "");
     };
-
     return backend;
+}
+
+FileDialog::SaveCopyBackend make_win_file_dialog_save_copy_backend() {
+    return [](const std::string& source,
+                           const std::string& title,
+                           const std::vector<FileFilter>&,
+                           const std::string&,
+                           const std::string& default_name,
+                           std::string* error) -> std::optional<std::string> {
+        (void)source; (void)title; (void)default_name;
+        if (error) {
+            *error = "atomic save-copy with filters is not supported by this Windows backend";
+        }
+        return std::nullopt;
+    };
 }
 
 }  // namespace pulp::platform

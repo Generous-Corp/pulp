@@ -13,6 +13,9 @@
 
 #include <string>
 #include <vector>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -35,6 +38,62 @@ TEST_CASE("FileDialog has_backend reflects native vs host-registered availabilit
 #else
     REQUIRE_FALSE(FileDialog::has_backend());
 #endif
+}
+
+TEST_CASE("FileDialog save_copy writes while the selected destination is owned",
+          "[platform][file-dialog][save-copy]") {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() /
+        ("pulp-file-dialog-save-copy-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directories(root));
+    const auto source = root / "source.vcv";
+    const auto destination = root / "chosen.vcv";
+    {
+        std::ofstream out(source, std::ios::binary);
+        out << "exact patch bytes\n";
+    }
+
+    int save_calls = 0;
+    FileDialog::set_save_copy_backend([&](const std::string& source_path,
+                            const std::string& title,
+                            const std::vector<FileFilter>& filters,
+                            const std::string& default_path,
+                            const std::string& default_name,
+                            std::string* error) {
+        ++save_calls;
+        REQUIRE(FileDialog::has_save_copy_backend());
+        REQUIRE(source_path == source.string());
+        REQUIRE(title == "Export patch");
+        REQUIRE(filters.size() == 1);
+        REQUIRE(filters.front().extensions == "vcv");
+        REQUIRE(default_path == root.string());
+        REQUIRE(default_name == "Named patch.vcv");
+        std::error_code ec;
+        REQUIRE(std::filesystem::copy_file(
+            source_path, destination,
+            std::filesystem::copy_options::overwrite_existing, ec));
+        REQUIRE_FALSE(ec);
+        if (error) error->clear();
+        return std::optional<std::string>(destination.string());
+    });
+    REQUIRE(FileDialog::has_save_copy_backend());
+
+    std::string error;
+    const auto saved = FileDialog::save_copy(
+        source.string(), "Export patch", {{"VCV Rack patch", "vcv"}},
+        root.string(), "Named patch.vcv", &error);
+    REQUIRE(saved == destination.string());
+    REQUIRE(error.empty());
+    REQUIRE(save_calls == 1);
+    REQUIRE(fs::exists(destination));
+    REQUIRE(fs::file_size(destination) == fs::file_size(source));
+
+    std::ifstream copied(destination, std::ios::binary);
+    REQUIRE(std::string(std::istreambuf_iterator<char>(copied), {}) ==
+            "exact patch bytes\n");
+    FileDialog::clear_backend();
+    fs::remove_all(root);
 }
 
 #if !defined(__APPLE__)
@@ -311,6 +370,42 @@ TEST_CASE("FileDialog backend registration is safe to call on any platform",
     REQUIRE_FALSE(FileDialog::has_backend());
 #endif
 }
+
+TEST_CASE("FileDialog backend preserves the original aggregate callback order",
+          "[platform][file-dialog][save-copy]") {
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#endif
+    FileDialog::Backend backend{
+        {}, {}, {},
+        [](const std::string&, const std::string&) {
+            return std::optional<std::string>("/tmp/folder");
+        }};
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
+    REQUIRE(backend.choose_folder);
+}
+
+#if !defined(__APPLE__)
+TEST_CASE("FileDialog native install preserves a host save-copy backend",
+          "[platform][file-dialog][save-copy]") {
+    int calls = 0;
+    FileDialog::set_save_copy_backend(
+        [&](const std::string&, const std::string&,
+            const std::vector<FileFilter>&, const std::string&,
+            const std::string&, std::string*) {
+            ++calls;
+            return std::optional<std::string>("/tmp/host-copy");
+        });
+    (void)FileDialog::install_native_backend();
+    REQUIRE(FileDialog::save_copy("source", "title", {}, {}, {}, nullptr) ==
+            "/tmp/host-copy");
+    REQUIRE(calls == 1);
+    FileDialog::clear_backend();
+}
+#endif
 
 #if defined(_WIN32)
 // W5: Windows ships a built-in IFileDialog backend (file_dialog_win.cpp),

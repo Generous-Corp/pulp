@@ -115,6 +115,11 @@ pulp_add_test_suite(pulp-test-playback-capture-engine
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+if(TARGET pulp::project-package)
+    target_sources(pulp-test-playback-capture-engine PRIVATE
+        test_playback_recording_coordinator.cpp)
+    target_link_libraries(pulp-test-playback-capture-engine PRIVATE pulp::project-package)
+endif()
 pulp_add_test_suite(pulp-test-standalone-recording
     SOURCES test_standalone_recording.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

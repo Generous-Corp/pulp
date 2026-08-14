@@ -13,6 +13,7 @@ Rack when necessary and verifies ordered evidence from Rack's log.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -27,6 +28,38 @@ import time
 DEFAULT_LOG = os.path.expanduser("~/Library/Application Support/Rack2/log.txt")
 DEFAULT_IDENTITY = os.path.expanduser(
     "~/Library/Application Support/Forge Modular/rack-open-identity.json")
+
+_PROC_PIDTBSDINFO = 3
+_PROC_PIDPATHINFO_MAXSIZE = 4096
+
+
+class _ProcBsdInfo(ctypes.Structure):
+    """ctypes mirror of macOS's public proc_bsdinfo structure."""
+
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
 
 
 def patch_module_count(patch: str) -> int:
@@ -293,13 +326,62 @@ def _app_binary(app: str) -> str:
     return os.path.join(app, "Contents", "MacOS", "Rack")
 
 
+def _load_libproc():
+    if sys.platform != "darwin":
+        return None
+    try:
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        library.proc_pidpath.argtypes = [
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        library.proc_pidpath.restype = ctypes.c_int
+        library.proc_pidinfo.argtypes = [
+            ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
+            ctypes.c_void_p, ctypes.c_int]
+        library.proc_pidinfo.restype = ctypes.c_int
+    except (AttributeError, OSError):
+        return None
+    return library
+
+
+def _native_process_identity(pid: int, expected_binary: str, *,
+                             _library=None) -> str | None:
+    """Return a kernel-backed identity for one exact macOS executable."""
+    if pid <= 0:
+        return None
+    library = _library if _library is not None else _load_libproc()
+    if library is None:
+        return None
+
+    path_buffer = ctypes.create_string_buffer(_PROC_PIDPATHINFO_MAXSIZE)
+    info = _ProcBsdInfo()
+    info_size = ctypes.sizeof(info)
+    try:
+        path_size = library.proc_pidpath(
+            pid, path_buffer, ctypes.sizeof(path_buffer))
+        if path_size <= 0:
+            return None
+        actual_binary = os.path.realpath(os.fsdecode(path_buffer.value))
+        if actual_binary != os.path.realpath(expected_binary):
+            return None
+        bytes_read = library.proc_pidinfo(
+            pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(info), info_size)
+    except (AttributeError, OSError, ValueError, ctypes.ArgumentError):
+        return None
+    if (bytes_read != info_size or info.pbi_pid != pid or
+            info.pbi_start_tvsec <= 0 or
+            info.pbi_start_tvusec >= 1_000_000):
+        return None
+    return (f"{pid}:{info.pbi_start_tvsec}."
+            f"{info.pbi_start_tvusec:06d}")
+
+
 def _rack_process_identity(app: str, timeout: float = 2.0) -> str | None:
     """Return PID plus start time for one running instance of this exact app."""
     pattern = "^" + re.escape(_app_binary(app)) + "($| )"
     try:
         found = subprocess.run(
             ["pgrep", "-f", pattern], capture_output=True, text=True,
-            timeout=max(0.001, timeout / 2.0))
+            timeout=max(0.001, timeout))
     except subprocess.TimeoutExpired:
         return None
     if found.returncode != 0 or not isinstance(found.stdout, str):
@@ -308,17 +390,7 @@ def _rack_process_identity(app: str, timeout: float = 2.0) -> str | None:
             if line.strip().isdigit()]
     if len(pids) != 1:
         return None
-    try:
-        started = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", pids[0]],
-            capture_output=True, text=True,
-            timeout=max(0.001, timeout / 2.0))
-    except subprocess.TimeoutExpired:
-        return None
-    if started.returncode != 0 or not isinstance(started.stdout, str):
-        return None
-    start_time = started.stdout.strip()
-    return f"{pids[0]}:{start_time}" if start_time else None
+    return _native_process_identity(int(pids[0]), _app_binary(app))
 
 
 def rack_running(app: str) -> bool:
