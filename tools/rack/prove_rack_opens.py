@@ -131,7 +131,13 @@ def rack_creates(patch, plugin_dir):
     # leave running and one that fills someone's crash-report folder.
     time.sleep(float(os.environ.get("PROVE_RACK_SETTLE", "1.5")))
     with tempfile.TemporaryDirectory(prefix="rack-open-") as tmp:
-        os.symlink(plugin_dir, Path(tmp) / plugin_dir.name)
+        # Rack scans the architecture-specific plugin directory beneath its
+        # user directory. A link at the user-directory root is invisible, so
+        # the patch opens without Forge and blocks on Rack's missing-module
+        # dialog rather than testing the supplied plugin.
+        plugins = Path(tmp) / "plugins-mac-arm64"
+        plugins.mkdir()
+        os.symlink(plugin_dir / "ForgeModular", plugins / "ForgeModular")
         r = subprocess.run([str(RACK), "-h", "-u", tmp, str(Path(patch).resolve())],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, timeout=180)
