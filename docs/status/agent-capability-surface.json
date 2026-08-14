@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 33,
+  "inventory_version": 34,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,21 +38,21 @@
   ],
   "counts": {
     "public_headers": 423,
-    "reviewed_headers": 124,
-    "legacy_unreviewed_headers": 299,
+    "reviewed_headers": 125,
+    "legacy_unreviewed_headers": 298,
     "unsupported_headers": 1,
     "by_disposition": {
       "capability_entrypoint": 80,
       "capability_support": 38,
-      "infrastructure": 5,
-      "legacy_unreviewed": 299,
+      "infrastructure": 6,
+      "legacy_unreviewed": 298,
       "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
         "public_headers": 112,
-        "reviewed_headers": 6,
-        "legacy_unreviewed_headers": 106,
+        "reviewed_headers": 7,
+        "legacy_unreviewed_headers": 105,
         "unsupported_headers": 0
       },
       "midi": {
@@ -154,11 +154,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_probe.hpp",
-      "fingerprint": "sha256:6451a59ef45103ad6816f6278e9a987c3fcc9b1e0d4530ef55975eed530240ad",
+      "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
       "include": "pulp/audio/audio_probe.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Optional prepared output-boundary diagnostics and capture plumbing; it is a reusable observability surface rather than a generator DSP claim."
     },
     {
       "domain": "audio",
@@ -3700,7 +3700,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/stft.hpp",
-      "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
+      "fingerprint": "sha256:9b1520fdb50618960b0ee63e78edb41f7649cfe07b9ad01e7227e4c91cc0204e",
       "include": "pulp/signal/stft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
