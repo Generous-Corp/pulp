@@ -1,0 +1,129 @@
+name: Shipyard merge steward
+
+# Single logical PR-landing controller. The first rollout is deliberately
+# workflow_dispatch-only; a later PR may add a schedule only after the live
+# managed/unmanaged and recovery canaries pass.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply exact-head queue/recovery mutations'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: shipyard-merge-steward-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == vars.PULP_PRIMARY_REPO && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STEWARD_LEDGER: ${{ github.workspace }}/.shipyard-steward/ledger.json
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint repository-scoped Shipyard App token
+        id: shipyard-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+          permission-issues: write
+          permission-merge-queues: write
+          permission-pull-requests: write
+          permission-statuses: write
+
+      - name: Install pinned Shipyard
+        run: |
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Actions caches are recoverable evidence, not a durable transactional
+      # store. Keep this first pilot to queue enrollment, whose GitHub mutation
+      # is exact-head guarded, externally observable, and idempotent. Durable
+      # remote ledger storage is required before enabling reruns or cancellation.
+      - name: Restore steward evidence ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: .shipyard-steward/ledger.json
+          key: shipyard-merge-steward-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            shipyard-merge-steward-v1-
+
+      - name: Configure ephemeral controller authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/shipyard" "$(dirname "$STEWARD_LEDGER")"
+          printf '%s\n' '[merge_queue]' 'mutation_machine = "github-actions"' \
+            > "$HOME/.config/shipyard/config.toml"
+          shipyard runner tag --set github-actions
+          shipyard merge-queue status --json | tee authority.json
+          python3 - <<'PY'
+          import json
+          status = json.load(open("authority.json", encoding="utf-8"))
+          assert status["authority_configured"] is True
+          assert status["authority_matches"] is True
+          assert status["machine"] == "github-actions"
+          assert status["mutation_machine"] == "github-actions"
+          PY
+
+      - name: Reconcile managed PRs
+        shell: bash
+        env:
+          APPLY: ${{ inputs.apply }}
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            runner steward
+            --repo "${GITHUB_REPOSITORY}"
+            --base main
+            --ledger "$STEWARD_LEDGER"
+            --max-transient-reruns 0
+            --no-coalesce
+            --no-preempt-capacity
+            --json
+          )
+          if [ "$APPLY" = true ]; then
+            args+=(--apply)
+          fi
+          shipyard "${args[@]}" | tee steward-report.json
+
+      - name: Save steward evidence ledger
+        if: always() && hashFiles('.shipyard-steward/ledger.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .shipyard-steward/ledger.json
+          key: shipyard-merge-steward-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shipyard-merge-steward-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            authority.json
+            steward-report.json
+            .shipyard-steward/ledger.json
+          retention-days: 14
+          if-no-files-found: warn

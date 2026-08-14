@@ -2696,6 +2696,42 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
+### Central merge steward pilot (Shipyard v0.88.0+)
+
+`.github/workflows/shipyard-merge-steward.yml` is the single logical
+repository-wide PR landing controller. The first rollout is intentionally
+`workflow_dispatch`-only. It runs on GitHub-hosted Ubuntu so all three Macs may
+be offline, serializes mutations with one repository-scoped concurrency group,
+restores a small bounded-retry ledger, and configures its ephemeral
+machine-global authority as `github-actions` before invoking
+`shipyard runner steward`.
+
+Queue and status mutations use a repository-scoped installation token minted
+from `SHIPYARD_APP_ID` and `SHIPYARD_APP_PRIVATE_KEY`, not the workflow
+`GITHUB_TOKEN`: GitHub suppresses downstream workflow events for mutations made
+with `GITHUB_TOKEN`, which would prevent required `merge_group` checks from
+starting. The job runs only from `refs/heads/main`, checks out `main` without
+persisted credentials, and passes the short-lived App token only to Shipyard's
+authority and reconciliation steps.
+
+Only an exact head carrying both the `shipyard:managed` label and a successful
+current-head `shipyard/steward-handoff` status is eligible for mutation. PRs
+without that contract remain visible as `unmanaged` and are never adopted
+implicitly. Routine checks, queue admission, merge confirmation, and cleanup
+use no model. A code/test/conflict blocker receives one deduplicated
+`shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
+the recovery dispatcher is a separate exception path.
+
+Repository automation must never create an unlabeled PR. In particular,
+`version_at_land.py --route pr` creates each `release/version-bump` PR with the
+`automation` label in the same `gh pr create` transaction; a later label repair
+is not an acceptable provenance window.
+
+Do not add the schedule until the manual canary proves all of these on live
+PRs: unmanaged negative control untouched, exact-head managed handoff,
+single recovery signal across repeated ticks, signal clearing on a corrected
+new head, and native merge-queue landing without an agent wait loop.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound

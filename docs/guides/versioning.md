@@ -447,6 +447,28 @@ steward ownership transfer. Pulp's leased profiles depend on that producer
 generation; an older binary must not advertise either protected Linux pool as
 healthy or assume merge-queue ownership.
 
+The v0.88 handoff contract remains part of that floor. A PR is mutable only
+when its current commit has a successful `shipyard/steward-handoff` status and
+the PR carries `shipyard:managed`. Repository-wide discovery still reports
+older PRs, but classifies them as `unmanaged` and never adopts, reruns, cancels,
+or queues them implicitly. Semantic failures are surfaced once through the
+deduplicated `shipyard/steward-recovery` status and `shipyard:needs-agent`
+label; routine reconciliation and native merge-queue admission require no
+model.
+
+Pulp's first controller rollout is the manual-only GitHub-hosted workflow in
+`.github/workflows/shipyard-merge-steward.yml`. It is serialized per repository
+and restores a small retry ledger, while GitHub statuses and labels remain the
+durable ownership truth. Its mutations use the repository-scoped Shipyard App
+installation token because workflow-token mutations do not emit the downstream
+`merge_group` events required to land. The controller job is restricted to the
+main-branch workflow and does not persist checkout credentials. Do not schedule
+that workflow until live canaries prove unmanaged negative control, exact-head
+handoff, recovery deduplication, recovery clearing on a corrected head, and
+merge-queue landing without an agent wait loop.
+
+### v0.83.0 floor — fleet health and formal stacks remain load-bearing
+
 v0.83.0 is historical context, not the current baseline. It added fail-closed
 formal-stack inspection to every Shipyard merge or enqueue mutation boundary,
 including the cross-repository runner steward. That prevented an unattended

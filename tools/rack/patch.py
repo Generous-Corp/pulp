@@ -4860,7 +4860,12 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
         if codex_effort is not None:
             command.extend(
                 ["-c", f'model_reasoning_effort="{codex_effort}"'])
-        command.extend(["--ephemeral", "--sandbox", "read-only",
+        # Generation is a sealed CLI job, not an interactive Codex session.
+        # Cataloguing installed apps/plugins/skills consumes the bounded skills
+        # context before the model can receive the module or patch contract.
+        command.extend(["--disable", "apps", "--disable", "plugins",
+                        "--disable", "skill_search", "--ephemeral",
+                        "--sandbox", "read-only",
                    "--ignore-user-config", "--ignore-rules", "--color",
                    "never", "--skip-git-repo-check", "--json",
                    "--output-last-message", answer_path, "-"])

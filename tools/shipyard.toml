@@ -62,6 +62,15 @@
 #   Pulp's leased profiles require this producer generation; older pins ignore
 #   the health-lease contract and must not be advertised as capable.
 #
+# v0.88.3 (earlier pin) — keeps v0.88.0's exact-head steward handoff and adds
+#   terminal-safe rescue replacement, auditable manual-cancel provenance, and
+#   process-tree termination when a running worker observes durable cancellation.
+#
+# v0.88.0 (earlier pin) — adds exact-head steward handoff receipts, explicit
+#   managed-PR ownership, repository-wide unmanaged discovery, and deduplicated
+#   recovery escalation so a GitHub-hosted controller can land routine PRs
+#   without keeping an agent alive.
+#
 # v0.83.0 (earlier pin) — inspects GitHub's formal stack metadata at every
 #   merge-queue mutation boundary, including runner-steward enqueue, and
 #   refuses the unstacked mutation path until the asynchronous stack lifecycle
