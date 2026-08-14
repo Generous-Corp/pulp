@@ -10,6 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "shipyard-recovery-worker.yml"
 CONFIG = ROOT / "tools" / "shipyard" / "recovery.config.toml"
+REPAIR_CONFIG = ROOT / "tools" / "shipyard" / "repair.config.toml"
 
 
 class RecoveryWorkerWorkflowTests(unittest.TestCase):
@@ -18,12 +19,13 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
         cls.doc = yaml.load(cls.text, Loader=yaml.BaseLoader)
         cls.config = CONFIG.read_text(encoding="utf-8")
+        cls.repair_config = REPAIR_CONFIG.read_text(encoding="utf-8")
 
     def test_pilot_is_manual_unique_label_and_deduplicated(self) -> None:
         self.assertEqual(set(self.doc["on"]), {"workflow_dispatch"})
         job = self.doc["jobs"]["m5-luna-triage"]
         self.assertIn("shipyard-recovery-canary-m5-20260814", job["runs-on"])
-        self.assertEqual(job["timeout-minutes"], "12")
+        self.assertEqual(job["timeout-minutes"], "45")
         group = self.doc["concurrency"]["group"]
         for key in ("pr_number", "expected_head", "blocker_fingerprint"):
             self.assertIn(f"inputs.{key}", group)
@@ -31,6 +33,7 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
     def test_status_mutation_is_explicitly_off_by_default(self) -> None:
         inputs = self.doc["on"]["workflow_dispatch"]["inputs"]
         self.assertEqual(inputs["publish_status"]["default"], "false")
+        self.assertEqual(inputs["attempt_repair"]["default"], "false")
         self.assertIn("always() && inputs.publish_status", self.text)
 
     def test_admin_secret_exists_only_in_lease_steps(self) -> None:
@@ -42,7 +45,12 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         ]
         self.assertEqual(
             secret_steps,
-            ["Acquire model-bound Subrouter lease", "Release Subrouter lease"],
+            [
+                "Acquire model-bound Subrouter lease",
+                "Release Subrouter lease",
+                "Acquire Sol-medium Subrouter lease",
+                "Release Sol-medium Subrouter lease",
+            ],
         )
         self.assertIn("chmod 600", self.text)
         self.assertNotIn("session-lease.json\n", self.text.split("path: |", 1)[1])
@@ -64,11 +72,35 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertIn("--sandbox read-only", self.text)
         self.assertIn("--output-schema", self.text)
 
+    def test_sol_repair_is_one_opt_in_fenced_post_triage_attempt(self) -> None:
+        self.assertIn('model = "gpt-5.6-sol"', self.repair_config)
+        self.assertIn('model_reasoning_effort = "medium"', self.repair_config)
+        self.assertIn('sandbox_mode = "workspace-write"', self.repair_config)
+        self.assertIn("network_access = false", self.repair_config)
+        self.assertIn("steps.triage.outputs.classification == 'needs_sol_fix'", self.text)
+        self.assertEqual(self.text.count("Run one ephemeral Sol-medium repair"), 1)
+        self.assertIn("--force-with-lease=\"refs/heads/${head_ref}:${EXPECTED_HEAD}\"", self.text)
+        self.assertIn("Shipyard-Recovery-For", self.text)
+        self.assertIn("shipyard/steward-handoff", self.text)
+
+    def test_push_credential_is_minted_only_after_models_exit(self) -> None:
+        model_end = self.text.index("Release Sol-medium Subrouter lease")
+        token = self.text.index("Mint post-model Shipyard repair token")
+        push = self.text.index("Fence, commit, and push repaired exact head")
+        self.assertLess(model_end, token)
+        self.assertLess(token, push)
+        self.assertIn("permission-contents: write", self.text)
+        publisher = self.doc["jobs"]["publish-recovery-result"]
+        self.assertEqual(publisher["runs-on"], "ubuntu-latest")
+        model_job = str(self.doc["jobs"]["m5-luna-triage"])
+        self.assertNotIn("SHIPYARD_APP_PRIVATE_KEY", model_job)
+        self.assertNotIn("git push", model_job)
+
     def test_artifact_excludes_prompt_logs_and_lease_material(self) -> None:
         upload = next(
             step
             for step in self.doc["jobs"]["m5-luna-triage"]["steps"]
-            if step.get("name") == "Publish sanitized triage artifact"
+            if step.get("name") == "Publish sanitized recovery artifact"
         )
         paths = upload["with"]["path"]
         self.assertIn("assignment.json", paths)

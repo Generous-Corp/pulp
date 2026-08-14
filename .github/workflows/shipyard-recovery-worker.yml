@@ -26,11 +26,15 @@ on:
         required: true
         default: false
         type: boolean
+      attempt_repair:
+        description: 'Allow one fenced Sol-medium repair after Luna authorizes it'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   actions: read
-  statuses: write
   pull-requests: read
 
 concurrency:
@@ -39,13 +43,16 @@ concurrency:
 
 jobs:
   m5-luna-triage:
+    outputs:
+      triage_classification: ${{ steps.triage.outputs.classification }}
+      repair_outcome: ${{ steps.repair.outputs.outcome }}
     runs-on:
       - self-hosted
       - macOS
       - ARM64
       - pulp-build-vm
       - shipyard-recovery-canary-m5-20260814
-    timeout-minutes: 12
+    timeout-minutes: 45
 
     steps:
       - name: Checkout trusted recovery harness
@@ -215,6 +222,7 @@ jobs:
             - < "$RUNNER_TEMP/recovery-input/prompt.txt"
           jq -e '.classification == "needs_sol_fix" or .classification == "needs_human" or .classification == "no_action"' \
             "$RUNNER_TEMP/recovery-result.json" >/dev/null
+          echo "classification=$(jq -r '.classification' "$RUNNER_TEMP/recovery-result.json")" >> "$GITHUB_OUTPUT"
 
       - name: Release Subrouter lease
         if: always() && steps.lease.outcome == 'success'
@@ -229,8 +237,129 @@ jobs:
             --request DELETE \
             --header "Authorization: Bearer $SUBROUTER_ADMIN_TOKEN" \
             "${SUBROUTER_BASE_URL%/}/internal/v1/session-leases/${lease_id}"
+          rm -f "$RUNNER_TEMP/session-lease.json" "$RUNNER_TEMP/session-lease-request.json"
 
-      - name: Publish sanitized triage artifact
+      - name: Render bounded Sol repair prompt
+        id: repair_prompt
+        if: inputs.attempt_repair && steps.triage.outputs.classification == 'needs_sol_fix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 control/tools/scripts/shipyard_recovery_repair.py \
+            --assignment "$RUNNER_TEMP/recovery-input/assignment.json" \
+            --triage "$RUNNER_TEMP/recovery-result.json" \
+            --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
+            --prompt-output "$RUNNER_TEMP/recovery-input/repair-prompt.txt"
+
+      - name: Acquire Sol-medium Subrouter lease
+        id: repair_lease
+        if: steps.repair_prompt.outcome == 'success'
+        shell: bash
+        env:
+          SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
+          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$SUBROUTER_ADMIN_TOKEN" ]
+          [ -n "$SUBROUTER_BASE_URL" ]
+          umask 077
+          jq -n \
+            --arg organizationId "$GITHUB_REPOSITORY_OWNER" \
+            --arg workspaceId "$GITHUB_REPOSITORY" \
+            --arg conversationId "pr-${{ inputs.pr_number }}-${{ inputs.expected_head }}" \
+            --arg invocationId "repair-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --arg agentSessionId "repair-${{ inputs.assignment_epoch }}" \
+            --arg proxyBaseUrl "${SUBROUTER_BASE_URL%/}" \
+            '{organizationId:$organizationId,workspaceId:$workspaceId,conversationId:$conversationId,invocationId:$invocationId,agentSessionId:$agentSessionId,agent:"pi",provider:"codex",model:"gpt-5.6-sol",proxyBaseUrl:$proxyBaseUrl}' \
+            > "$RUNNER_TEMP/repair-lease-request.json"
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $SUBROUTER_ADMIN_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/repair-lease-request.json" \
+            "${SUBROUTER_BASE_URL%/}/internal/v1/session-leases" \
+            > "$RUNNER_TEMP/repair-lease.json"
+          jq -e '.assignment.provider == "codex" and .assignment.model == "gpt-5.6-sol" and (.leaseId | length > 0) and (.environment.OPENAI_API_KEY | length > 0) and (.environment.OPENAI_BASE_URL | length > 0)' \
+            "$RUNNER_TEMP/repair-lease.json" >/dev/null
+          chmod 600 "$RUNNER_TEMP/repair-lease.json"
+
+      - name: Render isolated Sol-medium repair profile
+        if: steps.repair_lease.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url=$(jq -r '.environment.OPENAI_BASE_URL' "$RUNNER_TEMP/repair-lease.json")
+          BASE_URL="$base_url" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          source = Path("control/tools/shipyard/repair.config.toml").read_text(encoding="utf-8")
+          base_url = os.environ["BASE_URL"]
+          if not base_url.startswith(("http://", "https://")):
+              raise SystemExit("invalid lease base URL")
+          target = Path(os.environ["RUNNER_TEMP"]) / "codex-home" / "repair.config.toml"
+          target.write_text(source.replace("__SUBROUTER_CODEX_BASE_URL__", base_url), encoding="utf-8")
+          target.chmod(0o600)
+          PY
+
+      - name: Run one ephemeral Sol-medium repair
+        id: repair
+        if: steps.repair_lease.outcome == 'success'
+        shell: bash
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codex-home
+        run: |
+          set -euo pipefail
+          export SUBROUTER_REPAIR_TOKEN
+          SUBROUTER_REPAIR_TOKEN=$(jq -r '.environment.OPENAI_API_KEY' "$RUNNER_TEMP/repair-lease.json")
+          codex --profile repair --strict-config exec \
+            --ephemeral \
+            --sandbox workspace-write \
+            --output-schema "$GITHUB_WORKSPACE/control/tools/shipyard/repair-result.schema.json" \
+            --output-last-message "$RUNNER_TEMP/repair-result.json" \
+            --cd worktree \
+            - < "$RUNNER_TEMP/recovery-input/repair-prompt.txt"
+          jq -e '.outcome == "fixed" or .outcome == "needs_human" or .outcome == "no_change"' \
+            "$RUNNER_TEMP/repair-result.json" >/dev/null
+          echo "outcome=$(jq -r '.outcome' "$RUNNER_TEMP/repair-result.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Release Sol-medium Subrouter lease
+        if: always() && steps.repair_lease.outcome == 'success'
+        shell: bash
+        env:
+          SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
+          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+        run: |
+          set -euo pipefail
+          lease_id=$(jq -r '.leaseId' "$RUNNER_TEMP/repair-lease.json")
+          curl --fail --silent --show-error \
+            --request DELETE \
+            --header "Authorization: Bearer $SUBROUTER_ADMIN_TOKEN" \
+            "${SUBROUTER_BASE_URL%/}/internal/v1/session-leases/${lease_id}"
+          rm -f "$RUNNER_TEMP/repair-lease.json" "$RUNNER_TEMP/repair-lease-request.json"
+
+      - name: Validate and package model-produced patch
+        id: repair_bundle
+        if: steps.repair.outputs.outcome == 'fixed'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C worktree add --intent-to-add --all
+          git -C worktree diff --check
+          {
+            git -C worktree diff --name-only
+            git -C worktree ls-files --others --exclude-standard
+          } | sort -u > "$RUNNER_TEMP/changed-paths.txt"
+          python3 control/tools/scripts/shipyard_recovery_repair.py \
+            --assignment "$RUNNER_TEMP/recovery-input/assignment.json" \
+            --triage "$RUNNER_TEMP/recovery-result.json" \
+            --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
+            --prompt-output /dev/null \
+            --changed-paths "$RUNNER_TEMP/changed-paths.txt"
+          git -C worktree diff --binary --full-index > "$RUNNER_TEMP/recovery-repair.patch"
+          [ -s "$RUNNER_TEMP/recovery-repair.patch" ]
+
+      - name: Publish sanitized recovery artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -239,21 +368,154 @@ jobs:
             ${{ runner.temp }}/recovery-input/assignment.json
             ${{ runner.temp }}/recovery-input/checks.json
             ${{ runner.temp }}/recovery-result.json
+            ${{ runner.temp }}/repair-result.json
+            ${{ runner.temp }}/changed-paths.txt
+            ${{ runner.temp }}/recovery-repair.patch
           retention-days: 14
           if-no-files-found: warn
 
-      - name: Publish exact-head triage status
+  publish-recovery-result:
+    needs: m5-luna-triage
+    if: ${{ always() && (inputs.publish_status || needs.m5-luna-triage.outputs.repair_outcome == 'fixed') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      statuses: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout trusted recovery harness
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download sanitized recovery result
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: shipyard-recovery-${{ inputs.pr_number }}-${{ inputs.assignment_epoch }}
+          path: recovery-output
+
+      - name: Mint post-model Shipyard reporter token
+        id: shipyard_reporter_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-statuses: write
+
+      - name: Mint post-model Shipyard repair token
+        id: shipyard_repair_token
+        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: read
+          permission-statuses: write
+
+      - name: Checkout immutable PR head without credentials
+        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.expected_head }}
+          path: worktree
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fence, commit, and push repaired exact head
+        id: repair_push
+        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard_repair_token.outputs.token }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          ASSIGNMENT_EPOCH: ${{ inputs.assignment_epoch }}
+          BLOCKER_FINGERPRINT: ${{ inputs.blocker_fingerprint }}
+        run: |
+          set -euo pipefail
+          [ "${{ steps.download.outcome }}" = success ]
+          test -s recovery-output/recovery-repair.patch
+          test -s recovery-output/changed-paths.txt
+          python3 control/tools/scripts/shipyard_recovery_repair.py \
+            --assignment recovery-output/recovery-input/assignment.json \
+            --triage recovery-output/recovery-result.json \
+            --evidence /dev/null \
+            --prompt-output /dev/null \
+            --changed-paths recovery-output/changed-paths.txt
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > post-repair-pull.json
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_HEAD}/statuses?per_page=100" \
+            | jq 'add' > post-repair-statuses.json
+          python3 control/tools/scripts/shipyard_recovery_worker.py \
+            --pull post-repair-pull.json \
+            --statuses post-repair-statuses.json \
+            --evidence /dev/null \
+            --expected-head "$EXPECTED_HEAD" \
+            --assignment-epoch "$ASSIGNMENT_EPOCH" \
+            --fingerprint "$BLOCKER_FINGERPRINT" \
+            --assignment-output /dev/null \
+            --prompt-output /dev/null
+          [ "$(jq -r '.head.repo.full_name' post-repair-pull.json)" = "$GITHUB_REPOSITORY" ]
+          head_ref=$(jq -r '.head.ref' post-repair-pull.json)
+          [ -n "$head_ref" ] && [ "$head_ref" != null ]
+          git -C worktree apply --index --binary "$GITHUB_WORKSPACE/recovery-output/recovery-repair.patch"
+          git -C worktree diff --cached --check
+          git -C worktree config user.name 'Shipyard Recovery Agent'
+          git -C worktree config user.email 'shipyard-recovery@users.noreply.github.com'
+          git -C worktree commit \
+            -m "fix: recover PR #${PR_NUMBER} blocker" \
+            -m "Shipyard-Recovery-For: ${EXPECTED_HEAD}" \
+            -m "Shipyard-Recovery-Epoch: ${ASSIGNMENT_EPOCH}" \
+            -m "Shipyard-Recovery-Fingerprint: ${BLOCKER_FINGERPRINT}" \
+            -m "Agent: codex" \
+            -m "Model: gpt-5.6-sol" \
+            -m "Model-Reasoning: medium" \
+            -m "Router: subrouter"
+          new_head=$(git -C worktree rev-parse HEAD)
+          [ "$(git -C worktree rev-parse HEAD^)" = "$EXPECTED_HEAD" ]
+          gh auth setup-git
+          git -C worktree push origin HEAD:"refs/heads/${head_ref}" \
+            --force-with-lease="refs/heads/${head_ref}:${EXPECTED_HEAD}"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${new_head}" \
+            -f state=success \
+            -f context='shipyard/steward-handoff' \
+            -f description="recovery epoch=${ASSIGNMENT_EPOCH} previous=${EXPECTED_HEAD}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - name: Publish exact-head recovery status
         if: always() && inputs.publish_status
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.shipyard_reporter_token.outputs.token }}
         run: |
           set -euo pipefail
           state=error
           classification=triage_failed
-          if [ "${{ steps.triage.outcome }}" = success ]; then
+          if [ "${{ steps.repair_push.outcome }}" = success ]; then
             state=success
-            classification=$(jq -r '.classification' "$RUNNER_TEMP/recovery-result.json")
+            classification=repair_pushed
+          elif [ "${{ needs.m5-luna-triage.result }}" != success ] || [ "${{ steps.download.outcome }}" != success ] || [ "${{ steps.repair_push.outcome }}" = failure ]; then
+            classification=repair_failed
+          elif [ "${{ needs.m5-luna-triage.outputs.repair_outcome }}" = needs_human ] || [ "${{ needs.m5-luna-triage.outputs.repair_outcome }}" = no_change ]; then
+            state=success
+            classification="repair_${{ needs.m5-luna-triage.outputs.repair_outcome }}"
+          elif [ -n "${{ needs.m5-luna-triage.outputs.triage_classification }}" ]; then
+            state=success
+            classification="${{ needs.m5-luna-triage.outputs.triage_classification }}"
           fi
           description="classification=${classification} epoch=${{ inputs.assignment_epoch }} fingerprint=${{ inputs.blocker_fingerprint }}"
           gh api \
