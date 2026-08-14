@@ -572,6 +572,14 @@ function(pulp_add_ios_auv3)
 
     set(target "${AUV3_NAME}")
 
+    # The iOS-only helper bypasses pulp_add_plugin(), so establish the same
+    # production shipping declaration before _pulp_add_auv3() attaches its
+    # per-format manifest and scanner. Without this, the manifest directory is
+    # empty and CMake resolves `${target}.AUv3Extension.json` against `/`.
+    _pulp_cache_control_declarations(${target} production-stripped "" FALSE)
+    _pulp_configure_control_shipping(
+        ${target} "${AUV3_BUNDLE_ID}" "${AUV3_NAME}")
+
     if(AUV3_SOURCES)
         add_library(${target}_Core OBJECT ${AUV3_SOURCES})
         target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
