@@ -2670,6 +2670,14 @@ restores a small bounded-retry ledger, and configures its ephemeral
 machine-global authority as `github-actions` before invoking
 `shipyard runner steward`.
 
+Queue and status mutations use a repository-scoped installation token minted
+from `SHIPYARD_APP_ID` and `SHIPYARD_APP_PRIVATE_KEY`, not the workflow
+`GITHUB_TOKEN`: GitHub suppresses downstream workflow events for mutations made
+with `GITHUB_TOKEN`, which would prevent required `merge_group` checks from
+starting. The job runs only from `refs/heads/main`, checks out `main` without
+persisted credentials, and passes the short-lived App token only to Shipyard's
+authority and reconciliation steps.
+
 Only an exact head carrying both the `shipyard:managed` label and a successful
 current-head `shipyard/steward-handoff` status is eligible for mutation. PRs
 without that contract remain visible as `unmanaged` and are never adopted

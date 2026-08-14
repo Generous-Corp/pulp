@@ -28,10 +28,22 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         job = self.doc["jobs"]["reconcile"]
         self.assertEqual(job["runs-on"], "ubuntu-latest")
         self.assertIn("PULP_PRIMARY_REPO", job["if"])
+        self.assertIn("refs/heads/main", job["if"])
         permissions = self.doc["permissions"]
         self.assertEqual(permissions["contents"], "read")
-        for permission in ("actions", "statuses", "issues", "pull-requests"):
-            self.assertEqual(permissions[permission], "write")
+        self.assertEqual(permissions["actions"], "write")
+        for permission in ("statuses", "issues", "pull-requests"):
+            self.assertNotIn(permission, permissions)
+
+    def test_mutations_use_repository_scoped_shipyard_app_token(self) -> None:
+        self.assertIn("actions/create-github-app-token@", self.text)
+        self.assertIn("secrets.SHIPYARD_APP_ID", self.text)
+        self.assertIn("secrets.SHIPYARD_APP_PRIVATE_KEY", self.text)
+        self.assertIn("steps.shipyard-app-token.outputs.token", self.text)
+        self.assertNotIn("secrets.GITHUB_TOKEN", self.text)
+        checkout = self.doc["jobs"]["reconcile"]["steps"][0]
+        self.assertEqual(checkout["with"]["ref"], "main")
+        self.assertEqual(checkout["with"]["persist-credentials"], "false")
 
     def test_exact_pinned_binary_and_machine_authority_are_proven(self) -> None:
         self.assertIn("./tools/install-shipyard.sh", self.text)

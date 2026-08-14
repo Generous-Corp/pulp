@@ -15,9 +15,6 @@ on:
 permissions:
   contents: read
   actions: write
-  statuses: write
-  issues: write
-  pull-requests: write
 
 concurrency:
   group: shipyard-merge-steward-${{ github.repository }}
@@ -25,17 +22,32 @@ concurrency:
 
 jobs:
   reconcile:
-    if: github.repository == vars.PULP_PRIMARY_REPO
+    if: github.repository == vars.PULP_PRIMARY_REPO && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       STEWARD_LEDGER: ${{ github.workspace }}/.shipyard-steward/ledger.json
 
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: main
           fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint repository-scoped Shipyard App token
+        id: shipyard-app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+          permission-statuses: write
 
       - name: Install pinned Shipyard
         run: ./tools/install-shipyard.sh
@@ -50,6 +62,8 @@ jobs:
 
       - name: Configure ephemeral controller authority
         shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.config/shipyard" "$(dirname "$STEWARD_LEDGER")"
@@ -70,6 +84,7 @@ jobs:
         shell: bash
         env:
           APPLY: ${{ inputs.apply }}
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
         run: |
           set -euo pipefail
           args=(
