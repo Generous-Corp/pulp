@@ -201,6 +201,17 @@ matrix provider is derived from the selector that actually resolved. An
 operator dispatch with a configured selector fails instead of silently falling
 back to hosted Linux.
 
+**Activation evidence (2026-08-14).** The selector remains intentionally unset:
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` is not active. Protected-main dispatch
+`31844200914` reached Mac Pro VM `200` with runner
+`pulp-auto-ephemeral-200-b778b3c6-4576-42c0-8795-8754bd225ffb`, and its build
+completed successfully, but the non-Windows test phase failed. The failures
+were capability/image-specific (no usable browser/Node capture path, no
+headless visual path, and filesystem/cache-contract cases), so this is not a
+dispatch proof. Do not enable the selector or broaden the trusted runner group
+until a replacement golden passes the real dispatch and teardown proof. The
+hosted Linux check on PR #7521 remains the fallback and is green.
+
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
 qm list                          # 9xxx = pulp-linux-golden* (templates)
