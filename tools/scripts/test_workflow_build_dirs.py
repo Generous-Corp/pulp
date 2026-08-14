@@ -310,18 +310,18 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("- 'inspect/src/control_protocol*.cpp'", text)
         self.assertIn("- 'inspect/src/control_json_*.cpp'", text)
 
-    def test_macos_build_runs_ios_syntax_gate_after_configure(self) -> None:
+    def test_macos_build_runs_ios_compile_gate_after_configure(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
         configure = 'cmake -S . -B "$PULP_BUILD_DIR"'
-        syntax_gate = (
-            'bash test/cmake/test_ios_source_syntax.sh '
-            '"$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"'
+        compile_gate = (
+            "bash test/cmake/test_ios_compile_gate.sh \\\n"
+            '              "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
         )
         build = 'cmake --build "$PULP_BUILD_DIR" --config Release'
 
-        self.assertIn(syntax_gate, text)
-        self.assertLess(text.index(configure), text.index(syntax_gate))
-        self.assertLess(text.index(syntax_gate), text.index(build))
+        self.assertIn(compile_gate, text)
+        self.assertLess(text.index(configure), text.index(compile_gate))
+        self.assertLess(text.index(compile_gate), text.index(build))
 
 
 class MacosNinjaGeneratorTests(unittest.TestCase):
