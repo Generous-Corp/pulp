@@ -125,6 +125,7 @@ TEST_CASE("VisualizationBridge audio producer stays allocation-free when tap fil
     cfg.sample_rate = 48000.0f;
     cfg.capture_waveform = true;
     cfg.waveform_length = 128;
+    cfg.max_callback_frames = 256;
     cfg.capture_buffer_frames = 256;
     bridge.configure(cfg);
 
@@ -617,6 +618,7 @@ TEST_CASE("VisualizationBridge overflow starts a fresh continuity epoch",
     cfg.num_channels = 1;
     cfg.capture_waveform = true;
     cfg.waveform_length = 128;
+    cfg.max_callback_frames = 256;
     cfg.capture_buffer_frames = 256;
     bridge.configure(cfg);
 
@@ -627,6 +629,10 @@ TEST_CASE("VisualizationBridge overflow starts a fresh continuity epoch",
     auto overflow = bin_sine(7, 256);
     const float* overflow_channels[] = {overflow.data()};
     bridge.process(overflow_channels, 1, static_cast<int>(overflow.size()));
+
+    std::array<float, 64> suspended{};
+    const float* suspended_channels[] = {suspended.data()};
+    bridge.process(suspended_channels, 1, static_cast<int>(suspended.size()));
 
     // The first poll observes the drop, flushes the entry snapshot, and resets
     // continuity without publishing a frame assembled across the gap.
@@ -641,13 +647,37 @@ TEST_CASE("VisualizationBridge overflow starts a fresh continuity epoch",
     const auto spectrum = bridge.peek_spectrum();
     REQUIRE(spectrum.epoch == 2);
     REQUIRE(spectrum.sequence_number == 1);
-    REQUIRE(spectrum.dropped_frames == 256);
+    REQUIRE(spectrum.dropped_frames == 320);
     REQUIRE(std::abs(peak_bin(spectrum) - 31) <= 1);
 
     const auto waveform = bridge.peek_waveform();
     REQUIRE(waveform.epoch == 2);
     REQUIRE(waveform.sequence_number == 1);
-    REQUIRE(waveform.dropped_frames == 256);
+    REQUIRE(waveform.dropped_frames == 320);
+}
+
+TEST_CASE("VisualizationBridge automatic storage admits the declared callback maximum",
+          "[view][vizbridge][poll][capacity]") {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 256;
+    cfg.num_channels = 1;
+    cfg.capture_waveform = false;
+    cfg.max_callback_frames = 8192;
+    bridge.configure(cfg);
+
+    std::vector<float> block(8192);
+    for (std::size_t i = 0; i < block.size(); ++i) {
+        block[i] = std::sin(2.0f * kPi * 17.0f
+                            * static_cast<float>(i) / 256.0f);
+    }
+    const float* channels[] = {block.data()};
+    bridge.process(channels, 1, static_cast<int>(block.size()));
+    REQUIRE(bridge.poll());
+    const auto spectrum = bridge.peek_spectrum();
+    REQUIRE(spectrum.dropped_frames == 0);
+    REQUIRE(std::abs(peak_bin(spectrum) - 17) <= 1);
 }
 
 TEST_CASE("VisualizationBridge poll returns while producer continuously refills",
@@ -658,6 +688,7 @@ TEST_CASE("VisualizationBridge poll returns while producer continuously refills"
     cfg.hop_size = 256;
     cfg.num_channels = 1;
     cfg.capture_waveform = false;
+    cfg.max_callback_frames = 256;
     cfg.capture_buffer_frames = 256;
     bridge.configure(cfg);
 

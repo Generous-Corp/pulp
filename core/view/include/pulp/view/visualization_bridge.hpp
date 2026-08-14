@@ -82,9 +82,16 @@ struct VisualizationConfig {
     bool capture_waveform = true;
     int waveform_length = 1024; // samples to capture per snapshot
 
+    // Largest frame count the host can deliver in one audio callback. The
+    // automatic capture capacity and any smaller explicit capacity are raised
+    // to this bound so a valid callback can always be published atomically.
+    // Set this to the host's offline/variable-block maximum before configure().
+    int max_callback_frames = 4096;
+
     // Audio frames retained between non-RT polls. Zero selects an automatic
-    // capacity of at least four FFT windows. When the consumer falls behind,
-    // new frames are dropped and the cumulative count is stamped in snapshots.
+    // capacity of at least four FFT windows and max_callback_frames. When the
+    // consumer falls behind, new frames are dropped and the cumulative count
+    // is stamped in snapshots.
     int capture_buffer_frames = 0;
 
     // Optional upper bound on frames analyzed by one poll. Zero consumes the
@@ -122,6 +129,7 @@ public:
         config_.spectrum_floor_db = std::isfinite(config.spectrum_floor_db)
             ? std::clamp(config.spectrum_floor_db, -300.0f, 0.0f) : -120.0f;
         config_.max_frames_per_poll = std::max(0, config.max_frames_per_poll);
+        config_.max_callback_frames = std::max(1, config.max_callback_frames);
 
         // Configure one independent STFT per channel. Combining complex audio
         // before the FFT would make anti-phase stereo disappear visually.
@@ -145,11 +153,13 @@ public:
             : 0;
         waveform_pos_ = 0;
 
-        const int automatic_capacity = std::max(config_.fft_size * 4,
-                                                 std::max(1, waveform_length_));
+        const int automatic_capacity = std::max(
+            {config_.fft_size * 4, std::max(1, waveform_length_),
+             config_.max_callback_frames});
         const int requested_capacity = config_.capture_buffer_frames > 0
             ? config_.capture_buffer_frames : automatic_capacity;
-        capture_capacity_frames_ = std::max(config_.fft_size, requested_capacity);
+        capture_capacity_frames_ = std::max(
+            {config_.fft_size, requested_capacity, config_.max_callback_frames});
         capture_ready_ = capture_.prepare(
             static_cast<std::uint32_t>(channel_stfts_.size()),
             static_cast<std::uint64_t>(capture_capacity_frames_));

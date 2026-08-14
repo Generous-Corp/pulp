@@ -74,7 +74,11 @@ void VisualizationBridge::process(const float* const* channels,
         }
     }
     if (discontinuity_generation_.load(std::memory_order_acquire)
-        != acknowledged_discontinuity_.load(std::memory_order_acquire)) return;
+        != acknowledged_discontinuity_.load(std::memory_order_acquire)) {
+        dropped_capture_frames_.fetch_add(
+            static_cast<std::uint64_t>(num_samples), std::memory_order_relaxed);
+        return;
+    }
 
     const audio::BufferView<const float> block(
         channels, static_cast<std::size_t>(captured_channels),
