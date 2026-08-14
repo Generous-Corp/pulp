@@ -354,6 +354,27 @@ reclaim_stale_slot_runners() {
     log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
 }
 
+delegate_deferred_cleanup() {
+    local cleanup_unit
+    cleanup_unit="pulp-ephemeral-cleanup-${VMID}-$(date +%s)"
+    if command -v systemd-run >/dev/null 2>&1 \
+        && systemd-run --quiet --collect --unit="$cleanup_unit" \
+            --service-type=oneshot --property=TimeoutStartSec=80min \
+            --property=User=root \
+            --property=Restart=on-failure --property=RestartSec=30s \
+            --setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE" \
+            --setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE" \
+            --setenv="PULP_LINUX_GH_CLI=$GH_CLI" \
+            --setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR" \
+            "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
+            "$RUNNER_NAME" "$REGISTRATION_API"; then
+        log "runner is busy; delegated clone $VMID to $cleanup_unit"
+        return 0
+    fi
+    log "ERROR: runner is busy and deferred cleanup could not be scheduled; leaving clone $VMID for safe recovery"
+    return 1
+}
+
 cleanup() {
     # Guard: only tear down a VM this invocation actually created. Without this,
     # a failure before the clone lands makes cleanup destroy whatever now owns
@@ -381,22 +402,7 @@ cleanup() {
                 || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
             IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
             if [ "$runner_busy" = true ]; then
-                cleanup_unit="pulp-ephemeral-cleanup-${VMID}-$(date +%s)"
-                if command -v systemd-run >/dev/null 2>&1 \
-                    && systemd-run --quiet --collect --unit="$cleanup_unit" \
-                        --service-type=oneshot --property=TimeoutStartSec=80min \
-                        --property=User=root \
-                        --property=Restart=on-failure --property=RestartSec=30s \
-                        --setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE" \
-                        --setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE" \
-                        --setenv="PULP_LINUX_GH_CLI=$GH_CLI" \
-                        --setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR" \
-                        "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
-                        "$RUNNER_NAME" "$REGISTRATION_API"; then
-                    log "runner is busy; delegated clone $VMID to $cleanup_unit"
-                else
-                    log "ERROR: runner is busy and deferred cleanup could not be scheduled; leaving clone $VMID for safe recovery"
-                fi
+                delegate_deferred_cleanup || true
                 return
             fi
             [ "$runner_busy" = false ] \
@@ -416,8 +422,12 @@ cleanup() {
                     IFS=$'\t' read -r fenced_name runner_busy runner_status runner_labels <<< "$fenced_runner"
                     [ "$fenced_name" = "$RUNNER_NAME" ] \
                         || { log "ERROR: dispatch fence resolved the wrong runner; leaving clone $VMID for safe recovery"; return; }
+                    if [ "$runner_busy" = true ]; then
+                        delegate_deferred_cleanup || true
+                        return
+                    fi
                     [ "$runner_busy" = false ] \
-                        || { log "ERROR: exact runner became busy before dispatch fence; leaving clone $VMID for safe recovery"; return; }
+                        || { log "ERROR: exact runner has invalid fenced busy state; leaving clone $VMID for safe recovery"; return; }
                     { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                         || { log "ERROR: exact runner has invalid fenced status; leaving clone $VMID for safe recovery"; return; }
                     case ",$runner_labels," in

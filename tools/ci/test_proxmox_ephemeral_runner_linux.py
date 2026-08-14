@@ -143,25 +143,31 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertNotIn("runner lookup exceeded one API page", self.script)
 
     def test_shutdown_fences_only_idle_runner_before_deregistration(self) -> None:
-        cleanup = self.script[
-            self.script.index("cleanup() {") : self.script.index("trap cleanup EXIT")
+        delegation_start = self.script.index("\ndelegate_deferred_cleanup() {") + 1
+        cleanup_start = self.script.index("\ncleanup() {") + 1
+        delegation = self.script[
+            delegation_start:cleanup_start
         ]
-        self.assertIn('systemd-run --quiet --collect', cleanup)
-        self.assertIn('--service-type=oneshot', cleanup)
-        self.assertIn('--property=User=root', cleanup)
-        self.assertIn('--property=Restart=on-failure', cleanup)
-        self.assertIn('--setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE"', cleanup)
+        cleanup = self.script[
+            cleanup_start : self.script.index("trap cleanup EXIT")
+        ]
+        self.assertIn('systemd-run --quiet --collect', delegation)
+        self.assertIn('--service-type=oneshot', delegation)
+        self.assertIn('--property=User=root', delegation)
+        self.assertIn('--property=Restart=on-failure', delegation)
+        self.assertIn('--setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE"', delegation)
         self.assertIn(
-            '--setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE"', cleanup
+            '--setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE"', delegation
         )
-        self.assertIn('--setenv="PULP_LINUX_GH_CLI=$GH_CLI"', cleanup)
-        self.assertIn('--setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR"', cleanup)
-        self.assertIn('--deferred-cleanup "$VMID"', cleanup)
-        self.assertIn('runner is busy; delegated clone $VMID', cleanup)
+        self.assertIn('--setenv="PULP_LINUX_GH_CLI=$GH_CLI"', delegation)
+        self.assertIn('--setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR"', delegation)
+        self.assertIn('--deferred-cleanup "$VMID"', delegation)
+        self.assertIn('runner is busy; delegated clone $VMID', delegation)
+        self.assertEqual(cleanup.count("delegate_deferred_cleanup || true"), 2)
         self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
         self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
         self.assertIn('cannot fence runner dispatch', cleanup)
-        self.assertIn('exact runner became busy before dispatch fence', cleanup)
+        self.assertIn('exact runner has invalid fenced busy state', cleanup)
         self.assertIn('a routing label survived dispatch fence', cleanup)
         self.assertIn('pulp-auto-linux-x64', cleanup)
         self.assertIn('pulp-pr-safe-linux-x64', cleanup)
@@ -188,6 +194,54 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             cleanup.index('qm stop "$VMID"'),
             cleanup.rindex('[ "$runner_status" = offline ]'),
         )
+
+    def test_cleanup_delegates_job_that_wins_fence_race(self) -> None:
+        helper_start = self.script.index("\ndelegate_deferred_cleanup() {") + 1
+        helper = self.script[
+            helper_start : self.script.index("trap cleanup EXIT")
+        ]
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            delegated = tmp / "delegated"
+            qm_called = tmp / "qm-called"
+            harness = tmp / "harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -u\n"
+                "log() { printf '%s\\n' \"$*\"; }\n"
+                f"systemd-run() {{ printf '%s\\n' \"$*\" > '{delegated}'; }}\n"
+                f"qm() {{ : > '{qm_called}'; }}\n"
+                "github_api() {\n"
+                "  if [ \"${1:-}\" = --paginate ]; then\n"
+                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\tonline\\n'\n"
+                "  elif [ \"${1:-}\" = --method ]; then\n"
+                "    :\n"
+                "  else\n"
+                "    printf 'pulp-pr-safe-ephemeral-200-test\\ttrue\\tonline\\tpulp-shutdown-fenced\\n'\n"
+                "  fi\n"
+                "}\n"
+                "CLONED=1\nKEEP=0\nGITHUB_API_READY=1\n"
+                "VMID=200\nRUNNER_NAME='pulp-pr-safe-ephemeral-200-test'\n"
+                "REGISTRATION_API='orgs/Generous-Corp'\n"
+                "GITHUB_AUTH_MODE='app-helper'\n"
+                "ORG_PAT_FILE='/root/.config/pulp/secrets/gh-org-runner-pat'\n"
+                "GH_CLI='/usr/local/bin/ghapp'\n"
+                f"FIREWALL_DIR='{tmp}'\n"
+                + helper
+                + "\ncleanup\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(harness)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(delegated.exists())
+            self.assertIn("--deferred-cleanup 200", delegated.read_text())
+            self.assertIn("delegated clone 200", result.stdout)
+            self.assertFalse(qm_called.exists())
 
     def test_deferred_cleanup_is_bounded_and_preserves_busy_work(self) -> None:
         helper = self.script[
