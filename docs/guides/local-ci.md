@@ -228,6 +228,8 @@ TARTCI_RUNNER_PAT_FILE=/root/.config/tartci/secrets/repo-runner-pat \
 TARTCI_RUNNER_NAME_PREFIX=repo-pr-safe-ephemeral \
 TARTCI_PROXMOX_VM_NAME_PREFIX=repo-ci-ephemeral \
 TARTCI_PROXMOX_GOLDEN=9005 \
+TARTCI_PROXMOX_CLONE_BASE=203 TARTCI_PROXMOX_CLONE_MAX=203 \
+TARTCI_PROXMOX_GUEST_IPV4_FIRST_OCTET=254 \
 /usr/local/sbin/proxmox-ephemeral-runner-linux.sh --once
 ```
 
@@ -237,6 +239,11 @@ into the golden or guest. The guest must have no reusable GitHub credentials,
 no writable source/cache mount from the host, and must be destroyed after the
 job. A repository's workflow variable remains hosted until this proof records
 the exact runner assignment, labels, isolation, teardown, and fallback.
+
+Each repository/slot must use a non-overlapping VMID and guest-IP range. The
+supervisor checks existing Proxmox VM configuration and fails closed on an IP
+collision; do not assume that changing the VMID alone changes the deterministic
+guest address.
 
 For a new project, commit the corresponding `.shipyard/ci-profiles/` target and
 workflow selector first, then use the same profile from every fresh worktree.

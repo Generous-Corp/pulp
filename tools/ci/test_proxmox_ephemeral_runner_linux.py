@@ -33,6 +33,7 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         for marker in (
             "--ephemeral",
             "TARTCI_RUNNER_NETWORK_ISOLATION",
+            "TARTCI_PROXMOX_GUEST_IPV4_FIRST_OCTET",
             "AUTOMATIC_NETWORK_ISOLATION=1",
             "deregistered runner id",
             "destroying clone",
@@ -43,6 +44,7 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         self.assertIn("install -m 600 /dev/stdin", self.text)
         self.assertIn("TOKEN_FILE=/tmp/tartci-jit-token", self.text)
         self.assertNotIn("--token ${RT}", self.text)
+        self.assertIn("guest IP ${GUEST_IP} is already assigned", self.text)
 
 
 if __name__ == "__main__":

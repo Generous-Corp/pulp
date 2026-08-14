@@ -26,7 +26,7 @@ GOLDEN="${TARTCI_PROXMOX_GOLDEN:-${PULP_LINUX_GOLDEN:-9005}}"
 CLONE_BASE="${TARTCI_PROXMOX_CLONE_BASE:-200}" # pool slots, clear of persistent VMs
 CLONE_MAX="${TARTCI_PROXMOX_CLONE_MAX:-202}"
 GUEST_IPV4_PREFIX=192.168.86
-GUEST_IPV4_FIRST_OCTET=251
+GUEST_IPV4_FIRST_OCTET="${TARTCI_PROXMOX_GUEST_IPV4_FIRST_OCTET:-${PULP_PROXMOX_GUEST_IPV4_FIRST_OCTET:-251}}"
 GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
@@ -177,6 +177,14 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+
+for existing_vmid in $(qm list 2>/dev/null | awk 'NR > 1 {print $1}'); do
+    [ "$existing_vmid" = "$VMID" ] && continue
+    existing_ip="$(qm config "$existing_vmid" 2>/dev/null \
+        | sed -n 's/^ipconfig0:.*ip=\([^/,]*\).*/\1/p')"
+    [ "$existing_ip" = "$GUEST_IP" ] \
+        && die "guest IP ${GUEST_IP} is already assigned to VM ${existing_vmid}"
+done
 # The slot identity and GitHub registration name are stable. Reusing the same
 # name per repository/slot makes the fleet auditable and prevents registration
 # churn; cleanup reclaims only a confirmed offline registration for this exact
