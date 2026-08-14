@@ -413,12 +413,15 @@ RT="$(curl -s -X POST \
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
-ssh -o BatchMode=yes "ci@$GUEST_IP" "
+registration_output="$(ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
       --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
-" >/dev/null 2>&1 || die "runner registration failed"
+")" || {
+    printf '%s\n' "$registration_output" | sed 's/[Tt]oken[^[:space:]]*/token=<redacted>/g' >&2
+    die "runner registration failed"
+}
 
 # ── run exactly one job ──────────────────────────────────────────────────────
 # run.sh exits once the single job completes, because of --ephemeral.
