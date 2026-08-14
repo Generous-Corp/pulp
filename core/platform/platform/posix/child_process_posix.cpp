@@ -6,6 +6,7 @@
 
 #ifndef _WIN32
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -716,10 +717,12 @@ ProcessResult ChildProcess::wait() {
     while (true) {
         // Drain pipes — full output goes to stdout_full/stderr_full,
         // line splitting goes to lines_buf (independent buffers)
-        drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
-                   impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
-        drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
-                   impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
+        const auto stdout_bytes =
+            drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                       impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
+        const auto stderr_bytes =
+            drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                       impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
 
         // Check if process exited (use cached result from is_running() if available)
         int status = 0;
@@ -771,7 +774,19 @@ ProcessResult ChildProcess::wait() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (stdout_bytes == 0 && stderr_bytes == 0) {
+            std::array<pollfd, 2> ready{};
+            nfds_t ready_count = 0;
+            for (const auto descriptor : {impl_->stdout_pipe.read_end(),
+                                          impl_->stderr_pipe.read_end()}) {
+                if (descriptor >= 0)
+                    ready[ready_count++] = {.fd = descriptor, .events = POLLIN, .revents = 0};
+            }
+            if (ready_count > 0)
+                (void)::poll(ready.data(), ready_count, 1);
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 
     impl_->stdout_pipe.close_read();
