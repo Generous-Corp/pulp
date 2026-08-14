@@ -172,22 +172,27 @@ def resolve_route(
         raise ValueError("resolved Linux selector must not be empty")
 
     automatic_local = event_name == "merge_group"
-    if event_name == "workflow_dispatch" and (
-        dispatch is not None or configured is not None
-    ):
-        reason = "explicit-dispatch"
-        expected = dispatch if dispatch is not None else configured
-        if expected is not None and authorized != expected:
-            raise ValueError(
-                "workflow_dispatch authorized selector does not match its "
-                "dispatch override or configured selector"
-            )
-        if dispatch is None and configured is not None:
-            if resolved != configured or _is_known_github_hosted(configured):
+    if event_name == "workflow_dispatch" and dispatch is not None:
+        if is_macpro_linux_selector(dispatch):
+            if authorized is not None or resolved != "ubuntu-latest":
                 raise ValueError(
-                    "workflow_dispatch configured Linux selector unexpectedly "
-                    f"resolved to {resolved_json}"
+                    "workflow_dispatch cannot directly target the protected "
+                    "Mac Pro selector and must resolve exactly to ubuntu-latest"
                 )
+            reason = "security-hosted"
+        else:
+            reason = "explicit-dispatch"
+            if authorized != dispatch:
+                raise ValueError(
+                    "workflow_dispatch authorized selector does not match its "
+                    "dispatch override"
+                )
+    elif event_name == "workflow_dispatch":
+        if authorized is not None:
+            raise ValueError(
+                "workflow_dispatch unexpectedly authorized a configured selector"
+            )
+        reason = "security-hosted" if configured is not None else "unconfigured-hosted"
     elif automatic_local and authorized is not None:
         if configured is None or authorized != configured:
             raise ValueError(
@@ -224,11 +229,7 @@ def resolve_route(
     else:
         reason = "unconfigured-hosted"
 
-    configured_local = (
-        configured is not None
-        and ((event_name == "workflow_dispatch" and dispatch is None)
-             or reason == "local-enabled")
-    )
+    configured_local = configured is not None and reason == "local-enabled"
     return {
         "linux_route_reason": reason,
         "linux_provider": provider_for_selector(

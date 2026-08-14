@@ -30,20 +30,20 @@ assert _SPEC.loader is not None
 _SPEC.loader.exec_module(route)
 
 
-def test_dispatch_uses_configured_self_hosted_selector() -> None:
+def test_dispatch_does_not_implicitly_use_protected_configured_selector() -> None:
     metadata = route.resolve_route(
         event_name="workflow_dispatch",
         dispatch_selector_json="",
         configured_selector_json=MAC_PRO_SELECTOR,
-        authorized_selector_json=MAC_PRO_SELECTOR,
-        resolved_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json="",
+        resolved_selector_json='"ubuntu-latest"',
     )
-    assert metadata["linux_route_reason"] == "explicit-dispatch"
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_route_reason"] == "security-hosted"
+    assert metadata["linux_provider"] == "github-hosted"
     labels = json.loads(metadata["configured_selector_json"])
     assert "pulp-host-macpro" in labels
     assert labels[-1] == "pulp-auto-linux-x64"
-    assert metadata["event_authorized_selector_json"] == metadata["configured_selector_json"]
+    assert metadata["event_authorized_selector_json"] == ""
 
 
 def test_pull_request_exposes_security_hosted_route() -> None:
@@ -199,26 +199,28 @@ def test_bare_label_dispatch_override_remains_supported() -> None:
     assert metadata["event_authorized_selector_json"] == '"ubuntu-24.04"'
 
 
-def test_configured_custom_only_label_is_authoritatively_local() -> None:
+def test_configured_selector_is_not_implicitly_authorized_for_dispatch() -> None:
     metadata = route.resolve_route(
         event_name="workflow_dispatch",
         dispatch_selector_json="",
         configured_selector_json="pulp-macpro-custom-only",
-        authorized_selector_json="pulp-macpro-custom-only",
-        resolved_selector_json='"pulp-macpro-custom-only"',
+        authorized_selector_json="",
+        resolved_selector_json='"ubuntu-latest"',
     )
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_provider"] == "github-hosted"
+    assert metadata["linux_route_reason"] == "security-hosted"
 
 
-def test_configured_hosted_looking_custom_label_is_still_local() -> None:
+def test_protected_selector_dispatch_falls_back_hosted() -> None:
     metadata = route.resolve_route(
         event_name="workflow_dispatch",
-        dispatch_selector_json="",
-        configured_selector_json="ubuntu-pulp-macpro",
-        authorized_selector_json="ubuntu-pulp-macpro",
-        resolved_selector_json='"ubuntu-pulp-macpro"',
+        dispatch_selector_json=MAC_PRO_SELECTOR,
+        configured_selector_json=MAC_PRO_SELECTOR,
+        authorized_selector_json="",
+        resolved_selector_json='"ubuntu-latest"',
     )
-    assert metadata["linux_provider"] == "local"
+    assert metadata["linux_provider"] == "github-hosted"
+    assert metadata["linux_route_reason"] == "security-hosted"
 
 
 def test_ambiguous_operator_label_is_reported_as_operator() -> None:
@@ -243,7 +245,7 @@ def test_version_shaped_custom_label_is_reported_as_operator() -> None:
     assert metadata["linux_provider"] == "operator"
 
 
-def test_configured_dispatch_fails_if_it_resolves_hosted() -> None:
+def test_configured_dispatch_fails_if_it_is_implicitly_authorized() -> None:
     proc = subprocess.run(
         [
             sys.executable,
@@ -258,10 +260,10 @@ def test_configured_dispatch_fails_if_it_resolves_hosted() -> None:
         check=False,
     )
     assert proc.returncode == 1
-    assert "unexpectedly resolved" in proc.stderr
+    assert "unexpectedly authorized" in proc.stderr
 
 
-def test_configured_dispatch_rejects_hosted_configuration() -> None:
+def test_configured_hosted_selector_cannot_be_implicitly_authorized() -> None:
     proc = subprocess.run(
         [
             sys.executable,
@@ -276,7 +278,7 @@ def test_configured_dispatch_rejects_hosted_configuration() -> None:
         check=False,
     )
     assert proc.returncode == 1
-    assert "unexpectedly resolved" in proc.stderr
+    assert "unexpectedly authorized" in proc.stderr
 
 
 def test_non_dispatch_cannot_authorize_configured_selector_without_operator_lease() -> None:
@@ -335,12 +337,13 @@ def test_workflow_keeps_configured_selector_separate_from_event_authorization() 
     assert "inputs.linux_runner_selector_json" in authorized.group(1)
     assert "def local_linux_capacity" not in text
     assert 'REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")' in text
-    assert 'EVENT_NAME == "workflow_dispatch" and configured_linux_selector' in text
+    assert 'EVENT_NAME == "workflow_dispatch" and configured_linux_selector' not in text
+    assert "dispatch_uses_protected_selector" in text
     assert 'automatic_linux = EVENT_NAME == "merge_group"' in text
     assert "automatic_linux and configured_linux_valid" in text
     assert "PULP_LOCAL_LINUX_LEASE_UNTIL" in text
     assert "linux_requested_provider = (" in text
-    assert "if automatic_linux and not linux_local_enabled" in text
+    assert "automatic_linux and not linux_local_enabled" in text
     assert '"--requested-provider-env", "LINUX_REQUESTED_PROVIDER"' in text
     assert '"--requested-provider", linux_requested_provider' in text
 

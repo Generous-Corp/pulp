@@ -48,6 +48,7 @@ def test_expired_or_malformed_lease_falls_back() -> None:
     now = datetime(2026, 8, 13, 12, tzinfo=timezone.utc)
     assert _resolve(lease_until=(now - timedelta(seconds=1)).isoformat())["use_reusable"] is False
     assert _resolve(lease_until="not-a-time")["use_reusable"] is False
+    assert _resolve(lease_until="0001-01-01T00:00:00+14:00")["use_reusable"] is False
 
 
 def test_implausibly_distant_lease_falls_back() -> None:
@@ -83,6 +84,7 @@ def test_reusable_workflow_is_read_only_and_validates_both_protected_routes() ->
     assert "needs.admission.outputs.admitted == 'true'" in text
     assert "inputs.runner_selector_json || '\"ubuntu-latest\"'" in text
     assert "PR-safe admission denied; using hosted Linux" in text
+    assert "except (ValueError, OverflowError):" in text
     assert "AudioInspectorPanel renders a non-empty headless snapshot" in text
     assert "Subtree cache composites a GPU image on the replay frame" in text
 

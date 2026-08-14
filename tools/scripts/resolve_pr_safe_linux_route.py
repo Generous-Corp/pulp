@@ -35,11 +35,11 @@ def _parse_selector(raw: str) -> list[str]:
 def _lease_is_live(raw: str, now: datetime) -> bool:
     try:
         expiry = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+        if expiry.tzinfo is None:
+            return False
+        remaining = expiry.astimezone(timezone.utc) - now.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
         return False
-    if expiry.tzinfo is None:
-        return False
-    remaining = expiry.astimezone(timezone.utc) - now.astimezone(timezone.utc)
     return 0 < remaining.total_seconds() <= MAX_LEASE_HORIZON_SECONDS
 
 

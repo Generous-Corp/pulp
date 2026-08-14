@@ -124,7 +124,7 @@ jobs:
           PR_SAFE_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
           PR_SAFE_LINUX_LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
           PR_SAFE_LINUX_REUSABLE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
@@ -537,10 +537,17 @@ jobs:
           configured_linux_valid = is_macpro_linux_selector(
               configured_linux_value
           )
+          dispatch_linux_value = None
           if dispatch_linux_selector:
+              try:
+                  dispatch_linux_value = json.loads(dispatch_linux_selector)
+              except (json.JSONDecodeError, TypeError):
+                  dispatch_linux_value = None
+          dispatch_uses_protected_selector = is_macpro_linux_selector(
+              dispatch_linux_value
+          )
+          if dispatch_linux_selector and not dispatch_uses_protected_selector:
               authorized_linux_selector = dispatch_linux_selector
-          elif EVENT_NAME == "workflow_dispatch" and configured_linux_selector:
-              authorized_linux_selector = configured_linux_selector
           elif automatic_linux and configured_linux_valid and linux_lease_active:
               authorized_linux_selector = configured_linux_selector
           else:
@@ -557,7 +564,12 @@ jobs:
           # local lease into an unrelated Namespace route.
           linux_requested_provider = (
               "github-hosted"
-              if automatic_linux and not linux_local_enabled
+              if (
+                  automatic_linux and not linux_local_enabled
+              ) or (
+                  EVENT_NAME == "workflow_dispatch"
+                  and dispatch_uses_protected_selector
+              )
               else REQUESTED
           )
           os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = authorized_linux_selector

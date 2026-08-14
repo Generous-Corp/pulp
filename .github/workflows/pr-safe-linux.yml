@@ -78,11 +78,11 @@ jobs:
                   expiry = datetime.fromisoformat(
                       os.environ.get(name, "").replace("Z", "+00:00")
                   )
-              except ValueError:
+                  if expiry.tzinfo is None:
+                      return False
+                  remaining = expiry.astimezone(timezone.utc) - datetime.now(timezone.utc)
+              except (ValueError, OverflowError):
                   return False
-              if expiry.tzinfo is None:
-                  return False
-              remaining = expiry.astimezone(timezone.utc) - datetime.now(timezone.utc)
               return 0 < remaining.total_seconds() <= 15 * 60
 
           route_kind = os.environ.get("ROUTE_KIND")
