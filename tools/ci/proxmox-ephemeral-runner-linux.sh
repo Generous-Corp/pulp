@@ -179,7 +179,7 @@ deferred_cleanup() {
         esac
         { [ "$status" = online ] || [ "$status" = offline ]; } \
             || die "invalid deferred-cleanup runner status"
-        if [ "$status" = online ]; then
+        if [ "$status" = online ] || [ "$status" = offline ]; then
             github_api --method PUT \
                 "${registration_api}/actions/runners/${rid}/labels" \
                 -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
@@ -453,7 +453,7 @@ cleanup() {
                 || { log "ERROR: exact runner has invalid busy state; leaving clone $VMID for safe recovery"; return; }
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
-            if [ "$runner_status" = online ]; then
+            if [ "$runner_status" = online ] || [ "$runner_status" = offline ]; then
                 github_api --method PUT \
                     "${REGISTRATION_API}/actions/runners/${rid}/labels" \
                     -f 'labels[]=pulp-shutdown-fenced' >/dev/null \

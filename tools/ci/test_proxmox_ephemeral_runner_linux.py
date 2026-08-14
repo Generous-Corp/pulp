@@ -173,6 +173,10 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
         self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
         self.assertIn('cannot fence runner dispatch', cleanup)
+        self.assertIn(
+            'if [ "$runner_status" = online ] || [ "$runner_status" = offline ]; then',
+            cleanup,
+        )
         self.assertIn('exact runner has invalid fenced busy state', cleanup)
         self.assertIn('a routing label survived dispatch fence', cleanup)
         self.assertIn('pulp-auto-linux-x64', cleanup)
@@ -201,7 +205,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             cleanup.rindex('[ "$runner_status" = offline ]'),
         )
 
-    def test_cleanup_delegates_job_that_wins_fence_race(self) -> None:
+    def test_cleanup_fences_offline_runner_and_delegates_reconnect_race(self) -> None:
         helper_start = self.script.index("\ndelegate_deferred_cleanup() {") + 1
         helper = self.script[
             helper_start : self.script.index("trap cleanup EXIT")
@@ -219,7 +223,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 f"qm() {{ : > '{qm_called}'; }}\n"
                 "github_api() {\n"
                 "  if [ \"${1:-}\" = --paginate ]; then\n"
-                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\tonline\\n'\n"
+                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\toffline\\n'\n"
                 "  elif [ \"${1:-}\" = --method ]; then\n"
                 "    :\n"
                 "  else\n"
@@ -261,6 +265,9 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('legacy_credential="${4:-}"', helper)
         self.assertIn("invalid legacy deferred-cleanup credential path", helper)
         self.assertIn("labels[]=pulp-shutdown-fenced", helper)
+        self.assertIn(
+            'if [ "$status" = online ] || [ "$status" = offline ]; then', helper
+        )
         self.assertIn("for fence_probe in 1 2; do", helper)
         self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
         self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
@@ -360,7 +367,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.assertTrue(firewall.exists())
             self.assertFalse(destroyed.exists())
 
-    def test_deferred_cleanup_preserves_job_that_wins_fence_race(self) -> None:
+    def test_deferred_cleanup_fences_offline_runner_before_reconnect_race(self) -> None:
         helper = self.script[
             self.script.index("deferred_cleanup() {") : self.script.index(
                 'if [ "${1:-}" = "--deferred-cleanup" ]'
@@ -387,7 +394,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "configure_github_auth() { :; }\n"
                 "github_api() {\n"
                 "  if [ \"${1:-}\" = --paginate ]; then\n"
-                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\tonline\\n'\n"
+                "    printf '17\\tpulp-pr-safe-ephemeral-200-test\\tfalse\\toffline\\n'\n"
                 "  elif [ \"${1:-}\" = --method ]; then\n"
                 "    :\n"
                 "  else\n"
