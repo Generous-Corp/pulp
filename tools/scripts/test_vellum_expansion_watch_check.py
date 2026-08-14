@@ -335,6 +335,26 @@ class Tests(unittest.TestCase):
         self.assertEqual(report["status"], "pass", report["errors"])
         self.assertEqual(report["affected_families"], [])
 
+    def test_unknown_event_kind_fails_closed(self) -> None:
+        value = event("render-assets-and-backends")
+        value["kind"] = "authority-expansion-watch-unknown"
+        with self.assertRaisesRegex(watch.WatchError, "kind differs"):
+            watch.validate_event(
+                value,
+                ".github/vellum-expansion-watch-events/"
+                "20260811-render-watch-change.json",
+            )
+
+    def test_refresh_overlap_count_requires_integer_zero(self) -> None:
+        value = refresh_event()
+        value["refresh"]["open_vellum_overlap_count"] = False
+        with self.assertRaisesRegex(watch.WatchError, "expected zero"):
+            watch.validate_event(
+                value,
+                ".github/vellum-expansion-watch-events/"
+                "20260813-exact-boundary-audit-refresh.json",
+            )
+
     def test_event_with_extra_family_fails(self) -> None:
         temporary, repo = self.git_repo()
         del temporary

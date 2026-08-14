@@ -501,6 +501,11 @@ def validate_event(value: Any, filename: str) -> set[str]:
         "authority_effect",
     }
     kind = value.get("kind") if isinstance(value, dict) else None
+    if kind not in {
+        "authority-expansion-watch-change",
+        "authority-expansion-watch-refresh",
+    }:
+        raise WatchError(f"{filename}: kind differs from watch contract")
     fields = set(common_fields)
     if kind == "authority-expansion-watch-refresh":
         fields.add("refresh")
@@ -543,13 +548,18 @@ def validate_event(value: Any, filename: str) -> set[str]:
             f"{filename}.refresh",
         )
         _utc(refresh["audited_at"], f"{filename}.refresh.audited_at")
-        if not SHA40.fullmatch(refresh["pulp_main_commit"]):
+        if not isinstance(refresh["pulp_main_commit"], str) or not SHA40.fullmatch(
+            refresh["pulp_main_commit"]
+        ):
             raise WatchError(f"{filename}.refresh.pulp_main_commit: expected full SHA")
         if refresh["open_pr_audit_complete"] is not True:
             raise WatchError(f"{filename}.refresh.open_pr_audit_complete: expected true")
         if refresh["open_pr_rows"] != []:
             raise WatchError(f"{filename}.refresh.open_pr_rows: expected empty audit")
-        if refresh["open_vellum_overlap_count"] != 0:
+        if (
+            type(refresh["open_vellum_overlap_count"]) is not int
+            or refresh["open_vellum_overlap_count"] != 0
+        ):
             raise WatchError(
                 f"{filename}.refresh.open_vellum_overlap_count: expected zero"
             )
