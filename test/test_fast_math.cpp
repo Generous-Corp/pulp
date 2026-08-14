@@ -28,6 +28,16 @@ std::uint32_t positive_float_ulp_distance(float lhs, float rhs) {
     return lhs_bits > rhs_bits ? lhs_bits - rhs_bits : rhs_bits - lhs_bits;
 }
 
+// Exact approximation removed by the landed exp2 correctness fix. Keeping it
+// test-local proves the dense oracle rejects the former production behavior.
+float prior_pulp_cubic_exp2(float x) noexcept {
+    const float integral = std::floor(x);
+    const float fractional = x - integral;
+    const float polynomial =
+        1.0f + fractional * (0.6931472f + fractional * (0.2402265f + fractional * 0.0558015f));
+    return polynomial * std::ldexp(1.0f, static_cast<int>(integral));
+}
+
 } // namespace
 
 TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
@@ -159,6 +169,7 @@ TEST_CASE("FastMath exp2 agrees with a dense double-precision oracle", "[signal]
     constexpr double first = -150.0;
     constexpr double last = 128.0;
     std::uint32_t maximum_ulp_error = 0;
+    std::uint32_t prior_maximum_ulp_error = 0;
 
     for (std::size_t index = 0; index < sample_count; ++index) {
         const float exponent =
@@ -169,10 +180,35 @@ TEST_CASE("FastMath exp2 agrees with a dense double-precision oracle", "[signal]
         const float actual = FastMath::exp2(exponent);
         maximum_ulp_error =
             std::max(maximum_ulp_error, positive_float_ulp_distance(actual, oracle));
+        if (std::isfinite(oracle)) {
+            prior_maximum_ulp_error =
+                std::max(prior_maximum_ulp_error,
+                         positive_float_ulp_distance(prior_pulp_cubic_exp2(exponent), oracle));
+        }
     }
 
     INFO("max ULP error = " << maximum_ulp_error);
+    INFO("planted prior approximation max ULP error = " << prior_maximum_ulp_error);
     REQUIRE(maximum_ulp_error <= 1);
+    REQUIRE(prior_maximum_ulp_error > 1);
+}
+
+TEST_CASE("FastMath exp2 round trips through the standard logarithm where finite and normal",
+          "[signal][fast_math]") {
+    constexpr std::size_t sample_count = 100'001;
+    constexpr float first = -126.0f;
+    constexpr float last = 127.0f;
+    float maximum_absolute_error = 0.0f;
+
+    for (std::size_t index = 0; index < sample_count; ++index) {
+        const float exponent = first + (last - first) * static_cast<float>(index) /
+                                           static_cast<float>(sample_count - 1);
+        const float roundtrip = std::log2(FastMath::exp2(exponent));
+        maximum_absolute_error = std::max(maximum_absolute_error, std::abs(roundtrip - exponent));
+    }
+
+    INFO("max exp2/log2 roundtrip absolute error = " << maximum_absolute_error);
+    REQUIRE(maximum_absolute_error < 2.0e-5f);
 }
 
 TEST_CASE("FastMath exp2 has bounded relative and cents error in the DSP domain",
