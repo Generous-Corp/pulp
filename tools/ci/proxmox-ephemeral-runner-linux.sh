@@ -413,10 +413,17 @@ RT="$(curl -s -X POST \
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
+TOKEN_FILE=/tmp/tartci-jit-token
+ssh -o BatchMode=yes "ci@$GUEST_IP" \
+    "umask 077; install -m 600 /dev/stdin ${TOKEN_FILE}" <<<"$RT" \
+    || die "could not transfer the short-lived registration token"
+unset RT
 registration_output="$(ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
+    trap 'rm -f ${TOKEN_FILE}' EXIT
+    registration_token=\$(cat ${TOKEN_FILE})
     ./config.sh --unattended --ephemeral --replace \
-      --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
+      --url ${RUNNER_URL} --token \"\${registration_token}\" ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 ")" || {
     printf '%s\n' "$registration_output" | sed 's/[Tt]oken[^[:space:]]*/token=<redacted>/g' >&2

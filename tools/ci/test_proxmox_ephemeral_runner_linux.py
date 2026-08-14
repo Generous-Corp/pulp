@@ -37,6 +37,11 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.text)
 
+    def test_jit_token_does_not_travel_in_the_ssh_command_line(self) -> None:
+        self.assertIn("install -m 600 /dev/stdin", self.text)
+        self.assertIn("TOKEN_FILE=/tmp/tartci-jit-token", self.text)
+        self.assertNotIn("--token ${RT}", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()
