@@ -384,22 +384,38 @@ int run_harness() {
             }
         });
         for (uint32_t i = 1; i <= 64; ++i) {
-            auto event = one_word_event_list(0x20000000 | i);
+            const uint32_t note = 0x30 + (i % 24);
+            auto event = one_word_event_list(0x20900040 | (note << 8));
             if (MIDIReceivedEventList(source, &event) != noErr) {
                 keep_replacing.store(false, std::memory_order_release);
                 replacer.join();
                 return fail(@"UMP callback replacement stress send failed",
                             source, destination);
             }
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
         }
         keep_replacing.store(false, std::memory_order_release);
         replacer.join();
         if (!wait_until([&] {
                 return received_word->load(std::memory_order_acquire) != 0;
             })) {
-            return fail(@"UMP callback replacement stress lost all delivery",
+            return fail(input->is_open()
+                            ? @"UMP callback replacement stress lost all delivery while open"
+                            : @"UMP callback replacement stress endpoint closed",
                         source, destination);
         }
+
+        auto retired_callback_count =
+            std::make_shared<std::atomic<uint32_t>>(0);
+        constexpr uint32_t kReopenedSourceWord = 0x20903f03;
+        input->set_receive_callback(
+            [retired_callback_count](const pulp::midi::UmpPacket& p, double) {
+                if (p.word_count > 0 && p.words[0] == kReopenedSourceWord) {
+                    retired_callback_count->fetch_add(
+                        1, std::memory_order_acq_rel);
+                }
+            });
 
         MIDIEndpointDispose(source);
         source = 0;
@@ -446,6 +462,33 @@ int run_harness() {
             open_status != pulp::midi::UmpOpenStatus::Ok ||
             !reopened->is_open() || input->is_open()) {
             return fail(@"same-ID reopen violated borrowed-handle lifetime",
+                        source, 0);
+        }
+        auto reopened_callback_count =
+            std::make_shared<std::atomic<uint32_t>>(0);
+        reopened->set_receive_callback(
+            [reopened_callback_count](const pulp::midi::UmpPacket& p, double) {
+                if (p.word_count > 0 && p.words[0] == kReopenedSourceWord) {
+                    reopened_callback_count->fetch_add(
+                        1, std::memory_order_acq_rel);
+                }
+            });
+        auto reopened_event = one_word_event_list(kReopenedSourceWord);
+        if (MIDIReceivedEventList(source, &reopened_event) != noErr ||
+            !wait_until([&] {
+                return reopened_callback_count->load(
+                           std::memory_order_acquire) == 1;
+            })) {
+            return fail(@"same-ID replacement callback delivery failed",
+                        source, 0);
+        }
+        for (int drain = 0; drain < 5; ++drain) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        }
+        if (retired_callback_count->load(std::memory_order_acquire) != 0 ||
+            reopened_callback_count->load(std::memory_order_acquire) != 1) {
+            return fail(@"same-ID reopen left duplicate live callbacks",
                         source, 0);
         }
         MIDIEndpointDispose(source);

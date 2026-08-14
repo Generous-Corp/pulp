@@ -67,13 +67,26 @@ public:
           generation_at_open_(generation_->load(std::memory_order_acquire)) {}
 
     ~CoreMidiUmpEndpoint() override {
+        deactivate();
+    }
+
+    void deactivate() noexcept {
         {
             std::lock_guard<std::mutex> lk(callback_state_->mu);
             callback_state_->active = false;
             callback_state_->callback = nullptr;
         }
-        if (in_port_) MIDIPortDispose(in_port_);
+        open_.store(false, std::memory_order_release);
+        std::lock_guard<std::mutex> lk(ports_mu_);
+        if (in_port_) {
+            if (src_) MIDIPortDisconnectSource(in_port_, src_);
+            MIDIPortDispose(in_port_);
+        }
         if (out_port_) MIDIPortDispose(out_port_);
+        in_port_ = 0;
+        src_ = 0;
+        out_port_ = 0;
+        dest_ = 0;
     }
 
     const UmpEndpointInfo& info() const noexcept override { return info_; }
@@ -98,6 +111,7 @@ public:
     // CoreMIDI handles after construction.
     void set_ports(MIDIPortRef in_port, MIDIEndpointRef src,
                    MIDIPortRef out_port, MIDIEndpointRef dest) {
+        std::lock_guard<std::mutex> lk(ports_mu_);
         in_port_ = in_port;
         src_ = src;
         out_port_ = out_port;
@@ -107,6 +121,7 @@ public:
 
 private:
     UmpEndpointInfo info_;
+    std::mutex ports_mu_;
     MIDIPortRef in_port_ = 0;
     MIDIEndpointRef src_ = 0;
     MIDIPortRef out_port_ = 0;
@@ -237,10 +252,11 @@ bool CoreMidiUmpEndpoint::is_open() const noexcept {
 }
 
 bool CoreMidiUmpEndpoint::send(const UmpPacket& packet) {
+    if (packet.word_count < 1 || packet.word_count > 4) return false;
+    std::lock_guard<std::mutex> lk(ports_mu_);
     if (!info_.direction.can_send || !dest_ || !out_port_ || !is_open()) {
         return false;
     }
-    if (packet.word_count < 1 || packet.word_count > 4) return false;
     MIDIEventList list;
     MIDIEventPacket* mep = MIDIEventListInit(&list, kMIDIProtocol_2_0);
     mep = MIDIEventListAdd(&list, sizeof(list), mep, 0,
@@ -265,6 +281,29 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
                                1.0e9L);
 }
 
+bool is_topology_object_type(MIDIObjectType type) {
+    const auto base = static_cast<MIDIObjectType>(
+        type & ~kMIDIObjectType_ExternalMask);
+    return base == kMIDIObjectType_Device ||
+           base == kMIDIObjectType_Entity ||
+           base == kMIDIObjectType_Source ||
+           base == kMIDIObjectType_Destination;
+}
+
+bool notification_affects_topology(const MIDINotification* notification) {
+    if (!notification) return false;
+    // Additions do not invalidate handles that are already open. Only removal
+    // can make a cached CoreMIDI object unusable; enumerate/open perform a
+    // fresh census when callers want newly added endpoints.
+    if (notification->messageID == kMIDIMsgObjectRemoved) {
+        const auto* change =
+            reinterpret_cast<const MIDIObjectAddRemoveNotification*>(
+                notification);
+        return is_topology_object_type(change->childType);
+    }
+    return false;
+}
+
 bool os_init(const UmpSessionConfig& cfg, void** out_state) {
     if (!coremidi_ump_available()) return false;
 
@@ -276,7 +315,7 @@ bool os_init(const UmpSessionConfig& cfg, void** out_state) {
     OSStatus st = MIDIClientCreateWithBlock(
         name ? name : CFSTR("Pulp UMP Session"), &state->client,
         ^(const MIDINotification* notification) {
-            if (notification && notification->messageID == kMIDIMsgSetupChanged) {
+            if (notification_affects_topology(notification)) {
                 generation->fetch_add(1, std::memory_order_acq_rel);
             }
         });
@@ -333,6 +372,7 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
             if (status) *status = UmpOpenStatus::Ok;
             return existing->second.get();
         }
+        existing->second->deactivate();
         state->retired.push_back(std::move(existing->second));
         state->endpoints.erase(existing);
     }
