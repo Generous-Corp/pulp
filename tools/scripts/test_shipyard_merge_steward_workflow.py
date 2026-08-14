@@ -47,12 +47,22 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
 
     def test_exact_pinned_binary_and_machine_authority_are_proven(self) -> None:
         self.assertIn("./tools/install-shipyard.sh", self.text)
+        self.assertIn('echo "$HOME/.local/bin" >> "$GITHUB_PATH"', self.text)
         self.assertIn("mutation_machine = \"github-actions\"", self.text)
         self.assertIn("shipyard runner tag --set github-actions", self.text)
         self.assertIn('status["authority_matches"] is True', self.text)
 
     def test_retry_ledger_is_restored_and_evidence_is_bounded(self) -> None:
-        self.assertIn("actions/cache@v4", self.text)
+        steps = self.doc["jobs"]["reconcile"]["steps"]
+        restore = next(step for step in steps
+                       if step.get("name") == "Restore bounded-retry ledger")
+        save = next(step for step in steps
+                    if step.get("name") == "Save bounded-retry ledger")
+        self.assertEqual(restore["uses"], "actions/cache/restore@v4")
+        self.assertEqual(save["uses"], "actions/cache/save@v4")
+        self.assertIn("always()", save["if"])
+        self.assertIn("github.run_attempt", restore["with"]["key"])
+        self.assertEqual(restore["with"]["key"], save["with"]["key"])
         self.assertIn("--ledger \"$STEWARD_LEDGER\"", self.text)
         self.assertIn("retention-days: 14", self.text)
 

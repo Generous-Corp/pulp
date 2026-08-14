@@ -50,13 +50,15 @@ jobs:
           permission-statuses: write
 
       - name: Install pinned Shipyard
-        run: ./tools/install-shipyard.sh
+        run: |
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Restore bounded-retry ledger
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .shipyard-steward/ledger.json
-          key: shipyard-merge-steward-v1-${{ github.run_id }}
+          key: shipyard-merge-steward-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             shipyard-merge-steward-v1-
 
@@ -98,6 +100,13 @@ jobs:
             args+=(--apply)
           fi
           shipyard "${args[@]}" | tee steward-report.json
+
+      - name: Save bounded-retry ledger
+        if: always() && hashFiles('.shipyard-steward/ledger.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .shipyard-steward/ledger.json
+          key: shipyard-merge-steward-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Publish reconciliation evidence
         if: always()
