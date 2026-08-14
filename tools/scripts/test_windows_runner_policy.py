@@ -20,6 +20,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -275,7 +276,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         raise AssertionError("resolve-provider matrix step not found")
 
     def _matrix_keys(
-        self, event_name: str, *, run_windows: bool = True
+        self, event_name: str, *, run_windows: bool = True, trusted_linux: bool = False
     ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
         env = {
@@ -306,6 +307,16 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "NAMESPACE_WINDOWS_RUNS_ON_JSON": "",
             }
         )
+        if trusted_linux:
+            env["CONFIGURED_LINUX_RUNNER_SELECTOR_JSON"] = json.dumps(
+                [
+                    "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
+                    "pulp-host-macpro", "pulp-auto-linux-x64",
+                ]
+            )
+            env["CONFIGURED_LINUX_LEASE_UNTIL"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=5)
+            ).isoformat()
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "github_output"
             output.write_text("", encoding="utf-8")
@@ -349,6 +360,16 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertNotIn("windows", keys)
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
+
+    def test_active_trusted_merge_group_uses_main_owned_reusable_linux(self) -> None:
+        keys = self._matrix_keys("merge_group", trusted_linux=True)
+        self.assertEqual(keys, ["macos"])
+        trusted = self.workflow["jobs"]["trusted_linux"]
+        self.assertEqual(
+            trusted["uses"],
+            "Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main",
+        )
+        self.assertEqual(trusted["with"]["route_kind"], "trusted")
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.

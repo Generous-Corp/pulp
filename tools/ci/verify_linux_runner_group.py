@@ -13,11 +13,7 @@ import sys
 POLICIES = {
     "trusted": {
         "name": "pulp-trusted-build",
-        "workflows": (
-            ".github/workflows/build.yml",
-            ".github/workflows/vellum-freeze-check.yml",
-            ".github/workflows/version-skill-check.yml",
-        ),
+        "workflows": (".github/workflows/pr-safe-linux.yml",),
     },
     "pr-safe": {
         "name": "pulp-pr-safe-build",

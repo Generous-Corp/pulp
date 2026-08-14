@@ -645,8 +645,9 @@ The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
 that means a dedicated organization runner group containing only its ephemeral
 runners, repository access granted only to `Generous-Corp/pulp`, and workflow
 access restricted to the protected default-branch workflow assigned to that
-group. The trusted merge-group pool uses the main-owned build workflow; the
-separate PR-safe pool uses `.github/workflows/pr-safe-linux.yml@main`. Prove that
+group. Both groups permit only `.github/workflows/pr-safe-linux.yml@main`; its
+protected admission job distinguishes trusted merge-group from PR-safe calls
+and validates the disjoint selector and lease for that event. Prove that
 a PR changing its own workflow cannot target the group before enabling
 automatic PR routing. Never share the trusted and PR-safe capability labels,
 runner names, health leases, or runner groups.

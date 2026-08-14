@@ -199,8 +199,9 @@ deployment, and release workflow remain hosted or on a dedicated trusted path.
 
 The external boundary is the organization runner group, not the event-name
 guard in PR-controlled YAML. Each group contains only `Generous-Corp/pulp`.
-`pulp-trusted-build` permits the reviewed trusted workflows on `main`, while
-`pulp-pr-safe-build` permits only `pr-safe-linux.yml@main`. Never share their
+Both `pulp-trusted-build` and `pulp-pr-safe-build` permit only
+`pr-safe-linux.yml@main`; the protected workflow validates a different event,
+selector, lease, and runner capability for each group. Never share their
 capability labels, runner-name namespaces, health leases, or group ids.
 
 Install the common supervisor, both policy wrappers, the verifier, and the two

@@ -1,13 +1,16 @@
-name: PR-safe Linux
+name: Protected local Linux
 
 on:
   workflow_call:
     inputs:
-      source_sha:
+      route_kind:
         required: true
         type: string
+      source_sha:
+        required: false
+        type: string
       base_sha:
-        required: true
+        required: false
         type: string
       merge_sha:
         required: true
@@ -44,6 +47,9 @@ jobs:
           CONFIGURED_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
           LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
           ROUTE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
+          ROUTE_KIND: ${{ inputs.route_kind }}
+          TRUSTED_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          TRUSTED_LEASE_UNTIL: ${{ vars.PULP_LOCAL_LINUX_LEASE_UNTIL || '' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -51,22 +57,26 @@ jobs:
           import os
           from datetime import datetime, timezone
 
-          expected_selector = [
+          pr_safe_selector = [
               "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
               "pulp-host-macpro", "pulp-pr-safe-linux-x64",
           ]
+          trusted_selector = [
+              "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
+              "pulp-host-macpro", "pulp-auto-linux-x64",
+          ]
 
-          def selector(name):
+          def selector(name, expected):
               try:
                   value = json.loads(os.environ.get(name, ""))
               except json.JSONDecodeError:
                   return None
-              return value if value == expected_selector else None
+              return value if value == expected else None
 
-          def lease_is_live():
+          def lease_is_live(name):
               try:
                   expiry = datetime.fromisoformat(
-                      os.environ.get("LEASE_UNTIL", "").replace("Z", "+00:00")
+                      os.environ.get(name, "").replace("Z", "+00:00")
                   )
               except ValueError:
                   return False
@@ -75,18 +85,31 @@ jobs:
               remaining = expiry.astimezone(timezone.utc) - datetime.now(timezone.utc)
               return 0 < remaining.total_seconds() <= 15 * 60
 
+          route_kind = os.environ.get("ROUTE_KIND")
           checks = {
-              "event": os.environ.get("EVENT_NAME") == "pull_request",
               "repository": os.environ.get("REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
-              "same repository": os.environ.get("PR_HEAD_REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
-              "head SHA": os.environ.get("SOURCE_SHA") == os.environ.get("PR_HEAD_SHA"),
-              "base SHA": os.environ.get("BASE_SHA") == os.environ.get("PR_BASE_SHA"),
               "merge SHA": os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA"),
-              "enabled": os.environ.get("ROUTE_ENABLED", "").strip().lower() == "true",
-              "caller selector": selector("SELECTOR_JSON") is not None,
-              "configured selector": selector("CONFIGURED_SELECTOR_JSON") is not None,
-              "lease": lease_is_live(),
           }
+          if route_kind == "pr-safe":
+              checks.update({
+                  "event": os.environ.get("EVENT_NAME") == "pull_request",
+                  "same repository": os.environ.get("PR_HEAD_REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
+                  "head SHA": os.environ.get("SOURCE_SHA") == os.environ.get("PR_HEAD_SHA"),
+                  "base SHA": os.environ.get("BASE_SHA") == os.environ.get("PR_BASE_SHA"),
+                  "enabled": os.environ.get("ROUTE_ENABLED", "").strip().lower() == "true",
+                  "caller selector": selector("SELECTOR_JSON", pr_safe_selector) is not None,
+                  "configured selector": selector("CONFIGURED_SELECTOR_JSON", pr_safe_selector) is not None,
+                  "lease": lease_is_live("LEASE_UNTIL"),
+              })
+          elif route_kind == "trusted":
+              checks.update({
+                  "event": os.environ.get("EVENT_NAME") == "merge_group",
+                  "caller selector": selector("SELECTOR_JSON", trusted_selector) is not None,
+                  "configured selector": selector("TRUSTED_SELECTOR_JSON", trusted_selector) is not None,
+                  "lease": lease_is_live("TRUSTED_LEASE_UNTIL"),
+              })
+          else:
+              checks["route kind"] = False
           failed = [name for name, ok in checks.items() if not ok]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"admitted={'false' if failed else 'true'}\n")
@@ -95,7 +118,7 @@ jobs:
           PY
 
   linux:
-    name: Linux (x64) [pr-safe-with-hosted-fallback]
+    name: Linux (x64) [protected-with-hosted-fallback]
     needs: admission
     runs-on: >-
       ${{ fromJSON(
@@ -118,6 +141,7 @@ jobs:
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          ROUTE_KIND: ${{ inputs.route_kind }}
           SELECTOR_JSON: ${{ inputs.runner_selector_json }}
         run: |
           set -euo pipefail
@@ -129,13 +153,23 @@ jobs:
               "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
               "pulp-host-macpro", "pulp-pr-safe-linux-x64",
           ]
-          checks = {
-              "event": os.environ["EVENT_NAME"] == "pull_request",
-              "same repository": os.environ["PR_HEAD_REPOSITORY"] == os.environ["EXPECTED_REPOSITORY"],
-              "head SHA": os.environ["SOURCE_SHA"] == os.environ["PR_HEAD_SHA"],
-              "base SHA": os.environ["BASE_SHA"] == os.environ["PR_BASE_SHA"],
-              "selector": json.loads(os.environ["SELECTOR_JSON"]) == expected,
-          }
+          route_kind = os.environ["ROUTE_KIND"]
+          checks = {"selector": json.loads(os.environ["SELECTOR_JSON"]) == expected}
+          if route_kind == "pr-safe":
+              checks.update({
+                  "event": os.environ["EVENT_NAME"] == "pull_request",
+                  "same repository": os.environ["PR_HEAD_REPOSITORY"] == os.environ["EXPECTED_REPOSITORY"],
+                  "head SHA": os.environ["SOURCE_SHA"] == os.environ["PR_HEAD_SHA"],
+                  "base SHA": os.environ["BASE_SHA"] == os.environ["PR_BASE_SHA"],
+              })
+          elif route_kind == "trusted":
+              expected[-1] = "pulp-auto-linux-x64"
+              checks = {
+                  "event": os.environ["EVENT_NAME"] == "merge_group",
+                  "selector": json.loads(os.environ["SELECTOR_JSON"]) == expected,
+              }
+          else:
+              checks["route kind"] = False
           failed = [name for name, ok in checks.items() if not ok]
           if failed:
               raise SystemExit("PR-safe assignment rejected: " + ", ".join(failed))

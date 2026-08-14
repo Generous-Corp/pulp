@@ -89,6 +89,8 @@ jobs:
       pr_safe_linux: ${{ steps.resolve.outputs.pr_safe_linux }}
       pr_safe_linux_selector_json: ${{ steps.resolve.outputs.pr_safe_linux_selector_json }}
       pr_safe_linux_reason: ${{ steps.resolve.outputs.pr_safe_linux_reason }}
+      trusted_linux: ${{ steps.resolve.outputs.trusted_linux }}
+      trusted_linux_selector_json: ${{ steps.resolve.outputs.trusted_linux_selector_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -589,6 +591,12 @@ jobs:
           pr_safe_linux = bool(pr_safe_route["use_reusable"])
           pr_safe_linux_selector = str(pr_safe_route["selector_json"])
           pr_safe_linux_reason = str(pr_safe_route["reason"])
+          trusted_linux = linux_local_enabled
+          trusted_linux_selector = (
+              json.dumps(configured_linux_value, separators=(",", ":"))
+              if trusted_linux
+              else ""
+          )
           print(
               "resolve-provider: PR-safe Linux "
               f"enabled={pr_safe_linux}; reason={pr_safe_linux_reason}",
@@ -746,7 +754,7 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          if not pr_safe_linux:
+          if not pr_safe_linux and not trusted_linux:
               include.append({
                   "key": "linux",
                   "name": "Linux (x64)",
@@ -775,6 +783,10 @@ jobs:
                   f"pr_safe_linux_selector_json={pr_safe_linux_selector}\n"
               )
               handle.write(f"pr_safe_linux_reason={pr_safe_linux_reason}\n")
+              handle.write(f"trusted_linux={str(trusted_linux).lower()}\n")
+              handle.write(
+                  f"trusted_linux_selector_json={trusted_linux_selector}\n"
+              )
           PY
           )
 
@@ -826,10 +838,25 @@ jobs:
       needs.resolve-provider.outputs.pr_safe_linux == 'true'
     uses: Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main
     with:
+      route_kind: pr-safe
       source_sha: ${{ github.event.pull_request.head.sha }}
       base_sha: ${{ github.event.pull_request.base.sha }}
       merge_sha: ${{ github.sha }}
       runner_selector_json: ${{ needs.resolve-provider.outputs.pr_safe_linux_selector_json }}
+    permissions:
+      contents: read
+
+  trusted_linux:
+    needs: [resolve-provider, classify]
+    if: >-
+      github.event_name == 'merge_group' &&
+      needs.classify.outputs.native_build_required == 'true' &&
+      needs.resolve-provider.outputs.trusted_linux == 'true'
+    uses: Generous-Corp/pulp/.github/workflows/pr-safe-linux.yml@main
+    with:
+      route_kind: trusted
+      merge_sha: ${{ github.sha }}
+      runner_selector_json: ${{ needs.resolve-provider.outputs.trusted_linux_selector_json }}
     permissions:
       contents: read
 
