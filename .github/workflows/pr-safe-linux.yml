@@ -99,9 +99,9 @@ jobs:
           checks = {
               "repository": os.environ.get("REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
           }
-          if os.environ.get("MERGE_SHA"):
-              checks["merge SHA"] = os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")
           if route_kind == "pr-safe":
+              if os.environ.get("MERGE_SHA"):
+                  checks["merge SHA"] = os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA")
               checks.update({
                   "event": os.environ.get("EVENT_NAME") == "pull_request",
                   "same repository": os.environ.get("PR_HEAD_REPOSITORY") == os.environ.get("EXPECTED_REPOSITORY"),
@@ -115,6 +115,7 @@ jobs:
           elif route_kind == "trusted":
               checks.update({
                   "event": os.environ.get("EVENT_NAME") == "merge_group",
+                  "merge SHA": bool(os.environ.get("MERGE_SHA")) and os.environ.get("MERGE_SHA") == os.environ.get("EVENT_SHA"),
                   "caller selector": selector("SELECTOR_JSON", trusted_selector) is not None,
                   "configured selector": selector("TRUSTED_SELECTOR_JSON", trusted_selector) is not None,
                   "lease": lease_is_live("TRUSTED_LEASE_UNTIL"),
@@ -207,7 +208,13 @@ jobs:
         with:
           # Preserve the ordinary pull_request Linux gate's integration
           # semantics: build GitHub's proposed merge, not the raw PR head.
-          ref: ${{ inputs.merge_sha || inputs.source_sha }}
+          # A rejected supplied merge SHA must never become the hosted fallback
+          # checkout. New callers and every trusted merge-group route test the
+          # event's proposed merge; only the staged legacy PR caller omits
+          # merge_sha and retains its historical source_sha checkout.
+          ref: >-
+            ${{ (inputs.route_kind == 'trusted' || inputs.merge_sha != '') &&
+                github.sha || inputs.source_sha }}
           fetch-depth: 0
           lfs: false
           clean: true
