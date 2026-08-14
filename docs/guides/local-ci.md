@@ -209,6 +209,8 @@ ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
 qm list                          # 9xxx = pulp-linux-golden* (templates)
 systemctl status 'pulp-ephemeral-pool@*'
 journalctl -u 'pulp-ephemeral-pool@1' -f
+systemctl status 'pulp-pr-safe-ephemeral-pool@*'
+systemctl enable --now pulp-pr-safe-ephemeral-pool@1.service
 ```
 
 The supervisor and its systemd unit are versioned here as
@@ -230,9 +232,12 @@ cleaning — and the cache a job inherits cannot be poisoned by the job before i
 This closes the reused-build-dir class outright, which matters because `build.yml`
 sets `clean: false` on self-hosted runners.
 
-Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
-what provisions the next clone. Add a slot by enabling `@3` — but check the governor
-first.
+Two trusted slots run via `pulp-ephemeral-pool@{1,2}.service`; one independently
+named PR-safe slot runs via `pulp-pr-safe-ephemeral-pool@1.service`. The units
+pin organization groups 3 and 5 respectively and set disjoint profile and
+runner-name namespaces after loading their shared root-owned controller
+configuration. Systemd restarting a slot is what provisions the next clone.
+Before adding a slot, check both the governor and the three-clone VMID ceiling.
 
 The three clone VMIDs have deterministic network identities: `200..202` map to
 `192.168.86.251..253` and stable locally administered MAC addresses. Do not return

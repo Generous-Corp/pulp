@@ -11,6 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools" / "ci" / "proxmox-ephemeral-runner-linux.sh"
 SERVICE = ROOT / "tools" / "ci" / "pulp-ephemeral-pool@.service"
+PR_SAFE_SERVICE = ROOT / "tools" / "ci" / "pulp-pr-safe-ephemeral-pool@.service"
 PR_SAFE_WRAPPER = ROOT / "tools" / "ci" / "proxmox-pr-safe-ephemeral-runner-linux.sh"
 TRUSTED_WRAPPER = ROOT / "tools" / "ci" / "proxmox-trusted-ephemeral-runner-linux.sh"
 
@@ -20,6 +21,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = SCRIPT.read_text(encoding="utf-8")
         cls.service = SERVICE.read_text(encoding="utf-8")
+        cls.pr_safe_service = PR_SAFE_SERVICE.read_text(encoding="utf-8")
         cls.pr_safe_wrapper = PR_SAFE_WRAPPER.read_text(encoding="utf-8")
         cls.trusted_wrapper = TRUSTED_WRAPPER.read_text(encoding="utf-8")
 
@@ -58,6 +60,26 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "EnvironmentFile=-/etc/pulp/linux-runner-group.env", self.service
         )
         self.assertIn("User=root", self.service)
+
+    def test_systemd_can_run_both_profiles_concurrently(self) -> None:
+        self.assertIn("PULP_LINUX_RUNNER_GROUP_ID=3", self.service)
+        self.assertIn("PULP_LINUX_RUNNER_GROUP_PROFILE=trusted", self.service)
+        self.assertIn("PULP_RUNNER_NAME_PREFIX=pulp-auto-ephemeral", self.service)
+        self.assertIn("PULP_LINUX_RUNNER_GROUP_ID=5", self.pr_safe_service)
+        self.assertIn("PULP_LINUX_RUNNER_GROUP_PROFILE=pr-safe", self.pr_safe_service)
+        self.assertIn(
+            "PULP_RUNNER_NAME_PREFIX=pulp-pr-safe-ephemeral", self.pr_safe_service
+        )
+        self.assertEqual(
+            self.service.count("ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh"),
+            1,
+        )
+        self.assertEqual(
+            self.pr_safe_service.count(
+                "ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh"
+            ),
+            1,
+        )
 
     def test_slot_identity_is_stable_but_registration_name_is_per_boot(self) -> None:
         self.assertIn('RUNNER_SLOT_ID="macpro-linux-${VMID}"', self.script)

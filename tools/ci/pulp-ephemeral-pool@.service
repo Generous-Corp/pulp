@@ -1,14 +1,17 @@
 [Unit]
-Description=Pulp ephemeral CI runner slot %i (golden clone, one job, destroy)
+Description=Pulp trusted ephemeral CI runner slot %i (golden clone, one job, destroy)
 Documentation=planning/2026-07-30-macpro-proxmox-ci-handoff.md
 After=network-online.target pve-guests.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Optional. Setting PULP_LINUX_RUNNER_GROUP_ID changes registration from the
-# dispatch-only repository pool to the verified workflow-restricted org group.
+# Shared root-owned credential and controller paths. The unit's fixed profile
+# settings below deliberately override any legacy profile values in this file.
 EnvironmentFile=-/etc/pulp/linux-runner-group.env
+Environment=PULP_LINUX_RUNNER_GROUP_ID=3
+Environment=PULP_LINUX_RUNNER_GROUP_PROFILE=trusted
+Environment=PULP_RUNNER_NAME_PREFIX=pulp-auto-ephemeral
 # One job per invocation: the runner is --ephemeral, so run.sh exits when the job
 # completes and the clone is destroyed on the way out. systemd restarts us, which
 # provisions a fresh clone for the next job. That loop IS the pool.
