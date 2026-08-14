@@ -22,14 +22,17 @@ EXPECTED = [
 ]
 
 
-def valid_group() -> dict:
+def valid_group(profile: str = "trusted") -> dict:
+    name, workflows = MODULE.PROFILES[profile]
     return {
-        "name": "pulp-trusted-build",
+        "name": name,
         "default": False,
         "visibility": "selected",
         "allows_public_repositories": True,
         "restricted_to_workflows": True,
-        "selected_workflows": EXPECTED,
+        "selected_workflows": [
+            f"{REPO}/{workflow}@refs/heads/main" for workflow in workflows
+        ],
     }
 
 
@@ -39,25 +42,39 @@ def valid_repositories() -> dict:
 
 class VerifyLinuxRunnerGroupTests(unittest.TestCase):
     def test_exact_trusted_scope_passes(self) -> None:
-        self.assertEqual(MODULE.validate_policy(valid_group(), valid_repositories(), REPO), [])
+        self.assertEqual(
+            MODULE.validate_policy(valid_group(), valid_repositories(), REPO, "trusted"),
+            [],
+        )
+
+    def test_exact_pr_safe_scope_passes(self) -> None:
+        self.assertEqual(
+            MODULE.validate_policy(valid_group("pr-safe"), valid_repositories(), REPO, "pr-safe"),
+            [],
+        )
+
+    def test_profiles_cannot_exchange_groups(self) -> None:
+        self.assertTrue(
+            MODULE.validate_policy(valid_group("trusted"), valid_repositories(), REPO, "pr-safe")
+        )
 
     def test_secret_workflow_is_not_allowed(self) -> None:
         group = valid_group()
         group["selected_workflows"] = EXPECTED + [
             f"{REPO}/.github/workflows/wclap-cloudflare.yml@refs/heads/main"
         ]
-        self.assertTrue(MODULE.validate_policy(group, valid_repositories(), REPO))
+        self.assertTrue(MODULE.validate_policy(group, valid_repositories(), REPO, "trusted"))
 
     def test_pull_request_target_workflow_is_not_allowed(self) -> None:
         group = valid_group()
         group["selected_workflows"] = [
             f"{REPO}/.github/workflows/vellum-trusted-gate.yml@refs/heads/main"
         ]
-        self.assertTrue(MODULE.validate_policy(group, valid_repositories(), REPO))
+        self.assertTrue(MODULE.validate_policy(group, valid_repositories(), REPO, "trusted"))
 
     def test_wrong_repository_is_not_allowed(self) -> None:
         repositories = {"total_count": 1, "repositories": [{"full_name": "other/repo"}]}
-        self.assertTrue(MODULE.validate_policy(valid_group(), repositories, REPO))
+        self.assertTrue(MODULE.validate_policy(valid_group(), repositories, REPO, "trusted"))
 
 
 if __name__ == "__main__":

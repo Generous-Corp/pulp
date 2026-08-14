@@ -31,10 +31,19 @@ GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
+ORG="${REPO%%/*}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
 RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
+ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
+RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
+RUNNER_GROUP_PROFILE="${PULP_LINUX_RUNNER_GROUP_PROFILE:-trusted}"
+GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}"
+GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
+FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
+FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
+AUTOMATIC_NETWORK_ISOLATION=0
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -43,7 +52,58 @@ die() { log "ERROR: $*"; exit 1; }
 
 [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
 PAT="$(cat "$PAT_FILE")"
+command -v "$GH_CLI" >/dev/null 2>&1 \
+    || die "$GH_CLI is not on PATH"
 
+# Repository runners remain dispatch-only. Automatic PR or merge-group work is
+# permitted only when the controller can prove that an organization runner
+# group admits the protected default-branch workflow and this repository alone.
+# The extra label prevents a selector for the restricted pool from matching an
+# older repository-level worker during a staged rollout.
+REGISTRATION_API="repos/${REPO}"
+RUNNER_URL="https://github.com/${REPO}"
+RUNNER_GROUP_ARG=""
+if [ -n "$RUNNER_GROUP_ID" ]; then
+    [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
+        || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
+    [ "$RUNNER_GROUP_ID" != 1 ] \
+        || die "runner group 1 is the default group"
+    [ -r "$GROUP_VERIFIER" ] \
+        || die "runner-group verifier is missing at $GROUP_VERIFIER"
+    [ -r "$ORG_PAT_FILE" ] \
+        || die "automatic Linux runner organization PAT is missing"
+    PAT="$(cat "$ORG_PAT_FILE")"
+    case "$RUNNER_GROUP_PROFILE" in
+        trusted)
+            LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro,pulp-auto-linux-x64"
+            ;;
+        pr-safe)
+            LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro,pulp-pr-safe-linux-x64"
+            ;;
+        *)
+            die "PULP_LINUX_RUNNER_GROUP_PROFILE must be trusted or pr-safe"
+            ;;
+    esac
+    GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
+        --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID" \
+        --profile "$RUNNER_GROUP_PROFILE")" \
+        || die "automatic Linux runner group policy is not fail-closed"
+    [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
+    command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
+        || die "$FIREWALL_STATUS_BIN is not on PATH"
+    for tool in iptables-save ip6tables-save ipset ebtables-save; do
+        command -v "$tool" >/dev/null 2>&1 \
+            || die "$tool is required for automatic runner firewall proof"
+    done
+    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
+        || die "automatic Linux runners require the Proxmox firewall"
+    [ -d "$FIREWALL_DIR" ] \
+        || die "automatic Linux runner firewall directory is missing"
+    REGISTRATION_API="orgs/${ORG}"
+    RUNNER_URL="https://github.com/${ORG}"
+    RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
+    AUTOMATIC_NETWORK_ISOLATION=1
+fi
 # ── admission ────────────────────────────────────────────────────────────────
 # Ask before taking. A refused job queues on GitHub, which is recoverable; an
 # oversubscribed host that stops responding is not.
@@ -74,8 +134,35 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+# The slot identity is stable for operations and metrics. The GitHub
+# registration name is intentionally unique per boot so an interrupted runner
+# cannot collide with its replacement.
+RUNNER_SLOT_ID="macpro-linux-${VMID}"
 RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
 
+reclaim_stale_slot_runners() {
+    [ -n "${PAT:-}" ] || return 0
+    local runners_tsv slot_matches match_count stale_id stale_name stale_busy stale_status
+    runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+        || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
+    slot_matches="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+        -v prefix="${RUNNER_NAME_PREFIX}-${VMID}-" 'index($2, prefix) == 1')"
+    [ -n "$slot_matches" ] || return 0
+    match_count="$(printf '%s\n' "$slot_matches" | wc -l | tr -d ' ')"
+    [ "$match_count" = 1 ] \
+        || die "multiple registrations claim ${RUNNER_SLOT_ID}"
+    IFS=$'\t' read -r stale_id stale_name stale_busy stale_status <<< "$slot_matches"
+    [ "$stale_busy" = false ] \
+        || die "registration $stale_name is busy or has an invalid busy state"
+    [ "$stale_status" = offline ] \
+        || die "registration $stale_name is not offline"
+    GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+        "${REGISTRATION_API}/actions/runners/${stale_id}" \
+        || die "could not reclaim offline registration $stale_name"
+    log "reclaimed offline stale registration $stale_name for ${RUNNER_SLOT_ID}"
+}
 cleanup() {
     # Guard: only tear down a VM this invocation actually created. Without this,
     # a failure before the clone lands makes cleanup destroy whatever now owns
@@ -90,37 +177,34 @@ cleanup() {
     # otherwise leave an offline ghost runner that GitHub still schedules to —
     # jobs then queue against a VM that no longer exists.
     if [ -n "${PAT:-}" ]; then
-        runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/actions/runners?per_page=100" 2>/dev/null)" \
-            || { log "ERROR: cannot read runner registrations; leaving clone $VMID for safe recovery"; return; }
-        runner_lookup="$(printf '%s' "$runners_json" | python3 -c "
-import json,sys
-try: d=json.load(sys.stdin)
-except Exception: sys.exit(1)
-for r in d.get('runners',[]):
-    if r['name']=='${RUNNER_NAME}': print('found:'+str(r['id'])); break
-else: print('not-found:'+str(d.get('total_count', 0)))
-" 2>/dev/null)" \
-            || { log "ERROR: cannot parse runner registrations; leaving clone $VMID for safe recovery"; return; }
-        if [[ "$runner_lookup" == found:* ]]; then
-            rid="${runner_lookup#found:}"
-            if ! curl -fSs -o /dev/null -X DELETE -H "Authorization: Bearer $PAT" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/runners/${rid}"; then
+        runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+            "${REGISTRATION_API}/actions/runners?per_page=100" \
+            --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+            || { log "ERROR: cannot read all runner registrations; leaving clone $VMID for safe recovery"; return; }
+        runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+            -v name="$RUNNER_NAME" '$2 == name')"
+        if [ -n "$runner_lookup" ]; then
+            [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+                || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
+            IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
+            [ "$runner_busy" = false ] && [ "$runner_status" = offline ] \
+                || { log "ERROR: exact runner is not offline and idle; leaving clone $VMID for safe recovery"; return; }
+            if ! GH_TOKEN="$PAT" "$GH_CLI" api --method DELETE \
+                "${REGISTRATION_API}/actions/runners/${rid}"; then
                 log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
                 return
             fi
             log "deregistered runner id $rid"
-        elif [ "${runner_lookup#not-found:}" -gt 100 ]; then
-            log "ERROR: runner lookup exceeded one API page; leaving clone $VMID for safe recovery"
-            return
         fi
     fi
     log "destroying clone $VMID"
     qm stop "$VMID" >/dev/null 2>&1 || true
     for _ in $(seq 1 24); do [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break; sleep 5; done
-    qm destroy "$VMID" --purge >/dev/null 2>&1 || log "WARN: destroy of $VMID failed — check manually"
+    if qm destroy "$VMID" --purge >/dev/null 2>&1; then
+        [ -n "${VM_FIREWALL_FILE:-}" ] && rm -f "$VM_FIREWALL_FILE"
+    else
+        log "WARN: destroy of $VMID failed — check manually"
+    fi
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -142,13 +226,99 @@ CLONED=1
 # The id is now committed to disk (200.conf exists), so no other slot can pick
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
+NET0="virtio=${GUEST_MAC},bridge=vmbr0"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    VM_FIREWALL_FILE="${FIREWALL_DIR}/${VMID}.fw"
+    VM_FIREWALL_TMP="$(mktemp)" \
+        || die "cannot allocate automatic runner firewall policy"
+    umask 077
+    if ! cat > "$VM_FIREWALL_TMP" <<EOF
+[OPTIONS]
+enable: 1
+ipfilter: 1
+policy_in: ACCEPT
+policy_out: ACCEPT
+
+[IPSET ipfilter-net0]
+${GUEST_IP}
+
+[RULES]
+OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53
+OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p tcp -dport 53
+OUT DROP -dest 0.0.0.0/8
+OUT DROP -dest 10.0.0.0/8
+OUT DROP -dest 100.64.0.0/10
+OUT DROP -dest 127.0.0.0/8
+OUT DROP -dest 169.254.0.0/16
+OUT DROP -dest 172.16.0.0/12
+OUT DROP -dest 192.0.0.0/24
+OUT DROP -dest 192.0.2.0/24
+OUT DROP -dest 192.88.99.0/24
+OUT DROP -dest 192.168.0.0/16
+OUT DROP -dest 198.18.0.0/15
+OUT DROP -dest 198.51.100.0/24
+OUT DROP -dest 203.0.113.0/24
+OUT DROP -dest 224.0.0.0/4
+OUT DROP -dest 240.0.0.0/4
+OUT DROP -dest ::/0
+EOF
+    then
+        rm -f "$VM_FIREWALL_TMP"
+        die "cannot write automatic runner firewall policy"
+    fi
+    if ! cp "$VM_FIREWALL_TMP" "$VM_FIREWALL_FILE"; then
+        rm -f "$VM_FIREWALL_TMP"
+        die "cannot install automatic runner firewall policy"
+    fi
+    rm -f "$VM_FIREWALL_TMP"
+    NET0="${NET0},firewall=1"
+fi
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
     --cpuunits 50 --balloon 0 --onboot 0 \
-    --net0 "virtio=${GUEST_MAC},bridge=vmbr0" \
+    --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/24,gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_IPV4_GATEWAY" >/dev/null \
     || die "failed to apply deterministic network identity to clone $VMID"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    "$FIREWALL_STATUS_BIN" compile >/dev/null \
+        || die "automatic runner firewall policy does not compile"
+    [ "$($FIREWALL_STATUS_BIN status 2>/dev/null)" = "Status: enabled/running" ] \
+        || die "automatic runner firewall policy is not active"
+fi
 qm start "$VMID" >/dev/null || die "start failed"
+if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    firewall_active=0
+    blocked_ipv4=(
+        0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8
+        169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24
+        192.88.99.0/24 192.168.0.0/16 198.18.0.0/15
+        198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4
+    )
+    for _ in $(seq 1 15); do
+        iptables_rules="$(iptables-save 2>/dev/null)" || iptables_rules=""
+        ip6tables_rules="$(ip6tables-save 2>/dev/null)" || ip6tables_rules=""
+        ebtables_rules="$(ebtables-save 2>/dev/null)" || ebtables_rules=""
+        vm_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$iptables_rules" || true)"
+        vm6_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$ip6tables_rules" || true)"
+        vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
+        all_ipv4_drops=1
+        for subnet in "${blocked_ipv4[@]}"; do
+            grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
+                || { all_ipv4_drops=0; break; }
+        done
+        if [ "$all_ipv4_drops" = 1 ] \
+            && grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
+            && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then
+            firewall_active=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$firewall_active" = 1 ] \
+        || die "automatic runner firewall rules are not installed"
+fi
 
 # ── wait for the guest ───────────────────────────────────────────────────────
 for _ in $(seq 1 45); do
@@ -163,6 +333,10 @@ log "clone $VMID up at $GUEST_IP"
 # The golden's host keys were cleared, so each clone presents a NEW key on a
 # possibly-recycled DHCP address. Drop any stale entry rather than failing.
 ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
+
+# Reclaim only offline registrations from this exact slot. Never delete a busy
+# runner and never search by a broad repository-wide prefix.
+reclaim_stale_slot_runners
 
 for _ in $(seq 1 20); do
     ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 \
@@ -189,15 +363,15 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 log "minting registration token"
 RT="$(curl -s -X POST \
     -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${REPO}/actions/runners/registration-token" \
+    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
-log "registering ephemeral runner on $VMID"
+log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
 ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
-      --url https://github.com/${REPO} --token ${RT} \
+      --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 " >/dev/null 2>&1 || die "runner registration failed"
 
