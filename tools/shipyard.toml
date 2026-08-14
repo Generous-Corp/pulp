@@ -56,9 +56,15 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.88.3 (current pin) — keeps v0.88.0's exact-head steward handoff and adds
-#   terminal-safe rescue replacement, auditable manual-cancel provenance, and
-#   process-tree termination when a running worker observes durable cancellation.
+# v0.89.0 (current pin) — keeps v0.88.4's durable retry fence and adds the
+#   explanatory `shipyard:unmanaged` label in apply mode without adopting,
+#   rerunning, cancelling, or queueing an unmanaged PR. A later exact-head
+#   handoff clears that label while restoring `shipyard:managed` ownership.
+#
+# v0.88.4 (earlier pin) — keeps v0.88.3's terminal-safe rescue replacement,
+#   cancellation provenance, and process-tree termination, then also fences the
+#   steward's one bounded rerun with GitHub's durable run-attempt counter so a
+#   lost cache cannot reset retry allowance.
 #
 # v0.88.0 (earlier pin) — adds exact-head steward handoff receipts, explicit
 #   managed-PR ownership, repository-wide unmanaged discovery, and deduplicated
@@ -112,7 +118,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.88.3"
+version = "v0.89.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

@@ -19,7 +19,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
         cls.doc = yaml.load(cls.text, Loader=yaml.BaseLoader)
 
-    def test_first_rollout_is_manual_only_and_serialized(self) -> None:
+    def test_proof_stage_is_manual_only_and_serialized(self) -> None:
         triggers = self.doc["on"]
         self.assertEqual(set(triggers), {"workflow_dispatch"})
         concurrency = self.doc["concurrency"]
@@ -101,6 +101,26 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         lowered = self.text.lower()
         for launcher in ("codex exec", "claude -p", "openai api"):
             self.assertNotIn(launcher, lowered)
+
+    def test_exception_outbox_is_durable_and_health_failure_is_preserved(self) -> None:
+        self.assertIn("permission-issues: write", self.text)
+        steps = self.doc["jobs"]["reconcile"]["steps"]
+        for name in ("Collect open PR facts", "Sync durable GitHub exception issue"):
+            step = next(step for step in steps if step.get("name") == name)
+            self.assertEqual(
+                step["env"]["GH_TOKEN"],
+                "${{ steps.shipyard-app-token.outputs.token }}",
+            )
+        self.assertIn("shipyard_steward_outbox.py", self.text)
+        self.assertIn("shipyard:steward-outbox", self.text)
+        self.assertIn("gh issue create", self.text)
+        self.assertIn("gh issue reopen", self.text)
+        self.assertIn("gh issue close", self.text)
+        self.assertIn("Preserve outbox renderer failure", self.text)
+        self.assertIn("steps.outbox.outcome != 'success'", self.text)
+        self.assertIn("select(.title ==", self.text)
+        self.assertIn("Preserve unhealthy controller result", self.text)
+        self.assertIn('steps.reconcile.outputs.exit_code', self.text)
 
 
 if __name__ == "__main__":

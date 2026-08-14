@@ -54,6 +54,9 @@ on:
       - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/shipyard.toml'
+      - 'tools/scripts/shipyard_steward_outbox.py'
+      - 'tools/scripts/test_shipyard_steward_outbox.py'
+      - 'tools/scripts/test_shipyard_recovery_worker_canary_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -96,6 +99,9 @@ on:
       - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/shipyard.toml'
+      - 'tools/scripts/shipyard_steward_outbox.py'
+      - 'tools/scripts/test_shipyard_steward_outbox.py'
+      - 'tools/scripts/test_shipyard_recovery_worker_canary_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -188,6 +194,8 @@ jobs:
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
           python3 tools/scripts/test_shipyard_merge_steward_workflow.py
+          python3 tools/scripts/test_shipyard_steward_outbox.py
+          python3 tools/scripts/test_shipyard_recovery_worker_canary_workflow.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:

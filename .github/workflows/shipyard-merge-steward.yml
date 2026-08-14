@@ -1,8 +1,8 @@
 name: Shipyard merge steward
 
-# Single logical PR-landing controller. The first rollout is deliberately
-# workflow_dispatch-only; a later PR may add a schedule only after the live
-# managed/unmanaged and recovery canaries pass.
+# Single logical, model-free PR-landing controller. This proof stage remains
+# workflow_dispatch-only and dry-run by default. Every exception is mirrored
+# into one durable GitHub issue before a failing tick exits.
 on:
   workflow_dispatch:
     inputs:
@@ -51,6 +51,7 @@ jobs:
           permission-statuses: write
 
       - name: Install pinned Shipyard
+        id: install
         run: |
           ./tools/install-shipyard.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -68,6 +69,7 @@ jobs:
             shipyard-merge-steward-v1-
 
       - name: Configure ephemeral controller authority
+        id: configure
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
@@ -88,6 +90,8 @@ jobs:
           PY
 
       - name: Reconcile managed PRs
+        id: reconcile
+        if: always() && steps.install.outcome == 'success' && steps.configure.outcome == 'success'
         shell: bash
         env:
           APPLY: ${{ inputs.apply }}
@@ -107,7 +111,119 @@ jobs:
           if [ "$APPLY" = true ]; then
             args+=(--apply)
           fi
+          set +e
           shipyard "${args[@]}" | tee steward-report.json
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Collect open PR facts
+        id: pull_facts
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if ! gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            > open-prs.json; then
+            printf '%s\n' '[]' > open-prs.json
+            exit 1
+          fi
+
+      - name: Render durable PR exception outbox
+        id: outbox
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s steward-report.json ]; then
+            python3 - <<'PY'
+          import json, os
+          payload = {
+              "repos": [{
+                  "repo": os.environ["GITHUB_REPOSITORY"],
+                  "prs": [],
+                  "errors": ["steward produced no structured report"],
+              }]
+          }
+          with open("steward-report.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle)
+          PY
+          fi
+          [ -s open-prs.json ] || printf '%s\n' '[]' > open-prs.json
+          python3 tools/scripts/shipyard_steward_outbox.py \
+            --report steward-report.json \
+            --pulls open-prs.json \
+            --body steward-outbox.md \
+            --state steward-outbox.json
+
+      - name: Preserve outbox renderer failure
+        if: always() && steps.outbox.outcome != 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > steward-outbox.md <<EOF
+          <!-- shipyard-steward-outbox:v1 -->
+          # [Shipyard steward] Pulp PR exception outbox
+
+          The model-free controller could not render its structured exception census.
+
+          - Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - Exact controller revision: ${GITHUB_SHA}
+          - Next action: repair the controller before trusting PR landing automation.
+          EOF
+          printf '%s\n' \
+            '{"schema_version":1,"issue_title":"[Shipyard steward] Pulp PR exception outbox","exception_count":1,"pr_exception_count":0,"control_plane_error_count":1}' \
+            > steward-outbox.json
+
+      - name: Sync durable GitHub exception issue
+        id: sync_outbox
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          label='shipyard:steward-outbox'
+          gh label create "$label" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 5319E7 \
+            --description 'Model-free Shipyard PR exception census' \
+            --force
+          issue=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --label "$label" \
+            --limit 100 \
+            --json number,state,title \
+            --jq 'map(select(.title == "[Shipyard steward] Pulp PR exception outbox")) | sort_by(.number) | .[0].number // empty')
+          count=$(jq -r '.exception_count' steward-outbox.json)
+          title=$(jq -r '.issue_title' steward-outbox.json)
+          if [ -z "$issue" ] && [ "$count" -gt 0 ]; then
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --label "$label" \
+              --body-file steward-outbox.md
+          elif [ -n "$issue" ]; then
+            gh issue edit "$issue" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --body-file steward-outbox.md
+            state=$(gh issue view "$issue" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state \
+              --jq '.state')
+            if [ "$count" -gt 0 ] && [ "$state" = CLOSED ]; then
+              gh issue reopen "$issue" --repo "$GITHUB_REPOSITORY"
+            elif [ "$count" -eq 0 ] && [ "$state" = OPEN ]; then
+              gh issue close "$issue" \
+                --repo "$GITHUB_REPOSITORY" \
+                --comment 'Shipyard reconciled the exception count to zero.'
+            fi
+          fi
 
       - name: Save steward evidence ledger
         if: always() && hashFiles('.shipyard-steward/ledger.json') != ''
@@ -124,6 +240,21 @@ jobs:
           path: |
             authority.json
             steward-report.json
+            steward-outbox.md
+            steward-outbox.json
+            open-prs.json
             .shipyard-steward/ledger.json
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Preserve unhealthy controller result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "${{ steps.install.outcome }}" = success ]
+          [ "${{ steps.configure.outcome }}" = success ]
+          [ "${{ steps.pull_facts.outcome }}" = success ]
+          [ "${{ steps.outbox.outcome }}" = success ]
+          [ "${{ steps.sync_outbox.outcome }}" = success ]
+          [ "${{ steps.reconcile.outputs.exit_code }}" = 0 ]
