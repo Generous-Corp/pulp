@@ -1,0 +1,95 @@
+name: PR-safe Linux
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      runner_selector_json:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (x64) [local-pr-safe]
+    runs-on: ${{ fromJSON(inputs.runner_selector_json) }}
+    timeout-minutes: 60
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
+    steps:
+      - name: Validate same-repository PR assignment
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTOR_JSON: ${{ inputs.runner_selector_json }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = [
+              "self-hosted", "Linux", "X64", "pulp-build-linux-x64",
+              "pulp-host-macpro", "pulp-pr-safe-linux-x64",
+          ]
+          checks = {
+              "event": os.environ["EVENT_NAME"] == "pull_request",
+              "same repository": os.environ["PR_HEAD_REPOSITORY"] == os.environ["EXPECTED_REPOSITORY"],
+              "head SHA": os.environ["SOURCE_SHA"] == os.environ["PR_HEAD_SHA"],
+              "base SHA": os.environ["BASE_SHA"] == os.environ["PR_BASE_SHA"],
+              "selector": json.loads(os.environ["SELECTOR_JSON"]) == expected,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit("PR-safe assignment rejected: " + ", ".join(failed))
+          PY
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          lfs: false
+          clean: true
+
+      - name: Install Linux build dependencies
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build-linux-pr-safe \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        shell: bash
+        run: cmake --build build-linux-pr-safe --config Release --parallel 4
+
+      - name: Test
+        shell: bash
+        run: |
+          ctest --test-dir build-linux-pr-safe --output-on-failure \
+            --repeat until-pass:2 -C Release \
+            -LE 'validation|slow|performance|bench|quality-lab' \
+            -j4 --timeout 120

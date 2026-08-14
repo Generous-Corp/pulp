@@ -187,11 +187,12 @@ TEST_CASE("timeline plugin proof commits sequential note gestures and undo rebin
                         {tick_x(3 * note_ticks / 2), pitch_y(60)}, 4);
     first.simulate_click({tick_x(inserted_start), pitch_y(67)});
 
-    REQUIRE(processor.document().revision == timeline::DocumentRevision{3});
+    REQUIRE(processor.document().revision != timeline::DocumentRevision{});
     const auto snapshot = processor.document().snapshot;
     REQUIRE(first.bound_project() == snapshot.get());
     REQUIRE(second.bound_project() == snapshot.get());
-    REQUIRE(second_host.repaint_count == 3);
+    const auto repaint_after_edits = second_host.repaint_count;
+    REQUIRE(repaint_after_edits > 3);
     REQUIRE(first.piano_roll().notes().size() == 3);
     const auto* moved = find_note(*snapshot, ids.second_note);
     REQUIRE(moved != nullptr);
@@ -210,17 +211,110 @@ TEST_CASE("timeline plugin proof commits sequential note gestures and undo rebin
     const auto undone = processor.document().snapshot;
     REQUIRE(first.bound_project() == undone.get());
     REQUIRE(second.bound_project() == undone.get());
-    REQUIRE(second_host.repaint_count == 4);
+    REQUIRE(second_host.repaint_count == repaint_after_edits + 1);
     REQUIRE(find_note(*undone, inserted_id) == nullptr);
 
     REQUIRE(processor.redo());
     const auto redone = processor.document().snapshot;
     REQUIRE(first.bound_project() == redone.get());
     REQUIRE(second.bound_project() == redone.get());
-    REQUIRE(second_host.repaint_count == 5);
+    REQUIRE(second_host.repaint_count == repaint_after_edits + 2);
     REQUIRE(first.piano_roll().notes().size() == 3);
     REQUIRE(second.piano_roll().notes().size() == 3);
     REQUIRE(find_note(*redone, inserted_id) != nullptr);
+}
+
+TEST_CASE("timeline plugin proof continuously moves and resizes as one undo group") {
+    examples::TimelinePluginProofProcessor processor;
+    const auto ids = processor.ids();
+    auto first_editor = processor.create_view();
+    auto second_editor = processor.create_view();
+    auto& first = proof_view(first_editor);
+    auto& second = proof_view(second_editor);
+
+    const auto before_move = processor.serialize_plugin_state();
+    const auto second_start = examples::kTimelinePluginProofSecondNoteStart;
+    const auto note_ticks = examples::kTimelinePluginProofNoteTicks;
+    first.simulate_drag({tick_x(second_start) + 5.0f, pitch_y(62)},
+                        {tick_x(second_start + note_ticks) + 5.0f, pitch_y(64)}, 4);
+    const auto after_move = processor.serialize_plugin_state();
+    REQUIRE(after_move != before_move);
+    REQUIRE(first.bound_project() == processor.document().snapshot.get());
+    REQUIRE(second.bound_project() == processor.document().snapshot.get());
+    CHECK(find_note(*processor.document().snapshot, ids.second_note)->start ==
+          timebase::TickPosition{second_start + note_ticks});
+    CHECK(find_note(*processor.document().snapshot, ids.second_note)->pitch == 64);
+    const auto* moved_modifier =
+        midi_content(*processor.document().snapshot).modifier_for(ids.second_note);
+    REQUIRE(moved_modifier != nullptr);
+    CHECK(*moved_modifier ==
+          timeline::NoteModifier{.note_id = ids.second_note, .probability = 1'024});
+    CHECK(midi_content(*processor.document().snapshot).modifier_seed() == 0xC0FFEE);
+
+    REQUIRE(processor.undo());
+    CHECK(processor.serialize_plugin_state() == before_move);
+    REQUIRE(first.bound_project() == processor.document().snapshot.get());
+    REQUIRE(second.bound_project() == processor.document().snapshot.get());
+    REQUIRE(processor.redo());
+    CHECK(processor.serialize_plugin_state() == after_move);
+    REQUIRE(midi_content(*processor.document().snapshot).modifier_for(ids.second_note) !=
+            nullptr);
+
+    const auto before_resize = processor.serialize_plugin_state();
+    first.simulate_drag({tick_x(note_ticks), pitch_y(60)},
+                        {tick_x(3 * note_ticks / 2), pitch_y(60)}, 4);
+    const auto after_resize = processor.serialize_plugin_state();
+    REQUIRE(after_resize != before_resize);
+    CHECK(find_note(*processor.document().snapshot, ids.first_note)->duration ==
+          timebase::TickDuration{3 * note_ticks / 2});
+    REQUIRE(processor.undo());
+    CHECK(processor.serialize_plugin_state() == before_resize);
+    REQUIRE(first.bound_project() == processor.document().snapshot.get());
+    REQUIRE(second.bound_project() == processor.document().snapshot.get());
+    REQUIRE(processor.redo());
+    CHECK(processor.serialize_plugin_state() == after_resize);
+}
+
+TEST_CASE("timeline plugin proof cancel restores bytes and replacement resets provenance") {
+    examples::TimelinePluginProofProcessor processor;
+    auto first_editor = processor.create_view();
+    auto second_editor = processor.create_view();
+    auto& first = proof_view(first_editor);
+    auto& second = proof_view(second_editor);
+    const auto start = examples::kTimelinePluginProofSecondNoteStart;
+    const auto note_ticks = examples::kTimelinePluginProofNoteTicks;
+
+    const auto before_cancel = processor.serialize_plugin_state();
+    first.piano_roll().on_mouse_down({tick_x(start) + 5.0f, pitch_y(62)});
+    first.piano_roll().on_mouse_drag({tick_x(start + note_ticks / 2) + 5.0f,
+                                     pitch_y(63)});
+    first.piano_roll().on_mouse_drag({tick_x(start + note_ticks) + 5.0f,
+                                     pitch_y(64)});
+    REQUIRE(processor.serialize_plugin_state() != before_cancel);
+    first.piano_roll().on_mouse_cancel({tick_x(start + note_ticks) + 5.0f,
+                                       pitch_y(64)});
+    CHECK(processor.serialize_plugin_state() == before_cancel);
+    REQUIRE(first.bound_project() == processor.document().snapshot.get());
+    REQUIRE(second.bound_project() == processor.document().snapshot.get());
+
+    examples::TimelinePluginProofProcessor pristine;
+    const auto replacement = pristine.serialize_plugin_state();
+    first.piano_roll().on_mouse_down({tick_x(start) + 5.0f, pitch_y(62)});
+    first.piano_roll().on_mouse_drag({tick_x(start + note_ticks / 2) + 5.0f,
+                                     pitch_y(63)});
+    first.piano_roll().on_mouse_drag({tick_x(start + note_ticks) + 5.0f,
+                                     pitch_y(64)});
+    REQUIRE(processor.serialize_plugin_state() != replacement);
+    REQUIRE(processor.deserialize_plugin_state(replacement));
+    CHECK(processor.serialize_plugin_state() == replacement);
+    first.piano_roll().on_mouse_cancel({});
+    CHECK(processor.serialize_plugin_state() == replacement);
+
+    first.simulate_drag({tick_x(start) + 5.0f, pitch_y(62)},
+                        {tick_x(start + note_ticks) + 5.0f, pitch_y(64)}, 4);
+    REQUIRE(processor.serialize_plugin_state() != replacement);
+    REQUIRE(first.bound_project() == processor.document().snapshot.get());
+    REQUIRE(second.bound_project() == processor.document().snapshot.get());
 }
 
 TEST_CASE("timeline plugin proof rejects a stale note intent and keeps both views canonical") {

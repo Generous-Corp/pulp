@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 22,
+  "manifest_revision": 23,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -2543,6 +2543,10 @@
     {
       "key": "signal.multi-channel-meter",
       "domain": "signal",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "summary": "Fixed-storage peak, RMS, loudness, correlation, and clip metering for up to 16 channels.",
       "rt_class": "mixed",
       "lifecycle": {
@@ -2586,12 +2590,22 @@
             ],
             "required_features": []
           }
+        },
+        {
+          "role": "loudness_support",
+          "kind": "cpp_type",
+          "include": "pulp/signal/multi_channel_meter.hpp",
+          "qualified_name": "pulp::signal::MultiChannelMeterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -2600,7 +2614,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:92fe44dd2a7168b44a90ab57a00d5c3e0435ab05e46327a9bc7422c05685efc6"
+      "contract_digest": "sha256:b99f1e44ac9ce70fb76b141ffa90589fee9d74dbe376957d01339eb41ebdb432"
     },
     {
       "key": "signal.nlms-adaptive-filter",
@@ -8947,7 +8961,8 @@
               "prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles)",
               "process(const SampleType* const* channels, int num_channels, int num_samples)",
               "reset()",
-              "snapshot()"
+              "snapshot()",
+              "loudness_supported()"
             ],
             "enums": []
           },

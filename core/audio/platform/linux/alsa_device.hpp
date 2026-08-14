@@ -11,11 +11,33 @@
 #include <pulp/runtime/udev_monitor.hpp>
 
 #include <atomic>
+#include <cstdint>
+#include <optional>
 #include <thread>
 #include <string>
 #include <vector>
 
 namespace pulp::audio::linux_platform {
+
+namespace detail {
+
+std::uint64_t next_linux_audio_route_instance_token() noexcept;
+
+} // namespace detail
+
+struct AlsaTimingValues {
+    snd_pcm_sframes_t route_delay_frames = 0;
+    snd_pcm_uframes_t period_frames = 0;
+    double sample_rate_hz = 0.0;
+    snd_pcm_stream_t direction = SND_PCM_STREAM_PLAYBACK;
+};
+
+/// Converts ALSA's complete ADC/read or write/DAC delay into the shared
+/// residual-plus-period representation without counting the period twice.
+std::optional<AudioIoTiming>
+make_alsa_audio_io_timing(const AlsaTimingValues& values,
+                          std::uint64_t route_instance_token,
+                          std::uint64_t calibration_generation) noexcept;
 
 // ALSA audio device. Single instance wraps EITHER a PLAYBACK
 // (output) endpoint OR a CAPTURE (input) endpoint, selected via the
@@ -38,11 +60,13 @@ public:
     DeviceInfo info() const override;
     double sample_rate() const override { return config_.sample_rate; }
     int buffer_size() const override { return config_.buffer_size; }
+    std::optional<AudioIoTiming> audio_io_timing() const noexcept;
 
     /// Direction this device wraps (PLAYBACK = output, CAPTURE = input).
     snd_pcm_stream_t stream() const { return stream_; }
 
 private:
+    void invalidate_audio_io_timing() noexcept;
     void render_thread_func();
     void capture_thread_func();
 
@@ -56,6 +80,10 @@ private:
     uint64_t sample_position_ = 0;
     snd_pcm_uframes_t period_size_ = 0;
     int actual_channels_ = 0;
+    std::atomic<bool> monotonic_timing_available_{false};
+    std::atomic<std::uint64_t> route_instance_token_{0};
+    mutable std::atomic<std::uint64_t> calibration_generation_{0};
+    mutable std::atomic<snd_pcm_sframes_t> last_reported_delay_frames_{-1};
 
     std::thread io_thread_;
 

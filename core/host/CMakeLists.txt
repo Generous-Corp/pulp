@@ -35,6 +35,8 @@ target_sources(pulp-host PRIVATE
     src/anticipation_lane.cpp
     src/timeline_automation_delivery.cpp
     src/timeline_graph_binding.cpp
+    src/timeline_graph_binding_candidate.cpp
+    src/timeline_graph_binding_routes.cpp
     src/timeline_graph_stretch_policy.cpp
     src/graph_editor_view.cpp
 )
