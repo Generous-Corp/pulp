@@ -77,12 +77,75 @@ if(APPLE AND NOT IOS)
     )
 elseif(APPLE AND IOS)
     target_sources(pulp-midi PRIVATE
+        platform/mac/coremidi_device.mm
+        platform/mac/ump_session_coremidi.mm
         platform/mac/ble_midi_coremidi.mm
     )
     target_link_libraries(pulp-midi PRIVATE
+        "-framework CoreMIDI"
+        "-framework CoreFoundation"
         "-framework CoreBluetooth"
         "-framework Foundation"
     )
+
+    # Keep the shared-client identity/lifetime contract compiling in the real
+    # iOS SDK graph even though Catch2 tests do not execute on iphoneos.
+    add_library(pulp-ios-coremidi-shared-client-contract OBJECT EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/test/test_coremidi_shared_client.cpp)
+    target_compile_definitions(pulp-ios-coremidi-shared-client-contract PRIVATE
+        PULP_COREMIDI_SHARED_CLIENT_COMPILE_ONLY=1)
+    target_link_libraries(pulp-ios-coremidi-shared-client-contract PRIVATE
+        pulp::midi)
+
+    # A real installable Simulator app drives production MidiSystem discovery
+    # against virtual CoreMIDI endpoints. The P0-4 gate builds this for both
+    # Apple SDKs and launches the simulator variant.
+    add_executable(pulp-ios-coremidi-harness MACOSX_BUNDLE EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/test/ios/coremidi_backend_harness.mm)
+    target_link_libraries(pulp-ios-coremidi-harness PRIVATE
+        pulp::midi
+        "-framework CoreMIDI"
+        "-framework Foundation")
+    set(pulp_ios_coremidi_harness_plist
+        "${CMAKE_CURRENT_BINARY_DIR}/PulpCoreMidiHarness-Info.plist")
+    file(GENERATE OUTPUT "${pulp_ios_coremidi_harness_plist}" CONTENT [=[
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+</dict>
+</plist>
+]=])
+    set_target_properties(pulp-ios-coremidi-harness PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${pulp_ios_coremidi_harness_plist}"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.pulp.tests.coremidi"
+        MACOSX_BUNDLE_BUNDLE_NAME "PulpCoreMidiHarness"
+        OUTPUT_NAME "PulpCoreMidiHarness"
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "dev.pulp.tests.coremidi"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
 elseif(WIN32)
     target_sources(pulp-midi PRIVATE
         platform/win/winmidi_device.cpp

@@ -4,10 +4,24 @@
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/log.hpp>
 #include <CoreMIDI/CoreMIDI.h>
+#include <TargetConditionals.h>
 
 #include "coremidi_shared_client.h"
 
 namespace pulp::midi::mac {
+
+namespace {
+
+bool event_list_api_available() {
+#if TARGET_OS_IPHONE
+    if (@available(iOS 14.0, *)) return true;
+#else
+    if (@available(macOS 11.0, *)) return true;
+#endif
+    return false;
+}
+
+}  // namespace
 
 // A CoreMIDI client is a per-process registration with the system
 // MIDIServer, not a per-port handle. Creating one per input and per output
@@ -42,6 +56,12 @@ public:
 
     bool open(const std::string& port_id, MidiInputCallback callback) override {
         callback_ = std::move(callback);
+
+        // MIDIInputPortCreateWithProtocol is the UMP/event-list API added in
+        // iOS 14 and macOS 11. Pulp's current iOS floor is newer, but retain a
+        // runtime guard so an SDK consumer cannot weak-link and call it on an
+        // older OS by accident.
+        if (!event_list_api_available()) return false;
 
         const MIDIClientRef client = shared_client();
         if (client == 0) return false;
@@ -194,6 +214,8 @@ public:
     ~CoreMidiOutput() override { close(); }
 
     bool open(const std::string& port_id) override {
+        if (!event_list_api_available()) return false;
+
         const MIDIClientRef client = shared_client();
         if (client == 0) return false;
 

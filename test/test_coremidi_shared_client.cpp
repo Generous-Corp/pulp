@@ -1,4 +1,4 @@
-// The macOS CoreMIDI backend registers ONE client with the system MIDIServer
+// The Apple CoreMIDI backend registers ONE client with the system MIDIServer
 // for the whole process, not one per open port. A client per port multiplies
 // MIDIServer registrations by the number of ports, and again by the number of
 // loaded plug-in instances.
@@ -7,11 +7,29 @@
 // invariant being pinned is a property of that registration, not of a mock.
 // They need no MIDI hardware and open no ports.
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "../core/midi/platform/mac/coremidi_shared_client.h"
 
 #include <pulp/midi/device.hpp>
+
+#if defined(PULP_COREMIDI_SHARED_CLIENT_COMPILE_ONLY)
+
+// The iOS SDK gate builds this TU with tests disabled. Keep the production
+// declarations and their identity/lifetime use in that graph without pulling
+// Catch2 into the device build.
+namespace {
+[[maybe_unused]] void compile_shared_client_contract_for_ios() {
+    const MIDIClientRef first = pulp::midi::mac::shared_client();
+    const MIDIClientRef second = pulp::midi::mac::shared_client();
+    auto system = pulp::midi::create_midi_system();
+    (void)first;
+    (void)second;
+    (void)system;
+}
+}  // namespace
+
+#else
+
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("CoreMIDI client is created once for the process",
           "[midi][coremidi]") {
@@ -44,3 +62,5 @@ TEST_CASE("CoreMIDI shared client survives opening and closing ports",
     REQUIRE(after == before);
     REQUIRE(after != 0);
 }
+
+#endif

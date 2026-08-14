@@ -320,7 +320,7 @@ Pulp exposes a Pulp-native UMP transport surface in
 - `UmpEndpoint` (abstract) — id + direction (`can_receive` /
   `can_send`) + `send(UmpPacket)` + `set_receive_callback(...)`.
   Concrete subclasses are platform-specific (CoreMIDI 2.0 on
-  macOS) or in-process (`VirtualUmpEndpoint`).
+  macOS/iOS) or in-process (`VirtualUmpEndpoint`).
 - `UmpSession` — one per app/plugin; owns the OS MIDI client and a
   registry of virtual endpoints. `enumerate_endpoints()` merges
   OS-discovered and virtual entries; `open_endpoint(id, &status)`

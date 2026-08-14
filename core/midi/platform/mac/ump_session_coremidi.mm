@@ -1,4 +1,4 @@
-// CoreMIDI 2.0 backend for UmpSession (macOS plan item 8.1).
+// CoreMIDI 2.0 backend for UmpSession on macOS and iOS.
 //
 // Wires the Pulp UmpSession to a real `MIDIClientRef`. Discovery uses
 // `MIDIGetNumberOfSources()` / `MIDIGetNumberOfDestinations()`; per-
@@ -18,11 +18,11 @@
 //     the session, so the captured pointer stays valid for the block's
 //     entire active window.
 //
-// This file is compiled only when the platform is macOS (non-iOS); the
-// cross-platform `ump_session.cpp` falls back to virtual-endpoints-only
-// when this TU isn't linked.
+// The event-list API is available on macOS 11+ and iOS 14+. Older Apple
+// runtimes keep the cross-platform virtual-endpoint-only fallback.
 
 #import <CoreMIDI/CoreMIDI.h>
+#import <TargetConditionals.h>
 
 #include <pulp/midi/ump_endpoint.hpp>
 #include <pulp/midi/ump_session.hpp>
@@ -39,6 +39,15 @@
 namespace pulp::midi {
 
 namespace {
+
+bool coremidi_ump_available() {
+#if TARGET_OS_IPHONE
+    if (@available(iOS 14.0, *)) return true;
+#else
+    if (@available(macOS 11.0, *)) return true;
+#endif
+    return false;
+}
 
 class CoreMidiUmpEndpoint : public UmpEndpoint {
 public:
@@ -132,6 +141,8 @@ UmpEndpointInfo info_for_endpoint(MIDIEndpointRef ep, bool is_source) {
 }
 
 bool os_init(const UmpSessionConfig& cfg, void** out_state) {
+    if (!coremidi_ump_available()) return false;
+
     auto state = std::make_unique<OsState>();
     CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault,
                                                  cfg.name.c_str(),

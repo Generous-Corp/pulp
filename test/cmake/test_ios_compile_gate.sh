@@ -12,12 +12,25 @@ targets=(
     pulp-sequence
     pulp-smf-interop
     pulp-smf-interchange
+    pulp-midi
+    pulp-ios-coremidi-shared-client-contract
+    pulp-ios-coremidi-harness
+)
+
+static_library_targets=(
+    pulp-timebase
+    pulp-timeline
+    pulp-playback
+    pulp-sequence
+    pulp-smf-interop
+    pulp-smf-interchange
+    pulp-midi
 )
 
 verify_contract() {
     local actual expected
     actual="${targets[*]}"
-    expected="pulp-timebase pulp-timeline pulp-playback pulp-sequence pulp-smf-interop pulp-smf-interchange"
+    expected="pulp-timebase pulp-timeline pulp-playback pulp-sequence pulp-smf-interop pulp-smf-interchange pulp-midi pulp-ios-coremidi-shared-client-contract pulp-ios-coremidi-harness"
     if [[ "$actual" != "$expected" ]]; then
         echo "ERROR: iOS compile target contract drifted" >&2
         echo "expected: $expected" >&2
@@ -102,14 +115,78 @@ for sdk in iphonesimulator iphoneos; do
         cmake --build "$build_dir" --config Release --target "${targets[@]}" \
         -- -sdk "$sdk" CODE_SIGNING_ALLOWED=NO
 
-    for target in "${targets[@]}"; do
+    for target in "${static_library_targets[@]}"; do
         if ! find "$build_dir" -type f -name "lib${target}.a" -print -quit \
             | grep -q .; then
             echo "ERROR: $sdk did not produce lib${target}.a" >&2
             exit 1
         fi
     done
+    if ! find "$build_dir" -type d -name PulpCoreMidiHarness.app -print -quit \
+        | grep -q .; then
+        echo "ERROR: $sdk did not produce PulpCoreMidiHarness.app" >&2
+        exit 1
+    fi
 done
+
+simulator_udid=$(xcrun simctl list devices available -j | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+devices = [d for runtime in data["devices"].values() for d in runtime
+           if d.get("isAvailable") and "iPhone" in d.get("name", "")]
+booted = next((d for d in devices if d.get("state") == "Booted"), None)
+chosen = booted or (devices[0] if devices else None)
+if chosen:
+    print(chosen["udid"])
+')
+if [[ -z "$simulator_udid" ]]; then
+    echo "ERROR: no available iPhone Simulator" >&2
+    exit 1
+fi
+
+booted_here=0
+if [[ $(xcrun simctl list devices -j | python3 -c '
+import json, sys
+udid = sys.argv[1]
+data = json.load(sys.stdin)
+print(next((d.get("state", "") for ds in data["devices"].values()
+            for d in ds if d.get("udid") == udid), ""))
+' "$simulator_udid") != "Booted" ]]; then
+    xcrun simctl boot "$simulator_udid"
+    booted_here=1
+fi
+cleanup_simulator() {
+    if [[ $booted_here -eq 1 ]]; then
+        xcrun simctl shutdown "$simulator_udid" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup_simulator EXIT
+xcrun simctl bootstatus "$simulator_udid" -b
+
+harness_app=$(find "$build_root/iphonesimulator" -type d \
+    -name PulpCoreMidiHarness.app -print -quit)
+bundle_id=dev.pulp.tests.coremidi
+xcrun simctl uninstall "$simulator_udid" "$bundle_id" >/dev/null 2>&1 || true
+xcrun simctl install "$simulator_udid" "$harness_app"
+container=$(xcrun simctl get_app_container "$simulator_udid" "$bundle_id" data)
+result_file="$container/Documents/coremidi-result.txt"
+rm -f "$result_file"
+xcrun simctl launch --terminate-running-process "$simulator_udid" "$bundle_id"
+
+for _ in {1..150}; do
+    [[ -f "$result_file" ]] && break
+    sleep 0.1
+done
+if [[ ! -f "$result_file" ]]; then
+    echo "ERROR: CoreMIDI Simulator harness produced no result" >&2
+    exit 1
+fi
+if [[ $(head -n 1 "$result_file") != "PASS" ]]; then
+    echo "ERROR: CoreMIDI Simulator harness failed" >&2
+    cat "$result_file" >&2
+    exit 1
+fi
+echo "OK: iOS Simulator CoreMIDI virtual endpoints enumerate and disappear"
 
 choc_root=$(sed -n 's/^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=//p' \
     "$build_root/iphonesimulator/CMakeCache.txt" | head -n 1)

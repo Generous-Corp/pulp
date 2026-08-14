@@ -30,6 +30,23 @@ enumerate returns sane port descriptors, `create_input()` /
 
 ### macOS / iOS — CoreMIDI
 
+Both Apple platforms compile the same production `coremidi_device.mm` and
+`ump_session_coremidi.mm` translation units. The iOS Release gate builds them
+for `iphonesimulator` and `iphoneos`; its installable Simulator harness creates
+uniquely named virtual CoreMIDI source/destination endpoints through Pulp's
+process-wide shared client, enumerates them through `create_midi_system()`,
+checks id/name/direction, disposes them, and requires them to disappear. This is
+an OS-backed discovery proof, not an in-process `VirtualUmpEndpoint` substitute.
+
+The event-list/UMP path is availability-guarded at iOS 14 and macOS 11. Older
+Apple runtimes retain the virtual-only `UmpSession` fallback rather than calling
+a weak-linked CoreMIDI 2.0 API.
+
+iOS apps that create virtual CoreMIDI endpoints must include `audio` in the
+`UIBackgroundModes` Info.plist array; otherwise CoreMIDI rejects endpoint
+creation with `kMIDINotPermitted`. The Simulator harness carries this declaration
+in its CMake-generated bundle metadata.
+
 - **Sysex**: receive path uses the shared `UmpSysex7Reassembler` so
   multi-packet sysex spanning callback boundaries reassembles correctly. The
   "second word's top nibble is 0x3" UMP edge case is covered by the dedicated
