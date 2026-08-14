@@ -65,6 +65,10 @@ jobs:
       - pulp-build-vm
       - ${{ format('shipyard-recovery-{0}', inputs.worker) }}
     timeout-minutes: 45
+    env:
+      CODEX_RECOVERY_VERSION: '0.147.0'
+      CODEX_RECOVERY_PACKAGE_INTEGRITY: 'sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w=='
+      CODEX_RECOVERY_DARWIN_ARM64_INTEGRITY: 'sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw=='
 
     steps:
       - name: Fence exact selected runner
@@ -75,6 +79,23 @@ jobs:
           set -euo pipefail
           [ -n "$EXPECTED_RUNNER_NAME" ]
           [ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]
+
+      - name: Install pinned Codex CLI in the disposable VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_integrity=$(npm view \
+            "@openai/codex@${CODEX_RECOVERY_VERSION}" dist.integrity)
+          platform_integrity=$(npm view \
+            "@openai/codex@${CODEX_RECOVERY_VERSION}-darwin-arm64" dist.integrity)
+          [ "$package_integrity" = "$CODEX_RECOVERY_PACKAGE_INTEGRITY" ]
+          [ "$platform_integrity" = "$CODEX_RECOVERY_DARWIN_ARM64_INTEGRITY" ]
+          install_root="$RUNNER_TEMP/codex-cli"
+          npm install --global --ignore-scripts --prefix "$install_root" \
+            "@openai/codex@${CODEX_RECOVERY_VERSION}"
+          [ "$("$install_root/bin/codex" --version)" = \
+            "codex-cli ${CODEX_RECOVERY_VERSION}" ]
+          echo "$install_root/bin" >> "$GITHUB_PATH"
 
       - name: Checkout trusted recovery harness
         uses: actions/checkout@v5

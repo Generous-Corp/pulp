@@ -54,7 +54,21 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         steps = self.doc["jobs"]["luna-triage"]["steps"]
         self.assertEqual(steps[0]["name"], "Fence exact selected runner")
         self.assertIn('[ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]', steps[0]["run"])
-        self.assertEqual(steps[1]["name"], "Checkout trusted recovery harness")
+        self.assertEqual(steps[1]["name"], "Install pinned Codex CLI in the disposable VM")
+        self.assertEqual(steps[2]["name"], "Checkout trusted recovery harness")
+
+    def test_disposable_vm_installs_integrity_pinned_codex(self) -> None:
+        job = self.doc["jobs"]["luna-triage"]
+        self.assertEqual(job["env"]["CODEX_RECOVERY_VERSION"], "0.147.0")
+        self.assertTrue(job["env"]["CODEX_RECOVERY_PACKAGE_INTEGRITY"].startswith("sha512-"))
+        self.assertTrue(
+            job["env"]["CODEX_RECOVERY_DARWIN_ARM64_INTEGRITY"].startswith("sha512-")
+        )
+        install = job["steps"][1]["run"]
+        self.assertIn("npm view", install)
+        self.assertIn("--global --ignore-scripts --prefix", install)
+        self.assertIn('"codex-cli ${CODEX_RECOVERY_VERSION}"', install)
+        self.assertIn('echo "$install_root/bin" >> "$GITHUB_PATH"', install)
 
     def test_admin_secret_exists_only_in_lease_steps(self) -> None:
         steps = self.doc["jobs"]["luna-triage"]["steps"]
