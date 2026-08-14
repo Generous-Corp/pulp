@@ -41,12 +41,30 @@ GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_ru
 GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
+VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock
 AUTOMATIC_NETWORK_ISOLATION=0
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+
+destroy_clone_and_firewall_policy() {
+    local vmid="$1" firewall_file="$2" result=0
+    [[ "$vmid" =~ ^20[0-2]$ ]] || return 1
+    exec 9>"$VMID_LOCK" || return 1
+    flock -w 300 9 || return 1
+    # Allocation holds the same lock while it selects and clones a free VMID.
+    # Keep it through policy removal so an old invocation cannot delete a new
+    # clone generation's firewall after the numeric VMID has been reused.
+    if qm destroy "$vmid" --purge >/dev/null; then
+        rm -f -- "$firewall_file" || result=1
+    else
+        result=1
+    fi
+    flock -u 9 || result=1
+    return "$result"
+}
 
 [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
 PAT="$(cat "$PAT_FILE")"
@@ -105,7 +123,7 @@ fi
 # "200 is free" in the same instant; one clones it and the other's cleanup then
 # destroys 200 out from under the winner, whose `qm start` finds no config file.
 # Observed, not theoretical.
-LOCK=/var/lock/pulp-ephemeral-vmid.lock
+LOCK="$VMID_LOCK"
 exec 9>"$LOCK" || die "cannot open $LOCK"
 flock -w 300 9 || die "timed out waiting for the VMID lock"
 
@@ -187,10 +205,11 @@ cleanup() {
     log "destroying clone $VMID"
     qm stop "$VMID" >/dev/null 2>&1 || true
     for _ in $(seq 1 24); do [ "$(qm status "$VMID" 2>/dev/null)" = "status: stopped" ] && break; sleep 5; done
-    if qm destroy "$VMID" --purge >/dev/null 2>&1; then
-        [ -n "${VM_FIREWALL_FILE:-}" ] && rm -f "$VM_FIREWALL_FILE"
+    if destroy_clone_and_firewall_policy \
+        "$VMID" "${VM_FIREWALL_FILE:-${FIREWALL_DIR}/${VMID}.fw}"; then
+        :
     else
-        log "WARN: destroy of $VMID failed — check manually"
+        log "WARN: atomic destroy/policy cleanup of $VMID failed — check manually"
     fi
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
@@ -223,6 +242,9 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
 [OPTIONS]
 enable: 1
 ipfilter: 1
+# Static IPv4 runners need only ARP and untagged IPv4. Reject IPv6, VLAN
+# encapsulation, and every other EtherType before it can bypass the IP chains.
+layer2_protocols: ARP,IPv4
 policy_in: ACCEPT
 policy_out: ACCEPT
 
@@ -288,15 +310,28 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         vm_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$iptables_rules" || true)"
         vm6_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$ip6tables_rules" || true)"
         vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
+        vm_l2_rules="$(grep -F -- "-A tap${VMID}i0-OUT-PROTO " <<< "$ebtables_rules" || true)"
         all_ipv4_drops=1
         for subnet in "${blocked_ipv4[@]}"; do
             grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
                 || { all_ipv4_drops=0; break; }
         done
+        # ip6tables-save may normalize an all-address destination by omitting
+        # `-d ::/0`. Accept either form, but only in this VM's outbound chain.
+        ipv6_drop_installed=0
+        if grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            || grep -Fxq -- "-A tap${VMID}i0-OUT -j DROP" <<< "$vm6_out_rules"; then
+            ipv6_drop_installed=1
+        fi
         if [ "$all_ipv4_drops" = 1 ] \
-            && grep -Eq -- "-d ::/0( .*)? -j DROP" <<< "$vm6_out_rules" \
+            && [ "$ipv6_drop_installed" = 1 ] \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO" <<< "$ebtables_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p ARP -j RETURN" <<< "$vm_l2_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv4 -j RETURN" <<< "$vm_l2_rules" \
+            && ! grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv6 -j RETURN" <<< "$vm_l2_rules" \
+            && grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -j DROP" <<< "$vm_l2_rules" \
             && ipset test "PVEFW-${VMID}-ipfilter-net0-v4" "$GUEST_IP" >/dev/null 2>&1; then
             firewall_active=1
             break

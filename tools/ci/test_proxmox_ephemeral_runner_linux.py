@@ -118,8 +118,17 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_group_configuration_is_optional_and_root_managed(self) -> None:
         self.assertIn(
-            "EnvironmentFile=-/etc/pulp/linux-runner-group.env", self.service
+            "EnvironmentFile=-/etc/pulp/linux-runner-group-%i.env", self.service
         )
+        self.assertLess(
+            self.service.index(
+                "EnvironmentFile=-/etc/pulp/linux-runner-group.env\n"
+            ),
+            self.service.index(
+                "EnvironmentFile=-/etc/pulp/linux-runner-group-%i.env"
+            ),
+        )
+        self.assertIn("loaded last so it can override", self.service)
         self.assertIn("User=root", self.service)
 
     def test_slot_identity_is_stable_but_registration_name_is_per_boot(self) -> None:
@@ -163,6 +172,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn('NET0="${NET0},firewall=1"', self.script)
         self.assertIn("ipfilter: 1", self.script)
+        self.assertIn("layer2_protocols: ARP,IPv4", self.script)
         self.assertIn("[IPSET ipfilter-net0]", self.script)
         self.assertIn("${GUEST_IP}", self.script)
         self.assertIn('cannot write automatic runner firewall policy', self.script)
@@ -174,8 +184,23 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('ip6tables-save', self.script)
         self.assertIn('ebtables-save', self.script)
         self.assertIn('ipset test "PVEFW-${VMID}-ipfilter-net0-v4"', self.script)
+        self.assertIn('[ "$ipv6_drop_installed" = 1 ]', self.script)
         self.assertIn('--arp-ip-src ${GUEST_IP} -j RETURN', self.script)
         self.assertIn('-A tap${VMID}i0-OUT-ARP -j DROP', self.script)
+        self.assertIn(
+            '-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO', self.script
+        )
+        self.assertIn(
+            '-A tap${VMID}i0-OUT-PROTO -p ARP -j RETURN', self.script
+        )
+        self.assertIn(
+            '-A tap${VMID}i0-OUT-PROTO -p IPv4 -j RETURN', self.script
+        )
+        self.assertIn(
+            '! grep -Fq -- "-A tap${VMID}i0-OUT-PROTO -p IPv6 -j RETURN"',
+            self.script,
+        )
+        self.assertIn('-A tap${VMID}i0-OUT-PROTO -j DROP', self.script)
         self.assertNotIn('chmod 600 "$VM_FIREWALL_TMP"', self.script)
         self.assertGreater(
             self.script.index('qm set "$VMID"'),
@@ -212,7 +237,10 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "::/0",
         ):
             self.assertIn(f"OUT DROP -dest {subnet}", self.script)
-        self.assertIn('rm -f "$VM_FIREWALL_FILE"', self.script)
+        self.assertIn("destroy_clone_and_firewall_policy", self.script)
+        self.assertIn('VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock', self.script)
+        self.assertIn('exec 9>"$VMID_LOCK"', self.script)
+        self.assertIn('rm -f -- "$firewall_file"', self.script)
 
 
 if __name__ == "__main__":

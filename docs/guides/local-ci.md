@@ -214,6 +214,16 @@ the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The scrip
 `GOLDEN=` names the template in use — read it rather than trusting a number written
 down here, since re-baking a warmer golden mints a new id.
 
+Organization runner-group configuration is per slot at
+`/etc/pulp/linux-runner-group-<slot>.env`. A slot without that file retains the
+value from the legacy `/etc/pulp/linux-runner-group.env` migration fallback; a
+numbered file is loaded last and must either set the reviewed group ID or set
+`PULP_LINUX_RUNNER_GROUP_ID=` explicitly for repository-scoped dispatch mode.
+Create a numbered file for every enabled slot, reload and restart the services,
+verify both policies, and only then remove the legacy shared file. This avoids
+both a no-capacity migration window and silently converting every slot to a
+group that does not admit an operator workflow.
+
 **Golden + disposable clone.** The golden carries the dependency set, prebuilt
 Skia (`external/skia-build/.../libskia.a`), a warm ccache, the uncredentialed
 `gh` executable used by preamble/alias jobs, and the shared FetchContent
