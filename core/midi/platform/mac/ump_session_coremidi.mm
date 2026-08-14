@@ -6,23 +6,24 @@
 // `kMIDIProtocol_2_0` and `MIDISendEventList()` on the output side.
 //
 // The OS-backed `UmpEndpoint` lives here too: `CoreMidiUmpEndpoint`
-// wraps a paired (source, destination) for a given unique-id, so a
-// caller that asks the session to open id `1234` gets a single
-// endpoint that can both send and receive against the physical device.
+// wraps the source/destination endpoints belonging to one CoreMIDI entity.
+// Endpoint unique IDs are globally unique and therefore are not a pairing
+// key; entity (or, when needed, device) topology is.
 //
 // Lifetime:
 //   - The session's CoreMIDI client (`MIDIClientRef`) is owned by
 //     `OsState` and disposed in `os_shutdown`.
-//   - Endpoint objects are owned by `OsState::endpoints` and the input
-//     callback block captures the raw pointer; lifetime is bounded by
-//     the session, so the captured pointer stays valid for the block's
-//     entire active window.
+//   - Endpoint objects are owned by `OsState::endpoints`. Input blocks retain
+//     only a shared callback state that is deactivated before port disposal,
+//     so callback teardown never dereferences a destroyed endpoint.
 //
 // The event-list API is available on macOS 11+ and iOS 14+. Older Apple
 // runtimes keep the cross-platform virtual-endpoint-only fallback.
 
 #import <CoreMIDI/CoreMIDI.h>
 #import <TargetConditionals.h>
+
+#include <mach/mach_time.h>
 
 #include <pulp/midi/ump_endpoint.hpp>
 #include <pulp/midi/ump_session.hpp>
@@ -51,10 +52,21 @@ bool coremidi_ump_available() {
 
 class CoreMidiUmpEndpoint : public UmpEndpoint {
 public:
+    struct CallbackState {
+        std::mutex mu;
+        bool active = true;
+        UmpReceiveCallback callback;
+    };
+
     explicit CoreMidiUmpEndpoint(UmpEndpointInfo info)
-        : info_(std::move(info)) {}
+        : info_(std::move(info)), callback_state_(std::make_shared<CallbackState>()) {}
 
     ~CoreMidiUmpEndpoint() override {
+        {
+            std::lock_guard<std::mutex> lk(callback_state_->mu);
+            callback_state_->active = false;
+            callback_state_->callback = nullptr;
+        }
         if (in_port_) MIDIPortDispose(in_port_);
         if (out_port_) MIDIPortDispose(out_port_);
     }
@@ -62,8 +74,10 @@ public:
     const UmpEndpointInfo& info() const noexcept override { return info_; }
 
     void set_receive_callback(UmpReceiveCallback cb) override {
-        std::lock_guard<std::mutex> lk(cb_mu_);
-        cb_ = std::move(cb);
+        std::lock_guard<std::mutex> lk(callback_state_->mu);
+        if (callback_state_->active) {
+            callback_state_->callback = std::move(cb);
+        }
     }
 
     bool send(const UmpPacket& packet) override {
@@ -74,22 +88,15 @@ public:
         mep = MIDIEventListAdd(&list, sizeof(list), mep, 0,
                                static_cast<ByteCount>(packet.word_count),
                                packet.words.data());
+        if (!mep) return false;
         OSStatus st = MIDISendEventList(out_port_, dest_, &list);
         return st == noErr;
     }
 
     bool is_open() const noexcept override { return open_; }
 
-    // Called from the MIDIInputPort block. Bound to the same instance
-    // for the lifetime of the OS port → fine for the block to capture
-    // the raw pointer.
-    void deliver_from_callback(const UmpPacket& p, double ts) {
-        UmpReceiveCallback local;
-        {
-            std::lock_guard<std::mutex> lk(cb_mu_);
-            local = cb_;
-        }
-        if (local) local(p, ts);
+    std::shared_ptr<CallbackState> callback_state() const {
+        return callback_state_;
     }
 
     // Setters used during construction by os_open. They're not part of
@@ -101,7 +108,7 @@ public:
         src_ = src;
         out_port_ = out_port;
         dest_ = dest;
-        open_ = (src != 0 || dest != 0);
+        open_ = true;
     }
 
 private:
@@ -111,8 +118,7 @@ private:
     MIDIPortRef out_port_ = 0;
     MIDIEndpointRef dest_ = 0;
     bool open_ = false;
-    std::mutex cb_mu_;
-    UmpReceiveCallback cb_;
+    std::shared_ptr<CallbackState> callback_state_;
 };
 
 struct OsState {
@@ -121,23 +127,96 @@ struct OsState {
     std::unordered_map<std::string, std::unique_ptr<CoreMidiUmpEndpoint>> endpoints;
 };
 
-UmpEndpointInfo info_for_endpoint(MIDIEndpointRef ep, bool is_source) {
-    UmpEndpointInfo info;
+std::string object_unique_id(MIDIObjectRef object) {
     SInt32 unique_id = 0;
-    MIDIObjectGetIntegerProperty(ep, kMIDIPropertyUniqueID, &unique_id);
-    info.id = std::to_string(unique_id);
+    if (!object ||
+        MIDIObjectGetIntegerProperty(object, kMIDIPropertyUniqueID,
+                                     &unique_id) != noErr ||
+        unique_id == 0) {
+        return {};
+    }
+    return std::to_string(unique_id);
+}
+
+std::string topology_id(MIDIEndpointRef endpoint) {
+    MIDIEntityRef entity = 0;
+    if (MIDIEndpointGetEntity(endpoint, &entity) == noErr && entity) {
+        if (auto id = object_unique_id(entity); !id.empty()) return id;
+        MIDIDeviceRef device = 0;
+        if (MIDIEntityGetDevice(entity, &device) == noErr && device) {
+            if (auto id = object_unique_id(device); !id.empty()) return id;
+        }
+    }
+    // Virtual endpoints commonly have no entity. They remain independent
+    // one-direction groups, identified by their own unique ID.
+    return object_unique_id(endpoint);
+}
+
+UmpEndpointInfo info_for_endpoint(MIDIEndpointRef ep, bool is_source,
+                                  std::string id) {
+    UmpEndpointInfo info;
+    info.id = std::move(id);
 
     CFStringRef name = nullptr;
     MIDIObjectGetStringProperty(ep, kMIDIPropertyDisplayName, &name);
     if (name) {
-        char buf[256];
-        CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8);
-        info.name = buf;
+        char buf[256]{};
+        if (CFStringGetCString(name, buf, sizeof(buf),
+                              kCFStringEncodingUTF8)) {
+            info.name = buf;
+        }
         CFRelease(name);
     }
     info.direction.can_receive = is_source;
     info.direction.can_send = !is_source;
     return info;
+}
+
+struct EndpointGroup {
+    UmpEndpointInfo info;
+    MIDIEndpointRef source = 0;
+    MIDIEndpointRef destination = 0;
+};
+
+std::unordered_map<std::string, EndpointGroup> endpoint_groups() {
+    std::unordered_map<std::string, EndpointGroup> groups;
+    const auto add = [&](MIDIEndpointRef endpoint, bool is_source) {
+        const auto id = topology_id(endpoint);
+        if (id.empty()) return;
+        auto info = info_for_endpoint(endpoint, is_source, id);
+        auto [it, inserted] = groups.try_emplace(id);
+        auto& group = it->second;
+        if (inserted) group.info = std::move(info);
+        if (is_source) {
+            group.source = endpoint;
+            group.info.direction.can_receive = true;
+        } else {
+            group.destination = endpoint;
+            group.info.direction.can_send = true;
+        }
+        if (group.info.name.empty()) group.info.name = std::move(info.name);
+    };
+
+    for (ItemCount i = 0; i < MIDIGetNumberOfSources(); ++i) {
+        add(MIDIGetSource(i), true);
+    }
+    for (ItemCount i = 0; i < MIDIGetNumberOfDestinations(); ++i) {
+        add(MIDIGetDestination(i), false);
+    }
+    return groups;
+}
+
+double host_ticks_to_seconds(MIDITimeStamp ticks) {
+    static const mach_timebase_info_data_t timebase = [] {
+        mach_timebase_info_data_t value{};
+        mach_timebase_info(&value);
+        return value;
+    }();
+    if (timebase.denom == 0) return 0.0;
+    return static_cast<double>(static_cast<long double>(ticks) *
+                               static_cast<long double>(timebase.numer) /
+                               static_cast<long double>(timebase.denom) /
+                               1.0e9L);
 }
 
 bool os_init(const UmpSessionConfig& cfg, void** out_state) {
@@ -179,33 +258,9 @@ std::vector<UmpEndpointInfo> os_enumerate(void* opaque) {
     auto* state = static_cast<OsState*>(opaque);
     if (!state) return out;
 
-    // Merge sources and destinations by unique-id so a paired physical
-    // device shows up once with both direction flags set.
-    std::unordered_map<std::string, UmpEndpointInfo> by_id;
-
-    ItemCount src_count = MIDIGetNumberOfSources();
-    for (ItemCount i = 0; i < src_count; ++i) {
-        auto info = info_for_endpoint(MIDIGetSource(i), /*is_source=*/true);
-        auto it = by_id.find(info.id);
-        if (it == by_id.end()) {
-            by_id.emplace(info.id, std::move(info));
-        } else {
-            it->second.direction.can_receive = true;
-        }
-    }
-    ItemCount dest_count = MIDIGetNumberOfDestinations();
-    for (ItemCount i = 0; i < dest_count; ++i) {
-        auto info = info_for_endpoint(MIDIGetDestination(i), /*is_source=*/false);
-        auto it = by_id.find(info.id);
-        if (it == by_id.end()) {
-            by_id.emplace(info.id, std::move(info));
-        } else {
-            it->second.direction.can_send = true;
-            if (it->second.name.empty()) it->second.name = std::move(info.name);
-        }
-    }
-    out.reserve(by_id.size());
-    for (auto& [_, v] : by_id) out.push_back(std::move(v));
+    auto groups = endpoint_groups();
+    out.reserve(groups.size());
+    for (auto& [_, group] : groups) out.push_back(std::move(group.info));
     return out;
 }
 
@@ -215,59 +270,35 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
         if (status) *status = UmpOpenStatus::OsBackendUnavailable;
         return nullptr;
     }
-    {
-        std::lock_guard<std::mutex> lk(state->mu);
-        auto it = state->endpoints.find(id);
-        if (it != state->endpoints.end()) {
-            if (status) *status = UmpOpenStatus::Ok;
-            return it->second.get();
-        }
+    // Serialize the lookup-and-create transaction. A check before port
+    // creation followed by an unlocked insertion lets concurrent callers
+    // replace the first unique_ptr and invalidate its borrowed pointer.
+    std::lock_guard<std::mutex> state_lock(state->mu);
+    auto existing = state->endpoints.find(id);
+    if (existing != state->endpoints.end()) {
+        if (status) *status = UmpOpenStatus::Ok;
+        return existing->second.get();
     }
 
-    // Resolve id → endpoint refs.
-    SInt32 target_uid = 0;
-    try { target_uid = static_cast<SInt32>(std::stol(id)); }
-    catch (...) {
+    auto groups = endpoint_groups();
+    auto group_it = groups.find(id);
+    if (group_it == groups.end()) {
         if (status) *status = UmpOpenStatus::NotFound;
         return nullptr;
     }
-    MIDIEndpointRef src = 0, dest = 0;
-    ItemCount src_count = MIDIGetNumberOfSources();
-    for (ItemCount i = 0; i < src_count; ++i) {
-        MIDIEndpointRef e = MIDIGetSource(i);
-        SInt32 uid = 0;
-        MIDIObjectGetIntegerProperty(e, kMIDIPropertyUniqueID, &uid);
-        if (uid == target_uid) { src = e; break; }
-    }
-    ItemCount dest_count = MIDIGetNumberOfDestinations();
-    for (ItemCount i = 0; i < dest_count; ++i) {
-        MIDIEndpointRef e = MIDIGetDestination(i);
-        SInt32 uid = 0;
-        MIDIObjectGetIntegerProperty(e, kMIDIPropertyUniqueID, &uid);
-        if (uid == target_uid) { dest = e; break; }
-    }
+    MIDIEndpointRef src = group_it->second.source;
+    MIDIEndpointRef dest = group_it->second.destination;
     if (!src && !dest) {
         if (status) *status = UmpOpenStatus::NotFound;
         return nullptr;
     }
 
-    UmpEndpointInfo info;
-    info.id = id;
-    if (src) {
-        auto si = info_for_endpoint(src, /*is_source=*/true);
-        info.name = std::move(si.name);
-        info.direction.can_receive = true;
-    }
-    if (dest) {
-        auto di = info_for_endpoint(dest, /*is_source=*/false);
-        if (info.name.empty()) info.name = std::move(di.name);
-        info.direction.can_send = true;
-    }
+    UmpEndpointInfo info = group_it->second.info;
 
-    // Construct the endpoint up front so the block can capture its
-    // stable raw pointer. The session owns the unique_ptr.
+    // Construct the endpoint up front so the block can retain its fenced
+    // callback state. The session owns the endpoint itself.
     auto ep = std::make_unique<CoreMidiUmpEndpoint>(std::move(info));
-    CoreMidiUmpEndpoint* ep_raw = ep.get();
+    auto callback_state = ep->callback_state();
 
     MIDIPortRef in_port = 0;
     MIDIPortRef out_port = 0;
@@ -292,43 +323,62 @@ UmpEndpoint* os_open(void* opaque, const std::string& id, UmpOpenStatus* status)
                         for (uint8_t k = 0; k < words; ++k) {
                             p.words[k] = packet->words[idx + k];
                         }
-                        const double ts =
-                            static_cast<double>(packet->timeStamp) / 1e9;
-                        ep_raw->deliver_from_callback(p, ts);
+                        UmpReceiveCallback callback;
+                        {
+                            std::lock_guard<std::mutex> lk(callback_state->mu);
+                            if (callback_state->active) {
+                                callback = callback_state->callback;
+                            }
+                        }
+                        if (callback) {
+                            callback(p, host_ticks_to_seconds(packet->timeStamp));
+                        }
                         idx += words;
                     }
                     packet = MIDIEventPacketNext(packet);
                 }
             });
-        if (st == noErr && in_port) {
-            MIDIPortConnectSource(in_port, src, nullptr);
+        if (st != noErr || !in_port) {
+            if (status) *status = UmpOpenStatus::OsError;
+            return nullptr;
+        }
+        st = MIDIPortConnectSource(in_port, src, nullptr);
+        if (st != noErr) {
+            MIDIPortDispose(in_port);
+            if (status) *status = UmpOpenStatus::OsError;
+            return nullptr;
         }
     }
     if (dest) {
-        MIDIOutputPortCreate(state->client, CFSTR("Pulp UMP Out"), &out_port);
+        const OSStatus st =
+            MIDIOutputPortCreate(state->client, CFSTR("Pulp UMP Out"),
+                                 &out_port);
+        if (st != noErr || !out_port) {
+            if (in_port) MIDIPortDispose(in_port);
+            if (status) *status = UmpOpenStatus::OsError;
+            return nullptr;
+        }
     }
     ep->set_ports(in_port, src, out_port, dest);
 
     UmpEndpoint* out_ptr = ep.get();
-    {
-        std::lock_guard<std::mutex> lk(state->mu);
-        state->endpoints[id] = std::move(ep);
-    }
+    state->endpoints.emplace(id, std::move(ep));
     if (status) *status = UmpOpenStatus::Ok;
     return out_ptr;
 }
 
-struct BackendRegistrar {
-    BackendRegistrar() {
+} // namespace
+
+void register_coremidi_ump_backend() {
+    static std::once_flag once;
+    std::call_once(once, [] {
         ump_os::OsBackendVTable v;
         v.init = &os_init;
         v.shutdown = &os_shutdown;
         v.enumerate = &os_enumerate;
         v.open = &os_open;
         register_ump_os_backend(v);
-    }
-};
-BackendRegistrar g_registrar;
+    });
+}
 
-} // namespace
 } // namespace pulp::midi

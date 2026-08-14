@@ -130,6 +130,12 @@ UmpSession::UmpSession() : UmpSession(UmpSessionConfig{}) {}
 
 UmpSession::UmpSession(UmpSessionConfig cfg) : impl_(std::make_unique<Impl>()) {
     impl_->cfg = std::move(cfg);
+#if defined(__APPLE__)
+    // This call is deliberately non-inline: it leaves an unresolved symbol in
+    // ump_session.cpp.o, forcing static linkers to retain the CoreMIDI backend
+    // object and its registration code.
+    register_coremidi_ump_backend();
+#endif
     if (impl_->cfg.enable_os_backend && ump_os::vtable().init) {
         impl_->os_active = ump_os::vtable().init(impl_->cfg, &impl_->os_state);
     }

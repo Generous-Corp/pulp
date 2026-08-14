@@ -26,7 +26,7 @@ target_sources(pulp-midi PRIVATE
     src/tuning.cpp
     # macOS plan 8.1 — UMP Session + Endpoint + VirtualEndpoint.
     # Cross-platform virtual-endpoint registry; platform .mm/.cpp adds
-    # the OS-backed half via a static-init registrar.
+    # the OS-backed half via an explicit registration anchor.
     src/ump_session.cpp
     # BLE MIDI — Apple BLE-MIDI 1.0 transport. The packet codec is
     # cross-platform; create_ble_midi_central() resolves to either the
@@ -98,8 +98,8 @@ elseif(APPLE AND IOS)
         pulp::midi)
 
     # A real installable Simulator app drives production MidiSystem discovery
-    # against virtual CoreMIDI endpoints. The P0-4 gate builds this for both
-    # Apple SDKs and launches the simulator variant.
+    # and UMP event-list I/O against virtual CoreMIDI endpoints. The P0-4 gate
+    # builds this for both Apple SDKs and launches the simulator variant.
     add_executable(pulp-ios-coremidi-harness MACOSX_BUNDLE EXCLUDE_FROM_ALL
         ${CMAKE_SOURCE_DIR}/test/ios/coremidi_backend_harness.mm)
     target_link_libraries(pulp-ios-coremidi-harness PRIVATE

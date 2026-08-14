@@ -35,17 +35,22 @@ Both Apple platforms compile the same production `coremidi_device.mm` and
 for `iphonesimulator` and `iphoneos`; its installable Simulator harness creates
 uniquely named virtual CoreMIDI source/destination endpoints through Pulp's
 process-wide shared client, enumerates them through `create_midi_system()`,
-checks id/name/direction, disposes them, and requires them to disappear. This is
-an OS-backed discovery proof, not an in-process `VirtualUmpEndpoint` substitute.
+checks id/name/direction, requires an active production `UmpSession`, and proves
+real CoreMIDI event-list I/O in both directions before disposal and disappearance.
+This is an OS-backed discovery/I/O proof, not an in-process
+`VirtualUmpEndpoint` substitute.
 
 The event-list/UMP path is availability-guarded at iOS 14 and macOS 11. Older
 Apple runtimes retain the virtual-only `UmpSession` fallback rather than calling
 a weak-linked CoreMIDI 2.0 API.
 
-iOS apps that create virtual CoreMIDI endpoints must include `audio` in the
-`UIBackgroundModes` Info.plist array; otherwise CoreMIDI rejects endpoint
-creation with `kMIDINotPermitted`. The Simulator harness carries this declaration
-in its CMake-generated bundle metadata.
+In the gate's current iOS Simulator environment, creating virtual endpoints
+without the harness bundle's `UIBackgroundModes=audio` declaration returned
+`kMIDINotPermitted`; adding that declaration made the same creation oracle pass.
+The harness therefore carries it in generated bundle metadata. This is evidence
+for the test fixture, not a general recommendation that production MIDI apps
+claim background audio; applications must choose background modes according to
+their actual behavior and Apple's current policy.
 
 - **Sysex**: receive path uses the shared `UmpSysex7Reassembler` so
   multi-packet sysex spanning callback boundaries reassembles correctly. The
@@ -59,7 +64,10 @@ in its CMake-generated bundle metadata.
   short, allocation-free, and pass data to your audio / UI thread via
   lock-free FIFOs.
 - **UMP**: same backend supports UMP via `ump_session_coremidi.mm`
-  (CoreMIDI 2.0 path on macOS 11+ / iOS 14+).
+  (CoreMIDI 2.0 path on macOS 11+ / iOS 14+). Static consumers retain it
+  through the explicit anchor called by `UmpSession`; discovery pairs source
+  and destination directions by CoreMIDI entity/device topology, never by
+  equal endpoint unique IDs.
 
 ### Linux — ALSA raw MIDI
 

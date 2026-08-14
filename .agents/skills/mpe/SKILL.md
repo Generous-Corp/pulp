@@ -334,16 +334,16 @@ Pulp exposes a Pulp-native UMP transport surface in
 When you add a new OS backend (WinRT MIDI 2.0, ALSA UMP), do NOT
 write a parallel session abstraction — implement the
 `OsBackendVTable` declared in `core/midi/src/ump_session_backend.hpp`
-and register it from a static initialiser in the platform
-TU. The cross-platform `ump_session.cpp` patches the vtable at
-load time; if no platform backend is linked, the session reports
+and expose an explicit platform registration anchor. On Apple,
+`ump_session.cpp` calls that anchor so static-library linkers retain the
+CoreMIDI translation unit; a translation-unit-local static initialiser is not
+enough. If no platform backend is available, the session reports
 `os_backend_active() == false` and operates virtual-only (this is
 exactly what the test target exercises everywhere).
 
-Lifetime invariant: the input-port block on macOS captures the
-endpoint's raw pointer. The endpoint is `unique_ptr` inside
-`OsState::endpoints` — never reseat or move it after the block
-is installed, or the block's captured pointer dangles.
+Lifetime invariant: the Apple input-port block captures shared callback state,
+not the endpoint's raw pointer. Endpoint teardown deactivates that state before
+disposing the port, so a late callback cannot dereference a destroyed object.
 
 ## Implementation note: where MpeVoiceTracker bodies live
 

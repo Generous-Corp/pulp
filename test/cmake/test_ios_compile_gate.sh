@@ -130,10 +130,15 @@ for sdk in iphonesimulator iphoneos; do
 done
 
 simulator_udid=$(xcrun simctl list devices available -j | python3 -c '
-import json, sys
+import json, re, sys
 data = json.load(sys.stdin)
-devices = [d for runtime in data["devices"].values() for d in runtime
-           if d.get("isAvailable") and "iPhone" in d.get("name", "")]
+devices = []
+for runtime, entries in data["devices"].items():
+    match = re.search(r"\.iOS-(\d+)-(\d+)$", runtime)
+    if not match or tuple(map(int, match.groups())) < (16, 3):
+        continue
+    devices.extend(d for d in entries
+                   if d.get("isAvailable") and "iPhone" in d.get("name", ""))
 booted = next((d for d in devices if d.get("state") == "Booted"), None)
 chosen = booted or (devices[0] if devices else None)
 if chosen:
@@ -186,7 +191,7 @@ if [[ $(head -n 1 "$result_file") != "PASS" ]]; then
     cat "$result_file" >&2
     exit 1
 fi
-echo "OK: iOS Simulator CoreMIDI virtual endpoints enumerate and disappear"
+echo "OK: iOS Simulator CoreMIDI discovery and bidirectional UMP I/O passed"
 
 choc_root=$(sed -n 's/^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=//p' \
     "$build_root/iphonesimulator/CMakeCache.txt" | head -n 1)

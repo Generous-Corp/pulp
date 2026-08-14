@@ -967,17 +967,21 @@ iOS floor is newer, but retaining the guard prevents an installed-SDK consumer
 from weak-linking and calling the API on an older runtime. When unavailable,
 `UmpSession` stays virtual-endpoint-only.
 
-iOS requires an app that creates virtual CoreMIDI endpoints to list `audio` in
-its `UIBackgroundModes` Info.plist array. Without it, `MIDISourceCreate` and
-`MIDIDestinationCreate` return `kMIDINotPermitted`. The Simulator harness
-declares this mode in its CMake-generated Info.plist.
+In the current Simulator gate, omitting `UIBackgroundModes=audio` from the
+harness bundle made virtual endpoint creation return `kMIDINotPermitted`, while
+the same oracle passed with the declaration. The harness therefore declares
+that mode in its CMake-generated Info.plist. Do not generalize this fixture
+requirement into production guidance: only claim background modes justified by
+the app's real behavior and Apple's current policy.
 
 The authoritative iOS proof is `test/cmake/test_ios_compile_gate.sh`. It builds
 `pulp-midi`, the shared-client compile contract, and an installable harness for
 both the Simulator and device SDKs. On the Simulator it creates uniquely named
 virtual CoreMIDI endpoints through the shared client, enumerates via production
-`create_midi_system()`, verifies id/name/direction, disposes the endpoints, and
-requires disappearance. A source-syntax check or in-process
+`create_midi_system()`, verifies id/name/direction, requires an active
+production `UmpSession`, opens its CoreMIDI endpoints, proves event-list input
+and output, disposes the endpoints, and requires disappearance. A source-syntax
+check or in-process
 `VirtualUmpEndpoint` does not replace this proof.
 
 ## See Also

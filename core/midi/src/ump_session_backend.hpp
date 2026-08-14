@@ -30,4 +30,11 @@ namespace pulp::midi {
 /// platform .mm/.cpp file's static initialiser.
 void register_ump_os_backend(const ump_os::OsBackendVTable& v);
 
+#if defined(__APPLE__)
+/// Install the CoreMIDI vtable. This explicit anchor is called by
+/// UmpSession so static-library consumers retain the platform translation
+/// unit; a translation-unit-local static registrar is not sufficient.
+void register_coremidi_ump_backend();
+#endif
+
 } // namespace pulp::midi
