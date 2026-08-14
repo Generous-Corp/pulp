@@ -127,7 +127,10 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
 
     def test_recovery_dispatch_is_exact_head_deduplicated_and_bounded(self) -> None:
         self.assertIn("shipyard_recovery_dispatch.py", self.text)
+        self.assertIn("shipyard_recovery_worker_select.py", self.text)
+        self.assertIn("actions/runners?per_page=100", self.text)
         self.assertIn("recovery-statuses.json", self.text)
+        self.assertIn("recovery-worker.json", self.text)
         self.assertIn(".candidates[0] // empty", self.text)
         self.assertIn("shipyard/recovery-dispatch", self.text)
         self.assertIn("state=pending", self.text)
@@ -135,7 +138,11 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("gh workflow run shipyard-recovery-worker.yml", self.text)
         self.assertIn("-f expected_head=\"$head\"", self.text)
         self.assertIn("-f assignment_epoch=\"$epoch\"", self.text)
+        self.assertIn("-f worker=\"$worker\"", self.text)
+        self.assertIn("-f runner_name=\"$runner_name\"", self.text)
         self.assertIn("-f blocker_fingerprint=\"$fingerprint\"", self.text)
+        self.assertIn("shipyard/recovery-capacity", self.text)
+        self.assertIn("no explicitly enrolled recovery worker", self.text)
         self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)
 
 

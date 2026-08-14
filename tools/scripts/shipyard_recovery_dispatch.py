@@ -56,6 +56,14 @@ def _description_int(status: dict[str, Any], key: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _description_value(status: dict[str, Any], key: str) -> str | None:
+    match = re.search(
+        rf"\b{re.escape(key)}=([^\s]+)",
+        str(status.get("description") or ""),
+    )
+    return match.group(1) if match else None
+
+
 def _latest_dispatch_status(
     statuses: list[dict[str, Any]], fingerprint: str
 ) -> dict[str, Any] | None:
@@ -63,7 +71,7 @@ def _latest_dispatch_status(
         status
         for status in statuses
         if str(status.get("context") or "").lower() == CONTEXT
-        and f"fingerprint={fingerprint}" in str(status.get("description") or "")
+        and _description_value(status, "fingerprint") == fingerprint
     ]
     if not matching:
         return None

@@ -15,6 +15,7 @@ FULL_FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 HANDOFF_CONTEXT = "shipyard/steward-handoff"
 DISPATCH_CONTEXT = "shipyard/recovery-dispatch"
 REQUIRED_LABELS = {"shipyard:managed", "shipyard:needs-agent"}
+ALLOWED_WORKERS = {"m1", "m3", "m5"}
 
 
 def _load(path: Path) -> Any:
@@ -56,6 +57,14 @@ def _description_int(status: dict[str, Any], key: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _description_value(status: dict[str, Any], key: str) -> str | None:
+    match = re.search(
+        rf"\b{re.escape(key)}=([^\s]+)",
+        str(status.get("description") or ""),
+    )
+    return match.group(1) if match else None
+
+
 def validate_assignment(
     pull: dict[str, Any],
     statuses: list[dict[str, Any]],
@@ -64,6 +73,7 @@ def validate_assignment(
     assignment_epoch: int,
     dispatch_attempt: int,
     fingerprint: str,
+    worker: str,
 ) -> dict[str, Any]:
     expected_head = expected_head.lower()
     fingerprint = fingerprint.lower()
@@ -73,6 +83,8 @@ def validate_assignment(
         raise ValueError("assignment epoch must be positive")
     if dispatch_attempt not in (1, 2):
         raise ValueError("dispatch attempt must be one or two")
+    if worker not in ALLOWED_WORKERS:
+        raise ValueError("recovery worker is not allowlisted")
     if not FULL_FINGERPRINT.fullmatch(fingerprint):
         raise ValueError("fingerprint must be a full lowercase SHA-256")
     if str(pull.get("state") or "").lower() != "open":
@@ -89,13 +101,14 @@ def validate_assignment(
     dispatch = _latest(statuses, DISPATCH_CONTEXT)
     if dispatch is None or str(dispatch.get("state") or "").lower() != "pending":
         raise ValueError("exact head has no pending recovery dispatch")
-    description = str(dispatch.get("description") or "")
-    if f"epoch={assignment_epoch}" not in description:
+    if _description_int(dispatch, "epoch") != assignment_epoch:
         raise ValueError("recovery dispatch epoch does not match")
-    if f"attempt={dispatch_attempt}" not in description:
+    if _description_int(dispatch, "attempt") != dispatch_attempt:
         raise ValueError("recovery dispatch attempt does not match")
-    if f"fingerprint={fingerprint}" not in description:
+    if _description_value(dispatch, "fingerprint") != fingerprint:
         raise ValueError("recovery dispatch fingerprint does not match")
+    if _description_value(dispatch, "worker") != worker:
+        raise ValueError("recovery dispatch worker does not match")
     return {
         "schema_version": 1,
         "number": int(pull["number"]),
@@ -105,6 +118,7 @@ def validate_assignment(
         "assignment_epoch": assignment_epoch,
         "dispatch_attempt": dispatch_attempt,
         "fingerprint": fingerprint,
+        "worker": worker,
         "labels": sorted(_labels(pull)),
     }
 
@@ -118,6 +132,7 @@ PR: {assignment['number']} — {assignment['title']}
 Exact head: {assignment['head']}
 Assignment epoch: {assignment['assignment_epoch']}
 Blocker fingerprint: {assignment['fingerprint']}
+Recovery worker: {assignment['worker']}
 
 Rules:
 - Do not edit files, create commits, push, merge, rerun checks, or change GitHub/Linear state.
@@ -149,6 +164,7 @@ def main() -> int:
     parser.add_argument("--assignment-epoch", type=int, required=True)
     parser.add_argument("--dispatch-attempt", type=int, required=True)
     parser.add_argument("--fingerprint", required=True)
+    parser.add_argument("--worker", required=True)
     parser.add_argument("--assignment-output", type=Path, required=True)
     parser.add_argument("--prompt-output", type=Path, required=True)
     args = parser.parse_args()
@@ -159,6 +175,7 @@ def main() -> int:
         assignment_epoch=args.assignment_epoch,
         dispatch_attempt=args.dispatch_attempt,
         fingerprint=args.fingerprint,
+        worker=args.worker,
     )
     args.assignment_output.write_text(
         json.dumps(assignment, indent=2, sort_keys=True) + "\n", encoding="utf-8"

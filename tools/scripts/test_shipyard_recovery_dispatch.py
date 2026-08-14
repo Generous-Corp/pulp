@@ -129,6 +129,14 @@ class RecoveryDispatchTests(unittest.TestCase):
         self.assertEqual(plan["candidate_count"], 1)
         self.assertNotEqual(plan["candidates"][0]["fingerprint"], BLOCKER_FINGERPRINT)
 
+    def test_fingerprint_requires_an_exact_status_token(self):
+        lookalike = status(
+            "success",
+            f"attempt=1 epoch=1 fingerprint={BLOCKER_FINGERPRINT}0",
+        )
+        plan = dispatch.build_plan(report(), census(HEAD_A, lookalike), 10, now=NOW)
+        self.assertEqual(plan["candidate_count"], 1)
+
     def test_new_head_is_a_new_assignment(self):
         old = census(HEAD_A, status("failure"))
         plan = dispatch.build_plan(report(head=HEAD_B), old, 5)

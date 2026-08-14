@@ -23,24 +23,41 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
 
     def test_pilot_is_manual_unique_label_and_deduplicated(self) -> None:
         self.assertEqual(set(self.doc["on"]), {"workflow_dispatch"})
-        job = self.doc["jobs"]["m5-luna-triage"]
-        self.assertIn("shipyard-recovery-canary-m5-20260814", job["runs-on"])
+        job = self.doc["jobs"]["luna-triage"]
+        self.assertIn("${{ format('shipyard-recovery-{0}', inputs.worker) }}", job["runs-on"])
         self.assertEqual(job["timeout-minutes"], "45")
         group = self.doc["concurrency"]["group"]
-        for key in ("pr_number", "expected_head", "blocker_fingerprint"):
+        for key in (
+            "pr_number",
+            "expected_head",
+            "blocker_fingerprint",
+            "assignment_epoch",
+            "dispatch_attempt",
+        ):
             self.assertIn(f"inputs.{key}", group)
 
     def test_status_mutation_is_explicitly_off_by_default(self) -> None:
         inputs = self.doc["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("dispatch_attempt", inputs)
+        self.assertIn("worker", inputs)
+        self.assertIn("runner_name", inputs)
         self.assertEqual(inputs["publish_status"]["default"], "false")
         self.assertEqual(inputs["attempt_repair"]["default"], "false")
         self.assertIn("always() && inputs.publish_status", self.text)
         self.assertIn("context='shipyard/recovery-dispatch'", self.text)
         self.assertIn("completed attempt=${{ inputs.dispatch_attempt }}", self.text)
+        self.assertIn("description=\"c=${classification}", self.text)
+        self.assertEqual(self.text.count('[ "${#description}" -le 140 ]'), 1)
+        self.assertEqual(self.text.count('[ "${#dispatch_description}" -le 140 ]'), 1)
+
+    def test_selected_runner_name_is_fenced_before_checkout(self) -> None:
+        steps = self.doc["jobs"]["luna-triage"]["steps"]
+        self.assertEqual(steps[0]["name"], "Fence exact selected runner")
+        self.assertIn('[ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]', steps[0]["run"])
+        self.assertEqual(steps[1]["name"], "Checkout trusted recovery harness")
 
     def test_admin_secret_exists_only_in_lease_steps(self) -> None:
-        steps = self.doc["jobs"]["m5-luna-triage"]["steps"]
+        steps = self.doc["jobs"]["luna-triage"]["steps"]
         secret_steps = [
             step["name"]
             for step in steps
@@ -95,14 +112,14 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertIn("permission-contents: write", self.text)
         publisher = self.doc["jobs"]["publish-recovery-result"]
         self.assertEqual(publisher["runs-on"], "ubuntu-latest")
-        model_job = str(self.doc["jobs"]["m5-luna-triage"])
+        model_job = str(self.doc["jobs"]["luna-triage"])
         self.assertNotIn("SHIPYARD_APP_PRIVATE_KEY", model_job)
         self.assertNotIn("git push", model_job)
 
     def test_artifact_excludes_prompt_logs_and_lease_material(self) -> None:
         upload = next(
             step
-            for step in self.doc["jobs"]["m5-luna-triage"]["steps"]
+            for step in self.doc["jobs"]["luna-triage"]["steps"]
             if step.get("name") == "Publish sanitized recovery artifact"
         )
         paths = upload["with"]["path"]

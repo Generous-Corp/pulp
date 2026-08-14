@@ -21,6 +21,14 @@ on:
         description: 'Bounded dispatch attempt (one or two)'
         required: true
         type: string
+      worker:
+        description: 'Fenced recovery worker identity: m3, m5, or m1'
+        required: true
+        type: string
+      runner_name:
+        description: 'Exact repository runner selected by the controller census'
+        required: true
+        type: string
       blocker_fingerprint:
         description: 'Full blocker SHA-256 fingerprint'
         required: true
@@ -42,11 +50,11 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: shipyard-recovery-${{ inputs.pr_number }}-${{ inputs.expected_head }}-${{ inputs.blocker_fingerprint }}
+  group: shipyard-recovery-${{ inputs.pr_number }}-${{ inputs.expected_head }}-${{ inputs.blocker_fingerprint }}-${{ inputs.assignment_epoch }}-${{ inputs.dispatch_attempt }}
   cancel-in-progress: false
 
 jobs:
-  m5-luna-triage:
+  luna-triage:
     outputs:
       triage_classification: ${{ steps.triage.outputs.classification }}
       repair_outcome: ${{ steps.repair.outputs.outcome }}
@@ -55,10 +63,19 @@ jobs:
       - macOS
       - ARM64
       - pulp-build-vm
-      - shipyard-recovery-canary-m5-20260814
+      - ${{ format('shipyard-recovery-{0}', inputs.worker) }}
     timeout-minutes: 45
 
     steps:
+      - name: Fence exact selected runner
+        shell: bash
+        env:
+          EXPECTED_RUNNER_NAME: ${{ inputs.runner_name }}
+        run: |
+          set -euo pipefail
+          [ -n "$EXPECTED_RUNNER_NAME" ]
+          [ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]
+
       - name: Checkout trusted recovery harness
         uses: actions/checkout@v5
         with:
@@ -76,6 +93,7 @@ jobs:
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           ASSIGNMENT_EPOCH: ${{ inputs.assignment_epoch }}
           DISPATCH_ATTEMPT: ${{ inputs.dispatch_attempt }}
+          RECOVERY_WORKER: ${{ inputs.worker }}
           BLOCKER_FINGERPRINT: ${{ inputs.blocker_fingerprint }}
         run: |
           set -euo pipefail
@@ -98,6 +116,7 @@ jobs:
             --assignment-epoch "$ASSIGNMENT_EPOCH" \
             --dispatch-attempt "$DISPATCH_ATTEMPT" \
             --fingerprint "$BLOCKER_FINGERPRINT" \
+            --worker "$RECOVERY_WORKER" \
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
 
@@ -147,6 +166,7 @@ jobs:
             --assignment-epoch "${{ inputs.assignment_epoch }}" \
             --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "${{ inputs.blocker_fingerprint }}" \
+            --worker "${{ inputs.worker }}" \
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
 
@@ -385,8 +405,8 @@ jobs:
           if-no-files-found: warn
 
   publish-recovery-result:
-    needs: m5-luna-triage
-    if: ${{ always() && (inputs.publish_status || needs.m5-luna-triage.outputs.repair_outcome == 'fixed') }}
+    needs: luna-triage
+    if: ${{ always() && (inputs.publish_status || needs.luna-triage.outputs.repair_outcome == 'fixed') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -425,7 +445,7 @@ jobs:
 
       - name: Mint post-model Shipyard repair token
         id: shipyard_repair_token
-        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        if: needs.luna-triage.outputs.repair_outcome == 'fixed'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ secrets.SHIPYARD_APP_ID }}
@@ -437,7 +457,7 @@ jobs:
           permission-statuses: write
 
       - name: Checkout immutable PR head without credentials
-        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        if: needs.luna-triage.outputs.repair_outcome == 'fixed'
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.expected_head }}
@@ -447,7 +467,7 @@ jobs:
 
       - name: Fence, commit, and push repaired exact head
         id: repair_push
-        if: needs.m5-luna-triage.outputs.repair_outcome == 'fixed'
+        if: needs.luna-triage.outputs.repair_outcome == 'fixed'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard_repair_token.outputs.token }}
@@ -479,6 +499,7 @@ jobs:
             --assignment-epoch "$ASSIGNMENT_EPOCH" \
             --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "$BLOCKER_FINGERPRINT" \
+            --worker "${{ inputs.worker }}" \
             --assignment-output /dev/null \
             --prompt-output /dev/null
           [ "$(jq -r '.head.repo.full_name' post-repair-pull.json)" = "$GITHUB_REPOSITORY" ]
@@ -529,16 +550,17 @@ jobs:
           if [ "${{ steps.repair_push.outcome }}" = success ]; then
             state=success
             classification=repair_pushed
-          elif [ "${{ needs.m5-luna-triage.result }}" != success ] || [ "${{ steps.download.outcome }}" != success ] || [ "${{ steps.repair_push.outcome }}" = failure ]; then
+          elif [ "${{ needs.luna-triage.result }}" != success ] || [ "${{ steps.download.outcome }}" != success ] || [ "${{ steps.repair_push.outcome }}" = failure ]; then
             classification=repair_failed
-          elif [ "${{ needs.m5-luna-triage.outputs.repair_outcome }}" = needs_human ] || [ "${{ needs.m5-luna-triage.outputs.repair_outcome }}" = no_change ]; then
+          elif [ "${{ needs.luna-triage.outputs.repair_outcome }}" = needs_human ] || [ "${{ needs.luna-triage.outputs.repair_outcome }}" = no_change ]; then
             state=success
-            classification="repair_${{ needs.m5-luna-triage.outputs.repair_outcome }}"
-          elif [ -n "${{ needs.m5-luna-triage.outputs.triage_classification }}" ]; then
+            classification="repair_${{ needs.luna-triage.outputs.repair_outcome }}"
+          elif [ -n "${{ needs.luna-triage.outputs.triage_classification }}" ]; then
             state=success
-            classification="${{ needs.m5-luna-triage.outputs.triage_classification }}"
+            classification="${{ needs.luna-triage.outputs.triage_classification }}"
           fi
-          description="classification=${classification} epoch=${{ inputs.assignment_epoch }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          description="c=${classification} epoch=${{ inputs.assignment_epoch }} worker=${{ inputs.worker }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          [ "${#description}" -le 140 ]
           gh api \
             --method POST \
             "repos/${GITHUB_REPOSITORY}/statuses/${{ inputs.expected_head }}" \
@@ -550,7 +572,8 @@ jobs:
           if [ "$state" = error ]; then
             dispatch_state=error
           fi
-          dispatch_description="completed attempt=${{ inputs.dispatch_attempt }} epoch=${{ inputs.assignment_epoch }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          dispatch_description="completed attempt=${{ inputs.dispatch_attempt }} epoch=${{ inputs.assignment_epoch }} worker=${{ inputs.worker }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          [ "${#dispatch_description}" -le 140 ]
           gh api \
             --method POST \
             "repos/${GITHUB_REPOSITORY}/statuses/${{ inputs.expected_head }}" \
