@@ -79,6 +79,8 @@ jobs:
                   isinstance(item, str) for item in value
               ):
                   return None
+              if any(item != item.strip() for item in value):
+                  return None
               actual = [item.strip().lower() for item in value]
               wanted = [item.lower() for item in expected]
               return value if len(actual) == len(wanted) and set(actual) == set(wanted) else None
@@ -144,6 +146,7 @@ jobs:
       CCACHE_SLOPPINESS: time_macros
     steps:
       - name: Validate same-repository PR assignment
+        if: needs.admission.outputs.admitted == 'true'
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -210,10 +213,11 @@ jobs:
           # semantics: build GitHub's proposed merge, not the raw PR head.
           # A rejected supplied merge SHA must never become the hosted fallback
           # checkout. New callers and every trusted merge-group route test the
-          # event's proposed merge; only the staged legacy PR caller omits
-          # merge_sha and retains its historical source_sha checkout.
+          # event's proposed merge; only an admitted staged legacy PR caller
+          # omits merge_sha and retains its historical source_sha checkout.
           ref: >-
-            ${{ (inputs.route_kind == 'trusted' || inputs.merge_sha != '') &&
+            ${{ (needs.admission.outputs.admitted != 'true' ||
+                inputs.route_kind == 'trusted' || inputs.merge_sha != '') &&
                 github.sha || inputs.source_sha }}
           fetch-depth: 0
           lfs: false
