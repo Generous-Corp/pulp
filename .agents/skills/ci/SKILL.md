@@ -2678,6 +2678,11 @@ use no model. A code/test/conflict blocker receives one deduplicated
 `shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
 the recovery dispatcher is a separate exception path.
 
+Repository automation must never create an unlabeled PR. In particular,
+`version_at_land.py --route pr` creates each `release/version-bump` PR with the
+`automation` label in the same `gh pr create` transaction; a later label repair
+is not an acceptable provenance window.
+
 Do not add the schedule until the manual canary proves all of these on live
 PRs: unmanaged negative control untouched, exact-head managed handoff,
 single recovery signal across repeated ticks, signal clearing on a corrected
