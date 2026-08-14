@@ -55,7 +55,11 @@ jobs:
           ./tools/install-shipyard.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Restore bounded-retry ledger
+      # Actions caches are recoverable evidence, not a durable transactional
+      # store. Keep this first pilot to queue enrollment, whose GitHub mutation
+      # is exact-head guarded, externally observable, and idempotent. Durable
+      # remote ledger storage is required before enabling reruns or cancellation.
+      - name: Restore steward evidence ledger
         uses: actions/cache/restore@v4
         with:
           path: .shipyard-steward/ledger.json
@@ -95,6 +99,9 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
             --base main
             --ledger "$STEWARD_LEDGER"
+            --max-transient-reruns 0
+            --no-coalesce
+            --no-preempt-capacity
             --json
           )
           if [ "$APPLY" = true ]; then
@@ -102,7 +109,7 @@ jobs:
           fi
           shipyard "${args[@]}" | tee steward-report.json
 
-      - name: Save bounded-retry ledger
+      - name: Save steward evidence ledger
         if: always() && hashFiles('.shipyard-steward/ledger.json') != ''
         uses: actions/cache/save@v4
         with:

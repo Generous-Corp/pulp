@@ -57,12 +57,12 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("shipyard runner tag --set github-actions", self.text)
         self.assertIn('status["authority_matches"] is True', self.text)
 
-    def test_retry_ledger_is_restored_and_evidence_is_bounded(self) -> None:
+    def test_evidence_ledger_is_restored_and_artifacts_are_bounded(self) -> None:
         steps = self.doc["jobs"]["reconcile"]["steps"]
         restore = next(step for step in steps
-                       if step.get("name") == "Restore bounded-retry ledger")
+                       if step.get("name") == "Restore steward evidence ledger")
         save = next(step for step in steps
-                    if step.get("name") == "Save bounded-retry ledger")
+                    if step.get("name") == "Save steward evidence ledger")
         self.assertEqual(restore["uses"], "actions/cache/restore@v4")
         self.assertEqual(save["uses"], "actions/cache/save@v4")
         self.assertIn("always()", save["if"])
@@ -75,6 +75,13 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
             self.text,
         )
         self.assertIn("retention-days: 14", self.text)
+
+    def test_pilot_disables_mutations_that_require_durable_remote_ledger(self) -> None:
+        self.assertIn("--max-transient-reruns 0", self.text)
+        self.assertIn("--no-coalesce", self.text)
+        self.assertIn("--no-preempt-capacity", self.text)
+        self.assertIn("Durable", self.text)
+        self.assertIn("remote ledger storage is required", self.text)
 
     def test_apply_is_explicit_and_no_model_is_launched(self) -> None:
         workflow_dispatch = self.doc["on"]["workflow_dispatch"]
