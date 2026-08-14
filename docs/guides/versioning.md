@@ -438,7 +438,26 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.88.0 — exact-head stewardship is load-bearing
+
+v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
+is mutable only when its current commit has a successful
+`shipyard/steward-handoff` status and the PR carries `shipyard:managed`.
+Repository-wide discovery still reports older PRs, but classifies them as
+`unmanaged` and never adopts, reruns, cancels, or queues them implicitly.
+Semantic failures are surfaced once through the deduplicated
+`shipyard/steward-recovery` status and `shipyard:needs-agent` label; routine
+reconciliation and native merge-queue admission require no model.
+
+Pulp's first controller rollout is the manual-only GitHub-hosted workflow in
+`.github/workflows/shipyard-merge-steward.yml`. It is serialized per repository
+and restores a small retry ledger, while GitHub statuses and labels remain the
+durable ownership truth. Do not schedule that workflow until live canaries
+prove unmanaged negative control, exact-head handoff, recovery deduplication,
+recovery clearing on a corrected head, and merge-queue landing without an
+agent wait loop.
+
+### v0.83.0 floor — fleet health and formal stacks remain load-bearing
 
 v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
 enqueue mutation boundary, including the cross-repository runner steward. Pulp

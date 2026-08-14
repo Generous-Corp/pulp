@@ -52,6 +52,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -92,6 +93,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -183,6 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_shipyard_merge_steward_workflow.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:

@@ -1,0 +1,97 @@
+name: Shipyard merge steward
+
+# Single logical PR-landing controller. The first rollout is deliberately
+# workflow_dispatch-only; a later PR may add a schedule only after the live
+# managed/unmanaged and recovery canaries pass.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply exact-head queue/recovery mutations'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+  statuses: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: shipyard-merge-steward-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      STEWARD_LEDGER: ${{ github.workspace }}/.shipyard-steward/ledger.json
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install pinned Shipyard
+        run: ./tools/install-shipyard.sh
+
+      - name: Restore bounded-retry ledger
+        uses: actions/cache@v4
+        with:
+          path: .shipyard-steward/ledger.json
+          key: shipyard-merge-steward-v1-${{ github.run_id }}
+          restore-keys: |
+            shipyard-merge-steward-v1-
+
+      - name: Configure ephemeral controller authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/shipyard" "$(dirname "$STEWARD_LEDGER")"
+          printf '%s\n' '[merge_queue]' 'mutation_machine = "github-actions"' \
+            > "$HOME/.config/shipyard/config.toml"
+          shipyard runner tag --set github-actions
+          shipyard merge-queue status --json | tee authority.json
+          python3 - <<'PY'
+          import json
+          status = json.load(open("authority.json", encoding="utf-8"))
+          assert status["authority_configured"] is True
+          assert status["authority_matches"] is True
+          assert status["machine"] == "github-actions"
+          assert status["mutation_machine"] == "github-actions"
+          PY
+
+      - name: Reconcile managed PRs
+        shell: bash
+        env:
+          APPLY: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          args=(
+            runner steward
+            --repo "${GITHUB_REPOSITORY}"
+            --base main
+            --ledger "$STEWARD_LEDGER"
+            --json
+          )
+          if [ "$APPLY" = true ]; then
+            args+=(--apply)
+          fi
+          shipyard "${args[@]}" | tee steward-report.json
+
+      - name: Publish reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shipyard-merge-steward-${{ github.run_id }}
+          path: |
+            authority.json
+            steward-report.json
+            .shipyard-steward/ledger.json
+          retention-days: 14
+          if-no-files-found: warn
