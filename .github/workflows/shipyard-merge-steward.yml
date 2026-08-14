@@ -48,6 +48,7 @@ jobs:
           private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-administration: read
           permission-actions: write
           permission-contents: read
           permission-issues: write
