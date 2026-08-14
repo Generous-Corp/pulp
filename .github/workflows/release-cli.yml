@@ -1470,10 +1470,10 @@ jobs:
                       process.wait()
                       raise SystemExit("standalone host ignored termination")
               else:
+                  if return_code == 0:
+                      raise SystemExit("standalone host exited before bootstrap")
                   if return_code != 65:
-                      raise SystemExit(
-                          return_code or "standalone host exited before bootstrap"
-                      )
+                      raise SystemExit(return_code)
           PY
             else
               "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
