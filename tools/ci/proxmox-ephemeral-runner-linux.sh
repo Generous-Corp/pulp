@@ -120,6 +120,10 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+# The slot identity is stable for operations and metrics. The GitHub
+# registration name is intentionally unique per boot so an interrupted runner
+# cannot collide with its replacement.
+RUNNER_SLOT_ID="macpro-linux-${VMID}"
 RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
 
 reclaim_stale_slot_runners() {
@@ -316,6 +320,10 @@ log "clone $VMID up at $GUEST_IP"
 # possibly-recycled DHCP address. Drop any stale entry rather than failing.
 ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 
+# Reclaim only offline registrations from this exact slot. Never delete a busy
+# runner and never search by a broad repository-wide prefix.
+reclaim_stale_slot_runners
+
 for _ in $(seq 1 20); do
     ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 \
         "ci@$GUEST_IP" true 2>/dev/null && break
@@ -341,15 +349,15 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
 log "minting registration token"
 RT="$(curl -s -X POST \
     -H "Authorization: Bearer $PAT" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${REPO}/actions/runners/registration-token" \
+    "https://api.github.com/${REGISTRATION_API}/actions/runners/registration-token" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
 [ -n "$RT" ] || die "could not mint a registration token (PAT scope or expiry?)"
 
-log "registering ephemeral runner on $VMID"
+log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
 ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
-      --url https://github.com/${REPO} --token ${RT} \
+      --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 " >/dev/null 2>&1 || die "runner registration failed"
 
