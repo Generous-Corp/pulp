@@ -518,6 +518,18 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('GH_TOKEN="$PAT" "$GH_CLI" api "$@"', self.script)
         self.assertIn('RT="$(github_api --method POST', self.script)
 
+    def test_registration_token_is_not_exposed_in_process_arguments(self) -> None:
+        registration = self.script[
+            self.script.index('log "minting registration token"') : self.script.index(
+                "# ── run exactly one job"
+            )
+        ]
+        self.assertIn("printf '%s\\n' \"$RT\" | ssh", registration)
+        self.assertIn("IFS= read -r ACTIONS_RUNNER_INPUT_TOKEN", registration)
+        self.assertIn("export ACTIONS_RUNNER_INPUT_TOKEN", registration)
+        self.assertNotIn("--token", registration)
+        self.assertNotIn("${RT}", registration)
+
     def test_automatic_pool_can_use_the_root_owned_github_app_helper(self) -> None:
         self.assertIn(
             'GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"',

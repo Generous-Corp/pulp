@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.90.2`,
 which provides it, so the pinned binary is sufficient. That pin also makes
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
@@ -6025,8 +6025,9 @@ release, signing, deployment, and `pull_request_target` must never consume the
 generic selector. The checked-in `merge_group.linux` lane's `health_lease_*`
 profile fields require
 Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
-release); Shipyard 0.83.0 ignores them. Keep the selector unset until that
-producer is installed and scheduled. The producer must read `main`'s live
+release). Pulp pins Shipyard 0.90.2, which contains the producer and its bounded
+GitHub calls. Keep the selector unset until that pin is installed on the
+controller and the producer is scheduled. The producer must read `main`'s live
 `max_entries_to_build` and require unreserved idle capacity for that entire
 declared admission burst; the TTL is not an atomic reservation. Pulp currently
 declares five while the two legacy generic runners lack the protected opt-in
@@ -6036,9 +6037,10 @@ disarmed. When that lease path
 is inactive, the merge-group Linux selector is exactly `ubuntu-latest` even if
 `PULP_DEFAULT_RUNNER_PROVIDER=namespace`; global Namespace routing remains an
 explicit dispatch/PR policy and cannot bypass the automatic lease boundary.
-The separate `pr.linux` profile lane remains `github-only`; do not put this
-trusted lease tuple under the PR context, which Shipyard rejects and which would
-misrepresent the workflow's pull-request routing boundary.
+The separate `pr.linux` profile lane uses its own PR-safe lease, capability,
+runner-name prefix, and protected reusable workflow. Never put the trusted
+merge-group lease tuple under the PR context; Shipyard rejects the mismatch and
+it would erase the workflow boundary.
 
 Facts worth keeping (measured):
 

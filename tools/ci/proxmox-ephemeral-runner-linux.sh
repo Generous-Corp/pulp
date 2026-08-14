@@ -689,10 +689,15 @@ RT="$(github_api --method POST \
 [ -n "$RT" ] || die "could not mint a registration token (GitHub App/PAT permission or expiry?)"
 
 log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
-ssh -o BatchMode=yes "ci@$GUEST_IP" "
+# CommandSettings consumes and removes ACTIONS_RUNNER_INPUT_TOKEN before runner
+# configuration. Feed it over SSH stdin so neither the local ssh process nor
+# the remote config.sh / Runner.Listener argv exposes the organization token.
+printf '%s\n' "$RT" | ssh -o BatchMode=yes "ci@$GUEST_IP" "
+    IFS= read -r ACTIONS_RUNNER_INPUT_TOKEN
+    export ACTIONS_RUNNER_INPUT_TOKEN
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
-      --url ${RUNNER_URL} --token ${RT} ${RUNNER_GROUP_ARG} \
+      --url ${RUNNER_URL} ${RUNNER_GROUP_ARG} \
       --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 " >/dev/null 2>&1 || die "runner registration failed"
 
