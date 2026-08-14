@@ -177,11 +177,14 @@ done
 SLOT_INDEX=$((VMID - CLONE_BASE))
 GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
 printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
-# The slot identity is stable for operations and metrics. The GitHub
-# registration name is intentionally unique per boot so an interrupted runner
-# cannot collide with its replacement.
+# The slot identity and GitHub registration name are stable. Reusing the same
+# name per repository/slot makes the fleet auditable and prevents registration
+# churn; cleanup reclaims only a confirmed offline registration for this exact
+# slot before reuse.
 RUNNER_SLOT_ID="macpro-linux-${VMID}"
-RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
+RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}"
+[ "${#RUNNER_NAME}" -le 64 ] \
+    || die "runner name exceeds GitHub's 64-character limit: ${RUNNER_NAME}"
 
 reclaim_stale_slot_runners() {
     [ -n "${PAT:-}" ] || return 0
