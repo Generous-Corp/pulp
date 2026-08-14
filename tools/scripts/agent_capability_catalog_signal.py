@@ -694,6 +694,60 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.offline-fir-design", domain="signal",
+        summary=(
+            "Offline weighted least-squares linear-phase design and minimum-phase "
+            "reconstruction from sampled frequency targets."
+        ),
+        rt_class="control",
+        lifecycle={"construction": "none", "prepare": "none",
+                   "process": "offline or control thread; allocates bounded workspace",
+                   "reset": "none", "release": "returned vectors off audio"},
+        state_model="Stateless design functions returning owned coefficient and error vectors.",
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite sampled amplitudes or nonnegative one-sided magnitude bins",
+        output_domain="real FIR coefficients plus measured response and error diagnostics",
+        units=["radians per sample", "linear amplitude", "coefficients", "bytes"],
+        latency="offline design only; designed runtime latency depends on installed coefficients",
+        tail="none in the designer", scheduling="caller-invoked offline or control work",
+        bindings=[
+            binding(role="linear_phase", kind="cpp_function",
+                    include="pulp/signal/fir_design.hpp",
+                    qualified_name="pulp::signal::design_fir_least_squares",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:02ce3edcc337efd391b012daffb074b4dc3264ca53064cb8258cd64275678058",
+                    address_expression=(
+                        "static_cast<pulp::signal::FirLeastSquaresResult (*)("
+                        "std::span<const pulp::signal::FirDesignPoint>, const "
+                        "pulp::signal::FirLeastSquaresOptions&)>("
+                        "&pulp::signal::design_fir_least_squares)"
+                    )),
+            binding(role="minimum_phase", kind="cpp_function",
+                    include="pulp/signal/fir_design.hpp",
+                    qualified_name="pulp::signal::reconstruct_minimum_phase_fir",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:02ce3edcc337efd391b012daffb074b4dc3264ca53064cb8258cd64275678058",
+                    address_expression=(
+                        "static_cast<pulp::signal::MinimumPhaseFirResult (*)("
+                        "std::span<const double>, const pulp::signal::MinimumPhaseFirOptions&)>("
+                        "&pulp::signal::reconstruct_minimum_phase_fir)"
+                    )),
+        ],
+        _link_probes=[
+            {"role": "linear_phase", "binding": "pulp::signal::design_fir_least_squares",
+             "operation": "function_call", "arguments": (
+                 "std::span<const pulp::signal::FirDesignPoint>{}, "
+                 "pulp::signal::FirLeastSquaresOptions{}"
+             )},
+            {"role": "minimum_phase", "binding": "pulp::signal::reconstruct_minimum_phase_fir",
+             "operation": "function_call", "arguments": (
+                 "std::span<const double>{}, pulp::signal::MinimumPhaseFirOptions{}"
+             )},
+        ],
+    ),
+    capability(
         key="signal.linkwitz-riley-crossover", domain="signal",
         summary="Fixed-capacity multi-band Linkwitz-Riley crossover with bounded realtime retuning.",
         rt_class="audio",

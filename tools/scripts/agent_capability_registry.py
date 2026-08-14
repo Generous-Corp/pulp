@@ -44,6 +44,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/explicit_q_resonator_bank.hpp": "Pulp::signal",
     "pulp/signal/expander.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",

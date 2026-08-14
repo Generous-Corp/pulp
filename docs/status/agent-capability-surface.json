@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 33,
+  "inventory_version": 34,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 423,
-    "reviewed_headers": 124,
+    "public_headers": 424,
+    "reviewed_headers": 125,
     "legacy_unreviewed_headers": 299,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 80,
+      "capability_entrypoint": 81,
       "capability_support": 38,
       "infrastructure": 5,
       "legacy_unreviewed": 299,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 245,
-        "reviewed_headers": 85,
+        "public_headers": 246,
+        "reviewed_headers": 86,
         "legacy_unreviewed_headers": 160,
         "unsupported_headers": 1
       },
@@ -2560,6 +2560,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/fir_design.hpp",
+      "fingerprint": "sha256:02ce3edcc337efd391b012daffb074b4dc3264ca53064cb8258cd64275678058",
+      "include": "pulp/signal/fir_design.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.offline-fir-design"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
