@@ -64,9 +64,7 @@ def find_claude() -> str:
 
 
 RACK_USER = os.path.expanduser("~/Library/Application Support/Rack2")
-PLUGIN_DIRS = [os.path.join(RACK_USER, d) for d in os.listdir(RACK_USER)] \
-    if os.path.isdir(RACK_USER) else []
-PLUGIN_DIRS = [d for d in PLUGIN_DIRS if os.path.basename(d).startswith("plugins-")]
+RACK_PLUGIN_DIR_ENV = "RACK_PLUGIN_DIR"
 
 # Our own manifests carry real port names and roles; a third-party plugin.json
 # does not describe ports at all, so those stay as indices until something that
@@ -134,7 +132,6 @@ def _repair_bundled_pack() -> bool:
     Inventory is the first ordinary patch path that needs the pack, so it runs
     the same idempotent placer the installer uses before scanning.
     """
-    global PLUGIN_DIRS
     expected = rack_plugin_dir()
     try:
         if any(name == "ForgeModular" or
@@ -151,16 +148,17 @@ def _repair_bundled_pack() -> bool:
         return False
     try:
         import subprocess
+        command = [placer, "--source", app, "--home", os.path.expanduser("~")]
+        if os.environ.get(RACK_PLUGIN_DIR_ENV, "").strip():
+            command += ["--dest", expected]
         result = subprocess.run(
-            [placer, "--source", app, "--home", os.path.expanduser("~")],
+            command,
             capture_output=True, text=True, timeout=30)
     except Exception:                                           # noqa: BLE001
         return False
     if result.returncode != 0:
         return False
-    if os.path.isdir(expected) and expected not in PLUGIN_DIRS:
-        PLUGIN_DIRS.append(expected)
-    return True
+    return os.path.isdir(expected)
 
 
 def inventory() -> dict:
@@ -181,7 +179,7 @@ def inventory() -> dict:
                 pass
             break
 
-    for pdir in PLUGIN_DIRS:
+    for pdir in rack_plugin_dirs():
         if not os.path.isdir(pdir):
             continue
         for entry in sorted(os.listdir(pdir)):
@@ -3145,8 +3143,40 @@ def rack_arch() -> str:
 
 
 def rack_plugin_dir() -> str:
+    """The exact Rack plugin directory this process should target.
+
+    A host may give the generator a directory it can access even when its
+    inherited home is not the interactive user's home.  The override is one
+    directory, rather than a search path, because installs and repairs need an
+    unambiguous destination.
+    """
+    override = os.environ.get(RACK_PLUGIN_DIR_ENV, "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
     return os.path.expanduser(
         f"~/Library/Application Support/Rack2/plugins-{rack_arch()}")
+
+
+def rack_plugin_dirs() -> list[str]:
+    """Rack plugin directories visible now, in deterministic order.
+
+    Resolve this at the point of use.  The bundled-pack repair can create the
+    architecture directory after this module is imported, and a long-lived
+    host process can outlive other Rack installs.  An explicit destination is
+    authoritative even before it exists so install paths never fall through
+    to a different user's directory.
+    """
+    override = os.environ.get(RACK_PLUGIN_DIR_ENV, "").strip()
+    if override:
+        return [rack_plugin_dir()]
+    rack_user = os.path.expanduser("~/Library/Application Support/Rack2")
+    try:
+        names = sorted(os.listdir(rack_user))
+    except OSError:
+        return []
+    return [os.path.join(rack_user, name) for name in names
+            if name.startswith("plugins-") and
+            os.path.isdir(os.path.join(rack_user, name))]
 
 
 def install_module(plugin: str, version: str, premium: bool,
@@ -3695,7 +3725,7 @@ def _plugin_dir() -> str | None:
     generated module's patch as entirely uninstantiable.
     """
     import subprocess
-    for d in PLUGIN_DIRS:
+    for d in rack_plugin_dirs():
         if not os.path.isdir(d):
             continue
         for entry in os.listdir(d):
@@ -3966,13 +3996,14 @@ def gate_crash_report(signal: int, patch: dict) -> str:
     """
     plugins = sorted({m.get("plugin", "") for m in patch.get("modules", [])
                       if m.get("plugin")})
+    plugin_dirs = rack_plugin_dirs()
     return (f"{GATE_CRASHED} on signal {signal}. It did not judge this patch, "
             f"so nothing here says the patch is silent -- only that the check "
             f"could not be run.\n"
             f"  It was loading: {', '.join(plugins)}\n"
             f"  Reproduce it with:\n"
             f"    {os.path.join(CACHE_DIR, 'patch-gate')} <patch.vcv> "
-            f"{PLUGIN_DIRS[0] if PLUGIN_DIRS else '<plugin dir>'}")
+            f"{plugin_dirs[0] if plugin_dirs else '<plugin dir>'}")
 
 
 #: The three things the audibility check can say. Three, not two, because
@@ -5160,7 +5191,11 @@ def brand_mentions(prompt: str, cat: dict) -> dict:
     span = brand_phrase_span(directory)
 
     found: dict = {}
+    accepted_hits: list[tuple[int, int, str]] = []
     cue = False
+    active_exclusive = False
+    active_exclusive_start = -1
+    pending_exclusive_group = False
     i = 0
     while i < len(tokens):
         hit = None
@@ -5180,10 +5215,23 @@ def brand_mentions(prompt: str, cat: dict) -> dict:
             break
         if not hit:
             word = folded[i]
+            if word in EXCLUSIVE_WORDS:
+                cue = True
+                active_exclusive = True
+                active_exclusive_start = i
+                i += 1
+                continue
             if word in BRAND_CUES:
+                cue = True
+            elif active_exclusive and word in {
+                    "the", "a", "an", "module", "modules", "maker", "makers",
+                    "brand", "brands", "vendor", "vendors", "from", "by",
+                    "use", "using", "want", "build", "make", "create"}:
                 cue = True
             elif word not in BRAND_JOINERS and word:
                 cue = False
+                active_exclusive = False
+                pending_exclusive_group = False
             i += 1
             continue
         n, entry = hit
@@ -5196,11 +5244,156 @@ def brand_mentions(prompt: str, cat: dict) -> dict:
             "slugs": entry["slugs"], "exhaustive": False, "exclusive": False})
         if any(w in EXHAUSTIVE_WORDS for w in window):
             state["exhaustive"] = True
-        if any(w in EXCLUSIVE_WORDS for w in window):
+        # Exclusivity is clause state, not mere proximity. In "only one LFO
+        # from Bogaudio", the noun between "only" and the maker ends that
+        # state; treating any nearby "only" as maker-wide would incorrectly
+        # forbid the other makers requested by the sentence.
+        maker_end = i + n
+        next_word = folded[maker_end] if maker_end < len(folded) else ""
+        next_token = tokens[maker_end] if maker_end < len(tokens) else ""
+        clause_start = 0
+        for token_index in range(active_exclusive_start - 1, -1, -1):
+            if tokens[token_index].endswith((";", ".", "!", "?")):
+                clause_start = token_index + 1
+                break
+        exclusive_phrase = folded[active_exclusive_start:i]
+        after_maker = folded[maker_end:maker_end + 5]
+        role_scoped_after_maker = (
+            "for" in after_maker and
+            not ("patch" in after_maker and "this" in after_maker))
+        prefix_is_whole_patch = (
+            active_exclusive and
+            (active_exclusive_start == clause_start or
+             (active_exclusive_start > 0 and
+              folded[active_exclusive_start - 1]
+                  in {"use", "using", "build", "make", "want"} and
+              all(word in {"with", "from", "the", "module", "modules"}
+                  for word in folded[active_exclusive_start + 1:i])) or
+             (active_exclusive_start > 0 and
+              folded[active_exclusive_start - 1] == "with" and
+              any(word in {"make", "build", "create", "patch"}
+                  for word in folded[clause_start:active_exclusive_start])) or
+             (active_exclusive_start > 0 and
+              folded[active_exclusive_start - 1] == "patch" and
+              all(word in {"with", "from", "the", "module", "modules"}
+                  for word in folded[active_exclusive_start + 1:i])) or
+             any(word in {"use", "using"} for word in exclusive_phrase) or
+             any(word in {"module", "modules", "from"}
+                 for word in exclusive_phrase)) and
+            (not next_word or next_word in BRAND_JOINERS or
+             next_word in {"module", "modules", "patch", "nothing"} or
+             (next_word in {",", "nothing"}) or
+             tokens[maker_end - 1].endswith(",") or
+             (next_word == "to" and maker_end + 1 < len(folded) and
+              folded[maker_end + 1] in {"make", "build", "create"}) or
+             folded[maker_end:maker_end + 3] == ["for", "this", "patch"] or
+             next_token[:1] in ",;.!?" or
+             tokens[maker_end - 1].endswith((",", ";", ".", "!", "?"))) and
+            not role_scoped_after_maker)
+        accepted_hits.append((i, i + n, entry["brand"]))
+        is_list_continuation = (
+            next_word in BRAND_JOINERS or tokens[maker_end - 1].endswith(","))
+        pending_exclusive_group = pending_exclusive_group or prefix_is_whole_patch
+        if (pending_exclusive_group and
+                tokens[maker_end - 1].endswith((",", ";", ".", "!", "?")) and
+                (not is_list_continuation or next_word == "nothing")):
             state["exclusive"] = True
+            pending_exclusive_group = False
+        if pending_exclusive_group and not is_list_continuation:
+            governed = [accepted_hits[-1]]
+            for previous in reversed(accepted_hits[:-1]):
+                if tokens[previous[1] - 1].endswith((";", ".", "!", "?")):
+                    break
+                between = folded[previous[1]:governed[-1][0]]
+                if not between or all(word in BRAND_JOINERS for word in between):
+                    governed.append(previous)
+                else:
+                    break
+            for _start, _end, brand in governed:
+                found[brand]["exclusive"] = True
+            pending_exclusive_group = False
+        exclusive_phrase_end = ",;.!?"
+        exclusive_index = maker_end
+        if (exclusive_index < len(folded) and
+                folded[exclusive_index] in {"module", "modules"}):
+            exclusive_index += 1
+        if (exclusive_index < len(folded) and
+                folded[exclusive_index] in EXCLUSIVE_WORDS and
+                ((exclusive_index + 1 >= len(folded) or
+                  tokens[exclusive_index].endswith(tuple(exclusive_phrase_end))) or
+                 folded[exclusive_index + 1:exclusive_index + 4] == ["for", "this", "patch"] or
+                 (exclusive_index + 2 < len(folded) and
+                  folded[exclusive_index + 1] == "to" and
+                  folded[exclusive_index + 2] in {"make", "build", "create"}))):
+            governed = [accepted_hits[-1]]
+            for previous in reversed(accepted_hits[:-1]):
+                if tokens[previous[1] - 1].endswith((";", ".", "!", "?")):
+                    break
+                between = folded[previous[1]:governed[-1][0]]
+                if not between or all(word in BRAND_JOINERS for word in between):
+                    governed.append(previous)
+                else:
+                    break
+            for _start, _end, brand in governed:
+                found[brand]["exclusive"] = True
         cue = True                      # a list of makers keeps its qualifier
         i += n
     return found
+
+
+def exclusive_maker_plugins(mentions: dict) -> set[str]:
+    """Plugin slugs admitted by an exclusive maker request."""
+    return {
+        slug
+        for state in mentions.values() if state.get("exclusive")
+        for slug in state.get("slugs") or []
+    }
+
+
+def exclusive_maker_inventory_errors(inv: dict, mentions: dict) -> list[str]:
+    """Reject an exclusive request that no installed maker module can meet."""
+    allowed = exclusive_maker_plugins(mentions)
+    if not allowed or any((inv.get(slug, {}).get("modules") or {})
+                          for slug in allowed):
+        return []
+    makers = [brand for brand, state in mentions.items()
+              if state.get("exclusive")]
+    return [
+        "exclusive maker request requires at least one installed module from "
+        f"{', '.join(makers)}; none is available"
+    ]
+
+
+def exclusive_maker_errors(candidate: dict, mentions: dict) -> list[str]:
+    """Enforce the output contract for an exclusive maker request."""
+    allowed = exclusive_maker_plugins(mentions)
+    if not allowed:
+        return []
+    if not isinstance(candidate, dict):
+        return ["exclusive maker request requires a patch object"]
+    modules = candidate.get("modules") or []
+    if not isinstance(modules, list):
+        return ["exclusive maker request requires modules to be a list"]
+    if any(not isinstance(module, dict) for module in modules):
+        return ["exclusive maker request requires each module to be an object"]
+    if any(not isinstance(module.get("plugin"), str) for module in modules):
+        return ["exclusive maker request requires each plugin to be a string"]
+    outside = sorted({str(module.get("plugin") or "<missing plugin>")
+                      for module in modules
+                      if module.get("plugin") != "Core" and
+                      module.get("plugin") not in allowed})
+    errors = []
+    if outside:
+        errors.append(
+            "exclusive maker request forbids modules outside its named "
+            "plugin slugs and Core; got " + ", ".join(outside))
+    if not any(module.get("plugin") in allowed for module in modules):
+        makers = [brand for brand, state in mentions.items()
+                  if state.get("exclusive")]
+        errors.append(
+            "exclusive maker request requires at least one module from " +
+            ", ".join(makers) + "; got 0")
+    return errors
 
 
 def brand_module_rows(slugs: list, prompt: str, inv: dict, cat: dict,
@@ -5382,6 +5575,10 @@ def retry_note(prompt: str, cat: dict, last: bool) -> str:
                 "connection or the missing trigger, and keep the modules. "
                 "Replacing them with something safer is not the correction "
                 "being asked for.")
+    if any(state["exclusive"] for state in named.values()):
+        return ("\n\nThis is the LAST attempt. The request permits only " + who +
+                " plus Core infrastructure. Keep that exact boundary; report "
+                "a shortfall rather than substituting another plugin.")
     return ("\n\nThis is the LAST attempt. The request named " + who + " and "
             "keeping to it has not produced a patch that makes a sound, so a "
             "patch that works now matters more. Keep every module of theirs "
@@ -5393,10 +5590,9 @@ def retry_note(prompt: str, cat: dict, last: bool) -> str:
 def brand_report(patch: dict, mentions: dict) -> list:
     """What the finished patch actually did with the makers that were named.
 
-    VERIFY AND REPORT, DO NOT REJECT. A model asked for all 43 of a maker's
-    modules and returning 40 has not failed at anything worth throwing a good
-    patch away over -- but nobody should have to count the modules themselves
-    to find that out.
+    An exhaustive preference does not make every listed module mandatory, but
+    an exclusive request is enforced separately as a plugin allowlist. The
+    report remains useful for stating how much of each maker the result used.
     """
     if not mentions:
         return []
@@ -6688,6 +6884,12 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     """
     import re
     import subprocess
+    editable_base = refinement_model_base(base_patch, inv) \
+        if base_patch is not None else None
+    mentions = brand_mentions(prompt, catalog())
+    inventory_errors = exclusive_maker_inventory_errors(inv, mentions)
+    if inventory_errors:
+        raise SystemExit("\n".join(inventory_errors))
     saved_response = None
     if response_file is not None:
         try:
@@ -6697,8 +6899,6 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             raise SystemExit(f"cannot read saved model response {response_file}: {exc}")
         if not saved_response.strip():
             raise SystemExit(f"saved model response is empty: {response_file}")
-    editable_base = refinement_model_base(base_patch, inv) \
-        if base_patch is not None else None
     # Do not even resolve a provider executable during replay. Besides making
     # the zero-call contract testable, this lets a retained response be
     # validated on a machine where that provider is not installed or signed in.
@@ -6930,6 +7130,12 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             keep_attempt(patch, "rejected by the closed module set:\n" +
                          "\n".join(closed_errors), attempt + 1, "rejected")
             ctx = "The patch was rejected:\n" + "\n".join(closed_errors)
+            continue
+        maker_errors = exclusive_maker_errors(patch, mentions)
+        if maker_errors:
+            keep_attempt(patch, "rejected by the exclusive maker contract:\n" +
+                         "\n".join(maker_errors), attempt + 1, "rejected")
+            ctx = "The patch was rejected:\n" + "\n".join(maker_errors)
             continue
         why = {}
         if wj:
@@ -7549,6 +7755,9 @@ def main(argv):
         mentions = brand_mentions(argv[2], cat)
         inv, fetched_named = ensure_named_installed(argv[2], inv, cat, midx,
                                                     mentions)
+        exclusive_inventory = exclusive_maker_inventory_errors(inv, mentions)
+        if exclusive_inventory:
+            raise SystemExit("\n".join(exclusive_inventory))
         pf = preflight(argv[2], inv, midx, cat)
         if not pf["ok"] and "--anyway" not in argv:
             # Free first, and with the link. A refusal whose remedy is a free
@@ -7706,6 +7915,16 @@ def main(argv):
                 except OSError:
                     pass
             raise
+        exclusive_errors = exclusive_maker_errors(patch, mentions)
+        if exclusive_errors:
+            for reserved in reserved_outputs:
+                try:
+                    os.unlink(reserved)
+                except OSError:
+                    pass
+            raise SystemExit("the generated patch violated the exclusive "
+                             "maker request:\n  - " +
+                             "\n  - ".join(exclusive_errors))
         if out is None:
             slug = re.sub(r"[^a-z0-9]+", "-", argv[2].lower()).strip("-")[:40]
             if not slug:
@@ -7741,9 +7960,9 @@ def main(argv):
             json.dump(sidecar(patch, inv, why), output, indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
-        # What the patch did with the makers that were named. Reported, never
-        # enforced: a patch is not worse for using six of a maker's modules
-        # than for using seven, and the count is the only way to know which.
+        # What the patch did with the makers that were named. An exclusive
+        # boundary was already enforced; counts remain descriptive because a
+        # patch is not worse for using six of a maker's modules than seven.
         for line in brand_report(patch, mentions):
             print(line)
         # What was asked for and left out, said AFTER the patch exists.
