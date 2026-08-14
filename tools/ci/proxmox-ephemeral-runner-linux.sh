@@ -393,6 +393,15 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
             grep -Eq -- "-d ${subnet//./\\.}( .*)? -j DROP" <<< "$vm_out_rules" \
                 || { all_ipv4_drops=0; break; }
         done
+        # A populated ipset is not enforcement by itself. Prove this VM's
+        # outbound chain drops packets whose source is outside the exact set.
+        # Accept both inversion serializations emitted by supported iptables
+        # versions, but require the slot-specific set and DROP in one rule.
+        ipv4_source_filter_installed=0
+        if grep -Eq -- "-m set ! --match-set PVEFW-${VMID}-ipfilter-net0-v4 src( .*)? -j DROP" <<< "$vm_out_rules" \
+            || grep -Eq -- "-m set --match-set PVEFW-${VMID}-ipfilter-net0-v4 src !( .*)? -j DROP" <<< "$vm_out_rules"; then
+            ipv4_source_filter_installed=1
+        fi
         # ip6tables-save normalizes an all-address destination by omitting
         # "-d ::/0" on this Proxmox release.  Accept either serialization, but
         # still require an unconditional DROP in this VM's outbound chain.
@@ -402,6 +411,7 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
             ipv6_drop_installed=1
         fi
         if [ "$all_ipv4_drops" = 1 ] \
+            && [ "$ipv4_source_filter_installed" = 1 ] \
             && [ "$ipv6_drop_installed" = 1 ] \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \

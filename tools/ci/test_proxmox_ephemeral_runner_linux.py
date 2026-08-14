@@ -163,6 +163,11 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('ip6tables-save', self.script)
         self.assertIn('ebtables-save', self.script)
         self.assertIn('ipset test "PVEFW-${VMID}-ipfilter-net0-v4"', self.script)
+        self.assertIn("ipv4_source_filter_installed=0", self.script)
+        self.assertIn(
+            "! --match-set PVEFW-${VMID}-ipfilter-net0-v4 src", self.script
+        )
+        self.assertIn('[ "$ipv4_source_filter_installed" = 1 ]', self.script)
         self.assertIn("ipv6_drop_installed=0", self.script)
         self.assertIn(
             'grep -Fxq -- "-A tap${VMID}i0-OUT -j DROP"', self.script
