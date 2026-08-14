@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
-    '"pulp-host-macpro"]'
+    '"pulp-host-macpro","pulp-auto-linux-x64"]'
 )
 
 _SPEC = importlib.util.spec_from_file_location("linux_route_under_test", SCRIPT)
@@ -35,7 +35,7 @@ def test_dispatch_uses_configured_self_hosted_selector() -> None:
     )
     assert metadata["linux_route_reason"] == "explicit-dispatch"
     assert metadata["linux_provider"] == "local"
-    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-host-macpro"
+    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-auto-linux-x64"
     assert metadata["event_authorized_selector_json"] == metadata["configured_selector_json"]
 
 
@@ -247,6 +247,9 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in configured.group(1)
     assert "github.event_name == 'workflow_dispatch'" in authorized.group(1)
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in authorized.group(1)
+    assert '"pulp-auto-linux-x64"' in text
+    assert "automatic_local_linux_selector" in text
+    assert "configured Linux selector lacks the exact" in text
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:

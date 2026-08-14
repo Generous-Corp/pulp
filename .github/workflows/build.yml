@@ -101,7 +101,7 @@ jobs:
           # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
           # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
-          #       "pulp-host-macpro"].
+          #       "pulp-host-macpro","pulp-auto-linux-x64"].
           # A workflow_dispatch input overrides it. Same-repository pull_request
           # and protected merge_group events may use it after the trusted
           # workflow-ref boundary is applied below; fork pull requests remain
@@ -512,6 +512,24 @@ jobs:
           local_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
+          automatic_linux_labels = {
+              "self-hosted", "linux", "x64", "pulp-build-linux-x64",
+              "pulp-host-macpro", "pulp-auto-linux-x64",
+          }
+          try:
+              parsed_local_linux_selector = json.loads(local_linux_selector)
+          except (json.JSONDecodeError, TypeError):
+              parsed_local_linux_selector = None
+          automatic_local_linux_selector = (
+              local_linux_selector
+              if isinstance(parsed_local_linux_selector, list)
+              and len(parsed_local_linux_selector) == len(automatic_linux_labels)
+              and all(isinstance(label, str) for label in parsed_local_linux_selector)
+              and all(label == label.strip() for label in parsed_local_linux_selector)
+              and {label.strip().lower() for label in parsed_local_linux_selector}
+                  == automatic_linux_labels
+              else ""
+          )
           trusted_local_linux_workflow = (
               WORKFLOW_REF
               == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
@@ -526,12 +544,18 @@ jobs:
           if (
               not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()
               and trusted_local_linux_event
-              and local_linux_selector
+              and automatic_local_linux_selector
           ):
-              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = local_linux_selector
+              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = automatic_local_linux_selector
               print(
                   "resolve-provider: trusted local Linux route enabled for "
-                  f"{EVENT_NAME}; selector={local_linux_selector}",
+                  f"{EVENT_NAME}; selector={automatic_local_linux_selector}",
+                  file=sys.stderr,
+              )
+          elif trusted_local_linux_event and local_linux_selector:
+              print(
+                  "resolve-provider: configured Linux selector lacks the exact "
+                  "automatic-pool label contract; using hosted Linux",
                   file=sys.stderr,
               )
 

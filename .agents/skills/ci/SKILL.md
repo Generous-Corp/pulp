@@ -654,6 +654,11 @@ IP/ARP source filter plus an egress policy that permits DNS to the LAN gateway
 but denies private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
 destinations. Policy write, compile, and active-state failures must stop the VM
 before registration.
+The automatic selector must require all six labels exactly:
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`.
+GitHub matches requested labels as a subset, so the older five-label selector
+does not exclude repository-scoped runners. `build.yml` must fail closed to
+hosted Linux when the configured selector omits the automatic-only label.
 Treat checked-out pull-request source as untrusted even when a protected
 workflow orchestrates it. Runner inventory and cleanup must paginate the full
 organization result set, reclaim only exact slot-scoped offline idle
@@ -2788,7 +2793,7 @@ and use the provider fallback (GitHub-hosted by default) until the external
 runner-group boundary above exists.
 
 The Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`
 and is served by the Proxmox ephemeral pool described in
 `docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
 `explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
