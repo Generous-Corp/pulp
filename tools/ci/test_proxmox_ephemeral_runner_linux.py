@@ -99,6 +99,12 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertNotIn("EnvironmentFile=-", self.trusted_service)
         self.assertNotIn("EnvironmentFile=-", self.pr_safe_service)
+        documentation = (
+            "Documentation=https://github.com/Generous-Corp/pulp/blob/main/"
+            "docs/guides/local-ci.md"
+        )
+        for service in (self.service, self.trusted_service, self.pr_safe_service):
+            self.assertIn(documentation, service)
         self.assertIn("User=root", self.trusted_service)
         self.assertIn("User=root", self.pr_safe_service)
 

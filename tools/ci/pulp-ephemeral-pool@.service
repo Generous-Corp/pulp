@@ -1,6 +1,6 @@
 [Unit]
 Description=Pulp ephemeral CI runner slot %i (golden clone, one job, destroy)
-Documentation=planning/2026-07-30-macpro-proxmox-ci-handoff.md
+Documentation=https://github.com/Generous-Corp/pulp/blob/main/docs/guides/local-ci.md
 After=network-online.target pve-guests.service
 Wants=network-online.target
 

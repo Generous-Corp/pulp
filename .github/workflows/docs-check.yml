@@ -122,6 +122,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # tools/check-docs.sh verifies the installed capability manifest
+          # against origin/main; a shallow workflow-dispatch checkout has no
+          # protected base ref and fails closed for the wrong reason.
+          fetch-depth: 0
 
       - name: Check docs consistency
         run: |
