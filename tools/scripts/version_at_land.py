@@ -584,6 +584,7 @@ def apply_via_pr(
 
     created = _gh(repo, "pr", "create", "--base", branch, "--head", BUMP_BRANCH,
                   "--title", BUMP_SUBJECT,
+                  "--label", "automation",
                   "--body", _bump_message(plan, base, head), check=False)
     if created.returncode != 0:
         stderr = created.stderr or ""
