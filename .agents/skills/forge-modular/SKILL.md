@@ -911,6 +911,12 @@ alias to `gpt-5.6-sol`, and refuses a missing, corrupt, incomplete or unsupporte
 selection before the command starts. A headless benchmark that silently picks a
 different agent than the app is not reproducible evidence.
 
+Codex generation must also be a sealed execution: pass `--disable apps`,
+`--disable plugins`, and `--disable skill_search` before `exec`. Those
+interactive catalogues consume the bounded skills context and can reject a
+generation before its contract reaches the selected model. Keep the exact
+argv covered by both `test_generate_model.py` and `test_patch.py`.
+
 ### Seeing an ending is not the same as SHOWING it
 
 The monitor learned to classify every ending and the shell still reported one
