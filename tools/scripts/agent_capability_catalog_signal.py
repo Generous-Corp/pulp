@@ -715,6 +715,7 @@ EXPORTS = [
     ),
     capability(
         key="signal.multi-channel-meter", domain="signal",
+        contract_version={"major": 1, "minor": 1},
         summary="Fixed-storage peak, RMS, loudness, correlation, and clip metering for up to 16 channels.",
         rt_class="mixed",
         lifecycle={"construction": "control", "prepare": "control", "process": "audio",
@@ -728,11 +729,20 @@ EXPORTS = [
         units=["samples", "frames", "decibels full scale", "LUFS", "correlation"],
         latency="measurement-window readiness; no audio-path delay",
         tail="measurement history until reset", scheduling="block accumulation and snapshot",
-        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
-                         qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:cfe3d3d562c903e1c7c64f404a264e7445aed4d6f14ab4fa3544b5ccd8346aee")],
-        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
-                       "operation": "member_call", "member": "reset", "arguments": ""}],
+        bindings=[
+            binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
+                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:44ef8439be936bb441790331e4bd4fc2b4e233962635ee49a88ebc4820b54772"),
+            binding(role="loudness_support", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
+                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:44ef8439be936bb441790331e4bd4fc2b4e233962635ee49a88ebc4820b54772"),
+        ],
+        _link_probes=[
+            {"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "loudness_support", "binding": "pulp::signal::MultiChannelMeterT<float>",
+             "operation": "member_call", "member": "loudness_supported", "arguments": ""},
+        ],
     ),
     capability(
         key="signal.transient-designer", domain="signal",
