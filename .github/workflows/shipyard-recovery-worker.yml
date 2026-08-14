@@ -344,6 +344,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The model is forbidden to stage or commit, but normalize the index
+          # defensively so the bundle includes every tracked edit it left behind.
+          git -C worktree reset --mixed --quiet HEAD
           git -C worktree add --intent-to-add --all
           git -C worktree diff --check
           {
