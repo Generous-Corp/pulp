@@ -3565,6 +3565,13 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
     # was perfectly buildable.
     wanted = {tag for word, tag in TAG_WORDS.items()
               if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", low)}
+    # A # anchor is intentional and therefore a capability requirement. Plain
+    # words still reach the model as retrieval cues, but should not turn a
+    # musical sentence into a surprise refusal before the model sees it.
+    import intent_context
+    wanted.update(reference.tag for reference in
+                  intent_context.resolve_tag_references(prompt, inv, midx)
+                  if reference.explicit)
     if not wanted:
         return {"ok": True, "missing": {}}
 
@@ -3992,6 +3999,10 @@ class RuntimeQualityContract(NamedTuple):
     minimum_audible_layers: int = 0
     spectral_evolution: bool = False
     evolving: bool = False
+    # Periodic LFOs can change a patch at distant checkpoints while still
+    # returning to exactly the same state. A "never repeats" promise needs an
+    # entropy source, not merely visible movement.
+    nonrepeating: bool = False
     stereo: bool = False
     decorrelated_stereo: bool = False
     duration_seconds: float | None = None
@@ -4061,6 +4072,15 @@ def compile_runtime_quality_contract(prompt: str) -> RuntimeQualityContract:
         or affirmed(
         r"\b(?:slow|continuous|long[- ]term|gradual|microscopic|geological)\w*\b"
         r"[^,]{0,65}\b(?:evol|mov|chang|shift|transform|arc|breathe)\w*\b"))
+    nonrepeating = any(
+        re.search(
+            r"\b(?:never\s+repeat\w*|non[- ]?repeat(?:ing)?|"
+            r"non[- ]?looping|(?:does not|doesn't|do not|don't|without)\s+"
+            r"(?:ever\s+)?repeat\w*|(?:without|avoid)\s+(?:a\s+)?"
+            r"(?:short\s+)?loop\w*)\b", clause)
+        and not re.search(r"\bnot\s+(?:never\s+repeat|non[- ]?repeat|"
+                          r"non[- ]?loop)", clause)
+        for clause in clauses)
     stereo = affirmed(
         r"\b(stereo|left\s*/?\s*right|independent left|decorrelated|spatial|"
         r"extremely wide|wide on headphones)\b")
@@ -4075,6 +4095,7 @@ def compile_runtime_quality_contract(prompt: str) -> RuntimeQualityContract:
         minimum_audible_layers=minimum_audible_layers,
         spectral_evolution=spectral_evolution,
         evolving=evolving,
+        nonrepeating=nonrepeating,
         stereo=stereo,
         decorrelated_stereo=decorrelated_stereo,
         duration_seconds=long_horizon_seconds(prompt))
@@ -4096,6 +4117,10 @@ def runtime_quality_contract_prompt(contract: RuntimeQualityContract) -> str:
         requirements.append("dominant audible timbre must evolve spectrally")
     elif contract.evolving:
         requirements.append("material evolution must appear in real DSP")
+    if contract.nonrepeating:
+        requirements.append(
+            "a connected entropy or stochastic source must prevent the "
+            "audible patch from being only a periodic loop")
     if contract.stereo:
         requirements.append("both stereo lanes must remain materially audible")
     if contract.decorrelated_stereo:
@@ -4166,19 +4191,66 @@ def runtime_quality_static_errors(
     is active. This is path activity, not counterfactual proof that every source
     contributes above zero gain. No module identities or topology are blessed.
     """
-    if not contract.multiple_audible_layers:
-        return []
-    paths = runtime_quality_layer_paths(patch, inv)
-    roots = set().union(*paths) if paths else set()
-    required = max(2, contract.minimum_audible_layers)
-    if len(roots) >= required:
-        return []
-    return [
-        "runtime quality FAIL: multiple independent source paths were "
-        "requested, but "
-        f"only {len(roots)} of {required} required independent audio source "
-        "path(s) reach the output; "
-        "left/right copies of one source do not count as layers"]
+    errors = []
+    if contract.multiple_audible_layers:
+        paths = runtime_quality_layer_paths(patch, inv)
+        roots = set().union(*paths) if paths else set()
+        required = max(2, contract.minimum_audible_layers)
+        if len(roots) < required:
+            errors.append(
+                "runtime quality FAIL: multiple independent source paths were "
+                "requested, but "
+                f"only {len(roots)} of {required} required independent audio source "
+                "path(s) reach the output; "
+                "left/right copies of one source do not count as layers")
+    if contract.nonrepeating and not has_connected_entropy_source(patch, inv):
+        errors.append(
+            "runtime quality FAIL: the request promises that it never repeats, "
+            "but no noise, random, stochastic, or sample-and-hold source is "
+            "connected through the patch to an audio output; periodic LFOs "
+            "alone cannot prove that promise")
+    return errors
+
+
+def has_connected_entropy_source(patch: dict, inv: dict) -> bool:
+    """Prove that an inventory-described entropy source can affect audio.
+
+    Follow CV and audio cables alike: a random CV source is relevant only when
+    its downstream modulation reaches an interface. This rejects disconnected
+    decorative random modules without blessing any module identity.
+    """
+    modules = {module.get("id"): module for module in patch.get("modules") or []}
+    outgoing: dict[object, set] = {}
+    for cable in patch.get("cables") or []:
+        source, target = cable.get("outputModuleId"), cable.get("inputModuleId")
+        if source in modules and target in modules:
+            outgoing.setdefault(source, set()).add(target)
+
+    def entropy(module: dict) -> bool:
+        entry = (inv.get(module.get("plugin"), {}).get("modules", {})
+                 .get(module.get("model"), {}))
+        words = " ".join(str(value) for value in (
+            entry.get("name", ""), entry.get("description", ""),
+            *(entry.get("tags") or []))).casefold()
+        return bool(re.search(
+            r"\b(?:noise|random\w*|stochastic|probabil\w*|sample(?: |-)and(?: |-)hold|"
+            r"chaos|chaotic|entropy)\b", words))
+
+    outputs = {module_id for module_id, module in modules.items()
+               if is_audio_interface(module)}
+    for source_id, module in modules.items():
+        if not entropy(module):
+            continue
+        frontier, seen = [source_id], {source_id}
+        while frontier:
+            current = frontier.pop()
+            if current in outputs and current != source_id:
+                return True
+            for target in outgoing.get(current, set()):
+                if target not in seen:
+                    seen.add(target)
+                    frontier.append(target)
+    return False
 
 
 def long_horizon_seconds(prompt: str) -> float | None:
@@ -4216,7 +4288,7 @@ def runtime_quality_seconds(contract: RuntimeQualityContract) -> float | None:
     if any((contract.evolving, contract.stereo,
             contract.multiple_audible_layers,
             contract.no_obvious_sequence, contract.sustained,
-            contract.decorrelated_stereo)):
+            contract.decorrelated_stereo, contract.nonrepeating)):
         return 60.0
     return None
 
@@ -5269,17 +5341,12 @@ def brand_brief(prompt: str, inv: dict, cat: dict, midx: dict,
                        f"{tags}  ({r['mark']})")
         out.append("")
     if exclusive:
-        # NAME THE GAP, DO NOT SUBSTITUTE IN SILENCE. Quietly reaching for
-        # another vendor when the named one has no module for a role is the
-        # same move that produced self-built lookalikes of famous modules.
         out.append(
             f"\n### Only {', '.join(exclusive)}\nThe user asked for this maker "
             f"and no other. Build the patch from the modules above wherever "
             f"you can. Core Audio and Core MIDI are infrastructure and are "
-            f"always allowed. If a role genuinely cannot be filled from them, "
-            f"USE THE CLOSEST INSTALLED ALTERNATIVE AND SAY SO in your reasons "
-            f"— name the role and the maker that filled it instead. Do not "
-            f"substitute in silence, and do not abandon the patch.\n")
+            f"always allowed. Do not substitute another maker: the final patch "
+            f"is validated against this constraint.\n")
     return "\n".join(out) + "\n"
 
 
@@ -5302,6 +5369,12 @@ def retry_note(prompt: str, cat: dict, last: bool) -> str:
     named = brand_mentions(prompt, cat)
     if not named:
         return ""
+    exclusive = [brand for brand, state in named.items() if state["exclusive"]]
+    if exclusive:
+        return ("\n\nThe request says only " + ", ".join(exclusive) +
+                ". Keep that closed on every attempt: Core I/O is allowed, "
+                "but another maker is not a fallback. Fix the routing or end "
+                "with an honest unfinished patch rather than changing makers.")
     who = ", ".join(named)
     if not last:
         return ("\n\nThe request named " + who + ". That still holds. What was "
@@ -6634,10 +6707,15 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     # the model. A model that names its own target and is then graded against
     # that claim learns to name easier targets, so the claim is made outside it.
     import idiom_check
+    import intent_context
     import patch_vocabulary
     idioms = idiom_check.load_idioms()
     claimed = claim_idiom(prompt, idioms)
     quality_contract = compile_runtime_quality_contract(prompt)
+    catalogue = catalog()
+    midx = module_index()
+    maker_mentions = brand_mentions(prompt, catalogue)
+    tag_references = intent_context.resolve_tag_references(prompt, inv, midx)
     named = exact_named_module_selection(prompt, inv)
     closed_named = closed_named_module_selection(prompt, named)
     module_idiom_contract = closed_module_idiom_contract(
@@ -6649,10 +6727,21 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         selected.update((module.get("plugin"), module.get("model"))
                         for module in base_patch.get("modules") or []
                         if module.get("plugin") and module.get("model"))
+    exclusive_plugins = {
+        slug for state in maker_mentions.values() if state["exclusive"]
+        for slug in state["slugs"]}
+    exclusive_allowed = {
+        (plugin, model) for plugin, package in inv.items()
+        for model in (package.get("modules") or {})
+        if plugin == "Core" or plugin in exclusive_plugins}
+    allowed_modules = set(closed_named) if closed_named else None
+    if exclusive_plugins:
+        allowed_modules = (exclusive_allowed if allowed_modules is None
+                           else allowed_modules & exclusive_allowed)
     if module_idiom_contract is None:
         module_plan = intent_module_plan(
             prompt, inv, idioms, selected,
-            allowed=closed_named if closed_named else None)
+            allowed=allowed_modules)
     else:
         module_plan = (
             "\n---\n\n## Verified module capability for this structure\n\n"
@@ -6670,7 +6759,12 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     if selected and "AudioInterface2" in (
             inv.get("Core", {}).get("modules") or {}):
         selected.add(("Core", "AudioInterface2"))
-    model_inventory = inventory_subset(inv, selected) if selected else inv
+    if exclusive_plugins:
+        selected &= exclusive_allowed
+        model_inventory = inventory_subset(
+            inv, selected if selected else exclusive_allowed)
+    else:
+        model_inventory = inventory_subset(inv, selected) if selected else inv
     with open(CONTRACT, encoding="utf-8") as source:
         contract = source.read().replace(
             "<!--INVENTORY-->", render_inventory(model_inventory, prefer))
@@ -6741,7 +6835,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     for attempt in range(attempts):
         parts = [contract, module_plan,
                  runtime_quality_contract_prompt(quality_contract),
-                 library_brief(prompt, inv)]
+                 library_brief(prompt, inv),
+                 intent_context.render_tag_context(tag_references, model_inventory)]
         if base_patch is not None:
             parts.append(
                 "\n---\n\n## Existing patch to refine\n\n"
@@ -6860,6 +6955,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             patch, errs = prepare_and_lint(patch, inv, base_patch=base_patch)
         except RuntimeError as error:
             errs = [str(error)]
+        errs += intent_context.exclusive_maker_errors(patch, maker_mentions)
+        errs += intent_context.required_tag_errors(patch, inv, tag_references)
         activation_findings = module_activation_contract_errors(patch, inv)
         if activation_findings and base_patch is None:
             import deterministic_repair

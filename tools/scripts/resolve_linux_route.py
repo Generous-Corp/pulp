@@ -2,9 +2,11 @@
 """Describe and enforce the Build-and-Test Linux runner route.
 
 The build workflow deliberately keeps the configured Mac Pro selector separate
-from the selector authorized for the current event. Pull-request workflow YAML
-is contributor-controlled, so the configured private selector is authorized
-only for ``workflow_dispatch`` until an external runner-group boundary exists.
+from the selector authorized for the current event. The organization runner
+group restricts trusted workflow refs to protected default-branch copies, so
+only a caller that has already proved that workflow-ref boundary may use the
+disposable Mac Pro pool. Forks and PR workflow revisions outside that protected
+ref remain hosted.
 
 This helper turns that policy decision into machine-readable metadata and
 fails a dispatch if its configured selector is silently replaced by a hosted
@@ -22,6 +24,7 @@ from typing import Any, Optional
 
 ROUTE_REASONS = (
     "explicit-dispatch",
+    "trusted-local",
     "security-hosted",
     "unconfigured-hosted",
 )
@@ -146,9 +149,11 @@ def resolve_route(
                     "workflow_dispatch configured Linux selector unexpectedly "
                     f"resolved to {resolved_json}"
                 )
+    elif event_name in ("pull_request", "merge_group") and authorized is not None:
+        reason = "trusted-local"
     elif authorized is not None:
         raise ValueError(
-            "non-dispatch event unexpectedly authorized a Linux selector"
+            f"{event_name} unexpectedly authorized a Linux selector"
         )
     elif configured is not None:
         reason = "security-hosted"
@@ -156,6 +161,9 @@ def resolve_route(
         reason = "unconfigured-hosted"
 
     configured_local = (
+        event_name in ("pull_request", "merge_group")
+        and authorized is not None
+    ) or (
         event_name == "workflow_dispatch"
         and dispatch is None
         and configured is not None
