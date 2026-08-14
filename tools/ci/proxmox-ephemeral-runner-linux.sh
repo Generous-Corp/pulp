@@ -257,7 +257,7 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
     command -v "$FIREWALL_STATUS_BIN" >/dev/null 2>&1 \
         || die "$FIREWALL_STATUS_BIN is not on PATH"
-    for tool in timeout iptables-save ip6tables-save ipset ebtables-save; do
+    for tool in timeout ip iptables-save ip6tables-save ipset ebtables-save; do
         command -v "$tool" >/dev/null 2>&1 \
             || die "$tool is required for automatic runner firewall proof"
     done
@@ -519,6 +519,10 @@ CLONED=1
 flock -u 9
 NET0="virtio=${GUEST_MAC},bridge=vmbr0"
 if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
+    CONTROLLER_IPV4="$(ip -4 route get "$GUEST_IP" 2>/dev/null \
+        | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+    [[ "$CONTROLLER_IPV4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+        || die "cannot resolve the Proxmox controller IPv4 address for guest ingress"
     VM_FIREWALL_FILE="${FIREWALL_DIR}/${VMID}.fw"
     VM_FIREWALL_TMP="$(mktemp)" \
         || die "cannot allocate automatic runner firewall policy"
@@ -531,13 +535,14 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
 enable: 1
 ipfilter: 1
 layer2_protocols: ARP,IPv4
-policy_in: ACCEPT
+policy_in: DROP
 policy_out: ACCEPT
 
 [IPSET ipfilter-net0]
 ${GUEST_IP}
 
 [RULES]
+IN ACCEPT -source ${CONTROLLER_IPV4} -p tcp -dport 22
 OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p udp -dport 53
 OUT ACCEPT -dest ${GUEST_IPV4_GATEWAY} -p tcp -dport 53
 OUT DROP -dest 0.0.0.0/8
@@ -606,7 +611,9 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         ip6tables_rules="$(ip6tables-save 2>/dev/null)" || ip6tables_rules=""
         ebtables_rules="$(ebtables-save 2>/dev/null)" || ebtables_rules=""
         vm_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$iptables_rules" || true)"
+        vm_in_rules="$(grep -F -- "-A tap${VMID}i0-IN " <<< "$iptables_rules" || true)"
         vm6_out_rules="$(grep -F -- "-A tap${VMID}i0-OUT " <<< "$ip6tables_rules" || true)"
+        vm6_in_rules="$(grep -F -- "-A tap${VMID}i0-IN " <<< "$ip6tables_rules" || true)"
         vm_arp_rules="$(grep -F -- "-A tap${VMID}i0-OUT-ARP " <<< "$ebtables_rules" || true)"
         vm_l2_rules="$(grep -F -- "-A tap${VMID}i0-OUT-PROTO " <<< "$ebtables_rules" || true)"
         all_ipv4_drops=1
@@ -624,6 +631,12 @@ if [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ]; then
         fi
         if [ "$all_ipv4_drops" = 1 ] \
             && [ "$ipv6_drop_installed" = 1 ] \
+            && grep -F -- "-s ${CONTROLLER_IPV4}/32" <<< "$vm_in_rules" \
+                | grep -F -- "-p tcp" \
+                | grep -F -- "--dport 22" \
+                | grep -Fq -- "-j ACCEPT" \
+            && grep -Fxq -- "-A tap${VMID}i0-IN -j DROP" <<< "$vm_in_rules" \
+            && grep -Fxq -- "-A tap${VMID}i0-IN -j DROP" <<< "$vm6_in_rules" \
             && grep -Fq -- "--arp-ip-src ${GUEST_IP} -j RETURN" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT-ARP -j DROP" <<< "$vm_arp_rules" \
             && grep -Fq -- "-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO" <<< "$ebtables_rules" \

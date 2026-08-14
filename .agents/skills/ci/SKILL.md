@@ -655,9 +655,11 @@ a PR changing its own workflow cannot target the group before enabling
 automatic PR routing. Never share the trusted and PR-safe capability labels,
 runner names, health leases, or runner groups.
 Automatic clones require an enabled Proxmox firewall, exact IPv4/ARP source
-filtering, and an EtherType allowlist limited to ARP and IPv4. Policy write,
-compile, active-state, label, prefix, and group-verification failures must stop
-the VM before registration. Cleanup replaces every routing label with a shutdown
+filtering, an EtherType allowlist limited to ARP and IPv4, default-deny ingress,
+and one ingress exception for SSH from the exact Proxmox controller address.
+The active-rule proof must verify both IPv4 and IPv6 ingress drops as well as
+that narrow SSH exception. Policy write, compile, active-state, label, prefix,
+and group-verification failures must stop the VM before registration. Cleanup replaces every routing label with a shutdown
 fence, proves the runner idle twice, stops the clone, and requires the
 registration to become offline before deletion.
 

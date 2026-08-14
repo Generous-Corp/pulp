@@ -314,7 +314,9 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
-                timeout=5,
+                # Production deliberately bounds `qm stop` at 20 seconds.
+                # Leave enough harness headroom to observe that fail-closed path.
+                timeout=25,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
@@ -561,6 +563,13 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('NET0="${NET0},firewall=1"', self.script)
         self.assertIn("ipfilter: 1", self.script)
         self.assertIn("layer2_protocols: ARP,IPv4", self.script)
+        self.assertIn("policy_in: DROP", self.script)
+        self.assertNotIn("policy_in: ACCEPT", self.script)
+        self.assertIn('ip -4 route get "$GUEST_IP"', self.script)
+        self.assertIn(
+            "IN ACCEPT -source ${CONTROLLER_IPV4} -p tcp -dport 22",
+            self.script,
+        )
         self.assertIn("[IPSET ipfilter-net0]", self.script)
         self.assertIn("${GUEST_IP}", self.script)
         self.assertIn('cannot write automatic runner firewall policy', self.script)
@@ -587,6 +596,9 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             'grep -Fxq -- "-A tap${VMID}i0-OUT -j DROP"', self.script
         )
         self.assertIn('[ "$ipv6_drop_installed" = 1 ]', self.script)
+        self.assertIn('-A tap${VMID}i0-IN -j DROP', self.script)
+        self.assertIn('-s ${CONTROLLER_IPV4}/32', self.script)
+        self.assertIn('--dport 22', self.script)
         self.assertIn('--arp-ip-src ${GUEST_IP} -j RETURN', self.script)
         self.assertIn('-A tap${VMID}i0-OUT-ARP -j DROP', self.script)
         self.assertIn('-A tap${VMID}i0-OUT -j tap${VMID}i0-OUT-PROTO', self.script)

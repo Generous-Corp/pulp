@@ -256,9 +256,12 @@ workflow controls orchestration, but the checked-out pull-request source and its
 build system remain untrusted. Before an organization-scoped clone starts, the
 supervisor requires `pve-firewall status` to report `enabled/running`, enables
 the firewall on that clone's NIC, installs an exact-address IP/ARP source filter,
-and installs a per-VM egress policy. The generated policy must write, compile,
-enable on the clone NIC, and appear in the active IP, ARP, and egress rules
-before the guest can register. DNS to the LAN gateway is allowed;
+and installs per-VM ingress and egress policy. Inbound traffic is denied except
+for SSH from the exact Proxmox controller address, so untrusted jobs cannot
+observe LAN broadcast or multicast discovery traffic or expose guest services
+to the LAN. The generated policy must write, compile, enable on the clone NIC,
+and appear in the active IP, ARP, ingress, and egress rules before the guest can
+register. DNS to the LAN gateway is allowed;
 all private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
 destinations are denied; public IPv4 egress remains available for source and
 dependency downloads. Do not enable the automatic slots on a flat bridged LAN
