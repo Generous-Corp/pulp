@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260814-pr7399-visualization-analysis",
+  "created_at": "2026-08-14T07:22:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record bounded UI-thread visualization analysis and its preview/demo consumers without transferring rendering or visual-proof authority.",
+  "tests": [
+    "Release planar audio ring buffer tests (60 assertions, 7 cases)",
+    "Release visualization tests (1667 assertions, 28 cases)",
+    "agent capability manifest self-tests (86 checks)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
