@@ -190,6 +190,14 @@ which the job requires: the lane's earlier
 ARM64/Tart declaration would have changed its architecture rather than
 relocating it, silently deleting the only x64 Linux coverage.
 
+Every Mac Pro Linux worker starts with the exact five-label hardware selector
+`self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro`. Automatic lanes
+then add exactly one mutually exclusive policy capability:
+`pulp-auto-linux-x64`, `pulp-pr-safe-linux-x64`, or
+`pulp-release-control-linux-x64`. The five base labels identify hardware; the
+sixth label authorizes one policy lane. Never omit the base build label or
+combine policy capability labels.
+
 The trusted `pulp-trusted-build` group and PR-safe `pulp-pr-safe-build` group
 must remain separate. Each is repository-scoped and restricted to its exact
 default-branch workflow. A PR-safe worker must be one-job disposable, carry no
@@ -270,7 +278,7 @@ after both are online and idle:
 systemctl start pulp-release-control-ephemeral-pool@{1,2}.service
 gh variable set PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON \
   --repo Generous-Corp/pulp \
-  --body '["self-hosted","Linux","X64","pulp-host-macpro","pulp-release-control-linux-x64"]'
+  --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-release-control-linux-x64"]'
 gh variable set PULP_RELEASE_CONTROL_REF \
   --repo Generous-Corp/pulp --body 'refs/tags/v0.806.1'
 ```

@@ -340,7 +340,8 @@ class Parser {
             auto value = parse_value(depth + 1);
             if (!value)
                 return value;
-            result.object.emplace_back(std::move(key).value(), std::move(value).value());
+            result.object.push_back(
+                JsonObjectMember{std::move(key).value(), std::move(value).value()});
             skip_space();
             if (peek() == '}') {
                 ++position_;

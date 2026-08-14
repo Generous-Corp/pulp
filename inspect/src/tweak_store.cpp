@@ -407,17 +407,17 @@ std::string TweakStore::to_json_locked() const {
 
     // bypassed: Record<anchor, true | string[]>
     auto bypassed_obj = choc::value::createObject("");
-    for (auto& [anchor, b] : bypassed_) {
+    for (auto& bypassed_entry : bypassed_) {
         std::visit([&](auto&& v) {
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::is_same_v<T, bool>) {
-                bypassed_obj.addMember(anchor, choc::value::createBool(v));
+                bypassed_obj.addMember(bypassed_entry.first, choc::value::createBool(v));
             } else {
                 auto arr = choc::value::createEmptyArray();
                 for (auto& p : v) arr.addArrayElement(choc::value::createString(p));
-                bypassed_obj.addMember(anchor, arr);
+                bypassed_obj.addMember(bypassed_entry.first, arr);
             }
-        }, b);
+        }, bypassed_entry.second);
     }
     obj.addMember("bypassed", bypassed_obj);
 

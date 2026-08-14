@@ -100,7 +100,7 @@ jobs:
     # merge_group. The dedicated release-control selector may target the trusted
     # MacPro Linux/X64 pool; when it is unset, fall directly to ubuntu-latest.
     # Release control is privileged and never reads the generic PR Linux selector.
-    runs-on: ${{ fromJSON(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref == vars.PULP_RELEASE_CONTROL_REF && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON == '["self-hosted","Linux","X64","pulp-host-macpro","pulp-release-control-linux-x64"]' && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref == vars.PULP_RELEASE_CONTROL_REF && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON == '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-release-control-linux-x64"]' && vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       # Kept for the Namespace-profile step below, which still asks "did the macOS
       # leg resolve to a Namespace runner?".

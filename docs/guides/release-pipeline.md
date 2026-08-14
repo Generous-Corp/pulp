@@ -168,7 +168,10 @@ The lightweight resolver jobs in `release-cli.yml` and `sign-and-release.yml`
 may reuse trusted Linux capacity through the dedicated
 `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON` selector, then fall directly back to
 `ubuntu-latest` when it is unset. They never consume the generic
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` PR/merge-group selector. These workflows accept
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` PR/merge-group selector. The release lane uses
+the five-label Mac Pro hardware selector plus only the mutually exclusive
+`pulp-release-control-linux-x64` policy capability; it never substitutes or
+combine the trusted-auto or PR-safe capability labels. These workflows accept
 only a version-tag push or maintainer dispatch; only exact tag pushes consume
 the dedicated selector, and `PULP_RELEASE_CONTROL_REF` must byte-match that tag.
 Maintainer repair dispatches run from `main` and stay on hosted Linux because

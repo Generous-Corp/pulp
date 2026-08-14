@@ -1339,7 +1339,8 @@ class TrustedReleaseControlPlaneRouting(unittest.TestCase):
                 self.assertLess(dedicated, fallback)
                 self.assertNotIn("PULP_LOCAL_LINUX_RUNS_ON_JSON", runs_on)
                 self.assertIn(
-                    '["self-hosted","Linux","X64","pulp-host-macpro",'
+                    '["self-hosted","Linux","X64","pulp-build-linux-x64",'
+                    '"pulp-host-macpro",'
                     '"pulp-release-control-linux-x64"]',
                     runs_on,
                 )

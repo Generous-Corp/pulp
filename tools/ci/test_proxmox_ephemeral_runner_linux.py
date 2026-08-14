@@ -63,6 +63,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('automatic Linux runner group policy is not fail-closed', self.script)
         self.assertIn('EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"', self.script)
         self.assertIn('EXPECTED_LABELS="${BASE_LABELS},pulp-pr-safe-linux-x64"', self.script)
+        self.assertIn('RELEASE_CONTROL_LABELS="${BASE_LABELS},pulp-release-control-linux-x64"', self.script)
         self.assertIn('runner labels do not match the exact policy', self.script)
         self.assertIn('runner name prefix does not match the exact policy', self.script)
         self.assertIn('RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"', self.script)
