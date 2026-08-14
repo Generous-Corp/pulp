@@ -219510,7 +219510,7 @@
             },
             "music": {
               "state": "partial",
-              "capabilities": 7
+              "capabilities": 6
             },
             "offline": {
               "state": "not_inventoried",
@@ -220811,264 +220811,6 @@
             "contract_digest": "sha256:00f53240aa84b6c211c26b55b794b4cd425e0acfd0b2d8ac49cbf7739400a375"
           },
           {
-            "key": "music.pattern-development",
-            "domain": "music",
-            "summary": "Fixed-capacity exact-tick event-set development with stable IDs, nested density, regional fills, and deterministic integer A/B morphing.",
-            "rt_class": "any",
-            "lifecycle": {
-              "construction": "any",
-              "prepare": "none",
-              "process": "any",
-              "reset": "value-initialization",
-              "release": "none"
-            },
-            "state_model": "Pure operations over trivially copyable fixed-capacity event records; no hidden state, allocation, scheduler, clock, or note ownership.",
-            "seed_model": "explicit seed plus exact tick, lane, cycle, stream, and stable event ID coordinates",
-            "determinism": {
-              "repeatability": "bit_exact",
-              "block_partition": "not_applicable",
-              "platform_scope": "cross_platform",
-              "transport_history": "irrelevant"
-            },
-            "input_domain": "up to 64 canonical exact-tick event records per input, onset-set operation, target count, half-open tick region, seed coordinates, and integer morph amount",
-            "output_domain": "up to 64 canonical exact-tick event records or an explicit error",
-            "units": [
-              "ticks",
-              "event count",
-              "integer accent",
-              "integer morph amount",
-              "seed"
-            ],
-            "latency": "zero",
-            "tail": "none",
-            "scheduling": "pure caller-clocked whole-pattern development",
-            "bindings": [
-              {
-                "role": "event-id",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternEventId",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "event-role",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternEventRole",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "event-record",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternEvent",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "error",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternDevelopmentError",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "pattern",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::DevelopmentPattern<>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "result",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternDevelopmentResult<>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "set-operation",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternSetOperation",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "density-selection",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::DensitySelection",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "regional-fill-selection",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::RegionalFillSelection",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "morph-selection",
-                "kind": "cpp_type",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::PatternMorphSelection",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "make-event-id",
-                "kind": "cpp_function",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::make_pattern_event_id",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "set-algebra",
-                "kind": "cpp_function",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::pattern_set<64>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "density",
-                "kind": "cpp_function",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::select_pattern_density<64>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "regional-fill",
-                "kind": "cpp_function",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::apply_regional_fill<64>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              },
-              {
-                "role": "morph",
-                "kind": "cpp_function",
-                "include": "pulp/music/pattern_development.hpp",
-                "qualified_name": "pulp::music::morph_patterns<64>",
-                "target": "Pulp::music",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              }
-            ],
-            "contract_version": {
-              "major": 1,
-              "minor": 0
-            },
-            "status": "usable",
-            "evolution": {
-              "state": "active",
-              "introduced_in": {
-                "major": 1,
-                "minor": 0
-              }
-            },
-            "contract_digest": "sha256:d355402017022afb0573ac04dbbb920f126a24405312274c38d4a2847d648aa7"
-          },
-          {
             "key": "music.pattern-generation",
             "domain": "music",
             "summary": "Bounded Euclidean, versioned recipe, walking, cellular, and looping-shift-register pattern operations.",
@@ -222286,6 +222028,10 @@
           {
             "key": "signal.multi-channel-meter",
             "domain": "signal",
+            "contract_version": {
+              "major": 1,
+              "minor": 1
+            },
             "summary": "Fixed-storage peak, RMS, loudness, correlation, and clip metering for up to 16 channels.",
             "rt_class": "mixed",
             "lifecycle": {
@@ -222329,12 +222075,22 @@
                   ],
                   "required_features": []
                 }
+              },
+              {
+                "role": "loudness_support",
+                "kind": "cpp_type",
+                "include": "pulp/signal/multi_channel_meter.hpp",
+                "qualified_name": "pulp::signal::MultiChannelMeterT<float>",
+                "target": "Pulp::signal",
+                "availability": {
+                  "state": "available",
+                  "platforms": [
+                    "all"
+                  ],
+                  "required_features": []
+                }
               }
             ],
-            "contract_version": {
-              "major": 1,
-              "minor": 0
-            },
             "status": "usable",
             "evolution": {
               "state": "active",
@@ -222343,7 +222099,7 @@
                 "minor": 0
               }
             },
-            "contract_digest": "sha256:92fe44dd2a7168b44a90ab57a00d5c3e0435ab05e46327a9bc7422c05685efc6"
+            "contract_digest": "sha256:b99f1e44ac9ce70fb76b141ffa90589fee9d74dbe376957d01339eb41ebdb432"
           },
           {
             "key": "signal.nlms-adaptive-filter",
@@ -224768,11 +224524,11 @@
         ],
         "tombstones": [],
         "counts": {
-          "total": 73,
+          "total": 72,
           "by_domain": {
             "audio": 7,
             "midi": 9,
-            "music": 7,
+            "music": 6,
             "offline": 0,
             "sequence": 1,
             "signal": 40,
@@ -228690,7 +228446,8 @@
                     "prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles)",
                     "process(const SampleType* const* channels, int num_channels, int num_samples)",
                     "reset()",
-                    "snapshot()"
+                    "snapshot()",
+                    "loudness_supported()"
                   ],
                   "enums": []
                 },
@@ -232176,17 +231933,12 @@
           },
           {
             "include": "pulp/music/music.hpp",
-            "fingerprint": "sha256:4c95583dd9992f762edb2a00191ecd785ba3fac600d5528adf24167ad13a389e",
+            "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
             "disposition": "infrastructure"
           },
           {
             "include": "pulp/music/pattern.hpp",
             "fingerprint": "sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
-            "disposition": "capability_entrypoint"
-          },
-          {
-            "include": "pulp/music/pattern_development.hpp",
-            "fingerprint": "sha256:ea8026edcf0aa46f7d79d50751af14d422cf5c809720892b7af750529b553426",
             "disposition": "capability_entrypoint"
           },
           {
@@ -232896,7 +232648,7 @@
           },
           {
             "include": "pulp/signal/multi_channel_meter.hpp",
-            "fingerprint": "sha256:cfe3d3d562c903e1c7c64f404a264e7445aed4d6f14ab4fa3544b5ccd8346aee",
+            "fingerprint": "sha256:44ef8439be936bb441790331e4bd4fc2b4e233962635ee49a88ebc4820b54772",
             "disposition": "capability_entrypoint"
           },
           {
@@ -233507,7 +233259,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:f97fca5ee606cd0612e34b6a160fc98421c42da93e347b0246de3f0dcd704ef2"
+      "entry_digest": "sha256:370076907ae21137d366b7a3df5ef29ede543efa998ce1feae0ea4a275c45554"
     }
   ]
 }
