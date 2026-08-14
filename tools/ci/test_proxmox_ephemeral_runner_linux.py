@@ -119,8 +119,12 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.script.index("# ── admission"),
         )
         self.assertIn("gh-org-runner-pat", self.script)
+        self.assertIn('repository runner PAT is empty', self.script)
         self.assertIn(
             'automatic Linux runner organization PAT is missing', self.script
+        )
+        self.assertIn(
+            'automatic Linux runner organization PAT is empty', self.script
         )
         self.assertIn("apt-get install -y gh", self.guide)
 

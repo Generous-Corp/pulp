@@ -50,6 +50,7 @@ die() { log "ERROR: $*"; exit 1; }
 
 [ -r "$PAT_FILE" ] || die "no PAT at $PAT_FILE"
 PAT="$(cat "$PAT_FILE")"
+[[ "$PAT" =~ [^[:space:]] ]] || die "repository runner PAT is empty"
 command -v "$GH_CLI" >/dev/null 2>&1 \
     || die "$GH_CLI is not on PATH"
 
@@ -71,6 +72,8 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -r "$ORG_PAT_FILE" ] \
         || die "automatic Linux runner organization PAT is missing"
     PAT="$(cat "$ORG_PAT_FILE")"
+    [[ "$PAT" =~ [^[:space:]] ]] \
+        || die "automatic Linux runner organization PAT is empty"
     GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
         --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID")" \
         || die "automatic Linux runner group policy is not fail-closed"
