@@ -13,16 +13,27 @@
 # Shipyard/agents can explain or apply the same policy from the Pulp checkout.
 
 name = "normal-local-fast"
-description = "Fast PRs on local ARM64 VMs; nightly GitHub Intel validation."
+description = "Local-first safe phases with live-capacity probes and hosted fallback."
 
 [repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
-targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"]
+targets = ["m1.macos-arm64-vm", "m3.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"]
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.linux]
-strategy = "github-only"
-targets = ["github.linux-x64"]
+strategy = "ordered-fallback"
+targets = ["macpro.linux-x64-vm", "github.linux-x64"]
+github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
+
+[repo."Generous-Corp/pulp".merge_group.linux]
+strategy = "ordered-fallback"
+targets = ["macpro.linux-x64-vm", "github.linux-x64"]
+github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
+
+[repo."Generous-Corp/pulp".nightly.intel]
+strategy = "ordered-fallback"
+targets = ["macmini.macos-intel-metal", "github.macos-intel"]
+github_variable = "PULP_NATIVE_INTEL_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"
@@ -54,6 +65,12 @@ issue_on_failure = true
 [targets."macstudio.macos-arm64-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
 
+[targets."m1.macos-arm64-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
+
+[targets."m3.macos-arm64-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
+
 [targets."m5.macos-arm64-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
 
@@ -65,6 +82,13 @@ runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 
 [targets."macpro.linux-x64-vm"]
 runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
+
+[targets."macmini.macos-intel-metal"]
+runs_on_json = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+[targets."github.macos-intel"]
+runs_on_json = "macos-15-intel"
+authoritative_for = ["macos-intel"]
 
 [targets."macstudio.windows-arm64-qemu"]
 runs_on_json = ["self-hosted", "Windows", "ARM64", "pulp-build-windows"]
