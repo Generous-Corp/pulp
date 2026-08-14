@@ -740,6 +740,23 @@ The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
 
+### A native/WASM semantic oracle must share the production object closure
+
+When an existing native executable already owns the fixture and semantic hash,
+compile that same entry point against `$<TARGET_OBJECTS:pulp-wam-dsp>` and run
+the emitted Emscripten JavaScript under Node. Do not translate the fixture into
+JavaScript or create a second list of timeline/playback sources: either can stay
+green while the production WAM closure drifts. The registered chord-renderer
+proof in `examples/web-demos/wasm-build/CMakeLists.txt` is the reference shape.
+
+Its negative control belongs in the production renderer, not in the consumer or
+the expected hash: perturb one WASM-emitted value, force the `pulp-wam-dsp`
+object to rebuild, and require the native executable to stay green while the
+Node oracle goes red. Restore the renderer byte-for-byte, force both rebuilds,
+then rerun both green. A control that edits the expected value only proves the
+comparison can disagree; it does not prove the WASM executable reached the
+production realization path.
+
 `web-plugins.yml` also carries a second, unrelated job:
 `Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
 emscripten and runs the timeline conformance corpus through it. It shares the

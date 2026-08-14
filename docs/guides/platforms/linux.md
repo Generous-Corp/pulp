@@ -78,6 +78,27 @@ auto devices = system->enumerate_devices();
 // Includes "default" (PulseAudio/PipeWire) + hardware devices (hw:0, hw:1, ...)
 ```
 
+### Route timing
+
+`pulp::audio::query_audio_io_timing()` reports Linux route timing only while
+the selected backend has an authoritative live route:
+
+- ALSA uses `snd_pcm_delay()` for the live capture ADC-to-read or playback
+  write-to-DAC delay and configures monotonic PCM timestamps. Because that live
+  delay can fall below one period as the application consumes or supplies
+  frames, the report conservatively floors the complete path at one I/O period
+  before splitting it into residual latency plus that period.
+- JACK reports only connected ports after the server invokes its latency
+  callback. It uses each direction's maximum total latency, again represented
+  as residual latency plus one JACK period. An unconnected direction remains
+  absent instead of appearing as a zero-latency route.
+
+Reports carry a nonzero process-local route token and calibration generation.
+Closing or losing the ALSA route or JACK server invalidates the report; reopening
+creates a new token. Call the query from a control thread, never from the audio
+callback. `std::nullopt` means timing is unavailable or no longer authoritative,
+not that the route has zero latency.
+
 ### Low-Latency Setup
 
 For professional audio with low latency:

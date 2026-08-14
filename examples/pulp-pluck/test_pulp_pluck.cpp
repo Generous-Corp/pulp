@@ -4,7 +4,10 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 
 using namespace pulp;
 
@@ -93,4 +96,61 @@ TEST_CASE("PulpPluck silence without MIDI", "[examples][pluck]") {
         max_val = std::max(max_val, std::abs(output.view().channel(0)[i]));
     }
     REQUIRE(max_val < 0.0001f);
+}
+
+TEST_CASE("PulpPluck prepare clears active voices and permits retrigger",
+          "[examples][pluck][lifecycle]") {
+    auto proc = examples::create_pulp_pluck();
+    state::StateStore store;
+    proc->set_state_store(&store);
+    proc->define_parameters(store);
+
+    format::PrepareContext prep;
+    prep.sample_rate = 48000.0;
+    prep.max_buffer_size = 512;
+    prep.output_channels = 2;
+    prep.input_channels = 0;
+    proc->prepare(prep);
+
+    midi::MidiBuffer midi_out;
+    audio::BufferView<const float> empty_input(nullptr, 0, 0);
+    format::ProcessContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.num_samples = 512;
+
+    auto render_peaks = [&](midi::MidiBuffer& midi_in) {
+        audio::Buffer<float> output(2, 512);
+        auto out_view = output.view();
+        proc->process(out_view, empty_input, midi_in, midi_out, ctx);
+
+        std::array<float, 2> peaks{};
+        for (std::size_t ch = 0; ch < peaks.size(); ++ch) {
+            for (float sample : output.view().channel(ch)) {
+                if (!std::isfinite(sample)) {
+                    peaks[ch] = std::numeric_limits<float>::quiet_NaN();
+                    break;
+                }
+                peaks[ch] = std::max(peaks[ch], std::abs(sample));
+            }
+        }
+        return peaks;
+    };
+
+    midi::MidiBuffer first_note;
+    first_note.add(midi::MidiEvent::note_on(0, 60, 100));
+    const auto active_peaks = render_peaks(first_note);
+    REQUIRE(active_peaks[0] > 0.001f);
+    REQUIRE(active_peaks[1] > 0.001f);
+
+    proc->prepare(prep);
+    midi::MidiBuffer no_midi;
+    const auto reset_peaks = render_peaks(no_midi);
+    CHECK(reset_peaks[0] == 0.0f);
+    CHECK(reset_peaks[1] == 0.0f);
+
+    midi::MidiBuffer second_note;
+    second_note.add(midi::MidiEvent::note_on(0, 67, 100));
+    const auto retriggered_peaks = render_peaks(second_note);
+    CHECK(retriggered_peaks[0] > 0.001f);
+    CHECK(retriggered_peaks[1] > 0.001f);
 }

@@ -15,12 +15,16 @@ round trips the current `Project` through plugin-owned state.
 ## What It Demonstrates
 
 - A plugin-owned `Project`, `DocumentSession`, `WriterToken`, and MIDI clip
-- Insert, move, and resize gestures lowered through
-  `timeline_editor::lower_note_edit_intent()`
+- Insert lowered as a closed `Single` edit through
+  `timeline_editor::lower_note_edit_intent()`, while move and resize publish
+  continuously through `EditGestureIdentityAllocator` and one writer-owned undo
+  group
 - A 400x300 host-visible root and piano roll that project the full two-quarter
   clip into the editor bounds; interaction tests enter through that root
 - Two live piano-roll views rebound to each immutable snapshot after accepted or
   rejected submissions, undo, and state restore
+- `Cancel` restores the pre-Begin note, and terminal phases or successful atomic
+  state replacement discard the retained gesture provenance
 - One pinned `DocumentView` supplies the note span and revision for each lowered
   submission, so a gesture never combines values from different snapshots
 - Processor-first editor teardown detaches retained views before their host
@@ -44,13 +48,14 @@ cmake --build build --target timeline-plugin-proof-test TimelinePluginProof_CLAP
 ctest --test-dir build -R 'timeline plugin proof|clap-dlopen-TimelinePluginProof'
 ```
 
-The focused tests verify the real MIDI/view binding, host-routed sequential
-gesture submission, two-view undo and state rebinding, canonical state round
-trip, and fail-closed incompatible-state handling. The CMake configure also
-writes the resolved closure to `build/link-floor/TimelinePluginProof_CLAP.txt`.
+The focused tests verify real continuous move and resize through the plugin's
+`DocumentSession`, one-group undo/redo, cancellation, two-view convergence,
+state-replacement provenance reset, legacy `Single` edits, canonical state round
+trip, and fail-closed stale or incompatible input. The CMake configure also writes
+the resolved closure to `build/link-floor/TimelinePluginProof_CLAP.txt`.
 
 ## Scope
 
-Audition is explicitly unsupported, note gestures commit once on release, and
-the processor emits silence. The example proves editor/session integration and
-persistence; it does not claim a playback engine or audio routing.
+Audition is explicitly unsupported and the processor emits silence. The example
+proves editor/session integration and persistence; it does not claim a playback
+engine or audio routing.

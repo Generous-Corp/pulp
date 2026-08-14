@@ -693,7 +693,7 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 - Use `timeline_editor::EditGestureIdentityAllocator` for construction-safe
   continuous editor input. It owns one group and one opaque pending ticket,
   binds tickets to the real session/writer provenance, lowers the issued phase
-  internally, and derives transitions only from its own call to
+  internally for both clip and validated note intents, and derives transitions only from its own call to
   `DocumentSession::submit()`. Validation/lowering errors preserve the ticket;
   an actual submission consumes it while a rejected transaction preserves the
   confirmed state for a fresh-ID retry. Keep it on one control thread and route
@@ -1797,8 +1797,12 @@ roll inside a plugin".
 `Project` and `DocumentSession`, implements `NoteEditIntentHost`, returns a
 native `PianoRollView` from `create_view()`, and stores canonical Timeline JSON
 in plugin-owned state. It lowers insert, move, and resize gestures against the
-current MIDI snapshot, then rebinds and repaints every live view after accepted
-or rejected submissions, undo, and state restore. State restore also recognizes
+current MIDI snapshot. One `EditGestureIdentityAllocator` is retained from
+`Begin` through `Update` to `End` or `Cancel`, so move and resize repaint
+continuously while one undo restores the pre-Begin bytes. Terminal phases and a
+successful atomic state replacement discard that gesture provenance. The
+processor rebinds and repaints every live view after accepted or rejected
+submissions, undo, and state restore. State restore also recognizes
 the prior four-quarter empty-clip proof shape and migrates it to the MIDI proof
 while preserving its clip start and all other authored state. It claims
 `sequencer-plugin-editor` and

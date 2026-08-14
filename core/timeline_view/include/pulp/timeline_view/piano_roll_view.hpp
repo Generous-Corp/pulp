@@ -76,13 +76,16 @@ enum class PianoRollRefusal : std::uint8_t {
 /// submitted to a host. The view never builds a `timeline::Command`, never owns
 /// a revision, and never learns what applies its intents.
 ///
-/// EVERY GESTURE COMMITS ON RELEASE, as one `GesturePhase::Single` intent. That
-/// is a product decision before it is a constraint: a note edit lowers to a
-/// whole-content replacement, so a per-frame `Update` stream would pay one
-/// replacement of the entire clip per frame, while committing on release pays
-/// one per edit. The continuous-drag path needs granular note commands and is
-/// deliberately not served here — `lower_note_edit_intent` refuses a non-Single
-/// phase outright rather than emitting a transaction that dies mid-gesture.
+/// When continuous gestures are enabled, note transforms emit a `Begin` /
+/// `Update` / `End` stream whose adjacent expected and replacement notes form
+/// one optimistic chain. A host lowers the stream with one undo group, so the
+/// document applies continuously while one undo restores the pre-gesture
+/// bytes. A short drag with only one changed sample remains a closed `Single`
+/// edit. Insert and erase are always `Single`.
+///
+/// Shift-dragging a note body edits velocity instead of position. The gesture
+/// changes velocity by 128 authored units per vertical pixel, increasing as the
+/// pointer moves upward and clamping to the note domain.
 class PianoRollView : public view::View {
   public:
     /// Builds the payload for a create-note gesture at a lattice position.
@@ -114,6 +117,10 @@ class PianoRollView : public view::View {
     /// Enables the create-note gesture. Unset, a click on empty lattice space
     /// does nothing.
     void set_note_factory(NoteFactory factory);
+    /// Opts into continuous transform phases. The host must allocate and retain
+    /// one undo group across Begin/Update/End/Cancel. Disabled by default so
+    /// release-only hosts keep receiving the historical Single intent.
+    void set_continuous_gestures(bool enabled) noexcept { continuous_gestures_ = enabled; }
 
     /// The bound clip's notes, or empty when nothing is bound.
     std::span<const timeline::NoteEvent> notes() const;
@@ -140,8 +147,8 @@ class PianoRollView : public view::View {
     const std::vector<PianoRollRefusal>& refusals() const noexcept { return refusals_; }
     void clear_refusals() { refusals_.clear(); }
 
-    /// Whether a drag is mid-flight. Nothing has been emitted yet while this is
-    /// true: the intent leaves on release.
+    /// Whether a pointer gesture is mid-flight. A continuous transform may
+    /// already have emitted an open bracket while this remains true.
     bool gesture_open() const noexcept { return drag_.has_value(); }
 
     // ── View ─────────────────────────────────────────────────────────────
@@ -158,16 +165,17 @@ class PianoRollView : public view::View {
     void on_mouse_event(const view::MouseEvent& event) override;
 
   private:
-    /// What a press grabbed, and what it will emit on release.
+    /// What a press grabbed and how its continuous intent stream is shaped.
     enum class DragKind : std::uint8_t {
         Insert, ///< Empty lattice space: a note is created on release.
         Move,   ///< A note body: start and pitch change.
         Resize, ///< A note's trailing edge: duration changes.
+        SetVelocity, ///< Shift plus note body: velocity changes vertically.
     };
 
-    /// One gesture in flight. Nothing is emitted until it ends, so this holds
-    /// the whole edit rather than a chain of believed values — the optimistic
-    /// gate is the note as it was when the press landed.
+    /// One gesture in flight. `pending` deliberately trails the newest pointer
+    /// sample by one event, leaving a changed value for End even when a
+    /// synthetic drag reports its final point before mouse-up.
     struct Drag {
         DragKind kind = DragKind::Move;
         /// The note as the document carried it at press time. Empty for Insert.
@@ -180,6 +188,17 @@ class PianoRollView : public view::View {
         /// a gesture moved at all.
         timebase::TickPosition press_tick{};
         std::uint8_t press_pitch = 60;
+        float press_y = 0.0f;
+        /// Newest changed sample not yet emitted.
+        std::optional<timeline::NoteEvent> pending;
+        /// Replacement from the most recently emitted Begin or Update.
+        std::optional<timeline::NoteEvent> last_emitted;
+        /// Latest rejected sample, retained so release does not record the same
+        /// refusal twice after the final drag callback already reported it.
+        std::optional<timeline::NoteEvent> last_refused;
+        /// The host declined Begin, so this gesture preserves compatibility by
+        /// submitting one closed Single at release instead.
+        bool release_only = false;
     };
 
     const timeline::MidiContent* content() const;
@@ -195,8 +214,11 @@ class PianoRollView : public view::View {
     /// Rejects a note the note domain or the bound clip would not accept, so a
     /// refusal is recorded here instead of a malformed intent crossing the seam.
     bool admissible(const timeline::NoteEvent& note);
+    /// Resolves one pointer sample into the authored note for a transform.
+    std::optional<timeline::NoteEvent> replacement_at(const Drag& drag,
+                                                       view::Point position) const;
 
-    void emit(timeline_editor::NoteEditIntentKind kind,
+    bool emit(timeline_editor::NoteEditIntentKind kind, timeline::GesturePhase phase,
               std::optional<timeline::NoteEvent> expected,
               std::optional<timeline::NoteEvent> replacement);
 
@@ -209,6 +231,8 @@ class PianoRollView : public view::View {
     view::HitMetrics metrics_ = view::HitMetrics::for_pointer(view::PointerType::mouse);
     NoteFactory note_factory_;
     std::optional<Drag> drag_;
+    std::uint16_t current_modifiers_ = view::kModNone;
+    bool continuous_gestures_ = false;
     std::vector<PianoRollRefusal> refusals_;
     /// Segment-tree maximum note end for each canonical note range. It is
     /// rebuilt with the borrowed content in `set_clip()` so a viewport query

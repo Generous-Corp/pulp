@@ -339,6 +339,18 @@ and the failure waits for whoever does have it. `tools/rack/fetch_sdk.py
 --check` reports where it is (usually `~/SDKs/Rack-SDK`) — use it rather than
 searching the filesystem.
 
+## Intent anchors are constraints, not decoration
+
+`@Maker` and plain role words are retrieval guidance unless the user says
+`only` (or equivalent). An exclusive maker request is a closed final-patch
+constraint: allow Core I/O, reject every other maker after generation, and do
+not silently substitute one on a retry. `#Tag` is explicit: resolve it against
+the current VCV index with forgiving case/plural matching, pass its candidates
+to the model, and require at least one final module for each explicit tag.
+Ordinary words such as `quantizer` and `sampler` remain useful cues, not
+surprise preflight refusals. Keep these checks after parsing and linting so a
+model cannot claim compliance in prose while returning the wrong patch.
+
 ## Generated artefacts and the panel shaper
 
 `plugin.json`, `plugin.cpp`, `plugin.hpp`, `generated_modules.hpp` and every
