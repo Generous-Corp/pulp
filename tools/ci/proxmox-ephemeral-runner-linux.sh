@@ -31,6 +31,7 @@ GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
+ORG="${REPO%%/*}"
 LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
 PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
 ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"

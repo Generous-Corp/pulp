@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
+import tempfile
 import unittest
 
 
@@ -37,6 +38,79 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('automatic Linux runner group policy is not fail-closed', self.script)
         self.assertIn('LABELS="${LABELS},pulp-auto-linux-x64"', self.script)
         self.assertIn('RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"', self.script)
+
+    def test_org_registration_executes_under_nounset(self) -> None:
+        assignments = self.script[
+            self.script.index('REPO="') : self.script.index("log() {")
+        ]
+        registration = self.script[
+            self.script.index("# Repository runners remain dispatch-only.")
+            : self.script.index("# ── admission")
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = pathlib.Path(temporary_directory)
+            binaries = temporary / "bin"
+            binaries.mkdir()
+            for name in (
+                "gh",
+                "iptables-save",
+                "ip6tables-save",
+                "ipset",
+                "ebtables-save",
+            ):
+                executable = binaries / name
+                executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                executable.chmod(0o755)
+
+            firewall = binaries / "pve-firewall"
+            firewall.write_text(
+                '#!/bin/sh\n[ "$1" = status ] && echo "Status: enabled/running"\n',
+                encoding="utf-8",
+            )
+            firewall.chmod(0o755)
+            verifier = temporary / "verify-group.py"
+            verifier.write_text('print("Pulp Automatic Linux")\n', encoding="utf-8")
+            token = temporary / "org-token"
+            token.write_text("test-token\n", encoding="utf-8")
+            firewall_directory = temporary / "firewall"
+            firewall_directory.mkdir()
+
+            harness = "\n".join(
+                (
+                    "set -uo pipefail",
+                    assignments,
+                    "log() { :; }",
+                    'die() { printf "ERROR: %s\\n" "$*" >&2; exit 1; }',
+                    'PAT="repository-token"',
+                    registration,
+                    'printf "%s\\n" "$REGISTRATION_API|$RUNNER_URL|'
+                    '$RUNNER_GROUP_ARG|$LABELS|$AUTOMATIC_NETWORK_ISOLATION"',
+                )
+            )
+            environment = {
+                "PATH": f"{binaries}:{pathlib.Path('/usr/bin')}:/bin",
+                "PULP_LINUX_RUNNER_GROUP_ID": "42",
+                "PULP_LINUX_ORG_PAT_FILE": str(token),
+                "PULP_LINUX_GROUP_VERIFIER": str(verifier),
+                "PULP_LINUX_GH_CLI": str(binaries / "gh"),
+                "PULP_LINUX_FIREWALL_STATUS_BIN": str(firewall),
+                "PULP_LINUX_FIREWALL_DIR": str(firewall_directory),
+            }
+            result = subprocess.run(
+                ["/bin/bash"],
+                input=harness,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                "orgs/Generous-Corp|https://github.com/Generous-Corp|"
+                "--runnergroup Pulp Automatic Linux|"
+                "self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro,"
+                "pulp-auto-linux-x64|1",
+            )
 
     def test_all_registration_lifecycle_calls_follow_the_selected_scope(self) -> None:
         self.assertGreaterEqual(self.script.count("${REGISTRATION_API}/actions/runners"), 3)
