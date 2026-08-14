@@ -332,6 +332,12 @@ sets `clean: false` on self-hosted runners.
 Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
 what provisions the next clone. Add a slot by enabling `@3` — but check the governor
 first.
+If a supervisor is stopped while its exact runner is busy, cleanup preserves the
+active job and starts a separate transient systemd cleanup unit. The unit waits
+for the runner to become idle or deregister, fences any surviving idle
+registration, and then destroys the clone. A failed deferred cleanup restarts
+independently, so routine service interruption cannot permanently consume the
+three VMIDs.
 
 The three clone VMIDs have deterministic network identities: `200..202` map to
 `192.168.86.251..253` and stable locally administered MAC addresses. Do not return

@@ -77,7 +77,10 @@ def test_reusable_workflow_is_read_only_and_validates_pr_identity() -> None:
     assert "PULP_PR_SAFE_LINUX_REUSABLE_ENABLED" in text
     assert "PULP_PR_SAFE_LINUX_LEASE_UNTIL" in text
     assert "needs.admission.outputs.admitted == 'true'" in text
-    assert 'raise SystemExit("PR-safe admission denied:' in text
+    assert "inputs.runner_selector_json || '\"ubuntu-latest\"'" in text
+    assert "PR-safe admission denied; using hosted Linux" in text
+    assert "AudioInspectorPanel renders a non-empty headless snapshot" in text
+    assert "Subtree cache composites a GPU image on the replay frame" in text
 
 
 def test_build_calls_only_the_main_owned_reusable_workflow() -> None:

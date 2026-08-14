@@ -51,6 +51,104 @@ KEEP=0
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
+deferred_cleanup() {
+    local vmid="$1" runner_name="$2" registration_api="$3" credential_file="$4"
+    local token deadline runners_tsv runner_lookup rid _ busy status labels
+    [[ "$vmid" =~ ^20[0-2]$ ]] || die "invalid deferred-cleanup VMID"
+    [[ "$runner_name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid deferred-cleanup runner name"
+    case "$registration_api" in
+        "repos/${REPO}"|"orgs/${ORG}") ;;
+        *) die "invalid deferred-cleanup registration scope" ;;
+    esac
+    case "$credential_file" in
+        "$PAT_FILE"|"$ORG_PAT_FILE") ;;
+        *) die "invalid deferred-cleanup credential path" ;;
+    esac
+    [ -r "$credential_file" ] || die "deferred-cleanup credential is unavailable"
+    command -v "$GH_CLI" >/dev/null 2>&1 || die "$GH_CLI is not on PATH"
+    token="$(cat "$credential_file")"
+    deadline=$((SECONDS + 4500))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        runners_tsv="$(GH_TOKEN="$token" "$GH_CLI" api --paginate \
+            "${registration_api}/actions/runners?per_page=100" \
+            --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" || {
+                sleep 15
+                continue
+            }
+        runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+            -v name="$runner_name" '$2 == name')"
+        [ -n "$runner_lookup" ] || break
+        [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+            || die "duplicate deferred-cleanup runner registrations"
+        IFS=$'\t' read -r rid _ busy status <<< "$runner_lookup"
+        case "$busy" in
+            true) sleep 15; continue ;;
+            false) ;;
+            *) die "invalid deferred-cleanup runner busy state" ;;
+        esac
+        { [ "$status" = online ] || [ "$status" = offline ]; } \
+            || die "invalid deferred-cleanup runner status"
+        if [ "$status" = online ]; then
+            GH_TOKEN="$token" "$GH_CLI" api --method PUT \
+                "${registration_api}/actions/runners/${rid}/labels" \
+                -f 'labels[]=pulp-shutdown-fenced' >/dev/null \
+                || die "cannot fence deferred-cleanup runner"
+            labels="$(GH_TOKEN="$token" "$GH_CLI" api \
+                "${registration_api}/actions/runners/${rid}" \
+                --jq '[.labels[].name] | join(",")')" \
+                || die "cannot verify deferred-cleanup fence"
+            case ",$labels," in
+                *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
+                    die "routing label survived deferred-cleanup fence"
+                    ;;
+            esac
+        fi
+        break
+    done
+    [ "$SECONDS" -lt "$deadline" ] \
+        || die "deferred cleanup timed out while runner remained busy"
+
+    timeout 20s qm stop "$vmid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+        qm status "$vmid" >/dev/null 2>&1 || break
+        [ "$(qm status "$vmid" 2>/dev/null)" = "status: stopped" ] && break
+        sleep 2
+    done
+    if qm status "$vmid" >/dev/null 2>&1; then
+        [ "$(qm status "$vmid" 2>/dev/null)" = "status: stopped" ] \
+            || die "deferred-cleanup clone did not stop"
+    fi
+
+    runners_tsv="$(GH_TOKEN="$token" "$GH_CLI" api --paginate \
+        "${registration_api}/actions/runners?per_page=100" \
+        --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
+        || die "cannot confirm deferred-cleanup runner shutdown"
+    runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+        -v name="$runner_name" '$2 == name')"
+    if [ -n "$runner_lookup" ]; then
+        [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+            || die "duplicate deferred-cleanup runner registrations"
+        IFS=$'\t' read -r rid _ busy status <<< "$runner_lookup"
+        [ "$busy" = false ] && [ "$status" = offline ] \
+            || die "deferred-cleanup runner did not become idle and offline"
+        GH_TOKEN="$token" "$GH_CLI" api --method DELETE \
+            "${registration_api}/actions/runners/${rid}" \
+            || die "cannot deregister deferred-cleanup runner"
+    fi
+    if qm status "$vmid" >/dev/null 2>&1; then
+        qm destroy "$vmid" --purge >/dev/null \
+            || die "cannot destroy deferred-cleanup clone"
+    fi
+    rm -f "${FIREWALL_DIR}/${vmid}.fw"
+    log "deferred cleanup completed for clone $vmid"
+}
+
+if [ "${1:-}" = "--deferred-cleanup" ]; then
+    [ "$#" = 5 ] || die "invalid deferred-cleanup arguments"
+    deferred_cleanup "$2" "$3" "$4" "$5"
+    exit 0
+fi
+
 command -v "$GH_CLI" >/dev/null 2>&1 \
     || die "$GH_CLI is not on PATH"
 
@@ -62,6 +160,7 @@ command -v "$GH_CLI" >/dev/null 2>&1 \
 REGISTRATION_API="repos/${REPO}"
 RUNNER_URL="https://github.com/${REPO}"
 RUNNER_GROUP_ARG=""
+ACTIVE_PAT_FILE="$PAT_FILE"
 if [ -n "$RUNNER_GROUP_ID" ]; then
     [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
         || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
@@ -72,6 +171,7 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -r "$ORG_PAT_FILE" ] \
         || die "automatic Linux runner organization PAT is missing"
     PAT="$(cat "$ORG_PAT_FILE")"
+    ACTIVE_PAT_FILE="$ORG_PAT_FILE"
     GROUP_NAME="$(GH_TOKEN="$PAT" python3 "$GROUP_VERIFIER" \
         --gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID" \
         --policy "$RUNNER_GROUP_POLICY")" \
@@ -203,8 +303,22 @@ cleanup() {
             [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
                 || { log "ERROR: duplicate exact runner registrations; leaving clone $VMID for safe recovery"; return; }
             IFS=$'\t' read -r rid _ runner_busy runner_status <<< "$runner_lookup"
+            if [ "$runner_busy" = true ]; then
+                cleanup_unit="pulp-ephemeral-cleanup-${VMID}-$(date +%s)"
+                if command -v systemd-run >/dev/null 2>&1 \
+                    && systemd-run --quiet --collect --unit="$cleanup_unit" \
+                        --service-type=oneshot --property=TimeoutStartSec=80min \
+                        --property=Restart=on-failure --property=RestartSec=30s \
+                        "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
+                        "$RUNNER_NAME" "$REGISTRATION_API" "$ACTIVE_PAT_FILE"; then
+                    log "runner is busy; delegated clone $VMID to $cleanup_unit"
+                else
+                    log "ERROR: runner is busy and deferred cleanup could not be scheduled; leaving clone $VMID for safe recovery"
+                fi
+                return
+            fi
             [ "$runner_busy" = false ] \
-                || { log "ERROR: exact runner is busy; leaving clone $VMID for safe recovery"; return; }
+                || { log "ERROR: exact runner has invalid busy state; leaving clone $VMID for safe recovery"; return; }
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
             if [ "$runner_status" = online ]; then

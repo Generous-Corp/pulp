@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import pathlib
+import os
 import subprocess
+import tempfile
 import unittest
 
 
@@ -135,7 +137,11 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         cleanup = self.script[
             self.script.index("cleanup() {") : self.script.index("trap cleanup EXIT")
         ]
-        self.assertIn('exact runner is busy; leaving clone $VMID', cleanup)
+        self.assertIn('systemd-run --quiet --collect', cleanup)
+        self.assertIn('--service-type=oneshot', cleanup)
+        self.assertIn('--property=Restart=on-failure', cleanup)
+        self.assertIn('--deferred-cleanup "$VMID"', cleanup)
+        self.assertIn('runner is busy; delegated clone $VMID', cleanup)
         self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
         self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
         self.assertIn('cannot fence runner dispatch', cleanup)
@@ -166,6 +172,87 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             cleanup.index('qm stop "$VMID"'),
             cleanup.rindex('[ "$runner_status" = offline ]'),
         )
+
+    def test_deferred_cleanup_is_bounded_and_preserves_busy_work(self) -> None:
+        helper = self.script[
+            self.script.index("deferred_cleanup() {") : self.script.index(
+                'if [ "${1:-}" = "--deferred-cleanup" ]'
+            )
+        ]
+        self.assertIn('case "$busy" in', helper)
+        self.assertIn("true) sleep 15; continue", helper)
+        self.assertIn("deadline=$((SECONDS + 4500))", helper)
+        self.assertIn("labels[]=pulp-shutdown-fenced", helper)
+        self.assertIn('qm destroy "$vmid" --purge', helper)
+        self.assertLess(
+            helper.index('true) sleep 15; continue'),
+            helper.index('qm destroy "$vmid" --purge'),
+        )
+
+    def test_deferred_cleanup_waits_for_busy_runner_then_destroys_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            token = tmp / "org-token"
+            token.write_text("test-token", encoding="utf-8")
+            token.chmod(0o600)
+            gh_count = tmp / "gh-count"
+            qm_state = tmp / "qm-state"
+            destroyed = tmp / "destroyed"
+            qm_state.write_text("running", encoding="utf-8")
+            fake_gh = tmp / "gh"
+            fake_gh.write_text(
+                "#!/usr/bin/env bash\n"
+                f"count=$(cat '{gh_count}' 2>/dev/null || echo 0)\n"
+                "count=$((count + 1))\n"
+                f"printf '%s' \"$count\" > '{gh_count}'\n"
+                "if [ \"$count\" = 1 ]; then\n"
+                "  printf '17\\tpulp-pr-safe-ephemeral-200-test\\ttrue\\tonline\\n'\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake_qm = tmp / "qm"
+            fake_qm.write_text(
+                "#!/usr/bin/env bash\n"
+                f"state=$(cat '{qm_state}')\n"
+                "case \"$1\" in\n"
+                "  status) printf 'status: %s\\n' \"$state\" ;;\n"
+                f"  stop) printf stopped > '{qm_state}' ;;\n"
+                f"  destroy) : > '{destroyed}' ;;\n"
+                "  *) exit 1 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            fake_sleep = tmp / "sleep"
+            fake_sleep.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            for executable in (fake_gh, fake_qm, fake_sleep):
+                executable.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{tmp}:{env['PATH']}",
+                    "PULP_LINUX_GH_CLI": str(fake_gh),
+                    "PULP_LINUX_ORG_PAT_FILE": str(token),
+                    "PULP_LINUX_FIREWALL_DIR": str(tmp),
+                }
+            )
+            result = subprocess.run(
+                [
+                    "/bin/bash",
+                    str(SCRIPT),
+                    "--deferred-cleanup",
+                    "200",
+                    "pulp-pr-safe-ephemeral-200-test",
+                    "orgs/Generous-Corp",
+                    str(token),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(gh_count.read_text(encoding="utf-8"), "3")
+            self.assertTrue(destroyed.exists())
 
     def test_controller_dependencies_and_org_credential_are_fail_closed(self) -> None:
         self.assertIn('command -v "$GH_CLI"', self.script)

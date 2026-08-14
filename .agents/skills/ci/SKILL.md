@@ -2798,14 +2798,25 @@ The trusted lane adds `pulp-auto-linux-x64`; the PR-safe lane adds
 contract are reviewed together. Generic Mac Pro runners without either extra
 capability cannot receive automatic work. `resolve-provider` authorizes the
 trusted selector only for `merge_group` while its short RFC 3339 lease is valid;
-the separate main-owned reusable workflow validates same-repository PR identity
-before the PR-safe selector is used. It emits `linux_route_reason` as
+the separate main-owned reusable workflow validates repository variables,
+lease horizon, exact selector, event identity, and SHAs on hosted Linux before
+the PR-safe selector is used. If that protected admission recheck rejects a
+lease that expired after the caller's snapshot, the reusable workflow runs its
+Linux proof on `ubuntu-latest` instead of dropping the Linux leg. It emits
+`linux_route_reason` as
 `explicit-dispatch`,
 `local-enabled`, `security-hosted`, or `unconfigured-hosted`, and derives the
 displayed Linux provider from the selector that actually resolved.
 
 A successfully assigned self-hosted job has no live fallback. Shipyard must
 expire or clear each lease before unhealthy capacity can strand new jobs.
+If a supervisor is interrupted while its exact runner is busy, it delegates the
+VM to a separately scoped transient systemd cleanup unit. That unit waits for
+the job to finish, fences any later idle registration, and then deregisters and
+destroys the clone; do not replace this with immediate teardown or an abandoned
+VM slot. Automatic organization pools use the distinct root-only
+`gh-org-runner-pat`, never the repository pool credential, and the controller
+must pass it through `GH_TOKEN` rather than a command argument.
 
 Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
 proof during hosted saturation. Its default remains true so ordinary manual
