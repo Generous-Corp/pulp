@@ -64,6 +64,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             "EnvironmentFile=-/etc/pulp/linux-runner-group.env", self.service
         )
         self.assertIn("User=root", self.service)
+        self.assertIn("Documentation=https://", self.service)
+        self.assertIn("Documentation=https://", self.pr_safe_service)
 
     def test_systemd_can_run_both_profiles_concurrently(self) -> None:
         self.assertEqual(

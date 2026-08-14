@@ -1,6 +1,6 @@
 [Unit]
 Description=Pulp PR-safe ephemeral CI runner slot %i (golden clone, one job, destroy)
-Documentation=docs/guides/local-ci.md
+Documentation=https://github.com/Generous-Corp/pulp/blob/main/docs/guides/local-ci.md
 After=network-online.target pve-guests.service
 Wants=network-online.target
 
