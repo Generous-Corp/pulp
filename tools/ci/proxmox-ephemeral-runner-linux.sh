@@ -183,8 +183,6 @@ cleanup() {
             { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                 || { log "ERROR: exact runner has invalid status; leaving clone $VMID for safe recovery"; return; }
             if [ "$runner_status" = online ]; then
-                [ "$AUTOMATIC_NETWORK_ISOLATION" = 1 ] \
-                    || { log "ERROR: online dispatch runner cannot be fenced; leaving clone $VMID for safe recovery"; return; }
                 GH_TOKEN="$PAT" "$GH_CLI" api --method PUT \
                     "${REGISTRATION_API}/actions/runners/${rid}/labels" \
                     -f 'labels[]=pulp-shutdown-fenced' >/dev/null \

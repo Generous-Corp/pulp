@@ -79,6 +79,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('exact runner is busy; leaving clone $VMID', cleanup)
         self.assertIn('"${REGISTRATION_API}/actions/runners/${rid}/labels"', cleanup)
         self.assertIn("-f 'labels[]=pulp-shutdown-fenced'", cleanup)
+        self.assertNotIn('AUTOMATIC_NETWORK_ISOLATION" = 1', cleanup)
         self.assertIn('cannot fence automatic dispatch', cleanup)
         self.assertIn('exact runner became busy before dispatch fence', cleanup)
         self.assertIn('a routing label survived dispatch fence', cleanup)
