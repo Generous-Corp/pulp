@@ -35,16 +35,16 @@ EXTRA_CMAKE_ARGS=()
 EXTRA_CTEST_ARGS=()
 INCLUDE_SLOW_TESTS=false
 
+# shellcheck source=coverage_ctest_policy.sh
+source "${SCRIPT_DIR}/coverage_ctest_policy.sh"
+
 # Coverage measures executable source lines. It does not need to repeat the
 # long soak/configuration proofs that the primary build matrix already owns.
-# Keeping this policy in the canonical script means GitHub-hosted runners and
-# SSH/self-hosted M1/M3 callers get the same bounded suite. Keep the regexes as
-# array elements: several test names contain spaces and cannot safely travel
-# through PULP_COVERAGE_CTEST_ARGS' whitespace-tokenized compatibility hook.
-DEFAULT_CTEST_ARGS=(
-    -LE 'validation|slow|performance|bench|quality-lab'
-    -E '(fdn.*bounded.*parameter.*vector|saturating.*self-oscillate|physical.*sub-unity.*oscillation|drift.*pitch.*commanded.*RMS|Analog.*VCF.*worst-case.*oversampling|OSC-WT.*worst)'
-)
+# Keeping this policy in a sourced shell array means GitHub-hosted runners,
+# local diff coverage, and SSH/self-hosted M1/M3 callers get the same bounded
+# suite. Several test names contain spaces and cannot safely travel through
+# PULP_COVERAGE_CTEST_ARGS' whitespace-tokenized compatibility hook.
+DEFAULT_CTEST_ARGS=("${PULP_COVERAGE_CTEST_DEFAULT_ARGS[@]}")
 
 # Canonical source-filter regex used by llvm-cov and by the
 # LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in

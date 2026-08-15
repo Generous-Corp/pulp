@@ -43,6 +43,7 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
+CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 from lcov_cobertura import LcovCobertura  # noqa: E402
 
@@ -79,12 +80,17 @@ class ParallelismContractTests(unittest.TestCase):
 
     def test_default_suite_excludes_slow_proofs_for_every_caller(self) -> None:
         text = SCRIPT.read_text()
-        self.assertIn("DEFAULT_CTEST_ARGS=(", text)
-        self.assertIn("'validation|slow|performance|bench|quality-lab'", text)
-        self.assertIn("fdn.*bounded.*parameter.*vector", text)
+        policy = CTEST_POLICY.read_text()
+        self.assertIn('source "${SCRIPT_DIR}/coverage_ctest_policy.sh"', text)
+        self.assertIn("PULP_COVERAGE_CTEST_DEFAULT_ARGS", text)
+        self.assertIn("validation|slow|performance|bench|quality-lab", policy)
+        self.assertIn("fdn.*bounded.*parameter.*vector", policy)
         self.assertIn('EXTRA_CTEST_ARGS=("${DEFAULT_CTEST_ARGS[@]}")', text)
 
-        match = re.search(r"^\s+-E '(?P<pattern>[^']+)'$", text, re.MULTILINE)
+        match = re.search(
+            r"PULP_COVERAGE_CTEST_NAME_EXCLUDE:=\((?P<pattern>[^}]+)\)\}",
+            policy,
+        )
         self.assertIsNotNone(match, "default CTest name exclusion must be one array item")
         exclusion = re.compile(match.group("pattern"))
         source = "\n".join(
@@ -359,6 +365,7 @@ class StaleCacheTests(unittest.TestCase):
         repo.mkdir()
         (repo / "scripts").mkdir()
         (repo / "scripts" / "run_coverage.sh").symlink_to(SCRIPT)
+        (repo / "scripts" / "coverage_ctest_policy.sh").symlink_to(CTEST_POLICY)
 
         # Provide stub clang/llvm-profdata/llvm-cov so the preflight
         # checks pass even on hosts without a real toolchain.

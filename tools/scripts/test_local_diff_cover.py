@@ -34,6 +34,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "tools" / "scripts" / "local_diff_cover.sh"
 CONFIG = REPO_ROOT / "tools" / "scripts" / "coverage_config.json"
 CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
+CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 
 
 class ConfigTests(unittest.TestCase):
@@ -494,6 +495,8 @@ class RequiredGateCtestSelectionTests(unittest.TestCase):
             '"raise SystemExit(1)")\n'
             "set_tests_properties([=[slow-platform-smoke]=] PROPERTIES "
             'LABELS "slow")\n'
+            f'add_test([=[OSC-WT worst alias swept to the top of every band]=] "{python}" "-c" '
+            '"raise SystemExit(1)")\n'
         )
 
     def tearDown(self) -> None:
@@ -529,6 +532,17 @@ class RequiredGateCtestSelectionTests(unittest.TestCase):
             result.stdout,
             "the local diff-coverage lane selected a slow platform smoke",
         )
+        self.assertNotIn(
+            "OSC-WT worst alias swept to the top of every band",
+            result.stdout,
+            "local diff coverage bypassed the shared name exclusion policy",
+        )
+
+    def test_local_and_full_coverage_source_the_same_policy(self) -> None:
+        local = SCRIPT.read_text()
+        full = CI_SCRIPT.read_text()
+        self.assertIn("scripts/coverage_ctest_policy.sh", local)
+        self.assertIn("coverage_ctest_policy.sh", full)
 
     def test_negative_control_fails_when_slow_exclusion_is_removed(self) -> None:
         result = self._run_fixture("__matches_no_test_label__")
@@ -728,8 +742,12 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     """
     root = tmp / name
     (root / "tools" / "scripts").mkdir(parents=True)
+    (root / "scripts").mkdir(parents=True)
     dest = root / "tools" / "scripts" / "local_diff_cover.sh"
     dest.write_text(SCRIPT.read_text())
+    (root / "scripts" / "coverage_ctest_policy.sh").write_text(
+        CTEST_POLICY.read_text()
+    )
     return root
 
 

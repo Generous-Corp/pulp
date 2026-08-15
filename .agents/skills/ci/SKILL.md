@@ -6139,9 +6139,10 @@ coverage suite" step.
 
 Now a budget hit remains advisory only on Windows. Linux and macOS are receipt-authoritative:
 their Cobertura verifier runs and fails if the report is absent, so a green workflow can no
-longer hide missing native uploads. The canonical `scripts/run_coverage.sh` also skips the
-slow/soak/configuration proofs already enforced by the primary build matrix; this policy is
-shared by GitHub-hosted and SSH/self-hosted M1/M3 callers, and
+longer hide missing native uploads. A shared coverage CTest policy also skips the
+slow/soak/configuration proofs already enforced by the primary build matrix; both the canonical
+coverage script and local pre-push diff coverage consume it across GitHub-hosted and
+SSH/self-hosted M1/M3 callers, and
 `--include-slow-tests` opts into the full suite. The suite runs ctest in parallel (`-j`, capped
 like `build.yml`) with a per-test `--timeout`. The receipt watchdog remains the cross-run alarm.
 Editing

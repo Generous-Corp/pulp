@@ -608,9 +608,10 @@ number) but the silent-skip is closed.
 The native coverage build explicitly keeps `PULP_BUILD_EXAMPLES=ON`: although
 example source is excluded from the report, example-owned tests exercise core
 libraries and template/header paths that must remain in the measured inventory.
-The shared coverage script excludes `validation`, `slow`, `performance`,
-`bench`, and `quality-lab` CTest labels by default, including on SSH/self-hosted
-M1/M3 callers. Those long-running soak/configuration proofs remain
+The shared coverage test policy excludes `validation`, `slow`, `performance`,
+`bench`, and `quality-lab` CTest labels by default for both
+`scripts/run_coverage.sh` and the local pre-push diff-coverage hook, including
+on SSH/self-hosted M1/M3 callers. Those long-running soak/configuration proofs remain
 enforced by the primary build matrix; repeating them under instrumentation was
 consuming the report/upload window without materially expanding line coverage.
 Use `--include-slow-tests` when intentionally collecting a full local suite.

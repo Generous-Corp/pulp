@@ -396,10 +396,11 @@ that terminates the suite before the job cap. When that budget is hit the leg
 drops any partial report and records `budget_hit`. Windows remains advisory,
 but Linux and macOS are receipt-authoritative: their Cobertura verifier still
 runs and fails when the report is absent, so a green workflow cannot hide a
-missing native upload. The canonical `scripts/run_coverage.sh` excludes the
+missing native upload. The shared coverage CTest policy excludes the
 slow/soak/configuration proofs already enforced by the primary build matrix;
-that default applies equally to GitHub-hosted and SSH/self-hosted M1/M3 callers,
-with `--include-slow-tests` available for intentional full local collection.
+both `scripts/run_coverage.sh` and the local pre-push diff-coverage hook consume
+it across GitHub-hosted and SSH/self-hosted M1/M3 callers. Use
+`--include-slow-tests` for intentional full local collection.
 The suite also runs ctest in parallel with a per-test `--timeout` so it fits the
 budget; the receipt-aware upload watchdog remains the cross-run alarm. Report
 verification and Codecov transport are separate contracts:
