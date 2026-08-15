@@ -104,6 +104,12 @@ EXPORTS = [
     *SIGNAL_EXPORTS,
 ]
 
+# Reviewed public signal APIs that intentionally remain outside the legacy
+# generator-facing vocabulary compatibility projection.
+LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
+    "pulp/signal/waveset_transformer.hpp",
+}
+
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
@@ -512,7 +518,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:cf36559168b3f108277cd9106604ec16670b9cbae863813d468f4ab0363d3aff",
+        "fingerprint": "sha256:6a28b95cbbbab06543097273312efde14ce03abbedafc063e3950e3694bee56a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -529,6 +535,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "The harmonizer is a public DSP API, but it does not yet have the "
             "typed bindings, lifecycle contract, parameter semantics, and link "
             "probe required for a generator-facing capability claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/waveset_transformer.hpp",
+        "fingerprint": "sha256:9d0dcf5f66673d434f93481081be084dcfa7674613b801bb3d731117463aa267",
+        "disposition": "unsupported_capability",
+        "capability_keys": [],
+        "rationale": (
+            "The bounded WavesetTransformer is a signal-only public DSP API; it has no "
+            "typed generator binding and makes no installed agent capability claim."
         ),
     },
 ]
