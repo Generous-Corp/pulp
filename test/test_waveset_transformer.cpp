@@ -1,7 +1,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/rng.hpp>
-#include <pulp/signal/waveset_transformer.hpp>
+#include <pulp/signal/signal.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
