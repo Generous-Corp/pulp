@@ -1978,14 +1978,25 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
     return true;
 }
 
-void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
+std::string captured_art_path(
+    std::string path, const NativeMaterializeOptions& options) {
+    std::filesystem::path resolved{std::move(path)};
+    if (resolved.is_relative() && !options.asset_base_directory.empty())
+        resolved = options.asset_base_directory / resolved;
+    return resolved.string();
+}
+
+void apply_captured_art_knob_skin(
+    Knob& knob, const IRNode& node,
+    const NativeMaterializeOptions& options) {
     auto skin = attr(node, "asset_path");
     if (!skin || skin->empty()) return;
     const float pw = attr_float(node, "png_natural_w").value_or(0.0f);
     const float ph = attr_float(node, "png_natural_h").value_or(0.0f);
     if (pw <= 0.0f || ph <= 0.0f) return;
     auto strip = std::make_shared<SpriteStrip>();
-    strip->load_from_file(*skin, static_cast<int>(pw), static_cast<int>(ph), 1,
+    strip->load_from_file(captured_art_path(*skin, options),
+                          static_cast<int>(pw), static_cast<int>(ph), 1,
                           SpriteStrip::Orientation::vertical);
     knob.set_sprite_strip(std::move(strip));
     const float cw = attr_float(node, "art_core_w").value_or(0.0f);
@@ -2010,7 +2021,9 @@ void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
     }
 }
 
-void apply_captured_art_fader_skin(Fader& fader, const IRNode& node) {
+void apply_captured_art_fader_skin(
+    Fader& fader, const IRNode& node,
+    const NativeMaterializeOptions& options) {
     const auto body_path = attr(node, "fader_body_asset_path");
     const auto indicator_path = attr(node, "fader_indicator_asset_path");
     if (!body_path || !indicator_path) return;
@@ -2026,11 +2039,13 @@ void apply_captured_art_fader_skin(Fader& fader, const IRNode& node) {
         return;
 
     auto body = std::make_shared<SpriteStrip>();
-    body->load_from_file(*body_path, static_cast<int>(body_w),
+    body->load_from_file(captured_art_path(*body_path, options),
+                         static_cast<int>(body_w),
                          static_cast<int>(body_h), 1,
                          SpriteStrip::Orientation::vertical);
     auto indicator = std::make_shared<SpriteStrip>();
-    indicator->load_from_file(*indicator_path, static_cast<int>(indicator_w),
+    indicator->load_from_file(captured_art_path(*indicator_path, options),
+                              static_cast<int>(indicator_w),
                               static_cast<int>(indicator_h), 1,
                               SpriteStrip::Orientation::vertical);
     if (!body->loaded() || !indicator->loaded()) return;
@@ -2235,7 +2250,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (options.preview_mode) knob->set_render_style(WidgetRenderStyle::minimal);
             // Captured-art skin (design's disc + native notch overlay): keeps the
             // knob design-faithful AND interactive. See hoist_captured_art_knobs.
-            apply_captured_art_knob_skin(*knob, node);
+            apply_captured_art_knob_skin(*knob, node, options);
             apply_designed_body_skin(*knob, node);
             return knob;
         }
@@ -2260,7 +2275,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (semantics.fader_thumb_corner_radius)
                 fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
-            apply_captured_art_fader_skin(*fader, node);
+            apply_captured_art_fader_skin(*fader, node, options);
             // Same contract the knob case takes above: a design that painted its
             // own track owns the body, and the widget contributes only the value
             // layer. Without it a designed fader drew a stock track, fill and

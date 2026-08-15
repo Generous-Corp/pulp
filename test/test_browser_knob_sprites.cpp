@@ -507,6 +507,46 @@ TEST_CASE("a declared knob gets its own crop of the capture with the pointer era
     }
 }
 
+TEST_CASE("a declared knob body is cropped exactly from the indicator-free frame",
+          "[import-design][browser-capture][knob][indicator][static-frame]") {
+    TempDirectory temp;
+    const auto original = synthetic_panel();
+    auto clean = original;
+    // Arbitrary high-frequency art that an inpaint cannot infer from either
+    // side of the pointer. Chrome revealed these exact pixels by hiding only
+    // the declared indicator before taking browser-static.png.
+    for (int y = kDotTop; y < kDotTop + kDotSize; ++y)
+        for (int x = kDotLeft; x < kDotLeft + kDotSize; ++x) {
+            auto* p = pixel_at(clean, x, y);
+            p[0] = ((x + y) & 1) ? 3 : 231;
+            p[1] = ((x + y) & 1) ? 219 : 7;
+            p[2] = 91;
+            p[3] = 255;
+        }
+    const auto capture = temp.root / "browser.png";
+    const auto static_capture = temp.root / "browser-static.png";
+    write_png(capture, original);
+    write_png(static_capture, clean);
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.children.push_back(declared_knob());
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error,
+                static_capture) == 1);
+    CHECK(error.empty());
+    const auto sprite = read_png(
+        fs::path(ir.root.children.front().attributes.at("asset_path")));
+    REQUIRE(sprite.valid());
+    for (int y = 0; y < kDialSize; ++y)
+        for (int x = 0; x < kDialSize; ++x) {
+            const auto* got = pixel_at(sprite, x, y);
+            const auto* want = pixel_at(clean, kDialLeft + x, kDialTop + y);
+            REQUIRE(std::equal(want, want + 4, got));
+        }
+}
+
 TEST_CASE("an undeclared control is left exactly as it was",
           "[import-design][browser-capture][knob][indicator]") {
     // Pulp adds nothing of its own. Without a declaration there is nothing in a
@@ -854,6 +894,100 @@ TEST_CASE("a static browser fader keeps authored track and ticks while its thumb
               pulp::canvas::DrawCommand::Type::fill_rounded_rect) > 0);
 }
 
+TEST_CASE("static capture preserves an opaque thumb and isolates a rounded thumb",
+          "[import-design][browser-capture][fader][indicator][static-frame]") {
+    auto checker = [] {
+        ImportPngImage image;
+        image.width = kPanelWidth;
+        image.height = 100;
+        image.rgba.resize(static_cast<std::size_t>(image.width) * image.height * 4);
+        for (int y = 0; y < image.height; ++y)
+            for (int x = 0; x < image.width; ++x) {
+                auto* p = pixel_at(image, x, y);
+                const auto level = static_cast<std::uint8_t>(((x + y) & 1) ? 35 : 210);
+                p[0] = p[1] = p[2] = level;
+                p[3] = 255;
+            }
+        return image;
+    };
+    const int indicator_x = kStaticIndicatorLeft - 1;
+    const int indicator_y = kStaticIndicatorTop - 1;
+    const int indicator_w = kStaticIndicatorWidth + 2;
+    const int indicator_h = kStaticIndicatorHeight + 2;
+
+    SECTION("a solid white interior remains opaque even over white pixels") {
+        TempDirectory temp;
+        const auto clean = checker();
+        auto original = clean;
+        for (int y = indicator_y; y < indicator_y + indicator_h; ++y)
+            for (int x = indicator_x; x < indicator_x + indicator_w; ++x) {
+                auto* p = pixel_at(original, x, y);
+                const bool border = x < indicator_x + 2 ||
+                    x >= indicator_x + indicator_w - 2 ||
+                    y < indicator_y + 2 ||
+                    y >= indicator_y + indicator_h - 2;
+                p[0] = p[1] = p[2] = border ? 0 : 255;
+            }
+        const auto capture = temp.root / "browser.png";
+        const auto static_capture = temp.root / "browser-static.png";
+        write_png(capture, original);
+        write_png(static_capture, clean);
+        DesignIR ir;
+        ir.root.type = "frame";
+        auto fader = declared_static_horizontal_fader();
+        fader.attributes["browser_indicator_opaque_box"] = "1";
+        ir.root.children.push_back(std::move(fader));
+        std::string error;
+        REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                    ir, capture, temp.root / "sprites", &error,
+                    static_capture) == 1);
+        const auto indicator = read_png(
+            ir.root.children.front().attributes.at("fader_indicator_asset_path"));
+        REQUIRE(indicator.valid());
+        const auto* centre = pixel_at(
+            indicator, indicator.width / 2, indicator.height / 2);
+        CHECK(centre[0] == 255);
+        CHECK(centre[3] == 255);
+        const auto* edge = pixel_at(indicator, 0, indicator.height / 2);
+        CHECK(edge[0] == 0);
+        CHECK(edge[3] == 255);
+    }
+
+    SECTION("a rounded indicator keeps transparent corners from the delta") {
+        TempDirectory temp;
+        const auto clean = checker();
+        auto original = clean;
+        for (int y = 0; y < indicator_h; ++y)
+            for (int x = 0; x < indicator_w; ++x) {
+                const int dx = x - indicator_w / 2;
+                const int dy = y - indicator_h / 2;
+                if (dx * dx + dy * dy > 64) continue;
+                auto* p = pixel_at(
+                    original, indicator_x + x, indicator_y + y);
+                p[0] = p[1] = p[2] = 255;
+            }
+        const auto capture = temp.root / "browser.png";
+        const auto static_capture = temp.root / "browser-static.png";
+        write_png(capture, original);
+        write_png(static_capture, clean);
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.children.push_back(declared_static_horizontal_fader());
+        std::string error;
+        REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                    ir, capture, temp.root / "sprites", &error,
+                    static_capture) == 1);
+        const auto indicator = read_png(
+            ir.root.children.front().attributes.at("fader_indicator_asset_path"));
+        REQUIRE(indicator.valid());
+        CHECK(pixel_at(indicator, 0, 0)[3] == 0);
+        const auto* centre = pixel_at(
+            indicator, indicator.width / 2, indicator.height / 2);
+        CHECK(centre[0] == 255);
+        CHECK(centre[3] == 255);
+    }
+}
+
 TEST_CASE("an undeclared uniform fader keeps the live chrome path",
           "[import-design][browser-capture][fader][indicator][static-track]") {
     TempDirectory temp;
@@ -966,7 +1100,14 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
                 ir, capture, temp.root / "sprites", &error) == 1);
 
-    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    // Published DesignIR localizes captured art beside the document. Prove the
+    // materializer resolves that relocatable path, rather than only working in
+    // the importer's pre-publication run where the sprite path is absolute.
+    auto& sprite_path = ir.root.children.front().attributes.at("asset_path");
+    sprite_path = fs::relative(sprite_path, temp.root).generic_string();
+
+    auto root = pulp::view::build_native_view_tree(
+        ir, {}, {.asset_base_directory = temp.root});
     REQUIRE(root != nullptr);
     REQUIRE(root->child_count() == 1);
     auto* knob = dynamic_cast<pulp::view::Knob*>(root->child_at(0));
@@ -984,6 +1125,9 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     knob->set_bounds({0.0f, 0.0f, logical_size, logical_size});
     const float logical_half = logical_size * 0.5f;
     const float centre = logical_half;
+    pulp::canvas::RecordingCanvas body_probe;
+    knob->paint(body_probe);
+    CHECK(body_probe.count(pulp::canvas::DrawCommand::Type::draw_image) == 1);
 
     std::vector<Segment> frames;
     std::vector<float> angles;

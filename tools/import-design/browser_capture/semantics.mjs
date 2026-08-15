@@ -710,6 +710,33 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return '';
     }
   };
+  // Whether the marked element paints every pixel of its client rectangle.
+  // For a solid rectangular fader thumb, pixels where white happens to cover
+  // white are still thumb pixels and must travel with it. A screenshot delta
+  // cannot distinguish those from background; Chrome's computed paint does.
+  const indicatorOpaqueBox = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked) return false;
+      const style = window.getComputedStyle(marked);
+      const opaque = value => {
+        const text = (value || '').replace(/ /g, '').toLowerCase();
+        if (!text || text === 'transparent') return false;
+        if (text.indexOf('rgba(') !== 0) return true;
+        const fields = text.slice(5, -1).split(',');
+        return fields.length === 4 && Number(fields[3]) >= 1;
+      };
+      return opaque(style.backgroundColor) &&
+        style.backgroundClip === 'border-box' &&
+        Number(style.opacity) >= 1 &&
+        style.clipPath === 'none' &&
+        ['borderTopLeftRadius', 'borderTopRightRadius',
+         'borderBottomRightRadius', 'borderBottomLeftRadius']
+          .every(key => parseFloat(style[key]) === 0);
+    } catch (e) {
+      return false;
+    }
+  };
   // The accent this control is actually drawn in, resolved by the browser.
   //
   // Reading the PACK's accent token instead is wrong whenever a panel scopes or
@@ -902,6 +929,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // importer.
       indicator_bounds: indicatorBox(element),
       indicator_color: indicatorColor(element),
+      indicator_opaque_box: indicatorOpaqueBox(element),
       accent: accentColor(element),
       data_pulp: data,
       evidence,

@@ -854,6 +854,52 @@ async function runCapture(options) {
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
+    // Capture the exact authored body beneath declared moving indicators.
+    // Pixel inpainting cannot reconstruct arbitrary dither, tick rings, or
+    // gradients once a pointer/thumb has covered them; the defect is merely
+    // hidden at the declared value and becomes visible as soon as the control
+    // moves. `visibility` removes only the marked paint without changing its
+    // layout, so this second frame is a faithful source for static control
+    // bodies while browser.png remains the untouched comparison oracle.
+    const hiddenIndicators = await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        window.__pulpCaptureIndicatorStyles =
+          Array.from(document.querySelectorAll('[data-pulp-indicator]')).map(el => ({
+            el,
+            value: el.style.getPropertyValue('visibility'),
+            priority: el.style.getPropertyPriority('visibility')
+          }));
+        for (const entry of window.__pulpCaptureIndicatorStyles)
+          entry.el.style.setProperty('visibility', 'hidden', 'important');
+        return window.__pulpCaptureIndicatorStyles.length;
+      })()`,
+      returnByValue: true,
+    });
+    const hiddenIndicatorCount = hiddenIndicators.result?.value ?? 0;
+    let staticScreenshotBytes = screenshotBytes;
+    if (hiddenIndicatorCount > 0) {
+      staticScreenshotBytes =
+        await captureStableScreenshot(cdp, screenshotOptions);
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
+            if (entry.value)
+              entry.el.style.setProperty('visibility', entry.value, entry.priority);
+            else
+              entry.el.style.removeProperty('visibility');
+          }
+          delete window.__pulpCaptureIndicatorStyles;
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+    }
+    if (!staticScreenshotBytes) {
+      const error = new Error(
+        "the indicator-free visual frame did not stabilize");
+      error.code = "capture-static-frame-not-deterministic";
+      throw error;
+    }
     await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
@@ -876,6 +922,8 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
+      writeFile(
+        path.join(outputDir, "browser-static.png"), staticScreenshotBytes),
       // `layout.styles` rows are positional: entry N is the Nth property of
       // the request. Recording the request order alongside the data keeps the
       // snapshot self-describing, so a consumer never has to hardcode a
@@ -985,6 +1033,14 @@ async function runCapture(options) {
         mime_type: "image/png",
         path: "browser.png",
         sha256: sha256(screenshotBytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+      }, {
+        id: "reference:browser-static",
+        kind: "screenshot",
+        mime_type: "image/png",
+        path: "browser-static.png",
+        sha256: sha256(staticScreenshotBytes),
         width_px: pixels.width,
         height_px: pixels.height,
       }],

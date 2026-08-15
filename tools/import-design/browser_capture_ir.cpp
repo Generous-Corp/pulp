@@ -55,6 +55,13 @@ double number_member(const choc::value::ValueView& object,
     return object[key].getWithDefault<double>(fallback);
 }
 
+bool bool_member(const choc::value::ValueView& object,
+                 const char* key,
+                 bool fallback = false) {
+    if (!object.isObject() || !object.hasObjectMember(key)) return fallback;
+    return object[key].getWithDefault<bool>(fallback);
+}
+
 bool validate_reference_geometry(double logical_width,
                                  double logical_height,
                                  double dpr,
@@ -837,6 +844,8 @@ int lower_semantic_controls(const fs::path& path,
                     device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
                 control.attributes["browser_sprite_indicator_px"] =
                     device_pixel_rect(ind.left, ind.top, ind.width, ind.height, dpr);
+                if (bool_member(candidate, "indicator_opaque_box", false))
+                    control.attributes["browser_indicator_opaque_box"] = "1";
             }
         }
 
@@ -1273,6 +1282,45 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             *reference_png, *backing.width, *backing.height, result.error))
         return result;
 
+    const std::string render_asset_id = options.runtime_asset_id.empty()
+        ? reference_id : options.runtime_asset_id;
+    if (render_asset_id != reference_id) {
+        int matches = 0;
+        if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
+            const auto assets = envelope["assets"];
+            for (uint32_t i = 0; i < assets.size(); ++i) {
+                const auto asset = assets[static_cast<int>(i)];
+                if (!asset.isObject() ||
+                    string_member(asset, "id") != render_asset_id)
+                    continue;
+                ++matches;
+                const auto runtime_path = string_member(asset, "path");
+                auto runtime_png = contained_sidecar(
+                    envelope_path, runtime_path, result.error);
+                if (!runtime_png) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*runtime_png) != hash ||
+                    number_member(asset, "width_px", -1.0) !=
+                        logical_width * dpr ||
+                    number_member(asset, "height_px", -1.0) !=
+                        logical_height * dpr ||
+                    !validate_png_header(*runtime_png, *backing.width,
+                                         *backing.height, result.error)) {
+                    result.error = "browser runtime capture asset is invalid";
+                    return result;
+                }
+                backing.asset_id = render_asset_id;
+                backing.original_uri = "pulp-capture:///" + runtime_path;
+                backing.local_path = runtime_png->string();
+                backing.content_hash = hash;
+            }
+        }
+        if (matches != 1) {
+            result.error = "browser runtime capture asset is missing or ambiguous";
+            return result;
+        }
+    }
+
     DesignIR ir;
     ir.source = options.source;
     ir.source_file = options.source_file;
@@ -1349,14 +1397,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         capture.type = "frame";
         capture.name = "Browser capture";
         capture.render_mode = NodeRenderMode::faithful_capture;
-        capture.capture_asset_id = reference_id;
+        capture.capture_asset_id = render_asset_id;
         capture.style.position = "absolute";
         capture.style.left = static_cast<float>(-surface_left);
         capture.style.top = static_cast<float>(-surface_top);
         capture.style.width = static_cast<float>(logical_width);
         capture.style.height = static_cast<float>(logical_height);
         capture.style.object_fit = "fill";
-        capture.attributes["asset_ref"] = reference_id;
+        capture.attributes["asset_ref"] = render_asset_id;
         // Every node in a lowered tree carries an anchor: it is the identity a
         // consumer edits, re-links and reconciles against. This backdrop is
         // adapter-authored rather than a document element, so the anchor is a
@@ -1368,7 +1416,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         ir.root.children.push_back(std::move(capture));
     } else {
         ir.root.render_mode = NodeRenderMode::faithful_capture;
-        ir.root.capture_asset_id = reference_id;
+        ir.root.capture_asset_id = render_asset_id;
         ir.root.style.width = static_cast<float>(logical_width);
         ir.root.style.height = static_cast<float>(logical_height);
         ir.root.style.object_fit = "fill";
@@ -1389,7 +1437,9 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // the existing source-agnostic manifest refresh/localization pass aware
         // of the same backing without teaching that utility a browser-specific
         // field.
-        ir.root.attributes["asset_ref"] = reference_id;
+        ir.root.attributes["asset_ref"] = render_asset_id;
+        if (render_asset_id != reference_id)
+            ir.root.attributes["browser_reference_asset"] = reference_id;
     }
 
     // The backdrop alone is a picture. These children are the live controls.

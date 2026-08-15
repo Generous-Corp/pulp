@@ -181,6 +181,27 @@ std::string with_reference_member(std::string capture,
     return capture;
 }
 
+std::string with_static_runtime_asset(
+    std::string capture, std::string_view hash,
+    int width = 1912, int height = 1272) {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string asset = std::string(R"JSON(  },{
+    "id":"reference:browser-static",
+    "kind":"screenshot",
+    "mime_type":"image/png",
+    "path":"browser-static.png",
+    "sha256":")JSON") + std::string(hash) + R"JSON(",
+    "width_px":)JSON" + std::to_string(width) + R"JSON(,
+    "height_px":)JSON" + std::to_string(height) + R"JSON(
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), asset);
+    return capture;
+}
+
 std::string with_primary_surface(std::string capture,
                                  std::string_view surface) {
     const std::string settle =
@@ -294,6 +315,64 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
             "pulp-capture:///capture.json");
     REQUIRE(result.design_ir->root.attributes.at("browser_semantic_report") ==
             "pulp-capture:///semantic-report.json");
+}
+
+TEST_CASE("browser static frame is a validated runtime asset, not the A/B oracle",
+          "[import-design][browser-capture][ir][static-frame]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto hash = pulp::runtime::sha256_hex(png);
+    temp.write("browser.png", png);
+    temp.write("browser-static.png", png);
+    write_valid_reports(temp);
+    const auto options = pulp::import_design::BrowserCaptureIrOptions{
+        .source = pulp::view::DesignSource::html,
+        .runtime_asset_id = "reference:browser-static"};
+
+    SECTION("the untouched frame remains the oracle and static frame backs runtime") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), hash));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        REQUIRE(result);
+        CHECK(result.reference_png ==
+              fs::weakly_canonical(temp.root / "browser.png"));
+        CHECK(result.design_ir->root.capture_asset_id ==
+              "reference:browser-static");
+        CHECK(result.design_ir->root.attributes.at("asset_ref") ==
+              "reference:browser-static");
+        CHECK(result.design_ir->root.attributes.at("browser_reference_asset") ==
+              "reference:browser");
+        REQUIRE(result.design_ir->asset_manifest.assets.size() == 1);
+        CHECK(result.design_ir->asset_manifest.assets.front().asset_id ==
+              "reference:browser-static");
+    }
+
+    SECTION("missing static asset fails closed") {
+        temp.write("capture.json", envelope("browser.png", hash));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("missing or ambiguous") != std::string::npos);
+    }
+
+    SECTION("wrong static hash fails closed") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), std::string(64, '0')));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("invalid") != std::string::npos);
+    }
+
+    SECTION("wrong static geometry fails closed") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), hash, 1910, 1272));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("invalid") != std::string::npos);
+    }
 }
 
 TEST_CASE("browser interaction evidence is contained parsed and integrity-bound",
