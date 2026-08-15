@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.92.0`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.92.1`,
 which provides it, so the pinned binary is sufficient. That pin also makes
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
@@ -51,7 +51,7 @@ summary/watch commands.
 > One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
 > Continuous prevention is `shipyard runner watch --kill-hung-workers`
 > (v0.54.0+). Keep Shipyard itself current with `shipyard update`
-> (v0.55.0+; Pulp currently pins v0.92.0). All three replace the
+> (v0.55.0+; Pulp currently pins v0.92.1). All three replace the
 > legacy `planning/scripts/runner-watchdog.sh --fix` workflow, which is
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
@@ -2371,7 +2371,7 @@ envelope carries `status` and `merge_error`, and a malformed-request failure exi
 `8` rather than masquerading as success. See the Shipyard `ci` skill's
 status/exit-code table.
 
-Shipyard v0.92.0 is the fleet floor for queue throughput and capacity health,
+Shipyard v0.92.1 is the fleet floor for queue throughput and capacity health,
 including the v0.81.4 inventory and scheduler guarantees:
 fleet status observes complete registered and expected-host inventories, Tart
 disk/ccache admission problems, accidental hosted Linux routing, and stale
@@ -3532,7 +3532,7 @@ override is in place): give each runner its own `CCACHE_DIR`, or set
 ```bash
 shipyard update --check --json   # report installed vs available (safe in CI / cron)
 shipyard update                  # apply latest stable
-shipyard update --to v0.92.0     # restore Pulp's repository pin
+shipyard update --to v0.92.1     # restore Pulp's repository pin
 shipyard update --dry-run        # plan only
 ```
 
@@ -5408,7 +5408,7 @@ watch--kill-hung-workers`.
 ```bash
 shipyard update --check --json   # report installed vs available
 shipyard update                  # apply latest stable
-shipyard update --to v0.92.0     # restore Pulp's repository pin
+shipyard update --to v0.92.1     # restore Pulp's repository pin
 shipyard update --dry-run        # plan only
 ```
 
@@ -6068,7 +6068,7 @@ release, signing, deployment, and `pull_request_target` must never consume the
 generic selector. The checked-in `merge_group.linux` lane's `health_lease_*`
 profile fields require
 Shipyard's `runner local-linux-lease` producer (commit `f3bee74` or a containing
-release). Pulp pins Shipyard 0.92.0, which contains the producer and its bounded
+release). Pulp pins Shipyard 0.92.1, which contains the producer and its bounded
 GitHub calls while keeping offline-busy recovery fail-closed. Keep the selector
 unset until that pin is installed on the controller and the producer is
 scheduled. The producer must read `main`'s live

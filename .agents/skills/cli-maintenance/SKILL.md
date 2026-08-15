@@ -502,6 +502,12 @@ remain connection-bound through `ControlClient`. The installed broker may
 rebind its client ID and bounded grants across separate CLI processes only after
 every new connection independently passes kernel and static-code authentication;
 never persist a bearer token or accept a client-supplied durable principal.
+`cmd_control.cpp` must also remain compilable when `PULP_ENABLE_INSPECTOR=OFF`,
+where the `pulp::inspect-client` target is intentionally absent. Guard broker /
+client headers, helpers, and live execution with the target-derived availability
+macro; keep offline `control profiles` and `control audit` operational, and have
+live commands fail explicitly with `control-unavailable`. Pin both sides with an
+inspector-off shell-out test and a forge-dev SDK build/probe.
 For `control call` and `control watch`, `--timeout-ms`, and for their typed MCP
 operation counterparts, `timeout_ms`, are each one absolute operation deadline,
 not a fresh budget per transport step. Connect, enroll, exact-instance inventory,

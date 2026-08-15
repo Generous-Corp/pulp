@@ -438,9 +438,9 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.92.0 — leased runners and queue ownership are load-bearing
+### Why the pin sits at v0.92.1 — leased runners and queue ownership are load-bearing
 
-v0.92.0 is Pulp's current operational floor. It includes the v0.87 fail-closed
+v0.92.1 is Pulp's current operational floor. It includes the v0.87 fail-closed
 trusted and PR-safe local-Linux lease producers with bounded GitHub observation
 and mutation calls, the v0.88 exact-head steward handoff, and the v0.90 atomic
 steward ownership transfer. It also materializes missing classic required checks
