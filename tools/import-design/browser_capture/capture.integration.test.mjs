@@ -18,6 +18,15 @@ import { inflateSync } from "node:zlib";
 
 const execute = promisify(execFile);
 
+async function runCapture(script, browser, input, root, output, width, height) {
+  await execute(process.execPath, [
+    script, "capture", "--browser", browser, "--input", input,
+    "--root", root, "--output", output,
+    "--initial-width", String(width), "--initial-height", String(height),
+    "--dpr", "2", "--timeout-ms", "20000",
+  ], { maxBuffer: 1024 * 1024 });
+}
+
 function paeth(left, above, upperLeft) {
   const estimate = left + above - upperLeft;
   const leftDistance = Math.abs(estimate - left);
@@ -141,7 +150,8 @@ test("real browser capture waits through a delayed DOM commit",
       );
       resolve();
     }, 1400);
-  });
+});
+
 </script>
 `);
       await execute(process.execPath, [
@@ -169,6 +179,56 @@ test("real browser capture waits through a delayed DOM commit",
       });
       await assert.rejects(
         access(path.join(output, "interaction-report.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("indicator-free capture removes only declared moving art",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-static-art-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+        html,body{margin:0;width:80px;height:60px;background:#246}
+        .body{position:absolute;left:10px;top:10px;width:50px;height:40px;background:#ca8}
+        .pointer{position:absolute;left:23px;top:4px;width:4px;height:28px;background:#f00}
+      </style><div class="body" data-pulp-kind="knob">
+        <div class="pointer" data-pulp-indicator></div></div>`);
+      await runCapture(script, browser, input, root, output, 80, 60);
+      const original = await readFile(path.join(output, "browser.png"));
+      const clean = await readFile(path.join(output, "browser-static.png"));
+      assert.deepEqual(rgbaPixel(original, 100, 90), rgbaPixel(clean, 100, 90),
+        "pixels outside the declared indicator stay exact");
+      assert.deepEqual(rgbaPixel(original, 100, 90), [204, 170, 136, 255]);
+      assert.deepEqual(rgbaPixel(original, 70, 40), [255, 0, 0, 255]);
+      assert.deepEqual(rgbaPixel(clean, 70, 40), [204, 170, 136, 255],
+        "the clean frame reveals the exact body beneath moving art");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("a panel without declared indicators reuses its exact screenshot",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-static-zero-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input,
+        `<!doctype html><style>html,body{margin:0}main{width:40px;height:30px;background:#357}</style><main></main>`);
+      await runCapture(script, browser, input, root, output, 40, 30);
+      assert.deepEqual(
+        await readFile(path.join(output, "browser-static.png")),
+        await readFile(path.join(output, "browser.png")),
+        "zero-indicator capture publishes the original stable bytes");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

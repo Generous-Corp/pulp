@@ -55,6 +55,13 @@ double number_member(const choc::value::ValueView& object,
     return object[key].getWithDefault<double>(fallback);
 }
 
+bool bool_member(const choc::value::ValueView& object,
+                 const char* key,
+                 bool fallback = false) {
+    if (!object.isObject() || !object.hasObjectMember(key)) return fallback;
+    return object[key].getWithDefault<bool>(fallback);
+}
+
 bool validate_reference_geometry(double logical_width,
                                  double logical_height,
                                  double dpr,
@@ -237,6 +244,7 @@ struct DeclaredPointer {
     float r_in = 0.0f;
     float r_out = 0.0f;
     float width = 0.0f;
+    float angle_rad = 0.0f;
 };
 
 /// The pointer's box, as the capture recorded it.
@@ -333,13 +341,36 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
                                   : ind.top + ind.height * 0.5;
     const double dx = pointer_cx - cx;
     const double dy = pointer_cy - cy;
-    const double distance = std::sqrt(dx * dx + dy * dy);
+    double distance = std::sqrt(dx * dx + dy * dy);
     // A pointer centred on the dial has no radial direction to sweep along, so
     // there is nothing to reproduce. Refuse rather than divide by zero and
     // stamp a pointer that pivots on itself.
     if (!(distance > 0.0)) return std::nullopt;
-    const double ux = dx / distance;
-    const double uy = dy / distance;
+    double ux = dx / distance;
+    double uy = dy / distance;
+    const double short_axis = std::min(x_extent, y_extent);
+    const double long_axis = std::max(x_extent, y_extent);
+    const bool oriented_thin_pointer =
+        ind.oriented && short_axis > 0.0 && long_axis > short_axis * 1.5;
+    if (oriented_thin_pointer) {
+        // An elongated pointer declares its direction with its own long axis.
+        // A small border/containing-block offset must not rotate that axis. Pick
+        // the sign that points from the dial toward the pointer centre, then
+        // use the centre delta only to locate the pointer along that axis.
+        if (x_extent >= y_extent) {
+            ux = xx / x_extent;
+            uy = xy / x_extent;
+        } else {
+            ux = yx / y_extent;
+            uy = yy / y_extent;
+        }
+        if (ux * dx + uy * dy < 0.0) {
+            ux = -ux;
+            uy = -uy;
+        }
+        distance = ux * dx + uy * dy;
+        if (!(distance > 0.0)) return std::nullopt;
+    }
     // Support function of the box along the radial axis, and along the axis
     // perpendicular to it.
     const double along =
@@ -350,7 +381,17 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     DeclaredPointer out;
     out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
     out.r_out = static_cast<float>((distance + along) / half);
-    out.width = static_cast<float>((2.0 * across) / half);
+    // Thickness belongs to the pointer's own short axis. Projecting the whole
+    // rectangle onto the radial perpendicular leaks some of its long axis into
+    // the result whenever the authored pivot and the recovered dial centre are
+    // even slightly misaligned (borders and containing blocks commonly differ
+    // by a few pixels). That turns a thin rotated needle into a wedge. The
+    // transformed intrinsic axes already carry rotation and non-uniform scale;
+    // the shorter full extent is therefore the stable authored thickness.
+    const double thickness = oriented_thin_pointer ? 2.0 * short_axis
+                                                    : 2.0 * across;
+    out.width = static_cast<float>(thickness / half);
+    out.angle_rad = static_cast<float>(std::atan2(uy, ux));
     if (!(out.r_out > out.r_in)) return std::nullopt;
     return out;
 }
@@ -785,6 +826,30 @@ int lower_semantic_controls(const fs::path& path,
                         std::to_string(pointer->r_out);
                     control.attributes["knob_ind_w"] =
                         std::to_string(pointer->width);
+                    // Temporary sprite-pass geometry: unlike the painted
+                    // client rect below, this is the pointer's radial axis.
+                    // The cleaner uses it to erase only the oriented authored
+                    // pointer rather than its much larger axis-aligned bbox.
+                    control.attributes["knob_ind_capture_angle_rad"] =
+                        std::to_string(pointer->angle_rad);
+                    // Preserve the authored angular phase at the declared
+                    // value. Runtime still sweeps the full normal 270-degree
+                    // arc; this offset only calibrates that arc so its initial
+                    // frame agrees with the browser rather than snapping to a
+                    // generic rest angle on load.
+                    if (const auto value = strict_finite_float(declared_value)) {
+                        constexpr double kPi = 3.14159265358979323846;
+                        const double normalized = std::clamp(
+                            static_cast<double>(*value), 0.0, 1.0);
+                        const double standard_angle =
+                            -kPi * 0.5 + (normalized - 0.5) * kPi * 1.5;
+                        const double phase = std::remainder(
+                            static_cast<double>(pointer->angle_rad) -
+                                standard_angle,
+                            kPi * 2.0);
+                        control.attributes["knob_ind_phase_rad"] =
+                            std::to_string(phase);
+                    }
                     if (const auto color =
                             string_member(candidate, "indicator_color");
                         !color.empty())
@@ -811,6 +876,8 @@ int lower_semantic_controls(const fs::path& path,
                     device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
                 control.attributes["browser_sprite_indicator_px"] =
                     device_pixel_rect(ind.left, ind.top, ind.width, ind.height, dpr);
+                if (bool_member(candidate, "indicator_opaque_box", false))
+                    control.attributes["browser_indicator_opaque_box"] = "1";
             }
         }
 
@@ -1247,6 +1314,45 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             *reference_png, *backing.width, *backing.height, result.error))
         return result;
 
+    const std::string render_asset_id = options.runtime_asset_id.empty()
+        ? reference_id : options.runtime_asset_id;
+    if (render_asset_id != reference_id) {
+        int matches = 0;
+        if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
+            const auto assets = envelope["assets"];
+            for (uint32_t i = 0; i < assets.size(); ++i) {
+                const auto asset = assets[static_cast<int>(i)];
+                if (!asset.isObject() ||
+                    string_member(asset, "id") != render_asset_id)
+                    continue;
+                ++matches;
+                const auto runtime_path = string_member(asset, "path");
+                auto runtime_png = contained_sidecar(
+                    envelope_path, runtime_path, result.error);
+                if (!runtime_png) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*runtime_png) != hash ||
+                    number_member(asset, "width_px", -1.0) !=
+                        logical_width * dpr ||
+                    number_member(asset, "height_px", -1.0) !=
+                        logical_height * dpr ||
+                    !validate_png_header(*runtime_png, *backing.width,
+                                         *backing.height, result.error)) {
+                    result.error = "browser runtime capture asset is invalid";
+                    return result;
+                }
+                backing.asset_id = render_asset_id;
+                backing.original_uri = "pulp-capture:///" + runtime_path;
+                backing.local_path = runtime_png->string();
+                backing.content_hash = hash;
+            }
+        }
+        if (matches != 1) {
+            result.error = "browser runtime capture asset is missing or ambiguous";
+            return result;
+        }
+    }
+
     DesignIR ir;
     ir.source = options.source;
     ir.source_file = options.source_file;
@@ -1323,14 +1429,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         capture.type = "frame";
         capture.name = "Browser capture";
         capture.render_mode = NodeRenderMode::faithful_capture;
-        capture.capture_asset_id = reference_id;
+        capture.capture_asset_id = render_asset_id;
         capture.style.position = "absolute";
         capture.style.left = static_cast<float>(-surface_left);
         capture.style.top = static_cast<float>(-surface_top);
         capture.style.width = static_cast<float>(logical_width);
         capture.style.height = static_cast<float>(logical_height);
         capture.style.object_fit = "fill";
-        capture.attributes["asset_ref"] = reference_id;
+        capture.attributes["asset_ref"] = render_asset_id;
         // Every node in a lowered tree carries an anchor: it is the identity a
         // consumer edits, re-links and reconciles against. This backdrop is
         // adapter-authored rather than a document element, so the anchor is a
@@ -1342,7 +1448,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         ir.root.children.push_back(std::move(capture));
     } else {
         ir.root.render_mode = NodeRenderMode::faithful_capture;
-        ir.root.capture_asset_id = reference_id;
+        ir.root.capture_asset_id = render_asset_id;
         ir.root.style.width = static_cast<float>(logical_width);
         ir.root.style.height = static_cast<float>(logical_height);
         ir.root.style.object_fit = "fill";
@@ -1363,7 +1469,9 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // the existing source-agnostic manifest refresh/localization pass aware
         // of the same backing without teaching that utility a browser-specific
         // field.
-        ir.root.attributes["asset_ref"] = reference_id;
+        ir.root.attributes["asset_ref"] = render_asset_id;
+        if (render_asset_id != reference_id)
+            ir.root.attributes["browser_reference_asset"] = reference_id;
     }
 
     // The backdrop alone is a picture. These children are the live controls.

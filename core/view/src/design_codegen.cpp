@@ -1520,7 +1520,7 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                        << kattr_f("knob_ind_w") << ", '"
                        << js_single_quote_escape(
                               c != node.attributes.end() ? c->second : "")
-                       << "');\n";
+                       << "', " << kattr_f("knob_ind_phase_rad") << ");\n";
                 }
             }
         }
