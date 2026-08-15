@@ -46,6 +46,7 @@ TrackProgram::TrackProgram(
 
 PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                                  timeline::ItemId project_id, timeline::ItemId sequence_id,
+                                 std::shared_ptr<const timeline::Project> project,
                                  std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                                  std::shared_ptr<const CompileContextRegistry> content_compilers,
                                  std::shared_ptr<const void> content_compiler_generation,
@@ -56,7 +57,7 @@ PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t doc
                                  std::uint64_t generated_id_base,
                                  std::vector<std::shared_ptr<const TrackProgram>> tracks) noexcept
     : generation_(generation), document_revision_(document_revision), project_id_(project_id),
-      sequence_id_(sequence_id), tempo_map_(std::move(tempo_map)),
+      sequence_id_(sequence_id), project_(std::move(project)), tempo_map_(std::move(tempo_map)),
       content_compilers_(std::move(content_compilers)),
       content_compiler_generation_(std::move(content_compiler_generation)),
       content_compiler_revision_(content_compiler_revision), audio_assets_(std::move(audio_assets)),

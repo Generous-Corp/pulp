@@ -37,8 +37,19 @@ TimelineGraphAdmission validate_timeline_graph_routes(
         if (has_post_source != has_post_destination)
             return reject(TimelineGraphAdmissionCode::IncompletePostDeviceRoute, 1, 2,
                           route.track_id);
+        bool resolver_owned_candidate = false;
+        if (!program_track->ordered_device_placement_ids().empty() && route.device_routes.empty() &&
+            route.midi_destination == 0 && !has_post_source && !has_post_destination) {
+            const auto& project = program.project_owner();
+            const auto* sequence =
+                project ? project->find_sequence(program.sequence_id()) : nullptr;
+            const auto* authored = sequence ? sequence->find_track(route.track_id) : nullptr;
+            resolver_owned_candidate = authored && authored->device_chain().size() == 1 &&
+                                       authored->device_chain().front().configuration.device_kind ==
+                                           timeline::DeviceKind::BuiltIn;
+        }
         if (!program_track->ordered_device_placement_ids().empty() &&
-            !program_track->mixer().transparent() && !has_post_source)
+            !program_track->mixer().transparent() && !has_post_source && !resolver_owned_candidate)
             return reject(TimelineGraphAdmissionCode::MissingPostDeviceRoute, 0, 1, route.track_id);
         if (has_post_source) {
             const auto* source = graph.node(route.post_device_audio_source);
@@ -65,11 +76,13 @@ TimelineGraphAdmission validate_timeline_graph_routes(
                               std::max(0, post_destination->num_input_ports), route.track_id,
                               route.post_mixer_audio_destination);
         }
-        const auto automation_admission = detail::validate_timeline_automation_routes(
-            graph, *program_track, route.device_routes, claimed_device_nodes,
-            route_metadata[index]);
-        if (!automation_admission)
-            return automation_admission;
+        if (!resolver_owned_candidate) {
+            const auto automation_admission = detail::validate_timeline_automation_routes(
+                graph, *program_track, route.device_routes, claimed_device_nodes,
+                route_metadata[index]);
+            if (!automation_admission)
+                return automation_admission;
+        }
     }
 
     return {};

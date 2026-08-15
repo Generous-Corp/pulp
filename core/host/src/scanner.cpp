@@ -124,10 +124,19 @@ std::vector<std::string> PluginScanner::default_paths(PluginFormat format) {
             break;
         case PluginFormat::LV2:
             break; // LV2 not typical on macOS
+        case PluginFormat::BuiltIn:
+            break;
     }
 #elif defined(_WIN32)
-    paths.push_back("C:\\Program Files\\Common Files\\VST3");
-    paths.push_back("C:\\Program Files\\Common Files\\CLAP");
+    switch (format) {
+        case PluginFormat::VST3:
+            paths.push_back("C:\\Program Files\\Common Files\\VST3");
+            break;
+        case PluginFormat::CLAP:
+            paths.push_back("C:\\Program Files\\Common Files\\CLAP");
+            break;
+        default: break;
+    }
 #elif defined(__linux__)
     auto home = runtime::get_env("HOME");
     std::string home_str = home.value_or("");
@@ -165,6 +174,8 @@ bool PluginScanner::is_plugin_bundle(const std::string& path, PluginFormat forma
             return path.ends_with(".clap");
         case PluginFormat::LV2:
             return path.ends_with(".lv2");
+        case PluginFormat::BuiltIn:
+            return false;
     }
     return false;
 }
@@ -240,6 +251,8 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
                                                      const ScanBlacklist* blacklist) {
     std::vector<PluginInfo> results;
 
+    if (format == PluginFormat::BuiltIn) return results;
+
     std::error_code ec;
     if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec)) return results;
 
@@ -266,6 +279,8 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
             }
             case PluginFormat::LV2:
                 results.push_back(scan_lv2_bundle(path));
+                break;
+            case PluginFormat::BuiltIn:
                 break;
             default: break;
         }

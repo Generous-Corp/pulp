@@ -180,19 +180,14 @@ TEST_CASE("PluginInfo category taxonomy accepts known strings",
 
 // ── PluginFormat enum ───────────────────────────────────────────────────
 
-TEST_CASE("PluginFormat enum covers the 5 shipping formats",
+TEST_CASE("PluginFormat enum ordinals cover the 6 shipping formats",
           "[host][plugin-info][format]") {
-    for (auto f : {
-             PluginFormat::VST3,
-             PluginFormat::AudioUnit,
-             PluginFormat::AudioUnitV3,
-             PluginFormat::CLAP,
-             PluginFormat::LV2,
-         }) {
-        PluginInfo p;
-        p.format = f;
-        REQUIRE(p.format == f);
-    }
+    REQUIRE(static_cast<int>(PluginFormat::VST3) == 0);
+    REQUIRE(static_cast<int>(PluginFormat::AudioUnit) == 1);
+    REQUIRE(static_cast<int>(PluginFormat::AudioUnitV3) == 2);
+    REQUIRE(static_cast<int>(PluginFormat::CLAP) == 3);
+    REQUIRE(static_cast<int>(PluginFormat::LV2) == 4);
+    REQUIRE(static_cast<int>(PluginFormat::BuiltIn) == 5);
 }
 
 TEST_CASE("PluginScanner default paths match platform format support",
@@ -230,6 +225,7 @@ TEST_CASE("PluginScanner default paths match platform format support",
 #else
     REQUIRE(PluginScanner::default_paths(PluginFormat::VST3).empty());
 #endif
+    REQUIRE(PluginScanner::default_paths(PluginFormat::BuiltIn).empty());
 }
 
 TEST_CASE("PluginScanner identifies bundle suffixes for each host format",
@@ -251,6 +247,10 @@ TEST_CASE("PluginScanner identifies bundle suffixes for each host format",
                                                   PluginFormat::CLAP));
     REQUIRE_FALSE(PluginScanner::is_plugin_bundle("/tmp/Test.clap",
                                                   PluginFormat::LV2));
+    REQUIRE_FALSE(PluginScanner::is_plugin_bundle("pulp.instrument.basic",
+                                                  PluginFormat::BuiltIn));
+    REQUIRE_FALSE(PluginScanner::is_plugin_bundle("pulp.instrument.basic.builtin",
+                                                  PluginFormat::BuiltIn));
 }
 
 TEST_CASE("PluginScanner honors disabled format flags without progress callbacks",

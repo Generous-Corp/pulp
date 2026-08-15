@@ -59,6 +59,9 @@ void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
                                         edge.dest_port) &&
                           mutated;
         }
+        for (const auto& device : current->owned_devices)
+            if (edit->node(device.plugin_node) != nullptr)
+                mutated = edit->remove_node(device.plugin_node) && mutated;
         for (const auto& track : current->tracks) {
             if (edit->node(track->audio_node) != nullptr)
                 mutated = edit->remove_node(track->audio_node) && mutated;
@@ -110,6 +113,9 @@ TimelineGraphPlaybackBinding::adopt_program(const playback::PlaybackProgram& pro
     if (program.tracks().size() != previous->prepared_track_ids.size())
         return reject(TimelineGraphAdmissionCode::MissingTrack, program.tracks().size(),
                       previous->prepared_track_ids.size());
+    if (const auto devices = validate_owned_timeline_devices(program, previous->owned_devices);
+        !devices)
+        return devices;
     const auto aggregate_stretch = playback::admit_realtime_stretch_program(
         program, previous->prepared_sample_rate, previous->prepared_max_block_size,
         previous->config.audio_limits);
@@ -145,6 +151,7 @@ TimelineGraphPlaybackBinding::adopt_program(const playback::PlaybackProgram& pro
                       next->realtime_stretch->latency_samples(),
                       previous->realtime_stretch->latency_samples());
     next->tracks = previous->tracks;
+    next->owned_devices = previous->owned_devices;
     next->automation_tracks.reserve(previous->automation_tracks.size());
     std::vector<NodeId> claimed_device_nodes;
     for (const auto id : previous->prepared_track_ids) {
@@ -254,9 +261,8 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             return result;
         }
     }
-    // Validate every live-Stretch lane before automation, notes, or any graph
-    // worker can mutate callback state. One rejected track rejects the whole
-    // program block without leaving sibling side effects behind.
+    // Validate every live-Stretch lane before any graph worker can mutate
+    // callback state; one rejected track rejects the entire program block.
     if (const auto failure =
             detail::preflight_timeline_stretch(*state->realtime_stretch, *block.program(),
                                                state->prepared_track_ids, transport, output)) {
@@ -333,9 +339,6 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
                                notes_cleared && automation_cleared);
         }
         if (!state->graph_snapshot.inject_midi(track->midi_node, track->note_renderer->events())) {
-            // Admission bounds every note stream to the graph mailbox's exact
-            // capacity, so a failed injection here means the prepared live
-            // snapshot (and therefore the admitted routed path) disappeared.
             const bool notes_cleared = clear_notes();
             const bool automation_cleared = clear_automation(delivered_automation_tracks);
             return fail_closed(TimelineGraphProcessCode::RoutedDispatchFailed,
@@ -357,10 +360,7 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     for (std::uint8_t index = 0; index < transport.range_count; ++index)
         context.transport_jump = context.transport_jump || transport.ranges[index].discontinuity;
     // SignalGraph::process is a fork/join barrier: its parallel executor's
-    // worker-pool run() waits for every participant before returning. Therefore
-    // the stack-owned `block` pin and caller-owned exact snapshot remain alive
-    // for every custom-node callback, including all parallel workers. Clear the
-    // shared pointers only after that barrier has returned.
+    // worker-pool run() waits for every participant before returning.
     const auto routed_failures_before = graph_.routed_only_execution_failures();
     state->graph_snapshot.process(output, input, static_cast<int>(transport.frame_count), context);
     const bool routed_dispatch_failed =

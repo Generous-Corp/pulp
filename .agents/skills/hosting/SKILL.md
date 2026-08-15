@@ -335,6 +335,33 @@ Two things that bite when baking analog VCF nodes:
 
 ## Signal graph gotchas
 
+### Timeline-owned built-in devices stay document-authoritative
+
+`PluginFormat::BuiltIn` is the host-only identity for pathless Pulp devices. Its
+wire spelling is `builtin`; Timeline's existing durable `DeviceKind` spelling
+remains `built_in`. The only initial resolver key is
+`pulp.instrument.basic`, with an empty path and an exact 0-input/2-output
+shape. Do not add BuiltIn to external scan paths, bundle suffixes, the isolated
+scanner/worker protocol, or CLI format selection.
+
+Timeline lowering reads the immutable `Project` owner pinned inside the exact
+`PlaybackProgram`; it never consults the latest project store. Resolver-owned
+plugin NodeIds are derived graph state and must not enter Timeline JSON. Add and
+prepare their slots inside `PreparedTopologyEdit`, publish graph plus binding
+atomically, and remove only slots carrying that transaction's private ownership
+marker. Teardown and replacement must let retired execution snapshots drain
+before the slot's balanced release. An unchanged full `DevicePlacement` may
+retain its node; any declaration drift requires a fresh prepare and must not be
+accepted by content-only program adoption.
+
+The initial contract accepts exactly one `PreFader` `EventToAudio` BuiltIn
+placement, not bypassed, exact wet value 1.0, and no state reference. It creates
+one MIDI edge and two stereo audio edges through the track mixer. Unsupported
+positions, slot kinds, namespaces, keys, bypass/wet/state variants, multi-device
+chains, and mixed caller/resolver ownership fail closed with distinct admission
+codes. Keep a factory-failure atomicity test and a deterministic non-silent
+save/reopen render proof beside the legacy caller-owned route controls.
+
 - `SignalGraph` dispatches plugin nodes through the additive
   `PluginSlot::process(format::ProcessBuffers&, ...)` overload. The default
   implementation projects the active main input/output bus back to the legacy
