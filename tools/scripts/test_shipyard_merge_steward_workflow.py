@@ -141,6 +141,8 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("-f expected_head=\"$head\"", self.text)
         self.assertIn("-f assignment_epoch=\"$epoch\"", self.text)
         self.assertIn("-f blocker_fingerprint=\"$fingerprint\"", self.text)
+        self.assertIn("-f publish_status=true", self.text)
+        self.assertIn("-f attempt_repair=true", self.text)
         self.assertNotIn("actions/runners?per_page=100", self.text)
         self.assertNotIn("shipyard_recovery_worker_select.py", self.text)
         self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)

@@ -1273,6 +1273,12 @@ pulp macos status --pr 1910
 
 `build-macos.yml` is independent of `build.yml`'s matrix — they share check names but not workflow_runs. The matrix workflow continues running Linux/Windows as usual; only the macOS leg is replaced.
 
+The retarget lane consumes the same reduced required-gate CTest labels as
+`build.yml` and explicitly fetches protected `main` before capability-history
+checks. Keep those two contracts mirrored: a provider reroute must not turn the
+required gate into a full benchmark lane or depend on stale runner checkout
+history.
+
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 
 | Input | Default | Effect |

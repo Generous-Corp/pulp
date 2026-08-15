@@ -22,6 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+BUILD_MACOS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-macos.yml"
 COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
 SANITIZERS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "sanitizers.yml"
 TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.yml"
@@ -127,6 +128,24 @@ class WorkflowBuildDirTests(unittest.TestCase):
           fi"""
         self.assertIn(fetch_step, text)
         self.assertLess(text.index(fetch_step), text.index("- name: Test (non-Windows)"))
+
+    def test_macos_retarget_matches_required_gate_selection(self) -> None:
+        text = BUILD_MACOS_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("- name: Fetch protected capability base", text)
+        self.assertIn(
+            'git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"',
+            text,
+        )
+        self.assertIn(
+            '-LE "validation|slow|performance|bench|quality-lab"',
+            text,
+        )
+        self.assertIn("--repeat until-pass:2", text)
+        self.assertLess(
+            text.index("- name: Fetch protected capability base"),
+            text.index("- name: Test"),
+        )
 
     def test_event_pinned_fetch_repairs_a_shallow_pull_request_checkout(self) -> None:
         def git(

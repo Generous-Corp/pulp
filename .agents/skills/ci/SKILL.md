@@ -2801,6 +2801,20 @@ encoding priority in GitHub labels by giving their TartCI supervisors increasing
 minimum queued ages (M3 first, then M5, then M1). A returning faster host cannot
 preempt a job that another runner has already claimed.
 
+**Keep recovery routing and repair activation explicit.** The M3 recovery
+endpoint is a non-secret repository variable
+(`vars.SUBROUTER_RECOVERY_BASE_URL`); only the admin bearer belongs in the
+protected `SUBROUTER_SESSION_LEASE_ADMIN_TOKEN` secret. Mint the short-lived
+model-bound lease in trusted default-branch code before fetching the untrusted
+PR head, then expose only the returned scoped broker credential to the model.
+When the steward dispatches the recovery workflow it must set both
+`publish_status=true` and `attempt_repair=true`: omitting the latter silently
+turns the autonomous path into triage-only monitoring. This does not bypass the
+cost or safety fence—Luna must still return the exact `needs_sol_fix`
+classification before the single networkless Sol-medium repair step can run,
+and the GitHub-hosted publisher independently revalidates the exact head,
+assignment epoch, and blocker fingerprint before applying any patch.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
@@ -3148,6 +3162,12 @@ Linux/Windows too — wasted compute when they already passed.
 Branch protection's required `macos` check accepts the latest
 same-named check from either workflow, so `build-macos.yml`'s `macos`
 job supersedes the matrix's `macos` job when fresher.
+
+It must remain semantically identical to the required macOS gate: fetch
+protected `main` for capability-history checks and exclude
+`validation|slow|performance|bench|quality-lab`. A retarget changes only the
+provider; it must not turn required CI into a full benchmark lane or depend on
+a warm runner's stale refs.
 
 The macOS lane configures with `-DPULP_LOTTIE=ON` so the opt-in skottie
 render path (LottieAnimation → SkiaCanvas) gets real CI coverage — it is
@@ -6168,12 +6188,15 @@ leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost a
 budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
 coverage suite" step.
 
-Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
-`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
-genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
-in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
-`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
-flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+Now a budget hit remains advisory only on Windows. Linux and macOS are receipt-authoritative:
+their Cobertura verifier runs and fails if the report is absent, so a green workflow can no
+longer hide missing native uploads. A shared coverage CTest policy also skips the
+slow/soak/configuration proofs already enforced by the primary build matrix; both the canonical
+coverage script and local pre-push diff coverage consume it across GitHub-hosted and
+SSH/self-hosted M1/M3 callers, and
+`--include-slow-tests` opts into the full suite. The suite runs ctest in parallel (`-j`, capped
+like `build.yml`) with a per-test `--timeout`. The receipt watchdog remains the cross-run alarm.
+Editing
 `coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
 skill (skill-sync map).
 

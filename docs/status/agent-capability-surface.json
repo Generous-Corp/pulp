@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 36,
+  "inventory_version": 39,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,16 +37,16 @@
     }
   ],
   "counts": {
-    "public_headers": 423,
-    "reviewed_headers": 126,
+    "public_headers": 424,
+    "reviewed_headers": 127,
     "legacy_unreviewed_headers": 297,
-    "unsupported_headers": 1,
+    "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 80,
       "capability_support": 38,
       "infrastructure": 7,
       "legacy_unreviewed": 297,
-      "unsupported_capability": 1
+      "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
@@ -74,10 +74,10 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 245,
-        "reviewed_headers": 85,
+        "public_headers": 246,
+        "reviewed_headers": 86,
         "legacy_unreviewed_headers": 160,
-        "unsupported_headers": 1
+        "unsupported_headers": 2
       },
       "timebase": {
         "public_headers": 12,
@@ -3481,7 +3481,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:cf36559168b3f108277cd9106604ec16670b9cbae863813d468f4ab0363d3aff",
+      "fingerprint": "sha256:6a28b95cbbbab06543097273312efde14ce03abbedafc063e3950e3694bee56a",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3973,6 +3973,15 @@
         "signal.waveguide-primitives"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/waveset_transformer.hpp",
+      "fingerprint": "sha256:9d0dcf5f66673d434f93481081be084dcfa7674613b801bb3d731117463aa267",
+      "include": "pulp/signal/waveset_transformer.hpp",
+      "disposition": "unsupported_capability",
+      "capability_keys": [],
+      "rationale": "The bounded WavesetTransformer is a signal-only public DSP API; it has no typed generator binding and makes no installed agent capability claim."
     },
     {
       "domain": "signal",

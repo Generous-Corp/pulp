@@ -43,6 +43,7 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
+CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 from lcov_cobertura import LcovCobertura  # noqa: E402
 
@@ -76,6 +77,54 @@ class ParallelismContractTests(unittest.TestCase):
         self.assertIn('TEST_JOBS="${PULP_COVERAGE_TEST_JOBS:-8}"', text)
         self.assertIn('--test-jobs) TEST_JOBS="$2"', text)
         self.assertIn('CTEST_JOBS="${TEST_JOBS}"', text)
+
+    def test_default_suite_excludes_slow_proofs_for_every_caller(self) -> None:
+        text = SCRIPT.read_text()
+        policy = CTEST_POLICY.read_text()
+        self.assertIn('source "${SCRIPT_DIR}/coverage_ctest_policy.sh"', text)
+        self.assertIn("PULP_COVERAGE_CTEST_DEFAULT_ARGS", text)
+        self.assertIn("validation|slow|performance|bench|quality-lab", policy)
+        self.assertIn("fdn.*bounded.*parameter.*vector", policy)
+        self.assertIn('EXTRA_CTEST_ARGS=("${DEFAULT_CTEST_ARGS[@]}")', text)
+
+        match = re.search(
+            r"PULP_COVERAGE_CTEST_NAME_EXCLUDE:=\((?P<pattern>[^}]+)\)\}",
+            policy,
+        )
+        self.assertIsNotNone(match, "default CTest name exclusion must be one array item")
+        exclusion = re.compile(match.group("pattern"))
+        source = "\n".join(
+            (REPO_ROOT / "test" / name).read_text()
+            for name in (
+                "test_fdn_reverb.cpp",
+                "test_character_delay.cpp",
+                "test_osc_vco.cpp",
+                "test_analog_vcf.cpp",
+                "test_osc_wt.cpp",
+            )
+        )
+        expected_slow_cases = (
+            "fdn reverb stays bounded and decaying for every parameter vector",
+            "saturating characters self-oscillate bounded at maximum feedback",
+            "physical tape keeps sub-unity feedback below oscillation",
+            "drift wanders the pitch slowly at ~the commanded RMS",
+            "Analog VCF stays finite at worst-case drive and oversampling",
+            "OSC-WT worst alias swept to the top of every band",
+            "OSC-WT worst-case alias is detection-floor-limited, not a fixed spur",
+        )
+        for case in expected_slow_cases:
+            self.assertIn(case, source, f"expected slow test was renamed: {case}")
+            self.assertRegex(case, exclusion, f"coverage no longer excludes: {case}")
+
+    def test_full_suite_has_an_explicit_opt_out(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('--include-slow-tests) INCLUDE_SLOW_TESTS=true', text)
+        self.assertIn('if [[ "${INCLUDE_SLOW_TESTS}" == true ]]', text)
+        self.assertLess(
+            text.index('if [[ "${INCLUDE_SLOW_TESTS}" == true ]]'),
+            text.index('elif [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]'),
+            "the explicit full-suite option must override the compatibility env hook",
+        )
 
 
 class IgnoreRegexTests(unittest.TestCase):
@@ -316,6 +365,7 @@ class StaleCacheTests(unittest.TestCase):
         repo.mkdir()
         (repo / "scripts").mkdir()
         (repo / "scripts" / "run_coverage.sh").symlink_to(SCRIPT)
+        (repo / "scripts" / "coverage_ctest_policy.sh").symlink_to(CTEST_POLICY)
 
         # Provide stub clang/llvm-profdata/llvm-cov so the preflight
         # checks pass even on hosts without a real toolchain.

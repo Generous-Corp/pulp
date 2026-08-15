@@ -471,7 +471,8 @@ jobs:
             -f assignment_epoch="$epoch" \
             -f dispatch_attempt="$attempt" \
             -f blocker_fingerprint="$fingerprint" \
-            -f publish_status=true); then
+            -f publish_status=true \
+            -f attempt_repair=true); then
             if [[ "$recovery_url" =~ ^https://github.com/${GITHUB_REPOSITORY}/actions/runs/[1-9][0-9]*$ ]]; then
               run_id=${recovery_url##*/}
               if gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
