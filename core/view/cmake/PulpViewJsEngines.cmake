@@ -14,7 +14,7 @@ if(NOT PULP_JS_ENGINE IN_LIST _pulp_js_engine_choices)
         "PULP_JS_ENGINE must be one of auto, quickjs, jsc, or v8; got "
         "'${PULP_JS_ENGINE}'.")
 endif()
-if(PULP_ENABLE_JS AND PULP_JS_ENGINE STREQUAL "jsc" AND NOT APPLE)
+if(PULP_JS_ENGINE STREQUAL "jsc" AND NOT APPLE)
     message(FATAL_ERROR
         "PULP_JS_ENGINE=jsc is only supported on Apple platforms. Use auto or "
         "quickjs for the portable QuickJS backend.")
@@ -70,7 +70,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     if(IOS OR PULP_IOS)
         message(FATAL_ERROR
             "PULP_JS_ENGINE=v8 is not supported on iOS: V8 requires JIT, which iOS "
-            "apps and AUv3 extensions forbid. iOS uses JSC (the default on Apple).")
+            "apps and AUv3 extensions forbid. Use QuickJS (the default) or JSC.")
     endif()
     include(${PULP_ROOT_DIR}/tools/cmake/FindV8.cmake)
     if(NOT PULP_V8_FOUND)

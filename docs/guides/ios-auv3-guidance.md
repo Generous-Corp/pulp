@@ -67,7 +67,7 @@ Pulp supports QuickJS, JavaScriptCore (JSC), and V8 for scripted UIs. **On iOS, 
 
 | Engine | iOS rule | Use when |
 |---|---|---|
-| **JavaScriptCore** | Always allowed — part of the OS | Default pick. Fast, no JIT concerns inside the app sandbox. |
+| **JavaScriptCore** | Always allowed — part of the OS | You explicitly want the host OS engine; no JIT concerns inside the app sandbox. |
 | **QuickJS** | Allowed (interpreter, no JIT) | You want the same engine behaviour as desktop; small binary size matters. |
 | **V8** | **Not allowed on iOS** — V8 requires JIT, which App Review rejects | Never. The `engine` skill's auto-selector already blacklists V8 on iOS. |
 
