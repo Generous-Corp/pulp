@@ -3361,6 +3361,9 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     // not have to capture a second, unrelated PNG just to turn the comparison
     // into an enforcement gate.
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+#ifndef PULP_IMPORT_DESIGN_TEST_HAS_SKIA
+    SKIP("Skia image compositing is unavailable in this build");
+#else
 
     TempDir tmp("pulp-import-design-browser-fail-below");
     const auto input = tmp.path / "page.html";
@@ -3381,4 +3384,5 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     CHECK(fs::exists(output));
     CHECK(r.stderr_output.find("--fail-below requires --reference") ==
           std::string::npos);
+#endif
 }
