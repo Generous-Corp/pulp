@@ -392,12 +392,12 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
         "-framework AppKit" "-framework AudioToolbox" "-framework QuartzCore")
     target_compile_definitions(pulp-test-au-v2-cocoa-ui PRIVATE
         PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Test)
-    set_target_properties(pulp-test-au-v2-cocoa-ui PROPERTIES CXX_STANDARD 23)
-    # AudioUnitSDK 1.4 headers use std::expected (C++23). The root sets
-    # CMAKE_CXX_STANDARD=20 which wins for ObjC++ over the target CXX_STANDARD,
-    # so force C++23 explicitly on the OBJCXX sources (both .mm here).
-    target_compile_options(pulp-test-au-v2-cocoa-ui PRIVATE
-        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    # Let CMake map C++23 to the spelling accepted by the active Apple Clang
+    # (`gnu++2b` on Clang 15, `gnu++23` on newer toolchains).
+    set_target_properties(pulp-test-au-v2-cocoa-ui PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+        OBJCXX_STANDARD_REQUIRED ON)
     catch_discover_tests(pulp-test-au-v2-cocoa-ui)
 endif()
 
