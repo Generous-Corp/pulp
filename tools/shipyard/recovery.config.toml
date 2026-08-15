@@ -1,0 +1,26 @@
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+model_provider = "subrouter_recovery"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+[model_providers.subrouter_recovery]
+name = "M3 Subrouter recovery lease"
+base_url = "__SUBROUTER_CODEX_BASE_URL__"
+env_key = "SUBROUTER_RECOVERY_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
+request_max_retries = 1
+stream_max_retries = 1
+
+[features]
+plugins = false
+apps = false
+browser_use = false
+in_app_browser = false
+computer_use = false
+image_generation = false
+memories = false
+multi_agent = false
+multi_agent_v2 = false
+goals = false

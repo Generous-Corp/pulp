@@ -124,7 +124,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // setKnobCapturedIndicator(id, rIn, rOut, width, color) — the design's OWN
+    // setKnobCapturedIndicator(id, rIn, rOut, width, color, phaseRad) — the design's OWN
     // pointer geometry, as fractions of the disc's half extent. Knob::paint
     // sweeps THIS pointer along the value arc instead of the synthetic notch.
     //
@@ -147,7 +147,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                 static_cast<float>(args.get<double>(1, 0.0)),
                 static_cast<float>(args.get<double>(2, 0.0)),
                 static_cast<float>(args.get<double>(3, 0.0)),
-                color);
+                color,
+                static_cast<float>(args.get<double>(5, 0.0)));
             k->request_repaint();
             return choc::value::Value();
         });

@@ -213,6 +213,12 @@ For native Three.js work, verify:
 - docs do not overclaim DOM/addon/runtime parity
 - screenshot output still matches the claimed visible result
 
+For the audio-reactive `spectrum` demo, `VisualizationBridge::process()` only
+captures audio and meters on the realtime thread. The UI-side spectrum source
+must call `bridge.poll()` before `read_spectrum()`; snapshot reads no longer run
+FFT analysis implicitly. Keep that poll on the one UI owner so the demo cannot
+accidentally introduce a second consumer of the bridge's SPSC capture stream.
+
 ## When Updating Docs
 
 Keep these in sync when the workflow meaningfully changes:

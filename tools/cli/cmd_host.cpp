@@ -48,6 +48,7 @@ const char* format_name(pulp::host::PluginFormat f) {
         case F::AudioUnit:    return "AU";
         case F::AudioUnitV3:  return "AUv3";
         case F::LV2:          return "LV2";
+        case F::BuiltIn:      return "Built-in";
     }
     return "?";
 }
@@ -76,6 +77,7 @@ enumerate_plugins_metadata_only(pulp::host::PluginFormat format) {
         case PluginFormat::AudioUnit:   extension = ".component"; break;
         case PluginFormat::AudioUnitV3: extension = ".appex";     break;
         case PluginFormat::LV2:         extension = ".lv2";       break;
+        case PluginFormat::BuiltIn:      break;
     }
     if (!extension) return out;
 

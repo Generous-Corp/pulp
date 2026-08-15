@@ -21,7 +21,7 @@ namespace pulp::view {
 
 void VisualizationBridge::process(const float* const* channels,
                                   int num_channels,
-                                  int num_samples) {
+                                  int num_samples) noexcept {
     auto publish_meter = [this](const signal::MultiChannelMeterData& data) {
 #ifdef PULP_BENCHMARK
         const double t0 = render::bench::now_us();
@@ -35,8 +35,18 @@ void VisualizationBridge::process(const float* const* channels,
 #endif
     };
 
-    if (channels == nullptr || num_channels <= 0 || num_samples <= 0) {
+    if (num_samples <= 0) {
         publish_meter(signal::MultiChannelMeterData{});
+        return;
+    }
+    if (channels == nullptr || num_channels <= 0) {
+        publish_meter(signal::MultiChannelMeterData{});
+        // A positive-length callback advances host time even when it carries no
+        // readable channels. Mark the missing interval as a discontinuity;
+        // zero-length callbacks above do not advance analysis time.
+        if (capture_ready_ && !channel_stfts_.empty()) {
+            discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        }
         return;
     }
 
@@ -44,82 +54,197 @@ void VisualizationBridge::process(const float* const* channels,
     meter_.process(channels, num_channels, num_samples);
     publish_meter(meter_.snapshot());
 
-    // STFT on first channel (or mono mix for multi-channel)
-    if (num_channels > 0 && num_samples > 0) {
-        bool new_frame = stft_.push_samples(channels[0], num_samples);
+    if (!capture_ready_) return;
 
-        if (new_frame) {
-            // Publish spectrum
-            SpectrumData spec;
-            auto db = stft_.latest_magnitude_db(-120.0f);
-            spec.num_bins = std::min(static_cast<int>(db.size()),
-                                     static_cast<int>(SpectrumData::kMaxBins));
+    // Analyzer topology is invariant between quiescent configure() calls.
+    // Meter mismatched host blocks above, but never splice them into one STFT
+    // history and then label the result as a different channel layout. Capture
+    // stays suspended until poll() acknowledges the discontinuity, preventing
+    // later valid audio from being joined to pre-mismatch history.
+    const int captured_channels = static_cast<int>(channel_stfts_.size());
+    if (captured_channels <= 0) return;
+    if (num_channels != captured_channels) {
+        discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        return;
+    }
+    for (int ch = 0; ch < num_channels; ++ch) {
+        if (channels[ch] == nullptr) {
+            discontinuity_generation_.fetch_add(1, std::memory_order_release);
+            return;
+        }
+    }
+    if (discontinuity_generation_.load(std::memory_order_acquire)
+        != acknowledged_discontinuity_.load(std::memory_order_acquire)) {
+        dropped_capture_frames_.fetch_add(
+            static_cast<std::uint64_t>(num_samples), std::memory_order_relaxed);
+        return;
+    }
+
+    const audio::BufferView<const float> block(
+        channels, static_cast<std::size_t>(captured_channels),
+        static_cast<std::size_t>(num_samples));
+    const auto requested_frames = static_cast<std::uint64_t>(num_samples);
+    // Capture blocks are all-or-nothing. In SPSC use only the consumer can
+    // increase free space after this acquire, so a block that fits here cannot
+    // become partial. A block that does not fit is dropped before any prefix is
+    // published, then the existing generation handshake suspends capture until
+    // poll() flushes and acknowledges the discontinuity.
+    if (capture_.free_frames() < requested_frames) {
+        dropped_capture_frames_.fetch_add(requested_frames,
+                                          std::memory_order_relaxed);
+        discontinuity_generation_.fetch_add(1, std::memory_order_release);
+        return;
+    }
 #ifdef PULP_BENCHMARK
-            {
-                const double t_copy = render::bench::now_us();
-                std::copy_n(db.data(), spec.num_bins, spec.magnitude_db.data());
-                if (bench_counters_) {
-                    bench_counters_->audio_copy_total_us.fetch_add(
-                        render::bench::now_us() - t_copy,
-                        std::memory_order_relaxed);
-                }
-            }
-            {
-                const double t_pub = render::bench::now_us();
-                spectrum_buf_.write(spec);
-                if (bench_counters_) {
-                    bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                        render::bench::now_us() - t_pub,
-                        std::memory_order_relaxed);
-                }
-            }
-#else
-            std::copy_n(db.data(), spec.num_bins, spec.magnitude_db.data());
-            spectrum_buf_.write(spec);
+    const double copy_start = render::bench::now_us();
 #endif
+    (void)capture_.write(block, requested_frames);
+#ifdef PULP_BENCHMARK
+    if (bench_counters_) {
+        bench_counters_->audio_copy_total_us.fetch_add(
+            render::bench::now_us() - copy_start, std::memory_order_relaxed);
+    }
+#endif
+}
+
+void VisualizationBridge::reset_analysis_continuity() {
+    for (auto& stft : channel_stfts_) stft.reset();
+    waveform_pos_ = 0;
+    std::fill(waveform_ring_.begin(), waveform_ring_.end(), 0.0f);
+    if (++epoch_ == 0) ++epoch_;
+}
+
+bool VisualizationBridge::poll() {
+    if (!capture_ready_ || consumer_chunk_frames_ <= 0 || channel_stfts_.empty())
+        return false;
+
+    // Rejected/missing-layout blocks are analysis discontinuities. The audio
+    // producer suspends capture after signaling one, so this entry-bounded
+    // flush cannot discard valid post-gap audio. Acknowledge only the observed
+    // generation; a concurrent later discontinuity remains pending.
+    const auto discontinuity =
+        discontinuity_generation_.load(std::memory_order_acquire);
+    if (discontinuity != observed_discontinuity_) {
+        const auto available_at_entry = capture_.available_frames();
+        (void)capture_.drain(available_at_entry);
+        observed_discontinuity_ = discontinuity;
+        acknowledged_discontinuity_.store(discontinuity,
+                                           std::memory_order_release);
+        reset_analysis_continuity();
+        return false;
+    }
+
+    const auto available_at_entry = capture_.available_frames();
+    const auto dropped = dropped_capture_frames_.load(std::memory_order_acquire);
+
+    const auto entry_frames = config_.max_frames_per_poll > 0
+        ? std::min<std::uint64_t>(
+              available_at_entry,
+              static_cast<std::uint64_t>(config_.max_frames_per_poll))
+        : available_at_entry;
+
+    bool spectrum_changed = false;
+    bool waveform_changed = false;
+    std::uint64_t remaining_frames = entry_frames;
+    while (remaining_frames > 0) {
+        const auto chunk = static_cast<int>(std::min<std::uint64_t>(
+            remaining_frames,
+            static_cast<std::uint64_t>(consumer_chunk_frames_)));
+        audio::BufferView<float> destination(
+            consumer_channels_.data(), consumer_channels_.size(),
+            static_cast<std::size_t>(chunk));
+        (void)capture_.read(destination, static_cast<std::uint64_t>(chunk));
+        remaining_frames -= static_cast<std::uint64_t>(chunk);
+
+        for (std::size_t ch = 0; ch < channel_stfts_.size(); ++ch) {
+            float* samples = consumer_channels_[ch];
+            for (int i = 0; i < chunk; ++i) {
+                if (!std::isfinite(samples[i])) samples[i] = 0.0f;
+                samples[i] = std::clamp(samples[i], -1.0e6f, 1.0e6f);
+            }
+            spectrum_changed = channel_stfts_[ch].push_samples(samples, chunk)
+                || spectrum_changed;
+        }
+
+        if (config_.capture_waveform && waveform_length_ > 0) {
+            const float* first_channel = consumer_channels_.front();
+            for (int i = 0; i < chunk; ++i) {
+                waveform_ring_[waveform_pos_] = first_channel[i];
+                waveform_pos_ = (waveform_pos_ + 1) % waveform_length_;
+            }
+            waveform_changed = true;
         }
     }
 
-    // Waveform capture (ring buffer of latest samples from channel 0)
-    if (config_.capture_waveform && num_channels > 0) {
-        for (int i = 0; i < num_samples; ++i) {
-            waveform_ring_[waveform_pos_] = channels[0][i];
-            waveform_pos_ = (waveform_pos_ + 1) % waveform_length_;
-        }
+    const int source_channels = config_.num_channels;
 
+    if (spectrum_changed) {
+        const int analysis_channels = std::clamp(
+            source_channels, 1, static_cast<int>(channel_stfts_.size()));
+        SpectrumData spec;
+        spec.num_bins = std::min(num_bins(), SpectrumData::kMaxBins);
+        spec.epoch = epoch_;
+        spec.sequence_number = ++spectrum_sequence_;
+        spec.dropped_frames = dropped;
+        spec.source_channels = source_channels;
+        spec.fft_size = config_.fft_size;
+        spec.sample_rate = std::isfinite(config_.sample_rate)
+            ? config_.sample_rate : 0.0f;
+        spec.floor_db = config_.spectrum_floor_db;
+
+        const double floor_power = std::pow(
+            10.0, static_cast<double>(config_.spectrum_floor_db) / 10.0);
+        const double finite_floor_power = std::isfinite(floor_power)
+            && floor_power > 0.0 ? floor_power : 1.0e-12;
+        for (int bin = 0; bin < spec.num_bins; ++bin) {
+            double power = 0.0;
+            for (int ch = 0; ch < analysis_channels; ++ch) {
+                const auto& stft = channel_stfts_[static_cast<std::size_t>(ch)];
+                const float magnitude = stft.latest_frame().magnitude[bin];
+                const double finite_magnitude = std::isfinite(magnitude)
+                    ? static_cast<double>(magnitude) : 0.0;
+                power += finite_magnitude * finite_magnitude;
+            }
+            power /= static_cast<double>(analysis_channels);
+            const double db = 10.0 * std::log10(std::max(power, finite_floor_power));
+            spec.magnitude_db[bin] = std::isfinite(db)
+                ? static_cast<float>(db) : config_.spectrum_floor_db;
+        }
+#ifdef PULP_BENCHMARK
+        const double publish_start = render::bench::now_us();
+#endif
+        spectrum_buf_.write(spec);
+#ifdef PULP_BENCHMARK
+        if (bench_counters_) {
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(
+                render::bench::now_us() - publish_start, std::memory_order_relaxed);
+        }
+#endif
+    }
+
+    if (waveform_changed) {
         WaveformData wd;
         wd.num_samples = waveform_length_;
-        wd.num_channels = num_channels;
-#ifdef PULP_BENCHMARK
-        {
-            const double t_copy = render::bench::now_us();
-            // Copy in order from oldest to newest
-            for (int i = 0; i < waveform_length_; ++i) {
-                wd.samples[i] = waveform_ring_[(waveform_pos_ + i) % waveform_length_];
-            }
-            if (bench_counters_) {
-                bench_counters_->audio_copy_total_us.fetch_add(
-                    render::bench::now_us() - t_copy,
-                    std::memory_order_relaxed);
-            }
-        }
-        {
-            const double t_pub = render::bench::now_us();
-            waveform_buf_.write(wd);
-            if (bench_counters_) {
-                bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                    render::bench::now_us() - t_pub,
-                    std::memory_order_relaxed);
-            }
-        }
-#else
-        // Copy in order from oldest to newest
+        wd.num_channels = source_channels;
+        wd.epoch = epoch_;
+        wd.sequence_number = ++waveform_sequence_;
+        wd.dropped_frames = dropped;
         for (int i = 0; i < waveform_length_; ++i) {
             wd.samples[i] = waveform_ring_[(waveform_pos_ + i) % waveform_length_];
         }
+#ifdef PULP_BENCHMARK
+        const double publish_start = render::bench::now_us();
+#endif
         waveform_buf_.write(wd);
+#ifdef PULP_BENCHMARK
+        if (bench_counters_) {
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(
+                render::bench::now_us() - publish_start, std::memory_order_relaxed);
+        }
 #endif
     }
+
+    return spectrum_changed || waveform_changed;
 }
 
 } // namespace pulp::view

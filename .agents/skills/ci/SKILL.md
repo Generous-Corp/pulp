@@ -112,6 +112,17 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+### Browser-source fidelity is a required dependency, not a skip
+
+Generic agent HTML uses a real browser capture as its source reference before
+Skia/native lowering.  The local ARM runner images deliberately do not retain a
+mutable system browser, so `build.yml` installs the checksum-pinned Chrome for
+Testing archive into the job temp directory and exports `PULP_DESIGN_BROWSER`.
+When a browser-source test is added or changed, keep that bootstrap intact and
+fail on download, checksum, extraction, or executable discovery.  Do **not**
+convert a missing browser into a skipped fidelity test: that would let a PR
+claim source-to-native validation that never occurred.
+
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
 
@@ -2694,13 +2705,14 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### Central merge steward pilot (Shipyard v0.88.0+)
+### Central merge steward (Shipyard v0.88.4+)
 
 `.github/workflows/shipyard-merge-steward.yml` is the single logical
-repository-wide PR landing controller. The first rollout is intentionally
-`workflow_dispatch`-only. It runs on GitHub-hosted Ubuntu so all three Macs may
-be offline, serializes mutations with one repository-scoped concurrency group,
-restores a small bounded-retry ledger, and configures its ephemeral
+repository-wide PR landing controller. The proof stage is manual-only and
+dry-run by default; a later gate enables ten-minute scheduled apply. It runs on GitHub-hosted Ubuntu so
+all three Macs may be offline, serializes mutations with one repository-scoped
+concurrency group, restores a small bounded-retry cache, uses GitHub's durable
+run-attempt counter to prevent retry-budget reset after cache loss, and configures its ephemeral
 machine-global authority as `github-actions` before invoking
 `shipyard runner steward`.
 
@@ -2720,15 +2732,61 @@ use no model. A code/test/conflict blocker receives one deduplicated
 `shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
 the recovery dispatcher is a separate exception path.
 
+`shipyard pr` does **not** imply this durable controller handoff. After the PR
+exists and its remote head is final, the submitting agent must run:
+
+```bash
+shipyard runner steward-handoff \
+  --repo Generous-Corp/pulp \
+  --pr "$PR_NUMBER" \
+  --head "$EXACT_REMOTE_HEAD" \
+  --workstream-id "$WORKSTREAM_ID" \
+  --context-url "$DURABLE_CONTEXT_URL" \
+  --apply --json
+```
+
+Then re-read GitHub and verify that the same head has a successful
+`shipyard/steward-handoff` commit status. The managed label by itself is not a
+receipt and is not head-specific. For a small change without a Linear item,
+use a stable PR-scoped workstream ID such as `pulp-pr-7507` and the PR URL as
+the durable context. An agent may stop watching only after this server-owned
+receipt exists; local Shipyard state is never sufficient for cross-machine
+continuation.
+
+Each tick also reconciles one labeled GitHub issue containing every current PR
+exception and control-plane error. The issue is updated in place, closes at
+zero exceptions, and reopens on recurrence. This is the durable, model-free
+operator outbox; Actions artifacts remain bounded evidence rather than the only
+copy of work that needs attention.
+
 Repository automation must never create an unlabeled PR. In particular,
 `version_at_land.py --route pr` creates each `release/version-bump` PR with the
 `automation` label in the same `gh pr create` transaction; a later label repair
 is not an acceptable provenance window.
 
-Do not add the schedule until the manual canary proves all of these on live
-PRs: unmanaged negative control untouched, exact-head managed handoff,
-single recovery signal across repeated ticks, signal clearing on a corrected
-new head, and native merge-queue landing without an agent wait loop.
+Do not add a second scheduled or per-Mac mutating controller. M1, M3, and M5 may
+serve as fenced recovery workers only after disposable-runner proof; they do
+not independently poll or mutate the merge queue.
+
+Enable the ten-minute schedule only after live canaries prove an unmanaged
+negative control, exact-head handoff, native queue landing without an agent,
+one deduplicated recovery signal, and clearing that signal on a corrected head.
+
+When a GitHub Actions controller mints a repository-scoped installation token
+for `enqueuePullRequest`, request both `permission-merge-queues: write` and
+`permission-contents: write`. The dedicated queue permission alone is not the
+repository write access GitHub requires for queue enrollment; downscoping
+contents to read fails closed with `Resource not accessible by integration`
+even when the App installation itself has both permissions.
+
+`.github/workflows/shipyard-recovery-worker-canary.yml` is the manual, read-only
+precondition for recovery workers. Its one job requires the unique
+`shipyard-recovery-canary-m5-20260814` label in addition to the disposable VM
+labels, revalidates the open PR's exact head and a positive assignment epoch,
+and launches no model. Serve it only with a one-shot Tart JIT runner carrying
+that exact label. Do not generalize the label, add a persistent service, inject
+Subrouter credentials, or enable M3/M5/M1 failover until this proof passes and
+the runner is destroyed.
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**

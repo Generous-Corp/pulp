@@ -2043,10 +2043,16 @@ int main(int argc, char* argv[]) {
     auto& recognition_manifest_path = cli.recognition_manifest_path;
     auto& param_binding_manifest_path = cli.param_binding_manifest_path;
 
-    // Validate comparison-only flags before source detection or browser
-    // discovery. A missing optional runtime must not mask a malformed command,
-    // and --fail-below has no meaningful result without a reference image.
-    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+    // A browser-solved generic HTML document supplies its own Chromium
+    // reference during import. Rejecting it before dispatch made the advertised
+    // --fail-below gate impossible to use for the source-owned HTML lane. All
+    // other inputs (and explicit --offline HTML) still need an explicit PNG;
+    // the browser session separately fails closed if capture cannot produce its
+    // reference.
+    const bool browser_html_can_supply_reference =
+        source_str == "html" && !offline;
+    if (fail_below_pct >= 0.0f && reference_image.empty() &&
+        !browser_html_can_supply_reference) {
         std::cerr << "Error: --fail-below requires --reference\n";
         return 2;
     }

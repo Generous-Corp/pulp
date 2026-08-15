@@ -9,9 +9,10 @@
 /// silence-run) and publishes the latest summary through a
 /// `runtime::TripleBuffer<AudioProbeSnapshot>`.
 ///
-/// Do not model this on `pulp::view::VisualizationBridge`: that path runs STFT
-/// and returns std::vector copies inside the callback, so it is not RT-safe.
-/// The RT-safe scalar contract lives here.
+/// Use this for scalar output-boundary diagnostics. For spectra and waveforms,
+/// `pulp::view::VisualizationBridge` uses a different RT-safe producer: its
+/// callback copies into fixed SPSC storage and its UI-owned `poll()` performs
+/// STFT work later. Neither path performs FFT or vector growth in the callback.
 ///
 /// Gating: the whole probe lives behind `PULP_ENABLE_AUDIO_PROBES`. The
 /// release-safe counter subset (`AudioStats`) is always available without this

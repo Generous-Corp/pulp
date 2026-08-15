@@ -39,6 +39,7 @@ int apply_browser_capture_control_sprites(
     pulp::view::DesignIR& ir,
     const std::filesystem::path& capture_png,
     const std::filesystem::path& sprite_directory,
-    std::string* error = nullptr);
+    std::string* error = nullptr,
+    const std::filesystem::path& indicator_free_capture_png = {});
 
 }  // namespace pulp::import_design
