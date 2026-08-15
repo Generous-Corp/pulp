@@ -26,6 +26,7 @@ BUILD_MACOS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-macos.yml"
 COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
 SANITIZERS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "sanitizers.yml"
 TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.yml"
+CONTROL_SDK_CONSUMER = REPO_ROOT / "test" / "cmake" / "test_control_sdk_consumer.cmake"
 
 
 class WorkflowBuildDirTests(unittest.TestCase):
@@ -145,6 +146,18 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertLess(
             text.index("- name: Fetch protected capability base"),
             text.index("- name: Test"),
+        )
+
+    def test_installed_control_consumer_requests_cxx20(self) -> None:
+        text = CONTROL_SDK_CONSUMER.read_text(encoding="utf-8")
+
+        self.assertIn("std::jthread", text)
+        self.assertIn("std::stop_token", text)
+        self.assertIn(
+            "target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)",
+            text,
+            "the generated consumer uses C++20 threading and must request the "
+            "language level instead of inheriting a provider compiler default",
         )
 
     def test_event_pinned_fetch_repairs_a_shallow_pull_request_checkout(self) -> None:
