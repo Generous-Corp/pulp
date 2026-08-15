@@ -298,7 +298,7 @@ void check_fuzz(const FuzzResult& r, int vector_index, int rate_index) {
 }  // namespace
 
 TEST_CASE("fdn reverb stays bounded and decaying for every parameter vector",
-          "[fdn][reverb][stability]") {
+          "[fdn][reverb][stability][slow]") {
     // 64 vectors x 4 s across three representative rates, plus one full-length
     // 60 s render per rate. The spec's own sweep is 200 vectors x 60 s at all
     // eight rates; that is 26 hours of audio and does not belong in a per-PR

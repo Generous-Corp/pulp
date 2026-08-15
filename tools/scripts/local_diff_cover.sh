@@ -48,12 +48,15 @@ CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
 
+# shellcheck source=../../scripts/coverage_ctest_policy.sh
+source "${REPO_ROOT}/scripts/coverage_ctest_policy.sh"
+
 # Diff coverage is a local pre-push mirror of the required PR gate, not the
-# full/nightly test lane. Keep its CTest selection aligned with the required
-# gate so a coverage check cannot spend tens of minutes in an unrelated slow
-# platform smoke or validator. Full/nightly/main CI invoke CTest separately and
-# continue to run these labels.
-DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-validation|slow|performance|bench|quality-lab}"
+# full/nightly test lane. Source the same CTest policy as run_coverage.sh so
+# local and SSH hooks cannot spend tens of minutes in an unrelated slow
+# platform smoke or validator. Full/nightly/main CI invoke CTest separately.
+DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-${PULP_COVERAGE_CTEST_LABEL_EXCLUDE}}"
+DIFF_COVER_CTEST_NAME_EXCLUDE="${PULP_DIFF_COVER_CTEST_NAME_EXCLUDE:-${PULP_COVERAGE_CTEST_NAME_EXCLUDE}}"
 
 run_coverage_ctest() {
     local build_dir="$1"
@@ -62,6 +65,7 @@ run_coverage_ctest() {
         --test-dir "${build_dir}"
         --output-on-failure
         --label-exclude "${DIFF_COVER_CTEST_LABEL_EXCLUDE}"
+        --exclude-regex "${DIFF_COVER_CTEST_NAME_EXCLUDE}"
     )
     if [ -n "${test_regex}" ]; then
         echo "[local_diff_cover] limiting ctest to regex: ${test_regex}" >&2

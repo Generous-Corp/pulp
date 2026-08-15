@@ -3149,6 +3149,12 @@ Branch protection's required `macos` check accepts the latest
 same-named check from either workflow, so `build-macos.yml`'s `macos`
 job supersedes the matrix's `macos` job when fresher.
 
+It must remain semantically identical to the required macOS gate: fetch
+protected `main` for capability-history checks and exclude
+`validation|slow|performance|bench|quality-lab`. A retarget changes only the
+provider; it must not turn required CI into a full benchmark lane or depend on
+a warm runner's stale refs.
+
 The macOS lane configures with `-DPULP_LOTTIE=ON` so the opt-in skottie
 render path (LottieAnimation → SkiaCanvas) gets real CI coverage — it is
 the only lane that exercises it, since `PULP_LOTTIE` defaults OFF. This
@@ -6168,12 +6174,15 @@ leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost a
 budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
 coverage suite" step.
 
-Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
-`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
-genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
-in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
-`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
-flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+Now a budget hit remains advisory only on Windows. Linux and macOS are receipt-authoritative:
+their Cobertura verifier runs and fails if the report is absent, so a green workflow can no
+longer hide missing native uploads. A shared coverage CTest policy also skips the
+slow/soak/configuration proofs already enforced by the primary build matrix; both the canonical
+coverage script and local pre-push diff coverage consume it across GitHub-hosted and
+SSH/self-hosted M1/M3 callers, and
+`--include-slow-tests` opts into the full suite. The suite runs ctest in parallel (`-j`, capped
+like `build.yml`) with a per-test `--timeout`. The receipt watchdog remains the cross-run alarm.
+Editing
 `coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
 skill (skill-sync map).
 

@@ -92,6 +92,14 @@ jobs:
           # FetchContent / CMake configure persist between PRs.
           clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
 
+      # The capability-history check fails closed when a workflow_dispatch
+      # checkout has no protected-base ref. Keep the retarget lane aligned with
+      # build.yml instead of relying on whatever a warm runner happened to
+      # retain from an earlier job.
+      - name: Fetch protected capability base
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
+
       # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
       # Persist brew + ccache + Pulp FetchContent across runs on the
       # same workspace. This workflow's resolve-runner emits a
@@ -164,10 +172,9 @@ jobs:
           fi
 
       - name: Test
-        # Mirror build.yml's macOS test invocation. The `-LE validation`
-        # exclude keeps auval/pluginval out (they require codesign on the
-        # local runner) — same as the matrix leg.
-        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        # Mirror build.yml's required macOS selection. Retarget is another
+        # provider for the same gate, not a full/nightly benchmark lane.
+        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
   macos:
     # Stable required-check name. Branch protection on `main` requires a
