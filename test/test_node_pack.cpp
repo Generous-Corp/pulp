@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -89,6 +90,94 @@ TEST_CASE("node pack: error codes keep stable numeric values",
     REQUIRE(static_cast<int>(NodePackError::SymbolMissing) == 7);
     REQUIRE(static_cast<int>(NodePackError::UnsupportedRequirements) == 8);
     REQUIRE(static_cast<int>(NodePackError::NodeMetadataMismatch) == 9);
+    REQUIRE(static_cast<int>(NodePackError::PlatformPolicyDenied) == 10);
+}
+
+TEST_CASE("generated device policy admits only platform-safe artifacts",
+          "[host][node-pack][policy]") {
+    constexpr std::array artifacts{
+        GeneratedDeviceArtifact::DeclarativeGraph,
+        GeneratedDeviceArtifact::InterpretedProgram,
+        GeneratedDeviceArtifact::NativePack,
+        GeneratedDeviceArtifact::WebAssembly,
+        GeneratedDeviceArtifact::FrozenAudio,
+        GeneratedDeviceArtifact::Recipe,
+        GeneratedDeviceArtifact::GeneratedUi,
+    };
+    struct ExpectedRow {
+        GeneratedDevicePlatform platform;
+        GeneratedDeviceOrigin origin;
+        std::uint8_t allowed;
+    };
+    constexpr auto bit = [](GeneratedDeviceArtifact artifact) {
+        return static_cast<std::uint8_t>(1U << static_cast<std::uint8_t>(artifact));
+    };
+    constexpr auto declarative = bit(GeneratedDeviceArtifact::DeclarativeGraph);
+    constexpr auto interpreted = bit(GeneratedDeviceArtifact::InterpretedProgram);
+    constexpr auto native = bit(GeneratedDeviceArtifact::NativePack);
+    constexpr auto wasm = bit(GeneratedDeviceArtifact::WebAssembly);
+    constexpr auto frozen = bit(GeneratedDeviceArtifact::FrozenAudio);
+    constexpr auto recipe = bit(GeneratedDeviceArtifact::Recipe);
+    constexpr auto ui = bit(GeneratedDeviceArtifact::GeneratedUi);
+    constexpr std::array rows{
+        ExpectedRow{GeneratedDevicePlatform::Desktop, GeneratedDeviceOrigin::AppBundled,
+                    declarative | interpreted | native | frozen | recipe | ui},
+        ExpectedRow{GeneratedDevicePlatform::Desktop, GeneratedDeviceOrigin::RuntimeDownloaded,
+                    declarative | interpreted | native | frozen | recipe | ui},
+        ExpectedRow{GeneratedDevicePlatform::Android, GeneratedDeviceOrigin::AppBundled,
+                    declarative | native | frozen | recipe},
+        ExpectedRow{GeneratedDevicePlatform::Android,
+                    GeneratedDeviceOrigin::RuntimeDownloaded,
+                    declarative | frozen | recipe},
+        ExpectedRow{GeneratedDevicePlatform::Ios, GeneratedDeviceOrigin::AppBundled,
+                    declarative | interpreted | frozen | recipe},
+        ExpectedRow{GeneratedDevicePlatform::Ios, GeneratedDeviceOrigin::RuntimeDownloaded,
+                    declarative | interpreted | frozen | recipe},
+        ExpectedRow{GeneratedDevicePlatform::Web, GeneratedDeviceOrigin::AppBundled,
+                    declarative | interpreted | wasm | frozen | recipe | ui},
+        ExpectedRow{GeneratedDevicePlatform::Web, GeneratedDeviceOrigin::RuntimeDownloaded,
+                    declarative | interpreted | wasm | frozen | recipe | ui},
+    };
+
+    for (const auto& row : rows) {
+        for (const auto artifact : artifacts) {
+            const auto admission = generated_device_admission(row.platform, artifact, row.origin);
+            const bool allowed = (row.allowed & bit(artifact)) != 0;
+            CAPTURE(row.platform, row.origin, artifact);
+            REQUIRE(admission.allowed == allowed);
+            REQUIRE(admission.requires_separate_origin ==
+                    (allowed && artifact == GeneratedDeviceArtifact::GeneratedUi));
+            REQUIRE(admission.universal_fallback_part ==
+                    (artifact == GeneratedDeviceArtifact::FrozenAudio ||
+                     artifact == GeneratedDeviceArtifact::Recipe));
+        }
+    }
+
+    REQUIRE_FALSE(generated_device_admission(static_cast<GeneratedDevicePlatform>(255),
+                                             GeneratedDeviceArtifact::DeclarativeGraph,
+                                             GeneratedDeviceOrigin::RuntimeDownloaded)
+                      .allowed);
+    REQUIRE_FALSE(generated_device_admission(GeneratedDevicePlatform::Desktop,
+                                             static_cast<GeneratedDeviceArtifact>(255),
+                                             GeneratedDeviceOrigin::RuntimeDownloaded)
+                      .allowed);
+    REQUIRE_FALSE(generated_device_admission(GeneratedDevicePlatform::Desktop,
+                                             GeneratedDeviceArtifact::DeclarativeGraph,
+                                             static_cast<GeneratedDeviceOrigin>(255))
+                      .allowed);
+}
+
+TEST_CASE("node pack host policy defaults to the build platform",
+          "[host][node-pack][policy]") {
+#if defined(__ANDROID__)
+    REQUIRE(NodePackHostPolicy{}.platform == GeneratedDevicePlatform::Android);
+#elif defined(__EMSCRIPTEN__)
+    REQUIRE(NodePackHostPolicy{}.platform == GeneratedDevicePlatform::Web);
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    REQUIRE(NodePackHostPolicy{}.platform == GeneratedDevicePlatform::Ios);
+#else
+    REQUIRE(NodePackHostPolicy{}.platform == GeneratedDevicePlatform::Desktop);
+#endif
 }
 
 TEST_CASE("node pack: a trusted, intact, signed pack loads and runs",
@@ -219,6 +308,20 @@ TEST_CASE("node pack: rejection paths never load untrusted or tampered code",
             kp.private_key.data(), kp.private_key.size(), msg.data(), msg.size());
         REQUIRE(load_node_pack(dir, m, trust).error ==
                 NodePackError::LoadFailed);
+    }
+    SECTION("runtime-downloaded native pack is denied on android before binary access") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackHostPolicy policy;
+        policy.platform = GeneratedDevicePlatform::Android;
+        policy.origin = GeneratedDeviceOrigin::RuntimeDownloaded;
+        NodePackManifest m = good;
+        m.binary = "does-not-exist.bin";
+        const auto msg = node_pack_signed_message(m);
+        m.signature = *pulp::runtime::ed25519_sign(
+            kp.private_key.data(), kp.private_key.size(), msg.data(), msg.size());
+        REQUIRE(load_node_pack(dir, m, trust, policy).error ==
+                NodePackError::PlatformPolicyDenied);
     }
     SECTION("unsupported capabilities reject before loading") {
         NodePackTrust trust;
