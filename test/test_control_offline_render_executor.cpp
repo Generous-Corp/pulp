@@ -123,8 +123,10 @@ struct Fixture {
     Fixture()
         : broker([&] {
               ControlBrokerConfig config;
-              config.operation_store = {.directory = temporary.path / "receipts"};
-              config.artifact_store = {.root = temporary.path / "artifacts"};
+              config.operation_store =
+                  ControlOperationStoreConfig{.directory = temporary.path / "receipts"};
+              config.artifact_store =
+                  ControlArtifactStoreConfig{.root = temporary.path / "artifacts"};
               config.admission.host_available = [](const auto&, const auto&) { return true; };
               config.admission.activated = [](const auto&, const auto&) { return true; };
               config.admission.policy_eligible = [](const auto&, const auto&) { return true; };

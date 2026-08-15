@@ -343,8 +343,10 @@ TEST_CASE("control service dispatches canonical motion through admitted exact au
     MotionFixture fixture;
     TemporaryDirectory temporary;
     ControlBrokerConfig broker_config;
-    broker_config.operation_store = {.directory = temporary.path / "receipts"};
-    broker_config.artifact_store = {.root = temporary.path / "artifacts"};
+    broker_config.operation_store =
+        ControlOperationStoreConfig{.directory = temporary.path / "receipts"};
+    broker_config.artifact_store =
+        ControlArtifactStoreConfig{.root = temporary.path / "artifacts"};
     broker_config.admission.host_available = [](const auto&, const auto&) { return true; };
     broker_config.admission.activated = [](const auto&, const auto&) { return true; };
     broker_config.admission.policy_eligible = [](const auto&, const auto&) { return true; };

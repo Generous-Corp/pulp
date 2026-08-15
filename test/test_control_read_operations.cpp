@@ -89,7 +89,8 @@ struct Fixture {
     Fixture()
         : broker([&] {
               ControlBrokerConfig config;
-              config.operation_store = {.directory = temporary.path / "receipts"};
+              config.operation_store =
+                  ControlOperationStoreConfig{.directory = temporary.path / "receipts"};
               config.admission.host_available = [](const auto&, const auto&) { return true; };
               config.admission.activated = [](const auto&, const auto&) { return true; };
               config.admission.policy_eligible = [](const auto&, const auto&) { return true; };
