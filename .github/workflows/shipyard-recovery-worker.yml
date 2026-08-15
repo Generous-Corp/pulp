@@ -196,20 +196,12 @@ jobs:
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
 
-      - name: Checkout immutable PR head without credentials
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.expected_head }}
-          path: worktree
-          fetch-depth: 1
-          persist-credentials: false
-
       - name: Acquire model-bound Subrouter lease
         id: lease
         shell: bash
         env:
           SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
-          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+          SUBROUTER_BASE_URL: ${{ vars.SUBROUTER_RECOVERY_BASE_URL }}
         run: |
           set -euo pipefail
           [ -n "$SUBROUTER_ADMIN_TOKEN" ]
@@ -234,6 +226,14 @@ jobs:
           jq -e '.assignment.provider == "codex" and .assignment.model == "gpt-5.6-luna" and (.leaseId | length > 0) and (.environment.OPENAI_API_KEY | length > 0) and (.environment.OPENAI_BASE_URL | length > 0)' \
             "$RUNNER_TEMP/session-lease.json" >/dev/null
           chmod 600 "$RUNNER_TEMP/session-lease.json"
+
+      - name: Checkout immutable PR head without credentials
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.expected_head }}
+          path: worktree
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Render isolated lean Codex profile
         shell: bash
@@ -282,7 +282,7 @@ jobs:
         shell: bash
         env:
           SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
-          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+          SUBROUTER_BASE_URL: ${{ vars.SUBROUTER_RECOVERY_BASE_URL }}
         run: |
           set -euo pipefail
           lease_id=$(jq -r '.leaseId' "$RUNNER_TEMP/session-lease.json")
@@ -310,7 +310,7 @@ jobs:
         shell: bash
         env:
           SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
-          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+          SUBROUTER_BASE_URL: ${{ vars.SUBROUTER_RECOVERY_BASE_URL }}
         run: |
           set -euo pipefail
           [ -n "$SUBROUTER_ADMIN_TOKEN" ]
@@ -381,7 +381,7 @@ jobs:
         shell: bash
         env:
           SUBROUTER_ADMIN_TOKEN: ${{ secrets.SUBROUTER_SESSION_LEASE_ADMIN_TOKEN }}
-          SUBROUTER_BASE_URL: ${{ secrets.SUBROUTER_RECOVERY_BASE_URL }}
+          SUBROUTER_BASE_URL: ${{ vars.SUBROUTER_RECOVERY_BASE_URL }}
         run: |
           set -euo pipefail
           lease_id=$(jq -r '.leaseId' "$RUNNER_TEMP/repair-lease.json")
