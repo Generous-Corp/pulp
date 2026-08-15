@@ -237,10 +237,6 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
 
     const std::size_t rows = points.size();
     const std::size_t columns = independent_coefficient_count(options.type, options.tap_count);
-    if (rows < columns) {
-        result.status = FirDesignStatus::rank_deficient;
-        return result;
-    }
     double maximum_weight = 0.0;
     for (const auto& point : points) {
         if (!std::isfinite(point.omega) || point.omega < 0.0 || point.omega > pi ||
@@ -248,6 +244,10 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
             !std::isfinite(point.weight))
             return result;
         maximum_weight = std::max(maximum_weight, point.weight);
+    }
+    if (rows < columns) {
+        result.status = FirDesignStatus::rank_deficient;
+        return result;
     }
     const double maximum_weight_sqrt = std::sqrt(maximum_weight);
     if (!admit_least_squares_workspace(rows, columns, options.tap_count,
