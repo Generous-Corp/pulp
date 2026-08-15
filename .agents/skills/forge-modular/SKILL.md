@@ -1269,6 +1269,14 @@ notarizes, staples and re-reports all four bundles; `--check` reports without
 changing anything, and names an ad-hoc signature as ad-hoc rather than printing
 an empty authority that skims past as fine.
 
+Forge Modular packaging must run Pulp's unattended signing doctor before its
+first `codesign` and treat any nonzero result as terminal. Do not restore the
+old `PULP_SKIP_SIGNING_PREFLIGHT` escape hatch or warn-and-continue: either can
+fall through to the login-keychain copy and open an unanswerable GUI password
+dialog. The prompt-safe path is the dedicated keychain, full partition list,
+identity hash, and real timestamped probe maintained by
+`tools/scripts/ensure_signing_ready.sh`.
+
 ## A module's WIDTH is knowable from its artwork, and from nowhere else
 
 Four things could say how wide a third-party module is and, for a plugin

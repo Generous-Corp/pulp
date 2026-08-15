@@ -42,8 +42,8 @@
 #   tools/scripts/ensure_signing_ready.sh --quiet         # only emit errors + final status
 #
 # EXIT CODES
-#   0  signing ready (notarization too, unless creds absent — see summary lines)
-#   1  signing NOT ready (no usable identity in any keychain)
+#   0  dedicated-keychain signing passed a real timestamped codesign probe
+#   1  signing NOT ready (no prompt-safe dedicated identity or probe failure)
 #   2  configuration error (bad flag, secrets dir unreadable)
 #
 # The script NEVER prints secret values. It is deliberately written against the
@@ -105,8 +105,8 @@ converge_keychain_search_list() {
   # An empty read is treated as a transient failure: never write an empty list,
   # which would wipe the login keychain from the search path.
   if [ "${#current[@]}" -eq 0 ]; then
-    warn "keychain search list read empty — leaving it unchanged"
-    return 0
+    err "keychain search list read empty — refusing to mutate or sign"
+    return 1
   fi
 
   _seen_has() { local x; for x in "${seen[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
@@ -168,16 +168,52 @@ load_env_file "$SECRETS_DIR/notary.env"
 SIGN_READY=0
 NOTARY_READY=0
 
+verify_signing_probe() {
+  local probe_dir probe
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-signing-probe.XXXXXX")"
+  probe="$probe_dir/true"
+  cp /usr/bin/true "$probe"
+  if ! codesign --force --options runtime --timestamp \
+       --keychain "$KC" --sign "$PULP_SIGN_IDENTITY_HASH" "$probe" \
+       >/dev/null 2>&1 || \
+     ! codesign --verify --strict "$probe" >/dev/null 2>&1; then
+    rm -rf "$probe_dir"
+    return 1
+  fi
+  rm -rf "$probe_dir"
+}
+
 # ── 1. dedicated signing keychain (kills the codesign / 1Password prompt) ──────
 KC="${PULP_SIGN_KEYCHAIN:-}"
 if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
+  # Preserve a legacy dedicated keychain whose recorded password has drifted.
+  # The file-backed P12 is the durable authority, so materialize a stable
+  # sibling keychain instead of prompting, deleting, or overwriting the old
+  # one. Subsequent runs reuse the sibling with the recorded unattended
+  # password.
+  if [ -f "$KC" ] && \
+     ! security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$KC" \
+       >/dev/null 2>&1; then
+    if [ -z "${PULP_SIGN_P12:-}" ] || [ ! -f "${PULP_SIGN_P12:-}" ]; then
+      err "configured signing keychain cannot be unlocked and no local P12 is available for non-destructive repair"
+      exit 1
+    fi
+    case "$KC" in
+      *.keychain-db) KC="${KC%.keychain-db}-unattended.keychain-db" ;;
+      *) KC="${KC}-unattended.keychain-db" ;;
+    esac
+    warn "configured signing keychain could not be unlocked; preserving it and using $(basename "$KC") rebuilt from the local P12"
+  fi
   if [ ! -f "$KC" ]; then
     say "• creating dedicated keychain"
     security create-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$KC"
   fi
   # Unlock + disable auto-lock so it never re-locks mid-session (the re-lock is
   # what reintroduces the prompt).
-  security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$KC"
+  if ! security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$KC"; then
+    err "dedicated unattended signing keychain cannot be unlocked"
+    exit 1
+  fi
   security set-keychain-settings "$KC"   # no -t => no inactivity auto-lock timeout
 
   # Match the ready check below ("Developer ID Application"): a keychain holding
@@ -194,28 +230,35 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
 
   # THE zero-prompt step: authorize codesign/productsign to use the private key
   # without an interactive "allow access" dialog. Idempotent.
-  security set-key-partition-list -S apple-tool:,apple:,codesign: \
-    -s -k "$PULP_SIGN_KEYCHAIN_PW" "$KC" >/dev/null 2>&1 \
-    || warn "set-key-partition-list failed (signing may prompt)"
+  if ! security set-key-partition-list -S apple-tool:,apple:,codesign: \
+       -s -k "$PULP_SIGN_KEYCHAIN_PW" "$KC" >/dev/null 2>&1; then
+    err "set-key-partition-list failed — refusing prompt-capable signing"
+    exit 1
+  fi
 
   # Ensure the keychain is on the user search list so bare `codesign --sign HASH`
   # resolves it even without an explicit --keychain. Converge the list every run
   # (dedup + prune deleted keychains, spaced paths preserved as single tokens) so
   # it never accumulates dangling entries — see converge_keychain_search_list.
-  converge_keychain_search_list "$KC"
+  converge_keychain_search_list "$KC" || exit 1
 
-  if security find-identity -v -p codesigning "$KC" 2>/dev/null | grep -q "Developer ID Application"; then
-    SIGN_READY=1
-    say "• signing keychain READY: $(basename "$KC")"
+  if [ -z "${PULP_SIGN_IDENTITY_HASH:-}" ]; then
+    err "PULP_SIGN_IDENTITY_HASH is required for unambiguous dedicated-keychain signing"
+  elif security find-identity -v -p codesigning "$KC" 2>/dev/null | grep -q "Developer ID Application"; then
+    if verify_signing_probe; then
+      SIGN_READY=1
+      say "• signing keychain READY (timestamped probe passed): $(basename "$KC")"
+    else
+      err "timestamped codesign probe failed — refusing production signing"
+    fi
   fi
 fi
 
-# Fallback: a usable Developer ID already in the default search list (login).
-# Works, but WILL prompt — flag it loudly.
+# A login-keychain identity is diagnostic evidence only. It is never considered
+# ready because using it can open an interactive password/1Password prompt.
 if [ "$SIGN_READY" -eq 0 ]; then
   if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
-    SIGN_READY=1
-    warn "signing falls back to the login keychain — codesign MAY prompt. Configure $SECRETS_DIR/keychain.env for the hardened path."
+    err "Developer ID exists only in the default/login search path; refusing prompt-capable fallback. Configure $SECRETS_DIR/keychain.env."
   fi
 fi
 
@@ -261,5 +304,5 @@ say "signing:      $([ "$SIGN_READY" -eq 1 ] && echo READY || echo 'NOT READY')"
 say "notarization: $([ "$NOTARY_READY" -eq 1 ] && echo READY || echo 'NOT CONFIGURED')"
 
 if [ "$SIGN_READY" -eq 1 ]; then exit 0; fi
-err "no usable Developer ID signing identity found in any keychain"
+err "no verified prompt-safe Developer ID identity found in the dedicated keychain"
 exit 1
