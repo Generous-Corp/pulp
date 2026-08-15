@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR)
     message(FATAL_ERROR "PULP_SOURCE_DIR and FIXTURE_DIR are required")
 endif()
