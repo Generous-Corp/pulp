@@ -77,6 +77,49 @@ class ParallelismContractTests(unittest.TestCase):
         self.assertIn('--test-jobs) TEST_JOBS="$2"', text)
         self.assertIn('CTEST_JOBS="${TEST_JOBS}"', text)
 
+    def test_default_suite_excludes_slow_proofs_for_every_caller(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("DEFAULT_CTEST_ARGS=(", text)
+        self.assertIn("'validation|slow|performance|bench|quality-lab'", text)
+        self.assertIn("fdn.*bounded.*parameter.*vector", text)
+        self.assertIn('EXTRA_CTEST_ARGS=("${DEFAULT_CTEST_ARGS[@]}")', text)
+
+        match = re.search(r"^\s+-E '(?P<pattern>[^']+)'$", text, re.MULTILINE)
+        self.assertIsNotNone(match, "default CTest name exclusion must be one array item")
+        exclusion = re.compile(match.group("pattern"))
+        source = "\n".join(
+            (REPO_ROOT / "test" / name).read_text()
+            for name in (
+                "test_fdn_reverb.cpp",
+                "test_character_delay.cpp",
+                "test_osc_vco.cpp",
+                "test_analog_vcf.cpp",
+                "test_osc_wt.cpp",
+            )
+        )
+        expected_slow_cases = (
+            "fdn reverb stays bounded and decaying for every parameter vector",
+            "saturating characters self-oscillate bounded at maximum feedback",
+            "physical tape keeps sub-unity feedback below oscillation",
+            "drift wanders the pitch slowly at ~the commanded RMS",
+            "Analog VCF stays finite at worst-case drive and oversampling",
+            "OSC-WT worst alias swept to the top of every band",
+            "OSC-WT worst-case alias is detection-floor-limited, not a fixed spur",
+        )
+        for case in expected_slow_cases:
+            self.assertIn(case, source, f"expected slow test was renamed: {case}")
+            self.assertRegex(case, exclusion, f"coverage no longer excludes: {case}")
+
+    def test_full_suite_has_an_explicit_opt_out(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('--include-slow-tests) INCLUDE_SLOW_TESTS=true', text)
+        self.assertIn('if [[ "${INCLUDE_SLOW_TESTS}" == true ]]', text)
+        self.assertLess(
+            text.index('if [[ "${INCLUDE_SLOW_TESTS}" == true ]]'),
+            text.index('elif [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]'),
+            "the explicit full-suite option must override the compatibility env hook",
+        )
+
 
 class IgnoreRegexTests(unittest.TestCase):
     """The regex excludes noisy paths and keeps our real source tree."""

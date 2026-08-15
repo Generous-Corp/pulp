@@ -3,6 +3,7 @@
 #
 # Usage:
 #   scripts/run_coverage.sh [--jobs N] [--test-jobs N] [--tests REGEX]
+#                           [--include-slow-tests]
 #
 # Produces:
 #   build-coverage/coverage/index.html          — per-file drilldown
@@ -32,6 +33,18 @@ TEST_JOBS="${PULP_COVERAGE_TEST_JOBS:-8}"
 TESTS_REGEX=""
 EXTRA_CMAKE_ARGS=()
 EXTRA_CTEST_ARGS=()
+INCLUDE_SLOW_TESTS=false
+
+# Coverage measures executable source lines. It does not need to repeat the
+# long soak/configuration proofs that the primary build matrix already owns.
+# Keeping this policy in the canonical script means GitHub-hosted runners and
+# SSH/self-hosted M1/M3 callers get the same bounded suite. Keep the regexes as
+# array elements: several test names contain spaces and cannot safely travel
+# through PULP_COVERAGE_CTEST_ARGS' whitespace-tokenized compatibility hook.
+DEFAULT_CTEST_ARGS=(
+    -LE 'validation|slow|performance|bench|quality-lab'
+    -E '(fdn.*bounded.*parameter.*vector|saturating.*self-oscillate|physical.*sub-unity.*oscillation|drift.*pitch.*commanded.*RMS|Analog.*VCF.*worst-case.*oversampling|OSC-WT.*worst)'
+)
 
 # Canonical source-filter regex used by llvm-cov and by the
 # LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in
@@ -64,6 +77,7 @@ while [[ $# -gt 0 ]]; do
         --jobs) JOBS="$2"; shift 2 ;;
         --test-jobs) TEST_JOBS="$2"; shift 2 ;;
         --tests) TESTS_REGEX="$2"; shift 2 ;;
+        --include-slow-tests) INCLUDE_SLOW_TESTS=true; shift ;;
         *) echo "unknown arg: $1"; exit 2 ;;
     esac
 done
@@ -74,14 +88,17 @@ if [[ -n "${PULP_COVERAGE_CMAKE_ARGS:-}" ]]; then
     # shell words so simple space-delimited CMake args pass through.
     read -r -a EXTRA_CMAKE_ARGS <<< "${PULP_COVERAGE_CMAKE_ARGS}"
 fi
-if [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]; then
-    # Optional coverage-only CTest arguments. Keep policy in the workflow and
-    # let this script provide the shared execution/reporting mechanics.
+if [[ "${INCLUDE_SLOW_TESTS}" == true ]]; then
+    EXTRA_CTEST_ARGS=()
+elif [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]; then
+    # Optional advanced override for coverage-only CTest arguments.
     # NOTE: this is whitespace-tokenized only (no shell quoting) — fine for
     # simple flags like `-LE validation`, but a value needing an embedded space
     # (e.g. -LE 'validation|slow gpu') will split wrong. If that's ever needed,
     # switch this to a NUL/newline-delimited or JSON transport.
     read -r -a EXTRA_CTEST_ARGS <<< "${PULP_COVERAGE_CTEST_ARGS}"
+else
+    EXTRA_CTEST_ARGS=("${DEFAULT_CTEST_ARGS[@]}")
 fi
 
 # Require Clang — llvm-cov reads Clang-specific .profdata format.

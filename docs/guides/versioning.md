@@ -383,17 +383,19 @@ a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
 C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
 authoritative diff-coverage gate is the separate `Diff coverage required` check.
-The coverage matrix runs the instrumented build + full ctest suite under an
+The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
-drops any partial report and records `budget_hit`, and the verify + Cobertura
-upload steps **skip on every OS** so the leg concludes non-fatally rather than
-reddening `main` (previously only the `os-windows` leg was spared, so a slow
-macOS/linux run broke `main`). A genuine build failure — no budget hit, no
-report — still fails loudly. The suite runs ctest in parallel with a per-test
-`--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
-receipt-aware upload watchdog is the alarm if coverage genuinely stops
-flowing. Report verification and Codecov transport are separate contracts:
+drops any partial report and records `budget_hit`. Windows remains advisory,
+but Linux and macOS are receipt-authoritative: their Cobertura verifier still
+runs and fails when the report is absent, so a green workflow cannot hide a
+missing native upload. The canonical `scripts/run_coverage.sh` excludes the
+slow/soak/configuration proofs already enforced by the primary build matrix;
+that default applies equally to GitHub-hosted and SSH/self-hosted M1/M3 callers,
+with `--include-slow-tests` available for intentional full local collection.
+The suite also runs ctest in parallel with a per-test `--timeout` so it fits the
+budget; the receipt-aware upload watchdog remains the cross-run alarm. Report
+verification and Codecov transport are separate contracts:
 missing or structurally empty reports fail the producing leg, while the shared
 upload action records transport failure without making Codecov availability a
 merge prerequisite. Report eligibility follows the semantic artifact contract,

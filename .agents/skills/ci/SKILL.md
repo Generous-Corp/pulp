@@ -6062,12 +6062,14 @@ leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost a
 budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
 coverage suite" step.
 
-Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
-`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
-genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
-in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
-`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
-flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+Now a budget hit remains advisory only on Windows. Linux and macOS are receipt-authoritative:
+their Cobertura verifier runs and fails if the report is absent, so a green workflow can no
+longer hide missing native uploads. The canonical `scripts/run_coverage.sh` also skips the
+slow/soak/configuration proofs already enforced by the primary build matrix; this policy is
+shared by GitHub-hosted and SSH/self-hosted M1/M3 callers, and
+`--include-slow-tests` opts into the full suite. The suite runs ctest in parallel (`-j`, capped
+like `build.yml`) with a per-test `--timeout`. The receipt watchdog remains the cross-run alarm.
+Editing
 `coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
 skill (skill-sync map).
 
