@@ -438,14 +438,15 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.90.2 — leased runners and queue ownership are load-bearing
+### Why the pin sits at v0.92.0 — leased runners and queue ownership are load-bearing
 
-v0.90.2 is Pulp's current operational floor. It includes the v0.87 fail-closed
+v0.92.0 is Pulp's current operational floor. It includes the v0.87 fail-closed
 trusted and PR-safe local-Linux lease producers with bounded GitHub observation
 and mutation calls, the v0.88 exact-head steward handoff, and the v0.90 atomic
-steward ownership transfer. Pulp's leased profiles depend on that producer
-generation; an older binary must not advertise either protected Linux pool as
-healthy or assume merge-queue ownership.
+steward ownership transfer. It also materializes missing classic required checks
+during waits and keeps offline-busy runner recovery fail-closed. Pulp's leased
+profiles depend on that producer generation; an older binary must not advertise
+either protected Linux pool as healthy or assume merge-queue ownership.
 
 The v0.88 handoff contract remains part of that floor. A PR is mutable only
 when its current commit has a successful `shipyard/steward-handoff` status and

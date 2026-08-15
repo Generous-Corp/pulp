@@ -639,7 +639,7 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.4`, which
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.92.0`, which
 provides it, so no separate binary is needed.
 
 ```bash
@@ -1440,8 +1440,8 @@ The watcher is **safe to run alongside the overflow probe in `build.yml`** — t
 
 ### Self-hosted runner operations: prevent, recover, maintain
 
-Shipyard v0.55.0+ is the minimum pin for the full self-hosted-runner
-operational toolkit, and Pulp pins v0.56.2+ so rescue, update, and
+Shipyard v0.55.0+ is the minimum version for the full self-hosted-runner
+operational toolkit, and Pulp pins v0.92.0 so rescue, update, and
 `shipyard wait pr` have REST fallback paths when GraphQL is rate-limited. The
 commands are discoverable from `shipyard --help` and replace the legacy
 `planning/scripts/runner-watchdog.sh` + manual reinstall workflow.
@@ -1460,7 +1460,7 @@ shipyard runner watch --kill-hung-workers # implies --fix; pair with launchd/sys
 # Keep the installed Shipyard CLI current
 shipyard update --check --json            # report installed vs available
 shipyard update                           # apply latest stable
-shipyard update --to v0.56.2              # pin or roll back to Pulp's minimum
+shipyard update --to v0.92.0              # restore Pulp's repository pin
 shipyard update --dry-run                 # plan only
 
 # Wait after handoff/rescue without depending solely on GraphQL

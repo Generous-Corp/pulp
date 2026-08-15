@@ -56,11 +56,13 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.90.2 (current pin) — includes the v0.87 fail-closed trusted and PR-safe
+# v0.92.0 (current pin) — includes the v0.87 fail-closed trusted and PR-safe
 #   local-Linux lease producers, bounded observation/mutation calls, the v0.88
 #   exact-head steward handoff, and the v0.90 atomic steward ownership handoff.
-#   Pulp's leased profiles require this producer generation; older pins ignore
-#   the health-lease contract and must not be advertised as capable.
+#   It also materializes missing classic required checks during waits and keeps
+#   offline-busy runner recovery fail-closed. Pulp's leased profiles require
+#   this producer generation; older pins ignore the health-lease contract and
+#   must not be advertised as capable.
 #
 # v0.88.3 (earlier pin) — keeps v0.88.0's exact-head steward handoff and adds
 #   terminal-safe rescue replacement, auditable manual-cancel provenance, and
@@ -118,7 +120,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.90.2"
+version = "v0.92.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
