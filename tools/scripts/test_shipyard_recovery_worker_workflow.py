@@ -91,6 +91,13 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertIn("chmod 600", self.text)
         self.assertNotIn("session-lease.json\n", self.text.split("path: |", 1)[1])
 
+    def test_recovery_url_is_a_non_secret_repository_variable(self) -> None:
+        self.assertEqual(
+            self.text.count("vars.SUBROUTER_RECOVERY_BASE_URL"),
+            4,
+        )
+        self.assertNotIn("secrets.SUBROUTER_RECOVERY_BASE_URL", self.text)
+
     def test_exact_head_and_dispatch_are_revalidated_before_model(self) -> None:
         self.assertIn("shipyard_recovery_worker.py", self.text)
         self.assertIn("commits/${EXPECTED_HEAD}/statuses", self.text)
@@ -98,6 +105,13 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertIn('[ "$fenced" = 1 ]', self.text)
         self.assertIn("persist-credentials: false", self.text)
         self.assertIn("--strict-config exec", self.text)
+
+    def test_admin_lease_is_minted_before_untrusted_head_checkout(self) -> None:
+        lease = self.text.index("- name: Acquire model-bound Subrouter lease")
+        checkout = self.text.index("- name: Checkout immutable PR head without credentials")
+        triage = self.text.index("- name: Run one ephemeral Luna low triage")
+        self.assertLess(lease, checkout)
+        self.assertLess(checkout, triage)
 
     def test_profile_is_luna_low_ephemeral_read_only_and_lean(self) -> None:
         self.assertIn('model = "gpt-5.6-luna"', self.config)
