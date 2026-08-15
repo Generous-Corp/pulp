@@ -21,14 +21,6 @@ on:
         description: 'Bounded dispatch attempt (one or two)'
         required: true
         type: string
-      worker:
-        description: 'Fenced recovery worker identity: m3, m5, or m1'
-        required: true
-        type: string
-      runner_name:
-        description: 'Exact repository runner selected by the controller census'
-        required: true
-        type: string
       blocker_fingerprint:
         description: 'Full blocker SHA-256 fingerprint'
         required: true
@@ -58,12 +50,13 @@ jobs:
     outputs:
       triage_classification: ${{ steps.triage.outputs.classification }}
       repair_outcome: ${{ steps.repair.outputs.outcome }}
+      recovery_worker: ${{ steps.identity.outputs.worker }}
     runs-on:
       - self-hosted
       - macOS
       - ARM64
       - pulp-build-vm
-      - ${{ format('shipyard-recovery-{0}', inputs.worker) }}
+      - shipyard-recovery-pool
     timeout-minutes: 45
     env:
       CODEX_RECOVERY_VERSION: '0.147.0'
@@ -71,14 +64,18 @@ jobs:
       CODEX_RECOVERY_DARWIN_ARM64_INTEGRITY: 'sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw=='
 
     steps:
-      - name: Fence exact selected runner
+      - name: Derive fenced recovery worker identity
+        id: identity
         shell: bash
-        env:
-          EXPECTED_RUNNER_NAME: ${{ inputs.runner_name }}
         run: |
           set -euo pipefail
-          [ -n "$EXPECTED_RUNNER_NAME" ]
-          [ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]
+          case "$RUNNER_NAME" in
+            shipyard-recovery-m3-*) worker=m3 ;;
+            shipyard-recovery-m5-*) worker=m5 ;;
+            shipyard-recovery-m1-*) worker=m1 ;;
+            *) echo "unfenced recovery runner name: $RUNNER_NAME" >&2; exit 1 ;;
+          esac
+          echo "worker=$worker" >> "$GITHUB_OUTPUT"
 
       - name: Install pinned Codex CLI in the disposable VM
         shell: bash
@@ -114,32 +111,40 @@ jobs:
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           ASSIGNMENT_EPOCH: ${{ inputs.assignment_epoch }}
           DISPATCH_ATTEMPT: ${{ inputs.dispatch_attempt }}
-          RECOVERY_WORKER: ${{ inputs.worker }}
+          RECOVERY_WORKER: ${{ steps.identity.outputs.worker }}
           BLOCKER_FINGERPRINT: ${{ inputs.blocker_fingerprint }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/recovery-input"
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
             > "$RUNNER_TEMP/recovery-input/pull.json"
-          gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_HEAD}/statuses?per_page=100" \
-            | jq 'add' > "$RUNNER_TEMP/recovery-input/statuses.json"
+          : > "$RUNNER_TEMP/recovery-input/failed-checks.txt"
+          fenced=0
+          for _ in $(seq 1 12); do
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_HEAD}/statuses?per_page=100" \
+              | jq 'add' > "$RUNNER_TEMP/recovery-input/statuses.json"
+            if python3 control/tools/scripts/shipyard_recovery_worker.py \
+              --pull "$RUNNER_TEMP/recovery-input/pull.json" \
+              --statuses "$RUNNER_TEMP/recovery-input/statuses.json" \
+              --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
+              --expected-head "$EXPECTED_HEAD" \
+              --assignment-epoch "$ASSIGNMENT_EPOCH" \
+              --dispatch-attempt "$DISPATCH_ATTEMPT" \
+              --fingerprint "$BLOCKER_FINGERPRINT" \
+              --worker "$RECOVERY_WORKER" \
+              --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
+              --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"; then
+              fenced=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$fenced" = 1 ]
           gh pr checks "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --json name,state,link,workflow \
             > "$RUNNER_TEMP/recovery-input/checks.json"
-          : > "$RUNNER_TEMP/recovery-input/failed-checks.txt"
-          python3 control/tools/scripts/shipyard_recovery_worker.py \
-            --pull "$RUNNER_TEMP/recovery-input/pull.json" \
-            --statuses "$RUNNER_TEMP/recovery-input/statuses.json" \
-            --evidence "$RUNNER_TEMP/recovery-input/failed-checks.txt" \
-            --expected-head "$EXPECTED_HEAD" \
-            --assignment-epoch "$ASSIGNMENT_EPOCH" \
-            --dispatch-attempt "$DISPATCH_ATTEMPT" \
-            --fingerprint "$BLOCKER_FINGERPRINT" \
-            --worker "$RECOVERY_WORKER" \
-            --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
-            --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
 
       - name: Collect bounded failed-check logs
         shell: bash
@@ -187,7 +192,7 @@ jobs:
             --assignment-epoch "${{ inputs.assignment_epoch }}" \
             --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "${{ inputs.blocker_fingerprint }}" \
-            --worker "${{ inputs.worker }}" \
+            --worker "${{ steps.identity.outputs.worker }}" \
             --assignment-output "$RUNNER_TEMP/recovery-input/assignment.json" \
             --prompt-output "$RUNNER_TEMP/recovery-input/prompt.txt"
 
@@ -520,7 +525,7 @@ jobs:
             --assignment-epoch "$ASSIGNMENT_EPOCH" \
             --dispatch-attempt "${{ inputs.dispatch_attempt }}" \
             --fingerprint "$BLOCKER_FINGERPRINT" \
-            --worker "${{ inputs.worker }}" \
+            --worker "${{ needs.luna-triage.outputs.recovery_worker }}" \
             --assignment-output /dev/null \
             --prompt-output /dev/null
           [ "$(jq -r '.head.repo.full_name' post-repair-pull.json)" = "$GITHUB_REPOSITORY" ]
@@ -580,7 +585,9 @@ jobs:
             state=success
             classification="${{ needs.luna-triage.outputs.triage_classification }}"
           fi
-          description="c=${classification} epoch=${{ inputs.assignment_epoch }} worker=${{ inputs.worker }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          worker="${{ needs.luna-triage.outputs.recovery_worker }}"
+          [ -n "$worker" ] || worker=pool
+          description="c=${classification} epoch=${{ inputs.assignment_epoch }} worker=${worker} fingerprint=${{ inputs.blocker_fingerprint }}"
           [ "${#description}" -le 140 ]
           gh api \
             --method POST \
@@ -593,7 +600,7 @@ jobs:
           if [ "$state" = error ]; then
             dispatch_state=error
           fi
-          dispatch_description="completed attempt=${{ inputs.dispatch_attempt }} epoch=${{ inputs.assignment_epoch }} worker=${{ inputs.worker }} fingerprint=${{ inputs.blocker_fingerprint }}"
+          dispatch_description="completed attempt=${{ inputs.dispatch_attempt }} epoch=${{ inputs.assignment_epoch }} worker=${worker} fingerprint=${{ inputs.blocker_fingerprint }}"
           [ "${#dispatch_description}" -le 140 ]
           gh api \
             --method POST \

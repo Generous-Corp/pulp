@@ -935,6 +935,18 @@ accessible by integration` even when the App installation itself owns both
 permissions. Keep the token repository-scoped, retain the exact-head guard, and
 never replace this pair with a personal credential or an admin-merge bypass.
 
+Recovery dispatch must follow TartCI's disposable JIT lifecycle. The controller
+queues one exact-head job on `shipyard-recovery-pool`; it does **not** wait for
+an already-online idle recovery runner. TartCI runners do not exist until a
+matching job is queued, so a pre-dispatch runner census creates a deadlock. An
+eligible M3, M5, or M1 supervisor boots a disposable VM, registers a one-job
+runner whose name starts with `shipyard-recovery-m3-`,
+`shipyard-recovery-m5-`, or `shipyard-recovery-m1-`, and GitHub assigns the
+single queued job. The workflow derives the actual worker from that fenced
+name before checkout; an ordinary CI label or an unknown name fails closed.
+The pending exact-head status remains the durable obligation while every Mac
+is offline, so its age alone never creates a duplicate model invocation.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single

@@ -24,7 +24,7 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
     def test_pilot_is_manual_unique_label_and_deduplicated(self) -> None:
         self.assertEqual(set(self.doc["on"]), {"workflow_dispatch"})
         job = self.doc["jobs"]["luna-triage"]
-        self.assertIn("${{ format('shipyard-recovery-{0}', inputs.worker) }}", job["runs-on"])
+        self.assertIn("shipyard-recovery-pool", job["runs-on"])
         self.assertEqual(job["timeout-minutes"], "45")
         group = self.doc["concurrency"]["group"]
         for key in (
@@ -39,8 +39,8 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
     def test_status_mutation_is_explicitly_off_by_default(self) -> None:
         inputs = self.doc["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("dispatch_attempt", inputs)
-        self.assertIn("worker", inputs)
-        self.assertIn("runner_name", inputs)
+        self.assertNotIn("worker", inputs)
+        self.assertNotIn("runner_name", inputs)
         self.assertEqual(inputs["publish_status"]["default"], "false")
         self.assertEqual(inputs["attempt_repair"]["default"], "false")
         self.assertIn("always() && inputs.publish_status", self.text)
@@ -50,10 +50,12 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(self.text.count('[ "${#description}" -le 140 ]'), 1)
         self.assertEqual(self.text.count('[ "${#dispatch_description}" -le 140 ]'), 1)
 
-    def test_selected_runner_name_is_fenced_before_checkout(self) -> None:
+    def test_actual_pool_runner_identity_is_fenced_before_checkout(self) -> None:
         steps = self.doc["jobs"]["luna-triage"]["steps"]
-        self.assertEqual(steps[0]["name"], "Fence exact selected runner")
-        self.assertIn('[ "$RUNNER_NAME" = "$EXPECTED_RUNNER_NAME" ]', steps[0]["run"])
+        self.assertEqual(steps[0]["name"], "Derive fenced recovery worker identity")
+        for worker in ("m3", "m5", "m1"):
+            self.assertIn(f"shipyard-recovery-{worker}-*", steps[0]["run"])
+        self.assertIn("unfenced recovery runner name", steps[0]["run"])
         self.assertEqual(steps[1]["name"], "Install pinned Codex CLI in the disposable VM")
         self.assertEqual(steps[2]["name"], "Checkout trusted recovery harness")
 
@@ -92,6 +94,8 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
     def test_exact_head_and_dispatch_are_revalidated_before_model(self) -> None:
         self.assertIn("shipyard_recovery_worker.py", self.text)
         self.assertIn("commits/${EXPECTED_HEAD}/statuses", self.text)
+        self.assertIn("for _ in $(seq 1 12)", self.text)
+        self.assertIn('[ "$fenced" = 1 ]', self.text)
         self.assertIn("persist-credentials: false", self.text)
         self.assertIn("--strict-config exec", self.text)
 

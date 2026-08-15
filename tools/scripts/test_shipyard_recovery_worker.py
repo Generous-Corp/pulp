@@ -27,7 +27,7 @@ def statuses(
     attempt=1,
     fingerprint=FINGERPRINT,
     dispatch_state="pending",
-    worker_name="m5",
+    worker_name="pool",
 ):
     return [
         {
@@ -112,7 +112,7 @@ class RecoveryWorkerTests(unittest.TestCase):
                 "id": 3,
                 "context": worker.DISPATCH_CONTEXT,
                 "state": "error",
-                "description": f"attempt=1 epoch=19 worker=m5 fingerprint={FINGERPRINT}",
+                "description": f"attempt=1 epoch=19 worker=pool fingerprint={FINGERPRINT}",
                 "created_at": "2026-08-14T12:02:00Z",
             }
         )
@@ -130,6 +130,14 @@ class RecoveryWorkerTests(unittest.TestCase):
                 pull(), statuses(), expected_head=HEAD, assignment_epoch=19,
                 dispatch_attempt=1, fingerprint=FINGERPRINT, worker="arbitrary",
             )
+
+    def test_accepts_assignment_already_claimed_for_actual_worker(self):
+        got = worker.validate_assignment(
+            pull(), statuses(worker_name="m5"), expected_head=HEAD,
+            assignment_epoch=19, dispatch_attempt=1,
+            fingerprint=FINGERPRINT, worker="m5",
+        )
+        self.assertEqual(got["worker"], "m5")
 
     def test_status_fields_require_exact_tokens(self):
         cases = (

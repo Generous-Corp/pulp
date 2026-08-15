@@ -90,11 +90,10 @@ class RecoveryDispatchTests(unittest.TestCase):
         )
         self.assertEqual(plan["candidate_count"], 0)
 
-    def test_stale_pending_assignment_gets_one_refenced_retry(self):
+    def test_stale_pending_queued_assignment_never_duplicates(self):
         stale = status("pending", created="2026-08-14T12:00:00Z")
         plan = dispatch.build_plan(report(), census(HEAD_A, stale), 9, now=NOW)
-        self.assertEqual(plan["candidate_count"], 1)
-        self.assertEqual(plan["candidates"][0]["dispatch_attempt"], 2)
+        self.assertEqual(plan["candidate_count"], 0)
 
     def test_fresh_or_unparseable_pending_assignment_fails_closed(self):
         for created in ("2026-08-14T13:30:00Z", "not-a-time", ""):
