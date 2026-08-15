@@ -945,16 +945,23 @@ Two things that bite when baking analog VCF nodes:
   state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType`;
   that belongs to the `pulp_node_v1` ABI.
 - **Signed node-pack loader (`core/host/node_pack.{hpp,cpp}`).**
-  `load_node_pack(dir, manifest, trust)` loads a precompiled `pulp_node_v1` node
-  pack (a `.dylib`/`.so`/`.dll` exporting `pulp_node_v1_entry` + a JSON manifest).
-  It verifies trust BEFORE any `dlopen`: the signer key must be in the
+  `load_node_pack(dir, manifest, trust)` derives its platform from the build
+  target and treats the pack as runtime-downloaded; pass the four-argument
+  overload with an explicit `NodePackHostPolicy` when the origin is known to be
+  app-bundled. A pack is a precompiled `pulp_node_v1` dynamic library exporting
+  `pulp_node_v1_entry` plus a JSON manifest. The generated-device policy runs
+  before trust verification or any binary file access: native packs are allowed
+  on desktop, allowed on Android only when `origin == AppBundled`, and denied on
+  iOS/web. Thus the three-argument overload fails closed for Android native
+  packs instead of treating downloaded code as bundled. After policy admission,
+  the signer key must be in the
   `NodePackTrust` set, the Ed25519 signature over `node_pack_signed_message()`
   (pack_id + abi_major + binary SHA-256 + declared nodes/resources/requirements)
   must be authentic, the on-disk binary's SHA-256 must match the signed hash,
   and the entry's `abi_major` must match — any failure returns a
   `NodePackError` and loads nothing. Revocation = drop a key from the trust set.
-  Desktop + Android only; `pulp-host` (and this loader) is compiled out on iOS,
-  where native components are static-bundled + signed with the app. The crypto
+  `pulp-host` (and this loader) is compiled out on iOS, where native components
+  are static-bundled + signed with the app. The crypto
   comes from `pulp::runtime` (`ed25519_verify`, `sha256_hex`); OS
   codesign/notarization is a separate, additional distribution step on top of
   the manifest signature. Registry/package discovery metadata still needs its
