@@ -10,10 +10,11 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 #include <vector>
-// clang-format off
-namespace pulp::signal { namespace detail {
+namespace pulp::signal {
+namespace detail {
 struct CapacityLayout {
     std::size_t n{}, m{}, wcap{}, e{}, q{}, a{}, g{}, l{}, f{}, bytes{};
     static bool add(std::size_t a, std::size_t b, std::size_t& result) noexcept {
@@ -96,11 +97,21 @@ template <typename Program, typename Step, std::size_t Slots> class ProgramBank 
         wcap_ = wcap;
         return true;
     }
-    Program& operator[](std::size_t index) noexcept { return programs_[index]; }
-    const Program& operator[](std::size_t index) const noexcept { return programs_[index]; }
-    Step& step(std::size_t slot, std::size_t index) noexcept { return steps_[slot * n_ + index]; }
-    const Step& step(std::size_t slot, std::size_t index) const noexcept { return steps_[slot * n_ + index]; }
-    std::uint16_t& permutation(std::size_t slot, std::size_t index) noexcept { return permutations_[slot * wcap_ + index]; }
+    Program& operator[](std::size_t index) noexcept {
+        return programs_[index];
+    }
+    const Program& operator[](std::size_t index) const noexcept {
+        return programs_[index];
+    }
+    Step& step(std::size_t slot, std::size_t index) noexcept {
+        return steps_[slot * n_ + index];
+    }
+    const Step& step(std::size_t slot, std::size_t index) const noexcept {
+        return steps_[slot * n_ + index];
+    }
+    std::uint16_t& permutation(std::size_t slot, std::size_t index) noexcept {
+        return permutations_[slot * wcap_ + index];
+    }
     template <typename SourceProgram, typename Validator>
     bool publish(std::size_t slot, const SourceProgram& source, Validator&& validate) noexcept {
         if (slot >= Slots || !validate(source))
@@ -117,10 +128,16 @@ template <typename Program, typename Step, std::size_t Slots> class ProgramBank 
         destination.configured = true;
         return true;
     }
-    const std::uint16_t& permutation(std::size_t slot, std::size_t index) const noexcept { return permutations_[slot * wcap_ + index]; }
-    void clear() noexcept {
-        programs_.reset(); steps_.reset(); permutations_.reset(); n_ = wcap_ = 0;
+    const std::uint16_t& permutation(std::size_t slot, std::size_t index) const noexcept {
+        return permutations_[slot * wcap_ + index];
     }
+    void clear() noexcept {
+        programs_.reset();
+        steps_.reset();
+        permutations_.reset();
+        n_ = wcap_ = 0;
+    }
+
   private:
     std::unique_ptr<Program[]> programs_;
     std::unique_ptr<Step[]> steps_;
@@ -149,7 +166,10 @@ template <typename Sample> class Segmenter {
         if (side != Side::Inside)
             last_ = side;
     }
-    void reset() noexcept { last_ = Side::Inside; }
+    void reset() noexcept {
+        last_ = Side::Inside;
+    }
+
   private:
     Side last_ = Side::Inside;
 };
@@ -196,9 +216,17 @@ class ReservationLedger {
     bool owns(std::size_t index, ReservationToken::Owner owner) const noexcept {
         return index < capacity_ && tokens_[index].owner == owner;
     }
-    std::size_t count() const noexcept { return count_; }
-    std::size_t capacity() const noexcept { return capacity_; }
-    void clear() noexcept { tokens_.reset(); capacity_ = count_ = 0; }
+    std::size_t count() const noexcept {
+        return count_;
+    }
+    std::size_t capacity() const noexcept {
+        return capacity_;
+    }
+    void clear() noexcept {
+        tokens_.reset();
+        capacity_ = count_ = 0;
+    }
+
   private:
     std::unique_ptr<ReservationToken[]> tokens_;
     std::size_t capacity_ = 0, count_ = 0;
@@ -214,9 +242,20 @@ template <typename Sample> class OutputSplicer {
         reset();
         return true;
     }
-    void reset() noexcept { head_ = size_ = 0; invalidate(); }
-    void clear() noexcept { fifo_.reset(); capacity_ = 0; reset(); }
-    void publish(std::size_t full_length) noexcept { valid_ = true; full_length_ = full_length; age_ = 0; }
+    void reset() noexcept {
+        head_ = size_ = 0;
+        invalidate();
+    }
+    void clear() noexcept {
+        fifo_.reset();
+        capacity_ = 0;
+        reset();
+    }
+    void publish(std::size_t full_length) noexcept {
+        valid_ = true;
+        full_length_ = full_length;
+        age_ = 0;
+    }
     bool age(std::size_t limit) noexcept {
         if (!valid_)
             return false;
@@ -226,11 +265,22 @@ template <typename Sample> class OutputSplicer {
         }
         return false;
     }
-    void invalidate() noexcept { valid_ = false; full_length_ = age_ = 0; }
-    bool valid() const noexcept { return valid_; }
-    std::size_t full_length() const noexcept { return full_length_; }
-    std::size_t size() const noexcept { return size_; }
-    std::size_t capacity() const noexcept { return capacity_; }
+    void invalidate() noexcept {
+        valid_ = false;
+        full_length_ = age_ = 0;
+    }
+    bool valid() const noexcept {
+        return valid_;
+    }
+    std::size_t full_length() const noexcept {
+        return full_length_;
+    }
+    std::size_t size() const noexcept {
+        return size_;
+    }
+    std::size_t capacity() const noexcept {
+        return capacity_;
+    }
     std::size_t pull(Sample* output, std::size_t count, std::size_t holdback) noexcept {
         const auto available = size_ > holdback ? size_ - holdback : 0u;
         const auto amount = std::min(available, count);
@@ -259,6 +309,7 @@ template <typename Sample> class OutputSplicer {
         }
         publish(length);
     }
+
   private:
     std::unique_ptr<Sample[]> fifo_;
     std::size_t capacity_ = 0, head_ = 0, size_ = 0;
@@ -266,19 +317,44 @@ template <typename Sample> class OutputSplicer {
     bool valid_ = false;
 };
 } // namespace detail
-template <typename SampleType = float> class WavesetTransformerT {
+/**
+ * A bounded, allocation-free-at-runtime waveset transformation engine.
+ *
+ * Call prepare() and set_program() only from a control thread; both may allocate or copy. After
+ * preparation, push(), pull(), finish_input(), and the parameter setters are suitable for the
+ * realtime audio thread and perform no allocation or blocking synchronization. One audio thread
+ * owns push()/pull()/finish_input()/reset(); control-thread publication may race with that owner
+ * only through the documented setters and program-slot requests. Those operations fail closed by
+ * returning false when a concurrent lifecycle transition owns the packed control state.
+ *
+ * push() may accept fewer samples than requested when its bounded reservation/output capacity is
+ * exhausted. The caller must pull available output and retry the unaccepted suffix. Output remains
+ * owned by the transformer until pull() consumes it, and drained() becomes true only after input
+ * has finished and all buffered output and reservations have retired.
+ */
+template <typename SampleType = float>
+    requires std::is_floating_point_v<SampleType>
+class WavesetTransformerT {
   public:
     static constexpr std::size_t kMaxProgramSlots = 8;
     static constexpr std::size_t kMaxCoordinateChoices = 8;
     static constexpr int kMaxRepeatCount = 16;
     static constexpr int kMaxRotateWindow = 256;
     struct Capacity {
-        int max_wavesets, max_waveset_samples;
-        double max_normalize_ratio;
+        int max_wavesets = 0;
+        int max_waveset_samples = 0;
+        double max_normalize_ratio = 0.0;
     };
     enum class ZeroCrossingPolarity : std::uint8_t { Rising, Falling, Both };
-    enum class Operation : std::uint8_t { Pass, Repeat, Omit, Reverse, Rotate, Normalize,
-                                          CoordinateSelect };
+    enum class Operation : std::uint8_t {
+        Pass,
+        Repeat,
+        Omit,
+        Reverse,
+        Rotate,
+        Normalize,
+        CoordinateSelect
+    };
     struct ProgramStep {
         Operation operation = Operation::Pass;
         std::uint8_t repeat_count = 1;
@@ -326,17 +402,26 @@ template <typename SampleType = float> class WavesetTransformerT {
             !storage.splicer.prepare(layout.q) || !storage.capture || !storage.scratch ||
             !storage.rotate || !storage.held)
             return false;
-        capture_ = std::move(storage.capture); scratch_ = std::move(storage.scratch);
-        rotate_storage_ = std::move(storage.rotate); held_ = std::move(storage.held);
-        programs_ = std::move(storage.programs); ledger_ = std::move(storage.ledger);
+        capture_ = std::move(storage.capture);
+        scratch_ = std::move(storage.scratch);
+        rotate_storage_ = std::move(storage.rotate);
+        held_ = std::move(storage.held);
+        programs_ = std::move(storage.programs);
+        ledger_ = std::move(storage.ledger);
         splicer_ = std::move(storage.splicer);
-        sample_rate_ = sample_rate; capacity_ = capacity;
+        sample_rate_ = sample_rate;
+        capacity_ = capacity;
         max_normalize_ratio_ = capacity.max_normalize_ratio;
-        max_segment_output_ = layout.e; max_lookahead_ = static_cast<int>(layout.l);
-        tail_ = layout.q; max_fade_ = layout.f;
-        programs_[0].version = 1; programs_[0].step_count = 1;
-        programs_.step(0, 0) = ProgramStep{}; programs_[0].rotate_window = 1;
-        programs_[0].permutation_count = 0; programs_[0].configured = true;
+        max_segment_output_ = layout.e;
+        max_lookahead_ = static_cast<int>(layout.l);
+        tail_ = layout.q;
+        max_fade_ = layout.f;
+        programs_[0].version = 1;
+        programs_[0].step_count = 1;
+        programs_.step(0, 0) = ProgramStep{};
+        programs_[0].rotate_window = 1;
+        programs_[0].permutation_count = 0;
+        programs_[0].configured = true;
         control_.store(pack_control(State::Quiescent, 0, 1u), std::memory_order_release);
         reset();
         return true;
@@ -399,13 +484,20 @@ template <typename SampleType = float> class WavesetTransformerT {
         }
     }
     bool set_zero_crossing_polarity(ZeroCrossingPolarity polarity) noexcept {
-        if (polarity < ZeroCrossingPolarity::Rising ||
-            polarity > ZeroCrossingPolarity::Both)
+        if (polarity < ZeroCrossingPolarity::Rising || polarity > ZeroCrossingPolarity::Both)
             return false;
         return update_control([&] { polarity_.store(static_cast<std::uint8_t>(polarity)); });
     }
-    bool set_zero_crossing_epsilon(SampleType epsilon) noexcept { if (!std::isfinite(epsilon) || epsilon < SampleType{}) return false; return update_control([&] { epsilon_.store(epsilon); }); }
-    bool set_crossfade_law(CrossfadeGainLaw law) noexcept { if (law != CrossfadeGainLaw::EqualGain && law != CrossfadeGainLaw::EqualPower) return false; return update_control([&] { crossfade_law_.store(static_cast<std::uint8_t>(law)); }); }
+    bool set_zero_crossing_epsilon(SampleType epsilon) noexcept {
+        if (!std::isfinite(epsilon) || epsilon < SampleType{})
+            return false;
+        return update_control([&] { epsilon_.store(epsilon); });
+    }
+    bool set_crossfade_law(CrossfadeGainLaw law) noexcept {
+        if (law != CrossfadeGainLaw::EqualGain && law != CrossfadeGainLaw::EqualPower)
+            return false;
+        return update_control([&] { crossfade_law_.store(static_cast<std::uint8_t>(law)); });
+    }
     bool set_crossfade_duration_ms(SampleType duration_ms) noexcept {
         if (!std::isfinite(duration_ms) || duration_ms < SampleType{} ||
             duration_ms > SampleType{20})
@@ -420,23 +512,37 @@ template <typename SampleType = float> class WavesetTransformerT {
     }
 #if defined(PULP_WAVESET_TEST_SEAMS)
     using StartupHook = void (*)();
-    static void set_startup_hook(StartupHook hook) noexcept { startup_hook_.store(hook); }
+    static void set_startup_hook(StartupHook hook) noexcept {
+        startup_hook_.store(hook);
+    }
     using PublicationHook = void (*)();
-    static void set_publication_hook(PublicationHook hook) noexcept { publication_hook_.store(hook); }
+    static void set_publication_hook(PublicationHook hook) noexcept {
+        publication_hook_.store(hook);
+    }
     using FinishHook = void (*)();
-    static void set_finish_hook(FinishHook hook) noexcept { finish_hook_.store(hook); }
+    static void set_finish_hook(FinishHook hook) noexcept {
+        finish_hook_.store(hook);
+    }
     using ResetHook = void (*)();
-    static void set_reset_hook(ResetHook hook) noexcept { reset_hook_.store(hook); }
+    static void set_reset_hook(ResetHook hook) noexcept {
+        reset_hook_.store(hook);
+    }
     using ResetCompletionHook = void (*)();
-    static void set_reset_completion_hook(ResetCompletionHook hook) noexcept { reset_completion_hook_.store(hook); }
+    static void set_reset_completion_hook(ResetCompletionHook hook) noexcept {
+        reset_completion_hook_.store(hook);
+    }
     using ControlCompletionHook = void (*)();
-    static void set_control_completion_hook(ControlCompletionHook hook) noexcept { control_completion_hook_.store(hook); }
+    static void set_control_completion_hook(ControlCompletionHook hook) noexcept {
+        control_completion_hook_.store(hook);
+    }
     using DrainedSnapshotHook = void (*)();
     static void set_drained_snapshot_hook(DrainedSnapshotHook hook) noexcept {
         drained_snapshot_hook_.store(hook);
     }
 #endif
-    bool set_coordinate_seed(std::uint64_t seed) noexcept { return update_control([&] { coordinate_seed_.store(seed); }); }
+    bool set_coordinate_seed(std::uint64_t seed) noexcept {
+        return update_control([&] { coordinate_seed_.store(seed); });
+    }
     int push(const SampleType* input, int count) noexcept {
         auto word = control_.load(std::memory_order_acquire);
         auto state = control_state(word);
@@ -445,10 +551,12 @@ template <typename SampleType = float> class WavesetTransformerT {
         const bool starting = state == State::Quiescent;
         std::uint8_t startup_slot{};
         if (state == State::Quiescent) {
-            if (!std::isfinite(input[0])) return 0;
+            if (!std::isfinite(input[0]))
+                return 0;
             for (;;) {
                 state = control_state(word);
-                if (state != State::Quiescent) return 0;
+                if (state != State::Quiescent)
+                    return 0;
                 startup_slot = control_slot(word);
                 const auto desired =
                     pack_control(State::Pushing, startup_slot, control_configured(word));
@@ -459,8 +567,8 @@ template <typename SampleType = float> class WavesetTransformerT {
             if (!ensure_reservation()) {
                 word = control_.load(std::memory_order_acquire);
                 for (;;) {
-                    const auto target = control_finish_requested(word) ? State::Finished
-                                                                       : State::Quiescent;
+                    const auto target =
+                        control_finish_requested(word) ? State::Finished : State::Quiescent;
                     const auto completed =
                         pack_control(target, control_slot(word), control_configured(word));
                     if (control_.compare_exchange_weak(word, completed, std::memory_order_acq_rel,
@@ -527,15 +635,18 @@ template <typename SampleType = float> class WavesetTransformerT {
         }
     }
     int pull(SampleType* output, int count) noexcept {
-        if (output == nullptr || count <= 0) return 0;
+        if (output == nullptr || count <= 0)
+            return 0;
         auto word = control_.load(std::memory_order_acquire);
         State source{};
         for (;;) {
             source = control_state(word);
-            if (source == State::Quiescent) return 0;
-            if (source != State::Live && source != State::Finished) return 0;
-            const auto owned = with_state(word, source == State::Finished ? State::Draining
-                                                                          : State::Pulling);
+            if (source == State::Quiescent)
+                return 0;
+            if (source != State::Live && source != State::Finished)
+                return 0;
+            const auto owned =
+                with_state(word, source == State::Finished ? State::Draining : State::Pulling);
             if (control_.compare_exchange_weak(word, owned, std::memory_order_acq_rel,
                                                std::memory_order_acquire))
                 break;
@@ -543,7 +654,8 @@ template <typename SampleType = float> class WavesetTransformerT {
         const auto holdback = source == State::Finished || !splicer_.valid()
                                   ? std::size_t{}
                                   : std::min(max_fade_, splicer_.full_length() / 2u);
-        const auto amount = splicer_.pull(output, static_cast<std::size_t>(count), holdback); word = control_.load(std::memory_order_acquire);
+        const auto amount = splicer_.pull(output, static_cast<std::size_t>(count), holdback);
+        word = control_.load(std::memory_order_acquire);
         for (;;) {
             if (source == State::Live && control_finish_requested(word)) {
                 finish_owned_processing();
@@ -560,9 +672,9 @@ template <typename SampleType = float> class WavesetTransformerT {
         auto word = control_.load(std::memory_order_acquire);
         for (;;) {
             const auto state = control_state(word);
-            if (state == State::Unprepared || state == State::Finished || state == State::Draining ||
-                state == State::Observing || state == State::Faulted || state == State::Finishing ||
-                state == State::Resetting)
+            if (state == State::Unprepared || state == State::Finished ||
+                state == State::Draining || state == State::Observing || state == State::Faulted ||
+                state == State::Finishing || state == State::Resetting)
                 return;
             if (state == State::Publishing || state == State::Pushing || state == State::Pulling ||
                 state == State::Controlling) {
@@ -615,7 +727,8 @@ template <typename SampleType = float> class WavesetTransformerT {
             const auto state = control_state(word);
             if (state == State::Unprepared || state == State::Publishing ||
                 state == State::Pushing || state == State::Pulling || state == State::Draining ||
-                state == State::Observing || state == State::Controlling || state == State::Finishing || state == State::Resetting)
+                state == State::Observing || state == State::Controlling ||
+                state == State::Finishing || state == State::Resetting)
                 return;
             if (control_.compare_exchange_weak(word, with_state(word, State::Resetting),
                                                std::memory_order_acq_rel,
@@ -626,8 +739,10 @@ template <typename SampleType = float> class WavesetTransformerT {
         if (const auto hook = reset_hook_.load(std::memory_order_acquire))
             hook();
 #endif
-        capture_size_ = held_count_ = 0; ledger_.reset();
-        accepted_total_ = next_source_index_ = completed_index_ = 0; program_cursor_ = 0;
+        capture_size_ = held_count_ = 0;
+        ledger_.reset();
+        accepted_total_ = next_source_index_ = completed_index_ = 0;
+        program_cursor_ = 0;
         active_slot_ = programs_[0].configured ? 0 : first_configured_slot();
         const auto configured = control_configured(control_.load(std::memory_order_relaxed));
         segmenter_.reset();
@@ -639,9 +754,16 @@ template <typename SampleType = float> class WavesetTransformerT {
         control_.store(pack_control(State::Quiescent, active_slot_, configured),
                        std::memory_order_release);
     }
-    int latency_samples() const noexcept { return 0; }
-    int max_lookahead_samples() const noexcept { return prepared() ? max_lookahead_ : 0; }
-    std::size_t tail_samples() const noexcept { return prepared() ? tail_ : 0; }
+    int latency_samples() const noexcept {
+        return 0;
+    }
+    int max_lookahead_samples() const noexcept {
+        return prepared() ? max_lookahead_ : 0;
+    }
+    std::size_t tail_samples() const noexcept {
+        return prepared() ? tail_ : 0;
+    }
+
   private:
     enum class State : std::uint8_t {
         Unprepared,
@@ -668,15 +790,25 @@ template <typename SampleType = float> class WavesetTransformerT {
         return (configured << kConfiguredShift) |
                (static_cast<std::uint32_t>(state) << kStateShift) | (slot & kSlotMask);
     }
-    static constexpr State control_state(std::uint32_t word) noexcept { return static_cast<State>((word >> kStateShift) & 0x1fu); }
-    static constexpr std::uint8_t control_slot(std::uint32_t word) noexcept { return static_cast<std::uint8_t>(word & kSlotMask); }
-    static constexpr std::uint32_t control_configured(std::uint32_t word) noexcept { return (word >> kConfiguredShift) & kConfiguredMask; }
-    static constexpr bool control_finish_requested(std::uint32_t word) noexcept { return (word & kFinishRequestedMask) != 0; }
+    static constexpr State control_state(std::uint32_t word) noexcept {
+        return static_cast<State>((word >> kStateShift) & 0x1fu);
+    }
+    static constexpr std::uint8_t control_slot(std::uint32_t word) noexcept {
+        return static_cast<std::uint8_t>(word & kSlotMask);
+    }
+    static constexpr std::uint32_t control_configured(std::uint32_t word) noexcept {
+        return (word >> kConfiguredShift) & kConfiguredMask;
+    }
+    static constexpr bool control_finish_requested(std::uint32_t word) noexcept {
+        return (word & kFinishRequestedMask) != 0;
+    }
     static constexpr std::uint32_t with_state(std::uint32_t word, State state) noexcept {
         return pack_control(state, control_slot(word), control_configured(word)) |
                (word & kFinishRequestedMask);
     }
-    State current_state() const noexcept { return control_state(control_.load(std::memory_order_acquire)); }
+    State current_state() const noexcept {
+        return control_state(control_.load(std::memory_order_acquire));
+    }
     void transition_terminal(State terminal) noexcept {
         auto word = control_.load(std::memory_order_acquire);
         for (;;) {
@@ -715,8 +847,13 @@ template <typename SampleType = float> class WavesetTransformerT {
     }
     void clear_configuration() noexcept {
         control_.store(pack_control(State::Unprepared, 0), std::memory_order_release);
-        capture_.reset(); scratch_.reset(); splicer_.clear(); rotate_storage_.reset(); held_.reset();
-        ledger_.clear(); programs_.clear();
+        capture_.reset();
+        scratch_.reset();
+        splicer_.clear();
+        rotate_storage_.reset();
+        held_.reset();
+        ledger_.clear();
+        programs_.clear();
     }
     bool validate_program(const OperationProgram& program) const noexcept {
         if (program.version == 0 || program.steps.empty() ||
@@ -954,10 +1091,14 @@ template <typename SampleType = float> class WavesetTransformerT {
         if (current_state() != State::Faulted)
             transition_terminal(State::Finished);
     }
-    void apply_pending_program() noexcept { apply_program(control_slot(control_.load(std::memory_order_acquire))); }
+    void apply_pending_program() noexcept {
+        apply_program(control_slot(control_.load(std::memory_order_acquire)));
+    }
     void apply_program(std::uint8_t slot) noexcept {
-        if (slot == active_slot_) return;
-        active_slot_ = slot; program_cursor_ = 0;
+        if (slot == active_slot_)
+            return;
+        active_slot_ = slot;
+        program_cursor_ = 0;
     }
     void flush_partial_rotate() noexcept {
         for (std::size_t i = 0; i < held_count_; ++i) {
@@ -977,7 +1118,8 @@ template <typename SampleType = float> class WavesetTransformerT {
     }
     std::uint8_t first_configured_slot() const noexcept {
         for (std::uint8_t i = 0; i < kMaxProgramSlots; ++i)
-            if (programs_[i].configured) return i;
+            if (programs_[i].configured)
+                return i;
         return 0;
     }
     template <typename Mutation> bool update_control(Mutation&& mutation) noexcept {
@@ -985,7 +1127,9 @@ template <typename SampleType = float> class WavesetTransformerT {
         State source{};
         for (;;) {
             source = control_state(word);
-            if (control_finish_requested(word) || (source != State::Quiescent && source != State::Live)) return false;
+            if (control_finish_requested(word) ||
+                (source != State::Quiescent && source != State::Live))
+                return false;
             if (control_.compare_exchange_weak(word, with_state(word, State::Controlling),
                                                std::memory_order_acq_rel,
                                                std::memory_order_acquire))
@@ -993,14 +1137,19 @@ template <typename SampleType = float> class WavesetTransformerT {
         }
         mutation();
 #if defined(PULP_WAVESET_TEST_SEAMS)
-        if (const auto hook = control_completion_hook_.load(std::memory_order_acquire)) hook();
+        if (const auto hook = control_completion_hook_.load(std::memory_order_acquire))
+            hook();
 #endif
         word = control_.load(std::memory_order_acquire);
         for (;;) {
-            if (control_finish_requested(word)) { finish_owned_processing(); return true; }
+            if (control_finish_requested(word)) {
+                finish_owned_processing();
+                return true;
+            }
             if (control_.compare_exchange_weak(word, with_state(word, source),
                                                std::memory_order_acq_rel,
-                                               std::memory_order_acquire)) return true;
+                                               std::memory_order_acquire))
+                return true;
         }
     }
     detail::ProgramBank<StoredProgram, ProgramStep, kMaxProgramSlots> programs_{};
@@ -1039,4 +1188,6 @@ template <typename SampleType = float> class WavesetTransformerT {
     inline static std::atomic<DrainedSnapshotHook> drained_snapshot_hook_{nullptr};
 #endif
 };
-using WavesetTransformer = WavesetTransformerT<float>; using WavesetTransformer64 = WavesetTransformerT<double>; } // namespace pulp::signal
+using WavesetTransformer = WavesetTransformerT<float>;
+using WavesetTransformer64 = WavesetTransformerT<double>;
+} // namespace pulp::signal

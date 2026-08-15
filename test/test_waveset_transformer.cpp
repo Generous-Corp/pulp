@@ -16,6 +16,12 @@
 namespace {
 
 using Transformer = pulp::signal::WavesetTransformer;
+template <typename Sample>
+concept SupportsWavesetTransformer =
+    requires { typename pulp::signal::WavesetTransformerT<Sample>; };
+static_assert(SupportsWavesetTransformer<float>);
+static_assert(SupportsWavesetTransformer<double>);
+static_assert(!SupportsWavesetTransformer<int>);
 Transformer* startup_hook_transformer = nullptr;
 Transformer* publication_hook_transformer = nullptr;
 bool publication_push_rejected = false;
@@ -230,6 +236,7 @@ ScheduledResult run_constant_pull_schedule(int partition, std::uint32_t random_s
 TEST_CASE("waveset transformer validates preparation and publishes owned programs",
           "[signal][waveset]") {
     Transformer transformer;
+    REQUIRE_FALSE(transformer.prepare(48000.0, Transformer::Capacity{}));
     REQUIRE_FALSE(transformer.prepare(0.0, {2, 8, 2.0}));
     REQUIRE_FALSE(transformer.prepare(48000.0, {0, 8, 2.0}));
     REQUIRE_FALSE(transformer.prepare(48000.0, {2, 0, 2.0}));
@@ -1150,7 +1157,8 @@ TEST_CASE("waveset setter completion transfers latched EOS to processor finaliza
         REQUIRE(transformer.prepare(1000.0, {4, 2, 1.0}));
         Transformer::OperationProgram rotate;
         rotate.steps.resize(2);
-        for (auto& step : rotate.steps) step.operation = Transformer::Operation::Rotate;
+        for (auto& step : rotate.steps)
+            step.operation = Transformer::Operation::Rotate;
         rotate.rotate_window = 2;
         rotate.permutation = {0, 1};
         REQUIRE(transformer.set_program(0, rotate));
