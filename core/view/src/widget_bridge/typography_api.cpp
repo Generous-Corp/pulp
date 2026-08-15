@@ -199,6 +199,14 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    register_bridge_function(api, "clearCapturedLineBoxes", [&self](choc::javascript::ArgumentList args) {
+        if (auto* label = dynamic_cast<Label*>(
+                self.widget(args.get<std::string>(0, "")))) {
+            label->clear_cached_line_boxes();
+        }
+        return choc::value::Value();
+    });
+
     register_bridge_function(api, "setFontSize", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         float size = 0.0f;

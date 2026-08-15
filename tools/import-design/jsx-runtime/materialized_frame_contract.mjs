@@ -14,7 +14,7 @@ function finitePositive(value) {
 // Keeping this distinction in one contract prevents state screenshots from
 // being scaled into the authored frame or live controls from being laid out
 // against host gutters.
-export function resolveMaterializedFrames(ir) {
+export function resolveMaterializedFrames(ir, coordinateSpace = null) {
   const root = ir?.root || {};
   const attributes = root.attributes || {};
   const style = root.style || {};
@@ -29,14 +29,36 @@ export function resolveMaterializedFrames(ir) {
     throw new Error('DesignIR root is missing a finite positive visual frame');
   }
 
-  const behavior = {
+  const legacyBehavior = {
     left: finiteNumber(attributes.browser_authored_frame_x),
     top: finiteNumber(attributes.browser_authored_frame_y),
     width: finitePositive(attributes.browser_authored_frame_width) || visual.width,
     height: finitePositive(attributes.browser_authored_frame_height) || visual.height,
   };
-  if (behavior.width === 0 || behavior.height === 0) {
+  if (legacyBehavior.width === 0 || legacyBehavior.height === 0) {
     throw new Error('DesignIR root is missing a finite positive authored frame');
+  }
+  const authored = coordinateSpace?.authored_box;
+  const matrix = coordinateSpace?.captured_transform;
+  if (!authored || !matrix) return { visual, behavior: legacyBehavior };
+  const behavior = {
+    left: 0, top: 0,
+    width: finitePositive(authored.width),
+    height: finitePositive(authored.height),
+    transform: {
+      a: finiteNumber(matrix.a, Number.NaN),
+      b: finiteNumber(matrix.b, Number.NaN),
+      c: finiteNumber(matrix.c, Number.NaN),
+      d: finiteNumber(matrix.d, Number.NaN),
+      e: finiteNumber(matrix.e, Number.NaN),
+      f: finiteNumber(matrix.f, Number.NaN),
+    },
+  };
+  if (behavior.width === 0 || behavior.height === 0 ||
+      !Object.values(behavior.transform).every(Number.isFinite) ||
+      Math.abs(behavior.transform.a * behavior.transform.d -
+        behavior.transform.b * behavior.transform.c) < 1e-9) {
+    throw new Error('materialized authored coordinate space is invalid');
   }
   return { visual, behavior };
 }

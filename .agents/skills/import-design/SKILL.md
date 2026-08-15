@@ -6405,6 +6405,17 @@ interaction fake: invalid activation, a missing captured image, an unknown
 state, or a failed semantic match must fail closed. Validate the home state and
 every accepted atlas state independently against its own same-transaction
 browser frame.
+
+Under `--visual-authority native`, add `materialized_document` to each state
+entry and point it at that state's captured
+`pulp-materialized-browser-document-v1` sidecar. The native runtime then keeps
+executing the original state transition while rejoining Chromium's resolved
+element boxes, font bindings, and line boxes to the newly committed tree. State
+resolution must run even though native authority embeds no captured paint
+planes, and the per-commit hook must keep the active state's metadata until the
+state closes; otherwise a modal shell may match before its descendants commit
+or a later commit may silently restore home geometry. Browser-only `html`
+scaffolding is not a native binding target and is filtered at capture/load.
 Installed targets must colocate atlas paints beneath the generated runtime
 directory and use `--portable-state-assets`. This emits package-relative paths
 and rejects any paint that resolves outside the packaged runtime; absolute

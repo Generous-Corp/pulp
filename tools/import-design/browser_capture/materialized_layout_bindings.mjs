@@ -10,35 +10,40 @@
 // captured state supplies its own evidence.
 
 const MAX_BINDINGS = 16384;
+const SVG_PRESENTATION_PRIMITIVES = new Set([
+  "path", "rect", "line", "circle", "ellipse", "polygon", "polyline",
+]);
 
-function stringAt(strings, index) {
+import { materializedRectToAuthored } from './materialized_coordinate_space.mjs';
+
+export function materializedStringAt(strings, index) {
   return Number.isInteger(index) && index >= 0 ? String(strings[index] ?? "") : "";
 }
 
-function attributeValue(nodes, strings, nodeIndex, name) {
+export function materializedAttributeValue(nodes, strings, nodeIndex, name) {
   const row = nodes.attributes?.[nodeIndex] ?? [];
   for (let index = 0; index + 1 < row.length; index += 2) {
-    if (stringAt(strings, row[index]).toLowerCase() === name.toLowerCase()) {
-      return stringAt(strings, row[index + 1]);
+    if (materializedStringAt(strings, row[index]).toLowerCase() === name.toLowerCase()) {
+      return materializedStringAt(strings, row[index + 1]);
     }
   }
   return "";
 }
 
-function finiteRect(row) {
+export function materializedFiniteRect(row) {
   if (!Array.isArray(row) || row.length < 4) return null;
   const values = row.slice(0, 4).map(Number);
   if (!values.every(Number.isFinite) || values[2] < 0 || values[3] < 0) return null;
   return values;
 }
 
-function isMaterializedElement(nodes, strings, node) {
+export function isMaterializedElement(nodes, strings, node) {
   if (nodes.nodeType?.[node] !== 1) return false;
-  const tag = stringAt(strings, nodes.nodeName?.[node]).toLowerCase();
+  const tag = materializedStringAt(strings, nodes.nodeName?.[node]).toLowerCase();
   return tag.length > 0 && !tag.startsWith("::");
 }
 
-function buildElementChildren(nodes, strings) {
+export function buildMaterializedElementChildren(nodes, strings) {
   const children = new Map();
   const parent = nodes.parentIndex ?? [];
   const type = nodes.nodeType ?? [];
@@ -51,7 +56,7 @@ function buildElementChildren(nodes, strings) {
   return children;
 }
 
-function structuralPath(nodes, strings, elementChildren, owner) {
+export function materializedStructuralPath(nodes, strings, elementChildren, owner) {
   const parent = nodes.parentIndex ?? [];
   const type = nodes.nodeType ?? [];
   const names = nodes.nodeName ?? [];
@@ -62,8 +67,8 @@ function structuralPath(nodes, strings, elementChildren, owner) {
   let guard = 0;
   while (current >= 0 && current < parent.length && guard++ < parent.length) {
     if (type[current] === 1) {
-      const id = attributeValue(nodes, strings, current, "id");
-      const tag = stringAt(strings, names[current]).toLowerCase();
+      const id = materializedAttributeValue(nodes, strings, current, "id");
+      const tag = materializedStringAt(strings, names[current]).toLowerCase();
       if (id === "root") {
         anchor = "#root";
         anchorNode = current;
@@ -85,7 +90,7 @@ function structuralPath(nodes, strings, elementChildren, owner) {
   return { anchor, anchorNode, path: reversed.reverse() };
 }
 
-export function buildMaterializedLayoutBindings(snapshot) {
+export function buildMaterializedLayoutBindings(snapshot, coordinateSpace = null) {
   const document = snapshot?.documents?.[0];
   const strings = snapshot?.strings ?? [];
   const nodes = document?.nodes ?? {};
@@ -93,11 +98,13 @@ export function buildMaterializedLayoutBindings(snapshot) {
   if (!document || !Array.isArray(layout.nodeIndex) ||
       !Array.isArray(layout.bounds)) return [];
 
-  const elementChildren = buildElementChildren(nodes, strings);
+  const elementChildren = buildMaterializedElementChildren(nodes, strings);
   const layoutByNode = new Map();
   for (let index = 0; index < layout.nodeIndex.length; ++index) {
     const node = Number(layout.nodeIndex[index]);
-    const rect = finiteRect(layout.bounds[index]);
+    const captured = materializedFiniteRect(layout.bounds[index]);
+    const rect = captured
+      ? materializedRectToAuthored(captured, coordinateSpace) : null;
     if (Number.isSafeInteger(node) && rect && !layoutByNode.has(node)) {
       layoutByNode.set(node, rect);
     }
@@ -109,8 +116,22 @@ export function buildMaterializedLayoutBindings(snapshot) {
   for (const [node, rect] of layoutByNode) {
     if (bindings.length >= MAX_BINDINGS) break;
     if (!isMaterializedElement(nodes, strings, node)) continue;
-    const identity = structuralPath(nodes, strings, elementChildren, node);
+    const tag = materializedStringAt(strings, nodes.nodeName?.[node]).toLowerCase();
+    // DOMSnapshot bounds for SVG presentation primitives are painted/ink
+    // bounds, not independent CSS layout boxes. Replaying them through Yoga
+    // makes a path occupy its already-clipped ink rectangle, after which the
+    // ancestor viewBox scales it a second time. The surrounding <svg> owns
+    // layout; primitives fill that viewport and retain these bounds only in
+    // paint evidence where a primitive (notably <rect>) needs geometry.
+    if (SVG_PRESENTATION_PRIMITIVES.has(tag)) continue;
+    const identity = materializedStructuralPath(nodes, strings, elementChildren, node);
     if (!identity) continue;
+    // The native materialized tree begins at the authored application root;
+    // browser-only document scaffolding has no renderer node to bind. Keep
+    // body-anchored descendants, but never publish the HTML document element
+    // itself as an expected native match.
+    if (identity.anchor === "body" && identity.path.length === 1 &&
+        identity.path[0].tag === "html") continue;
     const pathKey = `${identity.anchor}:${identity.path
       .map((step) => `${step.tag}[${step.index}]`).join("/")}`;
     // DOMSnapshot can report more than one layout row for one rendered

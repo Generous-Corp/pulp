@@ -9,28 +9,34 @@ void SvgRectWidget::set_rect(float x, float y, float width, float height) {
     y_ = y;
     w_ = std::max(0.0f, width);
     h_ = std::max(0.0f, height);
+    request_repaint();
 }
 
 void SvgRectWidget::set_fill_color(canvas::Color c) {
     fill_color_ = c;
     has_fill_ = true;
+    request_repaint();
 }
 
 void SvgRectWidget::clear_fill() {
     has_fill_ = false;
+    request_repaint();
 }
 
 void SvgRectWidget::set_stroke_color(canvas::Color c) {
     stroke_color_ = c;
     has_stroke_ = true;
+    request_repaint();
 }
 
 void SvgRectWidget::clear_stroke() {
     has_stroke_ = false;
+    request_repaint();
 }
 
 void SvgRectWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
+    request_repaint();
 }
 
 void SvgRectWidget::paint(canvas::Canvas& canvas) {

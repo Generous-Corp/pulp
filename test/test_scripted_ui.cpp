@@ -380,6 +380,41 @@ TEST_CASE("ScriptedUiSession resolves reviewed kit asset roots", "[view][scripte
     fs::remove_all(temp_dir);
 }
 
+TEST_CASE("ScriptedUiSession resolves a sidecar beside its entry script",
+          "[view][scripted-ui][assets]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-sidecar");
+    const auto script_path = temp_dir / "ui" / "main.js";
+    fs::create_directories(script_path.parent_path());
+    write_text(script_path.parent_path() / "document.json", R"({"schema":"sidecar"})");
+    write_text(temp_dir / "outside.json", R"({"name":"outside"})");
+    write_text(script_path, R"JS(
+        var documentAsset = __loadAssetSync__('document.json');
+        var traversal = __loadAssetSync__('../outside.json');
+        createLabel('document', documentAsset.ok ? documentAsset.text : 'missing', '');
+        createLabel('traversal', traversal.ok ? 'leaked' : String(traversal.status), '');
+    )JS");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script_path,
+        .enable_hot_reload = false,
+        .enable_theme_reload = false,
+    });
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+    auto* document = dynamic_cast<Label*>(session.bridge()->widget("document"));
+    auto* traversal = dynamic_cast<Label*>(session.bridge()->widget("traversal"));
+    REQUIRE(document != nullptr);
+    REQUIRE(document->text() == R"({"schema":"sidecar"})");
+    REQUIRE(traversal != nullptr);
+    REQUIRE(traversal->text() == "404");
+    fs::remove_all(temp_dir);
+}
+
 TEST_CASE("ScriptedUiSession resolves imported assets beside load and reload scripts",
           "[view][scripted-ui][assets][reload]") {
     const auto temp_dir = make_temp_dir("pulp-scripted-relative-assets");

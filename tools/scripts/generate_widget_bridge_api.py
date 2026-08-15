@@ -111,6 +111,22 @@ export interface PulpBridgeRect {
     bottom: number;
     left: number;
 }
+export interface PulpBridgeBoxMetrics {
+    localX: number;
+    localY: number;
+    offsetWidth: number;
+    offsetHeight: number;
+    clientWidth: number;
+    clientHeight: number;
+    borderLeftWidth: number;
+    borderTopWidth: number;
+    borderRightWidth: number;
+    borderBottomWidth: number;
+    marginLeft: number;
+    marginTop: number;
+    marginRight: number;
+    marginBottom: number;
+}
 export interface PulpBridgeSize {
     width: number;
     height: number;
@@ -246,6 +262,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "getComputedValue": "(id: string, property: string) => string",
     "getGPUInfo": "() => PulpBridgeJsonObject",
     "getLayoutAncestorRects": "(id: string) => PulpBridgeRect[]",
+    "getLayoutBoxMetrics": "(id: string) => PulpBridgeBoxMetrics",
     "getLayoutRect": "(id: string) => PulpBridgeRect",
     "getMotionToken": "(name: string) => number | undefined",
     "getParam": "(name: string) => number",
@@ -319,6 +336,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
     "setTextRuns": "(id: string, runs: Array<{ start: number; end: number; fontWeight?: number; fontSize?: number; fontFamily?: string; color?: string; fontStyle?: string; letterSpacing?: number; textDecoration?: string }>) => void",
     "setCapturedLineBoxes": "(id: string, boxes: Array<{ left: number; top: number; width: number; height: number; start: number; length: number }>, basisWidth: number, basisFace: string, wrapOnCacheMiss?: boolean) => void",
+    "setVisibleAtAnchor": "(anchor: string, visible: boolean) => boolean",
     "setTheme": "(name: 'dark' | 'light' | 'pro_audio' | string) => void",
     "setTransform": "(id: string, a: number, b: number, c: number, d: number, e: number, f: number) => void",
     "setTransformOrigin": "(id: string, x: number, y?: number) => void",

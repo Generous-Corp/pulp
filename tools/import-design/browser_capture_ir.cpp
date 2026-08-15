@@ -49,6 +49,23 @@ std::optional<float> strict_finite_float(std::string_view text) {
     }
 }
 
+std::string portable_source_file(std::string_view source_file) {
+    if (source_file.empty()) return {};
+
+    // Network provenance is already portable and should remain descriptive.
+    const auto scheme = source_file.find("://");
+    if (scheme != std::string_view::npos) return std::string(source_file);
+
+    const fs::path path(source_file);
+    if (!path.is_absolute()) return path.generic_string();
+
+    // DesignIR is packaged into relocatable SDK/product artifacts.  Retaining
+    // a developer-machine absolute path leaks local topology and makes the
+    // generated artifact fail the portability scanner; the leaf still gives
+    // useful source provenance without coupling runtime bytes to the importer.
+    return path.filename().generic_string();
+}
+
 double number_member(const choc::value::ValueView& object,
                      const char* key,
                      double fallback = 0.0) {
@@ -1045,7 +1062,8 @@ bool validate_interaction_report(
         const auto action = actions[static_cast<int>(index)];
         const auto name = string_member(action, "action");
         const bool allowed =
-            name == "click" || name == "context-click" || name == "type" ||
+            name == "click" || name == "context-click" ||
+            name == "dispatch-event" || name == "type" ||
             name == "wait-for" || name == "wait-ms";
         if (!action.isObject() || !allowed ||
             string_member(action, "status") != "completed" ||
@@ -1326,7 +1344,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
     DesignIR ir;
     ir.source = options.source;
-    ir.source_file = options.source_file;
+    ir.source_file = portable_source_file(options.source_file);
     ir.capture_method = "chromium-cdp";
     ir.source_adapter = "browser-capture";
     ir.source_version = "pulp-browser-capture-v1";
@@ -1340,6 +1358,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     };
     std::vector<CapturedCanvasLayer> captured_canvas_layers;
     std::optional<std::string> chrome_asset_id;
+    std::optional<std::string> canvas_composite_asset_id;
     std::unordered_map<int, std::string> captured_element_assets;
     std::unordered_set<std::string> captured_asset_ids{
         "reference:browser"};
@@ -1396,6 +1415,58 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                 chrome.height = static_cast<int>(height);
                 ir.asset_manifest.assets.push_back(std::move(chrome));
                 chrome_asset_id = id;
+                continue;
+            }
+            if (asset.isObject() &&
+                string_member(asset, "kind") ==
+                    "canvas-composite-evidence") {
+                if (canvas_composite_asset_id) {
+                    result.error =
+                        "browser capture has duplicate canvas composite evidence";
+                    return result;
+                }
+                const auto id = string_member(asset, "id");
+                const auto path = string_member(asset, "path");
+                const auto mime = string_member(asset, "mime_type");
+                const double width = number_member(asset, "width_px", -1.0);
+                const double height = number_member(asset, "height_px", -1.0);
+                const double changed =
+                    number_member(asset, "changed_pixels", -1.0);
+                if (id.empty() || path.empty() || mime != "image/png" ||
+                    !std::isfinite(width) || std::trunc(width) != width ||
+                    width != logical_width * dpr ||
+                    !std::isfinite(height) || std::trunc(height) != height ||
+                    height != logical_height * dpr ||
+                    !std::isfinite(changed) || std::trunc(changed) != changed ||
+                    changed < 0.0 || changed > width * height ||
+                    !captured_asset_ids.emplace(id).second) {
+                    result.error =
+                        "browser canvas composite evidence metadata is invalid";
+                    return result;
+                }
+                auto local = contained_sidecar(
+                    envelope_path, path, result.error);
+                if (!local) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*local) != hash) {
+                    result.error =
+                        "browser canvas composite PNG hash does not match capture envelope";
+                    return result;
+                }
+                if (!validate_png_header(
+                        *local, static_cast<int>(width),
+                        static_cast<int>(height), result.error))
+                    return result;
+                IRAssetRef composite;
+                composite.asset_id = id;
+                composite.original_uri = "pulp-capture:///" + path;
+                composite.local_path = local->string();
+                composite.content_hash = hash;
+                composite.mime = mime;
+                composite.width = static_cast<int>(width);
+                composite.height = static_cast<int>(height);
+                ir.asset_manifest.assets.push_back(std::move(composite));
+                canvas_composite_asset_id = id;
                 continue;
             }
             if (!asset.isObject() ||
@@ -1490,10 +1561,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         }
     }
     if (options.materialized_canvas_composition &&
-        (!chrome_asset_id || captured_canvas_layers.empty())) {
+        (!chrome_asset_id || !canvas_composite_asset_id ||
+         captured_canvas_layers.empty())) {
         result.error =
             "materialized canvas composition requires one chrome screenshot "
-            "and at least one bounded canvas snapshot";
+            "one canvas composite evidence image, and at least one bounded "
+            "canvas snapshot";
         return result;
     }
     if (!load_token_report(
@@ -1607,6 +1680,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             "browser:chrome+native-canvases";
         ir.root.attributes["materialized_chrome_diagnostic_asset"] =
             *chrome_asset_id;
+        ir.root.attributes["materialized_canvas_validation_asset"] =
+            *canvas_composite_asset_id;
     } else if (native_lowering) {
         // No backdrop at all. The panel is its nodes.
         ir.root.style.width = static_cast<float>(

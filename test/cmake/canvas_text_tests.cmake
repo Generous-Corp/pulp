@@ -92,7 +92,10 @@ catch_discover_tests(pulp-test-font-async-lifecycle)
 add_executable(pulp-test-font-woff2 test_font_woff2.cpp)
 target_link_libraries(pulp-test-font-woff2 PRIVATE pulp::canvas Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-font-woff2 PRIVATE
-    PULP_TEST_WOFF2_FIXTURE="${CMAKE_SOURCE_DIR}/packages/pulp-web-player/src/theme/inter.woff2")
+    PULP_TEST_WOFF2_FIXTURE="${CMAKE_SOURCE_DIR}/packages/pulp-web-player/src/theme/inter.woff2"
+    PULP_TEST_INTER_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf"
+    PULP_TEST_JOST_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
+    PULP_TEST_JETBRAINS_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
 catch_discover_tests(pulp-test-font-woff2)
 
 # Color-font predicate on ResolvedFont.

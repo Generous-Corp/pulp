@@ -270,6 +270,8 @@ test("real browser capture preserves the executable pre-mount document",
       '<main style="width:320px;height:240px">' +
       '<button style="width:120px;height:40px;font-family:&quot;Captured Inter&quot;"' +
       ' onclick="void 0">READY</button>' +
+      '<svg width="16" height="16" style="color:#42b6f0">' +
+      '<rect width="16" height="16" fill="currentColor" /></svg>' +
       '</main>' +
       '<script src="' + url + '"><\\/script></body></html>';
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -341,6 +343,9 @@ test("real browser capture preserves the executable pre-mount document",
       assert.equal(materialized.semantic_bindings[0].bounds.width, 120);
       assert.equal(materialized.semantic_bindings[0].bounds.height, 40);
       assert.ok(materialized.text_bindings.length >= 1);
+      assert.ok(Array.isArray(materialized.paint_bindings));
+      assert.ok(materialized.paint_bindings.length > 0,
+        'same-frame computed SVG paint must survive capture serialization');
       const readyText = materialized.text_bindings.find(
         (binding) => binding.text === "READY");
       assert.ok(readyText);
@@ -361,6 +366,81 @@ test("real browser capture preserves the executable pre-mount document",
       assert.match(
         envelope.provenance.source.materialized_document_sha256,
         /^[0-9a-f]{64}$/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser capture separates authored geometry from its affine transform",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-coordinate-space-"));
+    const input = path.join(root, "transformed.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><html><body><script>
+  const html = ${JSON.stringify(`<!doctype html><html><head><style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    #root {
+      position: absolute; left: 50%; top: 50%; width: 1320px; height: 860px;
+      transform: translate(-50%, -50%) scale(0.9302325581395349);
+      transform-origin: center center; background: #05070a;
+    }
+    button { position: absolute; left: 688px; top: 11px; width: 48px;
+      height: 22px; font: 12px sans-serif; }
+  </style></head><body><main id="root"><button>A</button></main>
+  </body></html>`)};
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  document.documentElement.replaceWith(doc.documentElement);
+  globalThis.__pulpCaptureReady = Promise.resolve();
+</script></body></html>`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "1280",
+        "--initial-height", "800",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const materialized = JSON.parse(await readFile(
+        path.join(output, "materialized-document.json"), "utf8"));
+      assert.equal(materialized.coordinate_space.authored_box.width, 1320);
+      assert.equal(materialized.coordinate_space.authored_box.height, 860);
+      const transform = materialized.coordinate_space.captured_transform;
+      assert.ok(Math.abs(transform.a - 800 / 860) < 1e-6);
+      assert.ok(Math.abs(transform.d - 800 / 860) < 1e-6);
+      assert.ok(Math.abs(transform.b) < 1e-9);
+      assert.ok(Math.abs(transform.c) < 1e-9);
+      assert.ok(Math.abs(transform.e - 26.0465116279) < 0.05);
+      assert.ok(Math.abs(transform.f) < 0.05);
+
+      const button = materialized.layout_bindings.find(
+        (binding) => binding.path.at(-1)?.tag === "button");
+      assert.ok(button);
+      assert.ok(Math.abs(button.box.left - 688) < 0.05);
+      assert.ok(Math.abs(button.box.top - 11) < 0.05);
+      assert.ok(Math.abs(button.box.width - 48) < 0.05);
+      assert.ok(Math.abs(button.box.height - 22) < 0.05);
+
+      const label = materialized.text_bindings.find(
+        (binding) => binding.text === "A");
+      assert.ok(label);
+      assert.ok(Math.abs(label.basis.width - 48) < 0.05);
+      assert.ok(label.boxes.every((box) => box.left >= -0.05 &&
+        box.top >= -0.05 && box.left + box.width <= 48.05 &&
+        box.top + box.height <= 22.05));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -438,8 +518,10 @@ test("real browser capture freezes a canvas animation and names its browser",
         mime_type: "image/png",
         path: `canvas-${backendNodeId}.png`,
         sha256: canvasAsset.sha256,
-        width_px: 320,
-        height_px: 240,
+        // Canvas evidence is a browser-composited viewport plane at capture
+        // DPR, not the element's untransformed backing-store bitmap.
+        width_px: 640,
+        height_px: 480,
         backend_node_id: backendNodeId,
         bounds: canvasAsset.bounds,
       });
@@ -450,6 +532,26 @@ test("real browser capture freezes a canvas animation and names its browser",
         canvasAsset.sha256);
       const [red, green, blue, alpha] = rgbaPixel(canvasPng, 40, 80);
       assert.ok(red + green + blue > 80 && alpha > 240);
+
+      const compositeAsset = envelope.assets.find(
+        (asset) => asset.kind === "canvas-composite-evidence");
+      assert.deepEqual(compositeAsset, {
+        id: "evidence:browser-canvas-composite",
+        kind: "canvas-composite-evidence",
+        mime_type: "image/png",
+        path: "browser-canvas-composite.png",
+        sha256: compositeAsset.sha256,
+        width_px: 640,
+        height_px: 480,
+        changed_pixels: compositeAsset.changed_pixels,
+      });
+      assert.match(compositeAsset.sha256, /^[0-9a-f]{64}$/);
+      assert.ok(compositeAsset.changed_pixels > 0);
+      const compositePng = await readFile(
+        path.join(output, compositeAsset.path));
+      assert.equal(
+        createHash("sha256").update(compositePng).digest("hex"),
+        compositeAsset.sha256);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

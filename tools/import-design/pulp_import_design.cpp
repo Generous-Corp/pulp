@@ -2740,7 +2740,12 @@ int main(int argc, char* argv[]) {
 
     if (!parsed_serialized_design_ir)
         ir.source = *source;
-    ir.source_file = input_url.empty() ? input_file : input_url;
+    // Browser-capture and other provenance-aware adapters may already have
+    // reduced a local entry path to a relocatable source identifier.  Do not
+    // overwrite that adapter-owned value with the developer machine's absolute
+    // CLI input path during common finalization.
+    if (ir.source_file.empty())
+        ir.source_file = input_url.empty() ? input_file : input_url;
     if (ir.imported_at.empty()) ir.imported_at = current_utc_timestamp();
     if (ir.capture_method.empty()) ir.capture_method = "adapter_parse";
     if (ir.source_adapter.empty()) ir.source_adapter = source_str;

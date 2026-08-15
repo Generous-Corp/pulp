@@ -10,7 +10,7 @@
 
 import type { PulpInstance } from './types.js';
 import { makeSyntheticEvent } from './synthetic-event.js';
-import { call } from './prop-applier-internal.js';
+import { call, _resolveVar } from './prop-applier-internal.js';
 import { applyLayoutProp } from './prop-applier-layout.js';
 import { applyPaintProp } from './prop-applier-paint.js';
 import { applyTypographyProp } from './prop-applier-typography.js';
@@ -114,6 +114,14 @@ function isSvgPathType(type: string): boolean {
     // host-config maps both the typed component and the supported lowercase
     // SVG intrinsic to createSvgPath, so both share this compound paint state.
     return type === 'SvgPath' || type === 'path';
+}
+
+function isSvgRectType(type: string): boolean {
+    return type === 'SvgRect' || type === 'rect';
+}
+
+function isSvgLineType(type: string): boolean {
+    return type === 'SvgLine' || type === 'line';
 }
 
 function hasProp(props: Record<string, unknown>, key: string): boolean {
@@ -364,13 +372,13 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     // `type` BEFORE the generic flex routing. The geometry setters are
     // atomic: one bridge call per rect/line carries the full quad of
     // coords to avoid partial updates clobbering unset axes back to zero.
-    if (type === 'SvgRect') {
+    if (isSvgRectType(type)) {
         if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
             if (props) emitSvgRectGeometry(id, props);
             return;
         }
     }
-    if (type === 'SvgLine') {
+    if (isSvgLineType(type)) {
         if (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2') {
             if (props) emitSvgLineGeometry(id, props);
             return;
@@ -434,11 +442,31 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (type === 'Progress')   return call('setProgress', id, value as number);
             if (type === 'Meter')      return call('setMeterLevel', id, value as number);
             return call('setValue', id, value as number);
+        case 'min':         return call('setMin', id, Number(value));
+        case 'max':         return call('setMax', id, Number(value));
+        case 'step':        return call('setStep', id, Number(value));
+        case 'accentColor': return call('setAccentColor', id, String(_resolveVar(value)));
+        case 'placeholder':
+            if (type === 'input' || type === 'textarea' || type === 'TextEditor') {
+                return call('setPlaceholder', id, String(value));
+            }
+            return;
+        // HTML's boolean `disabled` prop is semantic state, not paint-only
+        // opacity.  Forward its inverse to View::enabled() so native controls
+        // both reject input and can select their disabled platform skin.
+        case 'disabled':    return call('setEnabled', id, !Boolean(value));
+        case 'orientation': return call('setOrientation', id, String(value));
 
         // SvgPath wires the SvgPathWidget bridge surface through a
         // typed JSX intrinsic.
         case 'd':            return call('setSvgPath', id, value as string);
         case 'viewBox': {
+            // A lowercase raw-SVG `<svg>` is represented by a generic layout
+            // container. Its descendants receive the viewport transform from
+            // host-config when they materialize; sending this setter to the
+            // container is a no-op and previously made the metadata appear to
+            // be applied while paths still painted in unscaled coordinates.
+            if (String(type).toLowerCase() === 'svg') return;
             // Array form `[w, h]` — the original wiring.
             if (Array.isArray(value) && value.length >= 2) {
                 return call('setSvgViewBox', id, value[0] as number, value[1] as number);
@@ -566,12 +594,12 @@ export function applyAllProps(instance: PulpInstance): void {
     // four geometry keys. Otherwise we'd issue four identical
     // setSvgRect / setSvgLine calls during the loop.
     let svgGeometryEmitted = false;
-    if (type === 'SvgRect') {
+    if (isSvgRectType(type)) {
         if (('x' in props) || ('y' in props) || ('width' in props) || ('height' in props)) {
             emitSvgRectGeometry(id, props);
             svgGeometryEmitted = true;
         }
-    } else if (type === 'SvgLine') {
+    } else if (isSvgLineType(type)) {
         if (('x1' in props) || ('y1' in props) || ('x2' in props) || ('y2' in props)) {
             emitSvgLineGeometry(id, props);
             svgGeometryEmitted = true;
@@ -586,8 +614,8 @@ export function applyAllProps(instance: PulpInstance): void {
             continue;
         }
         if (svgGeometryEmitted) {
-            if (type === 'SvgRect' && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
-            if (type === 'SvgLine' && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
+            if (isSvgRectType(type) && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
+            if (isSvgLineType(type) && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
         }
         applyOne(id, type, key, props[key], props);
     }
@@ -619,13 +647,13 @@ export function applyChangedProps(
     // setSvgRect / setSvgLine call sourced from the post-update props
     // snapshot. Without this, four separate prop diffs would each try
     // to emit a partial geometry update.
-    const svgRectGeoChanged = type === 'SvgRect' && (
+    const svgRectGeoChanged = isSvgRectType(type) && (
         oldProps.x !== newProps.x ||
         oldProps.y !== newProps.y ||
         oldProps.width !== newProps.width ||
         oldProps.height !== newProps.height
     );
-    const svgLineGeoChanged = type === 'SvgLine' && (
+    const svgLineGeoChanged = isSvgLineType(type) && (
         oldProps.x1 !== newProps.x1 ||
         oldProps.y1 !== newProps.y1 ||
         oldProps.x2 !== newProps.x2 ||
@@ -647,8 +675,8 @@ export function applyChangedProps(
         if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
         // SvgRect / SvgLine geometry already emitted above; skip the
         // per-prop dispatch so we don't double-fire bridge calls.
-        if (svgRectGeoChanged && type === 'SvgRect' && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
-        if (svgLineGeoChanged && type === 'SvgLine' && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
+        if (svgRectGeoChanged && isSvgRectType(type) && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
+        if (svgLineGeoChanged && isSvgLineType(type) && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
         if (oldProps[key] !== newProps[key]) {
             if (isEventHandler(key)) {
                 applyEventHandler(id, key, newProps[key]);

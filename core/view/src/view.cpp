@@ -1024,13 +1024,31 @@ View* View::hit_test(Point local_point) {
 }
 
 bool View::inverse_scale_transform(Point& point) const noexcept {
+    // Paint composes the scalar transform first and the explicit affine matrix
+    // second (CTM = scalar * matrix). Invert in reverse application order so
+    // imported CSS surfaces use one coordinate contract for paint and input.
     if (scale_ == 0.0f) return false;
-    if (scale_ == 1.0f) return true;
-
-    const float ox = bounds_.width * origin_x_;
-    const float oy = bounds_.height * origin_y_;
-    point.x = ox + (point.x - ox) / scale_;
-    point.y = oy + (point.y - oy) / scale_;
+    if (scale_ != 1.0f) {
+        const float ox = bounds_.width * origin_x_;
+        const float oy = bounds_.height * origin_y_;
+        point.x = ox + (point.x - ox) / scale_;
+        point.y = oy + (point.y - oy) / scale_;
+    }
+    if (has_transform_matrix_) {
+        const float determinant =
+            transform_matrix_a_ * transform_matrix_d_ -
+            transform_matrix_b_ * transform_matrix_c_;
+        if (!std::isfinite(determinant) || std::abs(determinant) < 1.0e-9f)
+            return false;
+        const float ox = origin_explicit_ ? bounds_.width * origin_x_ : 0.0f;
+        const float oy = origin_explicit_ ? bounds_.height * origin_y_ : 0.0f;
+        const float x = point.x - ox - transform_matrix_e_;
+        const float y = point.y - oy - transform_matrix_f_;
+        point.x = ox + (transform_matrix_d_ * x - transform_matrix_c_ * y) /
+                           determinant;
+        point.y = oy + (-transform_matrix_b_ * x + transform_matrix_a_ * y) /
+                           determinant;
+    }
     return true;
 }
 

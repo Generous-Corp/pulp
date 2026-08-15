@@ -22,14 +22,35 @@ const text = (value, weight = 500) => ({ text: value, basis: { requested: {
 
 test('selects the exact packaged unicode subset Chromium shaped', () => {
   assert.equal(runtimeFamilyForText(faces, text('Settings')),
-    'Captured Mono [latin]');
+    '"Captured Mono [latin]"');
   assert.equal(runtimeFamilyForText(faces, text('Настройки')),
-    'Captured Mono [cyrillic]');
+    '"Captured Mono [cyrillic]"');
 });
 
-test('requires one face to cover the complete text and requested weight', () => {
-  assert.equal(runtimeFamilyForText(faces, text('AЖ')), '');
+test('builds a captured subset stack for mixed-script text', () => {
+  assert.equal(runtimeFamilyForText(faces, text('AЖ')),
+    '"Captured Mono [latin]", "Captured Mono [cyrillic]"');
   assert.equal(runtimeFamilyForText(faces, text('Settings', 800)), '');
+});
+
+test('deduplicates subset aliases while preserving first-glyph order', () => {
+  assert.equal(runtimeFamilyForText(faces, text('ЖAБZ')),
+    '"Captured Mono [cyrillic]", "Captured Mono [latin]"');
+});
+
+test('preserves the exact Chromium platform fallback for uncovered glyphs', () => {
+  const mixed = text('PRESETS ▾');
+  mixed.basis.resolved_faces = [
+    { family_name: 'Captured Mono', post_script_name: 'CapturedMono-Regular',
+      is_custom_font: true, glyph_count: 8 },
+    { family_name: 'Menlo', post_script_name: 'Menlo-Regular',
+      is_custom_font: false, glyph_count: 1 },
+  ];
+  assert.equal(runtimeFamilyForText(faces, mixed),
+    '"Captured Mono [latin]", "Menlo"');
+
+  const unresolved = text('PRESETS ▾');
+  assert.equal(runtimeFamilyForText(faces, unresolved), '');
 });
 
 test('parses explicit and wildcard CSS unicode ranges fail closed', () => {
@@ -51,5 +72,5 @@ test('upgrades pre-subset captures from their content-addressed font asset', () 
     font_family: 'Inter, sans-serif', font_weight: 400, font_slant: 0,
   } } };
   assert.equal(runtimeFamilyForText(legacy, legacyText),
-    'Inter [pulp-materialized-asset-deadbeef]');
+    '"Inter [pulp-materialized-asset-deadbeef]"');
 });

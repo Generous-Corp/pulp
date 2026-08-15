@@ -654,7 +654,8 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
 
 
     // getLayoutRect(id) -> {x, y, width, height, top, right, bottom, left}
-    // Returns layout-resolved bounds in root-relative coordinates.
+    // Returns the presentation-space AABB in root viewport coordinates,
+    // matching DOM getBoundingClientRect().
     //
     // Force a fresh layout pass before reading bounds. Imported editors and any
     // React-imported tree call this via
@@ -671,6 +672,18 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
         self.root_.layout_children();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_rect_value(v);
+    });
+
+    // getLayoutBoxMetrics(id) -> {localX, localY, offsetWidth, offsetHeight,
+    // clientWidth, clientHeight, border*Width, margin*}. These values remain in the view's
+    // untransformed local coordinate space. offset*/client* match the DOM box
+    // model; localX/localY are an importer-only extension used to translate
+    // owner-relative captured evidence onto generated native paint children.
+    register_bridge_function(api, "getLayoutBoxMetrics", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        self.root_.layout_children();
+        View* v = id.empty() ? &self.root_ : self.widget(id);
+        return make_layout_box_metrics_value(v);
     });
 
 

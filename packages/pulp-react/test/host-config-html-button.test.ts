@@ -27,8 +27,13 @@ describe('HTML button materialization', () => {
     it('keeps an imported lowercase button as a styled box with full-box text', () => {
         const instance = lower('button', 'PRECISION');
         expect(bridge.calls.some(c => c.fn === 'createButton')).toBe(false);
-        expect(bridge.calls.find(c => c.fn === 'createCol')?.args)
+        expect(bridge.calls.find(c => c.fn === 'createRow')?.args)
             .toEqual(['action', 'root']);
+        expect(bridge.calls.filter(c => c.fn === 'setFlex').map(c => c.args))
+            .toEqual([
+                ['action', 'align_items', 'center'],
+                ['action', 'justify_content', 'center'],
+            ]);
         expect(bridge.calls.find(c => c.fn === 'createLabel')?.args)
             .toEqual(['action__text', 'PRECISION', 'action']);
         expect(bridge.calls.filter(c => c.fn === 'setPosition' ||
@@ -57,6 +62,15 @@ describe('HTML button materialization', () => {
         expect(PulpHostConfig.shouldSetTextContent!('button' as never, {
             children: [element, 'FLAT'],
         } as never)).toBe(false);
+
+        lower('button', [element, 'FLAT']);
+        expect(bridge.calls.find(c => c.fn === 'createRow')?.args)
+            .toEqual(['action', 'root']);
+        expect(bridge.calls.filter(c => c.fn === 'setFlex').map(c => c.args))
+            .toEqual([
+                ['action', 'align_items', 'center'],
+                ['action', 'justify_content', 'center'],
+            ]);
     });
 
     it('leaves explicit native Pulp Button on the stock widget path', () => {

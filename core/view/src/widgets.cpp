@@ -1172,13 +1172,18 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     bool horiz = orientation_ == Orientation::horizontal;
 
-    // Resolve theme colors. Caller-supplied accent overrides theme for
-    // both the active fill and the handle.
+    // CSS accent-color affects the active portion, not the handle. Keeping
+    // the thumb independently opaque is important: painting an accent with
+    // alpha over the already-painted track makes the track appear to show
+    // through the handle.
     auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
     auto theme_fill  = resolve_color("control.fill",  canvas::Color::rgba8(100, 150, 255));
     auto theme_thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-    auto fill_color  = has_accent_color_ ? accent_color_ : theme_fill;
-    auto thumb_color = has_accent_color_ ? accent_color_ : theme_thumb;
+    const bool active = enabled();
+    auto fill_color  = active && has_accent_color_ ? accent_color_ : theme_fill;
+    auto thumb_color = active && has_accent_color_
+        ? canvas::Color::rgba8(248, 248, 248)
+        : theme_thumb;
 
     // Track thickness — typical HTML range visuals sit in 4..6px.
     float track_thick = std::min(track_thickness_,
@@ -1202,7 +1207,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     }
 
     // Active fill — only the portion between min and current value.
-    canvas.set_fill_color(fill_color);
+    canvas.set_fill_color(active ? fill_color : track_color);
     if (horiz) {
         float fill_w = t * b.width;
         float ty = (b.height - track_thick) * 0.5f;
@@ -1216,20 +1221,51 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(tx, b.height - fill_h, track_thick, fill_h, track_thick * 0.5f);
     }
 
-    // Handle. Inset by handle radius so it never overshoots the bounds.
+    // Chromium's accented macOS range has a one-pixel light keyline around
+    // the track. It is part of the control skin (not the element's CSS box
+    // border), so draw it only for an enabled accented range. A disabled
+    // range remains the neutral unoutlined home-screen control.
+    if (active && has_accent_color_) {
+        canvas.set_stroke_color(thumb_color);
+        canvas.set_line_width(1.0f);
+        if (horiz) {
+            float ty = (b.height - track_thick) * 0.5f;
+            canvas.stroke_rounded_rect(0.5f, ty + 0.5f,
+                                       std::max(0.0f, b.width - 1.0f),
+                                       std::max(0.0f, track_thick - 1.0f),
+                                       std::max(0.0f, (track_thick - 1.0f) * 0.5f));
+        } else {
+            float tx = (b.width - track_thick) * 0.5f;
+            canvas.stroke_rounded_rect(tx + 0.5f, 0.5f,
+                                       std::max(0.0f, track_thick - 1.0f),
+                                       std::max(0.0f, b.height - 1.0f),
+                                       std::max(0.0f, (track_thick - 1.0f) * 0.5f));
+        }
+    }
+
+    // Chrome/macOS uses a 24x16 pill rather than a circular thumb. Inset by
+    // half its major-axis extent so it never overshoots the element bounds.
     canvas.set_fill_color(thumb_color);
-    float handle_radius = (horiz ? std::min(b.height, 16.0f) * 0.5f
-                                 : std::min(b.width,  16.0f) * 0.5f)
-                          * hover_scale_.value();
+    const float thumb_minor = (horiz ? std::min(b.height, 16.0f)
+                                     : std::min(b.width, 16.0f))
+                              * hover_scale_.value();
+    const float thumb_major = std::min(horiz ? b.width : b.height, 24.0f)
+                              * hover_scale_.value();
     if (horiz) {
-        float usable = std::max(0.0f, b.width - 2.0f * handle_radius);
-        float hx = handle_radius + t * usable;
-        canvas.fill_circle(hx, b.height * 0.5f, handle_radius);
+        float usable = std::max(0.0f, b.width - thumb_major);
+        float hx = thumb_major * 0.5f + t * usable;
+        canvas.fill_rounded_rect(hx - thumb_major * 0.5f,
+                                 (b.height - thumb_minor) * 0.5f,
+                                 thumb_major, thumb_minor,
+                                 thumb_minor * 0.5f);
     } else {
-        float usable = std::max(0.0f, b.height - 2.0f * handle_radius);
+        float usable = std::max(0.0f, b.height - thumb_major);
         // Vertical: t=0 → bottom (handle near max-y), t=1 → top.
-        float hy = handle_radius + (1.0f - t) * usable;
-        canvas.fill_circle(b.width * 0.5f, hy, handle_radius);
+        float hy = thumb_major * 0.5f + (1.0f - t) * usable;
+        canvas.fill_rounded_rect((b.width - thumb_minor) * 0.5f,
+                                 hy - thumb_major * 0.5f,
+                                 thumb_minor, thumb_major,
+                                 thumb_minor * 0.5f);
     }
 }
 

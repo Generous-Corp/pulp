@@ -142,6 +142,44 @@ function selectorProbeExpression(selector, operation) {
   })()`;
 }
 
+function dispatchEventExpression(selector, event) {
+  return `(() => {
+    const selector = ${JSON.stringify(selector)};
+    let element;
+    try {
+      element = document.querySelector(selector);
+    } catch (cause) {
+      return { ok: false, permanent: true,
+        error: "invalid CSS selector: " + cause.message };
+    }
+    if (!element) return { ok: false, state: "detached" };
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { ok: false, state: "hidden" };
+    }
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const EventConstructor = ${JSON.stringify(event)} === "pointerdown"
+      ? PointerEvent
+      : MouseEvent;
+    const dispatched = element.dispatchEvent(new EventConstructor(
+      ${JSON.stringify(event)}, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX,
+        clientY,
+        button: 2,
+        buttons: 2,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+    return { ok: true, canceled: !dispatched };
+  })()`;
+}
+
 function actionError(index, action, detail) {
   const error = new Error(
     `browser interaction ${index + 1} (${action.action}) failed: ${detail}`);
@@ -172,6 +210,7 @@ function publicActionEvidence(action) {
   if (action.selector !== undefined) evidence.selector = action.selector;
   if (action.timeout_ms !== undefined) evidence.timeout_ms = action.timeout_ms;
   if (action.state !== undefined) evidence.state = action.state;
+  if (action.event !== undefined) evidence.event = action.event;
   if (action.milliseconds !== undefined) {
     evidence.milliseconds = action.milliseconds;
   }
@@ -310,6 +349,15 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
         type: "mouseReleased", x: target.x, y: target.y,
         button, buttons: 0, clickCount: 1,
       });
+      await settle();
+    } else if (action.action === "dispatch-event") {
+      const result = await evaluate(
+        cdp, dispatchEventExpression(action.selector, action.event));
+      if (!result?.ok) {
+        throw actionError(index, action,
+          result?.error ?? `selector ${JSON.stringify(action.selector)} ` +
+            `did not accept ${action.event}`);
+      }
       await settle();
     } else if (action.action === "type") {
       await probeUntil(

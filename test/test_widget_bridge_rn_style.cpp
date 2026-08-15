@@ -383,6 +383,91 @@ TEST_CASE("CSS shim: setting borderRadius then borderColor preserves radius",
     REQUIRE_THAT(w->corner_radius(), WithinAbs(12.0f, 1e-5f)); // preserved
 }
 
+TEST_CASE("CSS shim: accentColor styles native range controls",
+          "[view][bridge][web-compat][range][accent-color]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createRangeSlider('range', '')");
+    auto* range = dynamic_cast<RangeSlider*>(bridge.widget("range"));
+    REQUIRE(range != nullptr);
+    REQUIRE_FALSE(range->has_accent_color());
+
+    // Exercise the reflected CSSStyleDeclaration property used by React's
+    // inline `style={{ accentColor: ... }}` rather than the Pulp-only bridge
+    // primitive directly.
+    bridge.load_script(
+        "var __rangeEl = { _id: 'range', _nativeCreated: true };"
+        "var __rangeStyle = new CSSStyleDeclaration(__rangeEl);"
+        "__rangeStyle.accentColor = 'hsl(200, 80%, 60%)';"
+    );
+    REQUIRE(range->has_accent_color());
+    REQUIRE_THAT(range->accent_color().r, WithinAbs(0.28f, 0.02f));
+    REQUIRE_THAT(range->accent_color().g, WithinAbs(0.71f, 0.02f));
+    REQUIRE_THAT(range->accent_color().b, WithinAbs(0.92f, 0.02f));
+}
+
+TEST_CASE("RangeSlider accent leaves an opaque independent thumb and disabled fill is neutral",
+          "[view][range][accent-color][disabled]") {
+    RangeSlider range;
+    range.set_bounds({0, 0, 100, 16});
+    range.set_value(0.5f, Notify::none);
+
+    Theme theme;
+    const auto track = pulp::canvas::Color::rgba8(40, 42, 46, 255);
+    const auto thumb = pulp::canvas::Color::rgba8(248, 248, 248, 255);
+    const auto accent = pulp::canvas::Color::rgba8(66, 182, 240, 160);
+    theme.colors["control.track"] = track;
+    theme.colors["control.fill"] = pulp::canvas::Color::rgba8(90, 120, 180, 255);
+    theme.colors["control.thumb"] = thumb;
+    range.set_theme(theme);
+    range.set_accent_color(accent);
+
+    auto paint_colors = [&]() {
+        pulp::canvas::RecordingCanvas recording;
+        range.paint(recording);
+        std::vector<pulp::canvas::Color> colors;
+        for (const auto& command : recording.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+                colors.push_back(command.color);
+        }
+        return colors;
+    };
+
+    auto colors = paint_colors();
+    REQUIRE(colors.size() == 3);
+    CHECK(colors[0] == track);
+    CHECK(colors[1] == accent);
+    CHECK(colors[2] == pulp::canvas::Color::rgba8(248, 248, 248, 255));
+    CHECK(colors[2].a8() == 255);
+
+    pulp::canvas::RecordingCanvas geometry;
+    range.paint(geometry);
+    bool has_keyline = false;
+    bool has_pill_thumb = false;
+    for (const auto& command : geometry.commands()) {
+        has_keyline |= command.type
+            == pulp::canvas::DrawCommand::Type::stroke_rounded_rect;
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect
+            && std::abs(command.f[2] - 24.0f) < 0.001f
+            && std::abs(command.f[3] - 16.0f) < 0.001f)
+            has_pill_thumb = true;
+    }
+    CHECK(has_keyline);
+    CHECK(has_pill_thumb);
+
+    range.set_enabled(false);
+    colors = paint_colors();
+    REQUIRE(colors.size() == 3);
+    CHECK(colors[0] == track);
+    CHECK(colors[1] == track);
+    CHECK(colors[2] == thumb);
+    CHECK(colors[2].a8() == 255);
+}
+
 // pulp #1027 / #1166 — CSS per-side flat props must NOT clobber the
 // unrelated attribute. The JS shim used to lower `borderTopWidth: '2px'`
 // to `setBorderSide(id, 'top', 2, "")` (resetting the side's color) and

@@ -220,8 +220,8 @@ inline view::WindowHost::ContentSize standalone_design_viewport_size(
     const auto extra_height = static_cast<uint32_t>(
         chrome.extra_window_height() > 0.0f ? chrome.extra_window_height() : 0.0f);
     return {
-        size_hints.preferred_width,
-        size_hints.preferred_height + extra_height,
+        design_viewport_width(size_hints),
+        design_viewport_height(size_hints) + extra_height,
     };
 }
 
@@ -229,16 +229,13 @@ inline void configure_standalone_design_viewport(
     view::WindowHost& window,
     const ViewSize& size_hints,
     const StandaloneEditorChrome& chrome) {
-    const auto viewport = standalone_design_viewport_size(size_hints, chrome);
-    if (viewport.width == 0 || viewport.height == 0)
-        return;
-
-    window.set_design_viewport(
-        static_cast<float>(viewport.width),
-        static_cast<float>(viewport.height));
-    window.set_fixed_aspect_ratio(
-        static_cast<float>(viewport.width) /
-        static_cast<float>(viewport.height));
+    auto host_hints = size_hints;
+    if (should_pin_design_viewport(host_hints)) {
+        const auto viewport = standalone_design_viewport_size(host_hints, chrome);
+        host_hints.design_width = viewport.width;
+        host_hints.design_height = viewport.height;
+    }
+    configure_native_viewport(window, host_hints);
 }
 
 inline void configure_standalone_tab_resizing(
@@ -252,6 +249,8 @@ inline void configure_standalone_tab_resizing(
         const auto& hints = bridge.size_hints();
         const float editor_w = static_cast<float>(hints.preferred_width);
         const float editor_h = static_cast<float>(hints.preferred_height);
+        const float design_w = static_cast<float>(design_viewport_width(hints));
+        const float design_h = static_cast<float>(design_viewport_height(hints));
         const bool settings = index == tab_panel->find_tab("Settings");
         const float height =
             settings
@@ -259,8 +258,19 @@ inline void configure_standalone_tab_resizing(
                       editor_h,
                       static_cast<float>(SettingsPanel::preferred_height()))
                 : editor_h;
-        window.set_fixed_aspect_ratio(editor_w / height);
-        window.set_design_viewport(editor_w, height);
+        // Settings temporarily adopts its own window shape, but must not
+        // change the editor's viewport policy. In particular, a responsive
+        // editor must keep laying out against live host bounds after a
+        // Settings -> Editor round trip; pinning the authored design size here
+        // silently converted it back into a fixed-design editor.
+        const float aspect = settings
+            ? editor_w / height
+            : static_cast<float>(native_view_aspect_ratio(hints));
+        window.set_fixed_aspect_ratio(aspect);  // zero explicitly clears it
+        if (should_pin_design_viewport(hints)) {
+            window.set_design_viewport(
+                design_w, settings ? std::max(design_h, height) : design_h);
+        }
         window.request_content_size(editor_w, height);
     };
 }
@@ -281,8 +291,8 @@ inline void install_standalone_editor_resize_handler(
             // request_content_size is synchronous on supported standalone
             // hosts, so publish it before committing the live viewport.
             window.request_content_size(w, h);
-            window.set_fixed_aspect_ratio(w / h);
-            window.set_design_viewport(w, h);
+            commit_editor_requested_viewport(
+                window, bridge.size_hints(), width, height);
             return true;
         });
 }

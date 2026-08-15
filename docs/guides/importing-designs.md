@@ -84,6 +84,13 @@ and its same-transaction Chromium paint. The live materialized application
 still performs the state change; native Skia selects the captured visual state
 only after the semantic match succeeds. A state whose activation fails or whose
 captured paint is missing fails closed rather than displaying an approximation.
+When a state remains live native UI rather than a captured paint plane, attach
+that capture's `materialized-document.json` as the entry's
+`materialized_document`. The transformer then reapplies the Chromium-resolved
+layout, font, line-box, and text contracts to the live state after its semantic
+match. This is the preferred contract for interactive menus and dialogs whose
+contents must remain selectable and editable; it is not permission to hand-tune
+an approximate native layout.
 Do not substitute executable canvas paint for the accepted pixels until that
 paint independently passes the same-frame visual gate. Keep the chrome-only and
 per-canvas captures as diagnostic evidence for that later handoff.

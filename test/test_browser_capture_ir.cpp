@@ -132,8 +132,9 @@ std::string interaction_report(
   "action_count":2,
   "actions":[
     {
-      "action":"click",
-      "selector":"#open",
+      "action":"dispatch-event",
+      "selector":"#surface",
+      "event":"contextmenu",
       "timeout_ms":5000,
       "status":"completed"
     },
@@ -260,6 +261,28 @@ std::string with_chrome_asset(std::string capture,
   }],
   "semantics")JSON";
     capture.replace(position, anchor.size(), chrome);
+    return capture;
+}
+
+std::string with_canvas_composite_asset(
+    std::string capture, std::string_view hash,
+    std::string_view path = "browser-canvas-composite.png") {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string composite = R"JSON(  },{
+    "id":"evidence:browser-canvas-composite",
+    "kind":"canvas-composite-evidence",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":1912,
+    "height_px":1272,
+    "changed_pixels":12
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), composite);
     return capture;
 }
 
@@ -451,9 +474,11 @@ TEST_CASE("materialized browser import keeps accepted Chromium chrome authoritat
     TempCapture temp;
     const auto reference = png_header(1912, 1272);
     const auto chrome = png_header(1912, 1272);
+    const auto composite = png_header(1912, 1272);
     const auto canvas = png_header(8, 4);
     temp.write("browser.png", reference);
     temp.write("browser-chrome.png", chrome);
+    temp.write("browser-canvas-composite.png", composite);
     temp.write("canvas-42.png", canvas);
     write_valid_reports(temp);
     auto capture = with_canvas_asset(
@@ -461,6 +486,8 @@ TEST_CASE("materialized browser import keeps accepted Chromium chrome authoritat
         pulp::runtime::sha256_hex(canvas));
     capture = with_chrome_asset(
         std::move(capture), pulp::runtime::sha256_hex(chrome));
+    capture = with_canvas_composite_asset(
+        std::move(capture), pulp::runtime::sha256_hex(composite));
     temp.write("capture.json", capture);
 
     auto result = pulp::import_design::lower_browser_capture_to_ir(
@@ -494,6 +521,9 @@ TEST_CASE("materialized browser import keeps accepted Chromium chrome authoritat
     CHECK(result.design_ir->root.attributes.at(
               "materialized_chrome_diagnostic_asset") ==
           "reference:browser-chrome");
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_canvas_validation_asset") ==
+          "evidence:browser-canvas-composite");
 }
 
 TEST_CASE("materialized paint keeps the full host frame around an authored panel",
@@ -501,9 +531,11 @@ TEST_CASE("materialized paint keeps the full host frame around an authored panel
     TempCapture temp;
     const auto reference = png_header(1912, 1272);
     const auto chrome = png_header(1912, 1272);
+    const auto composite = png_header(1912, 1272);
     const auto canvas = png_header(8, 4);
     temp.write("browser.png", reference);
     temp.write("browser-chrome.png", chrome);
+    temp.write("browser-canvas-composite.png", composite);
     temp.write("canvas-42.png", canvas);
     write_valid_reports(temp);
     auto capture = with_canvas_asset(
@@ -511,6 +543,8 @@ TEST_CASE("materialized paint keeps the full host frame around an authored panel
         pulp::runtime::sha256_hex(canvas));
     capture = with_chrome_asset(
         std::move(capture), pulp::runtime::sha256_hex(chrome));
+    capture = with_canvas_composite_asset(
+        std::move(capture), pulp::runtime::sha256_hex(composite));
     capture = with_reference_member(std::move(capture),
         R"JSON("authored_frame":{"x":40,"y":30,"width":576,"height":179})JSON");
     capture = with_primary_surface(std::move(capture),
@@ -631,6 +665,41 @@ TEST_CASE("browser interaction evidence is contained parsed and integrity-bound"
           kInteractionPlanHash);
     CHECK(result.design_ir->root.attributes.at(
               "browser_interaction_action_count") == "2");
+}
+
+TEST_CASE("browser capture DesignIR source provenance is relocatable",
+          "[import-design][browser-capture][ir][portability]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    SECTION("absolute local paths retain only the portable leaf") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "/Users/developer/project/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file == "editor.html");
+    }
+
+    SECTION("relative paths remain descriptive") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "resources/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file == "resources/editor.html");
+    }
+
+    SECTION("URLs remain intact") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "https://example.test/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file ==
+              "https://example.test/editor.html");
+    }
 }
 
 TEST_CASE("browser interaction lowering fails closed on missing or unsafe evidence",
@@ -2405,6 +2474,31 @@ TEST_CASE("the importer's comparison registers the reference before scoring",
         CHECK(registration.y == 0);
         CHECK(registration.width == 1520);
         CHECK(registration.height == 1772);
+    }
+
+    SECTION("materialized full-surface authority does not crop to its behavior frame") {
+        pulp::view::DesignIR materialized;
+        materialized.root.attributes["materialized_visual_authority"] =
+            "browser:chrome+native-canvases";
+        materialized.root.attributes["browser_device_scale_factor"] =
+            "2.000000";
+        materialized.root.attributes["browser_authored_frame_x"] =
+            "26.046509";
+        materialized.root.attributes["browser_authored_frame_y"] =
+            "0.000000";
+        materialized.root.attributes["browser_authored_frame_width"] =
+            "1227.906982";
+        materialized.root.attributes["browser_authored_frame_height"] =
+            "800.000000";
+
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                materialized, {}, 2640, 1720, 2640, 1720);
+        REQUIRE(registration.registered);
+        CHECK(registration.x == 0);
+        CHECK(registration.y == 0);
+        CHECK(registration.width == 2640);
+        CHECK(registration.height == 1720);
     }
 }
 

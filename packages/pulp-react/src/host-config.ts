@@ -194,7 +194,14 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // border, padding, typography and nested SVG/span content
                     // remain authoritative. Explicit <Button> continues to
                     // use createButton above for native application authors.
-                    call('createCol', id, parentId);
+                    // Browser buttons establish an inline formatting row and
+                    // center their content in both axes by default.  Preserve
+                    // that semantic default for nested SVG/span children;
+                    // captured/computed display, alignment, and positioning
+                    // styles remain free to override it afterwards.
+                    call('createRow', id, parentId);
+                    call('setFlex', id, 'align_items', 'center');
+                    call('setFlex', id, 'justify_content', 'center');
                     const textId = id + '__text';
                     call('createLabel', textId, text, id);
                     // The browser's text line boxes are relative to the
@@ -213,9 +220,13 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'input': {
                     const inputType = String(props.type ?? 'text').toLowerCase();
                     if (inputType === 'range') {
-                        const orient = (props['aria-orientation'] === 'vertical')
-                            ? 'vertical' : 'horizontal';
-                        call('createFader', id, orient, parentId);
+                        // HTML range inputs use the browser-shaped control:
+                        // a compact track and circular thumb with raw
+                        // min/max/step values.  Fader is Pulp's opinionated
+                        // audio control (large slab/pill thumb, normalized
+                        // value) and cannot faithfully replay Chromium's
+                        // range-control geometry.
+                        call('createRangeSlider', id, parentId);
                     } else if (inputType === 'checkbox') {
                         call('createCheckbox', id, parentId);
                     } else {
@@ -624,6 +635,8 @@ export const PulpHostConfig: HostConfig<
     removeChildFromContainer(_container, child) {
         // Detach from root and let the bridge clean up the subtree.
         if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
+        unregisterDomSubtree(child);
+        child.parentId = undefined;
     },
 
     clearContainer(_container) {
@@ -697,6 +710,12 @@ export const PulpHostConfig: HostConfig<
         // independent of the import pipeline.
         const metadataHook = g.__pulpApplyMaterializedImportMetadata__;
         if (typeof metadataHook === 'function') metadataHook();
+        // Semantic captured-state matching is commit-driven: menus, dialogs,
+        // and selected controls only change after a React commit. Let the
+        // importer refresh here instead of walking every selector on every
+        // animation frame while the editor is idle.
+        const stateHook = g.__pulpRefreshMaterializedState__;
+        if (typeof stateHook === 'function') stateHook();
         // Own commit-time layout/repaint flush. The bridge's individual
         // setX calls don't all self-flush layout, so we trigger one
         // explicit pass per React commit. Mirrors Ink's resetAfterCommit.
@@ -824,7 +843,37 @@ function attachToRoot(container: Container, child: Instance, _index = -1, _befor
 /// Emit createX + applyAllProps for a single child whose parent is on
 /// the bridge, then recursively drain the child's pendingChildren.
 function materialize(parent: Instance, child: Instance): void {
+    child.inheritedSvgViewBox = svgViewportFor(parent);
     materializeUnder(parent.id, child);
+}
+
+function parseSvgViewBox(value: unknown): [number, number] | undefined {
+    if (Array.isArray(value) && value.length >= 2) {
+        const width = Number(value[value.length === 4 ? 2 : 0]);
+        const height = Number(value[value.length === 4 ? 3 : 1]);
+        if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+            return [width, height];
+        }
+        return undefined;
+    }
+    if (typeof value !== 'string') return undefined;
+    const tokens = value.trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+    const width = tokens.length === 4 ? tokens[2] : tokens.length === 2 ? tokens[0] : NaN;
+    const height = tokens.length === 4 ? tokens[3] : tokens.length === 2 ? tokens[1] : NaN;
+    return width > 0 && height > 0 ? [width, height] : undefined;
+}
+
+function svgViewportFor(instance: Instance): [number, number] | undefined {
+    if (String(instance.type).toLowerCase() === 'svg') {
+        return parseSvgViewBox(instance.props.viewBox) ?? instance.inheritedSvgViewBox;
+    }
+    return instance.inheritedSvgViewBox;
+}
+
+function isSvgPrimitive(type: Type): boolean {
+    const lower = String(type).toLowerCase();
+    return lower === 'path' || lower === 'circle' || lower === 'rect' || lower === 'line'
+        || type === 'SvgPath' || type === 'SvgRect' || type === 'SvgLine';
 }
 
 /// Forward React's dev-mode `__source` prop to the native `setSource`
@@ -850,6 +899,14 @@ function materializeUnder(parentId: string, child: Instance): void {
         (child._dom as Record<string, unknown>).__pulpTextTargetId = child.textTargetId;
     }
     applyAllProps(child);
+    // Native SVG primitives own their viewBox transform. Raw JSX instead
+    // places viewBox on the surrounding `<svg>`, so explicitly inherit it.
+    // A primitive-authored viewBox remains authoritative.
+    if (isSvgPrimitive(child.type) && !parseSvgViewBox(child.props.viewBox)
+        && child.inheritedSvgViewBox) {
+        call('setSvgViewBox', child.id,
+            child.inheritedSvgViewBox[0], child.inheritedSvgViewBox[1]);
+    }
     bindSourceLocation(child);
     child.onBridge = true;
     // Drain any pending grand-children that were queued before this
@@ -858,6 +915,7 @@ function materializeUnder(parentId: string, child: Instance): void {
         const drained = child.pendingChildren;
         child.pendingChildren = [];
         for (const { child: gc } of drained) {
+            gc.inheritedSvgViewBox = svgViewportFor(child);
             materializeUnder(child.id, gc);
         }
     }
@@ -874,9 +932,29 @@ function detach(parent: Instance, child: Instance): void {
         if (domIndex >= 0) parentDom._children.splice(domIndex, 1);
         childDom._parentElement = null;
     }
-    domRegistry().delete(child.id);
-    clearMaterializedEventCallbacks(child.id);
+    unregisterDomSubtree(child);
     child.parentId = undefined;
+}
+
+function unregisterDomSubtree(instance: Instance): void {
+    const registry = domRegistry();
+    const rootDom = instance._dom as Record<string, unknown> | null | undefined;
+    const visit = (node: Record<string, unknown>): void => {
+        const children = Array.isArray(node._children)
+            ? [...node._children] as Array<Record<string, unknown>> : [];
+        for (const child of children) visit(child);
+        const id = node.__pulpId ?? node.id;
+        if (typeof id === 'string' && id.length > 0) {
+            registry.delete(id);
+            clearMaterializedEventCallbacks(id);
+        }
+        node._parentElement = null;
+    };
+    if (rootDom) visit(rootDom);
+    else {
+        registry.delete(instance.id);
+        clearMaterializedEventCallbacks(instance.id);
+    }
 }
 
 // ── Auto-ID generation ─────────────────────────────────────────────

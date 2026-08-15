@@ -42,3 +42,48 @@ test("fails closed for absent and non-finite layout evidence", () => {
   };
   assert.deepEqual(buildMaterializedLayoutBindings(snapshot), []);
 });
+
+test("does not publish browser-only html scaffolding as native evidence", () => {
+  const snapshot = {
+    strings: ["#document", "HTML", "BODY"],
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1], nodeType: [9, 1, 1],
+        nodeName: [0, 1, 2], attributes: [[], [], []],
+      },
+      layout: { nodeIndex: [1, 2], bounds: [[0, 0, 100, 50], [0, 0, 100, 50]] },
+    }],
+  };
+  const bindings = buildMaterializedLayoutBindings(snapshot);
+  assert.equal(bindings.some(binding => binding.anchor === "body" &&
+    binding.path.length === 1 && binding.path[0].tag === "html"), false);
+});
+
+test("does not replay SVG primitive ink bounds as Yoga layout boxes", () => {
+  const strings = ["#document", "HTML", "BODY", "DIV", "SVG", "PATH", "RECT",
+    "id", "root"];
+  const snapshot = {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4, 4],
+        nodeType: [9, 1, 1, 1, 1, 1, 1],
+        nodeName: [0, 1, 2, 3, 4, 5, 6],
+        attributes: [[], [], [], [7, 8], [], [], []],
+      },
+      layout: {
+        nodeIndex: [3, 4, 5, 6],
+        bounds: [
+          [0, 0, 100, 40], [11, 6, 22, 16],
+          [14.859375, 7.8125, 14.28125, 8],
+          [12, 8, 4, 6],
+        ],
+      },
+    }],
+  };
+
+  const bindings = buildMaterializedLayoutBindings(snapshot);
+  assert.deepEqual(bindings.map(binding => binding.path.at(-1).tag), ["svg"]);
+  assert.deepEqual(bindings[0].box,
+    { left: 11, top: 6, width: 22, height: 16 });
+});

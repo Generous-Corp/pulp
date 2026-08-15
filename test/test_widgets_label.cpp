@@ -703,6 +703,21 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     const auto zero_fills = commands_of(zero_canvas, DrawCommand::Type::fill_text);
     REQUIRE(zero_fills.size() == 1);
     CHECK(fills[0].f[1] - zero_fills[0].f[1] == Catch::Approx(3.0f));
+
+    // Chromium splits the 4px difference between a 16px line box and the
+    // 12px font em evenly. Native paint must retain the 2px top half-leading;
+    // otherwise compact controls look high even though their boxes match.
+    Label em_height("CENTERED");
+    em_height.set_font_family("Inter");
+    em_height.set_font_size(12.0f);
+    em_height.set_bounds({0, 0, 100, 40});
+    em_height.set_cached_line_boxes(
+        {{7, 3, 58, 12, 0, 8}}, 100.0f, face, false);
+    RecordingCanvas em_canvas;
+    em_height.paint(em_canvas);
+    const auto em_fills = commands_of(em_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(em_fills.size() == 1);
+    CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
 }
 
 TEST_CASE("Attributed Label honors each Chromium captured line position",

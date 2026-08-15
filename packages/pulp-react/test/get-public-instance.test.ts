@@ -16,6 +16,8 @@ describe('getPublicInstance returns DOM-shim Element', () => {
     });
     afterEach(() => {
         g.Element = savedElement;
+        delete g.__pulpReactDomRegistry__;
+        delete g.__pulpReactDomRegistryValues__;
     });
 
     it('returns _dom if present (the Element shim path)', () => {
@@ -139,6 +141,45 @@ describe('getPublicInstance returns DOM-shim Element', () => {
         );
         expect(childDom._parentElement).toBeNull();
         expect(parentDom._children).toEqual([]);
+    });
+
+    it('removes an entire detached DOM-shim subtree from selector authority', () => {
+        g.Element = function (this: Record<string, unknown>, _tag: string, id: string) {
+            this.__pulpId = id;
+            this.id = id;
+            this._children = [];
+            this._parentElement = null;
+            this.setAttribute = () => {};
+            this.removeAttribute = () => {};
+        };
+        const create = PulpHostConfig.createInstance!;
+        const root = { rootId: 'root', nextId: 0 } as unknown as
+            Parameters<typeof create>[2];
+        const parent = create('div', { id: 'modal' }, root, {}, null);
+        const child = create('div', { id: 'modal-panel' }, root, {}, null);
+        const grandchild = create('button', { id: 'modal-close' }, root, {}, null);
+        PulpHostConfig.appendInitialChild!(
+            child,
+            grandchild,
+        );
+        PulpHostConfig.appendInitialChild!(
+            parent,
+            child,
+        );
+        const registry = g.__pulpReactDomRegistry__ as Map<string, unknown>;
+        expect([...registry.keys()]).toEqual(
+            expect.arrayContaining(['modal', 'modal-panel', 'modal-close']));
+
+        const container = { rootId: 'root', nextId: 0 };
+        PulpHostConfig.removeChildFromContainer!(
+            container as Parameters<NonNullable<typeof PulpHostConfig.removeChildFromContainer>>[0],
+            parent,
+        );
+        expect([...registry.keys()]).not.toEqual(
+            expect.arrayContaining(['modal', 'modal-panel', 'modal-close']));
+        expect(registry.has('modal')).toBe(false);
+        expect(registry.has('modal-panel')).toBe(false);
+        expect(registry.has('modal-close')).toBe(false);
     });
 
     it('createInstance survives when global Element is missing (test sandbox)', () => {

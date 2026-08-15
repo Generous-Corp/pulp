@@ -91,6 +91,12 @@ export interface SyntheticElementWrapper {
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
     getBoundingClientRect: () => SyntheticLayoutRect;
+    readonly offsetWidth: number;
+    readonly offsetHeight: number;
+    readonly clientWidth: number;
+    readonly clientHeight: number;
+    setPointerCapture: (pointerId: number) => void;
+    releasePointerCapture: (pointerId: number) => void;
 }
 
 export interface SyntheticLayoutRect {
@@ -109,8 +115,22 @@ const emptyLayoutRect = (): SyntheticLayoutRect => ({
     top: 0, right: 0, bottom: 0, left: 0,
 });
 
+function publicElementFor(id: string): SyntheticElementWrapper | null {
+    const host = globalThis as unknown as {
+        __pulpReactDomRegistry__?: Map<string, unknown>;
+        window?: { __pulpReactDomRegistry__?: Map<string, unknown> };
+    };
+    const registry = host.__pulpReactDomRegistry__ ??
+        host.window?.__pulpReactDomRegistry__;
+    const candidate = registry?.get(id) as Partial<SyntheticElementWrapper> | undefined;
+    return candidate && typeof candidate.getBoundingClientRect === 'function'
+        ? candidate as SyntheticElementWrapper : null;
+}
+
 function makeElementWrapper(id: string): SyntheticElementWrapper {
-    return {
+    const publicElement = publicElementFor(id);
+    if (publicElement) return publicElement;
+    const wrapper = {
         id,
         _id: id, // mirrors web-compat Element naming for cross-compat consumers
         style: makeStyleProxy(id),
@@ -135,7 +155,30 @@ function makeElementWrapper(id: string): SyntheticElementWrapper {
                 left: Number(rect.left ?? x),
             };
         },
-    };
+        get offsetWidth(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { offsetWidth?: number } | undefined;
+            return Number(metrics?.offsetWidth ?? this.getBoundingClientRect().width);
+        },
+        get offsetHeight(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { offsetHeight?: number } | undefined;
+            return Number(metrics?.offsetHeight ?? this.getBoundingClientRect().height);
+        },
+        get clientWidth(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { clientWidth?: number } | undefined;
+            return Number(metrics?.clientWidth ?? this.offsetWidth);
+        },
+        get clientHeight(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { clientHeight?: number } | undefined;
+            return Number(metrics?.clientHeight ?? this.offsetHeight);
+        },
+        setPointerCapture(pointerId: number): void {
+            callBridge('nativeSetPointerCapture', id, pointerId);
+        },
+        releasePointerCapture(pointerId: number): void {
+            callBridge('nativeReleasePointerCapture', id, pointerId);
+        },
+    } satisfies SyntheticElementWrapper;
+    return wrapper;
 }
 
 /// Shape used by the bridge's `pointer*` and `gesture*` data payloads.

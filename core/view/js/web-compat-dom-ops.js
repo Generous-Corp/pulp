@@ -76,7 +76,10 @@ if (!Element.prototype.appendChild ||
         // avoids the QuickJS stack-overflow risk that motivated the
         // __domAppend fast path in the first place.
         var __domAppendHint = "";
-        if (child.tagName === "INPUT") {
+        if (typeof __pulpElementWantsScrollView__ === "function" &&
+            __pulpElementWantsScrollView__(child)) {
+            __domAppendHint = "scroll";
+        } else if (child.tagName === "INPUT") {
             if (child._type === "range") {
                 __domAppendHint = "range:" +
                     ((typeof __resolveRangeOrientation__ === "function")
@@ -206,7 +209,9 @@ if (!Element.prototype.appendChild ||
         this._children.splice(idx, 0, newChild);
         this._ensureNative();
         __pulpRememberNativeElement__(newChild);
-        __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase());
+        var __insertHint = (typeof __pulpElementWantsScrollView__ === "function" &&
+            __pulpElementWantsScrollView__(newChild)) ? "scroll" : "";
+        __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
         // Same pre-mount attribute replay path as appendChild, including

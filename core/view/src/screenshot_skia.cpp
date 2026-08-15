@@ -110,6 +110,10 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
                                                    backend, &had_provider);
     if (had_provider) return via_provider;
 
+    if (backend == ScreenshotBackend::gpu) {
+        return render_to_png_gpu(root, width, height, scale);
+    }
+
     // The only built-in non-Apple backend is Skia raster; coregraphics is
     // Apple-only, so any requested backend maps to the Skia path here.
     uint32_t pw = 0, ph = 0;

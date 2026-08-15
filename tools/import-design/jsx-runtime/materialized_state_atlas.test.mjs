@@ -15,6 +15,21 @@ function fixture(atlas) {
   return { atlasPath, image };
 }
 
+function metadataFixture(atlas) {
+  const result = fixture(atlas);
+  writeFileSync(join(result.atlasPath, '..', 'settings.materialized.json'),
+    JSON.stringify({
+      schema: 'pulp-materialized-browser-document-v1', version: 1,
+      font_bindings: [],
+      layout_bindings: [{
+        anchor: '#root', path: [{ tag: 'div', index: 0 }],
+        box: { left: 10, top: 20, width: 300, height: 200 },
+      }],
+      text_bindings: [],
+    }));
+  return result;
+}
+
 test('normalizes a captured dropdown or modal state contract', () => {
   const { atlasPath, image } = fixture({
     schema: 'pulp-materialized-state-atlas-v1',
@@ -30,6 +45,24 @@ test('normalizes a captured dropdown or modal state contract', () => {
     id: 'settings', image: realpathSync(image),
     match: { selector: '[aria-label="Settings"]', ancestor: '#panel' },
     activate: [{ selector: 'button[title="Settings"]', event: 'click', data: null }],
+    metadata: null,
+  }]);
+});
+
+test('loads captured state geometry independently from captured paint', () => {
+  const { atlasPath } = metadataFixture({
+    schema: 'pulp-materialized-state-atlas-v1', version: 1,
+    states: [{
+      id: 'settings', image: 'settings.png',
+      materialized_document: 'settings.materialized.json',
+    }],
+  });
+  const state = loadMaterializedStateAtlas(
+    atlasPath, { visualAuthority: 'native' })[0];
+  assert.equal(state.image, '');
+  assert.deepEqual(state.metadata.layout_bindings, [{
+    anchor: '#root', path: [{ tag: 'div', index: 0 }],
+    box: { left: 10, top: 20, width: 300, height: 200 },
   }]);
 });
 
@@ -56,7 +89,69 @@ test('native visual authority validates behavior without embedding screenshots',
     atlasPath, { visualAuthority: 'native' })[0], {
     id: 'context-menu', image: '', match: null,
     activate: [{ selector: '#canvas', event: 'contextmenu', data: { button: 2 } }],
+    metadata: null,
   });
+});
+
+test('native authority retains semantic state metadata without paint planes', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'pulp-native-state-metadata-'));
+  writeFileSync(join(temp, 'state.json'), JSON.stringify({
+    schema: 'pulp-materialized-browser-document-v1', version: 1,
+    font_bindings: [],
+    layout_bindings: [{ anchor: '#root', path: [{ tag: 'div', index: 0 }],
+      box: { left: 4, top: 5, width: 20, height: 10 } }],
+    text_bindings: [],
+  }));
+  const atlasPath = join(temp, 'atlas.json');
+  writeFileSync(atlasPath, JSON.stringify({
+    schema: 'pulp-materialized-state-atlas-v1', version: 1,
+    states: [{ id: 'open', image: 'unused.png',
+      materialized_document: 'state.json',
+      match: { selector: '[data-open]' } }],
+  }));
+  const [state] = loadMaterializedStateAtlas(atlasPath,
+    { visualAuthority: 'native' });
+  assert.equal(state.image, '');
+  assert.equal(state.metadata.layout_bindings.length, 1);
+});
+
+test('rejects missing, escaped, and malformed captured state metadata', () => {
+  const base = { schema: 'pulp-materialized-state-atlas-v1', version: 1 };
+  const missing = fixture({ ...base, states: [{
+    id: 'settings', image: 'settings.png',
+    materialized_document: 'missing.json',
+  }] });
+  assert.throws(() => loadMaterializedStateAtlas(missing.atlasPath),
+    /metadata does not exist/);
+
+  const escaped = fixture({ ...base, states: [{
+    id: 'settings', image: 'settings.png',
+    materialized_document: 'escaped.json',
+  }] });
+  const outsideRoot = mkdtempSync(join(tmpdir(), 'pulp-materialized-metadata-'));
+  const outsideDocument = join(outsideRoot, 'outside.json');
+  writeFileSync(outsideDocument, JSON.stringify({ schema: 'wrong', version: 1 }));
+  symlinkSync(outsideDocument, join(escaped.atlasPath, '..', 'escaped.json'));
+  assert.throws(() => loadMaterializedStateAtlas(escaped.atlasPath),
+    /metadata escapes/);
+
+  const malformed = fixture({ ...base, states: [{
+    id: 'settings', image: 'settings.png',
+    materialized_document: 'malformed.json',
+  }] });
+  writeFileSync(join(malformed.atlasPath, '..', 'malformed.json'),
+    JSON.stringify({ schema: 'wrong', version: 1 }));
+  assert.throws(() => loadMaterializedStateAtlas(malformed.atlasPath),
+    /metadata document is invalid/);
+
+  const oversized = fixture({ ...base, states: [{
+    id: 'settings', image: 'settings.png',
+    materialized_document: 'oversized.json',
+  }] });
+  writeFileSync(join(oversized.atlasPath, '..', 'oversized.json'),
+    Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+  assert.throws(() => loadMaterializedStateAtlas(oversized.atlasPath),
+    /metadata is too large/);
 });
 
 test('rejects missing paint, duplicate ids, and malformed activation atomically', () => {

@@ -18,6 +18,8 @@
 # The wasm slice published by skia-builder contains NO Dawn/wgpu symbols and
 # exactly one Graphite object, so SK_GRAPHITE/SK_DAWN must not be defined there.
 
+include("${CMAKE_CURRENT_LIST_DIR}/PulpMacosArchiveFloor.cmake")
+
 if(NOT SKIA_DIR)
     # Default: look in external/skia-build or SKIA_DIR env var
     if(DEFINED ENV{SKIA_DIR})
@@ -250,6 +252,17 @@ if(APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS") AND EXISTS "${SKIA_LIBRARY}"
     unset(_skia_req_archs)
     unset(_skia_have_archs)
     unset(_skia_missing_archs)
+endif()
+
+# A matching architecture is not enough: every object in the selected static
+# archives must also support the deployment target the consumer claims.  ld64
+# merely warns when a prebuilt carries a newer LC_BUILD_VERSION, so reject that
+# configuration before it can produce a deceptively successful bundle.
+if(APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        AND EXISTS "${SKIA_LIBRARY}" AND EXISTS "${DAWN_LIBRARY}")
+    pulp_assert_macos_archive_floor(
+        TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}"
+        ARCHIVES "${SKIA_LIBRARY}" "${DAWN_LIBRARY}")
 endif()
 
 if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")

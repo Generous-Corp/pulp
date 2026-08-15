@@ -520,7 +520,12 @@ float Label::measured_height(float available_width) const {
         return std::ceil(lh * static_cast<float>(std::max(1, line_count)));
     }
 
-    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    std::string family = font_family_;
+    if (family.empty()) {
+        if (auto inherited = inheritable_font_family(); inherited.has_value())
+            family = inherited.value();
+    }
+    if (family.empty()) family = "Inter";
     auto& shaper = canvas::global_text_shaper();
     auto prepared = has_attributed_
         ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
@@ -1275,6 +1280,7 @@ void Label::paint(canvas::Canvas& canvas) {
                             bounds().width, lh,
                             static_cast<int>(break_mode),
                             shaped_max_lines,
+                            captured_cache_usable,
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
@@ -1379,9 +1385,15 @@ void Label::paint(canvas::Canvas& canvas) {
     if (captured_cache_usable && shaped_layout != nullptr &&
         !shaped_layout->lines.empty()) {
         // A cached browser line box already resolved padding, line-height and
-        // vertical-align. Its top plus the active face ascent is the native
-        // baseline. Do not center that evidence a second time.
-        baseline_y = shaped_layout->lines.front().y + first_line_ascent;
+        // vertical-align. CSS distributes the line box's extra leading above
+        // and below the font em box; using only `top + ascent` drops that
+        // half-leading and paints compact button captions visibly high. Keep
+        // Chromium's captured top, add its half-leading, then the active face
+        // ascent. Do not center the complete owner bounds a second time.
+        const auto& first_line = shaped_layout->lines.front();
+        const float half_leading = std::max(
+            0.0f, (first_line.height - single_line_text_height) * 0.5f);
+        baseline_y = first_line.y + half_leading + first_line_ascent;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared

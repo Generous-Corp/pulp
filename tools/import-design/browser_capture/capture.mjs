@@ -68,6 +68,10 @@ import { evaluateDesignTokens } from "./tokens.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
+import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
+import {
+  materializedCoordinateSpaceFromQuad,
+} from "./materialized_coordinate_space.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -297,7 +301,7 @@ function pngDimensions(bytes) {
 const MAX_CAPTURED_CANVASES = 32;
 const MAX_CAPTURED_CANVAS_PIXELS = 64 * 1024 * 1024;
 
-async function captureCanvasAssets(cdp, snapshot) {
+async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
   const document = snapshot.documents?.[0];
   const nodes = document?.nodes;
   const strings = snapshot.strings ?? [];
@@ -367,37 +371,69 @@ async function captureCanvasAssets(cdp, snapshot) {
           `captured canvas pixels exceed ${MAX_CAPTURED_CANVAS_PIXELS}`);
       }
 
-      const captured = await cdp.call("Runtime.callFunctionOn", {
+      // Capture the browser-composited canvas in final viewport coordinates,
+      // rather than serializing its untransformed backing store. CSS may scale
+      // or translate a high-DPI canvas (Spectr's fixed design viewport does
+      // both); a raw toDataURL plane cannot be overlaid at 1:1 and therefore
+      // cannot reconstruct the accepted Chromium frame.
+      await cdp.call("Runtime.callFunctionOn", {
         objectId,
-        functionDeclaration: `function() { return this.toDataURL('image/png'); }`,
+        functionDeclaration: `async function() {
+          if (globalThis.__pulpCanvasIsolationRestore)
+            throw new Error('canvas isolation is already active');
+          const rect = this.getBoundingClientRect();
+          const body = document.body;
+          const root = document.documentElement;
+          const roots = [document.documentElement, document.body].filter(Boolean);
+          const backgrounds = roots.map(element => ({
+            element,
+            value: element.style.getPropertyValue('background'),
+            priority: element.style.getPropertyPriority('background')
+          }));
+          const bodyVisibility = body ? {
+            value: body.style.getPropertyValue('visibility'),
+            priority: body.style.getPropertyPriority('visibility')
+          } : null;
+          if (body) body.style.setProperty('visibility', 'hidden', 'important');
+          for (const item of backgrounds)
+            item.element.style.setProperty('background', 'transparent', 'important');
+          const overlay = document.createElement('img');
+          overlay.src = this.toDataURL('image/png');
+          overlay.style.cssText = [
+            'position:absolute', 'display:block', 'visibility:visible',
+            'pointer-events:none', 'margin:0', 'padding:0', 'border:0',
+            'max-width:none', 'max-height:none', 'object-fit:fill',
+            'left:' + (rect.left + window.scrollX) + 'px',
+            'top:' + (rect.top + window.scrollY) + 'px',
+            'width:' + rect.width + 'px', 'height:' + rect.height + 'px'
+          ].join(';');
+          root.appendChild(overlay);
+          globalThis.__pulpCanvasIsolationRestore = {
+            overlay, body, bodyVisibility, backgrounds
+          };
+          if (typeof overlay.decode === 'function') await overlay.decode();
+          return true;
+        }`,
+        awaitPromise: true,
         returnByValue: true,
       });
-      const dataUrl = captured.result?.value;
-      const prefix = "data:image/png;base64,";
-      if (typeof dataUrl !== "string" || !dataUrl.startsWith(prefix)) {
-        throw new Error(
-          `canvas backend node ${backendNodeId} could not be captured as PNG`);
-      }
-      const encoded = dataUrl.slice(prefix.length);
-      if (encoded.length === 0 || encoded.length % 4 !== 0 ||
-          !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
-        throw new Error(
-          `canvas backend node ${backendNodeId} returned invalid PNG base64`);
-      }
-      const bytes = Buffer.from(encoded, "base64");
+      await cdp.call("Emulation.setDefaultBackgroundColorOverride", {
+        color: { r: 0, g: 0, b: 0, a: 0 },
+      });
+      const bytes = await captureStableScreenshot(cdp, {
+        ...screenshotOptions,
+      }, 6, 16, 2);
+      if (!bytes) throw new Error(
+        `canvas backend node ${backendNodeId} did not present a stable isolated frame`);
       const dimensions = pngDimensions(bytes);
-      if (dimensions.width !== width || dimensions.height !== height) {
-        throw new Error(
-          `canvas backend node ${backendNodeId} PNG size does not match backing store`);
-      }
       assets.push({
         id: `canvas:${backendNodeId}`,
         kind: "canvas-snapshot",
         mime_type: "image/png",
         path: `canvas-${backendNodeId}.png`,
         sha256: sha256(bytes),
-        width_px: width,
-        height_px: height,
+        width_px: dimensions.width,
+        height_px: dimensions.height,
         backend_node_id: backendNodeId,
         bounds: {
           left: Number(measured.result?.value?.bounds?.left ?? 0),
@@ -408,10 +444,107 @@ async function captureCanvasAssets(cdp, snapshot) {
         bytes,
       });
     } finally {
+      await cdp.call("Emulation.setDefaultBackgroundColorOverride", {})
+        .catch(() => {});
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          const restore = globalThis.__pulpCanvasIsolationRestore;
+          if (!restore) return false;
+          restore.overlay?.remove();
+          if (restore.body && restore.bodyVisibility?.value)
+            restore.body.style.setProperty('visibility',
+              restore.bodyVisibility.value,
+              restore.bodyVisibility.priority || '');
+          else restore.body?.style.removeProperty('visibility');
+          for (const item of restore.backgrounds) {
+            if (item.value) item.element.style.setProperty(
+              'background', item.value, item.priority || '');
+            else item.element.style.removeProperty('background');
+          }
+          delete globalThis.__pulpCanvasIsolationRestore;
+          return true;
+        })()`,
+        returnByValue: true,
+      }).catch(() => {});
       await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
     }
   }
   return assets;
+}
+
+async function deriveCanvasCompositionEvidence(cdp, browserBytes, chromeBytes) {
+  const browserUrl = `data:image/png;base64,${browserBytes.toString("base64")}`;
+  const chromeUrl = `data:image/png;base64,${chromeBytes.toString("base64")}`;
+  const result = await cdp.call("Runtime.evaluate", {
+    expression: `(async () => {
+      const load = async (url) => {
+        const image = new Image();
+        image.src = url;
+        if (typeof image.decode === 'function') await image.decode();
+        else await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+        });
+        return image;
+      };
+      const [browser, chrome] = await Promise.all([
+        load(${JSON.stringify(browserUrl)}),
+        load(${JSON.stringify(chromeUrl)})
+      ]);
+      if (browser.naturalWidth !== chrome.naturalWidth ||
+          browser.naturalHeight !== chrome.naturalHeight)
+        throw new Error('browser and chrome evidence extents differ');
+      const width = browser.naturalWidth;
+      const height = browser.naturalHeight;
+      const read = (image) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d', {
+          alpha: true, willReadFrequently: true
+        });
+        if (!context) throw new Error('could not create evidence canvas');
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, width, height);
+      };
+      const accepted = read(browser);
+      const withoutCanvases = read(chrome);
+      const output = new ImageData(width, height);
+      let changedPixels = 0;
+      for (let pixel = 0; pixel < accepted.data.length; pixel += 4) {
+        if (accepted.data[pixel] === withoutCanvases.data[pixel] &&
+            accepted.data[pixel + 1] === withoutCanvases.data[pixel + 1] &&
+            accepted.data[pixel + 2] === withoutCanvases.data[pixel + 2])
+          continue;
+        output.data[pixel] = accepted.data[pixel];
+        output.data[pixel + 1] = accepted.data[pixel + 1];
+        output.data[pixel + 2] = accepted.data[pixel + 2];
+        output.data[pixel + 3] = 255;
+        changedPixels++;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { alpha: true });
+      if (!context) throw new Error('could not encode evidence canvas');
+      context.putImageData(output, 0, 0);
+      return { dataUrl: canvas.toDataURL('image/png'), changedPixels };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const value = result.result?.value;
+  const prefix = "data:image/png;base64,";
+  if (!value || !Number.isSafeInteger(value.changedPixels) ||
+      value.changedPixels < 0 ||
+      typeof value.dataUrl !== "string" ||
+      !value.dataUrl.startsWith(prefix)) {
+    throw new Error("browser did not produce valid canvas composition evidence");
+  }
+  return {
+    bytes: Buffer.from(value.dataUrl.slice(prefix.length), "base64"),
+    changedPixels: value.changedPixels,
+  };
 }
 
 function serializeJson(value) {
@@ -694,6 +827,61 @@ async function captureMaterializedSurfaceStyle(cdp) {
   };
 }
 
+async function captureMaterializedCoordinateSpace(cdp, captureOrigin) {
+  const elementResult = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      if (!document.body) return null;
+      const preferred = document.getElementById('root');
+      let element = preferred;
+      if (!element) {
+        for (const child of document.body.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) { element = child; break; }
+        }
+      }
+      if (!element) return null;
+      return element;
+    })()`,
+    returnByValue: false,
+  });
+  const objectId = elementResult.result?.objectId;
+  if (!objectId) return null;
+  let quad;
+  try {
+    // CDP's box model is the authoritative transformed quadrilateral. Unlike
+    // getBoundingClientRect(), it retains rotation/skew; unlike getBoxQuads(),
+    // it is available in the Chromium revision used by the importer.
+    const [metricsResult, boxResult] = await Promise.all([
+      cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function () {
+          return { width: Number(this.offsetWidth),
+            height: Number(this.offsetHeight) };
+        }`,
+        returnByValue: true,
+      }),
+      cdp.call("DOM.getBoxModel", { objectId }),
+    ]);
+    const metrics = metricsResult.result?.value;
+    const border = boxResult.model?.border;
+    if (!metrics || !Array.isArray(border) || border.length !== 8) return null;
+    quad = {
+      width: Number(metrics.width), height: Number(metrics.height),
+      p1: { x: Number(border[0]), y: Number(border[1]) },
+      p2: { x: Number(border[2]), y: Number(border[3]) },
+      p4: { x: Number(border[6]), y: Number(border[7]) },
+    };
+  } finally {
+    await cdp.call("Runtime.releaseObject", { objectId });
+  }
+  const relative = structuredClone(quad);
+  for (const point of [relative.p1, relative.p2, relative.p4]) {
+    point.x -= captureOrigin.left;
+    point.y -= captureOrigin.top;
+  }
+  return materializedCoordinateSpaceFromQuad(relative);
+}
+
 async function runProbe(options) {
   const browserPath = required(options.values, "--browser");
   const timeoutMs = positiveInteger(
@@ -786,7 +974,7 @@ async function runCapture(options) {
   if (dpr !== 2) throw new Error("browser capture currently requires DPR 2");
   validateCaptureDimensions(initialWidth, initialHeight, dpr);
   const timeoutMs = positiveInteger(
-    options.values, "--timeout-ms", 60000);
+    options.values, "--timeout-ms", 90000);
   const interactionPlanPath = options.values.get("--interactions");
   const interactionPlan = interactionPlanPath
     ? await readInteractionPlan(interactionPlanPath)
@@ -1081,6 +1269,8 @@ async function runCapture(options) {
       // retain that frozen surface colour as part of the capture contract.
       materializedDocument.surface_style =
         await captureMaterializedSurfaceStyle(cdp);
+      materializedDocument.coordinate_space =
+        await captureMaterializedCoordinateSpace(cdp, finalExtent);
       const frameTime = await cdp.call("Runtime.evaluate", {
         expression:
           "Number(globalThis.__pulpLastAnimationFrameTimestamp || 0)",
@@ -1187,24 +1377,9 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
-    // Canvas backing stores are imperative paint, not computed style. Snapshot
-    // each one while the same browser frame is frozen, then bind it back to the
-    // DOMSnapshot through backendNodeId. This preserves transparent overlap and
-    // paint order without flattening the whole editor into one photograph.
-    const canvasAssets = await captureCanvasAssets(cdp, snapshot);
-    if (materializedDocument) {
-      materializedDocument.canvas_bindings = canvasAssets.map(
-        (asset, index) => ({
-          index,
-          anchor: `chromium:backend-node:${asset.backend_node_id}`,
-          bounds: {
-            left: asset.bounds.left - finalExtent.left,
-            top: asset.bounds.top - finalExtent.top,
-            width: asset.bounds.width,
-            height: asset.bounds.height,
-          },
-        }));
-    }
+    // Canvas paint is captured after the final presented browser frame below;
+    // the DOMSnapshot already provides its stable backend-node identities.
+    let canvasAssets = [];
     const semanticReport = await evaluateSemantics(
       cdp, snapshot, {
         width: captureWidth,
@@ -1242,9 +1417,18 @@ async function runCapture(options) {
     const platformFontReport = await evaluatePlatformFonts(
       cdp, snapshot, COMPUTED_STYLES);
     if (materializedDocument) {
-      materializedDocument.layout_bindings = buildMaterializedLayoutBindings(snapshot);
+      materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
+        snapshot, materializedDocument.coordinate_space);
       materializedDocument.text_bindings = buildMaterializedTextBindings(
-        snapshot, platformFontReport);
+        snapshot, platformFontReport, materializedDocument.coordinate_space);
+      // CDP returns the positional style rows, but not the names we supplied
+      // in the capture request.  The serialized DOM snapshot gains that
+      // self-describing field below; give the same complete view to the paint
+      // binder now so same-frame SVG paint cannot silently collapse to an
+      // empty stream.
+      materializedDocument.paint_bindings = buildMaterializedPaintBindings(
+        { ...snapshot, computedStyleNames: COMPUTED_STYLES },
+        materializedDocument.coordinate_space);
     }
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
@@ -1258,13 +1442,40 @@ async function runCapture(options) {
     // boundaries even after DOM/timer motion is frozen. Always observe the
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
-    const screenshotBytes =
+    let screenshotBytes =
       await captureStableScreenshot(cdp, screenshotOptions);
+    // A compositor can miss the required identical tail at the very end of a
+    // bounded horizon even though its next horizon is completely still. Give
+    // that observable proof one fresh bounded attempt; keeping the common path
+    // at 32 frames avoids spending the whole capture deadline on pages that
+    // were already stable.
+    if (!screenshotBytes)
+      screenshotBytes = await captureStableScreenshot(cdp, screenshotOptions);
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
       error.code = "capture-frame-not-deterministic";
       throw error;
+    }
+    // The initial canvas read belongs to the paused DOMSnapshot frame. Some
+    // products intentionally need the resumed compositor boundaries above to
+    // finish their deterministic analyzer/minimap paint. Pair the composition
+    // assets with the accepted stable browser pixels, not with the earlier
+    // pre-presentation backing stores; otherwise the chrome plate and canvas
+    // layers are individually valid but can never reconstruct browser.png.
+    canvasAssets = await captureCanvasAssets(cdp, snapshot, screenshotOptions);
+    if (materializedDocument) {
+      materializedDocument.canvas_bindings = canvasAssets.map(
+        (asset, index) => ({
+          index,
+          anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          bounds: {
+            left: asset.bounds.left - finalExtent.left,
+            top: asset.bounds.top - finalExtent.top,
+            width: asset.bounds.width,
+            height: asset.bounds.height,
+          },
+        }));
     }
     // Capture the exact static chrome with imperative canvases removed. This
     // is the native-composition plate: typography, SVGs, spacing, modal chrome,
@@ -1286,7 +1497,9 @@ async function runCapture(options) {
       })()`,
       returnByValue: true,
     });
-    const chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    let chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    if (!chromeBytes)
+      chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
@@ -1305,6 +1518,16 @@ async function runCapture(options) {
       error.code = "capture-chrome-not-deterministic";
       throw error;
     }
+    // Canvas elements are not necessarily the topmost paint layer. Spectr's
+    // minimap canvas, for example, sits below DOM-authored labels. Replaying
+    // isolated canvas PNGs over a canvas-free screenshot therefore darkens
+    // those labels and cannot reproduce Chromium's stacking order. Record the
+    // sparse, browser-composited contribution of all canvases: unchanged
+    // pixels stay transparent and changed pixels carry the accepted opaque
+    // result. This is validation evidence only; executable per-canvas assets
+    // and command-stream bindings remain the shipping/runtime contract.
+    const canvasComposition = await deriveCanvasCompositionEvidence(
+      cdp, screenshotBytes, chromeBytes);
     await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
@@ -1327,6 +1550,8 @@ async function runCapture(options) {
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
       writeFile(path.join(outputDir, "browser-chrome.png"), chromeBytes),
+      writeFile(path.join(outputDir, "browser-canvas-composite.png"),
+        canvasComposition.bytes),
       ...canvasAssets.map((asset) =>
         writeFile(path.join(outputDir, asset.path), asset.bytes)),
       // `layout.styles` rows are positional: entry N is the Nth property of
@@ -1461,6 +1686,15 @@ async function runCapture(options) {
         sha256: sha256(chromeBytes),
         width_px: pixels.width,
         height_px: pixels.height,
+      }, {
+        id: "evidence:browser-canvas-composite",
+        kind: "canvas-composite-evidence",
+        mime_type: "image/png",
+        path: "browser-canvas-composite.png",
+        sha256: sha256(canvasComposition.bytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+        changed_pixels: canvasComposition.changedPixels,
       }, ...canvasAssets.map(({ bytes: _bytes, ...asset }) => asset)],
       semantics: {
         schema: semanticReport.schema,

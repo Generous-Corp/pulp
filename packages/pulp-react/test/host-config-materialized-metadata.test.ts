@@ -11,6 +11,7 @@ const resetAfterCommit = PulpHostConfig.resetAfterCommit as
 afterEach(() => {
     const host = globalThis as unknown as Record<string, unknown>;
     delete host.__pulpApplyMaterializedImportMetadata__;
+    delete host.__pulpRefreshMaterializedState__;
 });
 
 describe('host-config materialized metadata', () => {
@@ -27,6 +28,15 @@ describe('host-config materialized metadata', () => {
 
     it('is optional for ordinary native React applications', () => {
         expect(() => resetAfterCommit?.({})).not.toThrow();
+    });
+
+    it('refreshes captured semantic state once per React commit', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let refreshes = 0;
+        host.__pulpRefreshMaterializedState__ = () => ++refreshes;
+        resetAfterCommit?.({});
+        resetAfterCommit?.({});
+        expect(refreshes).toBe(2);
     });
 
     it('publishes mixed-content text renderer targets on the owning DOM node', () => {

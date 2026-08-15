@@ -478,19 +478,31 @@ Element.prototype.getBoundingClientRect = function() {
 // ── offsetWidth / offsetHeight ───────────────────────────────────────────────
 
 Object.defineProperty(Element.prototype, "offsetWidth", {
-    get: function() { var r = this.getBoundingClientRect(); return r.width; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetWidth : this.getBoundingClientRect().width;
+    }
 });
 
 Object.defineProperty(Element.prototype, "offsetHeight", {
-    get: function() { var r = this.getBoundingClientRect(); return r.height; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetHeight : this.getBoundingClientRect().height;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientWidth", {
-    get: function() { return this.offsetWidth; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientWidth : this.offsetWidth;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientHeight", {
-    get: function() { return this.offsetHeight; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientHeight : this.offsetHeight;
+    }
 });
 
 Object.defineProperty(Element.prototype, "ownerDocument", {
@@ -1182,6 +1194,12 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (txtColor) setTextColor(id, txtColor);
             break;
         }
+        case "accentColor": {
+            var accent = parseCSSColor(resolved);
+            if (accent && typeof setAccentColor === "function")
+                setAccentColor(id, accent);
+            break;
+        }
 
         // Typography
         case "fontSize": {
@@ -1420,7 +1438,7 @@ var __cssProperties__ = [
     "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
-    "backgroundColor", "color",
+    "backgroundColor", "color", "accentColor",
     "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight",
     "textAlign", "textTransform", "textDecoration", "textOverflow",
     "border", "borderColor", "borderWidth", "borderRadius",

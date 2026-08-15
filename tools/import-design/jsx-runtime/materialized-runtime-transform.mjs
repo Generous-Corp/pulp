@@ -9,10 +9,13 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  normalizeMaterializedFontBindings,
-  runtimeFamilyForText,
-} from './materialized_font_bindings.mjs';
-import { normalizeRequestedTypography } from './materialized_text_contract.mjs';
+  materializedAbsoluteInsets,
+  materializedMergedTextBindings,
+  materializedRuntimeFontStack,
+  materializedSvgRectGeometry,
+  materializedTextTargetGeometry,
+  normalizeMaterializedMetadata,
+} from './materialized_metadata_contract.mjs';
 import {
   MATERIALIZED_BACKGROUND_Z,
   MATERIALIZED_STATE_ATLAS_Z,
@@ -21,6 +24,9 @@ import {
 } from './materialized_layer_contract.mjs';
 import { resolveMaterializedFrames } from './materialized_frame_contract.mjs';
 import { loadMaterializedStateAtlas } from './materialized_state_atlas.mjs';
+import { materializedCssVariables } from './materialized_css_variables.mjs';
+import { canonicalizeMaterializedRuntimeDocument } from
+  './materialized_runtime_canonicalization.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -29,6 +35,7 @@ if (args.includes('--help') || args.includes('-h')) {
   --in <materialized-document.json> --design-ir <panel.ir.json> \\
   [--prelude <product-runtime.js>]... \\
   [--visual-authority reference|native] \\
+  [--runtime-document-asset <relative-path>] \\
   [--state-atlas <captured-states.json>] [--portable-state-assets] \
   [--activate-state <id>] \
   --out <behavior.js>
@@ -66,6 +73,13 @@ if (visualAuthority !== 'reference' && visualAuthority !== 'native') {
   throw new Error('--visual-authority must be reference or native');
 }
 const preludeArgs = values('--prelude').map((path) => resolve(path));
+const runtimeDocumentAsset = args.includes('--runtime-document-asset')
+  ? String(value('--runtime-document-asset')) : '';
+if (runtimeDocumentAsset &&
+    (runtimeDocumentAsset.startsWith('/') || runtimeDocumentAsset.includes('..') ||
+     !/^[A-Za-z0-9._/-]+$/.test(runtimeDocumentAsset))) {
+  throw new Error('--runtime-document-asset must be a safe relative path');
+}
 const stateAtlasArg = args.includes('--state-atlas')
   ? resolve(value('--state-atlas')) : '';
 const portableStateAssets = args.includes('--portable-state-assets');
@@ -98,99 +112,23 @@ if (surfaceBackground.length > 128 ||
     /[;{}<>]/.test(surfaceBackground)) {
   throw new Error('materialized browser surface background is invalid');
 }
-const finiteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
-const fontBindings = normalizeMaterializedFontBindings(parsed.font_bindings);
-const layoutBindings = Array.isArray(parsed.layout_bindings)
-  ? parsed.layout_bindings.map((binding, bindingIndex) => {
-      if (!binding || typeof binding !== 'object' ||
-          (binding.anchor !== '#root' && binding.anchor !== 'body') ||
-          !Array.isArray(binding.path) || binding.path.length === 0 ||
-          binding.path.length > 256 || !binding.box ||
-          !finiteNumber(binding.box.left) || !finiteNumber(binding.box.top) ||
-          !finiteNumber(binding.box.width) || binding.box.width < 0 ||
-          !finiteNumber(binding.box.height) || binding.box.height < 0) {
-        throw new Error(`materialized layout binding ${bindingIndex} is invalid`);
-      }
-      const path = binding.path.map((step, stepIndex) => {
-        if (!step || typeof step !== 'object' ||
-            typeof step.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(step.tag) ||
-            !Number.isSafeInteger(step.index) || step.index < 0) {
-          throw new Error(
-            `materialized layout binding ${bindingIndex} path ${stepIndex} is invalid`);
-        }
-        return { tag: step.tag, index: step.index };
-      });
-      return { anchor: binding.anchor, path, box: {
-        left: binding.box.left, top: binding.box.top,
-        width: binding.box.width, height: binding.box.height,
-      } };
-    }) : [];
-if (layoutBindings.length > 16384) {
-  throw new Error('materialized document contains too many layout bindings');
-}
-const textBindings = Array.isArray(parsed.text_bindings)
-  ? parsed.text_bindings.map((binding, bindingIndex) => {
-      const requestedTypography = normalizeRequestedTypography(
-        binding?.basis?.requested);
-      if (!binding || typeof binding !== 'object' ||
-          (binding.anchor !== '#root' && binding.anchor !== 'body') ||
-          !Array.isArray(binding.path) || binding.path.length === 0 ||
-          binding.path.length > 256 || typeof binding.text !== 'string' ||
-          binding.text.length === 0 || !binding.basis ||
-          (binding.anonymous_text_index !== undefined &&
-           (!Number.isSafeInteger(binding.anonymous_text_index) ||
-            binding.anonymous_text_index < 0)) ||
-          !finiteNumber(binding.basis.width) || binding.basis.width <= 0 ||
-          typeof binding.basis.resolved_face !== 'string' ||
-          binding.basis.resolved_face.length === 0 ||
-          !requestedTypography ||
-          !Array.isArray(binding.boxes) || binding.boxes.length === 0 ||
-          binding.boxes.length > 4096) {
-        throw new Error(`materialized text binding ${bindingIndex} is invalid`);
-      }
-      const path = binding.path.map((step, stepIndex) => {
-        if (!step || typeof step !== 'object' ||
-            typeof step.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(step.tag) ||
-            !Number.isSafeInteger(step.index) || step.index < 0) {
-          throw new Error(
-            `materialized text binding ${bindingIndex} path ${stepIndex} is invalid`);
-        }
-        return { tag: step.tag, index: step.index };
-      });
-      let previousEnd = 0;
-      const boxes = binding.boxes.map((box, boxIndex) => {
-        if (!box || typeof box !== 'object' ||
-            !finiteNumber(box.left) || !finiteNumber(box.top) ||
-            !finiteNumber(box.width) || box.width < 0 ||
-            !finiteNumber(box.height) || box.height <= 0 ||
-            !Number.isSafeInteger(box.start) || box.start < previousEnd ||
-            !Number.isSafeInteger(box.length) || box.length <= 0 ||
-            box.start + box.length > binding.text.length) {
-          throw new Error(
-            `materialized text binding ${bindingIndex} box ${boxIndex} is invalid`);
-        }
-        previousEnd = box.start + box.length;
-        return { left: box.left, top: box.top, width: box.width,
-          height: box.height, start: box.start, length: box.length };
-      });
-      return { anchor: binding.anchor, path, text: binding.text,
-        ...(binding.anonymous_text_index === undefined ? {} : {
-          anonymous_text_index: binding.anonymous_text_index,
-        }),
-        basis: { width: binding.basis.width,
-          resolved_face: binding.basis.resolved_face,
-          requested: requestedTypography }, boxes };
-    }) : [];
-if (textBindings.length > 4096) {
-  throw new Error('materialized document contains too many text bindings');
-}
-for (const binding of textBindings) {
-  binding.runtime_font_family = runtimeFamilyForText(fontBindings, binding);
-}
+const mainMetadata = normalizeMaterializedMetadata(parsed);
+const fontBindings = mainMetadata.font_bindings;
+const layoutBindings = mainMetadata.layout_bindings;
+const textBindings = mainMetadata.text_bindings;
+const paintBindings = mainMetadata.paint_bindings;
 const stateAtlas = loadMaterializedStateAtlas(stateAtlasArg, {
   visualAuthority,
   runtimeBase: portableStateAssets ? dirname(output) : '',
 });
+for (const state of stateAtlas) {
+  if (!state.metadata) continue;
+  state.metadata = {
+    ...state.metadata,
+    text_bindings: materializedMergedTextBindings(
+      textBindings, state.metadata.text_bindings),
+  };
+}
 if (requestedState && !stateAtlas.some((state) => state.id === requestedState)) {
   throw new Error(`--activate-state ${requestedState} is not present in the state atlas`);
 }
@@ -208,25 +146,36 @@ const injectPrelude = (html) => {
     /<head([^>]*)>/i,
     `<head$1><script>\n${requestedStatePrelude}${productPrelude}\n</script>`);
 };
-const runtimeDocument = { ...parsed, html: injectPrelude(parsed.html) };
+const runtimeDocument = canonicalizeMaterializedRuntimeDocument({
+  ...parsed, html: injectPrelude(parsed.html),
+});
 const sidecar = JSON.stringify(runtimeDocument);
+if (runtimeDocumentAsset) {
+  const assetOutput = resolve(dirname(output), runtimeDocumentAsset);
+  mkdirSync(dirname(assetOutput), { recursive: true });
+  writeFileSync(assetOutput, sidecar);
+}
 
 const canvasBindings = Array.isArray(parsed.canvas_bindings)
   ? parsed.canvas_bindings : [];
 let behaviorCanvasAnchors = Array.isArray(parsed.behavior_canvas_anchors)
   ? parsed.behavior_canvas_anchors : [];
 const ir = JSON.parse(readFileSync(designIrArg, 'utf8'));
+const capturedCssVariables = materializedCssVariables(ir.tokens);
 // The visible DesignIR root is the full capture surface. The executable
 // behavior tree is the authored panel INSIDE that surface. Prefer the explicit
 // registration rect; old uncropped captures legitimately fall back to the
 // root extent.
-const materializedFrames = resolveMaterializedFrames(ir);
+const materializedFrames = resolveMaterializedFrames(
+  ir, mainMetadata.coordinate_space);
 const { width: visualWidth, height: visualHeight } = materializedFrames.visual;
 const {
   left: authoredLeft, top: authoredTop,
   width: authoredWidth, height: authoredHeight,
 } = materializedFrames.behavior;
+const authoredTransform = materializedFrames.behavior.transform || null;
 const byAsset = new Map();
+const capturedPaintAuthorityAnchors = [];
 const visit = (node) => {
   if (!node || typeof node !== 'object') return;
   const asset = node.attributes?.asset_ref;
@@ -234,6 +183,10 @@ const visit = (node) => {
   if (typeof asset === 'string' && asset.startsWith('canvas:') &&
       typeof anchor === 'string' && anchor.length > 0) {
     byAsset.set(asset, anchor);
+  }
+  if (node.attributes?.materialized_role === 'captured-paint-authority' &&
+      typeof anchor === 'string' && anchor.length > 0) {
+    capturedPaintAuthorityAnchors.push(anchor);
   }
   for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
 };
@@ -251,12 +204,25 @@ import * as React from 'react';
 import { createRoot as createPulpRoot, render as renderPulp, unmount as unmountPulp } from '@pulp/react';
 
 const g = globalThis;
+${materializedRuntimeFontStack.toString()}
+${materializedTextTargetGeometry.toString()}
+${materializedAbsoluteInsets.toString()}
+${materializedSvgRectGeometry.toString()}
+// Executable React styles retain authored var(--name) expressions. Restore the
+// exact computed custom-property values Chromium captured before React mounts,
+// so font families, colours, lengths and other string-valued props reach the
+// native prop applier as resolved values instead of silently falling back.
+const capturedCssVariables = JSON.parse(${JSON.stringify(
+  JSON.stringify(capturedCssVariables))});
+g.__pulpCssVars = Object.freeze(Object.assign(
+  Object.create(null), g.__pulpCssVars || {}, capturedCssVariables));
 // Snapshot the native renderer bridge before the captured browser document
 // installs DOM-shaped globals with overlapping names (notably createCanvas).
 // @pulp/react consults this immutable namespace first, while the authored
 // browser code continues to see the compatibility functions it expects.
 g.__pulpNativeBridgeFunctions__ = Object.freeze({
   createCanvas: g.createCanvas,
+  setSvgRect: g.setSvgRect,
 });
 g.React = React;
 const behaviorRootId = '__pulp_materialized_behavior__';
@@ -371,6 +337,23 @@ function materializedDomRegistryValues() {
 }
 const capturedTextBindings = ${JSON.stringify(textBindings)};
 const capturedLayoutBindings = ${JSON.stringify(layoutBindings)};
+const capturedPaintBindings = ${JSON.stringify(paintBindings)};
+const capturedHomeMetadata = {
+  layout_bindings: capturedLayoutBindings,
+  text_bindings: capturedTextBindings,
+  paint_bindings: capturedPaintBindings,
+};
+let activeCapturedState = '';
+// React may commit a conditionally-mounted state over more than one pass.
+// Keep the commit hook pointed at the active state's Chromium evidence so a
+// later modal/menu subtree commit converges its newly-registered descendants
+// instead of accidentally reapplying the home document.
+let activeMaterializedMetadata = capturedHomeMetadata;
+// Filled after the generated canvas binding table is declared. Keeping this
+// callback in the same post-commit hook as captured layout/text evidence lets
+// React replace conditional behavior subtrees without leaving the visible
+// DesignIR canvas wired to an obsolete callback snapshot.
+let syncMaterializedCanvasBehaviorsAfterCommit = null;
 function materializedElementChildren(node, registrySet) {
   const children = Array.isArray(node && node._children) ? node._children : [];
   return children.filter(child => child && registrySet.has(child));
@@ -393,43 +376,135 @@ function materializedNodeAtPath(binding, values) {
   }
   return node;
 }
-g.__pulpApplyMaterializedImportMetadata__ = function () {
+function materializedOptionalTextNode(binding, values) {
+  const matches = values.filter(node => {
+    const anonymousTargets = Array.isArray(node && node.__pulpAnonymousTextTargets)
+      ? node.__pulpAnonymousTextTargets : [];
+    if (binding.anonymous_text_index !== undefined)
+      return anonymousTargets.some(target =>
+        String(target && target.text || '') === binding.text);
+    return String(node && node.textContent || '') === binding.text;
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+function applyMaterializedImportMetadata(metadata) {
   const values = materializedDomRegistryValues();
+  const activeLayoutBindings = Array.isArray(metadata && metadata.layout_bindings)
+    ? metadata.layout_bindings : [];
+  const activeTextBindings = Array.isArray(metadata && metadata.text_bindings)
+    ? metadata.text_bindings : [];
+  const activePaintBindings = Array.isArray(metadata && metadata.paint_bindings)
+    ? metadata.paint_bindings : [];
   let applied = 0;
   const diagnostics = {
+    state_id: typeof activeCapturedState === 'string' ? activeCapturedState : '',
+    layout_expected: activeLayoutBindings.length,
     layout_applied: 0,
     layout_node_miss: 0,
+    text_expected: activeTextBindings.filter(binding =>
+      !binding.runtime_optional).length,
     text_applied: 0,
     text_node_miss: 0,
     text_content_mismatch: 0,
     text_target_miss: 0,
+    text_optional_expected: activeTextBindings.filter(binding =>
+      binding.runtime_optional).length,
+    text_optional_applied: 0,
+    text_optional_miss: 0,
+    paint_expected: activePaintBindings.length,
+    paint_applied: 0,
+    paint_node_miss: 0,
+    paint_unsupported: 0,
+    paint_nodes: [],
   };
   // Freeze captured elements to Chromium's resolved parent-relative boxes.
   // This is generation evidence, not a screenshot at runtime: React remains
   // executable and newly-created dynamic nodes still flow through Yoga until
   // their captured state contributes an equivalent binding.
   if (typeof g.setPosition === 'function' && typeof g.setFlex === 'function') {
-    for (const binding of capturedLayoutBindings) {
+    for (const binding of activeLayoutBindings) {
       const node = materializedNodeAtPath(binding, values);
       const id = node && (node.__pulpId || node.id);
       if (!id) {
         ++diagnostics.layout_node_miss;
         continue;
       }
+      // Browser capture stores each child border box relative to its parent's
+      // border box. Yoga resolves absolute left/top from the parent's padding
+      // edge, so replaying the browser number verbatim adds the parent's
+      // border a second time (a 1 CSS-px / 2 Retina-px shift in compact rails
+      // and segmented controls). Translate coordinate spaces explicitly.
+      const parent = node.parentElement || node._parentElement;
+      const parentId = parent && (parent.__pulpId || parent.id);
+      const parentMetrics = parentId && typeof g.getLayoutBoxMetrics === 'function'
+        ? g.getLayoutBoxMetrics(String(parentId)) : null;
+      const targetMetrics = typeof g.getLayoutBoxMetrics === 'function'
+        ? g.getLayoutBoxMetrics(String(id)) : null;
+      const insets = materializedAbsoluteInsets(
+        binding.box, parentMetrics, targetMetrics);
+      const left = insets ? insets.left : binding.box.left;
+      const top = insets ? insets.top : binding.box.top;
       g.setPosition(String(id), 'absolute');
-      g.setLeft(String(id), binding.box.left);
-      g.setTop(String(id), binding.box.top);
+      g.setLeft(String(id), left);
+      g.setTop(String(id), top);
       g.setFlex(String(id), 'width', binding.box.width);
       g.setFlex(String(id), 'height', binding.box.height);
       ++applied;
       ++diagnostics.layout_applied;
     }
   }
-  if (typeof g.setCapturedLineBoxes !== 'function') return applied;
-  for (const binding of capturedTextBindings) {
+  // Apply Chromium's resolved SVG paint after React has committed authored
+  // attributes. This intentionally wins over currentColor and stylesheet
+  // tokens: the frozen computed value is the visual authority for this state.
+  for (const binding of activePaintBindings) {
     const node = materializedNodeAtPath(binding, values);
+    const id = node && (node.__pulpId || node.id);
+    if (!id) {
+      ++diagnostics.paint_node_miss;
+      continue;
+    }
+    diagnostics.paint_nodes.push({
+      index: binding.index,
+      tag: binding.tag,
+      id: String(id),
+    });
+    if (typeof g.setOpacity === 'function')
+      g.setOpacity(String(id), binding.paint.opacity);
+    if (typeof g.setTextColor === 'function' && binding.paint.color)
+      g.setTextColor(String(id), binding.paint.color);
+    if (binding.tag !== 'svg') {
+      if (binding.paint.stroke_dasharray !== 'none') {
+        ++diagnostics.paint_unsupported;
+        continue;
+      }
+      if (typeof g.setSvgFill === 'function')
+        g.setSvgFill(String(id), binding.paint.fill);
+      if (typeof g.setSvgStroke === 'function')
+        g.setSvgStroke(String(id), binding.paint.stroke);
+      if (typeof g.setSvgStrokeWidth === 'function')
+        g.setSvgStrokeWidth(String(id), binding.paint.stroke_width);
+      // SVG primitives are excluded from Yoga layout replay. Apply the
+      // Chromium-resolved parent-local box directly as rect geometry; zeroing
+      // x/y here collapses repeated bars because no layout binding moves the
+      // primitive View back to its captured position.
+      if (binding.tag === 'rect' && binding.box &&
+          typeof g.__pulpNativeBridgeFunctions__.setSvgRect === 'function') {
+        const rect = materializedSvgRectGeometry(binding.box);
+        if (rect) g.__pulpNativeBridgeFunctions__.setSvgRect(String(id),
+          rect.x, rect.y, rect.width, rect.height);
+      }
+    }
+    ++applied;
+    ++diagnostics.paint_applied;
+  }
+  if (typeof g.setCapturedLineBoxes !== 'function') return applied;
+  for (const binding of activeTextBindings) {
+    const optional = binding.runtime_optional === true;
+    const node = materializedNodeAtPath(binding, values)
+      || (optional ? materializedOptionalTextNode(binding, values) : null);
     if (!node) {
-      ++diagnostics.text_node_miss;
+      if (optional) ++diagnostics.text_optional_miss;
+      else ++diagnostics.text_node_miss;
       continue;
     }
     // HTML controls remain semantic/styled containers in the native tree.
@@ -442,7 +517,8 @@ g.__pulpApplyMaterializedImportMetadata__ = function () {
       ? null : anonymousTargets[binding.anonymous_text_index];
     if (anonymousTarget) {
       if (String(anonymousTarget.text || '') !== binding.text) {
-        ++diagnostics.text_content_mismatch;
+        if (optional) ++diagnostics.text_optional_miss;
+        else ++diagnostics.text_content_mismatch;
         continue;
       }
       // Mixed-content text is represented by a synthetic Label. Make its
@@ -458,13 +534,15 @@ g.__pulpApplyMaterializedImportMetadata__ = function () {
         g.setFlex(String(anonymousTarget.id), 'height', maxBottom);
       }
     } else if (String(node.textContent || '') !== binding.text) {
-      ++diagnostics.text_content_mismatch;
+      if (optional) ++diagnostics.text_optional_miss;
+      else ++diagnostics.text_content_mismatch;
       continue;
     }
     const id = anonymousTarget?.id ||
       node.__pulpTextTargetId || node.__pulpId || node.id;
     if (!id) {
-      ++diagnostics.text_target_miss;
+      if (optional) ++diagnostics.text_optional_miss;
+      else ++diagnostics.text_target_miss;
       continue;
     }
     // Generated anonymous Labels do not participate in the authored DOM
@@ -473,10 +551,7 @@ g.__pulpApplyMaterializedImportMetadata__ = function () {
     // Pure Label owners receive the same resolved values, making this path
     // deterministic for both HTML controls and ordinary text elements.
     if (typeof g.setFontFamily === 'function') {
-      const capturedFamily = binding.runtime_font_family;
-      g.setFontFamily(String(id), capturedFamily
-        ? JSON.stringify(capturedFamily) + ', ' + binding.basis.requested.font_family
-        : binding.basis.requested.font_family);
+      g.setFontFamily(String(id), materializedRuntimeFontStack(binding));
     }
     if (typeof g.setFontSize === 'function')
       g.setFontSize(String(id), binding.basis.requested.font_size);
@@ -486,12 +561,42 @@ g.__pulpApplyMaterializedImportMetadata__ = function () {
       g.setFontStyle(String(id), binding.basis.requested.font_slant === 1
         ? 'italic' : binding.basis.requested.font_slant === 2
           ? 'oblique' : 'normal');
-    g.setCapturedLineBoxes(String(id), binding.boxes, binding.basis.width,
+    if (typeof g.setLetterSpacing === 'function' &&
+        Number.isFinite(binding.basis.requested.letter_spacing)) {
+      g.setLetterSpacing(String(id), binding.basis.requested.letter_spacing);
+    }
+    let targetBoxes = binding.boxes;
+    let targetBasisWidth = binding.basis.width;
+    if (!anonymousTarget && node.__pulpTextTargetId &&
+        typeof g.getLayoutBoxMetrics === 'function') {
+      const metrics = g.getLayoutBoxMetrics(String(id));
+      const ownerId = node.__pulpId || node.id;
+      const ownerMetrics = ownerId
+        ? g.getLayoutBoxMetrics(String(ownerId)) : null;
+      const geometry = materializedTextTargetGeometry(
+        binding.basis.width, metrics, ownerMetrics);
+      if (geometry) {
+        targetBoxes = binding.boxes.map(box => ({
+          ...box,
+          left: box.left - geometry.localX,
+          top: box.top - geometry.localY,
+        }));
+        targetBasisWidth = geometry.basisWidth;
+      }
+    }
+    g.setCapturedLineBoxes(String(id), targetBoxes, targetBasisWidth,
       binding.basis.resolved_face, false);
     ++applied;
-    ++diagnostics.text_applied;
+    if (optional) ++diagnostics.text_optional_applied;
+    else ++diagnostics.text_applied;
   }
   g.__pulpMaterializedMetadataDiagnostics__ = diagnostics;
+  return applied;
+}
+g.__pulpApplyMaterializedImportMetadata__ = function () {
+  const applied = applyMaterializedImportMetadata(activeMaterializedMetadata);
+  if (typeof syncMaterializedCanvasBehaviorsAfterCommit === 'function')
+    syncMaterializedCanvasBehaviorsAfterCommit();
   return applied;
 };
 function materializedMatches(node, selector) {
@@ -664,25 +769,6 @@ g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData
       }
     }
   }
-  // Captured JSX frequently puts semantic identity on a wrapper (for
-  // example a span used to anchor a dropdown) and the handler on its child
-  // button. Activate the original nearest descendant handler instead of
-  // inventing a second product-specific selector.
-  if (typeof callback !== 'function') {
-    for (const candidate of materializedDomRegistryValues()) {
-      let parent = candidate;
-      while (parent && parent !== node) {
-        parent = parent.parentElement || parent._parentElement || null;
-      }
-      if (parent !== node) continue;
-      const descendantCallback = callbackFor(candidate);
-      if (typeof descendantCallback === 'function') {
-        target = candidate;
-        callback = descendantCallback;
-        break;
-      }
-    }
-  }
   // Browser hit testing may route an event from a semantic canvas/SVG leaf
   // to a React handler owned by an overlapping interaction surface even when
   // the bounded public-element shim cannot reconstruct that DOM ancestry.
@@ -716,6 +802,26 @@ g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData
       }
     }
   }
+  // Captured JSX frequently puts semantic identity on a wrapper (for
+  // example a span used to anchor a dropdown) and the handler on its child
+  // button. This is a last resort when neither ancestry nor authored point
+  // geometry identifies the handler: selecting the first descendant before
+  // hit testing can route a canvas gesture to an unrelated sibling control.
+  if (typeof callback !== 'function') {
+    for (const candidate of materializedDomRegistryValues()) {
+      let parent = candidate;
+      while (parent && parent !== node) {
+        parent = parent.parentElement || parent._parentElement || null;
+      }
+      if (parent !== node) continue;
+      const descendantCallback = callbackFor(candidate);
+      if (typeof descendantCallback === 'function') {
+        target = candidate;
+        callback = descendantCallback;
+        break;
+      }
+    }
+  }
   if (typeof callback === 'function') {
     callback(Object.assign({ type: event, target: node,
       currentTarget: target }, eventData || {}));
@@ -730,7 +836,18 @@ g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData
 if (typeof g.__pulpRuntimeImport__ !== 'function') {
   throw new Error('materialized runtime import capability is unavailable');
 }
-g.__pulpRuntimeImport__(${JSON.stringify(sidecar)}, 'materialized-browser');
+${runtimeDocumentAsset ? `
+if (typeof g.__loadAssetSync__ !== 'function') {
+  throw new Error('materialized runtime document asset loading is unavailable');
+}
+const runtimeDocumentAsset = g.__loadAssetSync__(
+  ${JSON.stringify(runtimeDocumentAsset)});
+if (!runtimeDocumentAsset || !runtimeDocumentAsset.ok ||
+    typeof runtimeDocumentAsset.text !== 'string') {
+  throw new Error('materialized runtime document asset could not be loaded');
+}
+g.__pulpRuntimeImport__(runtimeDocumentAsset.text, 'materialized-browser');
+` : `g.__pulpRuntimeImport__(${JSON.stringify(sidecar)}, 'materialized-browser');`}
 if (g.__pulpRuntimeImportErr__) throw new Error(String(g.__pulpRuntimeImportErr__));
 // The captured document may replace its browser-compatible window object
 // while materializing.  Re-run an explicitly supplied, idempotent service
@@ -785,6 +902,16 @@ setLeft(behaviorRootId, ${JSON.stringify(authoredLeft)});
 setTop(behaviorRootId, ${JSON.stringify(authoredTop)});
 setFlex(behaviorRootId, 'width', ${JSON.stringify(authoredWidth)});
 setFlex(behaviorRootId, 'height', ${JSON.stringify(authoredHeight)});
+${authoredTransform ? `
+// Chromium resolved layout, typography, Canvas client dimensions, and border
+// widths in authored CSS pixels, then transformed the application surface.
+// Native must replay those spaces in that order as well. Applying this matrix
+// to already-transformed boxes is the clipping bug this contract prevents.
+setTransformOrigin(behaviorRootId, 0, 0);
+setTransform(behaviorRootId,
+  ${JSON.stringify(authoredTransform.a)}, ${JSON.stringify(authoredTransform.b)},
+  ${JSON.stringify(authoredTransform.c)}, ${JSON.stringify(authoredTransform.d)},
+  ${JSON.stringify(authoredTransform.e)}, ${JSON.stringify(authoredTransform.f)});` : ''}
 setVisible(behaviorRootId, true);
 setOpacity(behaviorRootId, ${visualAuthority === 'native' ? '1' : '0'});
 // The root itself never becomes a catch-all hit target. In reference mode its
@@ -830,7 +957,6 @@ if (capturedPaintStates.length > 0) {
     setVisible(id, false);
   }
 }
-let activeCapturedState = '';
 const loadedCapturedStates = new Set();
 const requestedCapturedStateId = ${JSON.stringify(requestedState)};
 const requestedCapturedState = requestedCapturedStateId === '' ? null
@@ -904,32 +1030,132 @@ g.__pulpRefreshMaterializedState__ = function () {
       setVisible('__pulp_materialized_state_' + state.id, state.id === next);
     }
     activeCapturedState = next;
+    const state = capturedStates.find(candidate => candidate.id === next);
+    activeMaterializedMetadata = state && state.metadata
+      ? state.metadata : capturedHomeMetadata;
+    applyMaterializedImportMetadata(activeMaterializedMetadata);
   }
   return activeCapturedState;
 };
-function refreshCapturedStateFrame() {
-  g.__pulpRefreshMaterializedState__();
-  requestAnimationFrame(refreshCapturedStateFrame);
-}
-if (capturedPaintStates.length > 0) refreshCapturedStateFrame();
+// Native visual authority deliberately has no captured paint planes, but its
+// semantic states can still carry Chromium-measured layout and text evidence.
+// Resolve once after bootstrap; @pulp/react refreshes again after every later
+// commit, when semantic state can actually have changed.
+if (capturedStates.length > 0) g.__pulpRefreshMaterializedState__();
 const canvasBindings = ${JSON.stringify(canvasBindings)};
 const behaviorCanvasAnchors = ${JSON.stringify(behaviorCanvasAnchors)};
+const capturedPaintAuthorityAnchors = ${JSON.stringify(capturedPaintAuthorityAnchors)};
+function materializedCanvasBehaviorOwnerId(index) {
+  const binding = canvasBindings[index];
+  const canvases = materializedDomRegistryValues().filter(node =>
+    String(node && node.tagName || '').toLowerCase() === 'canvas');
+  let candidate = canvases[index] || null;
+  const callbackMaps = [g.__pulpReactEventCallbacks__,
+    globalThis.__pulpReactEventCallbacks__].filter((map, index, maps) =>
+      map instanceof Map && maps.indexOf(map) === index);
+  while (candidate) {
+    const id = String(candidate.__pulpId || candidate.id || '');
+    if (id && callbackMaps.some(callbacks =>
+        [...callbacks.keys()].some(key => key.startsWith(id + ':pointer'))))
+      return id;
+    candidate = candidate.parentElement || candidate._parentElement || null;
+  }
+  const owners = new Set();
+  const eventsByOwner = new Map();
+  for (const callbacks of callbackMaps) {
+    for (const key of callbacks.keys()) {
+      const separator = String(key).lastIndexOf(':');
+      if (separator > 0) {
+        const id = String(key).slice(0, separator);
+        const event = String(key).slice(separator + 1);
+        if (!eventsByOwner.has(id)) eventsByOwner.set(id, new Set());
+        eventsByOwner.get(id).add(event);
+        if (event.startsWith('pointer')) owners.add(id);
+      }
+    }
+  }
+  if (owners.size === 1) return [...owners][0];
+  const fullGestureOwners = [...eventsByOwner].filter(([, events]) =>
+    ['pointerdown', 'pointermove', 'pointerup', 'pointerleave', 'wheel']
+      .every(event => events.has(event))).map(([id]) => id);
+  if (fullGestureOwners.length === 1) return fullGestureOwners[0];
+  if (!binding || !binding.bounds) return '';
+  const centerX = binding.bounds.left + binding.bounds.width * 0.5;
+  const centerY = binding.bounds.top + binding.bounds.height * 0.5;
+  const nodesById = new Map(materializedDomRegistryValues().map(node =>
+    [String(node && (node.__pulpId || node.id) || ''), node]));
+  const candidates = [...owners].map(id => {
+    const node = nodesById.get(id);
+    const rect = typeof getLayoutRect === 'function'
+      ? getLayoutRect(id)
+      : node && typeof node.getBoundingClientRect === 'function'
+        ? node.getBoundingClientRect() : null;
+    return { id, rect };
+  }).filter(({ rect }) => {
+    return rect && [rect.left, rect.top, rect.width, rect.height]
+      .every(Number.isFinite) && rect.width > 0 && rect.height > 0 &&
+      centerX >= rect.left && centerX <= rect.left + rect.width &&
+      centerY >= rect.top && centerY <= rect.top + rect.height;
+  }).sort((a, b) =>
+    a.rect.width * a.rect.height - b.rect.width * b.rect.height ||
+    a.id.localeCompare(b.id));
+  if (candidates.length === 0) return '';
+  if (candidates.length > 1) {
+    const firstArea = candidates[0].rect.width * candidates[0].rect.height;
+    const secondArea = candidates[1].rect.width * candidates[1].rect.height;
+    if (Math.abs(firstArea - secondArea) < 0.01) return '';
+  }
+  return candidates[0].id;
+}
+g.__pulpApplyMaterializedVisualAuthority__ = function () {
+  if (${JSON.stringify(visualAuthority)} !== 'native') return 0;
+  for (const anchor of capturedPaintAuthorityAnchors) {
+    if (typeof setVisibleAtAnchor !== 'function' ||
+        !setVisibleAtAnchor(anchor, false)) {
+      throw new Error('could not retire captured paint authority ' + anchor);
+    }
+  }
+  return capturedPaintAuthorityAnchors.length;
+};
 g.__pulpBindMaterializedCanvases__ = function () {
+  const resolvedOwners = [];
   for (const binding of canvasBindings) {
     const visualAnchor = behaviorCanvasAnchors[binding.index];
     if (!visualAnchor) {
       throw new Error('missing visual anchor for live canvas ' + binding.index);
     }
     const bindType = typeof bindCanvasBehaviorAt;
+    const behaviorOwnerId = materializedCanvasBehaviorOwnerId(binding.index);
+    resolvedOwners[binding.index] = behaviorOwnerId;
     const bound = bindType === 'function'
       ? bindCanvasBehaviorAt(
-          visualAnchor, behaviorRootId, binding.index) : false;
+          visualAnchor, behaviorRootId, binding.index, behaviorOwnerId) : false;
     if (!bound) {
       throw new Error('could not bind live canvas ' + binding.index +
         ' to ' + visualAnchor + ' bind=' + bindType);
     }
   }
+  g.__pulpMaterializedCanvasBehaviorOwners__ = resolvedOwners;
   return canvasBindings.length;
+};
+syncMaterializedCanvasBehaviorsAfterCommit = function () {
+  const resolvedOwners = [];
+  const boundCanvases = [];
+  // The DesignIR sibling is attached by the product after the initial React
+  // commit, so absence here is expected and must not abort the realm. The
+  // product performs one strict __pulpBindMaterializedCanvases__ call after
+  // attach; subsequent React commits refresh callback snapshots here.
+  for (const binding of canvasBindings) {
+    const visualAnchor = behaviorCanvasAnchors[binding.index];
+    const behaviorOwnerId = materializedCanvasBehaviorOwnerId(binding.index);
+    resolvedOwners[binding.index] = behaviorOwnerId;
+    boundCanvases[binding.index] = Boolean(visualAnchor &&
+      typeof bindCanvasBehaviorAt === 'function' &&
+      bindCanvasBehaviorAt(visualAnchor, behaviorRootId, binding.index,
+        behaviorOwnerId));
+  }
+  g.__pulpMaterializedCanvasBehaviorOwners__ = resolvedOwners;
+  g.__pulpMaterializedCanvasBindingsReady__ = boundCanvases;
 };
 `;
 

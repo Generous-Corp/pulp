@@ -12,6 +12,8 @@
 const MAX_BINDINGS = 4096;
 const MAX_BOXES_PER_BINDING = 4096;
 
+import { materializedRectToAuthored } from './materialized_coordinate_space.mjs';
+
 function stringAt(strings, index) {
   return Number.isInteger(index) && index >= 0 ? String(strings[index] ?? "") : "";
 }
@@ -55,6 +57,15 @@ function parseCssSlant(value) {
   if (text === "italic") return 1;
   if (text.startsWith("oblique")) return 2;
   return null;
+}
+
+function parseCssLetterSpacing(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "normal") return 0;
+  const match = text.match(/^(-?(?:\d+\.?\d*|\.\d+))px$/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && Math.abs(parsed) <= 4096 ? parsed : null;
 }
 
 function buildElementChildren(nodes) {
@@ -112,7 +123,7 @@ function structuralPath(nodes, strings, elementChildren, owner) {
   return { anchor, path: reversed.reverse() };
 }
 
-function lineBoxesFor(layoutIndex, textBoxes, ownerBounds) {
+function lineBoxesFor(layoutIndex, textBoxes, ownerBounds, coordinateSpace) {
   const layoutIndices = textBoxes.layoutIndex ?? [];
   const bounds = textBoxes.bounds ?? [];
   const starts = textBoxes.start ?? [];
@@ -120,7 +131,9 @@ function lineBoxesFor(layoutIndex, textBoxes, ownerBounds) {
   const boxes = [];
   for (let index = 0; index < layoutIndices.length; ++index) {
     if (layoutIndices[index] !== layoutIndex) continue;
-    const rect = finiteRect(bounds[index]);
+    const captured = finiteRect(bounds[index]);
+    const rect = captured
+      ? materializedRectToAuthored(captured, coordinateSpace) : null;
     const start = Number(starts[index]);
     const length = Number(lengths[index]);
     if (!rect || !Number.isSafeInteger(start) || start < 0 ||
@@ -138,7 +151,55 @@ function lineBoxesFor(layoutIndex, textBoxes, ownerBounds) {
   return boxes.length > 0 ? boxes : null;
 }
 
-export function buildMaterializedTextBindings(snapshot, platformFontReport) {
+function mergeableOwnerRunGroup(group, nodes, elementChildren) {
+  if (group.length < 2) return false;
+  const owner = Number(group[0]?.owner_node_index);
+  if (!Number.isSafeInteger(owner) ||
+      (elementChildren.get(owner) ?? []).length !== 0) return false;
+  const ordinals = group.map(run =>
+    directTextIndex(nodes, Number(run?.node_index), owner));
+  if (ordinals.some(index => index === null) ||
+      new Set(ordinals).size !== ordinals.length) return false;
+  const requested = JSON.stringify(group[0]?.requested ?? {});
+  return group.every(run => Number(run?.owner_node_index) === owner &&
+    JSON.stringify(run?.requested ?? {}) === requested);
+}
+
+function mergeResolvedFaces(group) {
+  const first = group[0]?.resolved;
+  if (!Array.isArray(first)) return null;
+  // CSS.getPlatformFontsForNode reports the complete owner census for every
+  // adjacent layout run. Those answers must agree; summing them would double
+  // the glyph counts and make the face evidence false.
+  const identity = JSON.stringify(first);
+  if (!group.every(run => Array.isArray(run?.resolved) &&
+      JSON.stringify(run.resolved) === identity)) return null;
+  return first.map(face => ({ ...face }));
+}
+
+function mergedSingleLineBox(group, textBoxes, ownerBounds, coordinateSpace,
+                             textLength) {
+  const boxes = group.map(run => lineBoxesFor(
+    Number(run.layout_index), textBoxes, ownerBounds, coordinateSpace));
+  if (boxes.some(value => !value || value.length !== 1)) return null;
+  const lines = boxes.map(value => value[0]);
+  const first = lines[0];
+  if (lines.some(line => Math.abs(line.top - first.top) > 0.25 ||
+      Math.abs(line.height - first.height) > 0.25)) return null;
+  for (let index = 1; index < lines.length; ++index) {
+    if (lines[index].left + 0.25 < lines[index - 1].left)
+      return null;
+  }
+  const left = Math.min(...lines.map(line => line.left));
+  const right = Math.max(...lines.map(line => line.left + line.width));
+  const top = Math.min(...lines.map(line => line.top));
+  const bottom = Math.max(...lines.map(line => line.top + line.height));
+  return [{ left, top, width: right - left, height: bottom - top,
+    start: 0, length: textLength }];
+}
+
+export function buildMaterializedTextBindings(snapshot, platformFontReport,
+                                              coordinateSpace = null) {
   const document = snapshot?.documents?.[0];
   const strings = snapshot?.strings ?? [];
   const nodes = document?.nodes ?? {};
@@ -164,14 +225,34 @@ export function buildMaterializedTextBindings(snapshot, platformFontReport) {
     if (Number.isSafeInteger(owner)) ownerCounts.set(owner, (ownerCounts.get(owner) ?? 0) + 1);
   }
 
-  const bindings = [];
+  const runsByOwner = new Map();
   for (const run of platformFontReport.runs) {
+    const owner = Number(run?.owner_node_index);
+    if (!Number.isSafeInteger(owner)) continue;
+    if (!runsByOwner.has(owner)) runsByOwner.set(owner, []);
+    runsByOwner.get(owner).push(run);
+  }
+  const candidateRuns = [];
+  for (const group of runsByOwner.values()) {
+    if (mergeableOwnerRunGroup(group, nodes, elementChildren)) {
+      candidateRuns.push({ ...group[0], __materialized_merged_runs: group });
+    } else {
+      candidateRuns.push(...group);
+    }
+  }
+
+  const bindings = [];
+  for (const run of candidateRuns) {
     if (bindings.length >= MAX_BINDINGS) break;
     const owner = Number(run?.owner_node_index);
     const layoutIndex = Number(run?.layout_index);
-    if (!Number.isSafeInteger(owner) || !Number.isSafeInteger(layoutIndex) ||
-        ownerCounts.get(owner) !== 1) continue;
-    const resolved = Array.isArray(run?.resolved) ? run.resolved : [];
+    if (!Number.isSafeInteger(owner) || !Number.isSafeInteger(layoutIndex))
+      continue;
+    const mergedRuns = Array.isArray(run?.__materialized_merged_runs)
+      ? run.__materialized_merged_runs : null;
+    const resolved = mergedRuns ? mergeResolvedFaces(mergedRuns)
+      : Array.isArray(run?.resolved) ? run.resolved : [];
+    if (!resolved) continue;
     // Chromium may report a fallback face for one glyph (for example a star
     // or disclosure marker) even though the requested face shapes the run.
     // Captured line boxes describe the breaks; native shaping still owns the
@@ -183,25 +264,51 @@ export function buildMaterializedTextBindings(snapshot, platformFontReport) {
     const resolvedFace = String(
       dominant?.post_script_name || dominant?.family_name || "");
     if (!resolvedFace) continue;
+    const resolvedFaces = resolved
+      .filter(face => Number(face?.glyph_count ?? 0) > 0)
+      .map(face => ({
+        family_name: String(face?.family_name || ""),
+        post_script_name: String(face?.post_script_name || ""),
+        is_custom_font: face?.is_custom_font === true,
+        glyph_count: Number(face.glyph_count),
+      }))
+      .filter(face => face.family_name || face.post_script_name);
+    if (resolvedFaces.length === 0 || resolvedFaces.length > 64) continue;
     const ownerLayoutIndex = layoutIndexByNode.get(owner);
-    const ownerBounds = finiteRect(layout.bounds?.[ownerLayoutIndex]);
-    const text = stringAt(strings, layout.text?.[layoutIndex]);
+    const capturedOwnerBounds = finiteRect(layout.bounds?.[ownerLayoutIndex]);
+    const ownerBounds = capturedOwnerBounds
+      ? materializedRectToAuthored(capturedOwnerBounds, coordinateSpace) : null;
+    const text = mergedRuns
+      ? mergedRuns.sort((a, b) => Number(a.node_index) - Number(b.node_index))
+          .map(item => stringAt(strings, layout.text?.[Number(item.layout_index)]))
+          .join('')
+      : stringAt(strings, layout.text?.[layoutIndex]);
     const identity = structuralPath(nodes, strings, elementChildren, owner);
     if (!ownerBounds || !text || !identity) continue;
-    const boxes = lineBoxesFor(layoutIndex, textBoxes, ownerBounds);
+    const boxes = mergedRuns
+      ? mergedSingleLineBox(mergedRuns, textBoxes, ownerBounds,
+          coordinateSpace, text.length)
+      : lineBoxesFor(layoutIndex, textBoxes, ownerBounds, coordinateSpace);
     if (!boxes) continue;
     const requested = run?.requested ?? {};
     const fontSize = parseCssPixels(requested.font_size);
     const fontWeight = parseCssWeight(requested.font_weight);
     const fontSlant = parseCssSlant(requested.font_style);
+    const letterSpacing = parseCssLetterSpacing(requested.letter_spacing);
     const requestedFamily = String(requested.font_family ?? "").trim();
     if (!requestedFamily || fontSize === null || fontWeight === null ||
-        fontSlant === null) continue;
+        fontSlant === null || letterSpacing === null) continue;
     // A direct text node needs a separate native renderer target only when
     // its owner also contains element children. Pure `<span>text</span>` and
     // `<button>text</button>` already paint through the owner's Label target.
     const anonymousTextIndex = (elementChildren.get(owner) ?? []).length > 0
       ? directTextIndex(nodes, Number(run?.node_index), owner) : null;
+    // Several direct text nodes may share a mixed-content owner (for example
+    // `<span><svg/>SCULPT ▾</span>`). Each has its own synthetic native Label,
+    // so each captured run is independently representable. A multi-run pure
+    // Label still cannot express per-run clusters and must fail closed.
+    if (ownerCounts.get(owner) !== 1 && anonymousTextIndex === null &&
+        !mergedRuns) continue;
     bindings.push({
       index: bindings.length,
       anchor: identity.anchor,
@@ -213,11 +320,13 @@ export function buildMaterializedTextBindings(snapshot, platformFontReport) {
       basis: {
         width: ownerBounds[2],
         resolved_face: resolvedFace,
+        resolved_faces: resolvedFaces,
         requested: {
           font_family: requestedFamily,
           font_size: fontSize,
           font_weight: fontWeight,
           font_slant: fontSlant,
+          letter_spacing: letterSpacing,
         },
       },
       boxes,

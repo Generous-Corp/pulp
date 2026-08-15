@@ -306,7 +306,7 @@ TEST_CASE("View::anchor_id() defaults to empty for non-imported views",
     REQUIRE(v.anchor_id().empty());
 }
 
-TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured paint",
+TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
           "[view][bridge][canvas-binding]") {
     class RepaintHost final : public WindowHost {
     public:
@@ -331,7 +331,8 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
         setOpacity('captured', 0);
         setAnchor('captured', 'chromium:backend-node:42');
         createCol('behavior-root', 'root');
-        createCanvas('behavior', 'behavior-root');
+        createCol('behavior-wrapper', 'behavior-root');
+        createCanvas('behavior', 'behavior-wrapper');
         setAnchor('behavior', 'behavior-canvas');
         canvasFillRect('behavior', 1, 2, 3, 4, '#fff');
     )js");
@@ -343,37 +344,53 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
     REQUIRE(captured->command_count() == 0);
     captured->set_bounds({20, 30, 100, 80});
     REQUIRE(captured->opacity() == 0.0f);
-    // The accepted Chromium pixels are painted by the sibling ImageView. The
-    // transparent canvas above them must still own native hit testing or the
-    // materialized app would look exact while being inert.
+    // Before native authority is applied, this diagnostic target is still in
+    // the hit-test tree. Binding must retire it in favor of the authored-space
+    // source canvas that owns both its client metrics and gesture handlers.
     REQUIRE(root.hit_test({50, 60}) == captured);
 
     int edges = 0;
-    behavior->on_dom_pointer_event = [&edges](const MouseEvent&, bool) {
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
+          'behavior-wrapper')
+    )js").getWithDefault<bool>(false));
+    REQUIRE_FALSE(captured->on_dom_pointer_event);
+
+    // React commits behavior after the DesignIR sibling can already be
+    // attached. A later idempotent rebind must leave input on the live source,
+    // never copy it to the hidden final-space target.
+    auto* behavior_wrapper = bridge.widget("behavior-wrapper");
+    REQUIRE(behavior_wrapper != nullptr);
+    behavior_wrapper->on_dom_pointer_event = [&edges](const MouseEvent&, bool) {
         ++edges;
     };
     REQUIRE(engine.evaluate(R"js(
-        bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0)
+        bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
+          'behavior-wrapper')
     )js").getWithDefault<bool>(false));
 
     bridge.load_script("canvasStrokeRect('behavior', 4, 5, 6, 7, '#0ff', 1);");
     REQUIRE(behavior->command_count() == 2);
     REQUIRE(captured->command_count() == 2);
     CHECK(&captured->commands() == &behavior->commands());
+    CHECK(behavior->opacity() == 1.0f);
+    CHECK(captured->opacity() == 0.0f);
+    CHECK(captured->pointer_events() == View::PointerEvents::none);
     const int before_redraw = host.count;
     bridge.load_script("canvasClear('behavior'); canvasFillRect('behavior', 8, 9, 10, 11, '#f0f');");
     REQUIRE(host.count > before_redraw);
     REQUIRE(behavior->command_count() == 1);
     REQUIRE(captured->command_count() == 1);
 
-    REQUIRE(captured->on_dom_pointer_event);
+    REQUIRE_FALSE(captured->on_dom_pointer_event);
+    REQUIRE(behavior_wrapper->on_dom_pointer_event);
     MouseEvent down;
     down.phase = MousePhase::press;
     down.button = MouseButton::left;
     down.is_down = true;
     down.position = {10, 12};
     down.window_position = down.position;
-    captured->on_dom_pointer_event(down, true);
+    behavior_wrapper->on_dom_pointer_event(down, true);
     REQUIRE(edges == 1);
 
     REQUIRE_FALSE(engine.evaluate(
@@ -385,6 +402,29 @@ TEST_CASE("WidgetBridge binds live canvas behavior without replacing captured pa
     REQUIRE_FALSE(engine.evaluate(
         "bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0.5)")
         .getWithDefault<bool>(true));
+
+    bridge.load_script(R"js(
+        createImage('paint-authority-a', 'root');
+        setAnchor('paint-authority-a', 'browser:paint-authority');
+    )js");
+    auto* paint = bridge.widget("paint-authority-a");
+    REQUIRE(paint != nullptr);
+    REQUIRE(paint->visible());
+    REQUIRE(engine.evaluate(
+        "setVisibleAtAnchor('browser:paint-authority', false)")
+        .getWithDefault<bool>(false));
+    REQUIRE_FALSE(paint->visible());
+    REQUIRE_FALSE(engine.evaluate(
+        "setVisibleAtAnchor('missing-paint-authority', false)")
+        .getWithDefault<bool>(true));
+    bridge.load_script(R"js(
+        createImage('paint-authority-b', 'root');
+        setAnchor('paint-authority-b', 'browser:paint-authority');
+    )js");
+    REQUIRE_FALSE(engine.evaluate(
+        "setVisibleAtAnchor('browser:paint-authority', true)")
+        .getWithDefault<bool>(true));
+    REQUIRE_FALSE(paint->visible());
 }
 
 TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
@@ -605,6 +645,14 @@ TEST_CASE("WidgetBridge range slider setOrientation and setAccentColor",
     REQUIRE_THAT(c.r, WithinAbs(1.0, 0.01));
     REQUIRE_THAT(c.g, WithinAbs(0.533, 0.02));
     REQUIRE_THAT(c.b, WithinAbs(0.267, 0.02));
+
+    // Imported React/CSS commonly authors HSL rather than hex. The control
+    // API shares the CSS Color parser used by the other paint setters.
+    bridge.load_script("setAccentColor('volume', 'hsl(200,80%,60%)')");
+    c = range->accent_color();
+    REQUIRE_THAT(c.r, WithinAbs(0.28, 0.02));
+    REQUIRE_THAT(c.g, WithinAbs(0.706, 0.02));
+    REQUIRE_THAT(c.b, WithinAbs(0.92, 0.02));
 
     // Empty hex clears the override.
     bridge.load_script("setAccentColor('volume', '')");
@@ -917,6 +965,42 @@ TEST_CASE("WidgetBridge stale click callbacks are inert after bridge destruction
     REQUIRE_NOTHROW(global_click_handler("button", 0x10));
 }
 
+TEST_CASE("WidgetBridge stale DOM pointer callbacks are inert after bridge and engine destruction",
+          "[view][bridge][events][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    std::function<void(const MouseEvent&, bool)> pointer_handler;
+
+    {
+        // Keep the host tree alive while destroying the bridge and its script
+        // engine. This models a native host retaining an input callback during
+        // editor teardown: the callback captures a raw ScriptEngine pointer,
+        // so the shared bridge-lifetime token must reject it before any engine
+        // access occurs.
+        ScriptEngine engine;
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script(R"(
+            createCol('surface', 'root');
+            on('surface', 'pointerdown', function() {});
+            registerPointer('surface');
+        )");
+
+        auto* surface = bridge.widget("surface");
+        REQUIRE(surface != nullptr);
+        REQUIRE(surface->on_dom_pointer_event);
+        pointer_handler = surface->on_dom_pointer_event;
+    }
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {42.0f, 64.0f};
+    down.window_position = down.position;
+    REQUIRE_NOTHROW(pointer_handler(down, true));
+}
+
 // JSX `onClick={fn}` flows through @pulp/react's prop-applier into a bare
 // `on(id, 'click', fn)` bridge call (no addEventListener, no registerClick).
 // That path must wire View::on_click on the native side so real NSEvent / Win32
@@ -1141,6 +1225,62 @@ TEST_CASE("WidgetBridge getLayoutRect accounts for scroll offsets", "[view][brid
 
     auto after = engine.evaluate("getLayoutRect('anchor').y").getWithDefault<double>(-1.0);
     REQUIRE_THAT(before - after, WithinAbs(60.0, 0.5));
+}
+
+TEST_CASE("WidgetBridge keeps bounding client and local box coordinate spaces distinct",
+          "[view][bridge][layout][transform]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 1320, 860});
+    constexpr float scale = 800.0f / 860.0f;
+    constexpr float translate_x = 26.0465f;
+    root.set_transform_matrix(scale, 0.0f, 0.0f, scale, translate_x, 0.0f);
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto bcr_x = engine.evaluate("getLayoutRect('').x").getWithDefault<double>(-1.0);
+    const auto bcr_w = engine.evaluate("getLayoutRect('').width").getWithDefault<double>(-1.0);
+    const auto bcr_h = engine.evaluate("getLayoutRect('').height").getWithDefault<double>(-1.0);
+    const auto offset_w = engine.evaluate("getLayoutBoxMetrics('').offsetWidth").getWithDefault<double>(-1.0);
+    const auto local_x = engine.evaluate("getLayoutBoxMetrics('').localX").getWithDefault<double>(-1.0);
+    const auto local_y = engine.evaluate("getLayoutBoxMetrics('').localY").getWithDefault<double>(-1.0);
+    const auto client_w = engine.evaluate("getLayoutBoxMetrics('').clientWidth").getWithDefault<double>(-1.0);
+    const auto client_h = engine.evaluate("getLayoutBoxMetrics('').clientHeight").getWithDefault<double>(-1.0);
+
+    REQUIRE_THAT(bcr_x, WithinAbs(translate_x, 0.001));
+    REQUIRE_THAT(bcr_w, WithinAbs(1320.0 * scale, 0.001));
+    REQUIRE_THAT(bcr_h, WithinAbs(800.0, 0.001));
+    REQUIRE_THAT(offset_w, WithinAbs(1320.0, 0.001));
+    REQUIRE_THAT(local_x, WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(local_y, WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(client_w, WithinAbs(1320.0, 0.001));
+    REQUIRE_THAT(client_h, WithinAbs(860.0, 0.001));
+
+    root.set_border_width(2.0f);
+    root.flex().margin_left = 6.0f;
+    root.flex().margin_top = 3.0f;
+    root.flex().margin_right = 4.0f;
+    root.flex().margin_bottom = 5.0f;
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').borderLeftWidth").getWithDefault<double>(-1.0),
+                 WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').borderTopWidth").getWithDefault<double>(-1.0),
+                 WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').borderRightWidth").getWithDefault<double>(-1.0),
+                 WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').borderBottomWidth").getWithDefault<double>(-1.0),
+                 WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').clientWidth").getWithDefault<double>(-1.0),
+                 WithinAbs(1316.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').clientHeight").getWithDefault<double>(-1.0),
+                 WithinAbs(856.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').marginLeft").getWithDefault<double>(-1.0),
+                 WithinAbs(6.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').marginTop").getWithDefault<double>(-1.0),
+                 WithinAbs(3.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').marginRight").getWithDefault<double>(-1.0),
+                 WithinAbs(4.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("getLayoutBoxMetrics('').marginBottom").getWithDefault<double>(-1.0),
+                 WithinAbs(5.0, 0.001));
 }
 
 TEST_CASE("WidgetBridge set/get value from JS", "[view][bridge]") {
@@ -6322,4 +6462,77 @@ TEST_CASE("setCapturedLineBoxes rejects UTF-16 surrogate-pair splits",
     auto* label = dynamic_cast<Label*>(bridge.widget("emoji"));
     REQUIRE(label != nullptr);
     CHECK(label->cached_line_boxes().empty());
+}
+
+TEST_CASE("clearCapturedLineBoxes returns responsive text to native shaping",
+          "[widget_bridge][typography][responsive]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"js(
+        createLabel('responsive-copy', 'Readable copy', '');
+        setCapturedLineBoxes('responsive-copy', [
+          {left:0, top:0, width:70, height:13, start:0, length:13}
+        ], 100, 'CapturedFace', false);
+    )js");
+    auto* label = dynamic_cast<Label*>(bridge.widget("responsive-copy"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->cached_line_boxes().size() == 1);
+
+    bridge.load_script(R"js(clearCapturedLineBoxes('responsive-copy');)js");
+    CHECK(label->cached_line_boxes().empty());
+}
+
+TEST_CASE("web-compat overflow auto materializes a real ScrollView",
+          "[widget_bridge][web-compat][scroll][responsive]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        var panel = document.createElement('div');
+        panel.id = 'scroll-panel';
+        panel.style.overflowY = 'auto';
+        panel.style.width = '120px';
+        panel.style.height = '80px';
+        panel.style.background = 'rgba(14,18,25,0.98)';
+        panel.style.border = '1px solid rgba(255,255,255,0.1)';
+        panel.style.borderWidth = '1px';
+        panel.style.borderColor = 'rgba(255,255,255,0.1)';
+        panel.style.borderStyle = 'solid';
+        panel.style.borderRadius = '8px';
+        document.body.appendChild(panel);
+        var scrollPanelNativeId = panel._id;
+    )js");
+    const auto native_id = engine.evaluate("scrollPanelNativeId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(native_id.empty());
+    auto* scroll = dynamic_cast<ScrollView*>(bridge.widget(native_id));
+    REQUIRE(scroll != nullptr);
+    REQUIRE(scroll->has_background_color());
+    REQUIRE(scroll->has_border());
+    REQUIRE(scroll->border_width() == Catch::Approx(1.0f));
+
+    // Exercise the shared primitive independently of CSS longhand precedence:
+    // a ScrollView must paint its own box before applying child scroll offset.
+    ScrollView painted_scroll;
+    painted_scroll.set_bounds({0.0f, 0.0f, 120.0f, 80.0f});
+    painted_scroll.set_background_color(
+        pulp::canvas::Color::rgba8(14, 18, 25, 250));
+    painted_scroll.set_border(
+        pulp::canvas::Color::rgba8(255, 255, 255, 26), 1.0f, 8.0f);
+    pulp::canvas::RecordingCanvas painted;
+    painted_scroll.paint_all(painted);
+    CHECK(painted.count(
+              pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 1);
+    const auto border_draws = painted.count(
+        pulp::canvas::DrawCommand::Type::stroke_rounded_rect)
+        + painted.count(
+            pulp::canvas::DrawCommand::Type::fill_current_path);
+    CHECK(border_draws == 1);
+
+    bridge.load_script("__domAppend('', 'hinted-scroll', 'div', 'scroll');");
+    CHECK(dynamic_cast<ScrollView*>(bridge.widget("hinted-scroll")) != nullptr);
 }

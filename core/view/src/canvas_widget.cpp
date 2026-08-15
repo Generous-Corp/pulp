@@ -279,6 +279,27 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         return;
     }
 
+    // Canvas::fill_text() consumes a baseline Y coordinate, whereas the
+    // browser Canvas2D API lets callers choose whether Y denotes the top,
+    // middle, or bottom of the font box. Keep this replay-only state beside
+    // the recorded save stack and translate to a real baseline immediately
+    // before painting. The bridge has recorded this state for years; dropping
+    // it here displaced imported canvas labels by roughly one ascent.
+    auto text_baseline = canvas::TextBaseline::top;
+    std::vector<canvas::TextBaseline> text_baseline_stack;
+    const auto baseline_y = [&](const std::string& text, float y) {
+        const auto metrics = canvas.measure_text_full(text);
+        switch (text_baseline) {
+        case canvas::TextBaseline::middle:
+            return y + (metrics.ascent - metrics.descent) * 0.5f;
+        case canvas::TextBaseline::bottom:
+            return y - metrics.descent;
+        case canvas::TextBaseline::top:
+        default:
+            return y + metrics.ascent;
+        }
+    };
+
     for (const auto& cmd : commands->commands) {
         switch (cmd.type) {
         // Shapes
@@ -354,9 +375,10 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // so backends without a custom override behave bit-for-bit
             // identically to the legacy 3-arg path.
             if (cmd.w > 0.0f) {
-                canvas.fill_text_with_max_width(cmd.text, cmd.x, cmd.y, cmd.w);
+                canvas.fill_text_with_max_width(cmd.text, cmd.x,
+                                                baseline_y(cmd.text, cmd.y), cmd.w);
             } else {
-                canvas.fill_text(cmd.text, cmd.x, cmd.y);
+                canvas.fill_text(cmd.text, cmd.x, baseline_y(cmd.text, cmd.y));
             }
             break;
         case CanvasDrawCmd::Type::stroke_text:
@@ -373,7 +395,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // path; line width comes from the prior `set_line_width`
             // cmd. We do NOT re-set them here (mirrors fill_text's
             // commentary above).
-            canvas.stroke_text(cmd.text, cmd.x, cmd.y, cmd.w);
+            canvas.stroke_text(cmd.text, cmd.x, baseline_y(cmd.text, cmd.y), cmd.w);
             break;
         case CanvasDrawCmd::Type::set_font:
             canvas.set_font(cmd.text, cmd.extra);
@@ -436,9 +458,14 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // State
         case CanvasDrawCmd::Type::save:
             canvas.save();
+            text_baseline_stack.push_back(text_baseline);
             break;
         case CanvasDrawCmd::Type::restore:
             canvas.restore();
+            if (!text_baseline_stack.empty()) {
+                text_baseline = text_baseline_stack.back();
+                text_baseline_stack.pop_back();
+            }
             break;
 
         // Transform
@@ -522,7 +549,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             else canvas.set_text_align(canvas::TextAlign::left);
             break;
         case CanvasDrawCmd::Type::set_text_baseline:
-            // Recorded by the bridge but not applied during replay yet.
+            if (cmd.int_val == 1) text_baseline = canvas::TextBaseline::middle;
+            else if (cmd.int_val == 2) text_baseline = canvas::TextBaseline::bottom;
+            else text_baseline = canvas::TextBaseline::top;
             break;
 
         // Line cap/join

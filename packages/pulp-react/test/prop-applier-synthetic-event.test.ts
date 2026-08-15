@@ -41,8 +41,72 @@ describe('@pulp/react prop-applier — synthetic event factory', () => {
         bridge.install();
     });
     afterEach(() => {
-        delete (globalThis as Record<string, unknown>).__pulpReactEventCallbacks__;
+        const host = globalThis as Record<string, unknown>;
+        delete host.__pulpReactEventCallbacks__;
+        delete host.__pulpReactDomRegistry__;
         bridge.uninstall();
+    });
+
+    it('exposes layout dimensions and pointer capture on currentTarget', () => {
+        const host = globalThis as Record<string, unknown>;
+        const getLayoutRect = vi.fn(() => ({
+            x: 10, y: 20, left: 10, top: 20,
+            width: 240, height: 135, right: 250, bottom: 155,
+        }));
+        const getLayoutBoxMetrics = vi.fn(() => ({
+            offsetWidth: 324, offsetHeight: 184,
+            clientWidth: 320, clientHeight: 180,
+        }));
+        const capture = vi.fn();
+        const release = vi.fn();
+        host.getLayoutRect = getLayoutRect;
+        host.getLayoutBoxMetrics = getLayoutBoxMetrics;
+        host.nativeSetPointerCapture = capture;
+        host.nativeReleasePointerCapture = release;
+        try {
+            const evt = makeSyntheticEvent('canvas1', 'pointerdown', [{ pointerId: 7 }]);
+            expect(evt.currentTarget.clientWidth).toBe(320);
+            expect(evt.currentTarget.clientHeight).toBe(180);
+            expect(evt.currentTarget.offsetWidth).toBe(324);
+            expect(evt.currentTarget.offsetHeight).toBe(184);
+            expect(evt.currentTarget.getBoundingClientRect().width).toBe(240);
+            evt.currentTarget.setPointerCapture(7);
+            evt.currentTarget.releasePointerCapture(7);
+            expect(capture).toHaveBeenCalledWith('canvas1', 7);
+            expect(release).toHaveBeenCalledWith('canvas1', 7);
+        } finally {
+            delete host.getLayoutRect;
+            delete host.getLayoutBoxMetrics;
+            delete host.nativeSetPointerCapture;
+            delete host.nativeReleasePointerCapture;
+        }
+    });
+
+    it('uses the materialized public element as the event target', () => {
+        const host = globalThis as Record<string, unknown>;
+        const publicElement = {
+            id: 'canvas-public',
+            _id: 'canvas-public',
+            style: {},
+            setAttribute: vi.fn(),
+            getAttribute: vi.fn(() => null),
+            getBoundingClientRect: vi.fn(() => ({
+                x: 4, y: 8, left: 4, top: 8,
+                width: 640, height: 360, right: 644, bottom: 368,
+            })),
+            get clientWidth() { return 640; },
+            get clientHeight() { return 360; },
+            setPointerCapture: vi.fn(),
+            releasePointerCapture: vi.fn(),
+        };
+        host.__pulpReactDomRegistry__ = new Map([['canvas-public', publicElement]]);
+
+        const evt = makeSyntheticEvent('canvas-public', 'pointerdown', [{ pointerId: 9 }]);
+        expect(evt.currentTarget).toBe(publicElement);
+        expect(evt.target).toBe(publicElement);
+        expect(evt.currentTarget.clientWidth).toBe(640);
+        evt.currentTarget.setPointerCapture(9);
+        expect(publicElement.setPointerCapture).toHaveBeenCalledWith(9);
     });
 
     it('shares current handlers with materialized semantic activation', () => {

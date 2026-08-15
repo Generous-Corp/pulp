@@ -74,12 +74,50 @@ export function runtimeFamilyForText(fontBindings, textBinding) {
   const wantedStyle = requested.font_slant === 0 ? 'normal'
     : requested.font_slant === 1 ? 'italic' : 'oblique';
   const codepoints = [...textBinding.text].map((character) => character.codePointAt(0));
-  const face = fontBindings.find((candidate) =>
+  const candidates = fontBindings.filter((candidate) =>
     candidate.family.toLowerCase() === wantedFamily &&
     (candidate.style.toLowerCase() === wantedStyle ||
      (wantedStyle === 'oblique' && candidate.style.toLowerCase() === 'italic')) &&
-    weightCovers(candidate.weight, requested.font_weight) &&
-    (candidate.unicode_ranges.length === 0 || codepoints.every((point) =>
-      candidate.unicode_ranges.some(([lo, hi]) => point >= lo && point <= hi))));
-  return face?.runtime_family || '';
+    weightCovers(candidate.weight, requested.font_weight));
+  const covers = (candidate, point) => candidate.unicode_ranges.length === 0 ||
+    candidate.unicode_ranges.some(([lo, hi]) => point >= lo && point <= hi);
+
+  // CSS unicode-range selects a different face asset per character, not one
+  // face for the whole text node. Imported Google-font families commonly put
+  // Latin and symbols (arrows, disclosure triangles, infinity, command-key)
+  // in separate WOFF2 subsets. Requiring one subset to cover the complete
+  // string silently dropped the captured family for mixed labels such as
+  // "PRESETS ▾" and left native Skia to choose a host-dependent fallback.
+  //
+  // Preserve CSS's ordered fallback semantics by emitting the smallest stable
+  // family stack whose captured subsets collectively cover the string. Pulp's
+  // Label/TextShaper paths already accept CSS comma lists and SkParagraph then
+  // selects the first face containing each glyph. Every alias remains private
+  // and content-addressed, so this cannot accidentally resolve a system font.
+  const selected = [];
+  const missing = [];
+  for (const point of codepoints) {
+    if (selected.some((candidate) => covers(candidate, point))) continue;
+    const candidate = candidates.find((face) => covers(face, point));
+    if (candidate) selected.push(candidate);
+    else missing.push(point);
+  }
+  const families = selected.map((candidate) => candidate.runtime_family);
+  if (missing.length > 0) {
+    // CDP's platform-font report records the exact fallback faces Chromium
+    // actually used for this text run. Preserve those faces after the
+    // content-addressed web-font subsets instead of dropping the complete
+    // family when one disclosure/icon glyph is absent from the web font.
+    // SkParagraph will choose the first face containing each glyph, matching
+    // Chromium's per-glyph fallback semantics without a product-specific icon
+    // substitution.
+    for (const face of textBinding.basis.resolved_faces || []) {
+      if (face.is_custom_font) continue;
+      const family = face.family_name || face.post_script_name;
+      if (family && !families.includes(family)) families.push(family);
+    }
+    if (families.length === selected.length) return '';
+  }
+  return families.map((family) => `"${family
+    .replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`).join(', ');
 }

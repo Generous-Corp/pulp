@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { normalizeMaterializedMetadata } from './materialized_metadata_contract.mjs';
 
 const validId = /^[A-Za-z0-9._-]+$/;
 const validEvent = /^[A-Za-z][A-Za-z0-9:_-]*$/;
@@ -10,6 +11,8 @@ const maxSelectorLength = 4096;
 const maxActivationSteps = 32;
 const maxEventLength = 64;
 const maxEventDataBytes = 64 * 1024;
+const maxMetadataBytes = 8 * 1024 * 1024;
+const maxTotalMetadataBytes = 32 * 1024 * 1024;
 
 function boundedSelector(value) {
   return typeof value === 'string' && value.length > 0 &&
@@ -38,6 +41,7 @@ export function loadMaterializedStateAtlas(
   const atlasRoot = realpathSync(dirname(atlasPath));
   const portableRoot = runtimeBase ? realpathSync(runtimeBase) : '';
   const ids = new Set();
+  let totalMetadataBytes = 0;
   return atlas.states.map((state, index) => {
     const id = String(state?.id || '');
     const image = visualAuthority === 'reference' ? String(state?.image || '') : '';
@@ -108,6 +112,37 @@ export function loadMaterializedStateAtlas(
       };
     });
 
+    let metadata = null;
+    if (state?.materialized_document !== undefined) {
+      const metadataName = String(state.materialized_document || '');
+      const unresolvedMetadata = resolve(atlasRoot, metadataName);
+      if (metadataName === '' || !existsSync(unresolvedMetadata)) {
+        throw new Error(
+          `state atlas entry ${id} metadata does not exist: ${unresolvedMetadata}`);
+      }
+      const metadataPath = realpathSync(unresolvedMetadata);
+      const metadataRelative = relative(atlasRoot, metadataPath);
+      if (metadataRelative === '..' || metadataRelative.startsWith(`..${sep}`) ||
+          isAbsolute(metadataRelative) || !statSync(metadataPath).isFile()) {
+        throw new Error(`state atlas entry ${id} metadata escapes the atlas directory`);
+      }
+      const metadataBytes = readFileSync(metadataPath);
+      if (metadataBytes.length > maxMetadataBytes) {
+        throw new Error(`state atlas entry ${id} metadata is too large`);
+      }
+      totalMetadataBytes += metadataBytes.length;
+      if (totalMetadataBytes > maxTotalMetadataBytes) {
+        throw new Error('state atlas metadata total is too large');
+      }
+      const metadataDocument = JSON.parse(metadataBytes.toString('utf8'));
+      if (metadataDocument.schema !== 'pulp-materialized-browser-document-v1' ||
+          metadataDocument.version !== 1) {
+        throw new Error(`state atlas entry ${id} metadata document is invalid`);
+      }
+      metadata = normalizeMaterializedMetadata(
+        metadataDocument, `state atlas entry ${id}`);
+    }
+
     return {
       id,
       image: imagePath,
@@ -116,6 +151,7 @@ export function loadMaterializedStateAtlas(
         ancestor: match.ancestor || '',
       },
       activate: activation,
+      metadata,
     };
   });
 }

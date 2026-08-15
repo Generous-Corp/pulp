@@ -562,6 +562,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacosArchiveFloor.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPkgConfigImports.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkProvenance.cmake"
