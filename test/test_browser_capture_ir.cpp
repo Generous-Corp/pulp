@@ -1220,6 +1220,68 @@ TEST_CASE("an asymmetric pointer uses its transformed intrinsic centre",
     CHECK(pointer.at("browser_sprite_indicator_px") == "100,20,20,60");
 }
 
+TEST_CASE("a transformed thin pointer keeps its own short-axis width when its pivot is offset",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A border/containing-block disagreement can put the recovered pivot a few
+    // pixels away from the dial centre. The old perpendicular support
+    // projection then leaked the 46px long axis into thickness. Rotation and
+    // non-uniform scaling must not change the contract: width is the shorter
+    // transformed intrinsic axis, not the long axis projected at the offset.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1","version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"offset-thin",
+         "bounds":{"left":0,"top":0,"width":130,"height":130},
+         "paint_bounds":{"left":0,"top":0,"width":130,"height":130},
+         "indicator_bounds":{"left":29,"top":41,"width":42,"height":30,
+           "intrinsic":{"width":6,"height":46},
+           "transform":[0.529919,-0.848048,0.848048,0.529919,29.248,41.698]},
+         "indicator_color":"rgb(0,0,0)",
+         "data_pulp":{"param":"offset-thin","value":"0.76"}},
+        {"kind":"knob","binding_status":"bound","name":"horizontal-scaled",
+         "bounds":{"left":0,"top":0,"width":130,"height":130},
+         "paint_bounds":{"left":0,"top":0,"width":130,"height":130},
+         "indicator_bounds":{"left":18,"top":19,"width":51,"height":31,
+           "intrinsic":{"width":46,"height":4},
+           "transform":[1.082532,0.625,-0.25,0.433013,20,20]},
+         "indicator_color":"rgb(0,0,0)",
+         "data_pulp":{"param":"horizontal-scaled","value":"0.25"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1","version":1,
+      "colors":{"css/accent":"#000000"},"dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},"source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+    std::map<std::string, const pulp::view::IRNode*> found;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end()) found[binding->second] = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found.count("offset-thin") == 1);
+    REQUIRE(found.count("horizontal-scaled") == 1);
+    CHECK(std::stof(found.at("offset-thin")->attributes.at("knob_ind_w")) ==
+          Catch::Approx(6.0f / 65.0f).margin(0.0001f));
+    // The 4px local short axis is scaled by 0.5 while the horizontal long axis
+    // is scaled by 1.25. Its authored screen thickness is therefore 2px.
+    CHECK(std::stof(found.at("horizontal-scaled")->attributes.at("knob_ind_w")) ==
+          Catch::Approx(2.0f / 65.0f).margin(0.0001f));
+}
+
 TEST_CASE("a rotated pointer in a scaled viewBox keeps its user units straight",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // The same needle again, this time authored in a 24-unit viewBox painted at

@@ -358,7 +358,20 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     DeclaredPointer out;
     out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
     out.r_out = static_cast<float>((distance + along) / half);
-    out.width = static_cast<float>((2.0 * across) / half);
+    // Thickness belongs to the pointer's own short axis. Projecting the whole
+    // rectangle onto the radial perpendicular leaks some of its long axis into
+    // the result whenever the authored pivot and the recovered dial centre are
+    // even slightly misaligned (borders and containing blocks commonly differ
+    // by a few pixels). That turns a thin rotated needle into a wedge. The
+    // transformed intrinsic axes already carry rotation and non-uniform scale;
+    // the shorter full extent is therefore the stable authored thickness.
+    const double short_axis = std::min(x_extent, y_extent);
+    const double long_axis = std::max(x_extent, y_extent);
+    const bool oriented_thin_pointer =
+        ind.oriented && short_axis > 0.0 && long_axis > short_axis * 1.5;
+    const double thickness = oriented_thin_pointer ? 2.0 * short_axis
+                                                    : 2.0 * across;
+    out.width = static_cast<float>(thickness / half);
     out.angle_rad = static_cast<float>(std::atan2(uy, ux));
     if (!(out.r_out > out.r_in)) return std::nullopt;
     return out;
