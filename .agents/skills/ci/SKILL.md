@@ -2761,6 +2761,13 @@ Enable the ten-minute schedule only after live canaries prove an unmanaged
 negative control, exact-head handoff, native queue landing without an agent,
 one deduplicated recovery signal, and clearing that signal on a corrected head.
 
+When a GitHub Actions controller mints a repository-scoped installation token
+for `enqueuePullRequest`, request both `permission-merge-queues: write` and
+`permission-contents: write`. The dedicated queue permission alone is not the
+repository write access GitHub requires for queue enrollment; downscoping
+contents to read fails closed with `Resource not accessible by integration`
+even when the App installation itself has both permissions.
+
 `.github/workflows/shipyard-recovery-worker-canary.yml` is the manual, read-only
 precondition for recovery workers. Its one job requires the unique
 `shipyard-recovery-canary-m5-20260814` label in addition to the disposable VM

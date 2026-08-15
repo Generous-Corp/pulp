@@ -46,6 +46,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("secrets.SHIPYARD_APP_ID", self.text)
         self.assertIn("secrets.SHIPYARD_APP_PRIVATE_KEY", self.text)
         self.assertIn("permission-administration: read", self.text)
+        self.assertIn("permission-contents: write", self.text)
         self.assertIn("permission-merge-queues: write", self.text)
         self.assertIn("steps.shipyard-app-token.outputs.token", self.text)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.text)
@@ -148,7 +149,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
 
     def test_stale_merge_group_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
         self.assertIn("shipyard_merge_queue_run_cleanup.py", self.text)
-        self.assertIn("actions/runs?event=merge_group&per_page=100", self.text)
+        self.assertIn("actions/runs?event=merge_group&status=${status}&per_page=100", self.text)
         self.assertIn("--limit 20", self.text)
         self.assertIn("merge-group-cleanup-plan.json", self.text)
         self.assertIn(".candidates[]", self.text)
@@ -158,6 +159,33 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("actions/runs/${run_id}/cancel", self.text)
         self.assertIn("inputs.apply && steps.merge_group_cleanup_plan.outcome", self.text)
         self.assertIn("steps.merge_group_cleanup_apply.outcome", self.text)
+
+    def test_superseded_pull_request_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
+        self.assertIn("shipyard_pull_request_run_cleanup.py", self.text)
+        self.assertIn("actions/runs?event=pull_request&status=${status}&per_page=100", self.text)
+        self.assertIn("for status in in_progress pending queued requested waiting", self.text)
+        self.assertIn("pulls?state=open&per_page=100", self.text)
+        self.assertIn("--limit 20", self.text)
+        self.assertIn("pull-request-cleanup-plan.json", self.text)
+        self.assertIn("PR head ${head} is current again", self.text)
+        self.assertIn('.event == "pull_request"', self.text)
+        self.assertIn(".head_sha == $head", self.text)
+        self.assertIn("actions/runs/${run_id}/cancel", self.text)
+        self.assertIn("inputs.apply && steps.pull_request_cleanup_plan.outcome", self.text)
+        self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
+        self.assertNotIn('.event == "pull_request_target"', self.text)
+
+    def test_unlabeled_prs_receive_only_a_truthful_exact_head_sentinel(self) -> None:
+        self.assertIn("shipyard_provenance_label_plan.py", self.text)
+        self.assertIn("provenance-label-plan.json", self.text)
+        self.assertIn("shipyard:provenance-missing", self.text)
+        self.assertIn('.state == "open" and .head.sha == $head', self.text)
+        self.assertIn('if [ "$mutation" = add ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -eq 0 ] || continue', self.text)
+        self.assertIn('elif [ "$mutation" = remove ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -gt 1 ] || continue', self.text)
+        self.assertIn("inputs.apply && steps.provenance_label_plan.outcome", self.text)
+        self.assertIn("steps.provenance_label_apply.outcome", self.text)
 
 
 if __name__ == "__main__":

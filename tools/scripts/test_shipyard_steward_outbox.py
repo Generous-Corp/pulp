@@ -34,12 +34,18 @@ def pr(number, action, **decision):
     }
 
 
-def pull(number, title="Useful title", labels=()):
+def pull(
+    number,
+    title="Useful title",
+    labels=(),
+    created_at="2026-08-06T12:00:00Z",
+    updated_at="2026-08-13T12:00:00Z",
+):
     return {
         "number": number,
         "title": title,
-        "created_at": "2026-08-06T12:00:00Z",
-        "updated_at": "2026-08-13T12:00:00Z",
+        "created_at": created_at,
+        "updated_at": updated_at,
         "user": {"login": "agent"},
         "labels": [{"name": label} for label in labels],
         "base": {"ref": "main"},
@@ -55,7 +61,11 @@ class OutboxTests(unittest.TestCase):
                 pr(2, "unmanaged"),
                 pr(3, "required_failed", contexts=["linux", "macos"]),
             ),
-            [pull(1), pull(2, labels=["1·codex"]), pull(3)],
+            [
+                pull(1, updated_at="2026-08-14T11:00:00Z"),
+                pull(2, labels=["1·codex"]),
+                pull(3),
+            ],
             NOW,
         )
         self.assertEqual(repo, "Generous-Corp/pulp")
@@ -64,12 +74,43 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(rows[0].reason, "no explicit exact-head Shipyard handoff")
         self.assertIn("linux, macos", rows[1].reason)
 
+    def test_stale_waiting_and_queued_prs_become_visible_exceptions(self):
+        rows, errors, _ = outbox.build_outbox(
+            report(
+                pr(10, "waiting_required", contexts=["macos"]),
+                pr(11, "queued"),
+                pr(12, "waiting_required", contexts=["linux"]),
+            ),
+            [
+                pull(10, updated_at="2026-08-14T06:00:00Z"),
+                pull(11, updated_at="2026-08-14T05:59:59Z"),
+                pull(12, updated_at="2026-08-14T06:00:01Z"),
+            ],
+            NOW,
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual([row.number for row in rows], [10, 11])
+        self.assertEqual(rows[0].action, "stale_waiting_required")
+        self.assertIn("contexts: macos", rows[0].reason)
+        self.assertEqual(rows[1].action, "stale_queued")
+
     def test_report_error_overrides_normal_decision(self):
         broken = pr(4, "queued")
         broken["error"] = "mutation failed"
         rows, errors, _ = outbox.build_outbox(report(broken), [pull(4)], NOW)
         self.assertEqual(errors, [])
         self.assertEqual(rows[0].action, "mutation_error")
+
+    def test_unlabeled_pr_is_visible_as_unmanaged(self):
+        rows, errors, repo = outbox.build_outbox(
+            report(pr(13, "unmanaged")), [pull(13, labels=())], NOW
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual([row.number for row in rows], [13])
+        self.assertEqual(rows[0].labels, ())
+        body = outbox.render_markdown(rows, errors, repo, NOW)
+        self.assertIn("| none |", body)
+        self.assertIn("no explicit exact-head Shipyard handoff", body)
 
     def test_paginated_pull_shape_and_hostile_title_are_safe(self):
         rows, _, repo = outbox.build_outbox(
@@ -85,7 +126,9 @@ class OutboxTests(unittest.TestCase):
 
     def test_empty_outbox_is_closeable(self):
         rows, errors, repo = outbox.build_outbox(
-            report(pr(6, "queued")), [pull(6)], NOW
+            report(pr(6, "queued")),
+            [pull(6, updated_at="2026-08-14T11:00:00Z")],
+            NOW,
         )
         body = outbox.render_markdown(rows, errors, repo, NOW)
         self.assertEqual(rows, [])
@@ -95,7 +138,9 @@ class OutboxTests(unittest.TestCase):
         outside = pull(8, title="Old stacked work")
         outside["base"] = {"ref": "hold/generated-sequence"}
         rows, errors, repo = outbox.build_outbox(
-            report(pr(6, "queued")), [pull(6), outside], NOW
+            report(pr(6, "queued")),
+            [pull(6, updated_at="2026-08-14T11:00:00Z"), outside],
+            NOW,
         )
         self.assertEqual(errors, [])
         self.assertEqual([row.number for row in rows], [8])
@@ -106,7 +151,12 @@ class OutboxTests(unittest.TestCase):
 
     def test_new_managed_base_pr_between_snapshots_is_a_visible_census_gap(self):
         rows, errors, repo = outbox.build_outbox(
-            report(pr(6, "queued")), [pull(6), pull(9, title="Just opened")], NOW
+            report(pr(6, "queued")),
+            [
+                pull(6, updated_at="2026-08-14T11:00:00Z"),
+                pull(9, title="Just opened"),
+            ],
+            NOW,
         )
         self.assertEqual(errors, [])
         self.assertEqual([row.number for row in rows], [9])
