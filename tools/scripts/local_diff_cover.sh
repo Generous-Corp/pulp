@@ -59,25 +59,24 @@ DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-${PULP_CO
 DIFF_COVER_CTEST_NAME_EXCLUDE="${PULP_DIFF_COVER_CTEST_NAME_EXCLUDE:-${PULP_COVERAGE_CTEST_NAME_EXCLUDE}}"
 DIFF_COVER_TEST_JOBS="${PULP_DIFF_COVER_TEST_JOBS:-${PULP_COVERAGE_TEST_JOBS:-8}}"
 DIFF_COVER_PER_TEST_TIMEOUT="${PULP_DIFF_COVER_CTEST_TIMEOUT:-${PULP_COVERAGE_CTEST_TIMEOUT:-600}}"
+if ! [[ "${DIFF_COVER_TEST_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[local_diff_cover] invalid PULP_DIFF_COVER_TEST_JOBS: '${DIFF_COVER_TEST_JOBS}'" >&2
+    return 2 2>/dev/null || exit 2
+fi
+if [[ "${DIFF_COVER_TEST_JOBS}" -gt 8 ]]; then DIFF_COVER_TEST_JOBS=8; fi
 
 run_coverage_ctest() {
     local build_dir="$1"
     local test_regex="${2:-}"
-    local test_jobs="${DIFF_COVER_TEST_JOBS}"
-    if ! [[ "${test_jobs}" =~ ^[1-9][0-9]*$ ]]; then
-        echo "[local_diff_cover] invalid PULP_DIFF_COVER_TEST_JOBS: '${test_jobs}'" >&2
-        return 2
-    fi
     # Match scripts/run_coverage.sh and the primary CI lanes: enough parallelism
     # to avoid launching nearly 19k discovered Catch2 cases serially, without
     # oversubscribing memory on M1/M3 or SSH/self-hosted builders.
-    if [[ "${test_jobs}" -gt 8 ]]; then test_jobs=8; fi
     local args=(
         --test-dir "${build_dir}"
         --output-on-failure
         --label-exclude "${DIFF_COVER_CTEST_LABEL_EXCLUDE}"
         --exclude-regex "${DIFF_COVER_CTEST_NAME_EXCLUDE}"
-        --parallel "${test_jobs}"
+        --parallel "${DIFF_COVER_TEST_JOBS}"
         --timeout "${DIFF_COVER_PER_TEST_TIMEOUT}"
     )
     if [ -n "${test_regex}" ]; then
@@ -424,11 +423,11 @@ fi
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
-# Use LLVM's module-signature placeholder so all invocations of the same
-# instrumented binary merge into one profile file. The full CTest registry
-# launches thousands of one-case Catch2 processes; a per-PID pattern creates
-# enough files to hit ARG_MAX and can lose useful coverage when PIDs recycle.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
+# Use LLVM's `%Nm` merge pool, sized to the bounded CTest concurrency above.
+# Plain `%m` is a one-file pool; parallel exits corrupted that sole file on
+# Linux. A pool preserves online merging without the unbounded file count and
+# PID-reuse risk of `%p`.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${DIFF_COVER_TEST_JOBS}m.profraw"
 
 echo "=== Running tests ==="
 run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" || \

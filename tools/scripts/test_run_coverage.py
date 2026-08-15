@@ -289,11 +289,12 @@ class ObjectDiscoveryTests(unittest.TestCase):
     def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"',
             text,
-            "run_coverage.sh should use LLVM's module-signature merge "
-            "placeholder so repeated Catch2 invocations merge per binary.",
+            "run_coverage.sh should use LLVM's bounded merge pool so parallel "
+            "Catch2 invocations cannot corrupt one shared profile.",
         )
+        self.assertNotIn('pulp-%m.profraw', text)
         self.assertNotIn(
             "pulp-%p-%m.profraw",
             text,

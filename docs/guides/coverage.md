@@ -419,8 +419,10 @@ Source → Gradle `testDebugUnitTest`
   enabled when Clang is the compiler — gcov/gcc output shapes are
   incompatible with our llvm-cov pipeline.
 - **Collection**: `scripts/run_coverage.sh` runs the test suite with
-  `LLVM_PROFILE_FILE` pointing at a per-test-binary template. Each
-  test writes its own profraw shard.
+  `LLVM_PROFILE_FILE` pointing at an LLVM `%Nm` merge pool per instrumented
+  binary, sized to the bounded CTest concurrency. The pool prevents parallel
+  exits from corrupting a single `%m` profile without creating one file per
+  process.
 - **Merge**: `llvm-profdata merge -sparse` unions them into a single
   profdata.
 - **Report**: `llvm-cov show` produces the HTML locally;

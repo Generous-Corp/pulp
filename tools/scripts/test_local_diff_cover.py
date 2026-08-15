@@ -464,11 +464,12 @@ class TargetedCtestTests(unittest.TestCase):
     def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${DIFF_COVER_TEST_JOBS}m.profraw"',
             text,
-            "local_diff_cover.sh should use LLVM's module-signature merge "
-            "placeholder so thousands of one-test Catch2 runs merge per binary.",
+            "local_diff_cover.sh should use LLVM's bounded merge pool so "
+            "parallel Catch2 invocations cannot corrupt one shared profile.",
         )
+        self.assertNotIn('pulp-%m.profraw', text)
         self.assertNotIn(
             "pulp-%p-%m.profraw",
             text,

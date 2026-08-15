@@ -177,11 +177,11 @@ echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-# Use one merge-enabled profile per instrumented binary. The full suite runs
-# thousands of one-test Catch2 processes; per-PID profiles are noisy, can hit
-# shell argv limits during cleanup, and are vulnerable to PID reuse over a long
-# coverage run.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
+# Use a merge pool per instrumented binary. `%Nm` is LLVM's concurrency-safe
+# online merge form: the runtime selects and locks one of N shards. Plain `%m`
+# means N=1, which corrupts that sole shard when parallel CTest processes exit
+# together on Linux. Keep the pool equal to the capped CTest concurrency while
+# avoiding per-PID file growth and PID-reuse collisions.
 
 # Regression guard for #317: track the test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its partial coverage
@@ -203,6 +203,7 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"
 if [[ -n "${TESTS_REGEX}" ]]; then
     ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
