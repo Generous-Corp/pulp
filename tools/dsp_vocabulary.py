@@ -27,11 +27,6 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "scripts"))
-from agent_capability_registry import (
-    LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS,
-    REVIEWED_HEADERS,
-)
 
 SIGNAL = os.path.normpath(os.path.join(HERE, "..", "core", "signal",
                                        "include", "pulp", "signal"))
@@ -545,6 +540,14 @@ def scan_text(text: str) -> list[dict]:
 
 def scan_headers():
     """Regeneration input; consumers use scan(), which reads the manifest."""
+    scripts = os.path.join(HERE, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from agent_capability_registry import (
+        LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS,
+        REVIEWED_HEADERS,
+    )
+
     prefix = "pulp/signal/"
     reviewed = {entry["include"]: entry for entry in REVIEWED_HEADERS}
     exclusions = set()

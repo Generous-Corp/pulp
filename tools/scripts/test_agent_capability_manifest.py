@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1087,6 +1088,25 @@ def exercise_compatibility(canonical: dict) -> int:
         check=True,
     )
     assert legacy_markdown.stdout == module.markdown(header_projection) + "\n"
+    with tempfile.TemporaryDirectory(prefix="pulp-installed-vocabulary-") as temp:
+        installed = pathlib.Path(temp)
+        manifest_file = pathlib.Path("docs/status/agent-capabilities.json")
+        installed_tool = installed / "tools/dsp_vocabulary.py"
+        installed_manifest = installed / manifest_file
+        installed_tool.parent.mkdir(parents=True)
+        installed_manifest.parent.mkdir(parents=True)
+        shutil.copy2(vocabulary_tool, installed_tool)
+        shutil.copy2(ROOT / manifest_file, installed_manifest)
+        installed_result = subprocess.run(
+            [sys.executable, str(installed_tool), "--json"],
+            cwd=installed,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert installed_result.stdout == expected_json, (
+            "installed vocabulary unexpectedly depends on repo-only modules"
+        )
     vocabulary = json.loads(legacy.stdout)
     manifest_projection = canonical["compatibility"]["signal_vocabulary"]["entries"]
     assert vocabulary == manifest_projection == header_projection
@@ -1111,7 +1131,7 @@ def exercise_compatibility(canonical: dict) -> int:
     # those bindings, while this assertion proves that its legacy-compatible
     # subset still flows through the generated projection.
     assert projected_type_bindings > 0
-    return 3
+    return 4
 
 
 def main() -> int:
