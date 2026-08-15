@@ -513,6 +513,15 @@ and sends `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebu
 to Codecov. This is a JVM-only lane for `android/app/src/main/kotlin/**`
 and does not replace emulator/device coverage.
 
+Timeline and playback portability have a separate required-on-change job in
+`.github/workflows/android.yml`. It cross-compiles the structural and
+playback fixture runners as x86_64 NDK executables, boots an x86_64 API-34
+emulator on Linux/KVM, and executes them with explicit remote exit markers.
+`tools/ci/android-fixture-lane.sh` requires timeline round-trip, journal replay,
+and audio/MIDI golden markers, then corrupts only the copied device golden to
+prove the playback oracle can turn red before restoring it. An arm64 emulator
+run is useful during local development but does not satisfy this x86_64 gate.
+
 ### BLE-MIDI central validation
 
 The reference app supports BLE-MIDI central mode on Android 12 (API 31) and
