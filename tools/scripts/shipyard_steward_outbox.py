@@ -25,6 +25,8 @@ NORMAL_ACTIONS = {
     "rerun_transient",
     "waiting_required",
 }
+STALE_PROGRESS_ACTIONS = {"queued", "waiting_required"}
+STALE_PROGRESS_HOURS = 6
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class ExceptionRow:
     reason: str
     author: str
     age_days: int
-    updated_days: int
+    updated_hours: int
     labels: tuple[str, ...]
 
 
@@ -52,6 +54,10 @@ def _parse_time(value: str) -> datetime:
 
 def _age_days(now: datetime, value: str) -> int:
     return max(0, int((now - _parse_time(value)).total_seconds() // 86_400))
+
+
+def _age_hours(now: datetime, value: str) -> int:
+    return max(0, int((now - _parse_time(value)).total_seconds() // 3_600))
 
 
 def _one_line(value: object) -> str:
@@ -126,7 +132,7 @@ def _pull_row(
         reason=reason,
         author=str(author.get("login") or "unknown"),
         age_days=_age_days(now, created),
-        updated_days=_age_days(now, updated),
+        updated_hours=_age_hours(now, updated),
         labels=labels,
     )
 
@@ -158,12 +164,26 @@ def build_outbox(
         if error:
             action = "mutation_error"
             reason = str(error)
-        if action in NORMAL_ACTIONS:
-            observed_numbers.add(int(pr["number"]))
-            continue
         number = int(pr["number"])
-        observed_numbers.add(number)
         pull = pulls.get(number, {})
+        updated = str(pull.get("updated_at") or pull.get("created_at") or now.isoformat())
+        stalled_hours = _age_hours(now, updated)
+        if action in STALE_PROGRESS_ACTIONS and stalled_hours >= STALE_PROGRESS_HOURS:
+            prior_action = action
+            action = f"stale_{prior_action}"
+            contexts = ", ".join(
+                map(str, (pr.get("decision") or {}).get("contexts") or [])
+            )
+            reason = (
+                f"{prior_action.replace('_', ' ')} for {stalled_hours}h since the "
+                "PR last changed"
+            )
+            if contexts:
+                reason += f"; contexts: {contexts}"
+        if action in NORMAL_ACTIONS:
+            observed_numbers.add(number)
+            continue
+        observed_numbers.add(number)
         rows.append(
             _pull_row(
                 number,
@@ -242,6 +262,8 @@ def render_markdown(
             next_action = (
                 "Fix from the exact head, then let Shipyard clear `needs-agent`."
                 if row.action in {"required_failed", "needs_update", "mutation_error"}
+                else "Reconcile the stalled checks or merge-queue entry from this exact head."
+                if row.action in {"stale_waiting_required", "stale_queued"}
                 else "Retarget into a managed landing chain, explicitly govern that base, or close."
                 if row.action == "outside_scope"
                 else "Leave untouched; the next tick must observe it, or the "
@@ -252,7 +274,7 @@ def render_markdown(
             lines.append(" | ".join((
                 f"| {pr_link}",
                 f"`{_one_line(row.head_sha[:12])}`",
-                f"{row.age_days}d / {row.updated_days}d",
+                f"{row.age_days}d / {row.updated_hours}h",
                 labels,
                 f"`{_one_line(row.action)}`: {_one_line(row.reason)}",
                 f"{next_action} |",
@@ -275,6 +297,8 @@ def render_markdown(
             "- Every GitHub-open PR outside the managed base is retained as `outside_scope`.",
             "- A PR created between snapshots remains visible as `census_gap` "
             "and is never mutated from stale facts.",
+            f"- `waiting_required` and `queued` become visible exceptions after "
+            f"{STALE_PROGRESS_HOURS} hours without a PR update.",
             "- `shipyard:needs-agent` is deduplicated by exact head and blocker state.",
             "- Routine checks, retry classification, queue admission, merge "
             "confirmation, and cleanup invoke no model.",
