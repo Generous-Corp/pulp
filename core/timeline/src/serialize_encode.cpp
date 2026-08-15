@@ -500,9 +500,51 @@ bool write_clip(EncodeContext& context, const Clip& clip) {
 }
 
 bool write_device_placement(EncodeContext& context, const DevicePlacement& placement) {
-    return write_envelope(context, "pulp.timeline.device_placement", 1, [&] {
-        return context.writer.append("{\"id\":") && context.writer.u64(placement.id.value, true) &&
-               context.writer.character('}');
+    const auto& configuration = placement.configuration;
+    const auto position = configuration.position == DeviceChainPosition::PreFader
+                              ? "pre_fader"
+                              : "post_fader";
+    const auto slot_kind = [&] {
+        switch (configuration.slot_kind) {
+        case DeviceSlotKind::EventToEvent:
+            return "event_to_event";
+        case DeviceSlotKind::EventToAudio:
+            return "event_to_audio";
+        case DeviceSlotKind::AudioToAudio:
+            return "audio_to_audio";
+        }
+        return "";
+    }();
+    const auto device_kind = [&] {
+        switch (configuration.device_kind) {
+        case DeviceKind::Unresolved:
+            return "unresolved";
+        case DeviceKind::BuiltIn:
+            return "built_in";
+        case DeviceKind::External:
+            return "external";
+        case DeviceKind::Generated:
+            return "generated";
+        }
+        return "";
+    }();
+    return write_envelope(context, "pulp.timeline.device_placement", 2, [&] {
+        if (!context.writer.append("{\"binding_key\":") ||
+            !context.writer.quoted(configuration.binding_key) ||
+            !context.writer.append(",\"bypassed\":") ||
+            !context.writer.append(configuration.bypassed ? "true" : "false") ||
+            !context.writer.append(",\"device_kind\":") ||
+            !context.writer.quoted(device_kind) || !context.writer.append(",\"id\":") ||
+            !context.writer.u64(placement.id.value, true) ||
+            !context.writer.append(",\"position\":") || !context.writer.quoted(position) ||
+            !context.writer.append(",\"slot_kind\":") || !context.writer.quoted(slot_kind))
+            return false;
+        if (placement.state_ref &&
+            (!context.writer.append(",\"state_ref\":") ||
+             !context.writer.quoted(placement.state_ref->to_hex())))
+            return false;
+        return context.writer.append(",\"wet_dry_bits\":") &&
+               context.writer.u64(configuration.wet_dry_bits) && context.writer.character('}');
     });
 }
 
@@ -1119,6 +1161,14 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
             if (!is_valid_utf8(track.name()))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                                 track_path + "/name");
+            for (std::size_t device_index = 0; device_index < track.device_chain().size();
+                 ++device_index)
+                if (!is_valid_utf8(
+                        track.device_chain()[device_index].configuration.binding_key))
+                    return fail<SerializedSnapshot>(
+                        PersistenceErrorCode::InvalidUtf8,
+                        track_path + "/device_chain/" + std::to_string(device_index) +
+                            "/data/binding_key");
             for (std::size_t lane_index = 0; lane_index < track.take_lanes().size(); ++lane_index)
                 if (!is_valid_utf8(track.take_lanes()[lane_index].name()))
                     return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,

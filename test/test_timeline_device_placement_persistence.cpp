@@ -114,6 +114,34 @@ TEST_CASE("Timeline track migrations preserve device-placement identity or fail 
     REQUIRE(rejected.error().code == PersistenceErrorCode::MigrationFailed);
 }
 
+TEST_CASE("Timeline device placement v1 defaults upgrade and only exact defaults downgrade") {
+    const auto registry = builtins();
+    const std::string v1 =
+        R"({"data":{"id":"5"},"type_name":"pulp.timeline.device_placement","version":1})";
+    const std::string v2 = take(registry.migrate(
+        SchemaDomain::Document, "pulp.timeline.device_placement", 1, 2, v1));
+    REQUIRE(v2 ==
+            R"({"data":{"binding_key":"","bypassed":false,"device_kind":"unresolved","id":"5","position":"pre_fader","slot_kind":"audio_to_audio","wet_dry_bits":1065353216},"type_name":"pulp.timeline.device_placement","version":2})");
+    REQUIRE(take(registry.migrate(SchemaDomain::Document,
+                                  "pulp.timeline.device_placement", 2, 1, v2)) == v1);
+
+    auto lossy_binding = replace_once(v2, "\"binding_key\":\"\"",
+                                      "\"binding_key\":\"pulp.effect.delay\"");
+    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document,
+                                   "pulp.timeline.device_placement", 2, 1,
+                                   lossy_binding));
+    auto lossy_bypass = replace_once(v2, "\"bypassed\":false", "\"bypassed\":true");
+    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document,
+                                   "pulp.timeline.device_placement", 2, 1,
+                                   lossy_bypass));
+    auto lossy_state = replace_once(v2, "\"wet_dry_bits\":1065353216",
+                                    "\"state_ref\":\"" + std::string(64, 'a') +
+                                        "\",\"wet_dry_bits\":1065353216");
+    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document,
+                                   "pulp.timeline.device_placement", 2, 1,
+                                   lossy_state));
+}
+
 TEST_CASE("Timeline Track migration preserves raw member order and whitespace") {
     struct Case {
         std::string_view v2;
@@ -214,9 +242,17 @@ TEST_CASE("Timeline device chain envelopes reject mislabeled structural versions
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
                         "pulp.timeline.track\",\"version\":1"),
            PersistenceErrorCode::InvalidSchema);
-    reject(replace_once(current, "pulp.timeline.device_placement\",\"version\":1",
-                        "pulp.timeline.device_placement\",\"version\":2"),
+    reject(replace_once(current, "pulp.timeline.device_placement\",\"version\":2",
+                        "pulp.timeline.device_placement\",\"version\":3"),
            PersistenceErrorCode::UnsupportedSchemaVersion);
+    reject(replace_once(current, "\"binding_key\":\"pulp.instrument.basic\",", ""),
+           PersistenceErrorCode::InvalidSchema);
+    reject(replace_once(current, "\"device_kind\":\"built_in\"",
+                        "\"device_kind\":\"unknown\""),
+           PersistenceErrorCode::InvalidSchema);
+    reject(replace_once(current, "\"wet_dry_bits\":1065353216",
+                        "\"wet_dry_bits\":2139095040"),
+           PersistenceErrorCode::ModelRejected);
     reject(replace_once(current, "pulp.timeline.device_placement", "pulp.timeline.unknown_device"),
            PersistenceErrorCode::InvalidSchema);
 }

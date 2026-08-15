@@ -77,12 +77,22 @@ artifact is needed. Never modify canonical project JSON text directly.
   through the per-edit insertion path: its transient path copies turn initial
   construction into allocator-heavy O(n log n) work. Ordinary edits still use
   path-copy insertion/replacement so prior snapshots share untouched subtrees.
-- A Track owns an ordered `DevicePlacement` chain. Placements contain only a
-  durable `ItemId`; chain order is semantic, and clip edits retain the exact
-  immutable chain storage. Runtime instances, graph nodes, plugin formats,
-  paths, and platform metadata do not belong in Timeline. Durable device
-  definition and configuration will be future document-owned state keyed by
-  placement identity.
+- A Track owns an ordered `DevicePlacement` chain split into pre-fader and
+  post-fader stages. Each placement carries a format-neutral `DeviceKind` and
+  binding key, a typed event-to-event/event-to-audio/audio-to-audio slot,
+  bypass, canonical finite wet/dry bits, and an optional content-addressed
+  state reference. Pre-fader placements must precede post-fader placements;
+  post-fader slots are audio-to-audio, and adjacent signal domains must match.
+  Runtime instances, graph nodes, plugin formats, paths, inline state bytes,
+  and platform metadata do not belong in Timeline. `InsertDevice`,
+  `RemoveDevice`, `MoveDevice`, `RetargetDevice`, and `SetDeviceState` use exact
+  optimistic positions/values and participate in ordinary inverse undo/redo.
+  Removing a placement still referenced by automation or modulation fails
+  closed; it never silently cascades.
+- Typed device declarations describe authored topology only. They do not lower
+  note effects, instantiate hosts, or promise sample-accurate event-stream PDC.
+  Treat that runtime contract as open until `docs/policies/event-stream-pdc.md`
+  is resolved.
 - `ClipTimeAnchor::Musical` follows tempo in ticks. `Absolute` uses
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
