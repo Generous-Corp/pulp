@@ -27,6 +27,72 @@ bool has_feedback(const std::vector<Connection>& connections) {
                        [](const Connection& c) { return c.feedback; });
 }
 
+// Marks a PluginSlot admitted by a prepared edit as graph-owned and balances
+// its lifecycle only after every authoring/snapshot shared owner has drained.
+class PreparedOwnedBuiltInSlot final : public PluginSlot {
+  public:
+    explicit PreparedOwnedBuiltInSlot(std::unique_ptr<PluginSlot> inner)
+        : inner_(std::move(inner)) {}
+    ~PreparedOwnedBuiltInSlot() override {
+        try {
+            release();
+        } catch (...) {
+        }
+    }
+
+    const PluginInfo& info() const override { return inner_->info(); }
+    bool is_loaded() const override { return inner_->is_loaded(); }
+    bool prepare(double sample_rate, int maximum_block_size) override {
+        prepare_entered_ = true;
+        return inner_->prepare(sample_rate, maximum_block_size);
+    }
+    void release() override {
+        if (prepare_entered_ && !released_) {
+            released_ = true;
+            inner_->release();
+        }
+    }
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 const midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
+                 const ParameterEventQueue& events, int frames) override {
+        inner_->process(output, input, midi_in, midi_out, events, frames);
+    }
+    std::vector<HostParamInfo> parameters() const override { return inner_->parameters(); }
+    float get_parameter(std::uint32_t id) const override { return inner_->get_parameter(id); }
+    void set_parameter(std::uint32_t id, float value) override {
+        inner_->set_parameter(id, value);
+    }
+    void set_bypass(bool bypassed) override { inner_->set_bypass(bypassed); }
+    bool is_bypassed() const override { return inner_->is_bypassed(); }
+    std::vector<std::uint8_t> save_state() const override { return inner_->save_state(); }
+    bool restore_state(const std::vector<std::uint8_t>& data) override {
+        return inner_->restore_state(data);
+    }
+    bool has_editor() const override { return inner_->has_editor(); }
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    void* create_editor_view() override { return inner_->create_editor_view(); }
+    void destroy_editor_view() override { inner_->destroy_editor_view(); }
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
+    std::unique_ptr<HostedEditor> create_hosted_editor(void* parent) override {
+        return inner_->create_hosted_editor(parent);
+    }
+    void destroy_hosted_editor(std::unique_ptr<HostedEditor> editor) override {
+        inner_->destroy_hosted_editor(std::move(editor));
+    }
+    int latency_samples() const override { return inner_->latency_samples(); }
+    int tail_samples() const override { return inner_->tail_samples(); }
+
+  private:
+    std::unique_ptr<PluginSlot> inner_;
+    bool prepare_entered_ = false;
+    bool released_ = false;
+};
+
 } // namespace
 
 std::unique_ptr<SignalGraph::PreparedTopologyEdit> SignalGraph::begin_prepared_topology_edit() {
@@ -109,7 +175,8 @@ SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
             [&](const GraphNode& node) { return node.id == baseline.id; });
         if (retained)
             continue;
-        if (baseline.type == NodeType::Plugin)
+        if (baseline.type == NodeType::Plugin &&
+            dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
             return Result::BaselinePluginRemovalRequiresRelease;
         if (baseline.type == NodeType::Custom) {
             const auto type = owner_->custom_node_types_.find(
@@ -303,6 +370,19 @@ NodeId SignalGraph::PreparedTopologyEdit::add_midi_input_node(const std::string&
 
 NodeId SignalGraph::PreparedTopologyEdit::add_midi_output_node(const std::string& name) {
     return add_node_([&] { return candidate_->add_midi_output_node(name); });
+}
+
+NodeId SignalGraph::PreparedTopologyEdit::add_owned_builtin_plugin_node(
+    std::unique_ptr<PluginSlot> slot, int num_inputs, int num_outputs, const std::string& name) {
+    if (!slot || slot->info().format != PluginFormat::BuiltIn) {
+        mutation_failed_ = true;
+        return 0;
+    }
+    return add_node_([&] {
+        return candidate_->add_plugin_node(
+            std::make_unique<PreparedOwnedBuiltInSlot>(std::move(slot)), num_inputs, num_outputs,
+            name);
+    });
 }
 
 NodeId SignalGraph::PreparedTopologyEdit::add_custom_node(std::string_view type_id,
@@ -504,6 +584,19 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     for (const auto& n : candidate_->nodes_) {
         if (n.type != NodeType::Plugin || !n.plugin)
             continue;
+        if (is_new_node_(n.id) &&
+            dynamic_cast<const PreparedOwnedBuiltInSlot*>(n.plugin.get()) != nullptr) {
+            try {
+                if (!n.plugin->prepare(sample_rate, max_block_size))
+                    return last_result_ = Result::ExternalPluginReprepareRequired;
+            } catch (...) {
+                return last_result_ = Result::ExternalPluginReprepareRequired;
+            }
+            candidate_->prepared_plugin_meta_[n.id] = SignalGraph::PreparedPluginMetadata{
+                n.plugin->parameters(), std::max(0, n.plugin->latency_samples()),
+                n.plugin->wants_transport()};
+            continue;
+        }
         if (old == nullptr) {
             return last_result_ = Result::ExternalPluginReprepareRequired;
         }

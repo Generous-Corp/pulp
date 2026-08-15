@@ -361,6 +361,46 @@ TEST_CASE("PluginSlot load fails cleanly for invalid dispatch inputs",
     REQUIRE(PluginSlot::load(auv3) == nullptr);
 }
 
+TEST_CASE("PluginSlot loads only the canonical pathless basic instrument",
+          "[host][slot][builtin]") {
+    PluginInfo canonical;
+    canonical.format = PluginFormat::BuiltIn;
+    canonical.unique_id = "pulp.instrument.basic";
+    canonical.num_inputs = 0;
+    canonical.num_outputs = 2;
+
+    auto slot = PluginSlot::load(canonical);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->is_loaded());
+    REQUIRE(slot->info().format == PluginFormat::BuiltIn);
+    REQUIRE(slot->info().unique_id == "pulp.instrument.basic");
+    REQUIRE(slot->info().path.empty());
+    REQUIRE(slot->info().num_inputs == 0);
+    REQUIRE(slot->info().num_outputs == 2);
+
+    SECTION("unknown binding keys fail closed") {
+        auto wrong = canonical;
+        wrong.unique_id = "pulp.instrument.unknown";
+        REQUIRE(PluginSlot::load(wrong) == nullptr);
+    }
+
+    SECTION("filesystem paths are never accepted") {
+        auto wrong = canonical;
+        wrong.path = "/tmp/pulp.instrument.basic";
+        REQUIRE(PluginSlot::load(wrong) == nullptr);
+    }
+
+    SECTION("the canonical device shape is exact") {
+        auto wrong_inputs = canonical;
+        wrong_inputs.num_inputs = 2;
+        REQUIRE(PluginSlot::load(wrong_inputs) == nullptr);
+
+        auto wrong_outputs = canonical;
+        wrong_outputs.num_outputs = 1;
+        REQUIRE(PluginSlot::load(wrong_outputs) == nullptr);
+    }
+}
+
 // #296 regression: set_parameter on the CLAP slot must be observable via
 // get_parameter immediately (cached readback), not silently dropped.
 // Unknown param IDs must be rejected instead of polluting the cache.

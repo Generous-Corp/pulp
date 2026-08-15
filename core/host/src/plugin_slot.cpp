@@ -6,6 +6,7 @@
 // by PULP_HOST_HAS_<FORMAT> compile definitions in core/host/CMakeLists.txt.
 
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/timeline_device_resolver.hpp>
 #include <pulp/runtime/log.hpp>
 
 namespace pulp::host {
@@ -54,6 +55,8 @@ std::unique_ptr<PluginSlot> PluginSlot::load(const PluginInfo& info) {
             runtime::log_warn("PluginSlot::load: LV2 loader not compiled in");
             return nullptr;
 #endif
+    case PluginFormat::BuiltIn:
+        return load_builtin_plugin(info);
     }
     return nullptr;
 }

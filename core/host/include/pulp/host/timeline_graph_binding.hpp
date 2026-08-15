@@ -2,6 +2,7 @@
 
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/timeline_device_resolver.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/note_renderer.hpp>
@@ -92,6 +93,19 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     AutomationRendererRejected,
     RealtimeStretchRejected,
     CleanupRecoveryRequired,
+    MissingProgramProject,
+    ProgramProjectMismatch,
+    MissingProgramSequence,
+    UnsupportedDeviceChain,
+    UnsupportedDevicePosition,
+    UnsupportedDeviceSlotKind,
+    UnsupportedDeviceKind,
+    UnsupportedDeviceBinding,
+    UnsupportedDeviceBypass,
+    UnsupportedDeviceWetDry,
+    UnsupportedDeviceState,
+    MixedDeviceOwnership,
+    DeviceFactoryFailed,
 };
 
 /// Structured admission result. Capacity failures always report the exact
@@ -205,8 +219,15 @@ class TimelineGraphPlaybackBinding {
 
     NodeId audio_node_for(timeline::ItemId track_id) const noexcept;
     NodeId midi_input_node_for(timeline::ItemId track_id) const noexcept;
+    /// Returns the ephemeral graph node for a resolver-owned placement.
+    NodeId device_node_for(timeline::ItemId placement_id) const noexcept;
     playback::RendererProgramKey renderer_key_for(timeline::ItemId track_id) const noexcept;
     playback::RendererCarryState renderer_state_for(timeline::ItemId track_id) const noexcept;
+
+    /// Installs a control-thread test factory; null restores the production resolver.
+    void set_timeline_device_factory_for_test(TimelineDeviceSlotFactory factory) noexcept {
+        timeline_device_factory_ = factory ? factory : &load_builtin_plugin;
+    }
 
   private:
     TimelineGraphAdmission build_candidate(const playback::PlaybackProgram& program,
@@ -226,6 +247,7 @@ class TimelineGraphPlaybackBinding {
     std::shared_ptr<detail::ExactParameterIngressOwner> automation_claim_owner_;
     runtime::Slot<const detail::TimelineGraphBindingState> state_;
     std::uint64_t binding_instance_id_ = 0;
+    TimelineDeviceSlotFactory timeline_device_factory_ = &load_builtin_plugin;
     BeforeBindingPublishHookForTest before_binding_publish_hook_for_test_ = nullptr;
     void* before_binding_publish_context_for_test_ = nullptr;
     BeforeBindingPublishHookForTest before_graph_commit_hook_for_test_ = nullptr;

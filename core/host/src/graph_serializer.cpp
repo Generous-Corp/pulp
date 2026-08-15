@@ -220,6 +220,7 @@ const char* format_str(PluginFormat f) {
         case PluginFormat::AudioUnitV3: return "auv3";
         case PluginFormat::CLAP:        return "clap";
         case PluginFormat::LV2:         return "lv2";
+        case PluginFormat::BuiltIn:     return "builtin";
     }
     return "unknown";
 }
@@ -229,6 +230,7 @@ PluginFormat parse_format(std::string_view s) {
     if (s == "au")   return PluginFormat::AudioUnit;
     if (s == "auv3") return PluginFormat::AudioUnitV3;
     if (s == "clap") return PluginFormat::CLAP;
+    if (s == "builtin") return PluginFormat::BuiltIn;
     return PluginFormat::LV2;
 }
 

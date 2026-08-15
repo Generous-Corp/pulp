@@ -106,6 +106,7 @@ const char* format_name(PluginFormat f) {
         case PluginFormat::AudioUnitV3:  return "AUv3";
         case PluginFormat::CLAP:         return "CLAP";
         case PluginFormat::LV2:          return "LV2";
+        case PluginFormat::BuiltIn:      return "Built-in";
     }
     return "?";
 }
