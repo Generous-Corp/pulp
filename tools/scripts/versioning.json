@@ -25,6 +25,7 @@
         "inspect/src/**",
         "inspect/CMakeLists.txt",
         "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpAuv3.cmake",
         "experimental/pulp-rs/Cargo.toml",
         "experimental/pulp-rs/Cargo.lock",
         "experimental/pulp-rs/src/**/*.rs",
@@ -46,7 +47,8 @@
         "core/**/include/**/*.h",
         "inspect/include/**",
         "inspect/CMakeLists.txt",
-        "tools/cmake/PulpInstallRules.cmake"
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpAuv3.cmake"
       ],
       "internal_only_paths": [
         "core/**/src/**",
