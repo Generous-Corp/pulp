@@ -607,7 +607,7 @@ EXPORTS = [
             role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::design_fir_least_squares",
             target="Pulp::signal",
-            header_fingerprint="sha256:2a80917cb3ddec40f99346731381bba5d6e9bba8f9a6870f70d936efc7f8723d",
+            header_fingerprint="sha256:5bca92ea3c99cd128602d0518b1469b143a91956dbc48955f56dbd8137967759",
             address_expression=(
                 "static_cast<pulp::signal::FirLeastSquaresResult (*)"
                 "(std::span<const pulp::signal::FirDesignPoint>, "
