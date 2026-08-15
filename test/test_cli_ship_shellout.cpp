@@ -518,6 +518,10 @@ TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign refuses to continue after unattended preflight failure",
                  "[cli][shellout][ship][doctor]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+#ifndef __APPLE__
+    SUCCEED("unattended signing preflight is macOS-only");
+    return;
+#else
     auto root = make_fake_project("sign-preflight-failure", true);
     make_fake_bundle(root, "VST3", "MustNotSign.vst3");
     write_signing_doctor_stub(root, 23);
@@ -532,6 +536,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(contains(combined, "Signing MustNotSign.vst3"));
 
     fs::remove_all(root);
+#endif
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
