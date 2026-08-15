@@ -35,20 +35,20 @@ struct StftFrameT {
 using StftFrame = StftFrameT<float>;
 using StftFrame64 = StftFrameT<double>;
 
-/// Audio-thread-safe STFT processor.
+/// Allocation-stable STFT processor with single-thread ownership.
 ///
 /// Feed samples via push_samples(). When enough samples accumulate for a
 /// hop, a complete windowed FFT frame is computed. The latest frame is
 /// available via latest_frame().
 ///
-/// Intended usage:
-///   - Audio thread calls push_samples() from the process callback.
-///   - UI thread reads latest_frame() for visualization.
-///   - For lock-free publication, wrap the output in a TripleBuffer externally
-///     (VisualizationBridge does this).
+/// Intended usage keeps push and read on one thread. For realtime
+/// visualization, `VisualizationBridge` copies audio into fixed SPSC storage
+/// in the callback, then its UI-owned poll path calls push_samples(), reads the
+/// frame, and publishes a snapshot through TripleBuffer.
 ///
-/// The STFT itself is NOT thread-safe for concurrent push/read. Thread
-/// safety is provided by VisualizationBridge wrapping it with TripleBuffer.
+/// The STFT itself is NOT thread-safe for concurrent push/read. A
+/// TripleBuffer can publish completed results, but does not make concurrent
+/// access to this object safe.
 template <typename SampleType = float>
 class StftT {
 public:
@@ -58,7 +58,8 @@ public:
 
     /// RT contract: configure() allocates FFT/window/ring/frame storage and is
     /// not audio-thread safe. After configure(), push_samples(), latest_frame(),
-    /// frame_ready(), accessors, to_db(), and reset() are allocation-free.
+    /// frame_ready(), accessors, to_db(), and reset() are allocation-free, but
+    /// FFT cost still makes callback use an explicit product-level decision.
     /// latest_magnitude_db() returns a vector copy and is not RT-safe.
     void configure(const StftConfig& config) {
         assert(config.fft_size >= 256 && config.fft_size <= 8192);

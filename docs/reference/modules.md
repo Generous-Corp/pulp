@@ -2407,6 +2407,23 @@ grapheme boundaries.
 
 #### Audio visualization
 
+`VisualizationBridge` is the reusable audio-to-UI pipeline for custom native or
+WebView visualizations. Call `configure()` off the audio thread, then
+`process()` from the callback; the callback only performs fixed-capacity SPSC
+capture and metering. Exactly one UI thread calls bounded `poll()` to perform
+FFT analysis, then uses the cheap snapshot-only `peek_spectrum()` and
+`peek_waveform()` reads. Spectrum snapshots are finite, sequence-stamped, and
+power-averaged across channels, so swapping left/right or reversing one
+channel's polarity does not change the display. The configured channel layout
+is invariant: mismatched blocks are metered but not captured. Stop the audio
+producer and UI consumer before `configure()` or `reset()`.
+Set `max_frames_per_poll` when a UI needs a stricter per-tick analysis budget;
+zero still consumes no more than the frames visible when `poll()` begins.
+The legacy `read_spectrum()` and `read_waveform()` snapshot reads remain
+available. The behavioral compatibility break is that `process()` no longer
+performs FFT/waveform work or publishes those snapshots. Existing callers must
+now explicitly schedule UI-owned `poll()` before reading updated data.
+
 | Widget | Description |
 |--------|-------------|
 | CorrelationMeter | Displays stereo phase correlation from -1 (out of phase) to +1 (mono) |
