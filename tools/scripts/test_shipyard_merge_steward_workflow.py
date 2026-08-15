@@ -46,6 +46,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("secrets.SHIPYARD_APP_ID", self.text)
         self.assertIn("secrets.SHIPYARD_APP_PRIVATE_KEY", self.text)
         self.assertIn("permission-administration: read", self.text)
+        self.assertIn("permission-contents: write", self.text)
         self.assertIn("permission-merge-queues: write", self.text)
         self.assertIn("steps.shipyard-app-token.outputs.token", self.text)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.text)

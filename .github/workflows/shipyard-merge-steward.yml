@@ -50,7 +50,9 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-administration: read
           permission-actions: write
-          permission-contents: read
+          # Queue enrollment requires repository write access in addition to
+          # the dedicated merge-queue permission.
+          permission-contents: write
           permission-issues: write
           permission-merge-queues: write
           permission-pull-requests: write
