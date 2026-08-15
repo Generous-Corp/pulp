@@ -25,6 +25,7 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         self.assertNotRegex(self.text, r'--name "pulp-ci-ephemeral-\$VMID"')
         self.assertIn('RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}"', self.text)
         self.assertIn("runner name exceeds GitHub's 64-character limit", self.text)
+        self.assertIn('-v name="$RUNNER_NAME" \'$2 == name\'', self.text)
 
     def test_command_overrides_are_available_for_one_shot_proof(self) -> None:
         for option in ("--repo", "--labels", "--golden", "--name-prefix", "--once"):

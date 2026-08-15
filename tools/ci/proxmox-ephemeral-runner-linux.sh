@@ -200,7 +200,7 @@ reclaim_stale_slot_runners() {
         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
         || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
     slot_matches="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
-        -v prefix="${RUNNER_NAME_PREFIX}-${VMID}-" 'index($2, prefix) == 1')"
+        -v name="$RUNNER_NAME" '$2 == name')"
     [ -n "$slot_matches" ] || return 0
     match_count="$(printf '%s\n' "$slot_matches" | wc -l | tr -d ' ')"
     [ "$match_count" = 1 ] \
