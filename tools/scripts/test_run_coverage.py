@@ -94,13 +94,20 @@ class ParallelismContractTests(unittest.TestCase):
         self.assertIsNotNone(match, "default CTest name exclusion must be one array item")
         exclusion = re.compile(match.group("pattern"))
         source = "\n".join(
-            (REPO_ROOT / "test" / name).read_text()
-            for name in (
-                "test_fdn_reverb.cpp",
-                "test_character_delay.cpp",
-                "test_osc_vco.cpp",
-                "test_analog_vcf.cpp",
-                "test_osc_wt.cpp",
+            path.read_text()
+            for path in (
+                REPO_ROOT / "test" / "test_fdn_reverb.cpp",
+                REPO_ROOT / "test" / "test_character_delay.cpp",
+                REPO_ROOT / "test" / "test_osc_vco.cpp",
+                REPO_ROOT / "test" / "test_analog_vcf.cpp",
+                REPO_ROOT / "test" / "test_osc_wt.cpp",
+                REPO_ROOT / "test" / "test_modal_bank.cpp",
+                REPO_ROOT / "test" / "test_spectral_matrix.cpp",
+                REPO_ROOT / "test" / "test_playback_program.cpp",
+                REPO_ROOT
+                / "examples"
+                / "PulpSampler"
+                / "test_pulp_sampler_streaming.cpp",
             )
         )
         expected_slow_cases = (
@@ -111,6 +118,10 @@ class ParallelismContractTests(unittest.TestCase):
             "Analog VCF stays finite at worst-case drive and oversampling",
             "OSC-WT worst alias swept to the top of every band",
             "OSC-WT worst-case alias is detection-floor-limited, not a fixed spur",
+            "modal bank throughput scales to large banks in real time",
+            "matrix: realtime factor reported for quality and low-latency modes",
+            "deferred compiler handles ten thousand clips and one hundred coalesced edits",
+            "PulpSampler sinc follows independent continuous pitch modulation controls",
         )
         for case in expected_slow_cases:
             self.assertIn(case, source, f"expected slow test was renamed: {case}")
