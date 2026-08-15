@@ -2801,6 +2801,20 @@ encoding priority in GitHub labels by giving their TartCI supervisors increasing
 minimum queued ages (M3 first, then M5, then M1). A returning faster host cannot
 preempt a job that another runner has already claimed.
 
+**Keep recovery routing and repair activation explicit.** The M3 recovery
+endpoint is a non-secret repository variable
+(`vars.SUBROUTER_RECOVERY_BASE_URL`); only the admin bearer belongs in the
+protected `SUBROUTER_SESSION_LEASE_ADMIN_TOKEN` secret. Mint the short-lived
+model-bound lease in trusted default-branch code before fetching the untrusted
+PR head, then expose only the returned scoped broker credential to the model.
+When the steward dispatches the recovery workflow it must set both
+`publish_status=true` and `attempt_repair=true`: omitting the latter silently
+turns the autonomous path into triage-only monitoring. This does not bypass the
+cost or safety fence—Luna must still return the exact `needs_sol_fix`
+classification before the single networkless Sol-medium repair step can run,
+and the GitHub-hosted publisher independently revalidates the exact head,
+assignment epoch, and blocker fingerprint before applying any patch.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
