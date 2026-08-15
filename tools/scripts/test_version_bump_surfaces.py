@@ -320,11 +320,13 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
         self.assertIn(
             "tools/cmake/PulpInstallRules.cmake", sdk["trigger_paths"]
         )
+        self.assertIn("tools/cmake/PulpAuv3.cmake", sdk["trigger_paths"])
         self.assertIn("inspect/include/**", sdk["public_api_paths"])
         self.assertIn("inspect/CMakeLists.txt", sdk["public_api_paths"])
         self.assertIn(
             "tools/cmake/PulpInstallRules.cmake", sdk["public_api_paths"]
         )
+        self.assertIn("tools/cmake/PulpAuv3.cmake", sdk["public_api_paths"])
         self.assertIn("inspect/src/**", sdk["internal_only_paths"])
 
         surface = next(s for s in vbc.load_config(cfg_path).surfaces
@@ -338,6 +340,7 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "inspect/src/session.cpp": "patch",
                 "inspect/CMakeLists.txt": "minor",
                 "tools/cmake/PulpInstallRules.cmake": "minor",
+                "tools/cmake/PulpAuv3.cmake": "minor",
             }
             for path, expected in expected_levels.items():
                 with self.subTest(path=path):

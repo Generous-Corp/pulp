@@ -80,13 +80,18 @@ SSH, or CI sign. Two root causes, two durable fixes, both codified in
    `pulp-notary` convenience profile from the same `.p8`.
 
 ```bash
-pulp ship doctor                 # heal + report; exit 0 = ready (offline, deterministic)
+pulp ship doctor                 # heal + timestamped signing probe; exit 0 = prompt-safe
 pulp ship doctor --check-online  # also prove the .p8 against Apple (read-only) + refresh profile
 pulp ship doctor --print-env     # emit resolved identity/keychain/keypath handles (no secrets) for eval
 ```
 
-`pulp ship sign` runs this doctor as a **best-effort, quiet preflight** so the
-hardened path is automatic. The doctor itself NEVER prints secret values.
+`pulp ship sign` and the combined-installer path run this doctor as a
+**mandatory, quiet, fail-closed preflight** so the hardened path is automatic.
+Readiness requires a dedicated keychain, the full
+`apple-tool:,apple:,codesign:` partition list, an unambiguous identity hash,
+and a real timestamped hardened-runtime signing probe. Any failure stops before
+production `codesign`; never retry through the login keychain and never ask the
+user for a password. The doctor itself NEVER prints secret values.
 
 **Secrets live OUTSIDE the repo** (never committed), in
 `~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
@@ -96,8 +101,15 @@ hardened path is automatic. The doctor itself NEVER prints secret values.
   `PULP_NOTARY_ISSUER_ID` (the same trio `notary_env.cpp` resolves for `notarize`)
 
 Each value may also come from the same-named environment variable; **env wins
-over the file**. If no dedicated keychain is configured, the doctor falls back to
-the login keychain and warns loudly that signing **may** prompt.
+over the file**. If no dedicated keychain is configured, the doctor reports any
+login-keychain identity only as diagnostic evidence and exits nonzero. It never
+classifies a prompt-capable fallback as ready.
+
+If the configured legacy dedicated keychain exists but its recorded password no
+longer unlocks it, the doctor preserves that file and creates/reuses a stable
+`*-unattended.keychain-db` sibling from the local P12. It then applies the same
+partition, search-list, identity-hash, and real-probe gates to the sibling. Do
+not delete or overwrite the legacy keychain and do not substitute login.
 
 ## Configuration
 
@@ -748,14 +760,9 @@ security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db" "
 same `pulp ship doctor` preflight, single source of truth) before signing, so
 `pulp ship package` / a plugin's `package.sh` sign prompt-free out of the box —
 no manual `pulp ship doctor` needed first, and the fresh-machine case (keychain
-or `.p12` not yet imported) is covered too.
-`pulp ship doctor` separately authorizes the key for codesign via
-`set-key-partition-list` (login-keychain variant below, run once, needs the login
-password):
-```bash
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
-  -k "<login-password>" ~/Library/Keychains/login.keychain-db
-```
+or `.p12` not yet imported) is covered too. A failed preflight terminates the
+installer before its first `codesign`; there is no skip or warn-and-continue
+escape hatch for unattended packaging.
 (zsh trap: `${PIPESTATUS[0]}` is empty in zsh — it's `pipestatus`, 1-indexed — so a
 codesign exit reads blank when it actually succeeded; verify with `codesign
 --verify --strict` or run the check under `bash -c`.) Full local sign+notarize

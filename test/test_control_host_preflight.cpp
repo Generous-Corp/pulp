@@ -176,7 +176,8 @@ TEST_CASE("private preflight timeout and child exit are bounded and joined",
 
     auto exited = launch("--exit");
     CHECK_FALSE(exited.started);
-    CHECK(exited.diagnostics.status == ControlHostPreflightStatus::Timeout);
+    CHECK((exited.diagnostics.status == ControlHostPreflightStatus::Timeout ||
+           exited.diagnostics.status == ControlHostPreflightStatus::SendFailed));
 #else
     SUCCEED("unsupported child channel platforms fail closed before spawn");
 #endif

@@ -174,7 +174,7 @@
     },
     {
       "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
-      "purpose": "Linux build lane for build.yml's `Linux (x64)` leg, preferred for protected main workflow refs and merge-group jobs through the restricted pulp-trusted-build runner group, with hosted fallback for PR workflow revisions, forks, and an unset selector. Served by ephemeral Proxmox VMs on macpro. NATIVE x86_64 — the job is an x64 build, so the earlier ARM64/Tart plan for this lane would have changed its architecture rather than relocating it. Clones come from the `pulp-linux-golden` template (deps + prebuilt Skia + warm ccache baked in) and are destroyed per job.",
+      "purpose": "Dispatch and release fallback Linux x86_64 lane served by repository-scoped ephemeral Proxmox VMs on macpro.",
       "expect": [
         "self-hosted",
         "Linux",
@@ -184,6 +184,25 @@
       ],
       "provisioning": "ephemeral",
         "trusted_workflow_only": true,
+      "severity": "advisory",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_AUTO_LINUX_RUNS_ON_JSON",
+      "purpose": "Automatic Linux x86_64 lane for protected build.yml and trusted dispatcher workflows through the restricted pulp-trusted-build runner group.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro",
+        "pulp-auto-linux-x64"
+      ],
+      "provisioning": "ephemeral",
+      "trusted_workflow_only": true,
       "severity": "advisory",
       "supervisor": "proxmox-systemd",
       "hosts": [
