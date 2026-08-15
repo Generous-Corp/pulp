@@ -2492,33 +2492,32 @@ audit, but preserve and escalate because current TartCI does not emit a
 machine-checked orphan verdict. The symptom alone never authorizes a
 cancellation or registration removal.
 
-#### Shipyard cannot merge under a merge queue — it errors, and that is expected
+#### Shipyard v0.92.1 owns exact-head merge-queue admission
 
-`shipyard pr` is still the right way to create a PR: it runs the gates, applies
-version bumps, pushes the branch, and opens and tracks the PR. It **cannot land
-it**. Confirmed at tag v0.78.0, `src/wait.rs:189`:
+`shipyard pr` remains the normal create-and-close path: it runs the gates,
+applies version bumps, pushes the branch, opens and tracks the PR, detects the
+live merge-queue requirement, and validates the exact head. On a governed base
+it does not issue a direct merge. It enqueues through GitHub's native GraphQL
+mutation with the server-atomic `expectedHeadOid` set to the validated SHA,
+then waits for the protected queue to land or reject that exact lineage.
 
-```rust
-if merge_state.contains("RULESET") || merge_state == "MERGE_QUEUED" {
-    return Err(Box::new(UnsupportedScopeError(
-        "Rulesets / merge-queue governance isn't supported by
-         `shipyard wait pr --state green` yet …")))
-}
-```
+Do not follow the pre-v0.92 manual-enqueue recipe after a successful Shipyard
+validation. A second `ghapp pr merge --auto` call bypasses Shipyard's durable
+admission state and can race head drift or queue removal. Manual enqueueing is
+an explicit recovery path only: first reconcile Shipyard's durable state with
+authoritative GitHub head/queue truth, prove the exact reviewed SHA, and record
+why the native admission path is unavailable. Never use `--admin` or a direct
+merge to bypass the queue.
 
-So a ship that reaches the wait/merge step under the `main-merge-queue` ruleset
-fails there. **That is not a broken branch and not a Shipyard bug to work
-around** — the ruleset (`bypass_actors: []`, `current_user_can_bypass: never`)
-is what makes the queue the real merge authority rather than theatre. Do not
-admin-merge past it. Enqueue instead:
+The standalone `shipyard wait pr --state green` command can still report its
+historical unsupported-scope exit for ruleset/queue governance. That read-only
+wait limitation is not the `shipyard ship` / `shipyard pr` merge path and does
+not mean an otherwise healthy ship must be manually enqueued.
 
-```bash
-ghapp pr merge <n> --repo Generous-Corp/pulp --auto
-```
-
-The PR enters the queue once its required contexts are green. Note GitHub uses
-the **latest** run for a required context, so a newly-queued re-run makes an
-already-green context pending again and delays entry — that resolves itself.
+GitHub uses the **latest** run for a required context, so a newly queued rerun
+can make an already-green context pending again and delay admission. Preserve
+healthy jobs and let the protected check resolve unless exact stale proof
+authorizes a narrow recovery.
 
 #### The pin is load-bearing at v0.78.0 because of the post-tag hook
 
