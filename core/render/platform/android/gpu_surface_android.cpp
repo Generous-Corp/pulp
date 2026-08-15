@@ -971,7 +971,6 @@ void android_touch_down(int pointer_id, float px_x, float px_y, float pressure) 
         auto ev = make_touch_event(local, pt, pointer_id, pressure, true);
         ev.click_count = click_count;
         ev.phase = view::MousePhase::press;
-        target->on_mouse_event(ev);
         view::dispatch_dom_pointer_event(*g_root_view, target, ev, false);
         // Dispatch legacy event (Knob drag_start_y_, Toggle on/off)
         target->on_mouse_down(local);
@@ -1020,7 +1019,6 @@ void android_touch_up(int pointer_id, float px_x, float px_y) {
     auto local = to_local(g_captured_view, dp_x, dp_y);
     auto ev = make_touch_event(local, {dp_x, dp_y}, pointer_id, 0.0f, false);
     ev.phase = view::MousePhase::release;
-    g_captured_view->on_mouse_event(ev);
     view::dispatch_dom_pointer_event(*g_root_view, g_captured_view, ev, false);
     g_captured_view->on_mouse_up(local);
     g_captured_view = nullptr;

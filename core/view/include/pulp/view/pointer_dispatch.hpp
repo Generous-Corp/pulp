@@ -21,9 +21,10 @@ namespace pulp::view {
 /// `target` must be `root` or a descendant of it.
 Point point_to_local(Point root_pos, View* target, View* root);
 
-/// Enter JS pointer delivery from a platform host. The deepest registered View
-/// receives the sole full DOM dispatch; registered ancestors receive only their
-/// low-level callback so the JavaScript bubble walk is never re-entered.
+/// Enter rich + JS pointer delivery from a platform host. The target receives
+/// `on_mouse_event` once, the deepest registered View receives the sole full
+/// DOM dispatch, and registered ancestors receive only their low-level callback
+/// so the JavaScript bubble walk is never re-entered.
 void dispatch_dom_pointer_event(View& root, View* target,
                                 const MouseEvent& event, bool moving,
                                 bool bubble = true);

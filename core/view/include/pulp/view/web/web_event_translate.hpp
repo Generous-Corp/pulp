@@ -500,7 +500,6 @@ private:
         };
         MouseEvent local_event = me;
         local_event.position = point_to_local(me.window_position, target, &root_);
-        target->on_mouse_event(local_event);
         dispatch_dom_pointer_event(root_, target, local_event, false);
         if (target_is_live()) target->on_mouse_down(local_event.position);
         if (target_is_live())
@@ -530,7 +529,6 @@ private:
             local_event.is_down = true;
             local_event.phase = MousePhase::drag;
 
-            captured->on_mouse_event(local_event);
             dispatch_dom_pointer_event(root_, captured, local_event, true);
             if (captured_is_live())
                 captured->on_mouse_drag(local_event.position);
@@ -565,7 +563,6 @@ private:
 
         MouseEvent local_event = me;
         local_event.position = point_to_local(me.window_position, target, &root_);
-        target->on_mouse_event(local_event);
         dispatch_dom_pointer_event(root_, target, local_event, true);
         target->on_hover_move(local_event.position);
         mark_dirty();
@@ -586,7 +583,6 @@ private:
 
         MouseEvent local_event = me;
         local_event.position = point_to_local(me.window_position, target, &root_);
-        target->on_mouse_event(local_event);
         dispatch_dom_pointer_event(root_, target, local_event, false);
         if (!lifetime.expired() && in_tree(target, &root_)) {
             if (cancelled)

@@ -179,6 +179,22 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto* w = it->second.view;
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
+            auto previous_pointer = w->on_pointer_event;
+            w->on_pointer_event =
+                [w, previous_pointer](const MouseEvent& me) {
+                    if (previous_pointer) previous_pointer(me);
+                    // Platform delivery owns the target-to-root DOM walk under
+                    // one token. Preserve the historical direct
+                    // View::on_mouse_event seam used by hosts and tests without
+                    // entering that walk a second time.
+                    if (detail::dom_pointer_token() != 0) return;
+                    detail::ScopedDomPointerToken dispatch_token;
+                    const bool moving = me.phase == MousePhase::drag ||
+                                        me.phase == MousePhase::hover;
+                    auto callback = moving ? w->on_dom_pointer_move_event
+                                           : w->on_dom_pointer_event;
+                    if (callback) callback(me, true);
+                };
             w->on_dom_pointer_event =
                 [alive, engine, id](const MouseEvent& me, bool is_dom_origin) {
                     BridgeCallbackScope scope(alive);

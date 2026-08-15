@@ -87,7 +87,6 @@ void dispatch_dom_pointer_path(View& root,
                                const std::vector<ViewCapture>& path,
                                const MouseEvent& event,
                                bool moving) {
-    detail::ScopedDomPointerToken dispatch_token;
     bool has_origin = false;
     for (const auto& capture : path) {
         auto* view = capture.live_in(root);
@@ -164,6 +163,12 @@ void dispatch_dom_pointer_event(View& root, View* target,
                                 const MouseEvent& event, bool moving,
                                 bool bubble) {
     if (!target || !still_in_tree(target, &root)) return;
+    detail::ScopedDomPointerToken dispatch_token;
+    ViewCapture target_capture;
+    target_capture.set(target);
+    target->on_mouse_event(event);
+    target = target_capture.live_in(root);
+    if (!target) return;
     auto path = capture_path_to_root(target);
     if (!bubble && path.size() > 1) path.resize(1);
     dispatch_dom_pointer_path(root, path, event, moving);
@@ -252,10 +257,6 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
-    target->on_mouse_event(me);
-
-    target = target_capture.live_in(root);
-    if (!target) return;
     dispatch_dom_pointer_event(root, target, me, true);
 
     // The legacy callbacks carry no button identity and historically mean the
@@ -335,10 +336,6 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
-    target->on_mouse_event(me);
-
-    target = target_capture.live_in(root);
-    if (!should_continue() || !target) return false;
     dispatch_dom_pointer_event(root, target, me, false, bubble);
 
     // A modern handler may unmount the tree it was dispatched into. Re-validate
@@ -361,6 +358,10 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
         for (const auto& capture : bubble_path) {
             auto* b = capture.live_in(root);
             if (!b) continue;
+            // Registered DOM ancestors already received their callback-only
+            // delivery in dispatch_dom_pointer_event(). This legacy bubble is
+            // only for ordinary C++ on_pointer_event consumers.
+            if (b->on_dom_pointer_event) continue;
             auto callback = b->on_pointer_event;
             if (!callback) continue;
             MouseEvent bme = me;
@@ -447,18 +448,14 @@ void deliver_pointer_terminal(View& root, View* target, Point root_pt,
         me.pointer_id = pointer.pointer_id;
         me.altitude_angle = pointer.altitude_angle;
         me.azimuth_angle = pointer.azimuth_angle;
-        target->on_mouse_event(me);
-
-        target = target_capture.live_in(root);
-        if (target) {
-            dispatch_dom_pointer_event(root, target, me, false);
-        }
+        dispatch_dom_pointer_event(root, target, me, false);
 
         // 3. W3C pointerup bubble (mirrors the pointerdown bubble).
         if (target_capture.live_in(root)) {
             for (const auto& capture : bubble_path) {
                 auto* b = capture.live_in(root);
                 if (!b) continue;
+                if (b->on_dom_pointer_event) continue;
                 auto callback = b->on_pointer_event;
                 if (!callback) continue;
                 MouseEvent bme = me;
