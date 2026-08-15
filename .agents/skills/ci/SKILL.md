@@ -1809,14 +1809,14 @@ supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
 The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
-~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 150-min job
+~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 210-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
 staleness watchdog keys off a *successful run*, not per-OS Codecov flags — so a
 red Windows leg would otherwise keep a healthy full run red forever. **The
 subtle trap (verified by canary):** job-level `continue-on-error` does NOT
 neutralize a `timeout-minutes` *cancellation* — a cancelled job still makes the
 run conclude `cancelled`. It DOES neutralize a normal job *failure*. So the
-coverage suite step self-terminates at an **internal budget (135 min) below the
+coverage suite step self-terminates at an **internal budget (180 min) below the
 job cap**, turning the would-be cancellation into a normal non-zero exit that
 the job-level `continue-on-error: matrix.os=='windows'` then absorbs → the run
 concludes `success`. Don't "simplify" this to bare `continue-on-error`; it will
@@ -1824,7 +1824,7 @@ silently stop closing the watchdog. **And the watchdog that enforces the budget
 must separate its steps with `;`, NOT `&&`** — if the kill is `&&`-gated behind
 a `: > marker` write (which can fail on a Windows `RUNNER_TEMP` backslash path),
 a failed marker write short-circuits the chain and the suite is never killed,
-so the job hits the 150-min cap and is *cancelled* anyway. The kill is
+so the job hits the 210-min cap and is *cancelled* anyway. The kill is
 mandatory; the marker is best-effort (cleanup of any partial Cobertura also
 triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
@@ -3865,7 +3865,7 @@ the correct fix; they bound runs regardless of `cancel-in-progress`.
 `tools/scripts/classify_changes.py --mode=diff`, outputs
 `native_build_required`). Skip-safe PRs (docs / planning `*.md` only —
 classifier fails *closed*, any uncertainty → `true`) skip the
-`coverage` matrix (150 min/leg); docs-only PRs also skip
+`coverage` matrix (210 min/leg); docs-only PRs also skip
 `android-kotlin-coverage`. The Android Kotlin lane is additionally
 guarded with `github.event_name != 'pull_request'`, so it never allocates
 a runner on PRs. No coverage runner is allocated on a docs PR.
