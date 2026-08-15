@@ -345,6 +345,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
+# This option must exist before core/format is configured: pulp-format's
+# ViewBridge conditionally closes over pulp-view-script. Declaring it only in
+# core/view (which is added later) made a clean configure silently omit that
+# static-library dependency even though the eventual cached value was ON.
+option(PULP_ENABLE_JS
+    "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
 add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/music)

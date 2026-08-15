@@ -74,13 +74,19 @@ public:
 };
 }  // namespace
 
-TEST_CASE("render_to_png honors an explicit GPU backend on macOS",
+TEST_CASE("render_to_png honors an explicit GPU backend without raster fallback",
           "[view][screenshot][gpu][routing]") {
+    BackendProbeView root;
     if (!has_gpu_capture()) {
-        SUCCEED("GPU capture not compiled in (no pulp-render)");
+        // Web/WAM and GPU-off targets can still compile the portable Skia
+        // screenshot backend without linking screenshot_gpu.cpp.  The direct
+        // GPU request must fail closed instead of painting a plausible CPU
+        // frame or leaving an undefined symbol for the final link.
+        REQUIRE(render_to_png(root, 64, 64, 1.0f,
+                              ScreenshotBackend::gpu).empty());
+        REQUIRE_FALSE(root.saw_gpu_canvas);
         return;
     }
-    BackendProbeView root;
     const auto png = render_to_png(root, 64, 64, 1.0f,
                                    ScreenshotBackend::gpu);
     if (png.empty()) {

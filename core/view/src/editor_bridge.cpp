@@ -2,7 +2,6 @@
 
 #include "pulp/view/script_engine.hpp"
 #include "pulp/view/scripted_ui.hpp"
-#include "pulp/view/web_view.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -103,16 +102,6 @@ std::string EditorBridge::dispatch_webview_message(std::string_view type,
         return err_response("malformed JSON");
     }
     return dispatch(type, payload);
-}
-
-void EditorBridge::attach_webview(WebViewPanel& panel) {
-    panel.set_message_handler([this](const WebViewMessage& m) {
-        return dispatch_webview_message(m.type, m.payload_json);
-    });
-}
-
-void EditorBridge::detach_webview(WebViewPanel& panel) {
-    panel.set_message_handler({});
 }
 
 void EditorBridge::attach_native_runtime(JsRuntime& /*runtime*/,

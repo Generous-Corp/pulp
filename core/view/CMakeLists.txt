@@ -5,8 +5,9 @@
 # The faithful-vector design-import lane (native Skia draw_svg + native overlays)
 # and every native widget still work — view-core is self-contained and carries no
 # JS dependency (view-script depends on view-core, not the reverse). Default ON to
-# preserve the JS-scripted GPU UI path.
-option(PULP_ENABLE_JS "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+# preserve the JS-scripted GPU UI path. The option is declared by the root
+# project before core/format so that target can make the same composition
+# decision during a clean configure.
 
 add_library(pulp-view-core)
 add_library(pulp::view-core ALIAS pulp-view-core)
@@ -141,7 +142,8 @@ option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / W
 if(PULP_BUILD_WEBVIEW)
     add_library(pulp-view-webview STATIC
         src/web_view.cpp
-        src/web_view_backend.cpp)
+        src/web_view_backend.cpp
+        src/editor_bridge_webview.cpp)
     add_library(pulp::view-webview ALIAS pulp-view-webview)
     target_include_directories(pulp-view-webview
         PUBLIC

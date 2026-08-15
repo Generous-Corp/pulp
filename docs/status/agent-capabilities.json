@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 24,
+  "manifest_revision": 25,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -10974,6 +10974,7 @@
               "latest_frame()",
               "frame_ready()",
               "num_bins()",
+              "window_sum()",
               "fft_size()",
               "hop_size()",
               "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType{-120.0f})",

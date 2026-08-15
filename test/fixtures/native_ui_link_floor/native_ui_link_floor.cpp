@@ -1,4 +1,5 @@
 #include <pulp/format/processor.hpp>
+#include <pulp/view/editor_bridge.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
@@ -89,6 +90,9 @@ public:
 private:
     pulp::state::StateStore* store_ = nullptr;
     NativeScriptRoot* active_root_ = nullptr;
+    // Pull the native EditorBridge object into the link-floor artifact. This
+    // catches WebView methods accidentally cohabiting its native object file.
+    pulp::view::EditorBridge bridge_;
 };
 
 }  // namespace

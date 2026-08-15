@@ -384,6 +384,7 @@ static_assert(!std::is_move_assignable_v<EditorBridge>,
 // the bridge's dispatch path. A minimal in-process WebViewPanel stub
 // exercises that wiring without requiring a real WebView backend.
 
+#if defined(PULP_BUILD_WEBVIEW) && PULP_BUILD_WEBVIEW
 namespace {
 
 class StubWebViewPanel : public pulp::view::WebViewPanel {
@@ -478,6 +479,7 @@ TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler"
     bridge.detach_webview(panel);
     CHECK_FALSE(panel.has_message_handler());
 }
+#endif
 
 TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
           "[editor_bridge][issue-709][issue-468]")
