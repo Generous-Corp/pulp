@@ -445,7 +445,36 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.89.0 — exact-head stewardship is load-bearing
+### Why the pin sits at v0.92.1 — protected closure is load-bearing
+
+v0.92.1 is the common M1/M3/M5 floor. It retains v0.92.0's materialization of
+required checks that are configured in branch protection but not yet visible
+on the PR, so `shipyard wait` cannot report green merely because a required
+producer has not created its context. It also makes local signing unattended
+for release automation and carries fail-closed local-x64 proof, queue-admission
+and PR-close hardening, and bounded wait retries that preserve failure metadata.
+Together those properties keep Shipyard useful as the
+exact-head validator and fleet observer while GitHub's protected merge queue
+remains the only Pulp landing authority. Pin drift is operationally unsafe:
+an older host can validate the same commit but apply obsolete direct-merge
+semantics, invalidating a synthetic queue lineage. Update
+`tools/shipyard.toml`, the post-tag `SHIPYARD_VERSION`, and installed fleet
+binaries as one change, then verify `shipyard --version` on every host.
+
+Shipyard's App needs Actions/runner read access so fleet admission can see
+runner registrations and, for protected organization pools, runner-group
+membership. That evidence is what lets it prove labels/capacity and keep
+hosted fallback enabled when the local route is incomplete; it does not grant
+merge-queue bypass. The setup details and exact permission checks live in
+`docs/guides/local-ci.md`.
+
+v0.92.1 also retains GitHub's contradictory `offline + busy` state as
+`offline_busy`. Treat that as a reconciliation signal, not cancellation
+authority. Current TartCI does not emit machine-checked orphan proof, so the
+documented two-snapshot VM, lease, supervisor, runner, and job audit preserves
+and escalates the job rather than authorizing recovery.
+
+v0.88.0 introduced the exact-head stewardship foundation retained here.
 
 v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
 is mutable only when its current commit has a successful
