@@ -107,7 +107,8 @@ def validate_assignment(
         raise ValueError("recovery dispatch attempt does not match")
     if _description_value(dispatch, "fingerprint") != fingerprint:
         raise ValueError("recovery dispatch fingerprint does not match")
-    if _description_value(dispatch, "worker") != worker:
+    dispatched_worker = _description_value(dispatch, "worker")
+    if dispatched_worker not in {"pool", worker}:
         raise ValueError("recovery dispatch worker does not match")
     return {
         "schema_version": 1,

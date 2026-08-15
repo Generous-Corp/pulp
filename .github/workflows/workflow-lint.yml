@@ -71,10 +71,8 @@ on:
       - 'tools/shipyard/repair.config.toml'
       - 'tools/shipyard/repair-result.schema.json'
       - 'tools/scripts/shipyard_recovery_worker.py'
-      - 'tools/scripts/shipyard_recovery_worker_select.py'
       - 'tools/scripts/shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker.py'
-      - 'tools/scripts/test_shipyard_recovery_worker_select.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
@@ -136,10 +134,8 @@ on:
       - 'tools/shipyard/repair.config.toml'
       - 'tools/shipyard/repair-result.schema.json'
       - 'tools/scripts/shipyard_recovery_worker.py'
-      - 'tools/scripts/shipyard_recovery_worker_select.py'
       - 'tools/scripts/shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker.py'
-      - 'tools/scripts/test_shipyard_recovery_worker_select.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
       - 'tools/scripts/example_validation_paths.py'
@@ -241,7 +237,6 @@ jobs:
           python3 tools/scripts/test_shipyard_recovery_worker_canary_workflow.py
           python3 tools/scripts/test_shipyard_recovery_dispatch.py
           python3 tools/scripts/test_shipyard_recovery_worker.py
-          python3 tools/scripts/test_shipyard_recovery_worker_select.py
           python3 tools/scripts/test_shipyard_recovery_repair.py
           python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
 

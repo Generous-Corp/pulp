@@ -2788,6 +2788,19 @@ that exact label. Do not generalize the label, add a persistent service, inject
 Subrouter credentials, or enable M3/M5/M1 failover until this proof passes and
 the runner is destroyed.
 
+**Recovery dispatch must queue before a JIT runner exists.** Never select a
+recovery worker from `actions/runners`: a healthy idle Tart JIT worker is absent
+from that census, so preselection creates a circular wait in which no job is
+queued and no runner registers. Dispatch one durable job to the shared
+`shipyard-recovery-pool` first, record its exact Actions URL in the pending
+recovery status, and let a fenced one-shot runner claim it. Derive the actual
+worker only from the registered runner-name prefix inside the job. A pending
+pool assignment is an offline-safe obligation, not an age-based retry signal;
+do not dispatch a duplicate merely because it has waited. Prefer hosts without
+encoding priority in GitHub labels by giving their TartCI supervisors increasing
+minimum queued ages (M3 first, then M5, then M1). A returning faster host cannot
+preempt a job that another runner has already claimed.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound

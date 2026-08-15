@@ -447,29 +447,6 @@ jobs:
             --epoch "$GITHUB_RUN_ID" \
             --output recovery-plan.json
 
-      - name: Collect explicitly enrolled recovery runners
-        id: recovery_runners
-        if: always() && inputs.dispatch_recovery
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" \
-            | jq '{runners: [.[].runners[]]}' \
-            > recovery-runners.json
-
-      - name: Select one ordered recovery worker
-        id: recovery_worker
-        if: always() && inputs.dispatch_recovery && steps.recovery_runners.outcome == 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 tools/scripts/shipyard_recovery_worker_select.py \
-            --runners recovery-runners.json \
-            --output recovery-worker.json
-
       - name: Dispatch one fenced recovery assignment
         id: recovery_dispatch
         if: inputs.apply && inputs.dispatch_recovery && steps.recovery_plan.outcome == 'success'
@@ -485,44 +462,35 @@ jobs:
           epoch=$(jq -r '.assignment_epoch' <<<"$candidate")
           attempt=$(jq -r '.dispatch_attempt' <<<"$candidate")
           fingerprint=$(jq -r '.fingerprint' <<<"$candidate")
-          worker=$(jq -r '.selected.worker // empty' recovery-worker.json)
-          runner_name=$(jq -r '.selected.runner_name // empty' recovery-worker.json)
           target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          if [ -z "$worker" ] || [ -z "$runner_name" ]; then
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
-              -f state=error \
-              -f context='shipyard/recovery-capacity' \
-              -f description='no explicitly enrolled recovery worker is online and idle' \
-              -f target_url="$target_url"
-            exit 1
-          fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
-            -f state=success \
-            -f context='shipyard/recovery-capacity' \
-            -f description="selected worker=${worker} epoch=${epoch}" \
-            -f target_url="$target_url"
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
-            -f state=pending \
-            -f context='shipyard/recovery-dispatch' \
-            -f description="pending attempt=${attempt} epoch=${epoch} worker=${worker} fingerprint=${fingerprint}" \
-            -f target_url="$target_url"
-          if gh workflow run shipyard-recovery-worker.yml \
+          if recovery_url=$(gh workflow run shipyard-recovery-worker.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f pr_number="$pr" \
             -f expected_head="$head" \
             -f assignment_epoch="$epoch" \
             -f dispatch_attempt="$attempt" \
-            -f worker="$worker" \
-            -f runner_name="$runner_name" \
             -f blocker_fingerprint="$fingerprint" \
-            -f publish_status=true; then
-            exit 0
+            -f publish_status=true); then
+            if [[ "$recovery_url" =~ ^https://github.com/${GITHUB_REPOSITORY}/actions/runs/[1-9][0-9]*$ ]]; then
+              run_id=${recovery_url##*/}
+              if gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
+                -f state=pending \
+                -f context='shipyard/recovery-dispatch' \
+                -f description="queued attempt=${attempt} epoch=${epoch} worker=pool fingerprint=${fingerprint}" \
+                -f target_url="$recovery_url"; then
+                exit 0
+              fi
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+              echo "cancelled untracked recovery run ${run_id}" >&2
+            fi
+            echo "workflow dispatch returned no exact run URL" >&2
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" \
             -f state=error \
             -f context='shipyard/recovery-dispatch' \
-            -f description="dispatch_failed attempt=${attempt} epoch=${epoch} worker=${worker} fingerprint=${fingerprint}" \
+            -f description="dispatch_failed attempt=${attempt} epoch=${epoch} worker=pool fingerprint=${fingerprint}" \
             -f target_url="$target_url"
           exit 1
 
@@ -612,8 +580,6 @@ jobs:
             open-prs.json
             recovery-statuses.json
             recovery-plan.json
-            recovery-runners.json
-            recovery-worker.json
             merge-queue.json
             merge-group-runs.json
             merge-group-cleanup-plan.json
@@ -648,8 +614,6 @@ jobs:
           [ "${{ steps.recovery_statuses.outcome }}" = success ]
           [ "${{ steps.recovery_plan.outcome }}" = success ]
           if [ "${{ inputs.apply }}" = true ] && [ "${{ inputs.dispatch_recovery }}" = true ]; then
-            [ "${{ steps.recovery_runners.outcome }}" = success ]
-            [ "${{ steps.recovery_worker.outcome }}" = success ]
             [ "${{ steps.recovery_dispatch.outcome }}" = success ]
           fi
           [ "${{ steps.reconcile.outputs.exit_code }}" = 0 ]

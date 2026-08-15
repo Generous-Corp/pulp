@@ -20,7 +20,6 @@ from typing import Any
 CONTEXT = "shipyard/recovery-dispatch"
 RECOVERY_ACTIONS = {"needs_update", "required_failed"}
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-DEFAULT_STALE_PENDING_SECONDS = 60 * 60
 
 
 def _load(path: Path) -> Any:
@@ -95,17 +94,17 @@ def _parse_time(value: object) -> datetime | None:
 
 def _retry_attempt(
     status: dict[str, Any] | None,
-    *,
-    now: datetime,
-    stale_pending_seconds: int,
 ) -> int | None:
     if status is None:
         return 1
     state = str(status.get("state") or "").lower()
     if state == "pending":
-        created = _parse_time(status.get("created_at"))
-        if created is None or (now - created).total_seconds() < stale_pending_seconds:
-            return None
+        # A queued workflow is the durable recovery obligation. Disposable JIT
+        # runners intentionally do not exist until that job is queued, so age
+        # alone must never create a duplicate dispatch while every Mac is
+        # offline. A started/failed worker publishes error and receives the one
+        # bounded retry below.
+        return None
     elif state != "error":
         return None
     match = re.search(r"\battempt=(\d+)\b", str(status.get("description") or ""))
@@ -133,12 +132,9 @@ def build_plan(
     epoch: int,
     *,
     now: datetime | None = None,
-    stale_pending_seconds: int = DEFAULT_STALE_PENDING_SECONDS,
 ) -> dict[str, Any]:
     if epoch <= 0:
         raise ValueError("assignment epoch must be positive")
-    if stale_pending_seconds <= 0:
-        raise ValueError("stale pending threshold must be positive")
     now = now or datetime.now(timezone.utc)
     statuses = _status_map(statuses_raw)
     candidates: list[dict[str, Any]] = []
@@ -165,8 +161,6 @@ def build_plan(
             fingerprint = _fingerprint(repo, number, head, decision)
             attempt = _retry_attempt(
                 _latest_dispatch_status(statuses.get(head, []), fingerprint),
-                now=now,
-                stale_pending_seconds=stale_pending_seconds,
             )
             if attempt is None:
                 continue
@@ -196,7 +190,6 @@ def main() -> int:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--statuses", type=Path, required=True)
     parser.add_argument("--epoch", type=int, required=True)
-    parser.add_argument("--stale-pending-seconds", type=int, default=DEFAULT_STALE_PENDING_SECONDS)
     parser.add_argument("--now", help="RFC3339 test override")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -208,7 +201,6 @@ def main() -> int:
         _load(args.statuses),
         args.epoch,
         now=now,
-        stale_pending_seconds=args.stale_pending_seconds,
     )
     args.output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0 if not plan["errors"] else 1
