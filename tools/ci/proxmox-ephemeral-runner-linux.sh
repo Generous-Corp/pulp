@@ -315,8 +315,9 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
     case "$RUNNER_GROUP_POLICY" in
         trusted)
-            [ "$LABELS" = "$BASE_LABELS" ] \
-                && LABELS="${BASE_LABELS},pulp-auto-linux-x64"
+            if [ "$LABELS" = "$BASE_LABELS" ]; then
+                LABELS="${LABELS},pulp-auto-linux-x64"
+            fi
             EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"
             EXPECTED_PREFIX="pulp-ci-ephemeral"
             ;;
