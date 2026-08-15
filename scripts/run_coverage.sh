@@ -218,8 +218,29 @@ echo "=== Merging profiles ==="
 # on some OSes; feed via find -print0 | xargs.
 mkdir -p "${REPORT_DIR}"
 PROFDATA="${REPORT_DIR}/pulp.profdata"
-find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
-    | xargs -0 llvm-profdata merge -sparse -o "${PROFDATA}"
+MERGE_LOG="${REPORT_DIR}/llvm-profdata-merge.log"
+PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+    echo "run_coverage.sh: no raw profile shards were produced" >&2
+    exit 1
+fi
+# A timed-out or aborted test can leave its pool shard truncated. Keep every
+# valid shard instead of letting llvm-profdata's default failure-mode=any
+# blackhole the whole report, but fail closed if corruption is systemic.
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
+    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
+        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+    cat "${MERGE_LOG}" >&2
+    exit 1
+fi
+cat "${MERGE_LOG}" >&2
+INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
+if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
+    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+    exit 1
+fi
+echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # Gather binaries for llvm-cov's -object multi-arg form.
 #

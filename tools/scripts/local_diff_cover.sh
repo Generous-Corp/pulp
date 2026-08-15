@@ -460,8 +460,26 @@ fi
 PROFDATA="${BUILD_DIR}/coverage/pulp.profdata"
 mkdir -p "${BUILD_DIR}/coverage"
 echo "=== Merging profiles ==="
-find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
-    | xargs -0 llvm-profdata merge -sparse -o "${PROFDATA}"
+MERGE_LOG="${BUILD_DIR}/coverage/llvm-profdata-merge.log"
+PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+    echo "[local_diff_cover] no raw profile shards were produced" >&2
+    exit 1
+fi
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
+    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
+        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+    cat "${MERGE_LOG}" >&2
+    exit 1
+fi
+cat "${MERGE_LOG}" >&2
+INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
+if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
+    echo "[local_diff_cover] ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+    exit 1
+fi
+echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # ── Gather binaries for llvm-cov -object ────────────────────────────────────
 # Mirror scripts/run_coverage.sh's binary discovery so we cover the same

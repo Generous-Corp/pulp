@@ -477,6 +477,13 @@ class TargetedCtestTests(unittest.TestCase):
             "and can lose attribution when PIDs recycle.",
         )
 
+    def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("--failure-mode=all", text)
+        self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
+        self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
+        self.assertIn("PROFILE_SHARDS * 5", text)
+
 
 class RequiredGateCtestSelectionTests(unittest.TestCase):
     """The local coverage lane runs ordinary tests and excludes slow work."""

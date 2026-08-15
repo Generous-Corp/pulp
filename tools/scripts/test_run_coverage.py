@@ -313,6 +313,13 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "and are vulnerable to PID reuse.",
         )
 
+    def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("--failure-mode=all", text)
+        self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
+        self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
+        self.assertIn("PROFILE_SHARDS * 5", text)
+
 
 class StaleCacheTests(unittest.TestCase):
     """#570: the post-configure assert errors when the cache is stale.
