@@ -332,17 +332,38 @@ jobs:
 
       - name: Create and boot x86_64 emulator
         if: steps.fixture-scope.outputs.affected == 'true'
+        env:
+          ANDROID_AVD_HOME: ${{ runner.temp }}/android-avd
         run: |
-          echo no | avdmanager create avd --force --name pulp-fixtures \
-            --package "system-images;android-34;google_apis;x86_64"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd -f -n pulp-fixtures \
+            -k "system-images;android-34;google_apis;x86_64" \
+            -d pixel_2 -p "$ANDROID_AVD_HOME/pulp-fixtures.avd"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx pulp-fixtures
           "$ANDROID_HOME/emulator/emulator" -avd pulp-fixtures -no-window -no-audio \
-            -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
-          adb wait-for-device
+            -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            >"$RUNNER_TEMP/pulp-emulator.log" 2>&1 &
+          emulator_pid=$!
+          for _ in $(seq 1 60); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo "emulator exited before adb became ready" >&2
+              cat "$RUNNER_TEMP/pulp-emulator.log" >&2
+              exit 1
+            fi
+            [[ "$(adb get-state 2>/dev/null)" == device ]] && break
+            sleep 2
+          done
+          if [[ "$(adb get-state 2>/dev/null)" != device ]]; then
+            echo "emulator did not register with adb" >&2
+            cat "$RUNNER_TEMP/pulp-emulator.log" >&2
+            exit 1
+          fi
           for _ in $(seq 1 60); do
             [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] && exit 0
             sleep 2
           done
           echo "emulator did not boot" >&2
+          cat "$RUNNER_TEMP/pulp-emulator.log" >&2
           exit 1
 
       - name: Execute timeline, journal, and playback fixtures
