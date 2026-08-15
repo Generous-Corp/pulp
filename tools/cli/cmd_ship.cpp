@@ -143,14 +143,23 @@ static fs::path signing_doctor_script(const fs::path& root) {
     return root / "tools" / "scripts" / "ensure_signing_ready.sh";
 }
 
-// Best-effort, quiet, idempotent preflight: materialize the dedicated signing
-// keychain + validate the .p8 notary key so codesign/notarytool never pop a
-// keychain/1Password prompt. Never fails the caller — if the doctor reports
-// not-ready, the subsequent sign/notarize surfaces the real error itself.
-static void run_signing_preflight(const fs::path& root) {
+// Fail-closed, quiet, idempotent preflight: materialize and prove the dedicated
+// signing keychain before any production codesign invocation.  A failed
+// preflight must never fall through to login-keychain lookup, which can open a
+// GUI password dialog in an unattended session.
+static bool run_signing_preflight(const fs::path& root) {
     auto script = signing_doctor_script(root);
-    if (fs::exists(script))
-        run("/bin/bash " + shell_quote(script.string()) + " --quiet >/dev/null 2>&1 || true");
+    if (!fs::exists(script)) {
+        std::cerr << "pulp ship sign: missing unattended signing preflight: "
+                  << script.string() << "\n";
+        return false;
+    }
+    if (run("/bin/bash " + shell_quote(script.string()) + " --quiet") != 0) {
+        std::cerr << "pulp ship sign: unattended signing preflight failed; "
+                     "refusing to invoke codesign. Run `pulp ship doctor`.\n";
+        return false;
+    }
+    return true;
 }
 
 // Ship-time PULP_TRACING guard. Refuses to sign/package/release an artifact
@@ -257,7 +266,6 @@ static int ship_doctor(const std::vector<std::string>& args,
 static int ship_sign(const std::vector<std::string>& args,
                        const fs::path& root, const fs::path& build_dir) {
     const std::string sub = "sign";
-        run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
@@ -344,6 +352,10 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cout << "Signed " << signed_count << " Android artifacts.\n";
             return signed_count > 0 ? 0 : 1;
         }
+
+#ifdef __APPLE__
+        if (!run_signing_preflight(root)) return 1;
+#endif
 
         // Desktop signing (macOS/Windows) — fall back to config
         identity = ship_config(identity, "PULP_SIGN_IDENTITY", "signing.apple", "identity");

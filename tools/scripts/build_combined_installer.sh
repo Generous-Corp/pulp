@@ -117,11 +117,15 @@ fi
 # login password is rejected. Single source of truth — no inline keychain juggling
 # here, and it covers the fresh-machine case (keychain/.p12 not yet imported) too.
 _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ "${PULP_SKIP_SIGNING_PREFLIGHT:-0}" != 1 && -x "$_self_dir/ensure_signing_ready.sh" ]]; then
-  "$_self_dir/ensure_signing_ready.sh" >/dev/null 2>&1 \
-    && echo "[installer] signing keychain ready (pulp ship doctor preflight)" \
-    || echo "[installer] WARN: ensure_signing_ready.sh returned non-zero — signing may prompt; run 'pulp ship doctor'" >&2
+[[ -x "$_self_dir/ensure_signing_ready.sh" ]] || {
+  echo "[installer] ERROR: unattended signing preflight is missing; refusing to invoke codesign" >&2
+  exit 1
+}
+if ! "$_self_dir/ensure_signing_ready.sh" --quiet; then
+  echo "[installer] ERROR: unattended signing preflight failed; refusing to invoke codesign. Run 'pulp ship doctor'." >&2
+  exit 1
 fi
+echo "[installer] signing keychain ready (timestamped pulp ship doctor probe passed)"
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"

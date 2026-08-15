@@ -738,9 +738,10 @@ write_rack_provenance \
 if [[ -f "$HOME/.config/pulp/secrets/keychain.env" ]]; then
     source "$HOME/.config/pulp/secrets/keychain.env"
 fi
-if [[ "${PULP_SKIP_SIGNING_PREFLIGHT:-0}" != 1 ]]; then
-    "$REPO/tools/scripts/ensure_signing_ready.sh" >/dev/null
-fi
+"$REPO/tools/scripts/ensure_signing_ready.sh" --quiet || {
+    echo "ERROR: unattended signing preflight failed; refusing to invoke codesign" >&2
+    exit 1
+}
 : "${PULP_SIGN_IDENTITY_HASH:?set PULP_SIGN_IDENTITY_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 : "${PULP_SIGN_INSTALLER_HASH:?set PULP_SIGN_INSTALLER_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 
