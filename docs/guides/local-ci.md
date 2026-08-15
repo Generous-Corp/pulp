@@ -408,7 +408,7 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.91.3`, which
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.92.1`, which
 provides it, so no separate binary is needed.
 
 ```bash
@@ -601,7 +601,7 @@ capacity is idle.
 
 ### Reconcile `offline_busy` before recovering anything
 
-Shipyard v0.91.3 reports `offline_busy` when GitHub says a self-hosted runner is
+Shipyard v0.92.1 reports `offline_busy` when GitHub says a self-hosted runner is
 both offline and busy. That contradiction is a diagnostic signal, not authority
 to cancel a job or delete a VM. Capture two bounded snapshots separated by the
 configured TartCI stale-observation threshold; do not substitute an arbitrary

@@ -50,9 +50,11 @@
 # Full Shipyard release history lives with the Shipyard release notes. Keep this
 # file focused on the current Pulp pin and Pulp-specific operational reasons.
 #
-# v0.91.3 (current pin) — keeps PR closure queue-aware and fail-closed while
-#   making wait retries bounded and preserving their failure metadata. It also
-#   carries the v0.90.3 local-x64 proof guard and v0.91.0 queue-admission/PR-close
+# v0.92.1 (current pin) — keeps PR closure queue-aware and fail-closed while
+#   materializing required checks that GitHub has not yet exposed on the PR.
+#   That closes the false-green wait seam without treating a missing context as
+#   success. It also carries bounded wait retries, preserved failure metadata,
+#   the v0.90.3 local-x64 proof guard, and v0.91.0 queue-admission/PR-close
 #   hardening. Pinning this fleet-wide matters because an older `shipyard ship`
 #   can otherwise validate correctly but use pre-queue merge semantics, while
 #   newer hosts correctly defer the final mutation to GitHub's protected merge
@@ -123,7 +125,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.91.3"
+version = "v0.92.1"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

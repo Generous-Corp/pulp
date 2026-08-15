@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.91.3`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.92.1`,
 which provides it, so the pinned binary is sufficient. That pin also makes
 formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
@@ -2419,11 +2419,15 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
-#### v0.91.3 is the fleet floor for protected closure
+#### v0.92.1 is the fleet floor for protected closure
 
 Keep the checked-in pin, the post-tag workflow pin, and every installed
-M1/M3/M5 binary on v0.91.3 together. This release line preserves the
-queue-admission and PR-close guards, rejects unproved local x64 targets, and
+M1/M3/M5 binary on v0.92.1 together. This release retains v0.92.0's
+materialization of branch-protected required checks that GitHub has not yet
+exposed on the PR, preventing a false-green wait while a required producer is
+still absent. It also makes local signing unattended for release automation
+and preserves
+the queue-admission and PR-close guards, rejects unproved local x64 targets, and
 bounds retry waits without losing transient failure metadata. The practical
 value is one closure contract everywhere: Shipyard validates exact heads, but
 GitHub's protected merge queue owns the final Pulp mutation. A host on an older
@@ -2437,7 +2441,7 @@ administration used for ephemeral registration). Without that read access it
 cannot distinguish unavailable capacity from an idle or stale registration,
 prove group/label placement, or safely decide whether hosted fallback must
 remain active. This is read-side admission evidence, not permission to bypass
-the merge queue. v0.91.3 surfaces GitHub's contradictory `offline + busy`
+the merge queue. v0.92.1 retains GitHub's contradictory `offline + busy`
 state as `offline_busy`; require the bounded VM/lease/supervisor/job ownership
 audit, but preserve and escalate because current TartCI does not emit a
 machine-checked orphan verdict. The symptom alone never authorizes a
