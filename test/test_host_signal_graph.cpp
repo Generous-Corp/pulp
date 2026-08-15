@@ -5385,6 +5385,63 @@ private:
     PluginInfo info_;
 };
 
+class PreparedEditOwnedBuiltInPlugin final : public PluginSlot {
+public:
+    PreparedEditOwnedBuiltInPlugin(std::atomic<int>& prepare_calls,
+                                   std::atomic<int>& release_calls,
+                                   std::atomic<int>& destroy_calls,
+                                   bool prepare_result = true,
+                                   float level = 1.0f)
+        : prepare_calls_(prepare_calls), release_calls_(release_calls),
+          destroy_calls_(destroy_calls), prepare_result_(prepare_result),
+          level_(level) {
+        info_.name = "PreparedEditOwnedBuiltInPlugin";
+        info_.format = PluginFormat::BuiltIn;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    ~PreparedEditOwnedBuiltInPlugin() override {
+        destroy_calls_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override {
+        prepare_calls_.fetch_add(1, std::memory_order_relaxed);
+        return prepare_result_;
+    }
+    void release() override {
+        release_calls_.fetch_add(1, std::memory_order_relaxed);
+    }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * level_;
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+private:
+    std::atomic<int>& prepare_calls_;
+    std::atomic<int>& release_calls_;
+    std::atomic<int>& destroy_calls_;
+    bool prepare_result_ = true;
+    float level_ = 1.0f;
+    PluginInfo info_;
+};
+
 class PreparedEditDimensionPlugin final : public PluginSlot {
 public:
     PreparedEditDimensionPlugin() {
@@ -5434,6 +5491,255 @@ private:
     PluginInfo info_;
 };
 } // namespace
+
+TEST_CASE("SignalGraph prepared edit keeps owned built-in additions candidate-local until commit",
+          "[host][graph][prepared-edit][plugin][builtin]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepares{0};
+    std::atomic<int> releases{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+
+    auto edit = graph.begin_prepared_topology_edit();
+    const auto input = edit->add_input_node(1, "input");
+    const auto plugin = edit->add_owned_builtin_plugin_node(
+        std::make_unique<PreparedEditOwnedBuiltInPlugin>(prepares, releases, destroys),
+        1, 1, "owned built-in");
+    const auto output = edit->add_output_node(1, "output");
+    REQUIRE(plugin != 0);
+    REQUIRE(edit->connect(input, 0, plugin, 0));
+    REQUIRE(edit->connect(plugin, 0, output, 0));
+    REQUIRE(edit->node(plugin) != nullptr);
+    REQUIRE(edit->node(plugin)->plugin_info.format == PluginFormat::BuiltIn);
+
+    REQUIRE(graph.nodes().empty());
+    REQUIRE(graph.connections().empty());
+    REQUIRE_FALSE(graph.is_prepared());
+    REQUIRE(prepares.load(std::memory_order_relaxed) == 0);
+
+    REQUIRE(edit->prepare(48'000.0, 8) == Result::Prepared);
+    REQUIRE(prepares.load(std::memory_order_relaxed) == 1);
+    REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+    REQUIRE(graph.nodes().empty());
+    REQUIRE(edit->commit() == Result::Committed);
+    REQUIRE(graph.nodes().size() == 3);
+    REQUIRE(graph.node(plugin) != nullptr);
+    REQUIRE(graph.node(plugin)->plugin_info.format == PluginFormat::BuiltIn);
+    REQUIRE(graph.is_prepared());
+
+    std::array<float, 8> source{};
+    source.fill(0.375f);
+    std::array<float, 8> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, 8);
+    REQUIRE(rendered == source);
+
+    edit.reset();
+    graph.release();
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+    graph.clear();
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("SignalGraph prepared edit rolls back a failed owned built-in prepare exactly once",
+          "[host][graph][prepared-edit][plugin][builtin][negative]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepares{0};
+    std::atomic<int> releases{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->add_owned_builtin_plugin_node(
+                std::make_unique<PreparedEditOwnedBuiltInPlugin>(
+                    prepares, releases, destroys, false),
+                1, 1, "failing owned built-in") != 0);
+    REQUIRE(edit->prepare(48'000.0, 8)
+            == Result::ExternalPluginReprepareRequired);
+    REQUIRE(edit->prepare(48'000.0, 8)
+            == Result::ExternalPluginReprepareRequired);
+    REQUIRE(prepares.load(std::memory_order_relaxed) == 1);
+    REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+
+    edit.reset();
+    REQUIRE(graph.nodes().empty());
+    REQUIRE_FALSE(graph.is_prepared());
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("SignalGraph stale prepared edit releases its owned built-in exactly once",
+          "[host][graph][prepared-edit][plugin][builtin][negative]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepares{0};
+    std::atomic<int> releases{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+
+    auto edit = graph.begin_prepared_topology_edit();
+    const auto stale_plugin = edit->add_owned_builtin_plugin_node(
+        std::make_unique<PreparedEditOwnedBuiltInPlugin>(prepares, releases, destroys),
+        1, 1, "stale owned built-in");
+    REQUIRE(stale_plugin != 0);
+    REQUIRE(edit->prepare(48'000.0, 8) == Result::Prepared);
+    REQUIRE(prepares.load(std::memory_order_relaxed) == 1);
+    REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+
+    const auto winner = graph.add_gain_node("newer authoring state");
+    REQUIRE(winner != 0);
+    REQUIRE(edit->commit() == Result::StaleBase);
+    REQUIRE(graph.node(winner) != nullptr);
+    REQUIRE(graph.node(winner)->type == NodeType::Gain);
+    REQUIRE(graph.nodes().size() == 1);
+    REQUIRE(std::none_of(graph.nodes().begin(), graph.nodes().end(),
+                         [](const GraphNode& node) {
+                             return node.type == NodeType::Plugin;
+                         }));
+    REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+
+    edit.reset();
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+    graph.clear();
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+    REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("SignalGraph owned built-in removal and replacement wait for the old execution snapshot",
+          "[host][graph][prepared-edit][plugin][builtin][snapshot]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepares{0};
+    std::atomic<int> releases{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+
+    auto add = graph.begin_prepared_topology_edit();
+    const auto input = add->add_input_node(1, "input");
+    const auto plugin = add->add_owned_builtin_plugin_node(
+        std::make_unique<PreparedEditOwnedBuiltInPlugin>(
+            prepares, releases, destroys, true, 0.25f),
+        1, 1, "owned built-in");
+    const auto output = add->add_output_node(1, "output");
+    REQUIRE(plugin != 0);
+    REQUIRE(add->connect(input, 0, plugin, 0));
+    REQUIRE(add->connect(plugin, 0, output, 0));
+    REQUIRE(add->prepare(48'000.0, 8) == Result::Prepared);
+    REQUIRE(add->commit() == Result::Committed);
+    auto pinned = add->committed_execution_snapshot();
+    REQUIRE(pinned);
+    add.reset();
+
+    SECTION("removal") {
+        auto remove = graph.begin_prepared_topology_edit();
+        REQUIRE(remove->remove_node(plugin));
+        REQUIRE(remove->prepare(48'000.0, 8) == Result::Prepared);
+        REQUIRE(remove->commit() == Result::Committed);
+        remove.reset();
+        REQUIRE(graph.node(plugin) == nullptr);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+
+        pinned = {};
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+    }
+
+    SECTION("replacement") {
+        std::atomic<int> replacement_prepares{0};
+        std::atomic<int> replacement_releases{0};
+        std::atomic<int> replacement_destroys{0};
+        auto replace = graph.begin_prepared_topology_edit();
+        REQUIRE(replace->remove_node(plugin));
+        const auto replacement = replace->add_owned_builtin_plugin_node(
+            std::make_unique<PreparedEditOwnedBuiltInPlugin>(
+                replacement_prepares, replacement_releases, replacement_destroys,
+                true, 0.75f),
+            1, 1, "replacement owned built-in");
+        REQUIRE(replacement != 0);
+        REQUIRE(replace->connect(input, 0, replacement, 0));
+        REQUIRE(replace->connect(replacement, 0, output, 0));
+        REQUIRE(replace->prepare(48'000.0, 8) == Result::Prepared);
+        REQUIRE(replacement_prepares.load(std::memory_order_relaxed) == 1);
+        REQUIRE(replace->commit() == Result::Committed);
+        replace.reset();
+
+        REQUIRE(graph.node(plugin) == nullptr);
+        REQUIRE(graph.node(replacement) != nullptr);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+        REQUIRE(replacement_releases.load(std::memory_order_relaxed) == 0);
+        REQUIRE(replacement_destroys.load(std::memory_order_relaxed) == 0);
+
+        std::array<float, 8> source{};
+        source.fill(0.5f);
+        std::array<float, 8> old_render{};
+        std::array<float, 8> new_render{};
+        const float* source_ptrs[] = {source.data()};
+        float* old_ptrs[] = {old_render.data()};
+        float* new_ptrs[] = {new_render.data()};
+        pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> old_out(old_ptrs, 1, old_render.size());
+        pulp::audio::BufferView<float> new_out(new_ptrs, 1, new_render.size());
+        pinned.process(old_out, in, 8);
+        graph.process(new_out, in, 8);
+        std::array<float, 8> expected_old{};
+        expected_old.fill(0.125f);
+        std::array<float, 8> expected_new{};
+        expected_new.fill(0.375f);
+        REQUIRE(old_render == expected_old);
+        REQUIRE(new_render == expected_new);
+        REQUIRE(old_render != new_render);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 0);
+
+        pinned = {};
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+        REQUIRE(replacement_releases.load(std::memory_order_relaxed) == 0);
+        REQUIRE(replacement_destroys.load(std::memory_order_relaxed) == 0);
+
+        graph.release();
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+        REQUIRE(replacement_releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(replacement_destroys.load(std::memory_order_relaxed) == 0);
+        graph.clear();
+        REQUIRE(replacement_releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(replacement_destroys.load(std::memory_order_relaxed) == 1);
+    }
+}
+
+TEST_CASE("SignalGraph owned built-ins do not relax ordinary baseline plugin removal",
+          "[host][graph][prepared-edit][plugin][builtin][negative]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepares{0};
+    std::atomic<int> releases{0};
+    SignalGraph graph;
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<PreparedEditCountingPlugin>(prepares, &releases),
+        1, 1, "ordinary external plugin");
+    REQUIRE(graph.prepare(48'000.0, 8));
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->remove_node(plugin));
+    REQUIRE(edit->prepare(48'000.0, 8)
+            == Result::BaselinePluginRemovalRequiresRelease);
+    edit.reset();
+    REQUIRE(graph.node(plugin) != nullptr);
+    REQUIRE(graph.is_prepared());
+    REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+
+    graph.release();
+    REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+}
 
 TEST_CASE("SignalGraph prepared edit first prepare failure is a full rollback",
           "[host][graph][prepared-edit][transaction]") {

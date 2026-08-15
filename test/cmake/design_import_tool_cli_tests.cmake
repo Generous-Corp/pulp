@@ -200,6 +200,10 @@ target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
     PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
     PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-import-design-tool PRIVATE
+        PULP_IMPORT_DESIGN_TEST_HAS_SKIA=1)
+endif()
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool

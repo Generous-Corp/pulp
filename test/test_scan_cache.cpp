@@ -543,6 +543,37 @@ TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
     }
 }
 
+TEST_CASE("ScanCache round-trips a pathless BuiltIn entry without filesystem stamps",
+          "[scan_cache][builtin]") {
+    constexpr const char* cache_key = "builtin:pulp.instrument.basic";
+    auto info = sample_info();
+    info.name = "Pulp Basic Instrument";
+    info.path.clear();
+    info.unique_id = "pulp.instrument.basic";
+    info.format = PluginFormat::BuiltIn;
+    info.is_instrument = true;
+    info.is_effect = false;
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    HostScanCache written;
+    written.put(cache_key, info);
+    const auto json = written.to_json();
+    REQUIRE(json.find("\"path\": \"builtin:pulp.instrument.basic\"") !=
+            std::string::npos);
+    REQUIRE(json.find("\"plugin_path\": \"\"") != std::string::npos);
+    REQUIRE(json.find("\"format\": \"builtin\"") != std::string::npos);
+
+    HostScanCache read;
+    REQUIRE(read.from_json(json));
+    const auto& restored = read.entries().at(cache_key).info;
+    REQUIRE(restored.format == PluginFormat::BuiltIn);
+    REQUIRE(restored.unique_id == "pulp.instrument.basic");
+    REQUIRE(restored.path.empty());
+    REQUIRE(restored.num_inputs == 0);
+    REQUIRE(restored.num_outputs == 2);
+}
+
 TEST_CASE("ScanCache round-trips Audio Unit format identifiers",
           "[scan_cache]") {
     HostScanCache a;

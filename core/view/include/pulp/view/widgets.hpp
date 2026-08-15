@@ -840,14 +840,16 @@ public:
     /// core center on the [-135°,+135°] arc — and skips the synthetic notch, so
     /// the moving line rides the disc's baked min/center/max reference ticks.
     void set_captured_indicator(float r_in, float r_out, float width_px,
-                                canvas::Color color) {
+                                canvas::Color color, float phase_rad = 0.0f) {
         ind_r_in_ = r_in; ind_r_out_ = r_out;
         ind_width_ = width_px; ind_color_ = color;
+        ind_phase_rad_ = phase_rad;
         has_captured_indicator_ = true;
     }
     bool has_captured_indicator() const { return has_captured_indicator_; }
     float captured_indicator_r_in() const { return ind_r_in_; }
     float captured_indicator_r_out() const { return ind_r_out_; }
+    float captured_indicator_phase_rad() const { return ind_phase_rad_; }
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
@@ -859,6 +861,7 @@ private:
     float ind_r_in_ = 0.0f;
     float ind_r_out_ = 0.0f;
     float ind_width_ = 0.0f;
+    float ind_phase_rad_ = 0.0f;
     canvas::Color ind_color_ = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
 };
 

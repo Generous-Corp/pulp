@@ -84,6 +84,14 @@ Two halves are required and either alone still ships a dead app:
    `_NSGetExecutablePath` to `Contents`, then `Resources/tools/…`), after the
    Application Support copy so a user-replaceable copy still wins.
 
+Signed installer staging also has a hard precondition: Pulp's unattended
+signing doctor must pass before the first production `codesign`. A missing or
+failed preflight terminates packaging; never skip it or turn it into a warning,
+because login-keychain fallback can open a GUI password prompt and wedge an
+agent/SSH/CI session. The shared doctor owns dedicated-keychain repair, full
+partition authorization, identity-hash selection, and the real timestamped
+probe.
+
 **Test from a clean state.** Move the seeded directory aside before testing, or
 you are exercising the fallback that hides the bug:
 

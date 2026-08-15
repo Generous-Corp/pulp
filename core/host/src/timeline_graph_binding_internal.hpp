@@ -202,8 +202,17 @@ struct detail::TimelineGraphBoundTrack {
     std::unique_ptr<playback::ArrangementNoteRenderer> note_renderer;
 };
 
+namespace detail {
+struct TimelineGraphBoundDevice {
+    timeline::ItemId track_id;
+    timeline::DevicePlacement declaration;
+    NodeId plugin_node = 0;
+};
+} // namespace detail
+
 struct detail::TimelineGraphBindingState {
     std::vector<std::shared_ptr<TimelineGraphBoundTrack>> tracks;
+    std::vector<TimelineGraphBoundDevice> owned_devices;
     std::vector<std::shared_ptr<TimelineGraphAutomationTrack>> automation_tracks;
     TimelineGraphBindingConfig config;
     std::vector<timeline::ItemId> prepared_track_ids;
@@ -241,6 +250,33 @@ reconcile_track_connections(const std::unique_ptr<SignalGraph::PreparedTopologyE
                             const std::shared_ptr<TimelineGraphBoundTrack>& track,
                             const TimelineTrackGraphRoute& route,
                             const TimelineGraphBindingConfig& config);
+
+TimelineGraphAdmission resolve_timeline_device_route(
+    const playback::PlaybackProgram& program, TimelineTrackGraphRoute& route,
+    const std::shared_ptr<TimelineGraphBoundTrack>& track,
+    const std::unique_ptr<SignalGraph::PreparedTopologyEdit>& edit,
+    const TimelineGraphBindingState* previous, TimelineDeviceSlotFactory factory,
+    std::vector<TimelineDeviceGraphRoute>& generated_routes,
+    std::vector<TimelineAutomationRouteMetadata>& metadata, std::vector<NodeId>& claimed_nodes,
+    std::vector<TimelineGraphBoundDevice>& owned_devices);
+
+const timeline::Track* timeline_project_track_for(const playback::PlaybackProgram& program,
+                                                  timeline::ItemId track_id,
+                                                  TimelineGraphAdmission& error) noexcept;
+
+TimelineGraphAdmission
+remove_stale_timeline_devices(const std::unique_ptr<SignalGraph::PreparedTopologyEdit>& edit,
+                              const TimelineGraphBindingState* previous,
+                              std::span<const TimelineGraphBoundDevice> retained);
+
+TimelineGraphAdmission
+validate_owned_timeline_devices(const playback::PlaybackProgram& program,
+                                std::span<const TimelineGraphBoundDevice> devices) noexcept;
+
+TimelineGraphAdmission reconcile_detached_post_device_bypasses(
+    const std::unique_ptr<SignalGraph::PreparedTopologyEdit>& edit,
+    const TimelineGraphBindingState* previous, std::span<const TimelineTrackGraphRoute> ordered,
+    TimelineGraphBindingState& next);
 
 inline TimelineGraphAdmission admit_candidate(const SignalGraph& graph,
                                               std::span<const GraphNode> nodes,

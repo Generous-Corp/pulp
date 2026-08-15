@@ -35,6 +35,9 @@ struct BrowserCaptureIrOptions {
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     std::string source_file;
     bool require_interaction_report = false;
+    /// Optional capture asset used by the runtime underlay while the canonical
+    /// reference remains the untouched browser frame used for A/B scoring.
+    std::string runtime_asset_id;
     /// Draw the panel instead of photographing it: lower every painted node
     /// from the DOM snapshot into a tree that mirrors the DOM, each node
     /// absolutely positioned at Chrome's solved box expressed relative to its

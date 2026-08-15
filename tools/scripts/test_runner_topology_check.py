@@ -630,14 +630,105 @@ OTHER_SUPERVISORS = {
 }
 
 
-def _fixed_supervisor_labels(script: Path) -> list[str]:
-    """The default label set a non-Tart supervisor registers."""
+def _supervisor_label_sets(script: Path) -> list[list[str]]:
+    """The statically declared label sets a non-Tart supervisor registers."""
     text = script.read_text()
-    m = re.search(r'^LABELS="([^"$]+)"', text, re.M)
+    assignments = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        assignment = re.fullmatch(r'LABELS=(.+)', stripped)
+        if assignment:
+            assignments.append(assignment.group(1))
+            continue
+        # Every direct use must be a read expansion. This rejects all other
+        # shell mutation forms (+=, export/readonly/declare, unset, read,
+        # printf -v, array assignment, and direct eval) instead of silently
+        # omitting a runtime registration mode from the topology proof.
+        without_reads = re.sub(r'\$(?:\{LABELS\}|LABELS\b)', "", stripped)
+        assert not re.search(r'\bLABELS\b', without_reads), (
+            f"unmodeled LABELS mutation or use in {script}:{lineno}: {stripped}")
+    assert assignments, f"no LABELS assignment found in {script}"
+    m = re.fullmatch(r'"([^"$]+)"', assignments[0])
     if m is None:
-        m = re.search(r'^LABELS="\$\{[^:}]+:-([^}"]+)\}"', text, re.M)
+        m = re.fullmatch(r'"\$\{[^:}]+:-([^}"]+)\}"', assignments[0])
     assert m, f"no LABELS assignment found in {script}"
-    return [x.strip() for x in m.group(1).split(",") if x.strip()]
+    base = [x.strip() for x in m.group(1).split(",") if x.strip()]
+    label_sets = [base]
+    if len(assignments) > 1:
+        assert len(assignments) == 2, (
+            f"unmodeled LABELS control flow in {script}: {assignments}")
+        append = re.fullmatch(r'"\$\{LABELS\},([^"$]+)"', assignments[1])
+        assert append, (
+            f"unmodeled LABELS mutation in {script}: LABELS={assignments[1]}")
+        group_guard = 'if [ -n "$RUNNER_GROUP_ID" ]; then'
+        guard_start = text.find(group_guard)
+        guard_end = text.find("\nfi", guard_start)
+        append_at = text.find(f"LABELS={assignments[1]}")
+        assert guard_start >= 0 and guard_start < append_at < guard_end, (
+            f"automatic LABELS append escapes nonempty RUNNER_GROUP_ID branch in {script}")
+        suffix = [x.strip() for x in append.group(1).split(",") if x.strip()]
+        label_sets.append(base + suffix)
+    return label_sets
+
+
+class TestSupervisorLabelSetExtraction(unittest.TestCase):
+    def _extract(self, text: str) -> list[list[str]]:
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td) / "supervisor.sh"
+            script.write_text(text)
+            return _supervisor_label_sets(script)
+
+    def test_conditional_append_exposes_both_registration_modes(self):
+        self.assertEqual(
+            self._extract(
+                'LABELS="base,host"\n'
+                'if [ -n "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},auto"\n'
+                'fi\n'
+            ),
+            [["base", "host"], ["base", "host", "auto"]],
+        )
+
+    def test_unrecognized_label_mutation_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS mutation"):
+            self._extract('LABELS="base,host"\nLABELS="$LABELS,auto"\n')
+
+    def test_compound_assignment_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS mutation"):
+            self._extract('LABELS="base,host"\nLABELS+=",auto"\n')
+
+    def test_shell_builtin_mutation_fails_closed(self):
+        for mutation in ('export LABELS="other"', 'unset LABELS',
+                         'printf -v LABELS %s other'):
+            with self.subTest(mutation=mutation):
+                with self.assertRaisesRegex(
+                        AssertionError, "unmodeled LABELS mutation"):
+                    self._extract(f'LABELS="base,host"\n{mutation}\n')
+
+    def test_multiple_appends_fail_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS control flow"):
+            self._extract(
+                'LABELS="base"\n'
+                'if [ -n "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},trusted"\n'
+                '  LABELS="${LABELS},isolated"\n'
+                'fi\n'
+            )
+
+    def test_unconditional_automatic_append_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "escapes nonempty RUNNER_GROUP_ID"):
+            self._extract('LABELS="base"\nLABELS="${LABELS},auto"\n')
+
+    def test_inverted_automatic_append_guard_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "escapes nonempty RUNNER_GROUP_ID"):
+            self._extract(
+                'LABELS="base"\n'
+                'if [ -z "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},auto"\n'
+                'fi\n'
+            )
 
 
 class TestNonLaunchdSupervisorsCanRouteTheirHosts(unittest.TestCase):
@@ -678,13 +769,16 @@ class TestNonLaunchdSupervisorsCanRouteTheirHosts(unittest.TestCase):
             if script is None or not script.is_file():
                 continue  # reported by the test above
             with self.subTest(variable=lane["variable"], supervisor=name):
-                labels = _fixed_supervisor_labels(script)
+                label_sets = _supervisor_label_sets(script)
                 self.assertTrue(
-                    labels_mod.selecting_lanes(labels, self.lanes),
-                    f"{script.name} registers {labels}, which no lane selects")
-                self.assertEqual(
-                    [x.casefold() for x in labels],
-                    [x.casefold() for x in lane["expect"]],
+                    all(labels_mod.selecting_lanes(labels, self.lanes)
+                        for labels in label_sets),
+                    f"{script.name} registers {label_sets}, including a set no lane selects")
+                expected = [x.casefold() for x in lane["expect"]]
+                actual = [[x.casefold() for x in labels] for labels in label_sets]
+                self.assertIn(
+                    expected,
+                    actual,
                     f"{script.name} and {lane['variable']} disagree on labels")
 
 

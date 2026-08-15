@@ -3,6 +3,7 @@
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpTestSuite.cmake)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_rt_contract_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_series_modules.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/waveset_transformer_tests.cmake")
 find_package(Python3 COMPONENTS Interpreter QUIET)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/quality_tests.cmake")
 if(Python3_Interpreter_FOUND)

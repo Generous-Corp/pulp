@@ -335,6 +335,33 @@ Two things that bite when baking analog VCF nodes:
 
 ## Signal graph gotchas
 
+### Timeline-owned built-in devices stay document-authoritative
+
+`PluginFormat::BuiltIn` is the host-only identity for pathless Pulp devices. Its
+wire spelling is `builtin`; Timeline's existing durable `DeviceKind` spelling
+remains `built_in`. The only initial resolver key is
+`pulp.instrument.basic`, with an empty path and an exact 0-input/2-output
+shape. Do not add BuiltIn to external scan paths, bundle suffixes, the isolated
+scanner/worker protocol, or CLI format selection.
+
+Timeline lowering reads the immutable `Project` owner pinned inside the exact
+`PlaybackProgram`; it never consults the latest project store. Resolver-owned
+plugin NodeIds are derived graph state and must not enter Timeline JSON. Add and
+prepare their slots inside `PreparedTopologyEdit`, publish graph plus binding
+atomically, and remove only slots carrying that transaction's private ownership
+marker. Teardown and replacement must let retired execution snapshots drain
+before the slot's balanced release. An unchanged full `DevicePlacement` may
+retain its node; any declaration drift requires a fresh prepare and must not be
+accepted by content-only program adoption.
+
+The initial contract accepts exactly one `PreFader` `EventToAudio` BuiltIn
+placement, not bypassed, exact wet value 1.0, and no state reference. It creates
+one MIDI edge and two stereo audio edges through the track mixer. Unsupported
+positions, slot kinds, namespaces, keys, bypass/wet/state variants, multi-device
+chains, and mixed caller/resolver ownership fail closed with distinct admission
+codes. Keep a factory-failure atomicity test and a deterministic non-silent
+save/reopen render proof beside the legacy caller-owned route controls.
+
 - `SignalGraph` dispatches plugin nodes through the additive
   `PluginSlot::process(format::ProcessBuffers&, ...)` overload. The default
   implementation projects the active main input/output bus back to the legacy
@@ -945,16 +972,23 @@ Two things that bite when baking analog VCF nodes:
   state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType`;
   that belongs to the `pulp_node_v1` ABI.
 - **Signed node-pack loader (`core/host/node_pack.{hpp,cpp}`).**
-  `load_node_pack(dir, manifest, trust)` loads a precompiled `pulp_node_v1` node
-  pack (a `.dylib`/`.so`/`.dll` exporting `pulp_node_v1_entry` + a JSON manifest).
-  It verifies trust BEFORE any `dlopen`: the signer key must be in the
+  `load_node_pack(dir, manifest, trust)` derives its platform from the build
+  target and treats the pack as runtime-downloaded; pass the four-argument
+  overload with an explicit `NodePackHostPolicy` when the origin is known to be
+  app-bundled. A pack is a precompiled `pulp_node_v1` dynamic library exporting
+  `pulp_node_v1_entry` plus a JSON manifest. The generated-device policy runs
+  before trust verification or any binary file access: native packs are allowed
+  on desktop, allowed on Android only when `origin == AppBundled`, and denied on
+  iOS/web. Thus the three-argument overload fails closed for Android native
+  packs instead of treating downloaded code as bundled. After policy admission,
+  the signer key must be in the
   `NodePackTrust` set, the Ed25519 signature over `node_pack_signed_message()`
   (pack_id + abi_major + binary SHA-256 + declared nodes/resources/requirements)
   must be authentic, the on-disk binary's SHA-256 must match the signed hash,
   and the entry's `abi_major` must match — any failure returns a
   `NodePackError` and loads nothing. Revocation = drop a key from the trust set.
-  Desktop + Android only; `pulp-host` (and this loader) is compiled out on iOS,
-  where native components are static-bundled + signed with the app. The crypto
+  `pulp-host` (and this loader) is compiled out on iOS, where native components
+  are static-bundled + signed with the app. The crypto
   comes from `pulp::runtime` (`ed25519_verify`, `sha256_hex`); OS
   codesign/notarization is a separate, additional distribution step on top of
   the manifest signature. Registry/package discovery metadata still needs its

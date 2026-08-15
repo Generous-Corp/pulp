@@ -47,7 +47,7 @@ class CoverageWorkflowTests(unittest.TestCase):
     def test_native_upload_requires_semantically_verified_report(self) -> None:
         self.assertIn("id: native_cobertura", self.coverage)
         self.assertIn(
-            "if: always() && steps.coverage-suite.outputs.budget_hit != 'true'",
+            "if: always() && (steps.coverage-suite.outputs.budget_hit != 'true' || matrix.os != 'windows')",
             self.coverage,
         )
         self.assertNotIn("steps.coverage-suite.outcome", self.coverage)
@@ -58,6 +58,18 @@ class CoverageWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "uses: ./.github/actions/upload-codecov-report", self.coverage
+        )
+
+    def test_required_native_lanes_skip_slow_proofs_and_fail_on_budget_miss(self) -> None:
+        self.assertIn("scripts/run_coverage.sh owns the bounded CTest policy", self.coverage)
+        self.assertNotIn("PULP_COVERAGE_CTEST_ARGS:", self.coverage)
+        self.assertIn(
+            "receipt-authoritative native lanes",
+            self.coverage,
+        )
+        self.assertNotIn(
+            "marking this leg as a non-fatal skip",
+            self.coverage,
         )
 
     def test_native_budget_terminates_the_full_process_tree(self) -> None:

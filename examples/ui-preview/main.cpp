@@ -358,6 +358,10 @@ int run_benchmark(const BenchmarkConfig& cfg) {
             if (phase1 > two_pi) phase1 -= two_pi;
         }
         bridge.process(channels, /*num_channels=*/2, kBlockSize);
+        // poll() is the UI-owned FFT/waveform consumer. Keeping it inside the
+        // measured frame makes this benchmark cover the real visualization
+        // pipeline rather than only its audio-thread capture half.
+        (void)bridge.poll();
 
         const double frame_dt = pulp::render::bench::now_us() - frame_t0;
         counters.total_frame_total_us.fetch_add(

@@ -320,11 +320,13 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
         self.assertIn(
             "tools/cmake/PulpInstallRules.cmake", sdk["trigger_paths"]
         )
+        self.assertIn("tools/cmake/PulpAuv3.cmake", sdk["trigger_paths"])
         self.assertIn("inspect/include/**", sdk["public_api_paths"])
         self.assertIn("inspect/CMakeLists.txt", sdk["public_api_paths"])
         self.assertIn(
             "tools/cmake/PulpInstallRules.cmake", sdk["public_api_paths"]
         )
+        self.assertIn("tools/cmake/PulpAuv3.cmake", sdk["public_api_paths"])
         self.assertIn("inspect/src/**", sdk["internal_only_paths"])
 
         surface = next(s for s in vbc.load_config(cfg_path).surfaces
@@ -338,6 +340,7 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "inspect/src/session.cpp": "patch",
                 "inspect/CMakeLists.txt": "minor",
                 "tools/cmake/PulpInstallRules.cmake": "minor",
+                "tools/cmake/PulpAuv3.cmake": "minor",
             }
             for path, expected in expected_levels.items():
                 with self.subTest(path=path):
@@ -356,6 +359,41 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
             "tools/scripts/release_product_matrix.json",
             cfg["surfaces"]["sdk"]["trigger_paths"],
         )
+
+    def test_sdk_provenance_contract_is_an_sdk_release_surface(self) -> None:
+        # The CMake guard is installed in every SDK, while the Python helper
+        # authors the release provenance marker. Changes to either must be
+        # assigned to an SDK release instead of disappearing as tooling-only.
+        vbc = self._import_gate_module("version_bump_check")
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+        sdk = cfg["surfaces"]["sdk"]
+
+        self.assertIn(
+            "tools/cmake/PulpSdkProvenance.cmake", sdk["trigger_paths"]
+        )
+        self.assertIn("tools/scripts/sdk_provenance.py", sdk["trigger_paths"])
+        self.assertIn(
+            "tools/cmake/PulpSdkProvenance.cmake", sdk["public_api_paths"]
+        )
+
+        surface = next(s for s in vbc.load_config(cfg_path).surfaces
+                       if s.name == "sdk")
+        with mock.patch.object(
+            vbc, "git_diff_ignore_whitespace_nonempty", return_value=True
+        ):
+            expected_levels = {
+                "tools/cmake/PulpSdkProvenance.cmake": "minor",
+                "tools/scripts/sdk_provenance.py": "patch",
+            }
+            for path, expected in expected_levels.items():
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        vbc.heuristic_for_surface(
+                            surface, [path], "base", "head"
+                        ),
+                        expected,
+                    )
 
     def test_rack_toolchain_is_an_sdk_release_surface(self) -> None:
         # Forge packages these tools from the source commit recorded by its

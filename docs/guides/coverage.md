@@ -229,6 +229,7 @@ Optional flags:
 scripts/run_coverage.sh --jobs 16                 # parallelism
 scripts/run_coverage.sh --jobs 2 --test-jobs 8    # low-link-memory runner
 scripts/run_coverage.sh --tests '^pulp-test-audio' # regex filter
+scripts/run_coverage.sh --include-slow-tests       # include soak/config proofs
 python3 tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_resolve_runs_on.py'
 python3 tools/scripts/run_python_coverage.py \
   --pattern 'tools/scripts/test_resolve_runs_on.py' \
@@ -607,6 +608,16 @@ number) but the silent-skip is closed.
 The native coverage build explicitly keeps `PULP_BUILD_EXAMPLES=ON`: although
 example source is excluded from the report, example-owned tests exercise core
 libraries and template/header paths that must remain in the measured inventory.
+The shared coverage test policy excludes `validation`, `slow`, `performance`,
+`bench`, and `quality-lab` CTest labels by default for both
+`scripts/run_coverage.sh` and the local pre-push diff-coverage hook, including
+on SSH/self-hosted M1/M3 callers. Those long-running soak/configuration proofs remain
+enforced by the primary build matrix; repeating them under instrumentation was
+consuming the report/upload window without materially expanding line coverage.
+Use `--include-slow-tests` when intentionally collecting a full local suite.
+Linux and macOS are receipt-authoritative: if either hits the internal budget
+and produces no Cobertura XML, the workflow fails rather than reporting green
+without updating Codecov. Windows coverage remains advisory.
 On disposable GitHub-hosted macOS only, the workflow removes inactive Xcode
 bundles, requires at least 10 GiB free, and limits the instrumented build to two
 jobs to control linker peak space.

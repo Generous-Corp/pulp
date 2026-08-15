@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary", "tests"],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["fixed", "needs_human", "no_change"]
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 1200},
+    "tests": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+    }
+  }
+}

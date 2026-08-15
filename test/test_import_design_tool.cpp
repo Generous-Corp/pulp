@@ -3353,3 +3353,36 @@ TEST_CASE("pulp-import-design --fail-below requires --reference to compare again
     CHECK(r.exit_code == 2);
     CHECK(r.stderr_output.find("--fail-below requires --reference") != std::string::npos);
 }
+
+TEST_CASE("generic browser HTML supplies the reference for --fail-below",
+          "[import][validate][fail-below][browser]") {
+    // The source document itself is the reference for runnable HTML. This is
+    // the contract Forge relies on for agent-authored styling: a caller must
+    // not have to capture a second, unrelated PNG just to turn the comparison
+    // into an enforcement gate.
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+#ifndef PULP_IMPORT_DESIGN_TEST_HAS_SKIA
+    SKIP("Skia image compositing is unavailable in this build");
+#else
+
+    TempDir tmp("pulp-import-design-browser-fail-below");
+    const auto input = tmp.path / "page.html";
+    write_text(input, R"HTML(<!DOCTYPE html><html><head><style>
+      html,body{margin:0;background:#112233}
+      .panel{width:320px;height:160px;box-sizing:border-box;padding:24px;
+             border:3px solid #e8b44c;border-radius:18px;background:linear-gradient(135deg,#27384b,#526f82);color:#fff}
+    </style></head><body><div class="panel">SOURCE-OWNED PANEL</div></body></html>)HTML");
+    const auto output = tmp.path / "design.json";
+
+    const auto r = run_import_design({"--from", "html", "--file", input.string(),
+                                      "--emit", "ir-json", "--output", output.string(),
+                                      "--screenshot-backend", "skia", "--strict-fidelity",
+                                      "--fail-below", "85"});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << "\n" << r.stderr_output);
+    CHECK(r.exit_code == 0);
+    CHECK(fs::exists(output));
+    CHECK(r.stderr_output.find("--fail-below requires --reference") ==
+          std::string::npos);
+#endif
+}
