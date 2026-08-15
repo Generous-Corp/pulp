@@ -286,6 +286,14 @@ repository = "Generous-Corp/pulp"
 [merge]
 require_platforms = ["macos", "linux", "windows"]
 
+# On protected main, make PR creation and durable steward ownership one
+# operation. Shipyard reads this policy from origin/main rather than the PR
+# branch, writes an exact-head server receipt, revalidates the open PR/head,
+# and only then attaches shipyard:managed. The submitting agent may exit as
+# soon as `shipyard pr` has completed this handoff.
+[merge_steward]
+auto_handoff = true
+
 # ── Governance (required-check contract) ───────────────────────────────────
 # The GitHub checks that must be green before `main` accepts a merge. This
 # mirrors the LIVE branch-protection ruleset, NOT the full ship platform set:
