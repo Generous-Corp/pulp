@@ -28,6 +28,23 @@ if(_PULP_NODE_FOR_TESTS)
          ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.test.mjs)
     file(GLOB _PULP_MATERIALIZED_RUNTIME_NODE_TESTS CONFIGURE_DEPENDS
          ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/*.test.mjs)
+
+    # The real-browser cases are intentionally slow and serial within their
+    # file. Keeping them in the unit aggregate made one growing integration
+    # file consume the aggregate's entire timeout before later unit files ran.
+    set(_PULP_BROWSER_CAPTURE_INTEGRATION_TEST
+        ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/capture.integration.test.mjs)
+    list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
+         ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
+
+    # Canonicalization invokes esbuild. The required Linux lane installs this
+    # directory's locked dependencies; source-only/offline configurations keep
+    # the dependency-free suite available without pretending esbuild exists.
+    set(_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST
+        ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs)
+    list(REMOVE_ITEM _PULP_MATERIALIZED_RUNTIME_NODE_TESTS
+         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST})
+
     add_test(NAME pulp-browser-capture-node-unit
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_NODE_TESTS}
@@ -35,6 +52,22 @@ if(_PULP_NODE_FOR_TESTS)
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
         TIMEOUT 180
         LABELS "parser-import;browser-capture;node")
+
+    add_test(NAME pulp-browser-capture-node-integration
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
+    set_tests_properties(pulp-browser-capture-node-integration PROPERTIES
+        TIMEOUT 600
+        LABELS "parser-import;browser-capture;node")
+
+    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json")
+        add_test(NAME pulp-materialized-runtime-node-dependencies
+                 COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST})
+        set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
+            TIMEOUT 60
+            LABELS "parser-import;browser-capture;node")
+    endif()
 endif()
 
 # Pure capture-envelope lowering and HTML-shape dispatch. These stay separate

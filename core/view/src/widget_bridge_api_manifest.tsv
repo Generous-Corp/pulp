@@ -134,6 +134,7 @@ createCanvas	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 setLabel	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setAnchor	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setVisibleAtAnchor	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
+bindCanvasBehaviorAt	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setSource	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setWidgetStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
@@ -149,6 +150,7 @@ setLineHeight	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setTextAlign	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setMultiLine	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setCapturedLineBoxes	typography	function	core/view/src/widget_bridge/typography_api.cpp
+clearCapturedLineBoxes	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setFontSize	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setProgress	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setMeterLevel	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp

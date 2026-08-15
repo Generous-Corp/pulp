@@ -1155,9 +1155,10 @@ TEST_CASE("RangeSlider renders track + fill + handle",
     RecordingCanvas canvas;
     rs.paint(canvas);
 
-    // Track + active fill = 2 rounded rects, handle = 1 circle.
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    // Track + active fill + pill thumb = 3 rounded rects. Chromium's macOS
+    // range thumb is not circular.
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 0);
 }
 
 TEST_CASE("RangeSlider vertical paint draws lower fill and inverted handle",
@@ -1172,7 +1173,7 @@ TEST_CASE("RangeSlider vertical paint draws lower fill and inverted handle",
     rs.paint(canvas);
 
     auto rects = commands_of(canvas, DrawCommand::Type::fill_rounded_rect);
-    REQUIRE(rects.size() == 2);
+    REQUIRE(rects.size() == 3);
 
     // Track is centered horizontally and spans the full vertical bounds.
     REQUIRE_THAT(rects[0].f[0], WithinAbs(9.0, 0.001));
@@ -1186,11 +1187,11 @@ TEST_CASE("RangeSlider vertical paint draws lower fill and inverted handle",
     REQUIRE_THAT(rects[1].f[2], WithinAbs(6.0, 0.001));
     REQUIRE_THAT(rects[1].f[3], WithinAbs(50.0, 0.001));
 
-    auto handles = commands_of(canvas, DrawCommand::Type::fill_circle);
-    REQUIRE(handles.size() == 1);
-    REQUIRE_THAT(handles.front().f[0], WithinAbs(12.0, 0.001));
-    REQUIRE_THAT(handles.front().f[1], WithinAbs(146.0, 0.001));
-    REQUIRE_THAT(handles.front().f[2], WithinAbs(8.0, 0.001));
+    // The final rounded rect is the vertical 16x24 pill thumb.
+    REQUIRE_THAT(rects[2].f[0], WithinAbs(4.0, 0.001));
+    REQUIRE_THAT(rects[2].f[1], WithinAbs(132.0, 0.001));
+    REQUIRE_THAT(rects[2].f[2], WithinAbs(16.0, 0.001));
+    REQUIRE_THAT(rects[2].f[3], WithinAbs(24.0, 0.001));
 }
 
 TEST_CASE("RangeSlider at minimum draws track but skips empty fill",
@@ -1202,10 +1203,10 @@ TEST_CASE("RangeSlider at minimum draws track but skips empty fill",
     RecordingCanvas canvas;
     rs.paint(canvas);
 
-    // Only the background track rounded rect — fill is zero-width and
-    // skipped. Handle still renders.
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    // The active fill is zero-width and skipped; the track and pill thumb
+    // remain.
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 0);
 }
 
 TEST_CASE("RangeSlider accent color overrides theme fill",

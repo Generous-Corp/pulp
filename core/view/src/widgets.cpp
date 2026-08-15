@@ -1182,7 +1182,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     const bool active = enabled();
     auto fill_color  = active && has_accent_color_ ? accent_color_ : theme_fill;
     auto thumb_color = active && has_accent_color_
-        ? canvas::Color::rgba8(248, 248, 248)
+        ? canvas::Color::rgba8(248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
         : theme_thumb;
 
     // Track thickness — typical HTML range visuals sit in 4..6px.
