@@ -487,9 +487,13 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   right after `find_project_root()`.
 - `pulp ship doctor` shells out to `tools/scripts/ensure_signing_ready.sh` (the
   canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
-  thin pass-through, and `ship sign` invokes it as a **best-effort quiet
-  preflight** (`|| true`) so a doctor failure never masks the real sign error.
-  Keep secrets in `~/.config/pulp/secrets/`, never the repo.
+  thin pass-through, and macOS `ship sign` invokes it as a **mandatory quiet
+  preflight**. A doctor failure must return before any production `codesign`;
+  never append `|| true`, warn-and-continue, or accept a login-keychain
+  identity as ready. The doctor requires full partition authorization and a
+  real timestamped probe against the dedicated keychain. Android signing stays
+  outside this macOS preflight. Keep secrets in `~/.config/pulp/secrets/`, never
+  the repo.
 
 ### Rust CLI cutover path convention
 

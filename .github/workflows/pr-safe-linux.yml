@@ -52,7 +52,7 @@ jobs:
           LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
           ROUTE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
           ROUTE_KIND: ${{ inputs.route_kind }}
-          TRUSTED_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          TRUSTED_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           TRUSTED_LEASE_UNTIL: ${{ vars.PULP_LOCAL_LINUX_LEASE_UNTIL || '' }}
         run: |
           set -euo pipefail

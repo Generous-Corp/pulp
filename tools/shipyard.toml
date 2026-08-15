@@ -56,9 +56,30 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.88.3 (current pin) — keeps v0.88.0's exact-head steward handoff and adds
-#   terminal-safe rescue replacement, auditable manual-cancel provenance, and
-#   process-tree termination when a running worker observes durable cancellation.
+# v0.91.1 (current pin) — keeps v0.90.2's atomic PR handoff and adds bounded
+#   in-process recovery for transient GitHub token-helper/network preparation
+#   failures in `shipyard wait`. A brief App-token acquisition outage no longer
+#   drops a long-lived landing monitor; permanent auth/configuration failures
+#   still fail immediately and the original overall timeout remains binding.
+#
+# v0.90.2 (earlier pin) — keeps v0.89.0's unmanaged-backlog fence and makes
+#   PR submission ownership atomic: when protected main enables
+#   `[merge_steward].auto_handoff`, `shipyard pr` writes the exact-head server
+#   receipt and managed label immediately after PR creation and before its
+#   validation wait can outlive the submitting agent. A PR branch cannot enable
+#   that project default for itself. It also fixes deterministic
+#   `shipyard wait pr` observation against GitHub's supported PR JSON fields,
+#   with explicit required-check hydration and fail-closed unknown scope.
+#
+# v0.89.0 (earlier pin) — keeps v0.88.4's durable retry fence and adds the
+#   explanatory `shipyard:unmanaged` label in apply mode without adopting,
+#   rerunning, cancelling, or queueing an unmanaged PR. A later exact-head
+#   handoff clears that label while restoring `shipyard:managed` ownership.
+#
+# v0.88.4 (earlier pin) — keeps v0.88.3's terminal-safe rescue replacement,
+#   cancellation provenance, and process-tree termination, then also fences the
+#   steward's one bounded rerun with GitHub's durable run-attempt counter so a
+#   lost cache cannot reset retry allowance.
 #
 # v0.88.0 (earlier pin) — adds exact-head steward handoff receipts, explicit
 #   managed-PR ownership, repository-wide unmanaged discovery, and deduplicated
@@ -112,7 +133,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.88.3"
+version = "v0.91.1"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

@@ -8,6 +8,40 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v08061"></a>
+## [0.806.1] - 2026-08-14
+
+- release/version bump ([#7504](https://github.com/Generous-Corp/pulp/pull/7504))
+- governance/vellum acceptance refresh successor 20260813 ([#7474](https://github.com/Generous-Corp/pulp/pull/7474))
+- fix/forge hosted rack acceptance 20260812 ([#7436](https://github.com/Generous-Corp/pulp/pull/7436))
+- fix/rack proof plugin layout 20260814 ([#7499](https://github.com/Generous-Corp/pulp/pull/7499))
+- fix/protected linux interface bridge 20260814 ([#7506](https://github.com/Generous-Corp/pulp/pull/7506))
+- test/phase1 standalone partitions 20260810 ([#7382](https://github.com/Generous-Corp/pulp/pull/7382))
+- test/phase1 pattern switch 20260810 ([#7383](https://github.com/Generous-Corp/pulp/pull/7383))
+- test/audio source player adopt 20260811 ([#7445](https://github.com/Generous-Corp/pulp/pull/7445))
+- release/post tag sync v0.804.0 2e13c84b0bad ([#7480](https://github.com/Generous-Corp/pulp/pull/7480))
+- feature/p0 4 ios compile gate 20260813 ([#7466](https://github.com/Generous-Corp/pulp/pull/7466))
+
+<a id="v08060"></a>
+## [0.806.0] - 2026-08-14
+
+- release/version bump ([#7492](https://github.com/Generous-Corp/pulp/pull/7492))
+- integration/loudness layout hardening land 20260809 ([#7312](https://github.com/Generous-Corp/pulp/pull/7312))
+- refactor/p0 3b timeline binding split 20260813 ([#7472](https://github.com/Generous-Corp/pulp/pull/7472))
+- feature/p2 1c linux timing publish 20260813 ([#7491](https://github.com/Generous-Corp/pulp/pull/7491))
+- feat/local linux routing 20260813 ([#7483](https://github.com/Generous-Corp/pulp/pull/7483))
+- feature/rack intent context 20260813 ([#7486](https://github.com/Generous-Corp/pulp/pull/7486))
+- feature/timeline plugin continuous 20260813 ([#7487](https://github.com/Generous-Corp/pulp/pull/7487))
+
+<a id="v08050"></a>
+## [0.805.0] - 2026-08-13
+
+- release/version bump ([#7484](https://github.com/Generous-Corp/pulp/pull/7484))
+- agent/bootstrap pr safe linux main ([#7489](https://github.com/Generous-Corp/pulp/pull/7489))
+- feature/p1 9 wasm determinism 20260813 ([#7444](https://github.com/Generous-Corp/pulp/pull/7444))
+- feature/p1 4 continuous gesture 20260813 ([#7475](https://github.com/Generous-Corp/pulp/pull/7475))
+- refresh/pr7446 f856cbf 20260813 ([#7471](https://github.com/Generous-Corp/pulp/pull/7471))
+
 <a id="v08040"></a>
 ## [0.804.0] - 2026-08-13
 
@@ -7745,6 +7779,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.806.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.806.1
+[0.806.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.806.0
+[0.805.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.805.0
 [0.804.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.804.0
 [0.803.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.803.1
 [0.803.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.803.0

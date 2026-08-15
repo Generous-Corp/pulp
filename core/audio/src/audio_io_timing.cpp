@@ -4,14 +4,14 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
 #include "../platform/linux/alsa_device.hpp"
 #ifdef PULP_HAS_JACK
 #include "../platform/linux/jack_device.hpp"
 #endif
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 namespace pulp::audio::linux_platform::detail {
 
 std::uint64_t next_linux_audio_route_instance_token() noexcept {
@@ -32,7 +32,7 @@ std::uint64_t next_linux_audio_route_instance_token() noexcept {
 
 namespace pulp::audio {
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 std::optional<AudioIoTiming> query_audio_io_timing(
     const AudioDevice& device) noexcept {
     if (const auto* alsa =

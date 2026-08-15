@@ -441,7 +441,9 @@ pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft LIBRARIES pulp::signal)
 # Visualization bridge and widget tests
-pulp_add_test_suite(pulp-test-visualization LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-visualization
+    SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::view)
 
 # Clipboard tests
 add_executable(pulp-test-clipboard test_clipboard.cpp)

@@ -288,6 +288,7 @@ struct SyntheticSpectrumSource {
     }
 
     [[nodiscard]] choc::value::Value read_frame() {
+        (void)bridge.poll();
         const auto& spectrum = bridge.read_spectrum();
         std::array<float, kBars> bars{};
         float peak = 0.0f;

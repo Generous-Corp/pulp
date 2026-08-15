@@ -232,9 +232,13 @@ jobs:
         # stalling the matrix. Instrumentation already slows tests 5-10×;
         # anything that can't complete in 2 minutes under ASan is a
         # flake or a real hang worth separate investigation (#412).
-        # Skip the iOS AUv3 configure smoke here: the full .appex path is
+        # Skip the iOS AUv3 configure/build smokes here: the full .appex path is
         # already covered by regular Build/Test, and sanitizer builds exposed
         # a platform packaging assertion unrelated to memory safety (#3113).
+        # The FDN stability certification renders minutes of offline audio and
+        # exceeds its 900s suite budget at ASan's Debug/O0 speed; the remaining
+        # FDN cases retain sanitizer coverage and regular CI runs this exact
+        # certification in an optimized build.
         # Skip the WebSocket 16-bit payload subprocess under ASan until its
         # sanitizer-only abort is isolated; non-sanitized Build/Test keeps the
         # protocol coverage active (#3113). The teardown/free-under-callback
@@ -246,7 +250,7 @@ jobs:
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message'
+            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
 
   tsan:
     needs: resolve-runners
@@ -345,6 +349,8 @@ jobs:
         # (#3113); regular Build/Test still covers that path. Skip the
         # MountedVolumeListChangeDetector long-poll wake test under UBSan
         # only; it exceeded the sanitizer timeout while passing regular CI.
+        # The iOS HostApp link smoke is the build half of the excluded AUv3
+        # packaging path and likewise remains covered by regular Build/Test.
         # ConnectedChildProcess is process/IPC timing-sensitive under sanitizer
         # instrumentation and remains covered by the regular Build/Test lane.
         run: |
@@ -352,7 +358,7 @@ jobs:
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
+            --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
 
   rtsan:
     needs: resolve-runners

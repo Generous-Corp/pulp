@@ -647,6 +647,40 @@ automatic PR or merge-group routing. Until that exists, do not add another
 private pool to automatic `pull_request` routing. In particular, the Mac Pro
 Linux pool and example-validation advisory macOS selector remain
 `workflow_dispatch`-only.
+For a future automatic Mac Pro pool, use the supervisor's distinct
+`pulp-auto-linux-x64` label only after its live organization group verifier
+passes. Automatic clones also require an enabled Proxmox firewall and a per-VM
+IP/ARP source filter plus an egress policy that permits DNS to the LAN gateway
+but denies private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
+destinations. Policy write, compile, and active-state failures must stop the VM
+before registration.
+The automatic selector must require all six labels exactly:
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`.
+GitHub matches requested labels as a subset, so the older five-label selector
+does not exclude repository-scoped runners. Keep that dispatch/release selector
+in `PULP_LOCAL_LINUX_RUNS_ON_JSON`; use the six-label
+`PULP_AUTO_LINUX_RUNS_ON_JSON` only in workflows admitted by the restricted
+group. `build.yml` must fail closed to hosted Linux when the automatic selector
+omits the automatic-only label.
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+Use a separate organization-capable controller token for organization runner
+group, registration, inventory, and deletion APIs; the repository runner token
+is not that credential.
+Configure group membership per systemd slot with
+`/etc/pulp/linux-runner-group-<slot>.env`, never a shared pool environment.
+Reserve at least one repository-scoped slot for release and operator workflows
+that the restricted group does not admit. Serialize VM destruction and firewall
+policy removal under the same VMID lock so cleanup cannot delete a successor
+clone's policy after id reuse.
+A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
+GitHub cannot retarget a queued job, and the required `macos` alias currently
+waits for the whole build matrix. Keep PR and merge-group Linux hosted until
+that dependency is split and an external health controller can unset the
+selector before dispatch; never route `pull_request_target` or secret-bearing
+work to the generic pool.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
@@ -2660,13 +2694,14 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### Central merge steward pilot (Shipyard v0.88.0+)
+### Central merge steward (Shipyard v0.88.4+)
 
 `.github/workflows/shipyard-merge-steward.yml` is the single logical
-repository-wide PR landing controller. The first rollout is intentionally
-`workflow_dispatch`-only. It runs on GitHub-hosted Ubuntu so all three Macs may
-be offline, serializes mutations with one repository-scoped concurrency group,
-restores a small bounded-retry ledger, and configures its ephemeral
+repository-wide PR landing controller. The proof stage is manual-only and
+dry-run by default; a later gate enables ten-minute scheduled apply. It runs on GitHub-hosted Ubuntu so
+all three Macs may be offline, serializes mutations with one repository-scoped
+concurrency group, restores a small bounded-retry cache, uses GitHub's durable
+run-attempt counter to prevent retry-budget reset after cache loss, and configures its ephemeral
 machine-global authority as `github-actions` before invoking
 `shipyard runner steward`.
 
@@ -2686,15 +2721,54 @@ use no model. A code/test/conflict blocker receives one deduplicated
 `shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
 the recovery dispatcher is a separate exception path.
 
+`shipyard pr` does **not** imply this durable controller handoff. After the PR
+exists and its remote head is final, the submitting agent must run:
+
+```bash
+shipyard runner steward-handoff \
+  --repo Generous-Corp/pulp \
+  --pr "$PR_NUMBER" \
+  --head "$EXACT_REMOTE_HEAD" \
+  --workstream-id "$WORKSTREAM_ID" \
+  --context-url "$DURABLE_CONTEXT_URL" \
+  --apply --json
+```
+
+Then re-read GitHub and verify that the same head has a successful
+`shipyard/steward-handoff` commit status. The managed label by itself is not a
+receipt and is not head-specific. For a small change without a Linear item,
+use a stable PR-scoped workstream ID such as `pulp-pr-7507` and the PR URL as
+the durable context. An agent may stop watching only after this server-owned
+receipt exists; local Shipyard state is never sufficient for cross-machine
+continuation.
+
+Each tick also reconciles one labeled GitHub issue containing every current PR
+exception and control-plane error. The issue is updated in place, closes at
+zero exceptions, and reopens on recurrence. This is the durable, model-free
+operator outbox; Actions artifacts remain bounded evidence rather than the only
+copy of work that needs attention.
+
 Repository automation must never create an unlabeled PR. In particular,
 `version_at_land.py --route pr` creates each `release/version-bump` PR with the
 `automation` label in the same `gh pr create` transaction; a later label repair
 is not an acceptable provenance window.
 
-Do not add the schedule until the manual canary proves all of these on live
-PRs: unmanaged negative control untouched, exact-head managed handoff,
-single recovery signal across repeated ticks, signal clearing on a corrected
-new head, and native merge-queue landing without an agent wait loop.
+Do not add a second scheduled or per-Mac mutating controller. M1, M3, and M5 may
+serve as fenced recovery workers only after disposable-runner proof; they do
+not independently poll or mutate the merge queue.
+
+Enable the ten-minute schedule only after live canaries prove an unmanaged
+negative control, exact-head handoff, native queue landing without an agent,
+one deduplicated recovery signal, and clearing that signal on a corrected head.
+
+`.github/workflows/shipyard-recovery-worker-canary.yml` is the manual, read-only
+precondition for recovery workers. Its one job requires the unique
+`shipyard-recovery-canary-m5-20260814` label in addition to the disposable VM
+labels, revalidates the open PR's exact head and a positive assignment epoch,
+and launches no model. Serve it only with a one-shot Tart JIT runner carrying
+that exact label. Do not generalize the label, add a persistent service, inject
+Subrouter credentials, or enable M3/M5/M1 failover until this proof passes and
+the runner is destroyed.
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
@@ -2796,16 +2870,17 @@ shipyard run --resume-from build
 ### Linux self-hosted routing (opt-in) and Windows x64 authority
 
 `build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
-configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
-the current event. A `workflow_dispatch` input has highest precedence; without
-one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
-merge-group, and push events deliberately ignore the configured private selector
-and use the provider fallback (GitHub-hosted by default) until the external
-runner-group boundary above exists.
+configured selector and the selector authorized for the current event. A
+`workflow_dispatch` input has highest precedence, then the five-label
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` operator selector. Protected pull-request and
+merge-group events use the separate six-label `PULP_AUTO_LINUX_RUNS_ON_JSON`
+only through the restricted runner group; an unset or invalid automatic
+selector falls back to GitHub-hosted Linux.
 
-The Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
-and is served by the Proxmox ephemeral pool described in
+The automatic Mac Pro selector is
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`;
+the dispatch/release selector omits the final automatic-only label. Both are
+served by the Proxmox ephemeral pool described in
 `docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
 `explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
 the displayed Linux provider from the selector that actually resolved. A

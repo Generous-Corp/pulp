@@ -12,6 +12,7 @@ import sys
 
 TRUSTED_WORKFLOWS = (
     ".github/workflows/build.yml",
+    ".github/workflows/pr-safe-linux.yml",
     ".github/workflows/vellum-freeze-check.yml",
     ".github/workflows/version-skill-check.yml",
 )

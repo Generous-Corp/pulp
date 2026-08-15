@@ -163,6 +163,13 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 
 `.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge. Its `concurrency` uses **`cancel-in-progress: false`** (2026-07-21): because it posts the *required* `Enforce version & skill sync` check, cancelling an in-flight run under a churning main would leave that required check stuck at `cancelled` (never `success`), silently blocking merge. Do not flip a required-check gate back to `cancel-in-progress: true`.
 
+Same-repository PR and merge-group runs select the restricted organization
+Linux pool through `PULP_AUTO_LINUX_RUNS_ON_JSON`; fork PRs and an unset selector
+fall back to hosted Linux. Only trusted manual dispatch may use the separate
+repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
+distinct prevents automatic branch content from matching the less-isolated
+repository runner through GitHub's subset-based label selection.
+
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
 
@@ -440,7 +447,7 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.88.0 — exact-head stewardship is load-bearing
+### Why the pin sits at v0.89.0 — exact-head stewardship is load-bearing
 
 v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
 is mutable only when its current commit has a successful
@@ -450,17 +457,23 @@ Repository-wide discovery still reports older PRs, but classifies them as
 Semantic failures are surfaced once through the deduplicated
 `shipyard/steward-recovery` status and `shipyard:needs-agent` label; routine
 reconciliation and native merge-queue admission require no model.
+In apply mode, every discovered unmanaged PR receives the explanatory
+`shipyard:unmanaged` label without being adopted or otherwise mutated; a later
+successful exact-head handoff replaces it with `shipyard:managed`.
 
 Pulp's first controller rollout is the manual-only GitHub-hosted workflow in
 `.github/workflows/shipyard-merge-steward.yml`. It is serialized per repository
-and restores a small retry ledger, while GitHub statuses and labels remain the
-durable ownership truth. Its mutations use the repository-scoped Shipyard App
-installation token because workflow-token mutations do not emit the downstream
-`merge_group` events required to land. The controller job is restricted to the
-main-branch workflow and does not persist checkout credentials. Do not schedule that workflow until live canaries
-prove unmanaged negative control, exact-head handoff, recovery deduplication,
-recovery clearing on a corrected head, and merge-queue landing without an
-agent wait loop.
+and restores a small evidence ledger, while GitHub statuses and labels remain
+the durable ownership truth. Its mutations use the repository-scoped Shipyard
+App installation token because workflow-token mutations do not emit the
+downstream `merge_group` events required to land. The controller job is
+restricted to the main-branch workflow and does not persist checkout
+credentials. One labeled GitHub issue mirrors every current PR exception and
+closes at zero, so a local machine, Linear, and an interactive agent may all be
+offline without losing the operator queue. The ten-minute schedule and durable
+remote retry ledger remain disabled until live canaries prove unmanaged
+negative control, exact-head handoff, recovery deduplication, recovery clearing
+on a corrected head, and merge-queue landing without an agent wait loop.
 
 ### v0.83.0 floor — fleet health and formal stacks remain load-bearing
 

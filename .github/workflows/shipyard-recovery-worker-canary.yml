@@ -1,0 +1,85 @@
+name: Shipyard recovery worker canary
+
+# Manual, read-only proof that a uniquely labeled disposable M5 Tart runner can
+# receive an exact-head recovery assignment. This launches no model and mutates
+# no PR. Persistent/fleet workers remain disabled until this proof passes.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Open Pulp PR used as the exact-head canary'
+        required: true
+        type: string
+      expected_head:
+        description: 'Full immutable PR head SHA'
+        required: true
+        type: string
+      assignment_epoch:
+        description: 'Positive fenced assignment generation'
+        required: true
+        default: '1'
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: shipyard-recovery-canary-${{ inputs.pr_number }}-${{ inputs.expected_head }}
+  cancel-in-progress: false
+
+jobs:
+  m5-disposable-proof:
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - pulp-build-vm
+      - shipyard-recovery-canary-m5-20260814
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.expected_head }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Revalidate exact assignment
+        shell: bash
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          ASSIGNMENT_EPOCH: ${{ inputs.assignment_epoch }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ASSIGNMENT_EPOCH" =~ ^[1-9][0-9]*$ ]]
+          actual_head=$(git rev-parse HEAD)
+          [ "$actual_head" = "$EXPECTED_HEAD" ]
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pull.json
+          live_head=$(jq -r '.head.sha' pull.json)
+          live_state=$(jq -r '.state' pull.json)
+          [ "$live_head" = "$EXPECTED_HEAD" ]
+          [ "$live_state" = open ]
+          jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --argjson pr "$PR_NUMBER" \
+            --arg head "$EXPECTED_HEAD" \
+            --argjson epoch "$ASSIGNMENT_EPOCH" \
+            --arg runner "$RUNNER_NAME" \
+            --arg os "$RUNNER_OS" \
+            --arg arch "$RUNNER_ARCH" \
+            '{schema_version:1,repo:$repo,pr:$pr,head:$head,assignment_epoch:$epoch,runner:$runner,os:$os,arch:$arch,model_invocations:0}' \
+            > recovery-canary-proof.json
+
+      - name: Publish exact-head disposable-runner proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: shipyard-recovery-canary-${{ inputs.pr_number }}-${{ inputs.assignment_epoch }}
+          path: recovery-canary-proof.json
+          retention-days: 14
+          if-no-files-found: error

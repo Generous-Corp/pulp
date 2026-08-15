@@ -76,6 +76,17 @@ add_test(NAME cmake-au-v2-type-selection
 set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
+
+# The iOS-only public helper bypasses pulp_add_plugin(), but its AUv3 target
+# still carries the ordinary production control-shipping declaration.
+add_test(NAME cmake-ios-auv3-control-shipping
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ios-auv3-control-shipping
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_control_shipping.cmake)
+set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
+    LABELS "cmake;ios;auv3;control"
+    TIMEOUT 30)
 # pulp_add_binary_data Python encoder smoke — guards the fix
 # (legacy CMake hex loop was O(n²) and pinned cmake configure for 10–22
 # minutes on a 1 MB asset). Verifies the encoder's output ABI, mtime

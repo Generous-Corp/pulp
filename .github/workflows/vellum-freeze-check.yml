@@ -19,16 +19,19 @@ permissions:
 jobs:
   freeze-check:
     name: Vellum freeze
-    # Read-only, unprivileged freeze validation may use the protected local
-    # Linux group. Fork PRs and an unset selector fall back to hosted Linux.
+    # Automatic same-repository and merge-group validation uses the restricted
+    # organization pool; trusted manual dispatch may use the repository pool.
+    # Fork PRs and an unset selector fall back to hosted Linux.
     runs-on: >-
       ${{
         github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
+        github.event_name == 'workflow_dispatch' &&
+        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
+        github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
         (github.event_name == 'merge_group' ||
-         github.event_name == 'workflow_dispatch' ||
          (github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository)) &&
-        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
+        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
         'ubuntu-latest'
       }}
     steps:
