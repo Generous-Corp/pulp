@@ -22,6 +22,8 @@ concept SupportsWavesetTransformer =
 static_assert(SupportsWavesetTransformer<float>);
 static_assert(SupportsWavesetTransformer<double>);
 static_assert(!SupportsWavesetTransformer<int>);
+static_assert(!SupportsWavesetTransformer<const float>);
+static_assert(!SupportsWavesetTransformer<long double>);
 Transformer* startup_hook_transformer = nullptr;
 Transformer* publication_hook_transformer = nullptr;
 bool publication_push_rejected = false;

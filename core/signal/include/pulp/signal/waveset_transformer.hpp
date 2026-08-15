@@ -333,7 +333,7 @@ template <typename Sample> class OutputSplicer {
  * has finished and all buffered output and reservations have retired.
  */
 template <typename SampleType = float>
-    requires std::is_floating_point_v<SampleType>
+    requires(std::is_same_v<SampleType, float> || std::is_same_v<SampleType, double>)
 class WavesetTransformerT {
   public:
     static constexpr std::size_t kMaxProgramSlots = 8;
