@@ -7,7 +7,10 @@ Pulp versions three surfaces independently:
   CLI binary's `pulp --version`. The source-only combined-installer recipe is
   also mapped to this surface: SDK consumers execute it from a detached Pulp
   checkout at the SDK provenance SHA, so a recipe fix needs a new SDK tag even
-  though the script is not installed in the SDK prefix yet.
+  though the script is not installed in the SDK prefix yet. The provenance
+  marker authoring helper and installed `PulpSdkProvenance.cmake` contract are
+  mapped here too: changing either changes the identity or admission rules of
+  the SDK that downstream consumers receive.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
 - **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by

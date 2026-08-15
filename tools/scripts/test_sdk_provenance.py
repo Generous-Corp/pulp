@@ -49,6 +49,14 @@ class SdkProvenanceTests(unittest.TestCase):
             ["git", "-C", self.source, "rev-parse", "HEAD"], text=True
         ).strip()
         self.write_build_info()
+        (self.prefix / "include/pulp/view").mkdir(parents=True)
+        (self.prefix / "include/pulp/view/widget_bridge.hpp").write_bytes(
+            b"widget bridge fixture\n"
+        )
+        (self.prefix / "lib").mkdir()
+        (self.prefix / "lib/libpulp-view-script.a").write_bytes(
+            b"view script fixture\n"
+        )
         subprocess.run(
             ["git", "-C", self.source, "-c", "tag.gpgSign=false", "tag", f"v{VERSION}"],
             check=True,
@@ -105,6 +113,7 @@ class SdkProvenanceTests(unittest.TestCase):
             marker,
         )
         self.assertEqual(marker["features"], {"audio_probes": False, "inspector": True})
+        self.assertEqual(marker["integrity"]["schema"], provenance.INTEGRITY_SCHEMA)
         self.assertEqual(
             stat.S_IMODE((self.prefix / "sdk-provenance.json").stat().st_mode),
             0o644,
@@ -179,6 +188,21 @@ class SdkProvenanceTests(unittest.TestCase):
             marker,
         )
 
+    def test_windows_release_binds_the_windows_view_script_archive(self) -> None:
+        archive = self.prefix / "lib/pulp-view-script.lib"
+        archive.write_bytes(b"windows view script fixture\n")
+        marker = self.marker(platform="windows-x64")
+        self.assertIn("lib/pulp-view-script.lib", marker["integrity"]["files"])
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="windows-x64",
+                expected_source_sha=self.sha,
+            ),
+            marker,
+        )
+
     def test_rejects_tag_version_mismatch(self) -> None:
         with self.assertRaisesRegex(provenance.ProvenanceError, "does not match"):
             self.marker(release_tag="v1.2.3")
@@ -226,6 +250,7 @@ class SdkProvenanceTests(unittest.TestCase):
         marker = self.marker(release_tag=f"v{version}")
         provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
         self.assertEqual(marker["features"], {"audio_probes": False, "inspector": False})
+        self.assertNotIn("integrity", marker)
         self.assertEqual(
             provenance.verify_release_marker(
                 self.prefix,
@@ -437,6 +462,19 @@ class SdkProvenanceTests(unittest.TestCase):
             provenance.verify_release_marker(
                 self.prefix,
                 expected_platform="linux-x64",
+                expected_source_sha=self.sha,
+            )
+
+    def test_verify_rejects_mixed_widget_bridge_header_and_archive(self) -> None:
+        marker = self.marker()
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        (self.prefix / "include/pulp/view/widget_bridge.hpp").write_bytes(
+            b"stale widget bridge fixture\n"
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "coherence integrity"):
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
                 expected_source_sha=self.sha,
             )
 

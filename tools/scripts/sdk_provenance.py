@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -30,6 +31,8 @@ INSPECTOR_SDK_FLOOR = (0, 772, 0)
 PRODUCT_MATRIX = Path(__file__).with_name("release_product_matrix.json")
 BUILD_INFO_PATH = Path("include/pulp/runtime/build_info.hpp")
 BUILD_INFO_MAX_BYTES = 64 * 1024
+INTEGRITY_SCHEMA = "pulp.sdk-integrity.v1"
+INTEGRITY_SDK_FLOOR = (0, 807, 0)
 BUILD_INFO_CANONICAL_RE = re.compile(
     r"""\A\s*
     \#pragma[^\S\r\n]+once[^\S\r\n]*\r?\n\s*
@@ -54,6 +57,43 @@ BUILD_INFO_CANONICAL_RE = re.compile(
 
 class ProvenanceError(RuntimeError):
     pass
+
+
+def _coherence_paths(platform: str) -> tuple[Path, Path]:
+    archive = (
+        Path("lib/pulp-view-script.lib")
+        if platform.startswith("windows-")
+        else Path("lib/libpulp-view-script.a")
+    )
+    return Path("include/pulp/view/widget_bridge.hpp"), archive
+
+
+def _sha256(path: Path) -> str:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError as exc:
+        raise ProvenanceError(f"cannot hash SDK coherence member {path}: {exc}") from exc
+
+
+def build_integrity(prefix: Path, platform: str) -> dict[str, object]:
+    files = {
+        path.as_posix(): _sha256(prefix / path)
+        for path in _coherence_paths(platform)
+    }
+    return {"schema": INTEGRITY_SCHEMA, "algorithm": "sha256", "files": files}
+
+
+def verify_integrity(prefix: Path, platform: str, value: object) -> None:
+    expected = build_integrity(prefix, platform)
+    if value != expected:
+        raise ProvenanceError(
+            "SDK coherence integrity mismatch: widget_bridge.hpp and "
+            "pulp-view-script must come from the same stamped SDK"
+        )
 
 
 def _version_tuple(value: str) -> tuple[int, int, int]:
@@ -329,6 +369,8 @@ def build_release_marker(
             "inspector": expected_inspector,
         },
     }
+    if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
+        marker["integrity"] = build_integrity(prefix, platform)
     verify_installed_build_info(
         prefix,
         expected_version=version,
@@ -398,6 +440,8 @@ def verify_release_marker(
     }
     if marker.get("features") != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
+    if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
+        verify_integrity(prefix, expected_platform, marker.get("integrity"))
     if _read_text(prefix / "version.txt") != version:
         raise ProvenanceError(f"{path}: marker version does not match selected SDK prefix")
     if _read_text(prefix / "sdk_build_type.txt") != "Release":
