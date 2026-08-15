@@ -583,6 +583,45 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.fir-design", domain="signal",
+        summary=(
+            "Offline weighted least-squares design of bounded real Type I-IV linear-phase FIRs "
+            "from sampled frequency targets."
+        ),
+        rt_class="offline",
+        lifecycle={"construction": "control", "prepare": "offline design; may allocate bounded workspace",
+                   "process": "offline design request", "reset": "none",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Bounded sampled targets, pivoted QR workspace, and returned coefficients, residuals, "
+            "rank, and conditioning diagnostics."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite weighted frequency/amplitude samples in [0, pi] and a bounded tap/type specification",
+        output_domain="real linear-phase FIR coefficients and weighted fit diagnostics",
+        units=["radians per sample", "taps", "linear amplitude", "weighted RMS error"],
+        latency="offline whole-design solve", tail="none", scheduling="offline request",
+        bindings=[binding(
+            role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
+            qualified_name="pulp::signal::design_fir_least_squares",
+            target="Pulp::signal",
+            header_fingerprint="sha256:2a80917cb3ddec40f99346731381bba5d6e9bba8f9a6870f70d936efc7f8723d",
+            address_expression=(
+                "static_cast<pulp::signal::FirLeastSquaresResult (*)"
+                "(std::span<const pulp::signal::FirDesignPoint>, "
+                "const pulp::signal::FirLeastSquaresOptions&)>("
+                "&pulp::signal::design_fir_least_squares)"
+            ),
+        )],
+        _link_probes=[{
+            "role": "designer", "binding": "pulp::signal::design_fir_least_squares",
+            "operation": "function_call",
+            "arguments": "std::span<const pulp::signal::FirDesignPoint>{}, pulp::signal::FirLeastSquaresOptions{}",
+        }],
+    ),
+    capability(
         key="signal.source-filter-analysis", domain="signal",
         summary="Prepared offline cepstral spectral-envelope and linear-predictive analysis.",
         rt_class="offline",

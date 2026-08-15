@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 23,
+  "manifest_revision": 24,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 40
+        "capabilities": 41
       },
       "timebase": {
         "state": "partial",
@@ -2132,6 +2132,67 @@
         }
       },
       "contract_digest": "sha256:d08e93be0e8366bcb238fec115b4fc62cabd641615ca6d1c6f96f4fc8d8a2050"
+    },
+    {
+      "key": "signal.fir-design",
+      "domain": "signal",
+      "summary": "Offline weighted least-squares design of bounded real Type I-IV linear-phase FIRs from sampled frequency targets.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "offline design; may allocate bounded workspace",
+        "process": "offline design request",
+        "reset": "none",
+        "release": "destruction off audio"
+      },
+      "state_model": "Bounded sampled targets, pivoted QR workspace, and returned coefficients, residuals, rank, and conditioning diagnostics.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite weighted frequency/amplitude samples in [0, pi] and a bounded tap/type specification",
+      "output_domain": "real linear-phase FIR coefficients and weighted fit diagnostics",
+      "units": [
+        "radians per sample",
+        "taps",
+        "linear amplitude",
+        "weighted RMS error"
+      ],
+      "latency": "offline whole-design solve",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "designer",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::design_fir_least_squares",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:81ba54734e3a70376db0820de63e996499e17a8f9d235114d87fd338828f1ba5"
     },
     {
       "key": "signal.fm-operator-engine",
@@ -5039,14 +5100,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 72,
+    "total": 73,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 40,
+      "signal": 41,
       "timebase": 9
     }
   },
@@ -7726,6 +7787,17 @@
                 ]
               ]
             ]
+          }
+        ],
+        "fir_design.hpp": [
+          {
+            "class": "FirLeastSquaresResult",
+            "qualified_name": "pulp::signal::FirLeastSquaresResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
           }
         ],
         "fir_filter.hpp": [

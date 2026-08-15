@@ -80,6 +80,13 @@ A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
 
+For bounded sampled-target FIR design, register the public
+`pulp/signal/fir_design.hpp` entry point as `signal.fir-design`, keep it
+offline-only, and have the generated compile fixture invoke an empty-target
+request in addition to taking the exact function pointer. This preserves the
+contract's proof that the published binding is operational rather than merely
+type-visible.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
