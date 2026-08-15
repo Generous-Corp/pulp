@@ -1713,6 +1713,17 @@ TEST_CASE("pulp inspect fails explicitly when the inspector component is disable
         REQUIRE(result.stderr_output.find(diagnostic) != std::string::npos);
         REQUIRE(result.stdout_output.empty());
     }
+
+    auto profiles = run_pulp({"control", "profiles"}, 10000);
+    REQUIRE_FALSE(profiles.timed_out);
+    REQUIRE(profiles.exit_code == 0);
+    REQUIRE(profiles.stdout_output.find("observe") != std::string::npos);
+
+    auto live_control = run_pulp({"control", "instances"}, 10000);
+    REQUIRE_FALSE(live_control.timed_out);
+    REQUIRE(live_control.exit_code == 1);
+    REQUIRE(live_control.stderr_output.find("control-unavailable") != std::string::npos);
+    REQUIRE(live_control.stderr_output.find("PULP_ENABLE_INSPECTOR=OFF") != std::string::npos);
 }
 #endif
 

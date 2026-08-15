@@ -155,8 +155,8 @@ def rack_arch() -> str:
 
 
 def plugin_dir() -> str:
-    return os.path.expanduser(
-        f"~/Library/Application Support/Rack2/plugins-{rack_arch()}")
+    import patch as patch_mod
+    return patch_mod.rack_plugin_dir()
 
 INCLUDES = ["core/signal", "core/format", "core/audio", "core/state",
             "core/platform", "core/runtime", "core/timebase"]

@@ -1177,6 +1177,81 @@ def check_brand_targeting() -> tuple:
             # asks for one source, not for all fifty of their modules.
             ("just CV funk, nothing else", {"CV funk": (False, True)}),
             ("only modules from Valley", {"Valley": (False, True)}),
+            ("use only the modules from Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("please make a patch using only modules from Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("use only Bogaudio", {"Bogaudio": (False, True)}),
+            ("use only Bogaudio to make a drone",
+             {"Bogaudio": (False, True)}),
+            ("build exclusively with Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("build a patch exclusively using Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("use purely modules from Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("use only Bogaudio and Valley",
+             {"Bogaudio": (False, True), "Valley": (False, True)}),
+            ("use only Bogaudio, Valley",
+             {"Bogaudio": (False, True), "Valley": (False, True)}),
+            ("please only use Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("I want only Bogaudio", {"Bogaudio": (False, True)}),
+            ("I only want modules from Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("only build with Bogaudio", {"Bogaudio": (False, True)}),
+            ("exclusively make a Bogaudio patch",
+             {"Bogaudio": (False, True)}),
+            ("build exclusively with Bogaudio and Valley",
+             {"Bogaudio": (False, True), "Valley": (False, True)}),
+            ("use only Bogaudio and Valley for the oscillator",
+             {"Bogaudio": (False, False), "Valley": (False, False)}),
+            ("use only Bogaudio and add a Valley oscillator",
+             {"Bogaudio": (False, False), "Valley": (False, False)}),
+            ("make a patch with only Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("build a patch only with Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("a patch exclusively with Bogaudio",
+             {"Bogaudio": (False, True)}),
+            ("use only Bogaudio. Make a drone.",
+             {"Bogaudio": (False, True)}),
+            ("use only Bogaudio for the oscillator",
+             {"Bogaudio": (False, False)}),
+            ("use only Bogaudio modules for the oscillator",
+             {"Bogaudio": (False, False)}),
+            ("replace the oscillator with only Bogaudio",
+             {"Bogaudio": (False, False)}),
+            ("only modules from CV funk and Bogaudio",
+             {"CV funk": (False, True), "Bogaudio": (False, True)}),
+            ("modules from CV funk and Bogaudio only",
+             {"CV funk": (False, True), "Bogaudio": (False, True)}),
+            ("modules from CV funk and Bogaudio only; make a drone",
+             {"CV funk": (False, True), "Bogaudio": (False, True)}),
+            ("use Bogaudio for mixing and Valley only once",
+             {"Bogaudio": (False, False), "Valley": (False, False)}),
+            ("use Valley. Only add an LFO",
+             {"Valley": (False, False)}),
+            ("modules from Bogaudio only, amid a valley of sound",
+             {"Bogaudio": (False, True)}),
+            ("use Bogaudio exclusively for this patch",
+             {"Bogaudio": (False, True)}),
+            ("use only Bogaudio for this patch",
+             {"Bogaudio": (False, True)}),
+            ("use Bogaudio only to make a drone",
+             {"Bogaudio": (False, True)}),
+            ("use Bogaudio modules only",
+             {"Bogaudio": (False, True)}),
+            ("do not use Valley; use Bogaudio only.",
+             {"Valley": (False, False), "Bogaudio": (False, True)}),
+            ("Bogaudio; Valley only.",
+             {"Bogaudio": (False, False), "Valley": (False, True)}),
+            ("do not use Valley, use Bogaudio only.",
+             {"Valley": (False, False), "Bogaudio": (False, True)}),
+            ("use Valley for the oscillator and add only one LFO",
+             {"Valley": (False, False)}),
+            ("use Valley for the oscillator and only one LFO from Bogaudio",
+             {"Valley": (False, False), "Bogaudio": (False, False)}),
             # A token and the same words are one behaviour. The @ list inserts
             # the maker's own name, so there is nothing else it could be.
             ("a patch with @CV funk and @Valley",
@@ -1683,8 +1758,8 @@ def check_bundled_pack_repair() -> tuple:
         print(f"  ok     no bundled pack placer in this tree ({placer})")
         return 0, 0
 
-    old_dirs = P.PLUGIN_DIRS
     old_rack_plugin_dir = P.rack_plugin_dir
+    old_rack_plugin_dirs = P.rack_plugin_dirs
     old_app = os.environ.get("FORGE_MODULAR_APP")
     old_home = os.environ.get("HOME")
     try:
@@ -1711,8 +1786,8 @@ def check_bundled_pack_repair() -> tuple:
             os.chmod(installed_placer, 0o755)
 
             # A pack for another architecture must not suppress this one.
-            P.PLUGIN_DIRS = [os.path.dirname(foreign)]
             P.rack_plugin_dir = lambda: expected
+            P.rack_plugin_dirs = lambda: [expected]
             os.environ["FORGE_MODULAR_APP"] = app
             os.environ["HOME"] = home
             first = P._repair_bundled_pack()
@@ -1720,17 +1795,17 @@ def check_bundled_pack_repair() -> tuple:
             packs = glob.glob(os.path.join(expected, "*.vcvplugin"))
 
             if not first or second or len(packs) != 1 or \
-                    expected not in P.PLUGIN_DIRS:
+                    expected not in P.rack_plugin_dirs():
                 bad += 1
                 print("  WRONG  first-user repair did not place exactly one "
                       f"discoverable pack: first={first}, second={second}, "
-                      f"packs={packs}, dirs={P.PLUGIN_DIRS}")
+                      f"packs={packs}, dirs={P.rack_plugin_dirs()}")
             else:
                 print("  ok     first inventory repairs one bundled Rack pack; "
                       "later inventories are no-ops")
     finally:
-        P.PLUGIN_DIRS = old_dirs
         P.rack_plugin_dir = old_rack_plugin_dir
+        P.rack_plugin_dirs = old_rack_plugin_dirs
         if old_app is None:
             os.environ.pop("FORGE_MODULAR_APP", None)
         else:
@@ -2559,7 +2634,8 @@ if "FORGE_CODEX_MODEL" in os.environ:
 if "FORGE_CODEX_REASONING_EFFORT" in os.environ:
     fixed += ["-c", 'model_reasoning_effort="' +
              os.environ["FORGE_CODEX_REASONING_EFFORT"] + '"']
-fixed += ["--ephemeral", "--sandbox", "read-only",
+fixed += ["--disable", "apps", "--disable", "plugins",
+         "--disable", "skill_search", "--ephemeral", "--sandbox", "read-only",
          "--ignore-user-config", "--ignore-rules", "--color", "never",
          "--skip-git-repo-check", "--json"]
 if args[:len(fixed)] != fixed or args[-1] != "-" or \
@@ -2582,6 +2658,12 @@ elif mode == "nonzero":
 elif mode == "error-event":
     print(json.dumps({"type": "item.completed", "item": {
         "type": "error", "message": "model quota exhausted"}}))
+    raise SystemExit(9)
+elif mode == "top-level-error":
+    message = "You've hit your usage limit. Try again tomorrow."
+    print(json.dumps({"type": "error", "message": message}))
+    print(json.dumps({"type": "turn.failed", "error": {
+        "message": message}}))
     raise SystemExit(9)
 elif mode == "warning-success":
     print(json.dumps({"type": "item.completed", "item": {
@@ -2671,6 +2753,22 @@ else:
               f"{code} {text!r} {why!r}")
     else:
         print("  ok     a failing Codex error event becomes diagnostics")
+
+    os.environ["FAKE_CODEX_MODE"] = "top-level-error"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if (code != 9 or text or "usage limit" not in why or
+            why.count("usage limit") != 1):
+        bad += 1
+        print(f"  WRONG  top-level Codex failure events were lost or duplicated: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     top-level Codex failures become one diagnostic")
 
     os.environ["FAKE_CODEX_MODE"] = "warning-success"
     try:
