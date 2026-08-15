@@ -919,6 +919,22 @@ push, `origin/main` resolves to HEAD itself and the diff is always empty — so 
 docs-only merge is indistinguishable from a core merge, and the run never
 skips. A docs-only merge to main now correctly skips the whole matrix.
 
+## The Shipyard merge steward uses one repository-scoped writer
+
+`.github/workflows/shipyard-merge-steward.yml` is the single logical,
+model-free controller for exact-head PR reconciliation and native merge-queue
+enrollment. M1, M3, and M5 may supply fenced recovery capacity after their
+canaries pass; they must not run independent mutating queue loops.
+
+The steward mints a one-repository GitHub App installation token. Queue
+enrollment requires both `permission-merge-queues: write` and
+`permission-contents: write`: the first grants queue management, while the
+second gives the actor the repository write access GitHub requires to enqueue a
+pull request. Downscoping contents to read fails closed with `Resource not
+accessible by integration` even when the App installation itself owns both
+permissions. Keep the token repository-scoped, retain the exact-head guard, and
+never replace this pair with a personal credential or an admin-merge bypass.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single
