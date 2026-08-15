@@ -1103,6 +1103,10 @@ function(pulp_add_plugin_bundle target)
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
     set(PULP_${target}_CORE_OBJECTS "" CACHE INTERNAL "")
+    # Bundle formats use the same editor host as ordinary non-native plugins.
+    # Keep this per-target selection in lockstep with pulp_add_plugin(): format
+    # helpers no longer consult the process-global _PULP_VIEW_TARGET directly.
+    set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
     # No bundle-wide compile-time UI script: a bundle's plugins each resolve
     # their own editor assets from the keyed registry at runtime, rather than
     # from a single compile-time PULP_UI_SCRIPT_PATH shared by the whole binary.
