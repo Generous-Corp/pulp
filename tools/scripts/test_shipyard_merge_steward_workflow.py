@@ -174,6 +174,18 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
         self.assertNotIn('.event == "pull_request_target"', self.text)
 
+    def test_unlabeled_prs_receive_only_a_truthful_exact_head_sentinel(self) -> None:
+        self.assertIn("shipyard_provenance_label_plan.py", self.text)
+        self.assertIn("provenance-label-plan.json", self.text)
+        self.assertIn("shipyard:provenance-missing", self.text)
+        self.assertIn('.state == "open" and .head.sha == $head', self.text)
+        self.assertIn('if [ "$mutation" = add ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -eq 0 ] || continue', self.text)
+        self.assertIn('elif [ "$mutation" = remove ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -gt 1 ] || continue', self.text)
+        self.assertIn("inputs.apply && steps.provenance_label_plan.outcome", self.text)
+        self.assertIn("steps.provenance_label_apply.outcome", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

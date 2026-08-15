@@ -224,6 +224,63 @@ jobs:
             --output pull-request-cleanup-plan.json
           jq . pull-request-cleanup-plan.json
 
+      - name: Plan truthful provenance sentinel labels
+        id: provenance_label_plan
+        if: always() && steps.pull_request_cleanup_census.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/shipyard_provenance_label_plan.py \
+            --pulls pull-request-open-heads.json \
+            --output provenance-label-plan.json
+          jq . provenance-label-plan.json
+
+      - name: Converge truthful provenance sentinel labels
+        id: provenance_label_apply
+        if: inputs.apply && steps.provenance_label_plan.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          label='shipyard:provenance-missing'
+          if jq -e 'any(.candidates[]; .mutation == "add")' \
+            provenance-label-plan.json >/dev/null; then
+            gh label create "$label" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color D93F0B \
+              --description 'Open PR has no agent, machine, route, or ownership provenance yet' \
+              --force
+          fi
+          jq -c '.candidates[]' provenance-label-plan.json |
+          while IFS= read -r candidate; do
+            pr=$(jq -r '.number' <<<"$candidate")
+            head=$(jq -r '.expected_head' <<<"$candidate")
+            mutation=$(jq -r '.mutation' <<<"$candidate")
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr}" \
+              > "$RUNNER_TEMP/provenance-pull-${pr}.json"
+            jq -e --arg head "$head" \
+              '.state == "open" and .head.sha == $head' \
+              "$RUNNER_TEMP/provenance-pull-${pr}.json" >/dev/null
+            mapfile -t labels < <(jq -r '.labels[].name' \
+              "$RUNNER_TEMP/provenance-pull-${pr}.json")
+            if [ "$mutation" = add ]; then
+              # A concurrently added real label wins; never overwrite it.
+              [ "${#labels[@]}" -eq 0 ] || continue
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/issues/${pr}/labels" \
+                --input - <<<"$(jq -n --arg label "$label" '{labels:[$label]}')"
+            elif [ "$mutation" = remove ]; then
+              printf '%s\n' "${labels[@]}" | grep -Fx "$label" >/dev/null || continue
+              [ "${#labels[@]}" -gt 1 ] || continue
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/issues/${pr}/labels/shipyard%3Aprovenance-missing"
+            else
+              echo "refusing unexpected provenance mutation: $mutation" >&2
+              exit 1
+            fi
+          done
+
       - name: Cancel bounded superseded pull-request runs
         id: pull_request_cleanup_apply
         if: inputs.apply && steps.pull_request_cleanup_plan.outcome == 'success'
@@ -561,6 +618,7 @@ jobs:
             pull-request-open-heads.json
             pull-request-runs.json
             pull-request-cleanup-plan.json
+            provenance-label-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
           if-no-files-found: warn
@@ -576,9 +634,11 @@ jobs:
           [ "${{ steps.merge_group_cleanup_plan.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_census.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_plan.outcome }}" = success ]
+          [ "${{ steps.provenance_label_plan.outcome }}" = success ]
           if [ "${{ inputs.apply }}" = true ]; then
             [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]
             [ "${{ steps.pull_request_cleanup_apply.outcome }}" = success ]
+            [ "${{ steps.provenance_label_apply.outcome }}" = success ]
           fi
           [ "${{ steps.pull_facts.outcome }}" = success ]
           [ "${{ steps.outbox.outcome }}" = success ]
