@@ -196,7 +196,7 @@ reclaim_stale_slot_runners() {
     [ -n "${PAT:-}" ] || return 0
     local runners_tsv slot_matches match_count stale_id stale_name stale_busy stale_status
     runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
-        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        "${REGISTRATION_API}/actions/runners?per_page=100&cachebust=$(date +%s)" \
         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
         || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
     slot_matches="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
@@ -231,7 +231,7 @@ cleanup() {
     # jobs then queue against a VM that no longer exists.
     if [ -n "${PAT:-}" ]; then
         runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
-            "${REGISTRATION_API}/actions/runners?per_page=100" \
+            "${REGISTRATION_API}/actions/runners?per_page=100&cachebust=$(date +%s)" \
             --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
             || { log "ERROR: cannot read all runner registrations; leaving clone $VMID for safe recovery"; return; }
         runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
@@ -486,7 +486,7 @@ RUNNER_READY_TIMEOUT_SECONDS="${TARTCI_RUNNER_READY_TIMEOUT_SECONDS:-120}"
 RUNNER_READY=0
 for _ in $(seq 1 "$((RUNNER_READY_TIMEOUT_SECONDS / 2))"); do
     runners_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
-        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        "${REGISTRATION_API}/actions/runners?per_page=100&cachebust=$(date +%s)" \
         --jq '.runners[] | [.id,.name,.status,.busy] | @tsv' 2>/dev/null)" \
         || runners_tsv=""
     runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
@@ -514,10 +514,54 @@ if [ "$RUNNER_READY" != 1 ]; then
     die "JIT runner ${RUNNER_NAME} never became visible to GitHub"
 fi
 
+# Keep the one-shot supervisor from waiting forever on a runner that registered
+# successfully but then lost its Actions broker heartbeat. Two consecutive
+# misses avoid reacting to a single API race; an idle/offline runner is safe to
+# tear down, while a busy one is left for the exact recovery path.
+HEARTBEAT_FAILURE_FILE="$(mktemp)" || die "could not allocate heartbeat state"
+(
+    misses=0
+    while kill -0 "$RUNNER_PID" 2>/dev/null; do
+        heartbeat_tsv="$(GH_TOKEN="$PAT" "$GH_CLI" api --paginate \
+            "${REGISTRATION_API}/actions/runners?per_page=100&cachebust=$(date +%s)" \
+            --jq '.runners[] | [.id,.name,.status,.busy] | @tsv' 2>/dev/null)" \
+            || heartbeat_tsv=""
+        heartbeat_lookup="$(printf '%s\n' "$heartbeat_tsv" | awk -F '\t' \
+            -v name="$RUNNER_NAME" '$2 == name')"
+        heartbeat_status=""
+        heartbeat_busy=""
+        if [ -n "$heartbeat_lookup" ]; then
+            IFS=$'\t' read -r _heartbeat_id _heartbeat_name heartbeat_status heartbeat_busy \
+                <<< "$heartbeat_lookup"
+        fi
+        if [ "$heartbeat_status" = online ] || [ "$heartbeat_busy" = true ]; then
+            misses=0
+        else
+            misses=$((misses + 1))
+            if [ "$misses" -ge 2 ]; then
+                printf '%s\n' "runner=${RUNNER_NAME} status=${heartbeat_status:-missing} busy=${heartbeat_busy:-unknown}" \
+                    >"$HEARTBEAT_FAILURE_FILE"
+                kill "$RUNNER_PID" 2>/dev/null || true
+                break
+            fi
+        fi
+        sleep 15
+    done
+) &
+HEARTBEAT_PID=$!
+
 wait "$RUNNER_PID"
 runner_exit=$?
+kill "$HEARTBEAT_PID" 2>/dev/null || true
+wait "$HEARTBEAT_PID" 2>/dev/null || true
 registration_output="$(cat "$RUNNER_OUTPUT_FILE")"
 rm -f "$RUNNER_OUTPUT_FILE"
+heartbeat_failure="$(cat "$HEARTBEAT_FAILURE_FILE" 2>/dev/null || true)"
+rm -f "$HEARTBEAT_FAILURE_FILE"
+if [ -n "$heartbeat_failure" ]; then
+    log "ERROR: JIT runner lost GitHub heartbeat ($heartbeat_failure)"
+    die "JIT runner heartbeat failed before the job completed"
+fi
 if [ "$runner_exit" -ne 0 ]; then
     printf '%s\n' "$registration_output" \
         | sed -E 's/(token|authorization|credentials|jitconfig)[^ ]*/\1=<redacted>/Ig' >&2

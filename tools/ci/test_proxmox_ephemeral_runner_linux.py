@@ -59,6 +59,12 @@ class ProxmoxRunnerContractTests(unittest.TestCase):
         self.assertIn('kill "$RUNNER_PID"', self.text)
         self.assertIn('wait "$RUNNER_PID"', self.text)
 
+    def test_jit_runner_has_bounded_heartbeat_watchdog(self) -> None:
+        self.assertIn("HEARTBEAT_FAILURE_FILE", self.text)
+        self.assertIn("cachebust=$(date +%s)", self.text)
+        self.assertIn("lost GitHub heartbeat", self.text)
+        self.assertIn("misses=$((misses + 1))", self.text)
+
     def test_systemd_profile_is_repository_agnostic(self) -> None:
         service = SERVICE.read_text()
         self.assertIn("/etc/pulp/proxmox-runner/%i.env", service)
