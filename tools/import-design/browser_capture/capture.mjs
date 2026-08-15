@@ -1477,6 +1477,48 @@ async function runCapture(options) {
           },
         }));
     }
+    // Capture the exact authored body beneath declared moving indicators.
+    // Visibility removes only the marked paint without changing its layout,
+    // yielding a faithful source for movable control sprites.
+    const hiddenIndicators = await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        window.__pulpCaptureIndicatorStyles =
+          Array.from(document.querySelectorAll('[data-pulp-indicator]')).map(el => ({
+            el,
+            value: el.style.getPropertyValue('visibility'),
+            priority: el.style.getPropertyPriority('visibility')
+          }));
+        for (const entry of window.__pulpCaptureIndicatorStyles)
+          entry.el.style.setProperty('visibility', 'hidden', 'important');
+        return window.__pulpCaptureIndicatorStyles.length;
+      })()`,
+      returnByValue: true,
+    });
+    const hiddenIndicatorCount = hiddenIndicators.result?.value ?? 0;
+    let staticScreenshotBytes = screenshotBytes;
+    if (hiddenIndicatorCount > 0) {
+      staticScreenshotBytes =
+        await captureStableScreenshot(cdp, screenshotOptions);
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
+            if (entry.value)
+              entry.el.style.setProperty('visibility', entry.value, entry.priority);
+            else
+              entry.el.style.removeProperty('visibility');
+          }
+          delete window.__pulpCaptureIndicatorStyles;
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+    }
+    if (!staticScreenshotBytes) {
+      const error = new Error(
+        "the indicator-free visual frame did not stabilize");
+      error.code = "capture-static-frame-not-deterministic";
+      throw error;
+    }
     // Capture the exact static chrome with imperative canvases removed. This
     // is the native-composition plate: typography, SVGs, spacing, modal chrome,
     // and every non-canvas pixel remain Chromium-authoritative, while live
@@ -1549,6 +1591,8 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
+      writeFile(
+        path.join(outputDir, "browser-static.png"), staticScreenshotBytes),
       writeFile(path.join(outputDir, "browser-chrome.png"), chromeBytes),
       writeFile(path.join(outputDir, "browser-canvas-composite.png"),
         canvasComposition.bytes),
@@ -1676,6 +1720,14 @@ async function runCapture(options) {
         mime_type: "image/png",
         path: "browser.png",
         sha256: sha256(screenshotBytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+      }, {
+        id: "reference:browser-static",
+        kind: "screenshot",
+        mime_type: "image/png",
+        path: "browser-static.png",
+        sha256: sha256(staticScreenshotBytes),
         width_px: pixels.width,
         height_px: pixels.height,
       }, {

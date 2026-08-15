@@ -158,6 +158,7 @@ BrowserHtmlImportResult import_browser_html(
          .source_file = {},
          .require_interaction_report =
              request.browser_interactions.has_value(),
+         .runtime_asset_id = "reference:browser-static",
          .native_panel_lowering = request.native_panel_lowering,
          .materialized_canvas_composition =
              request.materialized_canvas_composition});

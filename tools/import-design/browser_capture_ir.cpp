@@ -1334,6 +1334,45 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             *reference_png, *backing.width, *backing.height, result.error))
         return result;
 
+    const std::string render_asset_id = options.runtime_asset_id.empty()
+        ? reference_id : options.runtime_asset_id;
+    if (render_asset_id != reference_id) {
+        int matches = 0;
+        if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
+            const auto assets = envelope["assets"];
+            for (uint32_t i = 0; i < assets.size(); ++i) {
+                const auto asset = assets[static_cast<int>(i)];
+                if (!asset.isObject() ||
+                    string_member(asset, "id") != render_asset_id)
+                    continue;
+                ++matches;
+                const auto runtime_path = string_member(asset, "path");
+                auto runtime_png = contained_sidecar(
+                    envelope_path, runtime_path, result.error);
+                if (!runtime_png) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*runtime_png) != hash ||
+                    number_member(asset, "width_px", -1.0) !=
+                        logical_width * dpr ||
+                    number_member(asset, "height_px", -1.0) !=
+                        logical_height * dpr ||
+                    !validate_png_header(*runtime_png, *backing.width,
+                                         *backing.height, result.error)) {
+                    result.error = "browser runtime capture asset is invalid";
+                    return result;
+                }
+                backing.asset_id = render_asset_id;
+                backing.original_uri = "pulp-capture:///" + runtime_path;
+                backing.local_path = runtime_png->string();
+                backing.content_hash = hash;
+            }
+        }
+        if (matches != 1) {
+            result.error = "browser runtime capture asset is missing or ambiguous";
+            return result;
+        }
+    }
+
     if (options.native_panel_lowering &&
         options.materialized_canvas_composition) {
         result.error =
