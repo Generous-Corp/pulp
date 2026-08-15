@@ -248,6 +248,18 @@ TEST_CASE("least-squares FIR rejects invalid parity, rank loss, conditioning, an
                 invalid_point, {.tap_count = 5u, .type = LinearPhaseFirType::type_i_symmetric_odd})
                 .status == FirDesignStatus::invalid_argument);
 
+    const std::vector<FirDesignPoint> invalid_underdetermined{
+        {std::numeric_limits<double>::quiet_NaN(), 1.0, 1.0}};
+    REQUIRE(design_fir_least_squares(
+                invalid_underdetermined,
+                {.tap_count = 5u, .type = LinearPhaseFirType::type_i_symmetric_odd})
+                .status == FirDesignStatus::invalid_argument);
+    const std::vector<FirDesignPoint> zero_weight_underdetermined{{0.3, 1.0, 0.0}};
+    REQUIRE(design_fir_least_squares(
+                zero_weight_underdetermined,
+                {.tap_count = 5u, .type = LinearPhaseFirType::type_i_symmetric_odd})
+                .status == FirDesignStatus::invalid_argument);
+
     const std::vector<FirDesignPoint> extreme{
         {0.0, std::numeric_limits<double>::max(), std::numeric_limits<double>::max()}};
     const auto overflow = design_fir_least_squares(
