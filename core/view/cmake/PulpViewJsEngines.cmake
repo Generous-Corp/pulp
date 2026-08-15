@@ -8,6 +8,18 @@
 #             tools/scripts/fetch_v8_for_release.py). Not supported on iOS.
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
+set(_pulp_js_engine_choices auto quickjs jsc v8)
+if(NOT PULP_JS_ENGINE IN_LIST _pulp_js_engine_choices)
+    message(FATAL_ERROR
+        "PULP_JS_ENGINE must be one of auto, quickjs, jsc, or v8; got "
+        "'${PULP_JS_ENGINE}'.")
+endif()
+if(PULP_ENABLE_JS AND PULP_JS_ENGINE STREQUAL "jsc" AND NOT APPLE)
+    message(FATAL_ERROR
+        "PULP_JS_ENGINE=jsc is only supported on Apple platforms. Use auto or "
+        "quickjs for the portable QuickJS backend.")
+endif()
+unset(_pulp_js_engine_choices)
 # Advanced local-experiment overrides only — normal v8 builds need none (FindV8
 # resolves external/v8-build or a baked $V8_DIR). When v8 is selected, the
 # provider is the pinned sealed libv8, nothing else.
@@ -137,10 +149,22 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     pulp_v8_windows_apply_abi(pulp-view-script)
 endif()
 
-# JSC backend (Apple platforms only).
-if(APPLE)
+# JSC is opt-in even on Apple. `auto` and `quickjs` are intentionally
+# QuickJS-only builds: compiling every platform backend made the documented
+# selection knob lie and forced JavaScriptCore.framework into otherwise
+# QuickJS-only plugin binaries.
+set(PULP_HAS_JSC_ACTUAL OFF)
+if(APPLE AND PULP_JS_ENGINE STREQUAL "jsc")
     list(APPEND PULP_JS_ENGINE_SOURCES src/js_jsc_engine.mm)
+    target_compile_definitions(pulp-view-script PUBLIC PULP_HAS_JSC=1)
+    set(PULP_HAS_JSC_ACTUAL ON)
 endif()
+# Sibling directories (notably the binary link-floor fixture under test/) need
+# the resolved availability after core/view returns to the parent scope. Cache
+# it internally and force-refresh it so reconfiguring jsc -> quickjs cannot
+# retain a stale ON value.
+set(PULP_HAS_JSC_ACTUAL "${PULP_HAS_JSC_ACTUAL}" CACHE INTERNAL
+    "Whether this build compiles and links the JavaScriptCore backend" FORCE)
 
 # Set compile definitions for engine availability / defaults.
 if(PULP_HAS_V8_ACTUAL)
@@ -157,7 +181,7 @@ endif()
 
 # Only set non-QuickJS default when explicitly requested (not auto).
 if(PULP_JS_ENGINE STREQUAL "jsc")
-    if(APPLE)
+    if(PULP_HAS_JSC_ACTUAL)
         target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_JSC=1)
     endif()
 elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)

@@ -238,10 +238,35 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     )
 endif()
 
-# JavaScriptCore framework for JSC backend (Apple only)
-if(APPLE)
+# JavaScriptCore framework is present only when the JSC backend was explicitly
+# selected. In particular, `auto` and `quickjs` must not leak JSC into installed
+# static-library link interfaces or final plugin binaries.
+if(PULP_HAS_JSC_ACTUAL)
     target_link_libraries(pulp-view-script PRIVATE "-framework JavaScriptCore")
 endif()
+
+# Configure-time source/link oracle. Static archives can dead-strip an unused
+# backend, so final-binary symbol scans alone cannot prove that a QuickJS SDK did
+# not compile or export JSC linkage. Keep the target graph itself fail-closed.
+get_target_property(_pulp_view_script_sources pulp-view-script SOURCES)
+get_target_property(_pulp_view_script_links pulp-view-script LINK_LIBRARIES)
+if(PULP_HAS_JSC_ACTUAL)
+    if(NOT "${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+       NOT "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+        message(FATAL_ERROR
+            "PULP_JS_ENGINE=jsc must compile js_jsc_engine.mm and link "
+            "JavaScriptCore.framework.")
+    endif()
+else()
+    if("${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+       "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+        message(FATAL_ERROR
+            "PULP_JS_ENGINE=${PULP_JS_ENGINE} leaked the JSC source or framework: "
+            "sources=${_pulp_view_script_sources}; links=${_pulp_view_script_links}")
+    endif()
+endif()
+unset(_pulp_view_script_sources)
+unset(_pulp_view_script_links)
 
 if(WIN32)
     # Process spawning routes through pulp::platform::ChildProcess.

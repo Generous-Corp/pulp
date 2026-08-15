@@ -1,8 +1,13 @@
-if(NOT NATIVE_STANDALONE OR NOT NATIVE_CLAP OR NOT POSITIVE_CONTROL)
+if(NOT NATIVE_STANDALONE OR NOT NATIVE_CLAP OR
+   NOT WEBKIT_POSITIVE_CONTROL OR NOT JSC_POSITIVE_CONTROL)
     message(FATAL_ERROR "native link-floor scanner requires all artifact paths")
 endif()
 
-foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}" "${POSITIVE_CONTROL}")
+foreach(_artifact
+        "${NATIVE_STANDALONE}"
+        "${NATIVE_CLAP}"
+        "${WEBKIT_POSITIVE_CONTROL}"
+        "${JSC_POSITIVE_CONTROL}")
     if(NOT EXISTS "${_artifact}")
         message(FATAL_ERROR "native link-floor artifact does not exist: ${_artifact}")
     endif()
@@ -20,10 +25,16 @@ function(_otool out artifact)
     set(${out} "${_output}" PARENT_SCOPE)
 endfunction()
 
-_otool(_positive_deps "${POSITIVE_CONTROL}")
-if(NOT _positive_deps MATCHES "WebKit.framework")
+_otool(_webkit_positive_deps "${WEBKIT_POSITIVE_CONTROL}")
+if(NOT _webkit_positive_deps MATCHES "WebKit.framework")
     message(FATAL_ERROR
-        "positive control does not link WebKit; the absence scanner is not mutation-sensitive:\n${_positive_deps}")
+        "positive control does not link WebKit; the absence scanner is not mutation-sensitive:\n${_webkit_positive_deps}")
+endif()
+
+_otool(_jsc_positive_deps "${JSC_POSITIVE_CONTROL}")
+if(NOT _jsc_positive_deps MATCHES "JavaScriptCore.framework")
+    message(FATAL_ERROR
+        "positive control does not link JavaScriptCore; the absence scanner is not mutation-sensitive:\n${_jsc_positive_deps}")
 endif()
 
 foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
@@ -31,8 +42,12 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
     if(_deps MATCHES "WebKit.framework")
         message(FATAL_ERROR "native artifact links forbidden WebKit: ${_artifact}\n${_deps}")
     endif()
-    if(NOT _deps MATCHES "JavaScriptCore.framework")
-        message(FATAL_ERROR "native artifact lost JavaScriptCore: ${_artifact}\n${_deps}")
+    if(EXPECT_JSC)
+        if(NOT _deps MATCHES "JavaScriptCore.framework")
+            message(FATAL_ERROR "JSC-selected native artifact lost JavaScriptCore: ${_artifact}\n${_deps}")
+        endif()
+    elseif(_deps MATCHES "JavaScriptCore.framework")
+        message(FATAL_ERROR "QuickJS native artifact links forbidden JavaScriptCore: ${_artifact}\n${_deps}")
     endif()
     if(NOT _deps MATCHES "libwgpu_native.dylib")
         message(FATAL_ERROR "native artifact lost wgpu-native: ${_artifact}\n${_deps}")
@@ -64,5 +79,10 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
     endif()
 endforeach()
 
+if(EXPECT_JSC)
+    set(_engine_contract "JavaScriptCore present")
+else()
+    set(_engine_contract "JavaScriptCore absent")
+endif()
 message(STATUS
-    "native link floor verified: ScriptedUiSession + JavaScriptCore + wgpu present; WebKit absent")
+    "native link floor verified: ScriptedUiSession + wgpu present; WebKit absent; ${_engine_contract}")
