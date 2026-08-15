@@ -293,7 +293,7 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
-            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.ipp"
         )
     endif()
 endforeach()

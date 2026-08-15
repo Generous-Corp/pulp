@@ -539,12 +539,32 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/waveset_transformer.hpp",
-        "fingerprint": "sha256:4989f5c1d7b6e20bc4ecd3383122eafe6748b4a506af1095b6b86a3eba66663a",
+        "fingerprint": "sha256:08e9ab25fb2e8400b015777e7ad47fd82a4b93221f0b42287f6c3254c431039f",
         "disposition": "unsupported_capability",
         "capability_keys": [],
         "rationale": (
             "The bounded WavesetTransformer is a signal-only public DSP API; it has no "
             "typed generator binding and makes no installed agent capability claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/detail/waveset_capacity_layout.ipp",
+        "fingerprint": "sha256:1954975f5374b6e3eb04f103d720b0a5d4e24281bde925a0e21e57e93cdade2c",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Installed implementation detail required by the public WavesetTransformer header; "
+            "it does not expose an independent agent capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/detail/waveset_storage.ipp",
+        "fingerprint": "sha256:2c7832026a8c2269c596a89f1b1b9a8e46a31d957824c910867bad26f2d5a679",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Installed implementation detail required by the public WavesetTransformer header; "
+            "it does not expose an independent agent capability."
         ),
     },
 ]

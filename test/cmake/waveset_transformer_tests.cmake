@@ -1,6 +1,9 @@
 # WavesetTransformer owns a focused variable-rate signal suite.
 pulp_add_test_suite(pulp-test-waveset-transformer
-    SOURCES test_waveset_transformer.cpp
+    SOURCES
+        test_waveset_transformer_operations.cpp
+        test_waveset_transformer_capacity.cpp
+        test_waveset_transformer_lifecycle.cpp
     LIBRARIES pulp::signal pulp::native-components pulp::runtime ${CMAKE_DL_LIBS})
 target_compile_definitions(pulp-test-waveset-transformer PRIVATE PULP_WAVESET_TEST_SEAMS=1)
 target_sources(pulp-test-waveset-transformer PRIVATE
