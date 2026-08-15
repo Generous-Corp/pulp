@@ -56,11 +56,14 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.91.1 (current pin) — keeps v0.90.2's atomic PR handoff and adds bounded
+# v0.92.1 (current pin) — keeps v0.90.2's atomic PR handoff and v0.91.1's bounded
 #   in-process recovery for transient GitHub token-helper/network preparation
 #   failures in `shipyard wait`. A brief App-token acquisition outage no longer
 #   drops a long-lived landing monitor; permanent auth/configuration failures
 #   still fail immediately and the original overall timeout remains binding.
+#   It also makes Shipyard's release signing/notarization fully unattended on
+#   maintained Macs by loading file-backed local secrets, authorizing a
+#   disposable keychain, and proving a real timestamped signature before use.
 #
 # v0.90.2 (earlier pin) — keeps v0.89.0's unmanaged-backlog fence and makes
 #   PR submission ownership atomic: when protected main enables
@@ -133,7 +136,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.91.1"
+version = "v0.92.1"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
