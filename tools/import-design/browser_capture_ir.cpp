@@ -341,13 +341,36 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
                                   : ind.top + ind.height * 0.5;
     const double dx = pointer_cx - cx;
     const double dy = pointer_cy - cy;
-    const double distance = std::sqrt(dx * dx + dy * dy);
+    double distance = std::sqrt(dx * dx + dy * dy);
     // A pointer centred on the dial has no radial direction to sweep along, so
     // there is nothing to reproduce. Refuse rather than divide by zero and
     // stamp a pointer that pivots on itself.
     if (!(distance > 0.0)) return std::nullopt;
-    const double ux = dx / distance;
-    const double uy = dy / distance;
+    double ux = dx / distance;
+    double uy = dy / distance;
+    const double short_axis = std::min(x_extent, y_extent);
+    const double long_axis = std::max(x_extent, y_extent);
+    const bool oriented_thin_pointer =
+        ind.oriented && short_axis > 0.0 && long_axis > short_axis * 1.5;
+    if (oriented_thin_pointer) {
+        // An elongated pointer declares its direction with its own long axis.
+        // A small border/containing-block offset must not rotate that axis. Pick
+        // the sign that points from the dial toward the pointer centre, then
+        // use the centre delta only to locate the pointer along that axis.
+        if (x_extent >= y_extent) {
+            ux = xx / x_extent;
+            uy = xy / x_extent;
+        } else {
+            ux = yx / y_extent;
+            uy = yy / y_extent;
+        }
+        if (ux * dx + uy * dy < 0.0) {
+            ux = -ux;
+            uy = -uy;
+        }
+        distance = ux * dx + uy * dy;
+        if (!(distance > 0.0)) return std::nullopt;
+    }
     // Support function of the box along the radial axis, and along the axis
     // perpendicular to it.
     const double along =
@@ -365,10 +388,6 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     // by a few pixels). That turns a thin rotated needle into a wedge. The
     // transformed intrinsic axes already carry rotation and non-uniform scale;
     // the shorter full extent is therefore the stable authored thickness.
-    const double short_axis = std::min(x_extent, y_extent);
-    const double long_axis = std::max(x_extent, y_extent);
-    const bool oriented_thin_pointer =
-        ind.oriented && short_axis > 0.0 && long_axis > short_axis * 1.5;
     const double thickness = oriented_thin_pointer ? 2.0 * short_axis
                                                     : 2.0 * across;
     out.width = static_cast<float>(thickness / half);

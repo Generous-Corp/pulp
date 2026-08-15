@@ -1276,6 +1276,14 @@ TEST_CASE("a transformed thin pointer keeps its own short-axis width when its pi
     REQUIRE(found.count("horizontal-scaled") == 1);
     CHECK(std::stof(found.at("offset-thin")->attributes.at("knob_ind_w")) ==
           Catch::Approx(6.0f / 65.0f).margin(0.0001f));
+    constexpr float kPi = 3.14159265358979323846f;
+    const float offset_runtime_angle =
+        -kPi * 0.5f + (0.76f - 0.5f) * kPi * 1.5f +
+        std::stof(found.at("offset-thin")->attributes.at("knob_ind_phase_rad"));
+    CHECK(std::cos(offset_runtime_angle) ==
+          Catch::Approx(std::cos(-148.0f * kPi / 180.0f)).margin(0.001f));
+    CHECK(std::sin(offset_runtime_angle) ==
+          Catch::Approx(std::sin(-148.0f * kPi / 180.0f)).margin(0.001f));
     // The 4px local short axis is scaled by 0.5 while the horizontal long axis
     // is scaled by 1.25. Its authored screen thickness is therefore 2px.
     CHECK(std::stof(found.at("horizontal-scaled")->attributes.at("knob_ind_w")) ==
