@@ -1055,7 +1055,8 @@ uses, or the golden warms a cache the real jobs never touch.
   `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
-- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has both Linux and macOS receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for the two receipt artifacts before changing `codecov.yml`.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, and Python-tools receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for all three receipt artifacts before changing `codecov.yml`.
+- **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
   path-scoped, advisory four-leg matrix builds production-stripped plug-ins on
@@ -1879,14 +1880,14 @@ supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
 The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
-~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 150-min job
+~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 210-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
 staleness watchdog keys off a *successful run*, not per-OS Codecov flags — so a
 red Windows leg would otherwise keep a healthy full run red forever. **The
 subtle trap (verified by canary):** job-level `continue-on-error` does NOT
 neutralize a `timeout-minutes` *cancellation* — a cancelled job still makes the
 run conclude `cancelled`. It DOES neutralize a normal job *failure*. So the
-coverage suite step self-terminates at an **internal budget (135 min) below the
+coverage suite step self-terminates at an **internal budget (180 min) below the
 job cap**, turning the would-be cancellation into a normal non-zero exit that
 the job-level `continue-on-error: matrix.os=='windows'` then absorbs → the run
 concludes `success`. Don't "simplify" this to bare `continue-on-error`; it will
@@ -1894,7 +1895,7 @@ silently stop closing the watchdog. **And the watchdog that enforces the budget
 must separate its steps with `;`, NOT `&&`** — if the kill is `&&`-gated behind
 a `: > marker` write (which can fail on a Windows `RUNNER_TEMP` backslash path),
 a failed marker write short-circuits the chain and the suite is never killed,
-so the job hits the 150-min cap and is *cancelled* anyway. The kill is
+so the job hits the 210-min cap and is *cancelled* anyway. The kill is
 mandatory; the marker is best-effort (cleanup of any partial Cobertura also
 triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
@@ -3930,7 +3931,7 @@ the correct fix; they bound runs regardless of `cancel-in-progress`.
 `tools/scripts/classify_changes.py --mode=diff`, outputs
 `native_build_required`). Skip-safe PRs (docs / planning `*.md` only —
 classifier fails *closed*, any uncertainty → `true`) skip the
-`coverage` matrix (150 min/leg); docs-only PRs also skip
+`coverage` matrix (210 min/leg); docs-only PRs also skip
 `android-kotlin-coverage`. The Android Kotlin lane is additionally
 guarded with `github.event_name != 'pull_request'`, so it never allocates
 a runner on PRs. No coverage runner is allocated on a docs PR.
