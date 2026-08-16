@@ -271,6 +271,21 @@ systemctl daemon-reload
 systemctl enable --now pulp-trusted-ephemeral-pool@1.service
 systemctl enable --now pulp-pr-safe-ephemeral-pool@1.service
 ```
+`--apply` and `--verify` both assert a **default-deny egress policy** per
+isolated bridge, not merely that the bridge exists. MASQUERADE is address
+translation, not filtering: with NAT alone and Proxmox's stock
+`-P FORWARD ACCEPT`, a guest on `10.240.20x.2/30` still reaches
+`192.168.86.0/24`, it just arrives looking like the host. The managed policy
+denies RFC1918 first, allows the uplink, permits established return traffic,
+and terminates in its own catch-all `DROP` so the chain policy is never what
+decides. The `post-up`/`pre-down` hooks restore and remove it alongside the NAT
+rule, so an `ifdown`/`ifup` cycle cannot leave a bridge up without its policy.
+
+This matters most for the PR-safe pool, which exists to run unreviewed
+contributor code. Do not enable `pulp-pr-safe-ephemeral-pool@N` on a host where
+`--verify` does not prove the egress policy.
+
+
 
 Start one instance of each protected role first and retain a generic pool
 instance. Verify the live group and exact role labels before adding capacity.

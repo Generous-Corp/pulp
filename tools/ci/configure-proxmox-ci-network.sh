@@ -10,6 +10,7 @@ STATE_FILE=/var/lib/pulp/ci-host-network.state
 LOCK_FILE=/var/lock/pulp-ci-host-network.lock
 VMID_LOCK_FILE=/var/lock/pulp-ephemeral-vmid.lock
 MANAGEMENT_BRIDGE=vmbr0
+FILTER_TARGET=DROP
 CLONE_BASE="${TARTCI_PROXMOX_CLONE_BASE:-200}"
 CLONE_MAX="${TARTCI_PROXMOX_CLONE_MAX:-202}"
 BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
@@ -158,6 +159,7 @@ ensure_nat() {
         fi
         [ "$(count_nat_rules "${SUBNETS[$index]}" "${BRIDGES[$index]}")" = 1 ] \
             || die "cannot prove exact managed NAT for ${BRIDGES[$index]}"
+        ensure_one_filter "${BRIDGES[$index]}"
     done
 }
 
@@ -178,6 +180,7 @@ ensure_one_nat() {
     [ "$count" = 1 ] || nat_rule -A "$subnet" "$bridge"
     [ "$(count_nat_rules "$subnet" "$bridge")" = 1 ] \
         || die "cannot prove exact managed NAT for $bridge"
+    ensure_one_filter "$bridge"
 }
 
 lock_host_network_unless_inherited() {
@@ -197,6 +200,79 @@ remove_one_nat() {
     done
     [ "$(count_nat_rules "$subnet" "$requested_bridge")" = 0 ] \
         || die "managed NAT rule survived removal for $requested_bridge"
+    remove_one_filter "$requested_bridge"
+}
+
+filter_rule() {
+    local operation="$1" bridge="$2"
+    shift 2
+    iptables -w 10 "$operation" FORWARD "$@" -m comment \
+        --comment "pulp-ci-isolation:$bridge" -j "$FILTER_TARGET"
+}
+
+# The exact egress policy for one isolated bridge, most specific first. RFC1918
+# is denied before the uplink is allowed, and the final catch-all makes the
+# policy default-deny regardless of the FORWARD chain's own policy: a packet
+# leaving the guest that matches no earlier rule is dropped rather than
+# inheriting `-P FORWARD ACCEPT`. MASQUERADE is address translation, not
+# filtering, so without these rules a guest still reaches the LAN.
+filter_specs() {
+    local bridge="$1"
+    printf '%s\n' \
+        "DROP -i $bridge -d 10.0.0.0/8" \
+        "DROP -i $bridge -d 172.16.0.0/12" \
+        "DROP -i $bridge -d 192.168.0.0/16" \
+        "ACCEPT -i $bridge -o $MANAGEMENT_BRIDGE" \
+        "ACCEPT -o $bridge -m conntrack --ctstate ESTABLISHED,RELATED" \
+        "DROP -i $bridge"
+}
+
+count_filter_rules() {
+    local bridge="$1" rules status count
+    rules="$(iptables-save -t filter)" || die "cannot inspect the filter table"
+    count="$(grep -Fc -- "--comment \"pulp-ci-isolation:$bridge\"" <<<"$rules")" || {
+        status=$?
+        [ "$status" = 1 ] || die "cannot count managed filter rules"
+    }
+    printf '%s\n' "$count"
+}
+
+expected_filter_count() {
+    filter_specs "$1" | wc -l | tr -d ' '
+}
+
+ensure_one_filter() {
+    local bridge="$1" spec expected
+    expected="$(expected_filter_count "$bridge")"
+    if [ "$(count_filter_rules "$bridge")" != "$expected" ]; then
+        remove_one_filter "$bridge"
+        while IFS= read -r spec; do
+            FILTER_TARGET="${spec%% *}"
+            # shellcheck disable=SC2086
+            filter_rule -A "$bridge" ${spec#* }
+        done < <(filter_specs "$bridge")
+    fi
+    [ "$(count_filter_rules "$bridge")" = "$expected" ] \
+        || die "cannot prove the exact managed egress policy for $bridge"
+}
+
+remove_one_filter() {
+    local bridge="$1" count spec
+    count="$(count_filter_rules "$bridge")"
+    [[ "$count" =~ ^[0-9]+$ ]] || die "cannot count $bridge filter rules"
+    while [ "$count" -gt 0 ]; do
+        while IFS= read -r spec; do
+            FILTER_TARGET="${spec%% *}"
+            # shellcheck disable=SC2086
+            filter_rule -D "$bridge" ${spec#* } 2>/dev/null || true
+        done < <(filter_specs "$bridge")
+        local remaining
+        remaining="$(count_filter_rules "$bridge")"
+        [ "$remaining" -lt "$count" ] || break
+        count="$remaining"
+    done
+    [ "$(count_filter_rules "$bridge")" = 0 ] \
+        || die "managed filter rules survived removal for $bridge"
 }
 
 count_nat_rules() {
@@ -222,11 +298,12 @@ remove_nat() {
         done
         [ "$(count_nat_rules "${SUBNETS[$index]}" "${BRIDGES[$index]}")" = 0 ] \
             || die "managed NAT rule survived removal for ${BRIDGES[$index]}"
+        remove_one_filter "${BRIDGES[$index]}"
     done
 }
 
 verify_live() {
-    local index bridge expected_address live_addresses ports count guest_ip route
+    local index bridge expected_address live_addresses ports count guest_ip route expected_filters
     file_is_exact "$INTERFACES_FILE" render_interfaces \
         || die "$INTERFACES_FILE is absent or differs from the managed contract"
     file_is_exact "$SYSCTL_FILE" render_sysctl \
@@ -251,6 +328,10 @@ verify_live() {
         esac
         count="$(count_nat_rules "${SUBNETS[$index]}" "$bridge")"
         [ "$count" = 1 ] || die "$bridge must have exactly one managed NAT rule (found $count)"
+        expected_filters="$(expected_filter_count "$bridge")"
+        count="$(count_filter_rules "$bridge")"
+        [ "$count" = "$expected_filters" ] \
+            || die "$bridge egress policy is not default-deny (found $count of $expected_filters rules)"
     done
     management_signature >/dev/null
     printf 'verified: isolated bridges, forwarding, NAT, and %s management route\n' \
