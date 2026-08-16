@@ -3,6 +3,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/host/timeline_graph_binding.hpp>
 #include <pulp/playback/program_compiler.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,26 @@ class TimelineExampleEngine {
     /// Control-thread publication into the existing program store. Track IDs,
     /// tempo-map identity, graph topology, and transport remain stable.
     bool recompile(playback::ProgramCompileRequest request);
+    /// Sparse control-thread publication driven by an exact committed document
+    /// delta. Unlike recompile(), this never sets `dirty.all`: the compiler
+    /// resolves the dirty track set from `committed`, so tracks the transaction
+    /// did not touch keep their existing TrackProgram by pointer rather than
+    /// being rebuilt. The compile context, tempo-map owner, and decoded-audio
+    /// pool are carried over from the live program so the only thing that
+    /// changes is what the edit actually changed.
+    bool recompile_committed(const timeline::CommitResult& committed);
+    /// Generation and document revision of the live program.
+    struct ProgramIdentity {
+        playback::ProgramGeneration generation = 0;
+        std::uint64_t document_revision = 0;
+        bool valid = false;
+    };
+    ProgramIdentity program_identity() const noexcept;
+    /// Shared owner of one track's compiled program, copied out while the
+    /// store's read guard is held. Returning the owner rather than the guard
+    /// lets an oracle compare pointer identity across recompiles without
+    /// pinning the reader for the lifetime of the comparison.
+    std::shared_ptr<const playback::TrackProgram> track_program(timeline::ItemId id) const;
     host::TimelineGraphProcessResult process(audio::BufferView<float>& output,
                                              const audio::BufferView<const float>& input) noexcept;
 
