@@ -188,3 +188,31 @@ elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_V8=1)
 endif()
 # auto → QuickJS default (backward compatible with all existing code)
+
+# Configure-time source/link oracle, called from core/view/CMakeLists.txt AFTER the
+# JSC source and framework linkage are attached to pulp-view-script. Calling it
+# earlier reads empty target properties and silently passes.
+function(pulp_view_assert_js_engine_link_contract)
+    # Configure-time source/link oracle. Static archives can dead-strip an unused
+    # backend, so final-binary symbol scans alone cannot prove that a QuickJS SDK did
+    # not compile or export JSC linkage. Keep the target graph itself fail-closed.
+    get_target_property(_pulp_view_script_sources pulp-view-script SOURCES)
+    get_target_property(_pulp_view_script_links pulp-view-script LINK_LIBRARIES)
+    if(PULP_HAS_JSC_ACTUAL)
+        if(NOT "${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+           NOT "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+            message(FATAL_ERROR
+                "PULP_JS_ENGINE=jsc must compile js_jsc_engine.mm and link "
+                "JavaScriptCore.framework.")
+        endif()
+    else()
+        if("${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+           "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+            message(FATAL_ERROR
+                "PULP_JS_ENGINE=${PULP_JS_ENGINE} leaked the JSC source or framework: "
+                "sources=${_pulp_view_script_sources}; links=${_pulp_view_script_links}")
+        endif()
+    endif()
+    unset(_pulp_view_script_sources)
+    unset(_pulp_view_script_links)
+endfunction()
