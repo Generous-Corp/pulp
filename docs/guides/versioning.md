@@ -7,7 +7,10 @@ Pulp versions three surfaces independently:
   CLI binary's `pulp --version`. The source-only combined-installer recipe is
   also mapped to this surface: SDK consumers execute it from a detached Pulp
   checkout at the SDK provenance SHA, so a recipe fix needs a new SDK tag even
-  though the script is not installed in the SDK prefix yet.
+  though the script is not installed in the SDK prefix yet. The provenance
+  marker authoring helper and installed `PulpSdkProvenance.cmake` contract are
+  mapped here too: changing either changes the identity or admission rules of
+  the SDK that downstream consumers receive.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
 - **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by
@@ -162,6 +165,13 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 ## CI workflow
 
 `.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge. Its `concurrency` uses **`cancel-in-progress: false`** (2026-07-21): because it posts the *required* `Enforce version & skill sync` check, cancelling an in-flight run under a churning main would leave that required check stuck at `cancelled` (never `success`), silently blocking merge. Do not flip a required-check gate back to `cancel-in-progress: true`.
+
+Same-repository PR and merge-group runs select the restricted organization
+Linux pool through `PULP_AUTO_LINUX_RUNS_ON_JSON`; fork PRs and an unset selector
+fall back to hosted Linux. Only trusted manual dispatch may use the separate
+repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
+distinct prevents automatic branch content from matching the less-isolated
+repository runner through GitHub's subset-based label selection.
 
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
@@ -383,17 +393,20 @@ a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
 C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
 authoritative diff-coverage gate is the separate `Diff coverage required` check.
-The coverage matrix runs the instrumented build + full ctest suite under an
+The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
-drops any partial report and records `budget_hit`, and the verify + Cobertura
-upload steps **skip on every OS** so the leg concludes non-fatally rather than
-reddening `main` (previously only the `os-windows` leg was spared, so a slow
-macOS/linux run broke `main`). A genuine build failure — no budget hit, no
-report — still fails loudly. The suite runs ctest in parallel with a per-test
-`--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
-receipt-aware upload watchdog is the alarm if coverage genuinely stops
-flowing. Report verification and Codecov transport are separate contracts:
+drops any partial report and records `budget_hit`. Windows remains advisory,
+but Linux and macOS are receipt-authoritative: their Cobertura verifier still
+runs and fails when the report is absent, so a green workflow cannot hide a
+missing native upload. The shared coverage CTest policy excludes the
+slow/soak/configuration proofs already enforced by the primary build matrix;
+both `scripts/run_coverage.sh` and the local pre-push diff-coverage hook consume
+it across GitHub-hosted and SSH/self-hosted M1/M3 callers. Use
+`--include-slow-tests` for intentional full local collection.
+The suite also runs ctest in parallel with a per-test `--timeout` so it fits the
+budget; the receipt-aware upload watchdog remains the cross-run alarm. Report
+verification and Codecov transport are separate contracts:
 missing or structurally empty reports fail the producing leg, while the shared
 upload action records transport failure without making Codecov availability a
 merge prerequisite. Report eligibility follows the semantic artifact contract,
@@ -412,8 +425,8 @@ to avoid ENOSPC without shrinking the measured test surface. Build and CTest
 parallelism are separate in the shared script: low-memory consumers can bound
 link workers while the default eight test workers prevent suite growth from
 consuming the upload window on GitHub-hosted, local, and SSH coverage. The native
-suite's 120-minute internal budget reserves the final 30 minutes of the
-150-minute job for report generation, side-language coverage, artifacts, and
+suite's 180-minute internal budget reserves the final 30 minutes of the
+210-minute job for report generation, side-language coverage, artifacts, and
 receipts, avoiding a hard job cancellation after a nominal budget hit.
 
 ---
@@ -438,7 +451,35 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.89.0 — exact-head stewardship is load-bearing
+
+v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
+is mutable only when its current commit has a successful
+`shipyard/steward-handoff` status and the PR carries `shipyard:managed`.
+Repository-wide discovery still reports older PRs, but classifies them as
+`unmanaged` and never adopts, reruns, cancels, or queues them implicitly.
+Semantic failures are surfaced once through the deduplicated
+`shipyard/steward-recovery` status and `shipyard:needs-agent` label; routine
+reconciliation and native merge-queue admission require no model.
+In apply mode, every discovered unmanaged PR receives the explanatory
+`shipyard:unmanaged` label without being adopted or otherwise mutated; a later
+successful exact-head handoff replaces it with `shipyard:managed`.
+
+Pulp's first controller rollout is the manual-only GitHub-hosted workflow in
+`.github/workflows/shipyard-merge-steward.yml`. It is serialized per repository
+and restores a small evidence ledger, while GitHub statuses and labels remain
+the durable ownership truth. Its mutations use the repository-scoped Shipyard
+App installation token because workflow-token mutations do not emit the
+downstream `merge_group` events required to land. The controller job is
+restricted to the main-branch workflow and does not persist checkout
+credentials. One labeled GitHub issue mirrors every current PR exception and
+closes at zero, so a local machine, Linear, and an interactive agent may all be
+offline without losing the operator queue. The ten-minute schedule and durable
+remote retry ledger remain disabled until live canaries prove unmanaged
+negative control, exact-head handoff, recovery deduplication, recovery clearing
+on a corrected head, and merge-queue landing without an agent wait loop.
+
+### v0.83.0 floor — fleet health and formal stacks remain load-bearing
 
 v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
 enqueue mutation boundary, including the cross-repository runner steward. Pulp

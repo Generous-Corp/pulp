@@ -31,7 +31,8 @@ std::string cell_value(std::size_t index, std::size_t count) {
 }
 
 bool is_interactive_target(View& view) {
-    return view.on_click || view.on_pointer_event || view.on_drag ||
+    return view.on_click || view.on_pointer_event || view.on_dom_pointer_event ||
+           view.on_dom_pointer_move_event || view.on_drag ||
            view.on_context_menu || view.focusable() || view.wants_wheel_value() ||
            view.wants_mouse_input();
 }

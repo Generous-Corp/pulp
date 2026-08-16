@@ -4,12 +4,16 @@
 #include "inspector_shipping_report.hpp"
 
 #include <pulp/inspect/capabilities.hpp>
+#if PULP_CLI_HAS_CONTROL_HEALTH
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_client.hpp>
 #include <pulp/inspect/control_client_connection.hpp>
+#endif
 #include <pulp/inspect/control_manifest.hpp>
+#if PULP_CLI_HAS_CONTROL_HEALTH
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
+#endif
 
 #include <choc/text/choc_JSON.h>
 
@@ -30,6 +34,7 @@
 namespace {
 using namespace pulp::inspect;
 
+#if PULP_CLI_HAS_CONTROL_HEALTH
 constexpr std::int64_t kDefaultOperationTimeoutMs = 3'000;
 constexpr std::int64_t kMaximumOperationTimeoutMs = 300'000;
 constexpr std::string_view kDefaultInstalledHostId = "ordinary-standalone";
@@ -55,6 +60,7 @@ std::filesystem::path broker_executable() {
     }
     return {};
 }
+#endif
 
 std::string json_error(std::string_view code, std::string_view explanation) {
     auto value = choc::value::createObject("");
@@ -72,6 +78,7 @@ int fail(std::string_view code, std::string_view explanation, bool json) {
     return code == "invalid-request" ? 2 : 1;
 }
 
+#if PULP_CLI_HAS_CONTROL_HEALTH
 std::optional<std::chrono::milliseconds> remaining_timeout(const OperationDeadline* deadline,
                                                            std::chrono::milliseconds fallback,
                                                            bool json) {
@@ -237,6 +244,7 @@ std::optional<std::string> token(std::string_view prefix) {
         return std::nullopt;
     return std::string(prefix) + pulp::runtime::hex_encode(*bytes);
 }
+#endif
 
 void help() {
     std::cout << "pulp control — authenticated local capability control\n\n"
@@ -454,6 +462,13 @@ int cmd_control(const std::vector<std::string>& args) {
     if (verb == "artifact" && (artifact_id.empty() || output.empty()))
         return fail("invalid-request", "artifact requires --id ID --out FILE", json);
 
+#if !PULP_CLI_HAS_CONTROL_HEALTH
+    return fail("control-unavailable",
+                "this Pulp SDK was built without the optional development inspector "
+                "component (PULP_ENABLE_INSPECTOR=OFF); only 'control profiles' and "
+                "'control audit' are available",
+                json);
+#else
     std::int64_t timeout_ms = kDefaultOperationTimeoutMs;
     if (!timeout_text.empty()) {
         const auto* begin = timeout_text.data();
@@ -682,4 +697,5 @@ int cmd_control(const std::vector<std::string>& args) {
         std::cout << receipt.operation_id << ": " << control_receipt_state_id(receipt.state)
                   << " (receipt " << receipt.receipt_id << ")\n";
     return receipt.state == ControlReceiptState::Completed ? 0 : 1;
+#endif
 }

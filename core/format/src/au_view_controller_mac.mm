@@ -117,6 +117,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 
 @implementation PulpAUMacViewController {
     NSSize _designSize;
+    pulp::format::ViewSize _sizeHints;
     NSUInteger _initialSizeSyncAttempts;
     // Deferred GPU-host creation (Logic OOP first-paint fix): we hold the
     // resolved root View and wait to build the PluginViewHost (and its Dawn/
@@ -285,6 +286,8 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 
     pulp::view::View *root = nullptr;
     uint32_t w = 400, h = 300;
+    uint32_t designW = w, designH = h;
+    _sizeHints = {};
     if (processor && store) {
         _bridge = std::make_unique<pulp::format::ViewBridge>(
             *processor, *store,
@@ -296,27 +299,35 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
             _bridge.reset();
         } else {
             root = _bridge->view();
-            w = _bridge->size_hints().preferred_width;
-            h = _bridge->size_hints().preferred_height;
+            const auto& hints = _bridge->size_hints();
+            _sizeHints = hints;
+            w = hints.preferred_width;
+            h = hints.preferred_height;
+            designW = pulp::format::design_viewport_width(hints);
+            designH = pulp::format::design_viewport_height(hints);
         }
     }
 
     if (!root) {
         _fallbackView = std::make_unique<pulp::view::View>();
         root = _fallbackView.get();
+        _sizeHints.preferred_width = w;
+        _sizeHints.preferred_height = h;
     }
 
-    // Publish the design size as the preferred size, but do NOT force the root
-    // view's frame to it here. Forcing the frame during rebuild poisons the
+    // Publish the requested initial window size, but keep the authored design
+    // coordinate space separately for viewport scaling. Do NOT force the root
+    // view's frame to either here. Forcing the frame during rebuild poisons the
     // first paint in Logic's OOP host: the editor paints at the design size
     // before Logic delivers its restored (smaller) window size, leaving the
     // first frame clipped. The PulpAUMacRootView `setFrameSize:` hook (wired
     // below) re-fits the design viewport to whatever size the host hands us —
     // including Logic's initial geometry push that `viewDidLayout` misses.
-    const NSSize designSize = NSMakeSize(w, h);
+    const NSSize preferredSize = NSMakeSize(w, h);
+    const NSSize designSize = NSMakeSize(designW, designH);
     _designSize = designSize;
     _initialSizeSyncAttempts = 0;
-    pulp_auv3_apply_preferred_size(self, designSize, /*resize_view_frame=*/false);
+    pulp_auv3_apply_preferred_size(self, preferredSize, /*resize_view_frame=*/false);
 
     // Defer PluginViewHost creation until the root view reports a real, settled
     // host size (see -createViewHostIfReady). Wire the frame-change hook first:
@@ -391,11 +402,11 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         return;
     }
 
-    // Viewport pin + aspect lock: paint the design at the host size.
-    if (w > 0 && h > 0) {
-        _viewHost->set_design_viewport(w, h);
-        _viewHost->set_fixed_aspect_ratio(static_cast<float>(w) /
-                                          static_cast<float>(h));
+    // Viewport pinning and aspect locking are independent. Responsive roots
+    // lay out against the live host bounds even when the host constrains the
+    // resize gesture to a declared aspect.
+    pulp::format::configure_native_viewport(*_viewHost, _sizeHints);
+    if (pulp::format::should_pin_design_viewport(_sizeHints)) {
         // Anchor the design to the TOP of the host pane. AU can't negotiate the
         // pane aspect the way CLAP (gui_adjust_size) / VST3 (checkSizeConstraint)
         // do, so a wide fixed design lands in a taller host pane (e.g. REAPER's
@@ -424,15 +435,16 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
                 // hints first so any synchronous host query sees the new
                 // natural size, then publish preferredContentSize before
                 // changing the viewport.
-                controller->_designSize = NSMakeSize(w, h);
+                const auto& hints = controller->_bridge->size_hints();
+                if (pulp::format::should_pin_design_viewport(hints)) {
+                    controller->_designSize = NSMakeSize(w, h);
+                }
                 pulp_auv3_apply_preferred_size(
-                    controller, controller->_designSize,
+                    controller, NSMakeSize(w, h),
                     /*resize_view_frame=*/true);
                 if (controller->_viewHost) {
-                    controller->_viewHost->set_design_viewport(
-                        static_cast<float>(w), static_cast<float>(h));
-                    controller->_viewHost->set_fixed_aspect_ratio(
-                        static_cast<float>(w) / static_cast<float>(h));
+                    pulp::format::commit_editor_requested_viewport(
+                        *controller->_viewHost, hints, w, h);
                 }
                 return true;
             });

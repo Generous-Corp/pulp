@@ -173,17 +173,21 @@ pulp ship doctor --check-online  # also prove the .p8 vs Apple (read-only) + ref
 keychain** authorized for `codesign` via `set-key-partition-list` (never the
 login keychain / 1Password), and verifies a **file-based App Store Connect `.p8`
 notary key** (no keychain to lock or lose). `pulp ship sign` runs it as a
-best-effort quiet preflight — and so does `tools/scripts/build_combined_installer.sh`
+mandatory quiet preflight — and so does `tools/scripts/build_combined_installer.sh`
 (the combined-installer path behind a plugin's `package.sh` / the planned
 `pulp ship package --combined`), so an unattended combined-installer build signs
-prompt-free without a manual `pulp ship doctor` first. (If `codesign` ever does
-pop a password dialog, it's asking for the *dedicated* keychain's stored
-password — not your login password — and means the preflight didn't run; see the
-`ship` skill's `errSecInternalComponent` note.) The working recipe: sign from the dedicated keychain
+prompt-free without a manual `pulp ship doctor` first. Readiness requires the
+dedicated keychain, full partition authorization, and a real timestamped
+hardened-runtime signing probe. Any failure exits before production `codesign`;
+there is no login-keychain or warn-and-continue fallback, and agents must never
+ask for a password. The working recipe: sign from the dedicated keychain
 with the identity hash + `--options runtime --timestamp` (inner dylibs/frameworks
 first), then `notarytool submit --key <.p8> --wait`, `stapler staple`, `spctl
 --assess`. **Secrets live in `~/.config/pulp/secrets/` (`keychain.env` +
 `notary.env`), never in the repo**; env vars of the same name override the files.
+If an older dedicated keychain's password has drifted, the doctor preserves it
+and rebuilds a stable `*-unattended.keychain-db` sibling from the local P12; it
+never overwrites the legacy keychain or falls back to login.
 
 After the Rust CLI cutover, source builds produce `./build/pulp` as
 the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
@@ -910,6 +914,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
+- Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority. → `tools/import-design/jsx-runtime/materialized-runtime-transform.mjs`
 - Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
 
 **import-roundtrip** — validate an import lane end to end

@@ -450,6 +450,70 @@ struct MoveTrack {
     std::optional<ItemId> replacement_before_track_id = std::nullopt;
 };
 
+/// Inserts a typed device declaration into a track's authored chain.
+struct InsertDevice {
+    /// Sequence containing the target track.
+    ItemId sequence_id;
+    /// Track receiving the placement.
+    ItemId track_id;
+    /// Complete typed declaration to insert.
+    DevicePlacement placement;
+    /// Authored successor, or empty to append.
+    std::optional<ItemId> before_device_id = std::nullopt;
+};
+
+/// Removes a device declaration by identity.
+struct RemoveDevice {
+    /// Sequence containing the target track.
+    ItemId sequence_id;
+    /// Track owning the placement.
+    ItemId track_id;
+    /// Placement identity to remove.
+    ItemId device_id;
+};
+
+/// Moves a device under an exact optimistic authored-position gate.
+struct MoveDevice {
+    /// Sequence containing the target track.
+    ItemId sequence_id;
+    /// Track owning the placement.
+    ItemId track_id;
+    /// Placement identity to move.
+    ItemId device_id;
+    /// Required current successor, or empty when currently last.
+    std::optional<ItemId> expected_before_device_id = std::nullopt;
+    /// Replacement successor, or empty to move last.
+    std::optional<ItemId> replacement_before_device_id = std::nullopt;
+};
+
+/// Replaces device kind, binding, slot, stage, bypass, and wet/dry atomically.
+struct RetargetDevice {
+    /// Sequence containing the target track.
+    ItemId sequence_id;
+    /// Track owning the placement.
+    ItemId track_id;
+    /// Placement identity to retarget.
+    ItemId device_id;
+    /// Required current configuration.
+    DeviceConfiguration expected;
+    /// Replacement configuration.
+    DeviceConfiguration replacement;
+};
+
+/// Replaces the optional content-addressed opaque state reference.
+struct SetDeviceState {
+    /// Sequence containing the target track.
+    ItemId sequence_id;
+    /// Track owning the placement.
+    ItemId track_id;
+    /// Placement identity whose state changes.
+    ItemId device_id;
+    /// Required current state content identity.
+    std::optional<ContentHash> expected;
+    /// Replacement state content identity.
+    std::optional<ContentHash> replacement;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -458,7 +522,8 @@ using Command = std::variant<
     SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion,
     RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
     InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
-    RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes>;
+    RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
+    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

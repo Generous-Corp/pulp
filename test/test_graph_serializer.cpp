@@ -1266,6 +1266,42 @@ TEST_CASE("GraphSerializer serializes plugin formats and state blobs",
     }
 }
 
+TEST_CASE("GraphSerializer resolves the canonical BuiltIn instrument round-trip",
+          "[host][serializer][builtin]") {
+    PluginInfo info;
+    info.format = PluginFormat::BuiltIn;
+    info.unique_id = "pulp.instrument.basic";
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+
+    SignalGraph src;
+    src.add_plugin_node(std::move(slot), 0, 2, "Basic Instrument");
+    const auto json = GraphSerializer::to_json(src);
+    REQUIRE(json.find("\"format\": \"builtin\"") != std::string::npos);
+    REQUIRE(json.find("\"unique_id\": \"pulp.instrument.basic\"") !=
+            std::string::npos);
+    REQUIRE(json.find("\"last_path\": \"\"") != std::string::npos);
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.empty());
+    REQUIRE(dst.nodes().size() == 1);
+
+    const auto& restored = dst.nodes().front();
+    REQUIRE(restored.type == NodeType::Plugin);
+    REQUIRE(restored.plugin != nullptr);
+    REQUIRE(restored.name == "Basic Instrument");
+    REQUIRE(restored.num_input_ports == 0);
+    REQUIRE(restored.num_output_ports == 2);
+    REQUIRE(restored.plugin_info.format == PluginFormat::BuiltIn);
+    REQUIRE(restored.plugin_info.unique_id == "pulp.instrument.basic");
+    REQUIRE(restored.plugin_info.path.empty());
+}
+
 TEST_CASE("GraphSerializer serializes short plugin state blobs with stable padding",
           "[host][serializer]") {
     SignalGraph src;

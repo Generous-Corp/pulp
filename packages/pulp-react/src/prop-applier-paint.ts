@@ -7,6 +7,52 @@
 
 import { call, _resolveVar } from './prop-applier-internal.js';
 
+interface _ParsedBorder {
+    width: number;
+    style: string;
+    color: string;
+}
+
+// CSS border shorthand accepted by authored React style objects. This is the
+// same semantic split as CSSStyleDeclaration's browser-compatible lane, but it
+// lives at the renderer-neutral prop boundary so every imported @pulp/react
+// tree receives identical width/style/color slots. Radius is deliberately not
+// part of the shorthand and must survive an update.
+function _parseCssBorder(value: unknown): _ParsedBorder | null {
+    const source = String(value ?? '').trim();
+    if (!source) return null;
+    if (/^(none|hidden)$/i.test(source)) {
+        return { width: 0, style: source.toLowerCase(), color: 'transparent' };
+    }
+    const match = source.match(
+        /^(\d+(?:\.\d+)?|\.\d+)px\s+(solid|dashed|dotted|double|groove|ridge|inset|outset|none|hidden)\s+(.+)$/i);
+    if (!match) return null;
+    const width = Number(match[1]);
+    if (!Number.isFinite(width) || width < 0 || width > 65536) return null;
+    return {
+        width,
+        style: match[2].toLowerCase(),
+        color: String(_resolveVar(match[3].trim())),
+    };
+}
+
+function _applyBorderSideShorthand(
+    id: string, side: 'top' | 'right' | 'bottom' | 'left', value: unknown,
+): void {
+    if (typeof value !== 'string') {
+        const border = value as { color: string; width: number };
+        call('setBorderSide', id, side, border.width, border.color);
+        return;
+    }
+    const parsed = _parseCssBorder(value);
+    if (!parsed) return;
+    // View currently stores one shared border style plus independent edge
+    // widths/colors. Preserve the exact common CSS case and make none/hidden
+    // unambiguously non-painting through a zero-width edge.
+    call('setBorderStyle', id, parsed.style);
+    call('setBorderSide', id, side, parsed.width, parsed.color);
+}
+
 // Parse a CSS-spec single-shadow `box-shadow` string. Mirrors the
 // regex in `core/view/js/web-compat-style-decl.js`
 // (the DOM-lite path) so the @pulp/react path produces identical
@@ -172,8 +218,18 @@ export function applyPaintProp(
         case 'backgroundClip':       call('setBackgroundClip',       id, value as string); return true;
         case 'backgroundOrigin':     call('setBackgroundOrigin',     id, value as string); return true;
         case 'border': {
-            const b = value as { color: string; width?: number; radius?: number };
-            call('setBorder', id, b.color, b.width ?? 1, b.radius ?? 0);
+            if (typeof value === 'string') {
+                const parsed = _parseCssBorder(value);
+                if (!parsed) return true;
+                // CSS `border` does not reset border-radius. Individual setters
+                // preserve that slot, unlike the legacy object-form setBorder.
+                call('setBorderColor', id, parsed.color);
+                call('setBorderWidth', id, parsed.width);
+                call('setBorderStyle', id, parsed.style);
+                return true;
+            }
+            const border = value as { color: string; width?: number; radius?: number };
+            call('setBorder', id, border.color, border.width ?? 1, border.radius ?? 0);
             return true;
         }
         // RN-style flat border props. These must route through the
@@ -233,10 +289,10 @@ export function applyPaintProp(
         case 'listStyleType':     call('setListStyleType', id, value as string); return true;
         case 'listStyleImage':    call('setListStyleImage', id, value as string); return true;
         case 'listStylePosition': call('setListStylePosition', id, value as string); return true;
-        case 'borderTop':    { const b = value as { color: string; width: number }; call('setBorderSide', id, 'top', b.width, b.color); return true; }
-        case 'borderRight':  { const b = value as { color: string; width: number }; call('setBorderSide', id, 'right', b.width, b.color); return true; }
-        case 'borderBottom': { const b = value as { color: string; width: number }; call('setBorderSide', id, 'bottom', b.width, b.color); return true; }
-        case 'borderLeft':   { const b = value as { color: string; width: number }; call('setBorderSide', id, 'left', b.width, b.color); return true; }
+        case 'borderTop':    _applyBorderSideShorthand(id, 'top', value); return true;
+        case 'borderRight':  _applyBorderSideShorthand(id, 'right', value); return true;
+        case 'borderBottom': _applyBorderSideShorthand(id, 'bottom', value); return true;
+        case 'borderLeft':   _applyBorderSideShorthand(id, 'left', value); return true;
         // RN per-side flat props — route to the per-side bridge setters
         // that already preserve the unrelated attribute (see the
         // widget_bridge applyBorderSide helper).

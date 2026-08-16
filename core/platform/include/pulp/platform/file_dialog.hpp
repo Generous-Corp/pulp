@@ -46,6 +46,22 @@ public:
         const std::string& default_path = "",
         const std::string& default_name = "");
 
+    // Copy an existing file to a destination chosen by a native save dialog.
+    // The copy occurs while the platform still owns the selection grant. This
+    // distinction is load-bearing in sandboxed plugin hosts on macOS: returning
+    // a pathname from NSSavePanel and opening it later loses the granted
+    // capability and fails with EPERM. Returns the chosen destination on
+    // success, nullopt on cancellation or failure. Native backends populate
+    // `error` when their platform API distinguishes failure from cancellation;
+    // an empty error means cancellation or an undifferentiated backend refusal.
+    static std::optional<std::string> save_copy(
+        const std::string& source_path,
+        const std::string& title = "Save",
+        const std::vector<FileFilter>& filters = {},
+        const std::string& default_path = "",
+        const std::string& default_name = "",
+        std::string* error = nullptr);
+
     // Show a folder selection dialog.
     static std::optional<std::string> choose_folder(
         const std::string& title = "Choose Folder",
@@ -81,7 +97,17 @@ public:
             const std::string& default_path)> choose_folder;
     };
 
+    using SaveCopyBackend = std::function<std::optional<std::string>(
+            const std::string& source_path,
+            const std::string& title,
+            const std::vector<FileFilter>& filters,
+            const std::string& default_path,
+            const std::string& default_name,
+            std::string* error)>;
+
     static void set_backend(Backend backend);
+    static void set_save_copy_backend(SaveCopyBackend backend);
+    static bool has_save_copy_backend();
     static void clear_backend();
     static bool has_backend();
 

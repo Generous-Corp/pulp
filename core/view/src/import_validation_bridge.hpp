@@ -16,10 +16,19 @@
 
 namespace pulp::view {
 
-// Compute the absolute (root-relative) layout rectangle for a view, walking the
-// parent chain and subtracting ScrollView scroll offsets. Returns a choc object
-// with x/y/width/height/top/left/right/bottom members.
+// Compute the presentation-space bounding client rectangle for a view.  The
+// returned AABB includes the complete ancestor transform/scroll chain and is in
+// root viewport coordinates, matching DOM getBoundingClientRect().
 choc::value::Value make_layout_rect_value(View* v);
+
+// Compute the untransformed local CSS box metrics for a view. localX/localY are
+// the border-box origin in the native parent's coordinate space, offset* is
+// the border box, client* is the padding box, and border*Width exposes each
+// effective edge for translating browser border-box evidence into Yoga's
+// padding-edge-relative absolute coordinate space.
+// Keeping this separate from make_layout_rect_value is essential for DOM code
+// that maps viewport-space pointer coordinates into an authored canvas.
+choc::value::Value make_layout_box_metrics_value(View* v);
 
 // Build the ancestor chain (root → view) as a choc array of {id, bounds} entries,
 // skipping ancestors without an anchor/id. Used by the getLayoutAncestorRects

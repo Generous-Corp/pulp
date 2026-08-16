@@ -577,6 +577,11 @@ docs:
     kind: reference
     summary: All subsystems with status and key headers
 
+  - slug: fir-design
+    path: reference/fir-design.md
+    kind: reference
+    summary: Bounded weighted least-squares design for real linear-phase FIR filters
+
   - slug: modulation-toolkit
     path: reference/modulation-toolkit.md
     kind: reference
@@ -650,6 +655,11 @@ docs:
     path: policies/plugin-collaboration.md
     kind: policy
     summary: Standards decision for host-owned plugin scene coordination
+
+  - slug: event-stream-pdc
+    path: policies/event-stream-pdc.md
+    kind: policy
+    summary: Open decision boundary for event-stream plugin delay compensation
 
   - slug: licensing
     path: reference/licensing.md

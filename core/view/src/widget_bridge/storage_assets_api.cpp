@@ -258,7 +258,14 @@ void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
 
     register_bridge_function(api, "__loadAssetSync__", [&self](choc::javascript::ArgumentList args) {
         auto url = args.get<std::string>(0, "");
-        auto asset = load_bridge_asset(url, self.asset_roots_);
+        // Generated runtime packages place reviewed sidecars beside the entry
+        // script. Treat that directory as the first bounded asset root, which
+        // matches resolve_script_relative() and avoids requiring every host to
+        // redundantly repeat script_path.parent_path() in asset_roots.
+        auto roots = self.asset_roots_;
+        if (!self.script_base_dir_.empty())
+            roots.insert(roots.begin(), self.script_base_dir_);
+        auto asset = load_bridge_asset(url, roots);
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));

@@ -66,6 +66,12 @@ import {
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
+import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
+import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
+import { buildMaterializedPaintBindings } from "./materialized_paint_bindings.mjs";
+import {
+  materializedCoordinateSpaceFromQuad,
+} from "./materialized_coordinate_space.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -292,6 +298,255 @@ function pngDimensions(bytes) {
   };
 }
 
+const MAX_CAPTURED_CANVASES = 32;
+const MAX_CAPTURED_CANVAS_PIXELS = 64 * 1024 * 1024;
+
+async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+  const document = snapshot.documents?.[0];
+  const nodes = document?.nodes;
+  const strings = snapshot.strings ?? [];
+  if (!nodes) return [];
+
+  const canvases = [];
+  const seenBackendNodeIds = new Set();
+  for (let index = 0; index < (nodes.nodeName?.length ?? 0); index++) {
+    const tag = String(strings[nodes.nodeName[index]] ?? "").toLowerCase();
+    if (tag !== "canvas") continue;
+    const backendNodeId = nodes.backendNodeId?.[index];
+    if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
+    if (seenBackendNodeIds.has(backendNodeId)) {
+      throw new Error(
+        `browser capture found duplicate canvas backend node ${backendNodeId}`);
+    }
+    seenBackendNodeIds.add(backendNodeId);
+    canvases.push(backendNodeId);
+  }
+  if (canvases.length > MAX_CAPTURED_CANVASES) {
+    throw new Error(
+      `browser capture found ${canvases.length} canvases; maximum is ` +
+      `${MAX_CAPTURED_CANVASES}`);
+  }
+
+  const assets = [];
+  let totalPixels = 0;
+  for (const backendNodeId of canvases) {
+    const resolved = await cdp.call("DOM.resolveNode", { backendNodeId });
+    const objectId = resolved.object?.objectId;
+    if (!objectId) {
+      throw new Error(`could not resolve canvas backend node ${backendNodeId}`);
+    }
+    try {
+      // Inspect the backing-store dimensions before asking Chromium to encode
+      // anything.  A malicious or accidental enormous canvas must fail before
+      // toDataURL can allocate its unbounded intermediate PNG/base64 buffers.
+      const measured = await cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function() {
+          if (!(this instanceof HTMLCanvasElement))
+            throw new Error('resolved node is not a canvas');
+          const r = this.getBoundingClientRect();
+          return {
+            width: this.width, height: this.height,
+            bounds: {
+              left: r.left + window.scrollX,
+              top: r.top + window.scrollY,
+              width: r.width,
+              height: r.height
+            }
+          };
+        }`,
+        returnByValue: true,
+      });
+      const width = Number(measured.result?.value?.width);
+      const height = Number(measured.result?.value?.height);
+      const pixels = width * height;
+      if (!Number.isInteger(width) || !Number.isInteger(height) ||
+          width <= 0 || height <= 0 || !Number.isSafeInteger(pixels)) {
+        throw new Error(`canvas backend node ${backendNodeId} has invalid size`);
+      }
+      totalPixels += pixels;
+      if (!Number.isSafeInteger(totalPixels) ||
+          totalPixels > MAX_CAPTURED_CANVAS_PIXELS) {
+        throw new Error(
+          `captured canvas pixels exceed ${MAX_CAPTURED_CANVAS_PIXELS}`);
+      }
+
+      // Capture the browser-composited canvas in final viewport coordinates,
+      // rather than serializing its untransformed backing store. CSS may scale
+      // or translate a high-DPI canvas (Spectr's fixed design viewport does
+      // both); a raw toDataURL plane cannot be overlaid at 1:1 and therefore
+      // cannot reconstruct the accepted Chromium frame.
+      await cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `async function() {
+          if (globalThis.__pulpCanvasIsolationRestore)
+            throw new Error('canvas isolation is already active');
+          const rect = this.getBoundingClientRect();
+          const body = document.body;
+          const root = document.documentElement;
+          const roots = [document.documentElement, document.body].filter(Boolean);
+          const backgrounds = roots.map(element => ({
+            element,
+            value: element.style.getPropertyValue('background'),
+            priority: element.style.getPropertyPriority('background')
+          }));
+          const bodyVisibility = body ? {
+            value: body.style.getPropertyValue('visibility'),
+            priority: body.style.getPropertyPriority('visibility')
+          } : null;
+          if (body) body.style.setProperty('visibility', 'hidden', 'important');
+          for (const item of backgrounds)
+            item.element.style.setProperty('background', 'transparent', 'important');
+          const overlay = document.createElement('img');
+          overlay.src = this.toDataURL('image/png');
+          overlay.style.cssText = [
+            'position:absolute', 'display:block', 'visibility:visible',
+            'pointer-events:none', 'margin:0', 'padding:0', 'border:0',
+            'max-width:none', 'max-height:none', 'object-fit:fill',
+            'left:' + (rect.left + window.scrollX) + 'px',
+            'top:' + (rect.top + window.scrollY) + 'px',
+            'width:' + rect.width + 'px', 'height:' + rect.height + 'px'
+          ].join(';');
+          root.appendChild(overlay);
+          globalThis.__pulpCanvasIsolationRestore = {
+            overlay, body, bodyVisibility, backgrounds
+          };
+          if (typeof overlay.decode === 'function') await overlay.decode();
+          return true;
+        }`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      await cdp.call("Emulation.setDefaultBackgroundColorOverride", {
+        color: { r: 0, g: 0, b: 0, a: 0 },
+      });
+      const bytes = await captureStableScreenshot(cdp, {
+        ...screenshotOptions,
+      }, 6, 16, 2);
+      if (!bytes) throw new Error(
+        `canvas backend node ${backendNodeId} did not present a stable isolated frame`);
+      const dimensions = pngDimensions(bytes);
+      assets.push({
+        id: `canvas:${backendNodeId}`,
+        kind: "canvas-snapshot",
+        mime_type: "image/png",
+        path: `canvas-${backendNodeId}.png`,
+        sha256: sha256(bytes),
+        width_px: dimensions.width,
+        height_px: dimensions.height,
+        backend_node_id: backendNodeId,
+        bounds: {
+          left: Number(measured.result?.value?.bounds?.left ?? 0),
+          top: Number(measured.result?.value?.bounds?.top ?? 0),
+          width: Number(measured.result?.value?.bounds?.width ?? 0),
+          height: Number(measured.result?.value?.bounds?.height ?? 0),
+        },
+        bytes,
+      });
+    } finally {
+      await cdp.call("Emulation.setDefaultBackgroundColorOverride", {})
+        .catch(() => {});
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          const restore = globalThis.__pulpCanvasIsolationRestore;
+          if (!restore) return false;
+          restore.overlay?.remove();
+          if (restore.body && restore.bodyVisibility?.value)
+            restore.body.style.setProperty('visibility',
+              restore.bodyVisibility.value,
+              restore.bodyVisibility.priority || '');
+          else restore.body?.style.removeProperty('visibility');
+          for (const item of restore.backgrounds) {
+            if (item.value) item.element.style.setProperty(
+              'background', item.value, item.priority || '');
+            else item.element.style.removeProperty('background');
+          }
+          delete globalThis.__pulpCanvasIsolationRestore;
+          return true;
+        })()`,
+        returnByValue: true,
+      }).catch(() => {});
+      await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
+    }
+  }
+  return assets;
+}
+
+async function deriveCanvasCompositionEvidence(cdp, browserBytes, chromeBytes) {
+  const browserUrl = `data:image/png;base64,${browserBytes.toString("base64")}`;
+  const chromeUrl = `data:image/png;base64,${chromeBytes.toString("base64")}`;
+  const result = await cdp.call("Runtime.evaluate", {
+    expression: `(async () => {
+      const load = async (url) => {
+        const image = new Image();
+        image.src = url;
+        if (typeof image.decode === 'function') await image.decode();
+        else await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+        });
+        return image;
+      };
+      const [browser, chrome] = await Promise.all([
+        load(${JSON.stringify(browserUrl)}),
+        load(${JSON.stringify(chromeUrl)})
+      ]);
+      if (browser.naturalWidth !== chrome.naturalWidth ||
+          browser.naturalHeight !== chrome.naturalHeight)
+        throw new Error('browser and chrome evidence extents differ');
+      const width = browser.naturalWidth;
+      const height = browser.naturalHeight;
+      const read = (image) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d', {
+          alpha: true, willReadFrequently: true
+        });
+        if (!context) throw new Error('could not create evidence canvas');
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, width, height);
+      };
+      const accepted = read(browser);
+      const withoutCanvases = read(chrome);
+      const output = new ImageData(width, height);
+      let changedPixels = 0;
+      for (let pixel = 0; pixel < accepted.data.length; pixel += 4) {
+        if (accepted.data[pixel] === withoutCanvases.data[pixel] &&
+            accepted.data[pixel + 1] === withoutCanvases.data[pixel + 1] &&
+            accepted.data[pixel + 2] === withoutCanvases.data[pixel + 2])
+          continue;
+        output.data[pixel] = accepted.data[pixel];
+        output.data[pixel + 1] = accepted.data[pixel + 1];
+        output.data[pixel + 2] = accepted.data[pixel + 2];
+        output.data[pixel + 3] = 255;
+        changedPixels++;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { alpha: true });
+      if (!context) throw new Error('could not encode evidence canvas');
+      context.putImageData(output, 0, 0);
+      return { dataUrl: canvas.toDataURL('image/png'), changedPixels };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const value = result.result?.value;
+  const prefix = "data:image/png;base64,";
+  if (!value || !Number.isSafeInteger(value.changedPixels) ||
+      value.changedPixels < 0 ||
+      typeof value.dataUrl !== "string" ||
+      !value.dataUrl.startsWith(prefix)) {
+    throw new Error("browser did not produce valid canvas composition evidence");
+  }
+  return {
+    bytes: Buffer.from(value.dataUrl.slice(prefix.length), "base64"),
+    changedPixels: value.changedPixels,
+  };
+}
+
 function serializeJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -339,12 +594,292 @@ async function configurePage(cdp, width, height, dpr) {
       });
     })()`,
   });
+  await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      // Capture the executable document at the browser loader's own handoff:
+      // after product adapters have patched the source, but before React has
+      // mounted into it.  A post-render outerHTML snapshot loses closures and
+      // canvas programs; the DOMParser input retains the exact scripts that
+      // produced the accepted Chromium frame.
+      const parser = DOMParser.prototype.parseFromString;
+      const replaceWith = Element.prototype.replaceWith;
+      const createObjectURL = URL.createObjectURL.bind(URL);
+      const blobs = new Map();
+      const parsedDocuments = new WeakMap();
+      globalThis.__pulpMaterializedDocument = null;
+      globalThis.__pulpMaterializedBlobs = blobs;
+      URL.createObjectURL = function(blob) {
+        const url = createObjectURL(blob);
+        if (blob instanceof Blob) blobs.set(url, blob);
+        return url;
+      };
+      DOMParser.prototype.parseFromString = function(source, type) {
+        const parsed = parser.call(this, source, type);
+        if (String(type).toLowerCase() === 'text/html' && parsed?.documentElement) {
+          parsedDocuments.set(parsed.documentElement, {
+            html: String(source),
+            mime_type: 'text/html'
+          });
+        }
+        return parsed;
+      };
+      Element.prototype.replaceWith = function(...replacements) {
+        // A loader may parse helpers, SVG fragments, or sanitization probes
+        // after constructing its executable document.  The last DOMParser
+        // call is therefore not an authority boundary.  Commit only the
+        // parsed root that actually replaces the live document root.
+        if (this === document.documentElement) {
+          const installed = replacements.find((replacement) =>
+            replacement && parsedDocuments.has(replacement));
+          if (installed) {
+            globalThis.__pulpMaterializedDocument =
+              parsedDocuments.get(installed);
+          }
+        }
+        return replaceWith.apply(this, replacements);
+      };
+    })()`,
+  });
   try {
     await cdp.call("Browser.setDownloadBehavior", { behavior: "deny" });
   } catch {
     // Older compatible CDP builds may expose the command only on the browser
     // target. Headless download UI is still absent and navigation stays guarded.
   }
+}
+
+async function captureMaterializedDocument(cdp) {
+  const metadata = await cdp.call("Runtime.evaluate", {
+    expression: `(async () => {
+      const document = globalThis.__pulpMaterializedDocument;
+      if (!document || typeof document.html !== 'string') return null;
+      const urls = [...document.html.matchAll(/blob:[^\\s"'<>\\)]+/g)]
+        .map((match) => match[0]);
+      const unique = [...new Set(urls)];
+      if (unique.length > 256) {
+        throw new Error('materialized document references too many blob assets');
+      }
+      const assets = [];
+      let total = 0;
+      for (const url of unique) {
+        const blob = globalThis.__pulpMaterializedBlobs?.get(url);
+        if (!(blob instanceof Blob)) {
+          throw new Error('materialized blob was not captured: ' + url);
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        total += bytes.byteLength;
+        if (total > 64 * 1024 * 1024) {
+          throw new Error('materialized blob assets exceed 64 MiB');
+        }
+        assets.push({
+          url,
+          mime_type: blob.type || 'application/octet-stream',
+          byte_length: bytes.byteLength
+        });
+      }
+      return {
+        schema: 'pulp-materialized-browser-document-v1',
+        version: 1,
+        html: document.html,
+        mime_type: document.mime_type,
+        assets
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const materialized = metadata.result?.value ?? null;
+  if (!materialized) return null;
+
+  // Parse only bounded @font-face declarations from the already-captured
+  // durable HTML. Keeping this outside Runtime.evaluate avoids realm and
+  // template-escape differences when Claude replaces the live document with
+  // one produced by DOMParser.
+  const fontBindings = [];
+  for (const style of materialized.html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
+    for (const face of style[1].matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+      const read = (name) => {
+        const match = face[1].match(new RegExp(
+          `(?:^|;)\\s*${name}\\s*:\\s*([^;}]*)`, "i"));
+        return match ? match[1].trim() : "";
+      };
+      const family = read("font-family").replace(/^(['"])(.*)\1$/, "$2");
+      const source = read("src");
+      const match = source.match(/url\((?:['"])?(blob:[^)'"\s]+)(?:['"])?\)/);
+      if (!family || !match) continue;
+      fontBindings.push({ family, url: match[1],
+        weight: read("font-weight") || "normal",
+        style: read("font-style") || "normal",
+        unicode_range: read("unicode-range") });
+      if (fontBindings.length > 256) {
+        throw new Error("materialized document contains too many font bindings");
+      }
+    }
+  }
+  materialized.font_bindings = fontBindings;
+
+  // Production bundles include Babel/React/font payloads. Returning them all
+  // in one Runtime.evaluate result can exceed Chrome's DevTools WebSocket
+  // message budget and close the connection without a protocol error. Read
+  // each bounded blob independently and assemble the durable sidecar here.
+  for (let index = 0; index < materialized.assets.length; index += 1) {
+    const payload = await cdp.call("Runtime.evaluate", {
+      expression: `(async () => {
+        const item = [...globalThis.__pulpMaterializedDocument.html
+          .matchAll(/blob:[^\\s"'<>\\)]+/g)].map((m) => m[0]);
+        const url = [...new Set(item)][${index}];
+        const blob = globalThis.__pulpMaterializedBlobs.get(url);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        }
+        return btoa(binary);
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const dataBase64 = payload.result?.value;
+    if (typeof dataBase64 !== "string") {
+      throw new Error(`materialized blob ${index} did not return bytes`);
+    }
+    materialized.assets[index].data_base64 = dataBase64;
+    const bytes = Buffer.from(dataBase64, "base64");
+    if (bytes.length !== materialized.assets[index].byte_length) {
+      throw new Error(`materialized blob ${index} length changed during capture`);
+    }
+    materialized.assets[index].sha256 = sha256(bytes);
+  }
+
+  // Blob URLs are realm-scoped and typically contain a fresh UUID on every
+  // launch.  They must not cross the browser/native handoff boundary.  Rewrite
+  // the executable document to content-addressed asset IDs so identical source
+  // material produces byte-identical sidecars across captures.
+  const stableAssets = new Map();
+  for (const asset of materialized.assets) {
+    const id = `pulp-materialized-asset-${asset.sha256}`;
+    materialized.html = materialized.html.split(asset.url).join(id);
+    for (const binding of materialized.font_bindings || []) {
+      if (binding.url === asset.url) binding.asset_id = id;
+    }
+    if (!stableAssets.has(id)) {
+      stableAssets.set(id, {
+        id,
+        mime_type: asset.mime_type,
+        byte_length: asset.byte_length,
+        data_base64: asset.data_base64,
+        sha256: asset.sha256,
+      });
+    }
+  }
+  materialized.assets = [...stableAssets.values()];
+  const stableFontBindings = new Map();
+  for (const binding of materialized.font_bindings || []) {
+    if (!binding.asset_id) {
+      throw new Error(`captured font face ${binding.family} did not resolve to an asset`);
+    }
+    const stable = {
+      family: binding.family,
+      asset_id: binding.asset_id,
+      weight: binding.weight,
+      style: binding.style,
+      unicode_range: binding.unicode_range,
+      // Native font managers do not implement CSS @font-face unicode-range
+      // selection. Give every packaged face a stable private family alias so
+      // the materialized text join can select the exact subset Chromium used.
+      runtime_family: `${binding.family} [${binding.asset_id}]`,
+    };
+    const key = JSON.stringify(stable);
+    if (!stableFontBindings.has(key)) stableFontBindings.set(key, stable);
+  }
+  materialized.font_bindings = [...stableFontBindings.values()];
+  if (materialized.html.includes("blob:")) {
+    throw new Error("materialized document retained an unresolved blob URL");
+  }
+  return materialized;
+}
+
+async function captureMaterializedSurfaceStyle(cdp) {
+  const result = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      const color = (node) => {
+        if (!node) return '';
+        const value = String(getComputedStyle(node).backgroundColor || '').trim();
+        return value.length <= 128 ? value : '';
+      };
+      const opaque = (value) => {
+        if (!value || value === 'transparent') return false;
+        const match = value.match(/^rgba?\\(([^)]+)\\)$/i);
+        if (!match) return true;
+        const parts = match[1].split(',').map((part) => Number(part.trim()));
+        return parts.length < 4 || (Number.isFinite(parts[3]) && parts[3] > 0);
+      };
+      const body = color(document.body);
+      const html = color(document.documentElement);
+      return { background_color: opaque(body) ? body : html };
+    })()`,
+    returnByValue: true,
+  });
+  const value = result.result?.value;
+  const background = String(value?.background_color ?? '').trim();
+  return {
+    background_color: background.length <= 128 ? background : '',
+  };
+}
+
+async function captureMaterializedCoordinateSpace(cdp, captureOrigin) {
+  const elementResult = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      if (!document.body) return null;
+      const preferred = document.getElementById('root');
+      let element = preferred;
+      if (!element) {
+        for (const child of document.body.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) { element = child; break; }
+        }
+      }
+      if (!element) return null;
+      return element;
+    })()`,
+    returnByValue: false,
+  });
+  const objectId = elementResult.result?.objectId;
+  if (!objectId) return null;
+  let quad;
+  try {
+    // CDP's box model is the authoritative transformed quadrilateral. Unlike
+    // getBoundingClientRect(), it retains rotation/skew; unlike getBoxQuads(),
+    // it is available in the Chromium revision used by the importer.
+    const [metricsResult, boxResult] = await Promise.all([
+      cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function () {
+          return { width: Number(this.offsetWidth),
+            height: Number(this.offsetHeight) };
+        }`,
+        returnByValue: true,
+      }),
+      cdp.call("DOM.getBoxModel", { objectId }),
+    ]);
+    const metrics = metricsResult.result?.value;
+    const border = boxResult.model?.border;
+    if (!metrics || !Array.isArray(border) || border.length !== 8) return null;
+    quad = {
+      width: Number(metrics.width), height: Number(metrics.height),
+      p1: { x: Number(border[0]), y: Number(border[1]) },
+      p2: { x: Number(border[2]), y: Number(border[3]) },
+      p4: { x: Number(border[6]), y: Number(border[7]) },
+    };
+  } finally {
+    await cdp.call("Runtime.releaseObject", { objectId });
+  }
+  const relative = structuredClone(quad);
+  for (const point of [relative.p1, relative.p2, relative.p4]) {
+    point.x -= captureOrigin.left;
+    point.y -= captureOrigin.top;
+  }
+  return materializedCoordinateSpaceFromQuad(relative);
 }
 
 async function runProbe(options) {
@@ -439,7 +974,7 @@ async function runCapture(options) {
   if (dpr !== 2) throw new Error("browser capture currently requires DPR 2");
   validateCaptureDimensions(initialWidth, initialHeight, dpr);
   const timeoutMs = positiveInteger(
-    options.values, "--timeout-ms", 60000);
+    options.values, "--timeout-ms", 90000);
   const interactionPlanPath = options.values.get("--interactions");
   const interactionPlan = interactionPlanPath
     ? await readInteractionPlan(interactionPlanPath)
@@ -718,6 +1253,7 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
+    const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -726,6 +1262,24 @@ async function runCapture(options) {
     // the settle-time measurement; every consumer below must describe the
     // frozen frame.
     finalExtent = await freezeAndMeasureDocumentExtent(cdp);
+    if (materializedDocument) {
+      // The executable React subtree may deliberately leave its root
+      // transparent and rely on the document/body surface for the accepted
+      // frame.  A native materialization has no browser body behind it, so
+      // retain that frozen surface colour as part of the capture contract.
+      materializedDocument.surface_style =
+        await captureMaterializedSurfaceStyle(cdp);
+      materializedDocument.coordinate_space =
+        await captureMaterializedCoordinateSpace(cdp, finalExtent);
+      const frameTime = await cdp.call("Runtime.evaluate", {
+        expression:
+          "Number(globalThis.__pulpLastAnimationFrameTimestamp || 0)",
+        returnByValue: true,
+      });
+      const value = Number(frameTime.result?.value ?? 0);
+      if (Number.isFinite(value) && value >= 0)
+        materializedDocument.presentation_time_ms = value;
+    }
     if (finalExtent.left < 0 || finalExtent.top < 0) {
       const error = new Error(
         `frozen content begins outside the corrected viewport at ` +
@@ -823,17 +1377,59 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
+    // Canvas paint is captured after the final presented browser frame below;
+    // the DOMSnapshot already provides its stable backend-node identities.
+    let canvasAssets = [];
     const semanticReport = await evaluateSemantics(
       cdp, snapshot, {
         width: captureWidth,
         height: captureHeight,
         device_scale_factor: dpr,
       });
+    if (materializedDocument) {
+      // Semantics and painted geometry were resolved from the same frozen
+      // DOMSnapshot. Keep a bounded, renderer-neutral binding manifest beside
+      // the executable document so the live native behavior tree can be joined
+      // to DesignIR by Chromium identity rather than by text/bounds heuristics.
+      materializedDocument.semantic_bindings = semanticReport.candidates
+        .filter((candidate) =>
+          candidate.resolved === true &&
+          Number.isSafeInteger(candidate.backend_node_id) &&
+          candidate.backend_node_id > 0)
+        .map((candidate, index) => ({
+          index,
+          backend_node_id: candidate.backend_node_id,
+          anchor: `chromium:backend-node:${candidate.backend_node_id}`,
+          kind: String(candidate.kind ?? "unknown"),
+          tag: String(candidate.tag ?? ""),
+          name: String(candidate.name ?? ""),
+          bounds: {
+            left: Number(candidate.bounds?.left ?? 0),
+            top: Number(candidate.bounds?.top ?? 0),
+            width: Number(candidate.bounds?.width ?? 0),
+            height: Number(candidate.bounds?.height ?? 0),
+          },
+        }));
+    }
     const tokenReport = await evaluateDesignTokens(cdp);
     // Read before time resumes, like every other DOM-derived sidecar: the
     // faces reported have to be the ones the frozen frame was shaped with.
     const platformFontReport = await evaluatePlatformFonts(
       cdp, snapshot, COMPUTED_STYLES);
+    if (materializedDocument) {
+      materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
+        snapshot, materializedDocument.coordinate_space);
+      materializedDocument.text_bindings = buildMaterializedTextBindings(
+        snapshot, platformFontReport, materializedDocument.coordinate_space);
+      // CDP returns the positional style rows, but not the names we supplied
+      // in the capture request.  The serialized DOM snapshot gains that
+      // self-describing field below; give the same complete view to the paint
+      // binder now so same-frame SVG paint cannot silently collapse to an
+      // empty stream.
+      materializedDocument.paint_bindings = buildMaterializedPaintBindings(
+        { ...snapshot, computedStyleNames: COMPUTED_STYLES },
+        materializedDocument.coordinate_space);
+    }
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
     await networkGuard.awaitProvenance();
@@ -846,14 +1442,134 @@ async function runCapture(options) {
     // boundaries even after DOM/timer motion is frozen. Always observe the
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
-    const screenshotBytes =
+    let screenshotBytes =
       await captureStableScreenshot(cdp, screenshotOptions);
+    // A compositor can miss the required identical tail at the very end of a
+    // bounded horizon even though its next horizon is completely still. Give
+    // that observable proof one fresh bounded attempt; keeping the common path
+    // at 32 frames avoids spending the whole capture deadline on pages that
+    // were already stable.
+    if (!screenshotBytes)
+      screenshotBytes = await captureStableScreenshot(cdp, screenshotOptions);
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
+    // The initial canvas read belongs to the paused DOMSnapshot frame. Some
+    // products intentionally need the resumed compositor boundaries above to
+    // finish their deterministic analyzer/minimap paint. Pair the composition
+    // assets with the accepted stable browser pixels, not with the earlier
+    // pre-presentation backing stores; otherwise the chrome plate and canvas
+    // layers are individually valid but can never reconstruct browser.png.
+    canvasAssets = await captureCanvasAssets(cdp, snapshot, screenshotOptions);
+    if (materializedDocument) {
+      materializedDocument.canvas_bindings = canvasAssets.map(
+        (asset, index) => ({
+          index,
+          anchor: `chromium:backend-node:${asset.backend_node_id}`,
+          bounds: {
+            left: asset.bounds.left - finalExtent.left,
+            top: asset.bounds.top - finalExtent.top,
+            width: asset.bounds.width,
+            height: asset.bounds.height,
+          },
+        }));
+    }
+    // Capture the exact authored body beneath declared moving indicators.
+    // Visibility removes only the marked paint without changing its layout,
+    // yielding a faithful source for movable control sprites.
+    const hiddenIndicators = await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        window.__pulpCaptureIndicatorStyles =
+          Array.from(document.querySelectorAll('[data-pulp-indicator]')).map(el => ({
+            el,
+            value: el.style.getPropertyValue('visibility'),
+            priority: el.style.getPropertyPriority('visibility')
+          }));
+        for (const entry of window.__pulpCaptureIndicatorStyles)
+          entry.el.style.setProperty('visibility', 'hidden', 'important');
+        return window.__pulpCaptureIndicatorStyles.length;
+      })()`,
+      returnByValue: true,
+    });
+    const hiddenIndicatorCount = hiddenIndicators.result?.value ?? 0;
+    let staticScreenshotBytes = screenshotBytes;
+    if (hiddenIndicatorCount > 0) {
+      staticScreenshotBytes =
+        await captureStableScreenshot(cdp, screenshotOptions);
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
+            if (entry.value)
+              entry.el.style.setProperty('visibility', entry.value, entry.priority);
+            else
+              entry.el.style.removeProperty('visibility');
+          }
+          delete window.__pulpCaptureIndicatorStyles;
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+    }
+    if (!staticScreenshotBytes) {
+      const error = new Error(
+        "the indicator-free visual frame did not stabilize");
+      error.code = "capture-static-frame-not-deterministic";
+      throw error;
+    }
+    // Capture the exact static chrome with imperative canvases removed. This
+    // is the native-composition plate: typography, SVGs, spacing, modal chrome,
+    // and every non-canvas pixel remain Chromium-authoritative, while live
+    // CanvasWidget programs can occupy the holes without double-painting the
+    // frozen analyzer/minimap frame underneath them.
+    await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        globalThis.__pulpCanvasVisibilityRestore = [];
+        for (const canvas of document.querySelectorAll('canvas')) {
+          globalThis.__pulpCanvasVisibilityRestore.push({
+            canvas,
+            value: canvas.style.getPropertyValue('visibility'),
+            priority: canvas.style.getPropertyPriority('visibility')
+          });
+          canvas.style.setProperty('visibility', 'hidden', 'important');
+        }
+        return globalThis.__pulpCanvasVisibilityRestore.length;
+      })()`,
+      returnByValue: true,
+    });
+    let chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    if (!chromeBytes)
+      chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
+          if (item.value) item.canvas.style.setProperty(
+            'visibility', item.value, item.priority || '');
+          else item.canvas.style.removeProperty('visibility');
+        }
+        delete globalThis.__pulpCanvasVisibilityRestore;
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    if (!chromeBytes) {
+      const error = new Error(
+        "the canvas-free chrome frame did not stabilize");
+      error.code = "capture-chrome-not-deterministic";
+      throw error;
+    }
+    // Canvas elements are not necessarily the topmost paint layer. Spectr's
+    // minimap canvas, for example, sits below DOM-authored labels. Replaying
+    // isolated canvas PNGs over a canvas-free screenshot therefore darkens
+    // those labels and cannot reproduce Chromium's stacking order. Record the
+    // sparse, browser-composited contribution of all canvases: unchanged
+    // pixels stay transparent and changed pixels carry the accepted opaque
+    // result. This is validation evidence only; executable per-canvas assets
+    // and command-stream bindings remain the shipping/runtime contract.
+    const canvasComposition = await deriveCanvasCompositionEvidence(
+      cdp, screenshotBytes, chromeBytes);
     await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
@@ -864,7 +1580,6 @@ async function runCapture(options) {
       error.code = "capture-dpr-mismatch";
       throw error;
     }
-
     progress.enterPhase("artifact-write");
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
@@ -876,6 +1591,13 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
+      writeFile(
+        path.join(outputDir, "browser-static.png"), staticScreenshotBytes),
+      writeFile(path.join(outputDir, "browser-chrome.png"), chromeBytes),
+      writeFile(path.join(outputDir, "browser-canvas-composite.png"),
+        canvasComposition.bytes),
+      ...canvasAssets.map((asset) =>
+        writeFile(path.join(outputDir, asset.path), asset.bytes)),
       // `layout.styles` rows are positional: entry N is the Nth property of
       // the request. Recording the request order alongside the data keeps the
       // snapshot self-describing, so a consumer never has to hardcode a
@@ -889,6 +1611,11 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
+      ...(materializedDocument
+        ? [writeJson(
+            path.join(outputDir, "materialized-document.json"),
+            materializedDocument)]
+        : []),
       ...(interactionReport
         ? [writeFile(
             path.join(outputDir, "interaction-report.json"),
@@ -913,6 +1640,14 @@ async function runCapture(options) {
         source: {
           entry: authorized.relativeEntry.split(path.sep).join("/"),
           sha256: sha256(sourceBytes),
+          ...(materializedDocument
+            ? {
+                materialized_document: "materialized-document.json",
+                materialized_document_sha256: sha256(Buffer.from(
+                  serializeJson(materializedDocument), "utf8")),
+                materialized_asset_count: materializedDocument.assets.length,
+              }
+            : {}),
         },
         viewport: {
           initial: { width: initialWidth, height: initialHeight },
@@ -987,7 +1722,32 @@ async function runCapture(options) {
         sha256: sha256(screenshotBytes),
         width_px: pixels.width,
         height_px: pixels.height,
-      }],
+      }, {
+        id: "reference:browser-static",
+        kind: "screenshot",
+        mime_type: "image/png",
+        path: "browser-static.png",
+        sha256: sha256(staticScreenshotBytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+      }, {
+        id: "reference:browser-chrome",
+        kind: "chrome-screenshot",
+        mime_type: "image/png",
+        path: "browser-chrome.png",
+        sha256: sha256(chromeBytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+      }, {
+        id: "evidence:browser-canvas-composite",
+        kind: "canvas-composite-evidence",
+        mime_type: "image/png",
+        path: "browser-canvas-composite.png",
+        sha256: sha256(canvasComposition.bytes),
+        width_px: pixels.width,
+        height_px: pixels.height,
+        changed_pixels: canvasComposition.changedPixels,
+      }, ...canvasAssets.map(({ bytes: _bytes, ...asset }) => asset)],
       semantics: {
         schema: semanticReport.schema,
         report: "semantic-report.json",

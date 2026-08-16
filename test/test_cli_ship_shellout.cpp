@@ -122,6 +122,17 @@ bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+void write_signing_doctor_stub(const fs::path& root, int exit_code = 0) {
+    auto scripts = root / "tools" / "scripts";
+    fs::create_directories(scripts);
+    auto stub = scripts / "ensure_signing_ready.sh";
+    std::ofstream out(stub);
+    out << "#!/usr/bin/env bash\nexit " << exit_code << "\n";
+    out.close();
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read |
+                              fs::perms::others_read);
+}
+
 std::string read_text_file(const fs::path& path) {
     std::ifstream in(path);
     REQUIRE(in.good());
@@ -454,6 +465,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
                  "[cli][shellout][ship][issue-643][issue-901]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("missing-identity", true);
+    write_signing_doctor_stub(root);
 
     auto r = run_pulp_in(root, {"ship", "sign"});
     REQUIRE_FALSE(r.timed_out);
@@ -471,6 +483,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
                  "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("sign-bundles", true);
+    write_signing_doctor_stub(root);
     make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
     make_fake_bundle(root, "CLAP", "FakeShipPlugin.clap");
     make_fake_bundle(root, "AU", "FakeShipPlugin.component");
@@ -499,6 +512,31 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(contains(config_combined, "Signing FakeShipPlugin.vst3"));
 
     fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses to continue after unattended preflight failure",
+                 "[cli][shellout][ship][doctor]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+#ifndef __APPLE__
+    SUCCEED("unattended signing preflight is macOS-only");
+    return;
+#else
+    auto root = make_fake_project("sign-preflight-failure", true);
+    make_fake_bundle(root, "VST3", "MustNotSign.vst3");
+    write_signing_doctor_stub(root, 23);
+
+    ScopedEnvVar identity("PULP_SIGN_IDENTITY", "Developer ID Application: Test");
+    auto result = run_pulp_in(root, {"ship", "sign"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
+    auto combined = result.stdout_output + result.stderr_output;
+    REQUIRE(contains(combined, "unattended signing preflight failed"));
+    REQUIRE(contains(combined, "refusing to invoke codesign"));
+    REQUIRE_FALSE(contains(combined, "Signing MustNotSign.vst3"));
+
+    fs::remove_all(root);
+#endif
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,

@@ -271,8 +271,9 @@ pulp_add_test_suite(pulp-test-particle-percussion
     TIMEOUT 300)
 
 # Offline FIR design from sampled targets. The suite covers all four real
-# linear-phase symmetry forms and the cepstral minimum-phase reconstruction;
-# neither designer belongs on the realtime callback.
+# linear-phase symmetry forms, independent dense response/weighted-residual
+# oracles, planted weight/normalization mutations, and the cepstral
+# minimum-phase reconstruction. It is not realtime DSP.
 pulp_add_test_suite(pulp-test-signal-fir-design
     SOURCES test_signal_fir_design.cpp
     LIBRARIES pulp::signal

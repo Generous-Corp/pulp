@@ -50,6 +50,13 @@ The four standard real linear-phase forms are explicit:
 | III | odd | antisymmetric | zero at DC and Nyquist |
 | IV | even | antisymmetric | zero at DC |
 
+Type I is the conventional magnitude-EQ form. Types II-IV are included because
+they reuse the same pivoted-QR solver and differ only in their analytic basis
+and symmetry reconstruction; the focused suite independently recovers every
+form and pins its forced endpoints. They are useful for even-length magnitude
+filters, differentiators, and Hilbert-style filters without introducing a
+second solver or design framework.
+
 Targets use signed, phase-removed amplitude—not absolute magnitude. For Types I
 and II, remove the linear delay and take the real component. For Types III and
 IV, take the coefficient of `+j`; equivalently, the implementation reconstructs
@@ -65,15 +72,26 @@ accepted pivoted-R diagonal. It is a useful deterministic rejection metric,
 but it is not a full matrix condition number. Tune `rank_tolerance` and
 `maximum_diagonal_condition_estimate` only with product-level numerical tests.
 
-`maximum_workspace_bytes` admits the complete retained workspace with checked
-integer geometry. The default is 256 MiB. A larger grid is accepted when its
-actual matrix and result storage fit the caller's budget; there is no unrelated
-small point-count cap.
+Targets are absolute signed amplitudes. The designer performs no implicit DC,
+peak, energy, or coefficient-sum normalization. Apply any product-specific
+normalization explicitly after checking how it changes the weighted objective.
+
+Tap count is bounded at 1,023 and grid size at 65,536 points. Within those
+limits, `maximum_workspace_bytes` admits the complete retained workspace with
+checked integer geometry; the default is 256 MiB. The returned result owns all
+coefficient and measurement vectors and retains no caller spans. When
+exceptions are enabled, allocation failure is translated to
+`FirDesignStatus::allocation_failure`; in a no-exceptions build, the platform's
+allocator failure policy applies.
 
 Any non-success result is fail-closed: coefficient and measurement vectors are
 empty, including when finite input drives an intermediate calculation outside
 the representable range. `rank_tolerance` must be in `(0, 1]`; rank loss and
 non-finite arithmetic are reported separately.
+
+This API does not perform Remez exchange, minimum-order search, IIR fitting,
+or frequency warping. Those are separate algorithms with distinct validation
+and lifecycle contracts.
 
 ## Minimum-phase reconstruction
 

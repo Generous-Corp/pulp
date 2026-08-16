@@ -65,6 +65,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(path_patterns.count(".github/actionlint.yaml"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/workflows/**"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/actions/**"), 2)
+        self.assertGreaterEqual(path_patterns.count("tools/shipyard.toml"), 2)
 
     def test_actionlint_knows_the_authority_runner_label(self) -> None:
         self.assertTrue(

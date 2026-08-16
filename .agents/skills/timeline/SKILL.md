@@ -77,12 +77,22 @@ artifact is needed. Never modify canonical project JSON text directly.
   through the per-edit insertion path: its transient path copies turn initial
   construction into allocator-heavy O(n log n) work. Ordinary edits still use
   path-copy insertion/replacement so prior snapshots share untouched subtrees.
-- A Track owns an ordered `DevicePlacement` chain. Placements contain only a
-  durable `ItemId`; chain order is semantic, and clip edits retain the exact
-  immutable chain storage. Runtime instances, graph nodes, plugin formats,
-  paths, and platform metadata do not belong in Timeline. Durable device
-  definition and configuration will be future document-owned state keyed by
-  placement identity.
+- A Track owns an ordered `DevicePlacement` chain split into pre-fader and
+  post-fader stages. Each placement carries a format-neutral `DeviceKind` and
+  binding key, a typed event-to-event/event-to-audio/audio-to-audio slot,
+  bypass, canonical finite wet/dry bits, and an optional content-addressed
+  state reference. Pre-fader placements must precede post-fader placements;
+  post-fader slots are audio-to-audio, and adjacent signal domains must match.
+  Runtime instances, graph nodes, plugin formats, paths, inline state bytes,
+  and platform metadata do not belong in Timeline. `InsertDevice`,
+  `RemoveDevice`, `MoveDevice`, `RetargetDevice`, and `SetDeviceState` use exact
+  optimistic positions/values and participate in ordinary inverse undo/redo.
+  Removing a placement still referenced by automation or modulation fails
+  closed; it never silently cascades.
+- Typed device declarations describe authored topology only. They do not lower
+  note effects, instantiate hosts, or promise sample-accurate event-stream PDC.
+  Treat that runtime contract as open until `docs/policies/event-stream-pdc.md`
+  is resolved.
 - `ClipTimeAnchor::Musical` follows tempo in ticks. `Absolute` uses
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
@@ -2703,3 +2713,36 @@ superlinearly in their count: a full-rate 10s wait spent 10s waiting and then
 ~30s in teardown (6663 reprepares), long enough to present as a CTest timeout
 rather than the failure it is. A 1ms pump sleep with a 2s deadline holds the
 whole failing run under 3s.
+
+## Widening `CompileContextSubscriptions` means changing three things, and missing one is silent
+
+The subscription set stores one bit per `CompileContextKind`. Widening its
+storage type is not one edit — it is `bits_`, `mask()`, **and** `subscribe()`.
+`subscribe()` casts the OR result back to the storage type, so leaving it at the
+old narrow type compiles cleanly, passes every existing test, and silently
+discards every bit past the old width. Nothing warns: the truncation happens in
+a `static_cast` the author wrote on purpose.
+
+The tell is that `reads()` returns false for a kind you just subscribed. If you
+widen the storage, add a test that subscribes to a slot *past the old ceiling*
+and asserts it reads back — asserting only the named kinds cannot catch this,
+because they all still fit in the old width.
+
+The bitset is in-memory only and never serialized, so widening is invisible to
+callers and safe to do early. Prefer widening when the vocabulary first grows
+rather than when it reaches the ceiling, so the person who adds the kind that
+would have tripped the limit is not the one who has to change the storage type.
+
+## Peer-edge context kinds make compile order a DAG, and nothing in the type system says so
+
+`ChordScale` and `Groove` are read from a sequence the reader already sits
+under, so compile order is a tree walk. Kinds that let a reader subscribe to
+context a *sibling* track produces turn that order into a DAG which must stay
+acyclic — two tracks each reading the other's context have no valid order and
+will either deadlock a compile or silently resolve against a stale peer.
+
+`CompileContextSubscriptions` cannot express this: it records **what** a reader
+reads, never **when** it may be compiled. So acyclicity is owned by whoever
+gives a peer-edge kind a producer, not by the subscription contract. Reserving
+the enum slot is safe on its own; wiring a producer to one is the point where
+the ordering proof becomes load-bearing.

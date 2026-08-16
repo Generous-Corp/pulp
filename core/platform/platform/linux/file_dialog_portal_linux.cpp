@@ -24,6 +24,7 @@
 #include <pulp/platform/file_dialog.hpp>
 
 #include <map>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,15 +81,29 @@ FileDialog::Backend make_linux_portal_backend() {
         if (paths.empty()) return std::nullopt;
         return paths.front();
     };
-
     backend.choose_folder = [](const std::string& title,
                                const std::string&) -> std::optional<std::string> {
         auto paths = run_chooser("OpenFile", title, {}, {{"directory", true}});
         if (paths.empty()) return std::nullopt;
         return paths.front();
     };
-
     return backend;
+}
+
+FileDialog::SaveCopyBackend make_linux_portal_save_copy_backend() {
+    return [](const std::string& source,
+                           const std::string& title,
+                           const std::vector<FileFilter>&,
+                           const std::string&,
+                           const std::string& default_name,
+                           std::string* error) -> std::optional<std::string> {
+        // A portal grant covers the selected document, not a sibling staging
+        // file. Until this backend owns a GIO replace-contents bridge, refuse
+        // before showing a chooser that could never complete the operation.
+        (void)source; (void)title; (void)default_name;
+        if (error) *error = "atomic save-copy is not supported by this portal backend";
+        return std::nullopt;
+    };
 }
 
 }  // namespace pulp::platform

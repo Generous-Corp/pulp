@@ -10,6 +10,45 @@
 using namespace pulp::state;
 using namespace pulp::view;
 
+TEST_CASE("click callbacks can remove their own widget",
+          "[view][bridge][click][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var click_hits = 0;
+        createLabel('remover', 'Remove', '');
+        on('remover', 'click', function () {
+            click_hits += 1;
+            removeWidget('remover');
+        });
+        registerClick('remover');
+    )JS");
+
+    auto* remover = bridge.widget("remover");
+    REQUIRE(remover != nullptr);
+    const auto removed_lifetime = remover->import_binding_lifetime_token();
+    remover->set_bounds({10, 10, 100, 80});
+    root.simulate_click({20, 20});
+
+    REQUIRE(bridge.widget("remover") == nullptr);
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(engine.evaluate("click_hits").getWithDefault<int>(0) == 1);
+    REQUIRE_FALSE(removed_lifetime.expired());
+
+    bridge.load_script(R"JS(
+        createLabel('collector', 'Collect', '');
+        on('collector', 'click', function () {});
+        registerClick('collector');
+    )JS");
+    bridge.widget("collector")->set_bounds({10, 10, 100, 80});
+    root.simulate_click({20, 20});
+    REQUIRE(removed_lifetime.expired());
+}
+
 TEST_CASE("pointer callbacks can remove their own widget and siblings",
           "[view][bridge][pointer][lifetime]") {
     ScriptEngine engine;
@@ -73,7 +112,12 @@ TEST_CASE("nested bridge callbacks defer retirement to the outer callback",
                 event.phase = MousePhase::press;
                 event.position = {5, 5};
                 event.window_position = {205, 25};
-                nested->on_mouse_event(event);
+                // This is an intentional nested bridge delivery, not a second
+                // platform hit-test walk. The outer pointer dispatch already
+                // owns the platform DOM token, so the historical
+                // on_mouse_event seam correctly suppresses re-entry.
+                if (nested->on_dom_pointer_event)
+                    nested->on_dom_pointer_event(event, true);
             }
             return choc::value::Value();
         });

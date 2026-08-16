@@ -26,6 +26,21 @@ inline bool canvas_paint_logging_enabled() {
     return true;
 }
 
+inline bool backend_satisfies(
+    NativeCanvasBackendRequirement requirement,
+    canvas::RendererBackend backend) noexcept {
+    switch (requirement) {
+        case NativeCanvasBackendRequirement::any:
+            return true;
+        case NativeCanvasBackendRequirement::skia_dawn_allow_recording:
+            return backend == canvas::RendererBackend::skia_dawn ||
+                   backend == canvas::RendererBackend::recording;
+        case NativeCanvasBackendRequirement::skia_dawn:
+            return backend == canvas::RendererBackend::skia_dawn;
+    }
+    return false;
+}
+
 // Translate CanvasDrawCmd::Type to a stable, grep-able
 // short string so the env-gated trace can summarise commands_ without dragging
 // a heavyweight reflection helper into the hot path. Names mirror the enum
@@ -107,6 +122,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
 } // namespace
 
 void CanvasWidget::paint(canvas::Canvas& canvas) {
+    const auto commands = recorded_commands_;
     // Env-gated paint trace. Logged at entry, BEFORE any
     // baseline / save_count snapshots so the line reflects the matrix the
     // parent View::paint_all chain handed us. Format is grep-able:
@@ -122,7 +138,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         const auto& b = bounds();
         const auto m = canvas.current_transform();
         std::map<int, int> type_counts;
-        for (const auto& cmd : commands_) {
+        for (const auto& cmd : commands->commands) {
             ++type_counts[static_cast<int>(cmd.type)];
         }
         std::string summary;
@@ -143,7 +159,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                      static_cast<double>(m.a), static_cast<double>(m.b),
                      static_cast<double>(m.c), static_cast<double>(m.d),
                      static_cast<double>(m.e), static_cast<double>(m.f),
-                     commands_.size(), summary.c_str());
+                     commands->commands.size(), summary.c_str());
         std::fflush(stderr);
     }
 
@@ -151,6 +167,8 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // onto the parent View transform rather than overwriting it.
     canvas.capture_paint_baseline_transform();
     last_native_gpu_texture_draw_succeeded_ = false;
+    last_native_paint_succeeded_ = false;
+    last_native_paint_backend_ = canvas.renderer_backend();
 
     // Defend against unbalanced JS save/restore. If the
     // draw script reaches an early-return path that skips a matching
@@ -230,7 +248,59 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     }
 #endif
 
-    for (auto& cmd : commands_) {
+    // Native content is a distinct retained mode, not an extra overlay on the
+    // recorded Canvas2D stream. Take a strong snapshot so a painter may safely
+    // replace/reset itself from inside paint without invalidating the active
+    // call. The renderer identity comes from Canvas and is checked before any
+    // application drawing, providing a fail-closed Graphite/Dawn contract.
+    if (content_mode_ == ContentMode::native_painter) {
+        auto painter = native_painter_;
+        const auto backend = canvas.renderer_backend();
+        if (painter && backend_satisfies(native_backend_requirement_, backend)) {
+            // Establish a widget-local clip and an independently balanced
+            // state scope. restore_to_count cleans up extra saves left by a
+            // painter; callers must not restore below the scope they receive.
+            const int painter_depth = canvas.save_count();
+            canvas.save();
+            canvas.clip_rect(0.0f, 0.0f, widget_bounds.width,
+                             widget_bounds.height);
+            NativeCanvasPaintContext context{
+                canvas,
+                {0.0f, 0.0f, widget_bounds.width, widget_bounds.height},
+                canvas.backing_scale(),
+                native_frame_id_++,
+                backend,
+            };
+            painter->paint(context);
+            canvas.restore_to_count(painter_depth);
+            last_native_paint_succeeded_ = true;
+        }
+        canvas.restore_to_count(saved_depth);
+        return;
+    }
+
+    // Canvas::fill_text() consumes a baseline Y coordinate, whereas the
+    // browser Canvas2D API lets callers choose whether Y denotes the top,
+    // middle, or bottom of the font box. Keep this replay-only state beside
+    // the recorded save stack and translate to a real baseline immediately
+    // before painting. The bridge has recorded this state for years; dropping
+    // it here displaced imported canvas labels by roughly one ascent.
+    auto text_baseline = canvas::TextBaseline::top;
+    std::vector<canvas::TextBaseline> text_baseline_stack;
+    const auto baseline_y = [&](const std::string& text, float y) {
+        const auto metrics = canvas.measure_text_full(text);
+        switch (text_baseline) {
+        case canvas::TextBaseline::middle:
+            return y + (metrics.ascent - metrics.descent) * 0.5f;
+        case canvas::TextBaseline::bottom:
+            return y - metrics.descent;
+        case canvas::TextBaseline::top:
+        default:
+            return y + metrics.ascent;
+        }
+    };
+
+    for (const auto& cmd : commands->commands) {
         switch (cmd.type) {
         // Shapes
         case CanvasDrawCmd::Type::clear:
@@ -305,9 +375,10 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // so backends without a custom override behave bit-for-bit
             // identically to the legacy 3-arg path.
             if (cmd.w > 0.0f) {
-                canvas.fill_text_with_max_width(cmd.text, cmd.x, cmd.y, cmd.w);
+                canvas.fill_text_with_max_width(cmd.text, cmd.x,
+                                                baseline_y(cmd.text, cmd.y), cmd.w);
             } else {
-                canvas.fill_text(cmd.text, cmd.x, cmd.y);
+                canvas.fill_text(cmd.text, cmd.x, baseline_y(cmd.text, cmd.y));
             }
             break;
         case CanvasDrawCmd::Type::stroke_text:
@@ -324,7 +395,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // path; line width comes from the prior `set_line_width`
             // cmd. We do NOT re-set them here (mirrors fill_text's
             // commentary above).
-            canvas.stroke_text(cmd.text, cmd.x, cmd.y, cmd.w);
+            canvas.stroke_text(cmd.text, cmd.x, baseline_y(cmd.text, cmd.y), cmd.w);
             break;
         case CanvasDrawCmd::Type::set_font:
             canvas.set_font(cmd.text, cmd.extra);
@@ -387,9 +458,14 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // State
         case CanvasDrawCmd::Type::save:
             canvas.save();
+            text_baseline_stack.push_back(text_baseline);
             break;
         case CanvasDrawCmd::Type::restore:
             canvas.restore();
+            if (!text_baseline_stack.empty()) {
+                text_baseline = text_baseline_stack.back();
+                text_baseline_stack.pop_back();
+            }
             break;
 
         // Transform
@@ -473,7 +549,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             else canvas.set_text_align(canvas::TextAlign::left);
             break;
         case CanvasDrawCmd::Type::set_text_baseline:
-            // Recorded by the bridge but not applied during replay yet.
+            if (cmd.int_val == 1) text_baseline = canvas::TextBaseline::middle;
+            else if (cmd.int_val == 2) text_baseline = canvas::TextBaseline::bottom;
+            else text_baseline = canvas::TextBaseline::top;
             break;
 
         // Line cap/join

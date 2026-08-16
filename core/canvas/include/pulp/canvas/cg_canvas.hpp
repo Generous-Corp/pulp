@@ -18,6 +18,10 @@ namespace pulp::canvas {
 // Renders directly into a CGContext (from NSView drawRect: or CGBitmapContext)
 class CoreGraphicsCanvas : public Canvas {
 public:
+    RendererBackend renderer_backend() const noexcept override {
+        return RendererBackend::core_graphics;
+    }
+    float backing_scale() const noexcept override;
     explicit CoreGraphicsCanvas(CGContextRef ctx, float width, float height);
     ~CoreGraphicsCanvas() override;
 

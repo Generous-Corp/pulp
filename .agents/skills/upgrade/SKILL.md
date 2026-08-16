@@ -342,6 +342,22 @@ Read the migration body for the replacement signature. If the change is
 a deprecation (old API still works, emits a warning), flag that —
 teams may want to migrate at their own pace.
 
+#### VisualizationBridge polling ownership (0.807.0)
+
+`VisualizationBridge::process()` no longer performs FFT/waveform analysis or
+publishes those snapshots. When upgrading a consumer that reads spectrum or
+waveform data, find the bridge reads and ensure exactly one non-audio-thread
+owner calls `poll()` first:
+
+```bash
+rg -n "VisualizationBridge|read_spectrum|read_waveform" .
+```
+
+The usual owner is the editor frame clock. Keep `read_spectrum()` and
+`read_waveform()` as cheap snapshot reads; do not move `poll()` onto the audio
+callback or call it concurrently from multiple UI/worker paths. Treat
+`configure()` and `reset()` as quiescent control-thread operations.
+
 ### Config file / path moves
 
 **Pattern.** A file Pulp reads (e.g. `~/.pulp/config.toml`,

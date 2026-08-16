@@ -3764,8 +3764,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
 - If the requested screen is not the landing state, pass
   `--browser-interactions <plan.json>`. The
-  `pulp-browser-interactions-v1` plan accepts only bounded `click`, `type`,
-  `wait-for`, and `wait-ms` actions. End navigation sequences with
+  `pulp-browser-interactions-v1` plan accepts only bounded `click`,
+  `context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
+  uses a real secondary-button gesture. End navigation sequences with
   `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
   script source do not prove which screen rendered. Capture records action
   results and typed-text length without retaining the text or a per-action
@@ -4990,26 +4991,32 @@ picture with no error — so always compare the registered reference's extent
 against the render's after cropping. A silently clamped crop is the same
 misregistration wearing a correct-looking rect.
 
-### 8. Pointer events need explicit `registerPointer(id)` AND don't bubble
+### 8. Pointer events register explicitly and bubble from one DOM origin
 
 **Spec:** `addEventListener('pointerdown', fn)` plus React synthetic-event bubbling: a click on a child reaches the parent's handler unless `stopPropagation` is called.
 
-**Bridge reality:** Pulp gates pointer dispatch behind an explicit `registerPointer(id)` call (parallel to `registerClick(id)` and `registerHover(id)`). `@pulp/react`'s prop-applier currently only wires `registerHover` for `mouseenter/leave`, so `onPointerDown/Move/Up` listeners are installed in the JS dispatch table but never fired by the native View — the JS handler appears registered (`on(id, 'pointerdown', fn)`) yet clicks never invoke it. Additionally, **pulp dispatches pointer events to the hit-test target only — there is no synthetic-event bubbling.** A handler on a parent `<div>` will not fire when the click lands on a child `<canvas>` that visually overlays it.
-
-This was the root cause of Spectr's "FilterBank renders rainbow but band drag is dead" symptom. Confirmed by `__spectrLog` probe at the top of `onPointerDown`: handler does NOT fire on `cliclick c:600,400` even though `on(pr_3, pointerdown, ...)` is registered.
+**Bridge reality:** Pulp gates pointer dispatch behind an explicit
+`registerPointer(id)` call (parallel to `registerClick(id)` and
+`registerHover(id)`). `@pulp/react`'s prop-applier wires that registrar for
+pointer-class props. Native delivery selects one deepest registered DOM origin;
+JavaScript then performs the standard capture/bubble walk to its ancestors and,
+unless propagation is stopped, the pointer document listeners. Registered
+native ancestors receive callback-only delivery so direct `@pulp/react` remains
+compatible without entering the DOM walk a second time.
 
 **Importer rule:**
 
-1. Whenever the importer emits an `onPointerDown / onPointerMove / onPointerUp / onPointerLeave / onWheel` handler, also emit a `registerPointer(id)` call against the same widget. Do this in the ref-mount callback (or its equivalent post-mount hook) so the bridge wires `on_pointer_event` into the View. Idempotent on the bridge side; safe to call on every remount.
-2. **Do not assume bubbling.** If the design has a parent element with a pointer handler and child elements that visually cover it, mirror the same handler onto each direct child too. The handler can use the parent's `getBoundingClientRect()` for coord math so the same function works on every binding.
-
-```ts
-// Bind on parent + every interactive child:
-<wrap onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU}>
-  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
-  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
-</wrap>
-```
+1. Whenever a non-React import emits an
+   `onPointerDown / onPointerMove / onPointerUp / onPointerCancel` handler, also
+   emit `registerPointer(id)` for that widget. (`onWheel` uses
+   `registerWheel(id)`.) Do this in the ref-mount callback or equivalent
+   post-mount hook. Registration is idempotent.
+2. Bind a logical handler once at its intended DOM node. Do not mirror it onto
+   visually covering children: ordinary bubbling reaches the parent, and
+   mirrored handlers would duplicate delivery.
+3. Use standard cancellation semantics. `stopPropagation()` keeps remaining
+   same-node listeners but prevents ancestor/document delivery;
+   `stopImmediatePropagation()` also stops remaining same-node listeners.
 
 ```ts
 // In the ref-mount callback:
@@ -5017,7 +5024,8 @@ const id = inst.id;
 if (typeof globalThis.registerPointer === 'function') globalThis.registerPointer(id);
 ```
 
-The cleaner long-term fix is for `@pulp/react`'s prop-applier to call `registerPointer` automatically when it sees any pointer-event prop (parallel to its existing `registerHover` wiring) — track that as a follow-up Pulp issue rather than an importer-side workaround if you encounter it on a fresh import.
+Direct `@pulp/react` consumers do not need to call the registrar manually; its
+prop-applier already does so for pointer-class props.
 
 ### 9. Shared widget promotion — `<div onClick>` → button
 
@@ -5389,7 +5397,11 @@ proof images.
   pixels, nothing downstream can retint or theme it, and the bitmap does not
   survive being saved, because a project persists the DesignIR and the ui.js,
   not the scratch directory the asset lived in. Count `faithful_capture` nodes
-  in the installed IR: on a natively lowered panel it is zero.
+  in the installed IR: on a natively lowered panel it is zero. Imperative
+  `<canvas>` backing stores are the narrow exception: while the frame is frozen,
+  each canvas is captured as its own integrity-bound PNG asset and reinserted at
+  its exact Chromium paint position. That preserves the rest of the panel as
+  native text/shape/image nodes; it is not a whole-panel photograph.
 
 ## Colour: the agent chooses it, and it belongs on the root
 
@@ -6279,6 +6291,136 @@ alone orphans them.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
+### Chromium state matrix -> computed DesignIR -> native proof
+
+For a React/Claude prototype, the browser capture is the visual authority and
+the native render is the implementation under test. Do not replace the source
+with a hand-built JSX approximation. Capture the patched shipping source at the
+authored size, once for every materially different screen (at minimum main and
+Settings), and drive secondary screens with the bounded interaction-plan JSON:
+
+```bash
+pulp-import-design --from claude --file editor.html --mode baked \
+  --emit ir-json --native-panel-lowering \
+  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --browser-interactions settings-interactions.json \
+  --render-size 1320x860 --output spectr-settings.ir.json --validate
+```
+
+The click executor follows actual browser pointer semantics: decorative
+`pointer-events:none` noise/glow may be clicked through, while a real blocker
+forces selection of an exposed centre/corner point or fails. `wait-for visible`
+is intentionally stricter and still requires visually uncovered paint.
+
+Computed layout, text runs, resolved fonts, colours, SVG paths, stacking and
+hit geometry lower through DesignIR. While Chromium virtual time is paused,
+each executable `<canvas>` backing store lowers as a separate, hash-verified
+PNG asset bound to its DOM `backendNodeId`. Canvas-heavy captures use a flat
+root paint list because Chromium can interleave canvas, pseudo-element and
+ancestor paint in an order a nested native tree cannot express; ordinary
+non-canvas panels retain native hierarchy. This is the static-parity bridge,
+not the final live-canvas implementation: replace each snapshot with a
+CanvasWidget/NativeCanvasPainter on Skia/Dawn when live behavior is required,
+without changing its box or paint slot, then rerun every captured state.
+
+Always pin `--render-size` to the authored dimensions. A different host window
+size invalidates the geometry comparison even if the import is correct. For an
+animated design, distinguish two gates: a same-frozen-frame comparison may use
+a strict threshold, while comparison to a previously approved fixed reference
+needs either masked dynamic regions or a deliberately lower threshold. Prove
+that threshold with a planted compositor mutation; in the Spectr reference the
+correct same-frame render scored 99% while hierarchy substituted for Chromium
+paint order scored 88%. Never call the browser screenshot itself a native
+result.
+
+Keep the repeatable evidence together: interaction JSON, capture envelope,
+semantic report, browser reference, DesignIR, native PNG, diff, presence report,
+and exact source/browser/Pulp commits. The Pulp capture/import orchestration is
+a `pulp-tooling-surface` and remains Pulp-owned; shared retained rendering and
+Skia/Dawn primitives are Vellum-owned and must be changed at their Vellum
+authority rather than forked in this importer.
+
+For an executable React/Claude panel, keep those accepted DesignIR pixels and
+materialize behavior separately. Browser capture emits
+`materialized-document.json`: the exact adapter-patched HTML handed to
+`DOMParser` before React mounts, with every Blob URL rewritten to a
+content-addressed, hash-verified asset. Import with
+`--materialized-canvas-composition`: the accepted full Chromium frame becomes
+the initial visible native ImageView authority, while transparent CanvasWidget
+targets retain the captured canvas anchors and stay hit-testable. Compile the
+document into a hidden native behavior tree, bind its closures to those visible
+targets, mount DesignIR as the only visible tree, and gate against the browser
+frame from that SAME import transaction:
+
+```bash
+runtime=tools/import-design/jsx-runtime
+test -d "$runtime/node_modules" || (cd "$runtime" && npm ci)
+
+node "$runtime/materialized-runtime-transform.mjs" \
+  --in spectr.ir-browser-capture/materialized-document.json \
+  --design-ir spectr.ir.json \
+  --state-atlas spectr.ir-browser-capture/captured-states.json \
+  --portable-state-assets \
+  --prelude spectr-native-services.js --out behavior.js
+
+pulp-screenshot --script behavior.js --design-ir spectr.ir.json \
+  --width 1320 --height 860 --scale 2 --backend skia \
+  --runtime-trace runtime.json --output native.png
+pulp-screenshot --compare spectr.ir-browser-capture/browser.png native.png \
+  --threshold 0.99 --diff native-diff.png
+```
+
+For any rAF/timer-driven CanvasWidget, use a production-length settle window
+(300 frames for Spectr) and inspect `runtime.json.canvas_program_frames`, not
+only the final `canvas_programs` entry. Each authored canvas must remain bounded
+across the whole window; a flat or naturally varying bounded series is valid,
+while a monotonic command-count ramp means the application is appending retained
+Canvas2D commands instead of replacing the frame. Keep a mutation fixture that
+removes the full-canvas clear and proves this oracle goes red. This is required
+before replacing a captured canvas snapshot with live native paint.
+
+The optional prelude is product-owned and runs in the captured document before
+its application scripts load. Use it for real analyzer, state, and host-bridge
+services that application modules may snapshot during declaration. Never put a
+product fallback in the generic transformer.
+The visible DesignIR owns geometry/style/captured paint; the hidden tree owns
+closures and event logic. Bindings forward input without substituting pixels.
+Opacity zero is intentional for those CanvasWidget targets and must remain
+hit-testable. A previous fixed reference may differ in animated analyzer
+regions, so it is evidence history, not the native parity oracle. Do not show or
+accept a native result until this same-transaction gate passes, runtime
+diagnostics are empty, and a planted missing-service or broken-binding control
+fails. Do not promote executable canvas paint merely because it runs: first
+prove that replacement independently matches its same-transaction canvas
+snapshot, including fonts, SVG/image assets, clipping, and compositing order.
+
+For dropdowns, context menus, settings, preset managers, and other alternate
+states, capture a `pulp-materialized-state-atlas-v1` document in the SAME
+Chromium transaction. Every entry must provide a stable id, its captured paint,
+the event sequence that activates it, and (when available) a semantic selector
+that proves the live materialized application reached the intended state. The
+runtime executes the original closures first and swaps native visual authority
+only after the match succeeds. Never use a state atlas as a screenshot-only
+interaction fake: invalid activation, a missing captured image, an unknown
+state, or a failed semantic match must fail closed. Validate the home state and
+every accepted atlas state independently against its own same-transaction
+browser frame.
+
+Under `--visual-authority native`, add `materialized_document` to each state
+entry and point it at that state's captured
+`pulp-materialized-browser-document-v1` sidecar. The native runtime then keeps
+executing the original state transition while rejoining Chromium's resolved
+element boxes, font bindings, and line boxes to the newly committed tree. State
+resolution must run even though native authority embeds no captured paint
+planes, and the per-commit hook must keep the active state's metadata until the
+state closes; otherwise a modal shell may match before its descendants commit
+or a later commit may silently restore home geometry. Browser-only `html`
+scaffolding is not a native binding target and is filtered at capture/load.
+Installed targets must colocate atlas paints beneath the generated runtime
+directory and use `--portable-state-assets`. This emits package-relative paths
+and rejects any paint that resolves outside the packaged runtime; absolute
+capture-host paths are validation evidence only and must not enter artifacts.
+
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
 the code, and both were found by measuring rather than reasoning:
@@ -6369,3 +6511,17 @@ Things that cost time here, all of them found by measuring:
   exactly this reason); and text clipped inside a box whose ink still ends short
   of the clip edge. Nodes it cannot measure are counted under `unmeasurable` and
   are never folded into the passing count.
+
+## Runnable agent HTML: enforce its own browser reference
+
+For a self-contained `--from html` artifact, Chromium's settled source capture
+is the reference. Invoke the importer with `--screenshot-backend skia`,
+`--strict-fidelity`, and `--fail-below <percent>` (Forge uses 85). Do **not**
+manufacture a second reference PNG and do not accept a mere advisory similarity
+line: `--fail-below` makes a below-threshold native render exit nonzero.
+
+The CLI must defer the missing-reference check for runnable generic HTML until
+browser capture has had the chance to supply that reference. `--offline` and
+all non-browser sources still require an explicit `--reference`; if browser
+capture cannot produce its source image, the import must fail closed. Keep a
+browser-backed regression test for both halves of this rule.

@@ -285,6 +285,12 @@ NodePackLoadResult load_node_pack(const std::string& manifest_dir,
         r.error = NodePackError::ManifestInvalid;
         return r;
     }
+    if (!generated_device_admission(policy.platform, GeneratedDeviceArtifact::NativePack,
+                                    policy.origin)
+             .allowed) {
+        r.error = NodePackError::PlatformPolicyDenied;
+        return r;
+    }
     if (!key_is_trusted(manifest.signer_public_key, trust)) {
         r.error = NodePackError::UntrustedSigner;
         return r;

@@ -40,7 +40,16 @@ class CombinedInstallerTest(unittest.TestCase):
             output = tmp / "out"
 
             self._write_tool(fake_bin, "codesign", "exit 0\n")
-            self._write_tool(fake_bin, "security", "exit 0\n")
+            self._write_tool(
+                fake_bin,
+                "security",
+                'if [[ "${1:-}" == "find-identity" ]]; then\n'
+                '  echo \'  1) ABC "Developer ID Application: Test (TEAMID0000)"\'\n'
+                'elif [[ "${1:-}" == "list-keychains" && "$*" != *" -s "* ]]; then\n'
+                '  printf \'    "%s"\\n\' "$PULP_SIGN_KEYCHAIN"\n'
+                'fi\n'
+                "exit 0\n",
+            )
             self._write_tool(
                 fake_bin,
                 "python3",
@@ -151,8 +160,14 @@ class CombinedInstallerTest(unittest.TestCase):
                 "CAPTURE_XML": str(capture),
                 "CAPTURE_APP_RELOCATION": str(relocation_capture),
                 "CAPTURE_PKG_ARGV": str(pkg_argv_capture),
-                "PULP_SKIP_SIGNING_PREFLIGHT": "1",
+                "PULP_SIGN_KEYCHAIN": str(tmp / "signing.keychain-db"),
+                "PULP_SIGN_KEYCHAIN_PW": "test-keychain-password",
+                "PULP_SIGN_P12": str(tmp / "signing.p12"),
+                "PULP_SIGN_P12_PW": "test-p12-password",
+                "PULP_SIGN_IDENTITY_HASH": "ABC",
             }
+            Path(env["PULP_SIGN_KEYCHAIN"]).touch()
+            Path(env["PULP_SIGN_P12"]).touch()
             completed = subprocess.run(
                 args,
                 cwd=ROOT,

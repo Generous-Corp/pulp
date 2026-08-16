@@ -24,6 +24,7 @@
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/explicit_q_resonator_bank.hpp>
 #include <pulp/signal/waveshaper.hpp>
+#include <pulp/signal/waveset_transformer.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/panner.hpp>
@@ -36,6 +37,7 @@
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/fir_filter.hpp>
+#include <pulp/signal/fir_design.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/log_ramped_value.hpp>

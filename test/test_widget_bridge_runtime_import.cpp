@@ -74,6 +74,34 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ surfaces parse failure as soft err
     REQUIRE(err_str.find("claude bundle") != std::string::npos);
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ accepts a materialized browser sidecar",
+          "[view][bridge][runtime-import][materialized-browser]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string sidecar = R"JSON({
+      "schema":"pulp-materialized-browser-document-v1",
+      "version":1,
+      "html":"<html><body><script src=\"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82\"></script></body></html>",
+      "assets":[{
+        "id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "mime_type":"text/javascript",
+        "byte_length":20,
+        "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
+        "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
+      }]
+    })JSON";
+    engine.evaluate(
+        "__pulpRuntimeImport__('" + js_single_quoted(sidecar) +
+        "','materialized-browser');");
+    REQUIRE(engine.evaluate("globalThis.okTrue === 1").getWithDefault(false));
+    REQUIRE(engine.evaluate("String(globalThis.__pulpRuntimeImportErr__ || '')")
+                .getWithDefault<std::string>("").empty());
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches v0 parser by source label",
           "[view][bridge][runtime-import-dispatch][v0][phase-6.6.2]") {
     ScriptEngine engine;

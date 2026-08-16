@@ -158,7 +158,10 @@ BrowserHtmlImportResult import_browser_html(
          .source_file = {},
          .require_interaction_report =
              request.browser_interactions.has_value(),
-         .native_panel_lowering = request.native_panel_lowering});
+         .runtime_asset_id = "reference:browser-static",
+         .native_panel_lowering = request.native_panel_lowering,
+         .materialized_canvas_composition =
+             request.materialized_canvas_composition});
     if (!lowered) {
         return BrowserHtmlFailure{
             3,
@@ -179,7 +182,7 @@ BrowserHtmlImportResult import_browser_html(
     std::string sprite_error;
     apply_browser_capture_control_sprites(
         *lowered.design_ir, lowered.reference_png, capture_directory,
-        &sprite_error);
+        &sprite_error, capture_directory / "browser-static.png");
     if (!sprite_error.empty()) {
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};

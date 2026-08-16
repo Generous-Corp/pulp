@@ -22,6 +22,14 @@ target_link_libraries(pulp-playback
         pulp::midi
 )
 
+# Headless conformance companion for platforms that cannot run Catch2. The
+# interchange-owned runner validates the portable corpus; this playback-owned
+# executable adds journal replay and rendered audio/MIDI golden proof without
+# widening interchange's dependency floor.
+add_executable(pulp-android-fixture-runner tools/android_fixture_runner_main.cpp)
+target_compile_features(pulp-android-fixture-runner PRIVATE cxx_std_20)
+target_link_libraries(pulp-android-fixture-runner PRIVATE pulp::playback)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI" OR
    CMAKE_SYSTEM_NAME STREQUAL "Emscripten" OR EMSCRIPTEN)
     target_compile_definitions(pulp-playback PRIVATE

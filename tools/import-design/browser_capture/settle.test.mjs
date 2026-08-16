@@ -63,6 +63,38 @@ test("page settle reaches a transition inside its minimum readiness window", asy
   assert.deepEqual([...observedVisibility], [1, 2]);
 });
 
+test("page settle ignores mutation-only React churn", async () => {
+  let samples = 0;
+  const cdp = {
+    async call(method, options) {
+      assert.equal(method, "Runtime.evaluate");
+      if (options.expression.includes("JSON.stringify({")) {
+        samples += 1;
+        return { result: { value: JSON.stringify({
+          ready: "complete",
+          fonts: "loaded",
+          width: 1320,
+          height: 860,
+          visible: 83,
+          geometry: 2365765203,
+          textLength: 92,
+          mutationEpoch: samples,
+        }) } };
+      }
+      return { result: { value: true } };
+    },
+  };
+
+  const result = await waitForStable(cdp, {
+    stableRounds: 2,
+    maximumRounds: 8,
+    intervalMs: 0,
+  });
+
+  assert.equal(result.stableRounds, 2);
+  assert.equal(samples, 3);
+});
+
 test("stable screenshot capture uses the settled tail, not an early plateau",
   async () => {
   const frames = ["one", "one", "two", "two", "two"];

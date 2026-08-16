@@ -132,8 +132,9 @@ std::string interaction_report(
   "action_count":2,
   "actions":[
     {
-      "action":"click",
-      "selector":"#open",
+      "action":"dispatch-event",
+      "selector":"#surface",
+      "event":"contextmenu",
       "timeout_ms":5000,
       "status":"completed"
     },
@@ -181,6 +182,27 @@ std::string with_reference_member(std::string capture,
     return capture;
 }
 
+std::string with_static_runtime_asset(
+    std::string capture, std::string_view hash,
+    int width = 1912, int height = 1272) {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string asset = std::string(R"JSON(  },{
+    "id":"reference:browser-static",
+    "kind":"screenshot",
+    "mime_type":"image/png",
+    "path":"browser-static.png",
+    "sha256":")JSON") + std::string(hash) + R"JSON(",
+    "width_px":)JSON" + std::to_string(width) + R"JSON(,
+    "height_px":)JSON" + std::to_string(height) + R"JSON(
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), asset);
+    return capture;
+}
+
 std::string with_primary_surface(std::string capture,
                                  std::string_view surface) {
     const std::string settle =
@@ -191,6 +213,76 @@ std::string with_primary_surface(std::string capture,
                     settle + R"JSON(,"viewport":{"document":{)JSON" +
                         R"JSON("width":956,"height":636,"primary_surface":)JSON" +
                         std::string(surface) + "}}");
+    return capture;
+}
+
+std::string with_canvas_asset(std::string capture,
+                              std::string_view hash,
+                              int backend_node_id = 42,
+                              std::string_view id = "canvas:42",
+                              std::string_view path = "canvas-42.png",
+                              int width = 8,
+                              int height = 4) {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string canvas = R"JSON(  },{
+    "id":")JSON" + std::string(id) + R"JSON(",
+    "kind":"canvas-snapshot",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":)JSON" + std::to_string(width) + R"JSON(,
+    "height_px":)JSON" + std::to_string(height) + R"JSON(,
+    "backend_node_id":)JSON" + std::to_string(backend_node_id) + R"JSON(,
+    "bounds":{"left":16,"top":24,"width":4,"height":2}
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), canvas);
+    return capture;
+}
+
+std::string with_chrome_asset(std::string capture,
+                              std::string_view hash,
+                              std::string_view path = "browser-chrome.png") {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string chrome = R"JSON(  },{
+    "id":"reference:browser-chrome",
+    "kind":"chrome-screenshot",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":1912,
+    "height_px":1272
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), chrome);
+    return capture;
+}
+
+std::string with_canvas_composite_asset(
+    std::string capture, std::string_view hash,
+    std::string_view path = "browser-canvas-composite.png") {
+    const std::string anchor = R"JSON(  }],
+  "semantics")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    const std::string composite = R"JSON(  },{
+    "id":"evidence:browser-canvas-composite",
+    "kind":"canvas-composite-evidence",
+    "mime_type":"image/png",
+    "path":")JSON" + std::string(path) + R"JSON(",
+    "sha256":")JSON" + std::string(hash) + R"JSON(",
+    "width_px":1912,
+    "height_px":1272,
+    "changed_pixels":12
+  }],
+  "semantics")JSON";
+    capture.replace(position, anchor.size(), composite);
     return capture;
 }
 
@@ -296,6 +388,251 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
             "pulp-capture:///semantic-report.json");
 }
 
+TEST_CASE("browser static frame is a validated runtime asset, not the A/B oracle",
+          "[import-design][browser-capture][ir][static-frame]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto hash = pulp::runtime::sha256_hex(png);
+    temp.write("browser.png", png);
+    temp.write("browser-static.png", png);
+    write_valid_reports(temp);
+    const auto options = pulp::import_design::BrowserCaptureIrOptions{
+        .source = pulp::view::DesignSource::html,
+        .runtime_asset_id = "reference:browser-static"};
+
+    SECTION("the untouched frame remains the oracle and static frame backs runtime") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), hash));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        REQUIRE(result);
+        CHECK(result.reference_png ==
+              fs::weakly_canonical(temp.root / "browser.png"));
+        CHECK(result.design_ir->root.capture_asset_id ==
+              "reference:browser-static");
+        CHECK(result.design_ir->root.attributes.at("asset_ref") ==
+              "reference:browser-static");
+        CHECK(result.design_ir->root.attributes.at("browser_reference_asset") ==
+              "reference:browser");
+        REQUIRE(result.design_ir->asset_manifest.assets.size() == 1);
+        CHECK(result.design_ir->asset_manifest.assets.front().asset_id ==
+              "reference:browser-static");
+    }
+
+    SECTION("missing static asset fails closed") {
+        temp.write("capture.json", envelope("browser.png", hash));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("missing or ambiguous") != std::string::npos);
+    }
+
+    SECTION("wrong static hash fails closed") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), std::string(64, '0')));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("invalid") != std::string::npos);
+    }
+
+    SECTION("wrong static geometry fails closed") {
+        temp.write("capture.json", with_static_runtime_asset(
+            envelope("browser.png", hash), hash, 1910, 1272));
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json", options);
+        CHECK_FALSE(result);
+        CHECK(result.error.find("invalid") != std::string::npos);
+    }
+}
+
+TEST_CASE("browser capture accepts an integrity-bound canvas snapshot asset",
+          "[import-design][browser-capture][ir][canvas]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas)));
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html"});
+    REQUIRE(result);
+    REQUIRE(result.design_ir->asset_manifest.assets.size() == 2);
+    CHECK(result.design_ir->asset_manifest.assets[1].asset_id == "canvas:42");
+    CHECK(result.design_ir->asset_manifest.assets[1].width == 8);
+    CHECK(result.design_ir->asset_manifest.assets[1].height == 4);
+}
+
+TEST_CASE("materialized browser import keeps accepted Chromium chrome authoritative",
+          "[import-design][browser-capture][ir][materialized]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto chrome = png_header(1912, 1272);
+    const auto composite = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("browser-chrome.png", chrome);
+    temp.write("browser-canvas-composite.png", composite);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_chrome_asset(
+        std::move(capture), pulp::runtime::sha256_hex(chrome));
+    capture = with_canvas_composite_asset(
+        std::move(capture), pulp::runtime::sha256_hex(composite));
+    temp.write("capture.json", capture);
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html",
+         .materialized_canvas_composition = true});
+    REQUIRE(result);
+    REQUIRE(result.design_ir->root.children.size() == 2);
+
+    const auto& authority = result.design_ir->root.children[0];
+    CHECK(authority.type == "image");
+    CHECK(authority.stable_anchor_id == "browser:paint-authority");
+    CHECK(authority.attributes.at("asset_ref") ==
+          "reference:browser-chrome");
+    CHECK(authority.attributes.at("materialized_role") ==
+          "captured-paint-authority");
+    CHECK_FALSE(authority.style.opacity.has_value());
+
+    const auto& target = result.design_ir->root.children[1];
+    CHECK(target.type == "canvas");
+    CHECK(target.stable_anchor_id == "browser:canvas:0");
+    CHECK(target.attributes.at("asset_ref") == "canvas:42");
+    CHECK(target.attributes.at("materialized_role") ==
+          "executable-canvas-target");
+    CHECK_FALSE(target.style.opacity.has_value());
+    CHECK_FALSE(target.style.pointer_events.has_value());
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_visual_authority") ==
+          "browser:chrome+native-canvases");
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_chrome_diagnostic_asset") ==
+          "reference:browser-chrome");
+    CHECK(result.design_ir->root.attributes.at(
+              "materialized_canvas_validation_asset") ==
+          "evidence:browser-canvas-composite");
+}
+
+TEST_CASE("materialized paint keeps the full host frame around an authored panel",
+          "[import-design][browser-capture][ir][materialized][coordinates]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto chrome = png_header(1912, 1272);
+    const auto composite = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("browser-chrome.png", chrome);
+    temp.write("browser-canvas-composite.png", composite);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_chrome_asset(
+        std::move(capture), pulp::runtime::sha256_hex(chrome));
+    capture = with_canvas_composite_asset(
+        std::move(capture), pulp::runtime::sha256_hex(composite));
+    capture = with_reference_member(std::move(capture),
+        R"JSON("authored_frame":{"x":40,"y":30,"width":576,"height":179})JSON");
+    capture = with_primary_surface(std::move(capture),
+        R"JSON({"left":40,"top":30,"width":576,"height":179})JSON");
+    temp.write("capture.json", capture);
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html",
+         .materialized_canvas_composition = true});
+    REQUIRE(result);
+    const auto& root = result.design_ir->root;
+    CHECK(root.style.width == 956.0f);
+    CHECK(root.style.height == 636.0f);
+    REQUIRE(root.children.size() == 2);
+    CHECK(root.children[0].style.left == 0.0f);
+    CHECK(root.children[0].style.top == 0.0f);
+    CHECK(root.children[0].style.width == 956.0f);
+    CHECK(root.children[0].style.height == 636.0f);
+    CHECK(root.children[1].style.left == 16.0f);
+    CHECK(root.children[1].style.top == 24.0f);
+    CHECK(std::stod(root.attributes.at("browser_authored_frame_x")) ==
+          Catch::Approx(40.0));
+    CHECK(std::stod(root.attributes.at("browser_authored_frame_width")) ==
+          Catch::Approx(576.0));
+}
+
+TEST_CASE("browser capture rejects a tampered canvas snapshot asset",
+          "[import-design][browser-capture][ir][canvas]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        std::string(64, '0')));
+
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html"});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("canvas PNG hash") != std::string::npos);
+}
+
+TEST_CASE("browser capture rejects duplicate canvas asset identifiers",
+          "[import-design][browser-capture][ir][canvas][security]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", reference);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        pulp::runtime::sha256_hex(canvas));
+    capture = with_canvas_asset(
+        std::move(capture), pulp::runtime::sha256_hex(canvas), 43,
+        "canvas:42", "canvas-43.png");
+    temp.write("capture.json", capture);
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", {});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("duplicate canvas asset identifiers") !=
+          std::string::npos);
+}
+
+TEST_CASE("browser capture rejects oversized canvas assets before file access",
+          "[import-design][browser-capture][ir][canvas][security]") {
+    TempCapture temp;
+    const auto reference = png_header(1912, 1272);
+    temp.write("browser.png", reference);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_canvas_asset(
+        envelope("browser.png", pulp::runtime::sha256_hex(reference)),
+        std::string(64, '0'), 42, "canvas:42", "missing-canvas.png",
+        8193, 8193));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", {});
+    REQUIRE_FALSE(result);
+    CHECK(result.error.find("canvas pixel safety limit") != std::string::npos);
+}
+
 TEST_CASE("browser interaction evidence is contained parsed and integrity-bound",
           "[import-design][browser-capture][ir][interactions][security]") {
     TempCapture temp;
@@ -328,6 +665,41 @@ TEST_CASE("browser interaction evidence is contained parsed and integrity-bound"
           kInteractionPlanHash);
     CHECK(result.design_ir->root.attributes.at(
               "browser_interaction_action_count") == "2");
+}
+
+TEST_CASE("browser capture DesignIR source provenance is relocatable",
+          "[import-design][browser-capture][ir][portability]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    SECTION("absolute local paths retain only the portable leaf") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "/Users/developer/project/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file == "editor.html");
+    }
+
+    SECTION("relative paths remain descriptive") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "resources/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file == "resources/editor.html");
+    }
+
+    SECTION("URLs remain intact") {
+        const auto result = pulp::import_design::lower_browser_capture_to_ir(
+            temp.root / "capture.json",
+            {.source_file = "https://example.test/editor.html"});
+        REQUIRE(result);
+        CHECK(result.design_ir->source_file ==
+              "https://example.test/editor.html");
+    }
 }
 
 TEST_CASE("browser interaction lowering fails closed on missing or unsafe evidence",
@@ -1013,7 +1385,7 @@ TEST_CASE("a rotated pointer is measured in its own space, not its footprint",
            "transform":[0.788010754,0.615661475,
                         -0.615661475,0.788010754,77.819613,36.824268]},
          "indicator_color":"rgb(255, 255, 255)",
-         "data_pulp":{"param":"turned"}}
+         "data_pulp":{"param":"turned","value":"0.25"}}
       ]
     })JSON");
     temp.write("tokens.json", R"JSON({
@@ -1054,6 +1426,20 @@ TEST_CASE("a rotated pointer is measured in its own space, not its footprint",
     // box was recorded.
     CHECK(std::stof(turned.at("knob_ind_w")) ==
           Catch::Approx(0.08333f).margin(0.001f));
+    // The pointer is rotated 38 degrees from its vertical authored axis, so it
+    // sits at -52 degrees on screen while the standard knob arc would put
+    // value 0.25 at -157.5 degrees. The retained phase makes the
+    // runtime angle land back on the captured direction without changing the
+    // sweep itself.
+    REQUIRE(turned.count("knob_ind_phase_rad") == 1);
+    constexpr float kPi = 3.14159265358979323846f;
+    const float runtime_at_declared =
+        -kPi * 0.5f + (0.25f - 0.5f) * kPi * 1.5f +
+        std::stof(turned.at("knob_ind_phase_rad"));
+    CHECK(std::cos(runtime_at_declared) ==
+          Catch::Approx(std::cos(-52.0f * kPi / 180.0f)).margin(0.001f));
+    CHECK(std::sin(runtime_at_declared) ==
+          Catch::Approx(std::sin(-52.0f * kPi / 180.0f)).margin(0.001f));
 
     // The sprite hand-off keeps the FOOTPRINT, which is the opposite choice and
     // the right one: that pass crops the control out of the flat capture and
@@ -1125,6 +1511,76 @@ TEST_CASE("an asymmetric pointer uses its transformed intrinsic centre",
           Catch::Approx(0.2f).margin(0.001f));
     // Erasure still consumes the painted footprint, not the intrinsic box.
     CHECK(pointer.at("browser_sprite_indicator_px") == "100,20,20,60");
+}
+
+TEST_CASE("a transformed thin pointer keeps its own short-axis width when its pivot is offset",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A border/containing-block disagreement can put the recovered pivot a few
+    // pixels away from the dial centre. The old perpendicular support
+    // projection then leaked the 46px long axis into thickness. Rotation and
+    // non-uniform scaling must not change the contract: width is the shorter
+    // transformed intrinsic axis, not the long axis projected at the offset.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1","version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"offset-thin",
+         "bounds":{"left":0,"top":0,"width":130,"height":130},
+         "paint_bounds":{"left":0,"top":0,"width":130,"height":130},
+         "indicator_bounds":{"left":29,"top":41,"width":42,"height":30,
+           "intrinsic":{"width":6,"height":46},
+           "transform":[0.529919,-0.848048,0.848048,0.529919,29.248,41.698]},
+         "indicator_color":"rgb(0,0,0)",
+         "data_pulp":{"param":"offset-thin","value":"0.76"}},
+        {"kind":"knob","binding_status":"bound","name":"horizontal-scaled",
+         "bounds":{"left":0,"top":0,"width":130,"height":130},
+         "paint_bounds":{"left":0,"top":0,"width":130,"height":130},
+         "indicator_bounds":{"left":18,"top":19,"width":51,"height":31,
+           "intrinsic":{"width":46,"height":4},
+           "transform":[1.082532,0.625,-0.25,0.433013,20,20]},
+         "indicator_color":"rgb(0,0,0)",
+         "data_pulp":{"param":"horizontal-scaled","value":"0.25"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1","version":1,
+      "colors":{"css/accent":"#000000"},"dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},"source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+    std::map<std::string, const pulp::view::IRNode*> found;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end()) found[binding->second] = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found.count("offset-thin") == 1);
+    REQUIRE(found.count("horizontal-scaled") == 1);
+    CHECK(std::stof(found.at("offset-thin")->attributes.at("knob_ind_w")) ==
+          Catch::Approx(6.0f / 65.0f).margin(0.0001f));
+    constexpr float kPi = 3.14159265358979323846f;
+    const float offset_runtime_angle =
+        -kPi * 0.5f + (0.76f - 0.5f) * kPi * 1.5f +
+        std::stof(found.at("offset-thin")->attributes.at("knob_ind_phase_rad"));
+    CHECK(std::cos(offset_runtime_angle) ==
+          Catch::Approx(std::cos(-148.0f * kPi / 180.0f)).margin(0.001f));
+    CHECK(std::sin(offset_runtime_angle) ==
+          Catch::Approx(std::sin(-148.0f * kPi / 180.0f)).margin(0.001f));
+    // The 4px local short axis is scaled by 0.5 while the horizontal long axis
+    // is scaled by 1.25. Its authored screen thickness is therefore 2px.
+    CHECK(std::stof(found.at("horizontal-scaled")->attributes.at("knob_ind_w")) ==
+          Catch::Approx(2.0f / 65.0f).margin(0.0001f));
 }
 
 TEST_CASE("a rotated pointer in a scaled viewBox keeps its user units straight",
@@ -2018,6 +2474,31 @@ TEST_CASE("the importer's comparison registers the reference before scoring",
         CHECK(registration.y == 0);
         CHECK(registration.width == 1520);
         CHECK(registration.height == 1772);
+    }
+
+    SECTION("materialized full-surface authority does not crop to its behavior frame") {
+        pulp::view::DesignIR materialized;
+        materialized.root.attributes["materialized_visual_authority"] =
+            "browser:chrome+native-canvases";
+        materialized.root.attributes["browser_device_scale_factor"] =
+            "2.000000";
+        materialized.root.attributes["browser_authored_frame_x"] =
+            "26.046509";
+        materialized.root.attributes["browser_authored_frame_y"] =
+            "0.000000";
+        materialized.root.attributes["browser_authored_frame_width"] =
+            "1227.906982";
+        materialized.root.attributes["browser_authored_frame_height"] =
+            "800.000000";
+
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                materialized, {}, 2640, 1720, 2640, 1720);
+        REQUIRE(registration.registered);
+        CHECK(registration.x == 0);
+        CHECK(registration.y == 0);
+        CHECK(registration.width == 2640);
+        CHECK(registration.height == 1720);
     }
 }
 

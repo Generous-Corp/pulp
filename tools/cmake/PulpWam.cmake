@@ -7,8 +7,8 @@
 #
 # WHY A CURATED DSP SUBSET INSTEAD OF LINKING pulp::format / pulp::state:
 # A headless WASM DSP module must NOT link the desktop-shaped Pulp libraries.
-# `pulp-format` PUBLICLY links pulp::view / pulp::graph / pulp::native-components
-# (view pulls the GPU canvas/Skia/Dawn stack) and `pulp-runtime` links mbedTLS +
+# `pulp-format` PUBLICLY links pulp::view-core / pulp::graph / pulp::native-components
+# (view-core pulls the GPU canvas/Skia/Dawn stack) and `pulp-runtime` links mbedTLS +
 # an HTTP client — none of which belongs in, or builds in, a browser audio
 # worklet. So this helper compiles the portable DSP subset directly. This is the
 # SINGLE source of truth for that subset (it previously lived duplicated in the

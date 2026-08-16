@@ -44,8 +44,9 @@ void draw_knob_indicator_notch(canvas::Canvas& canvas,
 void draw_knob_captured_pointer(canvas::Canvas& canvas,
                                 float cx, float cy,
                                 float r_in, float r_out, float width,
-                                canvas::Color color, float value) {
-    float angle = -1.5707963f + (value - 0.5f) * 4.7123890f;
+                                canvas::Color color, float value,
+                                float phase_rad) {
+    float angle = -1.5707963f + (value - 0.5f) * 4.7123890f + phase_rad;
     float ox = cx + r_out * std::cos(angle);
     float oy = cy + r_out * std::sin(angle);
     float ix = cx + r_in  * std::cos(angle);

@@ -253,8 +253,11 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                                  RemapIdFixups fixups) {
     std::vector<DevicePlacement> device_chain;
     device_chain.reserve(track.device_chain().size());
-    for (const auto& device : track.device_chain())
-        device_chain.push_back({*table.find(device.id)});
+    for (const auto& device : track.device_chain()) {
+        auto remapped = device;
+        remapped.id = *table.find(device.id);
+        device_chain.push_back(std::move(remapped));
+    }
     std::vector<Clip> clips;
     clips.reserve(track.clips().size());
     for (const auto& clip : track.clips()) {

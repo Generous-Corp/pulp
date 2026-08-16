@@ -17,6 +17,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -630,14 +631,105 @@ OTHER_SUPERVISORS = {
 }
 
 
-def _fixed_supervisor_labels(script: Path) -> list[str]:
-    """The default label set a non-Tart supervisor registers."""
+def _supervisor_label_sets(script: Path) -> list[list[str]]:
+    """The statically declared label sets a non-Tart supervisor registers."""
     text = script.read_text()
-    m = re.search(r'^LABELS="([^"$]+)"', text, re.M)
+    assignments = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        assignment = re.fullmatch(r'LABELS=(.+)', stripped)
+        if assignment:
+            assignments.append(assignment.group(1))
+            continue
+        # Every direct use must be a read expansion. This rejects all other
+        # shell mutation forms (+=, export/readonly/declare, unset, read,
+        # printf -v, array assignment, and direct eval) instead of silently
+        # omitting a runtime registration mode from the topology proof.
+        without_reads = re.sub(r'\$(?:\{LABELS\}|LABELS\b)', "", stripped)
+        assert not re.search(r'\bLABELS\b', without_reads), (
+            f"unmodeled LABELS mutation or use in {script}:{lineno}: {stripped}")
+    assert assignments, f"no LABELS assignment found in {script}"
+    m = re.fullmatch(r'"([^"$]+)"', assignments[0])
     if m is None:
-        m = re.search(r'^LABELS="\$\{[^:}]+:-([^}"]+)\}"', text, re.M)
+        m = re.fullmatch(r'"\$\{[^:}]+:-([^}"]+)\}"', assignments[0])
     assert m, f"no LABELS assignment found in {script}"
-    return [x.strip() for x in m.group(1).split(",") if x.strip()]
+    base = [x.strip() for x in m.group(1).split(",") if x.strip()]
+    label_sets = [base]
+    if len(assignments) > 1:
+        assert len(assignments) == 2, (
+            f"unmodeled LABELS control flow in {script}: {assignments}")
+        append = re.fullmatch(r'"\$\{LABELS\},([^"$]+)"', assignments[1])
+        assert append, (
+            f"unmodeled LABELS mutation in {script}: LABELS={assignments[1]}")
+        group_guard = 'if [ -n "$RUNNER_GROUP_ID" ]; then'
+        guard_start = text.find(group_guard)
+        guard_end = text.find("\nfi", guard_start)
+        append_at = text.find(f"LABELS={assignments[1]}")
+        assert guard_start >= 0 and guard_start < append_at < guard_end, (
+            f"automatic LABELS append escapes nonempty RUNNER_GROUP_ID branch in {script}")
+        suffix = [x.strip() for x in append.group(1).split(",") if x.strip()]
+        label_sets.append(base + suffix)
+    return label_sets
+
+
+class TestSupervisorLabelSetExtraction(unittest.TestCase):
+    def _extract(self, text: str) -> list[list[str]]:
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td) / "supervisor.sh"
+            script.write_text(text)
+            return _supervisor_label_sets(script)
+
+    def test_conditional_append_exposes_both_registration_modes(self):
+        self.assertEqual(
+            self._extract(
+                'LABELS="base,host"\n'
+                'if [ -n "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},auto"\n'
+                'fi\n'
+            ),
+            [["base", "host"], ["base", "host", "auto"]],
+        )
+
+    def test_unrecognized_label_mutation_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS mutation"):
+            self._extract('LABELS="base,host"\nLABELS="$LABELS,auto"\n')
+
+    def test_compound_assignment_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS mutation"):
+            self._extract('LABELS="base,host"\nLABELS+=",auto"\n')
+
+    def test_shell_builtin_mutation_fails_closed(self):
+        for mutation in ('export LABELS="other"', 'unset LABELS',
+                         'printf -v LABELS %s other'):
+            with self.subTest(mutation=mutation):
+                with self.assertRaisesRegex(
+                        AssertionError, "unmodeled LABELS mutation"):
+                    self._extract(f'LABELS="base,host"\n{mutation}\n')
+
+    def test_multiple_appends_fail_closed(self):
+        with self.assertRaisesRegex(AssertionError, "unmodeled LABELS control flow"):
+            self._extract(
+                'LABELS="base"\n'
+                'if [ -n "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},trusted"\n'
+                '  LABELS="${LABELS},isolated"\n'
+                'fi\n'
+            )
+
+    def test_unconditional_automatic_append_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "escapes nonempty RUNNER_GROUP_ID"):
+            self._extract('LABELS="base"\nLABELS="${LABELS},auto"\n')
+
+    def test_inverted_automatic_append_guard_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "escapes nonempty RUNNER_GROUP_ID"):
+            self._extract(
+                'LABELS="base"\n'
+                'if [ -z "$RUNNER_GROUP_ID" ]; then\n'
+                '  LABELS="${LABELS},auto"\n'
+                'fi\n'
+            )
 
 
 class TestNonLaunchdSupervisorsCanRouteTheirHosts(unittest.TestCase):
@@ -678,13 +770,16 @@ class TestNonLaunchdSupervisorsCanRouteTheirHosts(unittest.TestCase):
             if script is None or not script.is_file():
                 continue  # reported by the test above
             with self.subTest(variable=lane["variable"], supervisor=name):
-                labels = _fixed_supervisor_labels(script)
+                label_sets = _supervisor_label_sets(script)
                 self.assertTrue(
-                    labels_mod.selecting_lanes(labels, self.lanes),
-                    f"{script.name} registers {labels}, which no lane selects")
-                self.assertEqual(
-                    [x.casefold() for x in labels],
-                    [x.casefold() for x in lane["expect"]],
+                    all(labels_mod.selecting_lanes(labels, self.lanes)
+                        for labels in label_sets),
+                    f"{script.name} registers {label_sets}, including a set no lane selects")
+                expected = [x.casefold() for x in lane["expect"]]
+                actual = [[x.casefold() for x in labels] for labels in label_sets]
+                self.assertIn(
+                    expected,
+                    actual,
                     f"{script.name} and {lane['variable']} disagree on labels")
 
 
@@ -913,17 +1008,158 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class TestSelectorParsing(unittest.TestCase):
+    """Capacity is not the only way a lane fails to route.
+
+    On 2026-08-16 a required check hung repo-wide because a `runs-on`
+    interpolated a lane variable without `fromJSON`, collapsing the JSON array
+    into one literal label. The value was HOSTED, so no amount of self-hosted
+    capacity was relevant — and this tool reported green throughout, because
+    its workflow attribution is a substring search that cannot tell a parsed
+    reference from an interpolated one.
+    """
+
+    def _workflows(self, body: str) -> Path:
+        directory = Path(tempfile.mkdtemp(prefix="pulp-topology-selectors-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        (directory / "gate.yml").write_text(body)
+        return directory
+
+    def test_unwrapped_second_variable_is_an_error(self):
+        # The shape the required workflows actually use: two variables in one
+        # selector. Wrapping only the first is what made the previous guard
+        # skip the block entirely.
+        directory = self._workflows(
+            "jobs:\n"
+            "  gate:\n"
+            "    runs-on: >-\n"
+            "      ${{ fromJSON(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '\"ubuntu-latest\"') ||\n"
+            "          (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || 'ubuntu-latest') }}\n"
+            "    steps:\n"
+            "      - run: true\n"
+        )
+        findings = gate.check(contract([]), runners(), {}, [], directory)
+        selectors = [f for f in findings if f.kind == "unparsed-selector"]
+        self.assertEqual(len(selectors), 1, findings)
+        self.assertEqual(selectors[0].variable, "PULP_AUTO_LINUX_RUNS_ON_JSON")
+        self.assertEqual(selectors[0].level, gate.ERROR)
+
+    def test_wrapped_selector_is_clean(self):
+        # The control. Without it, a check that flagged everything would look
+        # identical to a check that works.
+        directory = self._workflows(
+            "jobs:\n"
+            "  gate:\n"
+            "    runs-on: >-\n"
+            "      ${{ fromJSON(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '\"ubuntu-latest\"') }}\n"
+            "    steps:\n"
+            "      - run: true\n"
+        )
+        findings = gate.check(contract([]), runners(), {}, [], directory)
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+
+    def test_live_workflow_tree_is_clean(self):
+        findings = gate.check(
+            gate.load_contract(gate.DEFAULT_CONTRACT), runners(), {}, [],
+            Path(__file__).resolve().parents[2] / ".github" / "workflows",
+        )
+        self.assertEqual(
+            [f.detail for f in findings if f.kind == "unparsed-selector"], [])
+
+    def test_offline_fixture_runs_without_a_workflow_tree(self):
+        # workflows_dir is optional so fixture-driven runs keep working; a
+        # missing tree must be silent rather than a fabricated finding.
+        findings = gate.check(contract([]), runners(), {}, [], None)
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+        findings = gate.check(contract([]), runners(), {}, [], Path("/nonexistent"))
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+
+
+class TestRunnerInventoryScope(unittest.TestCase):
+    """A repo-scoped query cannot see org runner groups.
+
+    Pulp's Linux capacity lives in an org group, so a repo-only inventory
+    reports zero Linux runners on a healthy fleet — and this inventory feeds
+    black-hole adjudication, which would then condemn a lane that is being
+    served perfectly well.
+    """
+
+    ORG_RUNNER = {
+        "name": "pulp-auto-ephemeral-200", "status": "online",
+        "labels": ["self-hosted", "Linux", "X64", "pulp-auto-linux-x64"],
+    }
+
+    def _api_returning(self, repo_payload, org_payload):
+        def fake(args):
+            payload = repo_payload if args[0].startswith("repos/") else org_payload
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
+        return fake
+
+    def test_org_runners_are_included(self):
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 0, "runners": []},
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+        )):
+            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual([r.name for r in runners], ["pulp-auto-ephemeral-200"])
+        self.assertEqual(warnings, [])
+
+    def test_a_repo_runner_is_not_duplicated_by_the_org_scope(self):
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+        )):
+            runners, _ = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(runners), 1)
+
+    def test_org_permission_failure_warns_instead_of_silently_degrading(self):
+        # Falling back to repo-only WITHOUT saying so would reproduce exactly
+        # the misreading this scope-union exists to prevent.
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 0, "runners": []},
+            subprocess.CalledProcessError(1, "ghapp", stderr="HTTP 403"),
+        )):
+            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(runners, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("orgs/Generous-Corp", warnings[0])
+        self.assertIn("403", warnings[0])
+
+    def test_row_count_disagreeing_with_total_count_is_flagged(self):
+        # An empty rendered list next to total_count=3 reads as "no runners"
+        # but means "you did not receive them".
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 3, "runners": []},
+            {"total_count": 0, "runners": []},
+        )):
+            _, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("total_count=3", warnings[0])
+
+    def test_repo_endpoint_failure_still_propagates(self):
+        # Only the ORG scope degrades gracefully. Losing the repo scope means
+        # the inventory is unknown, which must reach main()'s exit-2 path.
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            subprocess.CalledProcessError(1, "ghapp", stderr="boom"), None,
+        )):
+            with self.assertRaises(subprocess.CalledProcessError):
+                gate.fetch_runner_inventory("Generous-Corp/pulp")
+
+
 class TestApiFailureHandling(unittest.TestCase):
     def test_api_failure_does_not_report_a_false_green(self):
         # A check that says OK because the API was unreachable is worse than
         # no check: exit 2 is distinct from both pass (0) and violation (1).
-        with mock.patch.object(gate, "fetch_runners",
+        with mock.patch.object(gate, "fetch_runner_inventory",
                                side_effect=subprocess.CalledProcessError(
                                    1, "ghapp", stderr="boom")):
             self.assertEqual(gate.main(["--mode", "report"]), 2)
 
     def test_missing_ghapp_is_advisory_in_hint_mode(self):
-        with mock.patch.object(gate, "fetch_runners", side_effect=FileNotFoundError):
+        with mock.patch.object(gate, "fetch_runner_inventory",
+                               side_effect=FileNotFoundError):
             self.assertEqual(gate.main(["--mode", "hint"]), 0)
 
 

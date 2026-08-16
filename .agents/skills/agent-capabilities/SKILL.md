@@ -86,6 +86,20 @@ A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
 
+For a fixed-capacity record algebra such as `music.pattern-development`, bind
+the stable record, error, configuration, and result types as well as every
+advertised free function. Each free function needs its own operational probe;
+a type-only row or one aggregate probe cannot establish that installed
+consumers can execute density, fill, set-algebra, ID, and morph operations.
+Keep scheduling, clocks, note ownership, and publication outside this manifest.
+
+For bounded sampled-target FIR design, register the public
+`pulp/signal/fir_design.hpp` entry point as `signal.fir-design`, keep it
+offline-only, and have the generated compile fixture invoke an empty-target
+request in addition to taking the exact function pointer. This preserves the
+contract's proof that the published binding is operational rather than merely
+type-visible.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
@@ -164,6 +178,24 @@ means the UI or profile selector must disclose the resolution limit, select a
 higher supported geometry, or use a different filter architecture; zoom alone
 cannot create additional FFT bins.
 
+## Reuse the realtime visualization bridge
+
+`pulp::view::VisualizationBridge` is the shared realtime-safe audio-to-UI tap
+for spectrum, waveform, and meter consumers. Configure it while fully
+quiescent, call `process()` from the audio callback, and give exactly one UI
+thread ownership of `poll()` plus the snapshot reads. The callback path only
+meters and copies into fixed SPSC storage; FFT and waveform assembly happen in
+the bounded, non-realtime `poll()` call.
+
+`read_spectrum()` and `read_waveform()` remain cheap snapshot reads for source
+compatibility. They do not analyze newly captured audio. A consumer that needs
+fresh data must schedule `poll()` first, then read or use the explicit
+`peek_spectrum()` / `peek_waveform()` aliases. Treat capture overflow, rejected
+channel topology, and positive-length missing-channel callbacks as continuity
+breaks: the bridge advances its epoch and never joins audio across the gap.
+Keep `configure()` and `reset()` quiescent; neither is concurrent with the
+audio producer or UI consumer.
+
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
@@ -206,7 +238,72 @@ under the build directory.
 The official-SDK handoff self-test separately covers exact identity plus wrong
 source SHA, importer hash, capability hash, and schema-invalid documents.
 
+`test/cmake/quality_tests.cmake` is also the registry for capability-manifest
+and adjacent policy self-tests. When adding a new Python policy test there,
+register the test explicitly in the same change; merely creating a
+`tools/ci/test_*.py` file does not make CTest execute it.
+
 The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST
 inventory may reduce comment/private-detail churn only if its version and
 toolchain are pinned and mutation tests retain add/remove/change detection.
+
+Because the fingerprint covers full bytes, **editing only comments in a
+capability header is a surface change** and `--write` will refuse it twice
+before it succeeds. The declared fingerprint lives in the catalog source, not
+just the generated JSON, so the order is: edit the header, then replace every
+occurrence of the old digest in the owning `agent_capability_catalog_*.py`
+(one per binding, so a single header can hold a dozen copies), then raise
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`, then run `--write` once.
+
+Derive both counters from the CURRENT protected base every time. A capability
+transaction can land while yours waits in the merge queue, which takes the
+numbers you reserved and leaves your branch conflicting on exactly those two
+constant lines. Re-read them from main and regenerate rather than resolving
+that conflict by hand.
+
+Regenerate exactly once from final header bytes. Each `--write` appends a full
+entry to `contract-history.json`, so editing the header again after a
+successful `--write` leaves two entries for one logical change.
+
+## A STALE verdict on a tree you did not touch is a base problem, not a you problem
+
+If `--check` reports these on a clean checkout whose diff touches no capability
+file, stop and look at the base before touching anything:
+
+```
+agent-capabilities: STALE: capability history is not append-only relative to the protected base
+agent-capabilities: STALE: manifest changed without a manifest_revision increase
+agent-capabilities: STALE: public surface changed without an inventory_version increase
+```
+
+The check is not wrong — it is answering correctly against the wrong reference.
+The protected base **must be an ancestor of the commit under validation**, or
+"append-only relative to the base" is ill-posed: measured against a tip that
+carries commits your branch does not have, every correct branch looks
+non-append-only.
+
+Naming a moving ref makes that routine. The build hosts run ~134 worktrees off
+one shared `.git`, so a `git fetch` in **any** sibling advances `origin/main`
+for all of them — mid-validation included, with your session issuing no fetch.
+`_resolve_local_base` therefore checks ancestry and steps back to the merge-base
+when the ref has moved past you. The merge-base does not move when the tip
+advances, which is what makes the verdict reproducible.
+
+Two consequences worth knowing:
+
+* **Re-running does not help.** The tip keeps moving, so the failure reproduces
+  and reads like a real defect. It is the failure mode most likely to send you
+  editing correct generated files.
+* **"Don't fetch during a validation" cannot fix it** and is not the rule. The
+  ref was observed moving with the validating session issuing no fetch at all;
+  discipline is blind to peers sharing the `.git`.
+
+To pin the base explicitly — for a bisect, or to reproduce a CI verdict exactly:
+
+```sh
+PULP_AGENT_CAPABILITY_BASE_REF=<sha> python3 tools/scripts/agent_capability_manifest.py --check
+```
+
+That path is deliberately literal: an explicit ref is used as given, without the
+ancestry fallback.

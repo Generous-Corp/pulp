@@ -256,6 +256,17 @@ back with its VCA level at zero. If you add a field to a manifest that the
 model should reason about, it has to reach `render_inventory` or it may as well
 not exist.
 
+In a long-lived DAW host, never cache Rack's plugin directories at Python
+import time. The directory may be created by the bundled-pack installer or a
+Rack launch after the generator was loaded. Resolve it at the point of use;
+when `RACK_PLUGIN_DIR` is set, treat that one sandbox-visible directory as the
+authoritative install and scan destination.
+
+“Only” or “exclusively” naming a maker is an output contract, not merely prompt
+copy. Preflight must prove at least one named-maker module is installed, and
+the retained patch may contain only those maker plugin slugs plus Rack's Core
+infrastructure. Reporting a substitution does not satisfy an exclusive request.
+
 ## Rendering a view in a test, when the view places itself
 
 Two of these cost three attempts each, and both produce an EMPTY frame that
@@ -444,6 +455,13 @@ with the module library symlinked in and `settings.json` + `licenses` copied
 so a Pro launch stays licensed. A directory Rack has never seen has no last
 session to have crashed in: 5 of 5. It also stops the scan clobbering the
 user's autosave, log and open rack.
+
+**The symlink must preserve Rack's architecture-specific layout.** In an
+isolated proof, link `ForgeModular` at
+`plugins-mac-arm64/ForgeModular`, not at the scratch user-directory root.
+Rack ignores a root-level link, then a missing-module dialog can make a launch
+look like a plugin proof unless the log also proves the expected module was
+created. Keep a regression stub that rejects the wrong layout.
 
 **Three ways a launch dies before it reaches the patch**, all of which look
 from the map like a library with nothing in it:
@@ -893,6 +911,12 @@ alias to `gpt-5.6-sol`, and refuses a missing, corrupt, incomplete or unsupporte
 selection before the command starts. A headless benchmark that silently picks a
 different agent than the app is not reproducible evidence.
 
+Codex generation must also be a sealed execution: pass `--disable apps`,
+`--disable plugins`, and `--disable skill_search` before `exec`. Those
+interactive catalogues consume the bounded skills context and can reject a
+generation before its contract reaches the selected model. Keep the exact
+argv covered by both `test_generate_model.py` and `test_patch.py`.
+
 ### Seeing an ending is not the same as SHOWING it
 
 The monitor learned to classify every ending and the shell still reported one
@@ -1245,6 +1269,14 @@ notarizes, staples and re-reports all four bundles; `--check` reports without
 changing anything, and names an ad-hoc signature as ad-hoc rather than printing
 an empty authority that skims past as fine.
 
+Forge Modular packaging must run Pulp's unattended signing doctor before its
+first `codesign` and treat any nonzero result as terminal. Do not restore the
+old `PULP_SKIP_SIGNING_PREFLIGHT` escape hatch or warn-and-continue: either can
+fall through to the login-keychain copy and open an unanswerable GUI password
+dialog. The prompt-safe path is the dedicated keychain, full partition list,
+identity hash, and real timestamped probe maintained by
+`tools/scripts/ensure_signing_ready.sh`.
+
 ## A module's WIDTH is knowable from its artwork, and from nowhere else
 
 Four things could say how wide a third-party module is and, for a plugin
@@ -1296,3 +1328,13 @@ no lines at all, so the deadline has to be a timer that kills the process.
 `ask_model()` still accepts plain text on stdout: most checks here stub the CLI
 with a script that prints an answer, and making each one imitate a stream to
 test the code AROUND the model would be work for nothing.
+
+Codex failures are not confined to `item.completed` error items. Current Codex
+emits a top-level `{"type":"error","message":...}` followed by a
+`turn.failed` event whose nested `error.message` repeats the same diagnosis.
+Capture all three forms, deduplicate identical messages, and only promote them
+to stderr when the process failed or produced no answer. Otherwise a real quota
+or authentication refusal becomes the useless `exited non-zero and said
+nothing`, while naively appending both current events prints the same failure
+twice. Pin both the current paired-event shape and the older item form in the
+stream regression.

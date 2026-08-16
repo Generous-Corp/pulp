@@ -88,6 +88,16 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             if (txtColor) setTextColor(id, txtColor);
             return true;
         }
+        // CSS UI `accent-color` is the browser-authoritative color for native
+        // form-control chrome such as <input type="range">. React exposes the
+        // camelCase spelling through CSSStyleDeclaration, so keep it in this
+        // shared CSS lane instead of requiring a Pulp-only prop.
+        case "accentColor": {
+            var accent = parseCSSColor(resolved);
+            if (accent && typeof setAccentColor === "function")
+                setAccentColor(id, accent);
+            return true;
+        }
 
         // Border attributes used to lower onto
         // the unified `setBorder(id, color, width, radius)` which clobbers

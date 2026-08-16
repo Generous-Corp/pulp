@@ -85,7 +85,9 @@ import json
 import sys
 args = sys.argv[1:]
 prefix = ["exec", "--model", "gpt-5.6-sol", "-c",
-          'model_reasoning_effort="medium"', "--ephemeral", "--sandbox",
+          'model_reasoning_effort="medium"', "--disable", "apps",
+          "--disable", "plugins", "--disable", "skill_search",
+          "--ephemeral", "--sandbox",
           "read-only", "--ignore-user-config", "--ignore-rules", "--color",
           "never", "--skip-git-repo-check", "--json"]
 if args[:len(prefix)] != prefix or args[-1] != "-":
@@ -113,7 +115,9 @@ import os
 import sys
 effort = os.environ["FORGE_CODEX_REASONING_EFFORT"]
 expected = ["exec", "--model", "gpt-5.6-sol", "-c",
-            'model_reasoning_effort="' + effort + '"', "--ephemeral"]
+            'model_reasoning_effort="' + effort + '"', "--disable", "apps",
+            "--disable", "plugins", "--disable", "skill_search",
+            "--ephemeral"]
 if sys.argv[1:len(expected) + 1] != expected:
     print("wrong Codex effort: " + repr(sys.argv[1:]), file=sys.stderr)
     raise SystemExit(64)

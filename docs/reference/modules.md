@@ -594,6 +594,35 @@ allocation-free during evaluation:
   coordinate-keyed decision over seed, cycle, lane, and step, so evaluation
   order cannot change the result.
 
+### Fixed-capacity pattern development
+
+`pattern_development.hpp` adds a pure record-development layer above the binary
+pattern kernels. `DevelopmentPattern<MaxEvents>` defaults to 64 events, keeps
+records in canonical onset order, and requires unique nonzero `PatternEventId`
+values and unique exact-tick onsets. Each record names an `anchor`, `primary`,
+`ornament`, or `fill` role and an integer `0..1000` accent.
+
+- `make_pattern_event_id()` derives a stable nonzero ID from a seed and
+  `RandomCoordinate`.
+- `pattern_set()` provides onset union, intersection, difference, and symmetric
+  difference. Conflicting records at one union onset and capacity overflow fail
+  without returning a partial pattern.
+- `select_pattern_density()` returns exactly the requested event count, rejects
+  a target below the anchor count, and ranks other events by their complete
+  musical coordinate. Counts are nested: a selection of `k` is always a subset
+  of the same recipe at `k+1`.
+- `apply_regional_fill()` changes only a half-open tick region. Events outside
+  it are retained exactly, anchors inside it are mandatory, and base plus fill
+  candidates use the same exact nested density rule.
+- `morph_patterns()` accepts an integer amount from 0 through 1000. The
+  endpoints return A and B exactly. Shared event IDs interpolate exact integer
+  ticks and accents; unique records disappear or appear at stable
+  coordinate-keyed thresholds.
+
+These operations are bounded, allocation-free, `constexpr`, `noexcept`, and
+compatible with `-fno-exceptions`. They do not schedule events, own notes,
+advance a clock, capture live input, quantize, humanize, or retime audio.
+
 Random words are mapped to bounded choices with full-domain multiply-high
 reduction rather than remainder reduction.
 
@@ -839,7 +868,7 @@ a working convolution and would hide the bug. Assert
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
-| [FIR Design](fir-design.md) | `fir_design.hpp` | Weighted sampled-target Type I-IV design and causal minimum-phase reconstruction with measured error |
+| [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
 | Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
@@ -2305,11 +2334,14 @@ Full widget toolkit with CSS-inspired layout and JS scripting.
 
 **Link:** `pulp::view` · **Include prefix:** `<pulp/view/...>`
 
-`pulp::view` is the full compatibility target and links both native widgets and
-the JS runtime bridge. Baked/native UI code that constructs `View` trees
-directly and does not evaluate JS can link `pulp::view-core`; code that uses
-`ScriptEngine`, `WidgetBridge`, scripted UIs, or runtime import should link
-`pulp::view-script` or the full `pulp::view` target.
+`pulp::view` is the full compatibility target and links native widgets, the JS
+runtime bridge, and (when `PULP_BUILD_WEBVIEW=ON`) the optional
+`pulp::view-webview` backend. A fully native scripted UI that uses
+`ScriptedUiSession`, `WidgetBridge`, or `@pulp/react` but must not load a browser
+runtime should link `pulp::view-native`; `pulp_add_plugin(... NATIVE_UI)` selects
+that composition for every requested format and uses
+`pulp::standalone-native` for Standalone. Baked UI code that constructs `View`
+trees directly and does not evaluate JS can link `pulp::view-core`.
 
 ### Creating a UI
 
@@ -2407,6 +2439,23 @@ grapheme boundaries.
 | TreeView | Hierarchical data display with expand/collapse and lazy loading |
 
 #### Audio visualization
+
+`VisualizationBridge` is the reusable audio-to-UI pipeline for custom native or
+WebView visualizations. Call `configure()` off the audio thread, then
+`process()` from the callback; the callback only performs fixed-capacity SPSC
+capture and metering. Exactly one UI thread calls bounded `poll()` to perform
+FFT analysis, then uses the cheap snapshot-only `peek_spectrum()` and
+`peek_waveform()` reads. Spectrum snapshots are finite, sequence-stamped, and
+power-averaged across channels, so swapping left/right or reversing one
+channel's polarity does not change the display. The configured channel layout
+is invariant: mismatched blocks are metered but not captured. Stop the audio
+producer and UI consumer before `configure()` or `reset()`.
+Set `max_frames_per_poll` when a UI needs a stricter per-tick analysis budget;
+zero still consumes no more than the frames visible when `poll()` begins.
+The legacy `read_spectrum()` and `read_waveform()` snapshot reads remain
+available. The behavioral compatibility break is that `process()` no longer
+performs FFT/waveform work or publishes those snapshots. Existing callers must
+now explicitly schedule UI-owned `poll()` before reading updated data.
 
 | Widget | Description |
 |--------|-------------|

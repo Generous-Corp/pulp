@@ -4,6 +4,7 @@
 #include "owned_identity_traversal.hpp"
 #include "sequence_graph_validation.hpp"
 #include "transaction_automation_internal.hpp"
+#include "transaction_device_internal.hpp"
 #include "transaction_dispatch_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
@@ -57,6 +58,7 @@ constexpr int dispatch_claims() {
            static_cast<int>(detail::is_take_command_type<T>) +
            static_cast<int>(detail::is_marker_command_type<T>) +
            static_cast<int>(detail::is_scene_command_type<T>) +
+           static_cast<int>(detail::is_device_command_type<T>) +
            static_cast<int>(detail::is_track_command_type<T>) +
            static_cast<int>(detail::is_track_state_command_type<T>) +
            static_cast<int>(detail::is_sequence_command_type<T>) +
@@ -250,6 +252,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         } else if (detail::is_scene_command(envelope.command)) {
             auto reduced = detail::reduce_scene_command(project, envelope.command, transaction,
                                                         envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_device_command(envelope.command)) {
+            auto reduced = detail::reduce_device_command(project, envelope.command, transaction,
+                                                         envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

@@ -1520,7 +1520,7 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                        << kattr_f("knob_ind_w") << ", '"
                        << js_single_quote_escape(
                               c != node.attributes.end() ? c->second : "")
-                       << "');\n";
+                       << "', " << kattr_f("knob_ind_phase_rad") << ");\n";
                 }
             }
         }
@@ -2784,6 +2784,25 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         return;
     }
     if (emit_js_svg_path_node(e)) return;
+
+    // Materialized browser captures use canvas nodes as stable visible
+    // targets for a live React/Canvas2D behavior realm. They may carry a PNG
+    // only as a diagnostic/bootstrap asset, but must still lower to an actual
+    // CanvasWidget so bindCanvasBehaviorAt() can share the executable command
+    // stream with them.
+    if (node.type == "canvas") {
+        ss << e.ind << "createCanvas('" << e.id << "', " << e.pid << ");\n";
+        emit_js_absolute_position(e, e.id);
+        emit_js_visual_overrides(e, e.id);
+        if (node.style.width)
+            ss << e.ind << "setFlex('" << e.id << "', 'width', "
+               << *node.style.width << ");\n";
+        if (node.style.height)
+            ss << e.ind << "setFlex('" << e.id << "', 'height', "
+               << *node.style.height << ");\n";
+        ss << "\n";
+        return;
+    }
 
     // Container, image, or text node. Classification comes from the shared
     // recognition resolver (resolved.kind) rather than an inline re-derivation:

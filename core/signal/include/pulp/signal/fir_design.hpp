@@ -12,18 +12,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <numeric>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace pulp::signal {
 
 inline constexpr std::uint64_t kDefaultFirDesignWorkspaceBytes = 256u * 1024u * 1024u;
+inline constexpr std::size_t kMaximumFirDesignTapCount = 1023u;
+inline constexpr std::size_t kMaximumFirDesignPointCount = 65536u;
+/// Largest admitted radix-2 FFT size for minimum-phase reconstruction. This
+/// mirrors the point-count bound: the one-sided input is a sampled grid too.
+inline constexpr std::size_t kMaximumMinimumPhaseFirSize = 65536u;
 
 enum class FirDesignStatus {
     success,
     invalid_argument,
+    unsupported_size,
     workspace_limit_exceeded,
+    allocation_failure,
     rank_deficient,
     ill_conditioned,
     numerical_failure,
@@ -94,6 +103,21 @@ struct MinimumPhaseFirResult {
     }
 };
 
+namespace fir_design_detail {
+
+inline constexpr double pi = 3.141592653589793238462643383279502884;
+
+inline bool is_forced_zero_endpoint(LinearPhaseFirType type, double omega) noexcept {
+    const bool at_dc = omega == 0.0;
+    const bool at_nyquist = omega == pi;
+    return (type == LinearPhaseFirType::type_ii_symmetric_even && at_nyquist) ||
+           (type == LinearPhaseFirType::type_iii_antisymmetric_odd &&
+            (at_dc || at_nyquist)) ||
+           (type == LinearPhaseFirType::type_iv_antisymmetric_even && at_dc);
+}
+
+} // namespace fir_design_detail
+
 inline std::complex<double> fir_response(std::span<const double> coefficients,
                                          double omega) noexcept {
     std::complex<double> response{};
@@ -113,6 +137,8 @@ inline double linear_phase_fir_amplitude(std::span<const double> coefficients,
                                          LinearPhaseFirType type, double omega) noexcept {
     if (coefficients.empty())
         return 0.0;
+    if (fir_design_detail::is_forced_zero_endpoint(type, omega))
+        return 0.0;
     const double delay = 0.5 * static_cast<double>(coefficients.size() - 1u);
     const auto zero_phase = fir_response(coefficients, omega) * std::polar(1.0, delay * omega);
     const bool antisymmetric = type == LinearPhaseFirType::type_iii_antisymmetric_odd ||
@@ -121,12 +147,6 @@ inline double linear_phase_fir_amplitude(std::span<const double> coefficients,
 }
 
 namespace fir_design_detail {
-
-inline constexpr double pi = 3.141592653589793238462643383279502884;
-
-inline bool is_power_of_two(std::size_t value) noexcept {
-    return value >= 2u && (value & (value - 1u)) == 0u;
-}
 
 inline bool valid_type_length(LinearPhaseFirType type, std::size_t count) noexcept {
     if (count == 0u)
@@ -150,6 +170,8 @@ inline std::size_t independent_coefficient_count(LinearPhaseFirType type,
 }
 
 inline double basis_value(LinearPhaseFirType type, std::size_t column, double omega) noexcept {
+    if (is_forced_zero_endpoint(type, omega))
+        return 0.0;
     switch (type) {
     case LinearPhaseFirType::type_i_symmetric_odd:
         return column == 0u ? 1.0 : 2.0 * std::cos(static_cast<double>(column) * omega);
@@ -180,6 +202,24 @@ inline void clear_payload(MinimumPhaseFirResult& result) noexcept {
     result.maximum_absolute_error = 0.0;
 }
 
+inline bool is_power_of_two(std::size_t value) noexcept {
+    return value >= 2u && (value & (value - 1u)) == 0u;
+}
+
+inline bool admit_minimum_phase_workspace(std::size_t fft_size, std::size_t bins,
+                                          std::size_t coefficients, std::uint64_t limit) noexcept {
+    if (limit == 0u)
+        return false;
+    CheckedRetainedByteCharge charge(limit);
+    // One complex work spectrum, FftT's retained twiddles, coefficients,
+    // measured bins, and errors. No hidden full-spectrum copy is retained.
+    if (!charge.add<std::complex<double>>(fft_size) ||
+        !charge.add<std::complex<double>>(fft_size / 2u) || !charge.add<double>(coefficients) ||
+        !charge.add<double>(bins) || !charge.add<double>(bins))
+        return false;
+    return charge.total() <= limit;
+}
+
 inline bool admit_least_squares_workspace(std::size_t rows, std::size_t columns, std::size_t taps,
                                           std::uint64_t limit) noexcept {
     std::uint64_t matrix_elements = 0;
@@ -191,6 +231,7 @@ inline bool admit_least_squares_workspace(std::size_t rows, std::size_t columns,
     CheckedRetainedByteCharge charge(limit);
     if (!charge.add<double>(matrix_elements) || !charge.add<double>(rows) ||
         !charge.add<std::size_t>(columns) || !charge.add<double>(columns) ||
+        !charge.add<double>(columns) || !charge.add<double>(columns) ||
         !charge.add<double>(columns) || !charge.add<double>(taps) || !charge.add<double>(rows) ||
         !charge.add<double>(rows))
         return false;
@@ -230,10 +271,17 @@ inline void reconstruct_coefficients(LinearPhaseFirType type, std::span<const do
 /// and control threads, never an audio callback. Frequencies may be in any
 /// order. A deterministic column-pivoted Householder QR rejects rank loss and
 /// excessive R-diagonal spread instead of solving unstable normal equations.
+/// Targets are absolute signed zero-phase amplitudes: there is no implicit DC,
+/// peak, or energy normalization.
 inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignPoint> points,
                                                       const FirLeastSquaresOptions& options) {
     using namespace fir_design_detail;
     FirLeastSquaresResult result;
+    if (options.tap_count > kMaximumFirDesignTapCount ||
+        points.size() > kMaximumFirDesignPointCount) {
+        result.status = FirDesignStatus::unsupported_size;
+        return result;
+    }
     if (!valid_type_length(options.type, options.tap_count) || points.empty() ||
         !(options.rank_tolerance > 0.0) || options.rank_tolerance > 1.0 ||
         !std::isfinite(options.rank_tolerance) ||
@@ -243,10 +291,6 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
 
     const std::size_t rows = points.size();
     const std::size_t columns = independent_coefficient_count(options.type, options.tap_count);
-    if (rows < columns) {
-        result.status = FirDesignStatus::rank_deficient;
-        return result;
-    }
     double maximum_weight = 0.0;
     for (const auto& point : points) {
         if (!std::isfinite(point.omega) || point.omega < 0.0 || point.omega > pi ||
@@ -255,196 +299,282 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
             return result;
         maximum_weight = std::max(maximum_weight, point.weight);
     }
+    if (rows < columns) {
+        result.status = FirDesignStatus::rank_deficient;
+        return result;
+    }
+    const double maximum_weight_sqrt = std::sqrt(maximum_weight);
     if (!admit_least_squares_workspace(rows, columns, options.tap_count,
                                        options.maximum_workspace_bytes)) {
         result.status = FirDesignStatus::workspace_limit_exceeded;
         return result;
     }
 
-    std::vector<double> matrix(rows * columns);
-    std::vector<double> rhs(rows);
-    std::vector<std::size_t> permutation(columns);
-    std::vector<double> solution(columns);
-    for (std::size_t row = 0u; row < rows; ++row) {
-        // A common positive scale does not change the minimizer. Dividing by
-        // the largest weight keeps otherwise-valid finite weights away from
-        // overflow when their square roots multiply the design matrix.
-        const double scale = std::sqrt(points[row].weight / maximum_weight);
-        rhs[row] = scale * points[row].amplitude;
-        if (!std::isfinite(rhs[row])) {
-            result.status = FirDesignStatus::numerical_failure;
-            return result;
-        }
-        for (std::size_t column = 0u; column < columns; ++column) {
-            matrix[row * columns + column] =
-                scale * basis_value(options.type, column, points[row].omega);
-            if (!std::isfinite(matrix[row * columns + column])) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+#endif
+        std::vector<double> matrix(rows * columns);
+        std::vector<double> rhs(rows);
+        std::vector<std::size_t> permutation(columns);
+        std::vector<double> solution(columns);
+        for (std::size_t row = 0u; row < rows; ++row) {
+            // A common positive scale does not change the minimizer. Dividing
+            // the square roots separately preserves weight ratios that remain
+            // representable even when the ratio itself would underflow.
+            const double scale = std::sqrt(points[row].weight) / maximum_weight_sqrt;
+            rhs[row] = scale * points[row].amplitude;
+            if (!std::isfinite(rhs[row])) {
                 result.status = FirDesignStatus::numerical_failure;
                 return result;
             }
-        }
-    }
-    std::iota(permutation.begin(), permutation.end(), std::size_t{0});
-
-    double leading_norm = 0.0;
-    for (std::size_t column = 0u; column < columns; ++column) {
-        double norm = 0.0;
-        for (std::size_t row = 0u; row < rows; ++row)
-            norm = std::hypot(norm, matrix[row * columns + column]);
-        leading_norm = std::max(leading_norm, norm);
-    }
-    if (!std::isfinite(leading_norm)) {
-        result.status = FirDesignStatus::numerical_failure;
-        return result;
-    }
-    if (!(leading_norm > 0.0)) {
-        result.status = FirDesignStatus::rank_deficient;
-        return result;
-    }
-
-    const double rank_threshold = options.rank_tolerance * leading_norm;
-    double minimum_diagonal = std::numeric_limits<double>::infinity();
-    double maximum_diagonal = 0.0;
-    for (std::size_t step = 0u; step < columns; ++step) {
-        std::size_t pivot = step;
-        double pivot_norm = -1.0;
-        for (std::size_t column = step; column < columns; ++column) {
-            double norm = 0.0;
-            for (std::size_t row = step; row < rows; ++row)
-                norm = std::hypot(norm, matrix[row * columns + column]);
-            if (norm > pivot_norm) { // Strict comparison preserves the first tie.
-                pivot_norm = norm;
-                pivot = column;
+            for (std::size_t column = 0u; column < columns; ++column) {
+                matrix[row * columns + column] =
+                    scale * basis_value(options.type, column, points[row].omega);
+                if (!std::isfinite(matrix[row * columns + column])) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    return result;
+                }
             }
         }
-        if (!std::isfinite(pivot_norm)) {
-            result.status = FirDesignStatus::numerical_failure;
-            result.numerical_rank = step;
-            return result;
-        }
-        if (!(pivot_norm > rank_threshold)) {
-            result.status = FirDesignStatus::rank_deficient;
-            result.numerical_rank = step;
-            return result;
-        }
-        if (pivot != step) {
+        std::iota(permutation.begin(), permutation.end(), std::size_t{0});
+
+        double leading_norm = 0.0;
+        for (std::size_t column = 0u; column < columns; ++column) {
+            double norm = 0.0;
             for (std::size_t row = 0u; row < rows; ++row)
-                std::swap(matrix[row * columns + step], matrix[row * columns + pivot]);
-            std::swap(permutation[step], permutation[pivot]);
+                norm = std::hypot(norm, matrix[row * columns + column]);
+            leading_norm = std::max(leading_norm, norm);
         }
-
-        const double x0 = matrix[step * columns + step];
-        const double alpha = x0 >= 0.0 ? -pivot_norm : pivot_norm;
-        matrix[step * columns + step] = x0 - alpha;
-        double vector_norm_squared = 0.0;
-        for (std::size_t row = step; row < rows; ++row) {
-            const double value = matrix[row * columns + step];
-            vector_norm_squared += value * value;
-        }
-        if (!(vector_norm_squared > 0.0) || !std::isfinite(vector_norm_squared)) {
+        if (!std::isfinite(leading_norm)) {
             result.status = FirDesignStatus::numerical_failure;
-            clear_payload(result);
             return result;
         }
-        const double beta = 2.0 / vector_norm_squared;
-        for (std::size_t column = step + 1u; column < columns; ++column) {
-            double dot = 0.0;
+        if (!(leading_norm > 0.0)) {
+            result.status = FirDesignStatus::rank_deficient;
+            return result;
+        }
+
+        const double rank_threshold = options.rank_tolerance * leading_norm;
+        double minimum_diagonal = std::numeric_limits<double>::infinity();
+        double maximum_diagonal = 0.0;
+        for (std::size_t step = 0u; step < columns; ++step) {
+            std::size_t pivot = step;
+            double pivot_norm = -1.0;
+            for (std::size_t column = step; column < columns; ++column) {
+                double norm = 0.0;
+                for (std::size_t row = step; row < rows; ++row)
+                    norm = std::hypot(norm, matrix[row * columns + column]);
+                if (norm > pivot_norm) { // Strict comparison preserves the first tie.
+                    pivot_norm = norm;
+                    pivot = column;
+                }
+            }
+            if (!std::isfinite(pivot_norm)) {
+                result.status = FirDesignStatus::numerical_failure;
+                result.numerical_rank = step;
+                return result;
+            }
+            if (!(pivot_norm > rank_threshold)) {
+                result.status = FirDesignStatus::rank_deficient;
+                result.numerical_rank = step;
+                return result;
+            }
+            if (pivot != step) {
+                for (std::size_t row = 0u; row < rows; ++row)
+                    std::swap(matrix[row * columns + step], matrix[row * columns + pivot]);
+                std::swap(permutation[step], permutation[pivot]);
+            }
+
+            const double x0 = matrix[step * columns + step];
+            const double alpha = x0 >= 0.0 ? -pivot_norm : pivot_norm;
+            matrix[step * columns + step] = x0 - alpha;
+            double vector_norm_squared = 0.0;
+            for (std::size_t row = step; row < rows; ++row) {
+                const double value = matrix[row * columns + step];
+                vector_norm_squared += value * value;
+            }
+            if (!(vector_norm_squared > 0.0) || !std::isfinite(vector_norm_squared)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            const double beta = 2.0 / vector_norm_squared;
+            for (std::size_t column = step + 1u; column < columns; ++column) {
+                double dot = 0.0;
+                for (std::size_t row = step; row < rows; ++row)
+                    dot += matrix[row * columns + step] * matrix[row * columns + column];
+                const double factor = beta * dot;
+                for (std::size_t row = step; row < rows; ++row)
+                    matrix[row * columns + column] -= factor * matrix[row * columns + step];
+            }
+            double rhs_dot = 0.0;
             for (std::size_t row = step; row < rows; ++row)
-                dot += matrix[row * columns + step] * matrix[row * columns + column];
-            const double factor = beta * dot;
+                rhs_dot += matrix[row * columns + step] * rhs[row];
+            const double rhs_factor = beta * rhs_dot;
             for (std::size_t row = step; row < rows; ++row)
-                matrix[row * columns + column] -= factor * matrix[row * columns + step];
+                rhs[row] -= rhs_factor * matrix[row * columns + step];
+            matrix[step * columns + step] = alpha;
+            for (std::size_t row = step + 1u; row < rows; ++row)
+                matrix[row * columns + step] = 0.0;
+
+            const double diagonal = std::abs(alpha);
+            minimum_diagonal = std::min(minimum_diagonal, diagonal);
+            maximum_diagonal = std::max(maximum_diagonal, diagonal);
+            result.numerical_rank = step + 1u;
         }
-        double rhs_dot = 0.0;
-        for (std::size_t row = step; row < rows; ++row)
-            rhs_dot += matrix[row * columns + step] * rhs[row];
-        const double rhs_factor = beta * rhs_dot;
-        for (std::size_t row = step; row < rows; ++row)
-            rhs[row] -= rhs_factor * matrix[row * columns + step];
-        matrix[step * columns + step] = alpha;
-        for (std::size_t row = step + 1u; row < rows; ++row)
-            matrix[row * columns + step] = 0.0;
 
-        const double diagonal = std::abs(alpha);
-        minimum_diagonal = std::min(minimum_diagonal, diagonal);
-        maximum_diagonal = std::max(maximum_diagonal, diagonal);
-        result.numerical_rank = step + 1u;
-    }
+        result.qr_diagonal_condition_estimate = maximum_diagonal / minimum_diagonal;
+        if (!std::isfinite(result.qr_diagonal_condition_estimate)) {
+            result.status = FirDesignStatus::numerical_failure;
+            return result;
+        }
+        if (result.qr_diagonal_condition_estimate > options.maximum_diagonal_condition_estimate) {
+            result.status = FirDesignStatus::ill_conditioned;
+            return result;
+        }
 
-    result.qr_diagonal_condition_estimate = maximum_diagonal / minimum_diagonal;
-    if (!std::isfinite(result.qr_diagonal_condition_estimate)) {
-        result.status = FirDesignStatus::numerical_failure;
-        return result;
-    }
-    if (result.qr_diagonal_condition_estimate > options.maximum_diagonal_condition_estimate) {
-        result.status = FirDesignStatus::ill_conditioned;
-        return result;
-    }
+        for (std::size_t reverse = columns; reverse-- > 0u;) {
+            double value = rhs[reverse];
+            for (std::size_t column = reverse + 1u; column < columns; ++column)
+                value -= matrix[reverse * columns + column] * solution[column];
+            solution[reverse] = value / matrix[reverse * columns + reverse];
+            if (!std::isfinite(solution[reverse])) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+        }
 
-    for (std::size_t reverse = columns; reverse-- > 0u;) {
-        double value = rhs[reverse];
-        for (std::size_t column = reverse + 1u; column < columns; ++column)
-            value -= matrix[reverse * columns + column] * solution[column];
-        solution[reverse] = value / matrix[reverse * columns + reverse];
-        if (!std::isfinite(solution[reverse])) {
+        // Semi-normal refinement recovers small projections that can be lost
+        // when a large target component is nearly orthogonal to the design
+        // space. Limit it to systems where squaring the diagonal spread still
+        // leaves ample precision; the primary QR result handles the rest.
+        const double refinement_condition_limit =
+            1.0 / std::sqrt(std::sqrt(std::numeric_limits<double>::epsilon()));
+        if (result.qr_diagonal_condition_estimate <= refinement_condition_limit) {
+            std::vector<double> correction(columns, 0.0);
+            std::vector<double> gradient(columns, 0.0);
+            for (std::size_t row = 0u; row < rows; ++row) {
+                const double scale = std::sqrt(points[row].weight) / maximum_weight_sqrt;
+                double predicted = 0.0;
+                for (std::size_t column = 0u; column < columns; ++column) {
+                    const double value =
+                        scale * basis_value(options.type, permutation[column], points[row].omega);
+                    predicted = std::fma(value, solution[column], predicted);
+                }
+                const double residual = scale * points[row].amplitude - predicted;
+                if (!std::isfinite(residual)) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    clear_payload(result);
+                    return result;
+                }
+                for (std::size_t column = 0u; column < columns; ++column) {
+                    const double value =
+                        scale * basis_value(options.type, permutation[column], points[row].omega);
+                    gradient[column] = std::fma(value, residual, gradient[column]);
+                }
+            }
+            for (std::size_t column = 0u; column < columns; ++column) {
+                double value = gradient[column];
+                if (!std::isfinite(value)) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    clear_payload(result);
+                    return result;
+                }
+                for (std::size_t row = 0u; row < column; ++row)
+                    value -= matrix[row * columns + column] * correction[row];
+                correction[column] = value / matrix[column * columns + column];
+                if (!std::isfinite(correction[column])) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    clear_payload(result);
+                    return result;
+                }
+            }
+            for (std::size_t reverse = columns; reverse-- > 0u;) {
+                double value = correction[reverse];
+                for (std::size_t column = reverse + 1u; column < columns; ++column)
+                    value -= matrix[reverse * columns + column] * correction[column];
+                correction[reverse] = value / matrix[reverse * columns + reverse];
+                if (!std::isfinite(correction[reverse])) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    clear_payload(result);
+                    return result;
+                }
+            }
+            double linear_gain = 0.0;
+            double correction_energy = 0.0;
+            for (std::size_t row = 0u; row < columns; ++row) {
+                linear_gain = std::fma(correction[row], gradient[row], linear_gain);
+                double transformed = 0.0;
+                for (std::size_t column = row; column < columns; ++column)
+                    transformed =
+                        std::fma(matrix[row * columns + column], correction[column], transformed);
+                correction_energy = std::fma(transformed, transformed, correction_energy);
+            }
+            const double predicted_reduction = 2.0 * linear_gain - correction_energy;
+            if (std::isfinite(predicted_reduction) && predicted_reduction > 0.0) {
+                bool finite_candidate = true;
+                for (std::size_t column = 0u; column < columns; ++column) {
+                    gradient[column] = solution[column] + correction[column];
+                    finite_candidate = finite_candidate && std::isfinite(gradient[column]);
+                }
+                if (finite_candidate)
+                    solution = gradient;
+            }
+        }
+        std::vector<double> unpermuted(columns);
+        for (std::size_t column = 0u; column < columns; ++column)
+            unpermuted[permutation[column]] = solution[column];
+
+        result.coefficients.assign(options.tap_count, 0.0);
+        reconstruct_coefficients(options.type, unpermuted, result.coefficients);
+        result.measured_amplitudes.resize(rows);
+        result.errors.resize(rows);
+        double weighted_squared_error = 0.0;
+        double weight_sum = 0.0;
+        for (std::size_t row = 0u; row < rows; ++row) {
+            const double measured =
+                linear_phase_fir_amplitude(result.coefficients, options.type, points[row].omega);
+            const double error = measured - points[row].amplitude;
+            if (!std::isfinite(measured) || !std::isfinite(error)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            result.measured_amplitudes[row] = measured;
+            result.errors[row] = error;
+            result.maximum_absolute_error =
+                std::max(result.maximum_absolute_error, std::abs(error));
+            const double scale = std::sqrt(points[row].weight) / maximum_weight_sqrt;
+            const double scaled_error = scale * error;
+            if (!std::isfinite(scaled_error)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            weighted_squared_error += scaled_error * scaled_error;
+            weight_sum += scale * scale;
+        }
+        result.weighted_rms_error = std::sqrt(weighted_squared_error / weight_sum);
+        if (!std::isfinite(result.weighted_rms_error)) {
             result.status = FirDesignStatus::numerical_failure;
             clear_payload(result);
             return result;
         }
-    }
-    std::vector<double> unpermuted(columns);
-    for (std::size_t column = 0u; column < columns; ++column)
-        unpermuted[permutation[column]] = solution[column];
-
-    result.coefficients.assign(options.tap_count, 0.0);
-    reconstruct_coefficients(options.type, unpermuted, result.coefficients);
-    result.measured_amplitudes.resize(rows);
-    result.errors.resize(rows);
-    double weighted_squared_error = 0.0;
-    double weight_sum = 0.0;
-    for (std::size_t row = 0u; row < rows; ++row) {
-        const double measured =
-            linear_phase_fir_amplitude(result.coefficients, options.type, points[row].omega);
-        const double error = measured - points[row].amplitude;
-        if (!std::isfinite(measured) || !std::isfinite(error)) {
-            result.status = FirDesignStatus::numerical_failure;
-            clear_payload(result);
-            return result;
-        }
-        result.measured_amplitudes[row] = measured;
-        result.errors[row] = error;
-        result.maximum_absolute_error = std::max(result.maximum_absolute_error, std::abs(error));
-        const double normalized_weight = points[row].weight / maximum_weight;
-        weighted_squared_error += normalized_weight * error * error;
-        weight_sum += normalized_weight;
-    }
-    result.weighted_rms_error = std::sqrt(weighted_squared_error / weight_sum);
-    if (!std::isfinite(result.weighted_rms_error)) {
-        result.status = FirDesignStatus::numerical_failure;
+        result.status = FirDesignStatus::success;
+        return result;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    } catch (const std::bad_alloc&) {
         clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    } catch (const std::length_error&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
         return result;
     }
-    result.status = FirDesignStatus::success;
-    return result;
+#endif
 }
-
-namespace fir_design_detail {
-
-inline bool admit_minimum_phase_workspace(std::size_t fft_size, std::size_t bins,
-                                          std::size_t coefficients, std::uint64_t limit) noexcept {
-    if (limit == 0u)
-        return false;
-    CheckedRetainedByteCharge charge(limit);
-    // One complex work spectrum, FftT's retained twiddles, coefficients,
-    // measured bins, and errors. No hidden full-spectrum copy is retained.
-    if (!charge.add<std::complex<double>>(fft_size) ||
-        !charge.add<std::complex<double>>(fft_size / 2u) || !charge.add<double>(coefficients) ||
-        !charge.add<double>(bins) || !charge.add<double>(bins))
-        return false;
-    return charge.total() <= limit;
-}
-
-} // namespace fir_design_detail
 
 /// Reconstruct a causal minimum-phase FIR from N/2+1 nonnegative magnitude bins.
 ///
@@ -452,7 +582,9 @@ inline bool admit_minimum_phase_workspace(std::size_t fft_size, std::size_t bins
 /// N=2*(bins-1). Exact zeros are floored before the logarithm. Retaining fewer
 /// than N coefficients truncates the circular impulse and therefore changes the
 /// requested magnitude; measured_magnitudes and errors always report that
-/// post-truncation result. This is allocation-allowed offline/control work.
+/// post-truncation result. This is allocation-allowed offline or control work,
+/// never an audio callback. The result is minimum phase within the finite,
+/// floored FFT geometry; it is not a linear-phase design.
 inline MinimumPhaseFirResult
 reconstruct_minimum_phase_fir(std::span<const double> one_sided_magnitudes,
                               const MinimumPhaseFirOptions& options = {}) {
@@ -465,9 +597,12 @@ reconstruct_minimum_phase_fir(std::span<const double> one_sided_magnitudes,
     const std::size_t fft_size = 2u * (one_sided_magnitudes.size() - 1u);
     const std::size_t coefficient_count =
         options.coefficient_count == 0u ? fft_size : options.coefficient_count;
-    if (!is_power_of_two(fft_size) ||
-        fft_size > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
-        coefficient_count == 0u || coefficient_count > fft_size)
+    if (fft_size > kMaximumMinimumPhaseFirSize ||
+        fft_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        result.status = FirDesignStatus::unsupported_size;
+        return result;
+    }
+    if (!is_power_of_two(fft_size) || coefficient_count == 0u || coefficient_count > fft_size)
         return result;
     for (double magnitude : one_sided_magnitudes) {
         if (!(magnitude >= 0.0) || !std::isfinite(magnitude))
@@ -479,84 +614,101 @@ reconstruct_minimum_phase_fir(std::span<const double> one_sided_magnitudes,
         return result;
     }
 
-    std::vector<std::complex<double>> spectrum(fft_size);
-    for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
-        const double log_magnitude =
-            std::log(std::max(one_sided_magnitudes[bin], options.log_magnitude_floor));
-        if (!std::isfinite(log_magnitude)) {
-            result.status = FirDesignStatus::numerical_failure;
-            return result;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+#endif
+        std::vector<std::complex<double>> spectrum(fft_size);
+        for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
+            const double log_magnitude =
+                std::log(std::max(one_sided_magnitudes[bin], options.log_magnitude_floor));
+            if (!std::isfinite(log_magnitude)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            spectrum[bin] = {log_magnitude, 0.0};
         }
-        spectrum[bin] = {log_magnitude, 0.0};
-    }
-    for (std::size_t bin = one_sided_magnitudes.size(); bin < fft_size; ++bin)
-        spectrum[bin] = spectrum[fft_size - bin];
+        for (std::size_t bin = one_sided_magnitudes.size(); bin < fft_size; ++bin)
+            spectrum[bin] = spectrum[fft_size - bin];
 
-    FftT<double> fft(static_cast<int>(fft_size));
-    fft.inverse(spectrum.data());
-    for (const auto value : spectrum) {
-        if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
-            result.status = FirDesignStatus::numerical_failure;
-            clear_payload(result);
-            return result;
+        FftT<double> fft(static_cast<int>(fft_size));
+        fft.inverse(spectrum.data());
+        for (const auto value : spectrum) {
+            if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
         }
-    }
-    for (std::size_t quefrency = 1u; quefrency < fft_size / 2u; ++quefrency)
-        spectrum[quefrency] *= 2.0;
-    for (std::size_t quefrency = fft_size / 2u + 1u; quefrency < fft_size; ++quefrency)
-        spectrum[quefrency] = {};
-    fft.forward(spectrum.data());
-    for (auto& value : spectrum) {
-        value = std::exp(value);
-        if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
-            result.status = FirDesignStatus::numerical_failure;
-            clear_payload(result);
-            return result;
+        for (std::size_t quefrency = 1u; quefrency < fft_size / 2u; ++quefrency)
+            spectrum[quefrency] *= 2.0;
+        for (std::size_t quefrency = fft_size / 2u + 1u; quefrency < fft_size; ++quefrency)
+            spectrum[quefrency] = {};
+        fft.forward(spectrum.data());
+        for (auto& value : spectrum) {
+            value = std::exp(value);
+            if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
         }
-    }
-    fft.inverse(spectrum.data());
+        fft.inverse(spectrum.data());
 
-    result.fft_size = fft_size;
-    result.coefficients.resize(coefficient_count);
-    for (std::size_t index = 0u; index < coefficient_count; ++index) {
-        const double value = spectrum[index].real();
-        if (!std::isfinite(value)) {
-            result.status = FirDesignStatus::numerical_failure;
-            clear_payload(result);
-            return result;
+        result.fft_size = fft_size;
+        result.coefficients.resize(coefficient_count);
+        for (std::size_t index = 0u; index < coefficient_count; ++index) {
+            const double value = spectrum[index].real();
+            if (!std::isfinite(value)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            result.coefficients[index] = value;
         }
-        result.coefficients[index] = value;
-    }
 
-    std::fill(spectrum.begin(), spectrum.end(), std::complex<double>{});
-    for (std::size_t index = 0u; index < coefficient_count; ++index)
-        spectrum[index] = {result.coefficients[index], 0.0};
-    fft.forward(spectrum.data());
-    result.measured_magnitudes.resize(one_sided_magnitudes.size());
-    result.errors.resize(one_sided_magnitudes.size());
-    double squared_error = 0.0;
-    for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
-        const double measured = std::abs(spectrum[bin]);
-        const double target = std::max(one_sided_magnitudes[bin], options.log_magnitude_floor);
-        const double error = measured - target;
-        if (!std::isfinite(measured) || !std::isfinite(error)) {
+        std::fill(spectrum.begin(), spectrum.end(), std::complex<double>{});
+        for (std::size_t index = 0u; index < coefficient_count; ++index)
+            spectrum[index] = {result.coefficients[index], 0.0};
+        fft.forward(spectrum.data());
+        result.measured_magnitudes.resize(one_sided_magnitudes.size());
+        result.errors.resize(one_sided_magnitudes.size());
+        double squared_error = 0.0;
+        for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
+            const double measured = std::abs(spectrum[bin]);
+            const double target = std::max(one_sided_magnitudes[bin], options.log_magnitude_floor);
+            const double error = measured - target;
+            if (!std::isfinite(measured) || !std::isfinite(error)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            result.measured_magnitudes[bin] = measured;
+            result.errors[bin] = error;
+            result.maximum_absolute_error =
+                std::max(result.maximum_absolute_error, std::abs(error));
+            squared_error += error * error;
+        }
+        result.rms_error =
+            std::sqrt(squared_error / static_cast<double>(one_sided_magnitudes.size()));
+        if (!std::isfinite(result.rms_error)) {
             result.status = FirDesignStatus::numerical_failure;
             clear_payload(result);
             return result;
         }
-        result.measured_magnitudes[bin] = measured;
-        result.errors[bin] = error;
-        result.maximum_absolute_error = std::max(result.maximum_absolute_error, std::abs(error));
-        squared_error += error * error;
-    }
-    result.rms_error = std::sqrt(squared_error / static_cast<double>(one_sided_magnitudes.size()));
-    if (!std::isfinite(result.rms_error)) {
-        result.status = FirDesignStatus::numerical_failure;
+        result.status = FirDesignStatus::success;
+        return result;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    } catch (const std::bad_alloc&) {
         clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    } catch (const std::length_error&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
         return result;
     }
-    result.status = FirDesignStatus::success;
-    return result;
+#endif
 }
 
 } // namespace pulp::signal

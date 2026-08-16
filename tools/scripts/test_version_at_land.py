@@ -182,6 +182,65 @@ class VersionAtLandTest(unittest.TestCase):
         self.r.commit("chore: bump versions")
         self.assertEqual(self.r.assigned()["sdk"], "1.3.0")
 
+    def _integrate_marker_pr(self) -> str:
+        _git(self.repo, "switch", "-q", "-c", "release-bump", env=self.r.env)
+        self.r.write(".claude-plugin/plugin.json", '{\n  "version": "0.5.1"\n}\n')
+        self.r.write(".claude-plugin/marketplace.json",
+                     '{\n  "version": "0.5.1",\n'
+                     '  "plugins": [\n    { "version": "0.5.1" }\n  ]\n}\n')
+        marker = self.r.commit(
+            "chore: bump versions", "Version-Bump-Applied: prior",
+        )
+        _git(self.repo, "switch", "-q", "main", env=self.r.env)
+        _git(self.repo, "merge", "-q", "--no-ff", "release-bump",
+             "-m", "Merge release bump", env=self.r.env)
+        return marker
+
+    def test_pr_route_marker_and_skip_only_remain_noop(self):
+        marker = self._integrate_marker_pr()
+        _git(self.repo, "switch", "-q", "-c", "sdk-skip", env=self.r.env)
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 7; }\n")
+        self.r.commit(
+            "fix(audio): internal generated refresh",
+            'Version-Bump: sdk=skip reason="generated artifact identical"',
+        )
+        _git(self.repo, "switch", "-q", "main", env=self.r.env)
+        _git(self.repo, "merge", "-q", "--no-ff", "sdk-skip",
+             "-m", "Merge sdk-skip", env=self.r.env)
+
+        self.assertEqual(
+            val.plan_for_range(self.repo, CONFIG, marker, self.r.head()), [],
+        )
+
+    def test_skip_in_one_pr_cannot_suppress_later_sdk_pr(self):
+        marker = self._integrate_marker_pr()
+
+        _git(self.repo, "switch", "-q", "-c", "sdk-skip", env=self.r.env)
+        self.r.write("core/audio/src/generated.cpp", "int generated() { return 1; }\n")
+        self.r.commit(
+            "fix(audio): generated refresh",
+            'Version-Bump: sdk=skip reason="generated artifact identical"',
+        )
+        _git(self.repo, "switch", "-q", "main", env=self.r.env)
+        _git(self.repo, "merge", "-q", "--no-ff", "sdk-skip",
+             "-m", "Merge sdk-skip", env=self.r.env)
+
+        _git(self.repo, "switch", "-q", "-c", "sdk-real", env=self.r.env)
+        self.r.write("core/audio/include/pulp/audio/new_api.hpp",
+                     "#pragma once\nint new_api();\n")
+        self.r.commit("feat(audio): add public API")
+        _git(self.repo, "switch", "-q", "main", env=self.r.env)
+        _git(self.repo, "merge", "-q", "--no-ff", "sdk-real",
+             "-m", "Merge sdk-real", env=self.r.env)
+
+        plan = val.plan_for_range(
+            self.repo, CONFIG, marker, self.r.head(),
+        )
+        self.assertEqual(
+            {(a.surface, a.current, a.assigned) for a in plan},
+            {("sdk", "1.2.3", "1.3.0")},
+        )
+
 
 # ── Git-fixture tests (real range walk + real push transaction) ──────────
 
@@ -388,7 +447,7 @@ class _FakeGh:
     def __init__(self, *, open_prs: int = 0, open_prs_seq: list[int] | None = None,
                  list_rc: int = 0, list_rc_seq: list[int] | None = None,
                  create_rc: int = 0, create_stderr: str = "",
-                 merge_rc: int = 0) -> None:
+                 merge_rc: int = 0, draft_pr: bool = False) -> None:
         self.open_prs = open_prs
         self.open_prs_seq = list(open_prs_seq) if open_prs_seq else None
         self.list_rc = list_rc
@@ -396,6 +455,7 @@ class _FakeGh:
         self.create_rc = create_rc
         self.create_stderr = create_stderr
         self.merge_rc = merge_rc
+        self.draft_pr = draft_pr
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, repo, *args, check: bool = True):
@@ -414,6 +474,10 @@ class _FakeGh:
         if head == ("pr", "create"):
             return subprocess.CompletedProcess(
                 args, self.create_rc, stdout="", stderr=self.create_stderr)
+        if head == ("pr", "view"):
+            return subprocess.CompletedProcess(
+                args, 0, stdout=("true\n" if self.draft_pr else "false\n"),
+                stderr="")
         if head == ("pr", "merge"):
             return subprocess.CompletedProcess(
                 args, self.merge_rc, stdout="", stderr="")
@@ -495,6 +559,11 @@ class PrRouteTest(unittest.TestCase):
         # A PR was opened and auto-merge armed with --merge (contract: NEVER
         # --squash — squash folds the bump-marker commit and trips auto-release).
         self.assertTrue(fake.did("pr", "create"))
+        create_call = next(
+            call for call in fake.calls if call[:2] == ("pr", "create")
+        )
+        self.assertIn("--label", create_call)
+        self.assertEqual(create_call[create_call.index("--label") + 1], "automation")
         self.assertTrue(fake.did("pr", "merge"))
         self.assertIn("--auto", fake.calls[-1])
         self.assertIn("--merge", fake.calls[-1])
@@ -608,6 +677,37 @@ class PrRouteTest(unittest.TestCase):
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "arm-failed")
+
+    def test_pr_route_preserves_draft_hold_and_fails_closed(self) -> None:
+        _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
+        (self.clone / "STALE_BUMP.txt").write_text("held draft head\n")
+        _git(self.clone, "add", "--", "STALE_BUMP.txt")
+        _git(self.clone, "commit", "--no-verify", "-q", "-m", "held draft")
+        _git(self.clone, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        held_sha = _git(self.clone, "rev-parse", "HEAD").strip()
+        _git(self.clone, "switch", "-q", "main")
+
+        fake = _FakeGh(open_prs=1, draft_pr=True)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "arm-failed")
+        self.assertFalse(fake.did("pr", "merge"))
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertEqual(_git(self.clone, "ls-remote", "origin",
+                              val.BUMP_BRANCH).split()[0], held_sha)
+
+        # Once the owner closes the held draft, the next drain reclaims the
+        # now-unowned bump branch and opens the coherent replacement. The hold
+        # is fail-closed, not a permanent poison pill for later drains.
+        replacement = _FakeGh(open_prs=0)
+        val._gh = replacement
+        status2, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status2, "pr-opened")
+        self.assertTrue(replacement.did("pr", "create"))
+        self.assertTrue(replacement.did("pr", "merge"))
+        replacement_sha = _git(self.clone, "ls-remote", "origin",
+                               val.BUMP_BRANCH).split()[0]
+        self.assertNotEqual(replacement_sha, held_sha)
 
     def test_pr_route_noop_without_intent(self) -> None:
         # Drain an origin that already carries the marker → nothing to bump.

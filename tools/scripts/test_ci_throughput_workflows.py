@@ -19,6 +19,7 @@ except ImportError:  # Required macOS CTest runners do not install PyYAML.
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "examples-validation.yml"
 SANITIZERS = ROOT / ".github" / "workflows" / "sanitizers.yml"
+ANDROID = ROOT / ".github" / "workflows" / "android.yml"
 TOPOLOGY = ROOT / "tools" / "scripts" / "runner_topology.json"
 SHIPYARD_PROFILE = ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml"
 
@@ -182,6 +183,50 @@ class SanitizerCadenceTests(unittest.TestCase):
             "github.repository == 'Generous-Corp/pulp'",
             condition,
         )
+
+    def test_memory_sanitizers_skip_non_sanitizer_ios_builds(self) -> None:
+        for job_name, display_name in (("asan", "ASan"), ("ubsan", "UBSan")):
+            with self.subTest(job=job_name):
+                script = named_step(
+                    self.workflow["jobs"][job_name],
+                    f"Test with {display_name}",
+                )["run"]
+                self.assertIn("cmake-ios-auv3-configure", script)
+                self.assertIn("cmake-ios-hostapp-links", script)
+
+    def test_asan_skips_optimized_fdn_stability_certification(self) -> None:
+        script = named_step(
+            self.workflow["jobs"]["asan"], "Test with ASan"
+        )["run"]
+        self.assertIn(
+            "fdn reverb stays bounded and decaying for every parameter vector",
+            script,
+        )
+
+
+class AndroidFixtureWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.job = load_workflow(ANDROID)["jobs"]["android-run-fixtures"]
+
+    def test_emulator_uses_one_explicit_avd_home(self) -> None:
+        step = named_step(self.job, "Create and boot x86_64 emulator")
+        self.assertEqual(
+            step["env"]["ANDROID_AVD_HOME"],
+            "${{ runner.temp }}/android-avd",
+        )
+        script = step["run"]
+        self.assertIn('-p "$ANDROID_AVD_HOME/pulp-fixtures.avd"', script)
+        self.assertIn("emulator\" -list-avds | grep -Fx pulp-fixtures", script)
+
+    def test_emulator_readiness_is_bounded_and_diagnostic(self) -> None:
+        script = named_step(
+            self.job, "Create and boot x86_64 emulator"
+        )["run"]
+        self.assertNotIn("adb wait-for-device", script)
+        self.assertIn("adb get-state", script)
+        self.assertIn("kill -0 \"$emulator_pid\"", script)
+        self.assertIn("pulp-emulator.log", script)
 
 
 class ShipyardTopologyContractTests(unittest.TestCase):

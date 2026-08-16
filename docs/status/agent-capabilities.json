@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 24,
+  "manifest_revision": 27,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -25,7 +25,7 @@
       },
       "music": {
         "state": "partial",
-        "capabilities": 6
+        "capabilities": 7
       },
       "offline": {
         "state": "not_inventoried",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 41
+        "capabilities": 42
       },
       "timebase": {
         "state": "partial",
@@ -1326,6 +1326,264 @@
       "contract_digest": "sha256:00f53240aa84b6c211c26b55b794b4cd425e0acfd0b2d8ac49cbf7739400a375"
     },
     {
+      "key": "music.pattern-development",
+      "domain": "music",
+      "summary": "Fixed-capacity exact-tick event-set development with stable IDs, nested density, regional fills, and deterministic integer A/B morphing.",
+      "rt_class": "any",
+      "lifecycle": {
+        "construction": "any",
+        "prepare": "none",
+        "process": "any",
+        "reset": "value-initialization",
+        "release": "none"
+      },
+      "state_model": "Pure operations over trivially copyable fixed-capacity event records; no hidden state, allocation, scheduler, clock, or note ownership.",
+      "seed_model": "explicit seed plus exact tick, lane, cycle, stream, and stable event ID coordinates",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "up to 64 canonical exact-tick event records per input, onset-set operation, target count, half-open tick region, seed coordinates, and integer morph amount",
+      "output_domain": "up to 64 canonical exact-tick event records or an explicit error",
+      "units": [
+        "ticks",
+        "event count",
+        "integer accent",
+        "integer morph amount",
+        "seed"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure caller-clocked whole-pattern development",
+      "bindings": [
+        {
+          "role": "event-id",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventId",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-role",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventRole",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-record",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEvent",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "error",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentError",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "pattern",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DevelopmentPattern<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "result",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentResult<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-operation",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternSetOperation",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DensitySelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::RegionalFillSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternMorphSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "make-event-id",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::make_pattern_event_id",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-algebra",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::pattern_set<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::select_pattern_density<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::apply_regional_fill<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::morph_patterns<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:d355402017022afb0573ac04dbbb920f126a24405312274c38d4a2847d648aa7"
+    },
+    {
       "key": "music.pattern-generation",
       "domain": "music",
       "summary": "Bounded Euclidean, versioned recipe, walking, cellular, and looping-shift-register pattern operations.",
@@ -2134,6 +2392,67 @@
       "contract_digest": "sha256:d08e93be0e8366bcb238fec115b4fc62cabd641615ca6d1c6f96f4fc8d8a2050"
     },
     {
+      "key": "signal.fir-design",
+      "domain": "signal",
+      "summary": "Offline weighted least-squares design of bounded real Type I-IV linear-phase FIRs from sampled frequency targets.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "offline design; may allocate bounded workspace",
+        "process": "offline design request",
+        "reset": "none",
+        "release": "destruction off audio"
+      },
+      "state_model": "Bounded sampled targets, pivoted QR workspace, and returned coefficients, residuals, rank, and conditioning diagnostics.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite weighted frequency/amplitude samples in [0, pi] and a bounded tap/type specification",
+      "output_domain": "real linear-phase FIR coefficients and weighted fit diagnostics",
+      "units": [
+        "radians per sample",
+        "taps",
+        "linear amplitude",
+        "weighted RMS error"
+      ],
+      "latency": "offline whole-design solve",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "designer",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::design_fir_least_squares",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:81ba54734e3a70376db0820de63e996499e17a8f9d235114d87fd338828f1ba5"
+    },
+    {
       "key": "signal.fm-operator-engine",
       "domain": "signal",
       "summary": "Fixed-capacity eight-operator FM and phase-modulation synthesis engine.",
@@ -2452,6 +2771,67 @@
       "contract_digest": "sha256:a4b8818f25bc81b9b9e34f3c4dc341dc757a6abfb441254ce1d88d7cecae096b"
     },
     {
+      "key": "signal.minimum-phase-fir",
+      "domain": "signal",
+      "summary": "Offline cepstral minimum-phase FIR reconstruction from bounded one-sided magnitude bins.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "none",
+        "process": "offline reconstruction; may allocate bounded workspace",
+        "reset": "none",
+        "release": "returned vectors destroyed off audio"
+      },
+      "state_model": "Stateless reconstruction over a bounded radix-2 work spectrum, returning owned coefficients, measured magnitudes, and per-bin errors.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite nonnegative one-sided magnitude bins from DC through Nyquist for a bounded radix-2 FFT size",
+      "output_domain": "real causal minimum-phase FIR coefficients with measured magnitude and error diagnostics",
+      "units": [
+        "linear magnitude",
+        "coefficients",
+        "FFT bins",
+        "bytes"
+      ],
+      "latency": "offline whole-reconstruction transform",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "reconstructor",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::reconstruct_minimum_phase_fir",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:ad59514cbd7d101df3df95427b291bd579806895d2a8a13eba3b05ef4078bed4"
+    },
+    {
       "key": "signal.modulation-primitives",
       "domain": "signal",
       "summary": "Shared curve vocabulary, bounded breakpoint envelopes, and rise/fall generators.",
@@ -2766,81 +3146,6 @@
         }
       },
       "contract_digest": "sha256:f96ab0ee43fcf5bbfdea31592ddf9bb85873cba45d0b1fddfa3a749eee7c7a2a"
-    },
-    {
-      "key": "signal.offline-fir-design",
-      "domain": "signal",
-      "summary": "Offline weighted least-squares linear-phase design and minimum-phase reconstruction from sampled frequency targets.",
-      "rt_class": "control",
-      "lifecycle": {
-        "construction": "none",
-        "prepare": "none",
-        "process": "offline or control thread; allocates bounded workspace",
-        "reset": "none",
-        "release": "returned vectors off audio"
-      },
-      "state_model": "Stateless design functions returning owned coefficient and error vectors.",
-      "seed_model": "none",
-      "determinism": {
-        "repeatability": "tolerance_bounded",
-        "block_partition": "not_applicable",
-        "platform_scope": "same_build",
-        "transport_history": "irrelevant"
-      },
-      "input_domain": "finite sampled amplitudes or nonnegative one-sided magnitude bins",
-      "output_domain": "real FIR coefficients plus measured response and error diagnostics",
-      "units": [
-        "radians per sample",
-        "linear amplitude",
-        "coefficients",
-        "bytes"
-      ],
-      "latency": "offline design only; designed runtime latency depends on installed coefficients",
-      "tail": "none in the designer",
-      "scheduling": "caller-invoked offline or control work",
-      "bindings": [
-        {
-          "role": "linear_phase",
-          "kind": "cpp_function",
-          "include": "pulp/signal/fir_design.hpp",
-          "qualified_name": "pulp::signal::design_fir_least_squares",
-          "target": "Pulp::signal",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        },
-        {
-          "role": "minimum_phase",
-          "kind": "cpp_function",
-          "include": "pulp/signal/fir_design.hpp",
-          "qualified_name": "pulp::signal::reconstruct_minimum_phase_fir",
-          "target": "Pulp::signal",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:f02b19c2249924dba859efd09ac8a1548b37752f1485b860f8c9540d4f5c980a"
     },
     {
       "key": "signal.particle-percussion",
@@ -5114,14 +5419,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 73,
+    "total": 75,
     "by_domain": {
       "audio": 7,
       "midi": 9,
-      "music": 6,
+      "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 41,
+      "signal": 42,
       "timebase": 9
     }
   },
@@ -10811,6 +11116,7 @@
               "latest_frame()",
               "frame_ready()",
               "num_bins()",
+              "window_sum()",
               "fft_size()",
               "hop_size()",
               "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType{-120.0f})",

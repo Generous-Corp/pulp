@@ -35,6 +35,9 @@ struct BrowserCaptureIrOptions {
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     std::string source_file;
     bool require_interaction_report = false;
+    /// Optional capture asset used by the runtime underlay while the canonical
+    /// reference remains the untouched browser frame used for A/B scoring.
+    std::string runtime_asset_id;
     /// Draw the panel instead of photographing it: lower every painted node
     /// from the DOM snapshot into a tree that mirrors the DOM, each node
     /// absolutely positioned at Chrome's solved box expressed relative to its
@@ -44,6 +47,13 @@ struct BrowserCaptureIrOptions {
     /// permanent CI oracle — native ships per panel only once it has been shown
     /// to pass against the picture, so the picture cannot be removed first.
     bool native_panel_lowering = false;
+    /// Preserve Chromium's accepted full frame as the initial visible paint
+    /// authority and emit each captured canvas as a separately anchored,
+    /// transparent native interaction target. The materialized runtime binds
+    /// the original canvas closures to those targets without reimplementing
+    /// solved text, SVG, font, layout, or canvas geometry. Executable canvas
+    /// paint may replace the accepted pixels only after a separate parity gate.
+    bool materialized_canvas_composition = false;
 };
 
 /// Parse and validate a capture envelope, reject sidecar paths that escape its

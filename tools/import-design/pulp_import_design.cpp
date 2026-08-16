@@ -1581,6 +1581,7 @@ struct CliOptions {
     /// photograph with overlays. See the flag parse site for why this had no
     /// way to be turned on before.
     bool native_panel_lowering = false;
+    bool materialized_canvas_composition = false;
     std::string browser_path;
     std::string browser_interactions_path;
     bool offline = false;
@@ -1853,6 +1854,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             // unreachable from the product, and a shipped panel stayed a
             // faithful_capture bitmap with buttons on top.
             opt.native_panel_lowering = true;
+        } else if (std::strcmp(argv[i], "--materialized-canvas-composition") == 0) {
+            opt.materialized_canvas_composition = true;
         } else if (std::strcmp(argv[i], "--browser") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --browser requires an executable path\n";
@@ -2034,6 +2037,13 @@ int main(int argc, char* argv[]) {
     auto& allow_network_fetch = cli.allow_network_fetch;
     auto& allow_browser_network = cli.allow_browser_network;
     const bool native_panel_lowering = cli.native_panel_lowering;
+    const bool materialized_canvas_composition =
+        cli.materialized_canvas_composition;
+    if (native_panel_lowering && materialized_canvas_composition) {
+        std::cerr << "Error: --native-panel-lowering and "
+                     "--materialized-canvas-composition are mutually exclusive\n";
+        return 2;
+    }
     auto& browser_path = cli.browser_path;
     auto& browser_interactions_path = cli.browser_interactions_path;
     auto& offline = cli.offline;
@@ -2043,10 +2053,16 @@ int main(int argc, char* argv[]) {
     auto& recognition_manifest_path = cli.recognition_manifest_path;
     auto& param_binding_manifest_path = cli.param_binding_manifest_path;
 
-    // Validate comparison-only flags before source detection or browser
-    // discovery. A missing optional runtime must not mask a malformed command,
-    // and --fail-below has no meaningful result without a reference image.
-    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+    // A browser-solved generic HTML document supplies its own Chromium
+    // reference during import. Rejecting it before dispatch made the advertised
+    // --fail-below gate impossible to use for the source-owned HTML lane. All
+    // other inputs (and explicit --offline HTML) still need an explicit PNG;
+    // the browser session separately fails closed if capture cannot produce its
+    // reference.
+    const bool browser_html_can_supply_reference =
+        source_str == "html" && !offline;
+    if (fail_below_pct >= 0.0f && reference_image.empty() &&
+        !browser_html_can_supply_reference) {
         std::cerr << "Error: --fail-below requires --reference\n";
         return 2;
     }
@@ -2503,6 +2519,8 @@ int main(int argc, char* argv[]) {
          .supports_faithful_capture =
              artifact_emit != ArtifactEmit::swiftui,
          .native_panel_lowering = native_panel_lowering,
+         .materialized_canvas_composition =
+             materialized_canvas_composition,
          .validate = validate},
         content);
     if (const auto* failure =
@@ -2722,7 +2740,12 @@ int main(int argc, char* argv[]) {
 
     if (!parsed_serialized_design_ir)
         ir.source = *source;
-    ir.source_file = input_url.empty() ? input_file : input_url;
+    // Browser-capture and other provenance-aware adapters may already have
+    // reduced a local entry path to a relocatable source identifier.  Do not
+    // overwrite that adapter-owned value with the developer machine's absolute
+    // CLI input path during common finalization.
+    if (ir.source_file.empty())
+        ir.source_file = input_url.empty() ? input_file : input_url;
     if (ir.imported_at.empty()) ir.imported_at = current_utc_timestamp();
     if (ir.capture_method.empty()) ir.capture_method = "adapter_parse";
     if (ir.source_adapter.empty()) ir.source_adapter = source_str;

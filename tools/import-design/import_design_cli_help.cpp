@@ -53,8 +53,11 @@ void print_usage() {
     std::cout << "                    evaluates HTML; private/local and WebSocket access stays blocked\n";
     std::cout << "  --browser <path>  Chromium/Chrome executable for browser-solved HTML import\n";
     std::cout << "  --browser-interactions <json>\n";
-    std::cout << "                    Apply a versioned bounded click/type/wait plan before capture\n";
+    std::cout << "                    Apply a versioned bounded click/context-click/type/wait plan before capture\n";
     std::cout << "                    Typed text may appear in capture evidence; never type secrets\n";
+    std::cout << "  --materialized-canvas-composition\n";
+    std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";
+    std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";
@@ -103,7 +106,7 @@ void print_usage() {
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
     std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
     std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
-    std::cout << "  --fail-below <pct>      Exit nonzero (5) when --reference similarity is below\n";
+    std::cout << "  --fail-below <pct>      Exit nonzero (5) when browser source capture or --reference similarity is below\n";
     std::cout << "                    <pct>, given as a percentage 0-100 (e.g. 85, not 0.85).\n";
     std::cout << "                    Without this flag the similarity is advisory and the exit\n";
     std::cout << "                    code is unchanged, at any similarity.\n";

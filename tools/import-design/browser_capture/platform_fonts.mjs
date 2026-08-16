@@ -95,6 +95,7 @@ function requestedFont(snapshot, styleNames, layoutIndex) {
     font_size: read("font-size"),
     font_weight: read("font-weight"),
     font_style: read("font-style"),
+    letter_spacing: read("letter-spacing"),
   };
 }
 

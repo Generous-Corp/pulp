@@ -112,7 +112,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"automation.track-gain", "An automation lane targeting a track's gain.", true},
     {"automation.track-pan", "An automation lane targeting a track's pan.", true},
     {"device.placement", "A device occupying a slot in a track's chain, by identity.", true},
-    {"device.payload", "A device's type and saved parameter state.", false},
+    {"device.payload", "A device's type and saved parameter state.", true},
     {"effect.timewarp", "An effect that remaps time rather than processing content.", false},
     {"take.lane", "An alternate recording lane holding takes alongside the arrangement.", true},
     {"take.comp", "A composite assembled by selecting segments across takes.", true},

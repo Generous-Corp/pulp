@@ -154,6 +154,7 @@ TEST_CASE("compute_playhead_changes: first call after construction reports no ch
     REQUIRE_FALSE(ctx.time_sig_changed);
     REQUIRE_FALSE(ctx.transport_changed);
     REQUIRE_FALSE(ctx.transport_jump);
+    REQUIRE_FALSE(ctx.ordinary_loop_wrap);
 
     REQUIRE(snapshot.has_previous);
     REQUIRE(snapshot.tempo_bpm == 137.5);
@@ -370,6 +371,109 @@ TEST_CASE("compute_playhead_changes: playing sample-position discontinuity is a 
 
     REQUIRE(next.transport_jump);
     REQUIRE_FALSE(next.transport_changed);
+}
+
+TEST_CASE("compute_playhead_changes: ordinary loop wrap preserves stream history",
+          "[format][playhead][transport-jump][loop-wrap]") {
+    const auto mark_host_transport_valid = [](ProcessContext& context) {
+        context.transport_validity.set(TransportField::Playing);
+        context.transport_validity.set(TransportField::Looping);
+        context.transport_validity.set(TransportField::LoopRange);
+        context.transport_validity.set(TransportField::BeatPosition);
+        context.transport_validity.set(TransportField::SamplePosition);
+        context.transport_validity.set(TransportField::Tempo);
+    };
+
+    PlayheadSnapshot snapshot;
+    ProcessContext before;
+    before.sample_rate = 48000.0;
+    before.num_samples = 480;
+    before.tempo_bpm = 120.0;
+    before.is_playing = true;
+    before.is_looping = true;
+    before.loop_start_beats = 4.0;
+    before.loop_end_beats = 8.0;
+    before.position_beats = 7.99;
+    before.position_samples = 191760;
+    mark_host_transport_valid(before);
+    compute_playhead_changes(before, snapshot, TransportDiffMode::FieldValidity);
+
+    auto wrapped = before;
+    wrapped.position_beats = 4.01;
+    wrapped.position_samples = 96240;
+    compute_playhead_changes(wrapped, snapshot,
+                             TransportDiffMode::FieldValidity);
+
+    // Timeline consumers still see the backward jump. Only continuous audio
+    // history gets the narrower, non-destructive classification.
+    REQUIRE(wrapped.transport_jump);
+    REQUIRE(wrapped.ordinary_loop_wrap);
+    REQUIRE(wrapped.should_reset_dsp_state());
+    REQUIRE_FALSE(wrapped.should_reset_stream_history());
+
+    wrapped.reset_requested = true;
+    REQUIRE(wrapped.should_reset_stream_history());
+}
+
+TEST_CASE("compute_playhead_changes: cycle mode never hides a real seek",
+          "[format][playhead][transport-jump][loop-wrap]") {
+    const auto mark_host_transport_valid = [](ProcessContext& context) {
+        context.transport_validity.set(TransportField::Playing);
+        context.transport_validity.set(TransportField::Looping);
+        context.transport_validity.set(TransportField::LoopRange);
+        context.transport_validity.set(TransportField::BeatPosition);
+        context.transport_validity.set(TransportField::SamplePosition);
+        context.transport_validity.set(TransportField::Tempo);
+    };
+
+    PlayheadSnapshot snapshot;
+    ProcessContext before;
+    before.sample_rate = 48000.0;
+    before.num_samples = 480;
+    before.tempo_bpm = 120.0;
+    before.is_playing = true;
+    before.is_looping = true;
+    before.loop_start_beats = 4.0;
+    before.loop_end_beats = 8.0;
+    before.position_beats = 7.99;
+    before.position_samples = 191760;
+    mark_host_transport_valid(before);
+    compute_playhead_changes(before, snapshot, TransportDiffMode::FieldValidity);
+
+    SECTION("seek lands somewhere other than the predicted wrap position") {
+        auto seek = before;
+        seek.position_beats = 5.0;
+        seek.position_samples = 120000;
+        compute_playhead_changes(seek, snapshot,
+                                 TransportDiffMode::FieldValidity);
+        REQUIRE(seek.transport_jump);
+        REQUIRE_FALSE(seek.ordinary_loop_wrap);
+        REQUIRE(seek.should_reset_stream_history());
+    }
+
+    SECTION("changed loop range is a transport edit") {
+        auto edited = before;
+        edited.loop_start_beats = 2.0;
+        edited.position_beats = 2.01;
+        edited.position_samples = 48240;
+        compute_playhead_changes(edited, snapshot,
+                                 TransportDiffMode::FieldValidity);
+        REQUIRE(edited.transport_jump);
+        REQUIRE_FALSE(edited.ordinary_loop_wrap);
+        REQUIRE(edited.should_reset_stream_history());
+    }
+
+    SECTION("missing beat timing stays conservative") {
+        auto incomplete = before;
+        incomplete.position_beats = 4.01;
+        incomplete.position_samples = 96240;
+        incomplete.transport_validity.set(TransportField::BeatPosition, false);
+        compute_playhead_changes(incomplete, snapshot,
+                                 TransportDiffMode::FieldValidity);
+        REQUIRE(incomplete.transport_jump);
+        REQUIRE_FALSE(incomplete.ordinary_loop_wrap);
+        REQUIRE(incomplete.should_reset_stream_history());
+    }
 }
 
 TEST_CASE("compute_playhead_changes: stopped sample-position change is a jump",

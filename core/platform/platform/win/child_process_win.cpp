@@ -60,11 +60,10 @@ struct WinPipe {
     }
 };
 
-size_t drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
-                  size_t max_bytes,
-                  const std::function<void(std::string_view)>& line_cb) {
-    if (fd == INVALID_HANDLE_VALUE) return 0;
-    size_t total = 0;
+bool drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
+                size_t max_bytes,
+                std::function<void(std::string_view)>* line_cb) {
+    if (fd == INVALID_HANDLE_VALUE) return true;
     while (true) {
         DWORD avail = 0;
         if (!PeekNamedPipe(fd, nullptr, 0, nullptr, &avail, nullptr) || avail == 0)
@@ -76,14 +75,13 @@ size_t drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
         if (!ReadFile(fd, chunk, to_read, &bytes_read, nullptr) || bytes_read == 0)
             break;
 
-        total += bytes_read;
         if (full_output.size() < max_bytes)
             full_output.append(chunk, std::min<size_t>(bytes_read, max_bytes - full_output.size()));
-        if (line_cb && line_buf.size() < max_bytes)
+        if (line_cb && *line_cb && line_buf.size() < max_bytes)
             line_buf.append(chunk, std::min<size_t>(bytes_read, max_bytes - line_buf.size()));
     }
 
-    if (line_cb && !line_buf.empty()) {
+    if (line_cb && *line_cb && !line_buf.empty()) {
         size_t pos = 0;
         while (pos < line_buf.size()) {
             auto nl = line_buf.find('\n', pos);
@@ -92,12 +90,18 @@ size_t drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
             // Strip trailing \r
             if (!line.empty() && line.back() == '\r')
                 line = line.substr(0, line.size() - 1);
-            line_cb(line);
+            try {
+                (*line_cb)(line);
+            } catch (...) {
+                *line_cb = {};
+                line_buf.clear();
+                return false;
+            }
             pos = nl + 1;
         }
         if (pos > 0) line_buf.erase(0, pos);
     }
-    return total;
+    return true;
 }
 
 std::string quote_windows_arg(const std::string& arg) {
@@ -445,20 +449,39 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             completion->set_value(delivered);
         });
         auto ready = std::future_status::timeout;
+        bool output_drain_failed = false;
         while ((ready = completed.wait_for(std::chrono::milliseconds(1))) !=
                    std::future_status::ready &&
                std::chrono::steady_clock::now() < deadline) {
-            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full, impl_->stdout_lines_buf,
-                       options.max_output_bytes, options.on_stdout_line);
-            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full, impl_->stderr_lines_buf,
-                       options.max_output_bytes, options.on_stderr_line);
+            const bool stdout_ok =
+                drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
+                           impl_->stdout_lines_buf, options.max_output_bytes,
+                           &impl_->options.on_stdout_line);
+            if (!stdout_ok) {
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
+            const bool stderr_ok =
+                drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
+                           impl_->stderr_lines_buf, options.max_output_bytes,
+                           &impl_->options.on_stderr_line);
+            if (!stdout_ok || !stderr_ok) {
+                output_drain_failed = true;
+                impl_->result.was_cancelled = true;
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+                TerminateProcess(impl_->process, 1);
+                WaitForSingleObject(impl_->process, 1000);
+                CancelSynchronousIo(writer.native_handle());
+                break;
+            }
         }
         if (ready != std::future_status::ready)
             CancelSynchronousIo(writer.native_handle());
         writer.join();
         const bool delivered = ready == std::future_status::ready && completed.get();
         impl_->standard_input.close_write();
-        if (!delivered) {
+        if (output_drain_failed || !delivered) {
             cancel();
             (void)wait();
             return false;
@@ -512,21 +535,44 @@ ProcessResult ChildProcess::wait() {
     auto max_bytes = impl_->options.max_output_bytes;
 
     while (true) {
-        drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
-                   impl_->stdout_lines_buf,
-                   max_bytes, impl_->options.on_stdout_line);
-        drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
-                   impl_->stderr_lines_buf,
-                   max_bytes, impl_->options.on_stderr_line);
+        const bool stdout_ok =
+            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
+                       impl_->stdout_lines_buf, max_bytes, &impl_->options.on_stdout_line);
+        if (!stdout_ok) {
+            impl_->options.on_stdout_line = {};
+            impl_->options.on_stderr_line = {};
+        }
+        const bool stderr_ok =
+            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
+                       impl_->stderr_lines_buf, max_bytes,
+                       &impl_->options.on_stderr_line);
+        if (!stdout_ok || !stderr_ok) {
+            impl_->result.was_cancelled = true;
+            impl_->options.on_stdout_line = {};
+            impl_->options.on_stderr_line = {};
+            cancel();
+            return impl_->result;
+        }
 
         if (WaitForSingleObject(impl_->process, 0) != WAIT_TIMEOUT) {
             // Final drain
-            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
-                       impl_->stdout_lines_buf,
-                       max_bytes, impl_->options.on_stdout_line);
-            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
-                       impl_->stderr_lines_buf,
-                       max_bytes, impl_->options.on_stderr_line);
+            const bool final_stdout_ok =
+                drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
+                           impl_->stdout_lines_buf, max_bytes,
+                           &impl_->options.on_stdout_line);
+            if (!final_stdout_ok) {
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
+            const bool final_stderr_ok =
+                drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
+                           impl_->stderr_lines_buf, max_bytes,
+                           &impl_->options.on_stderr_line);
+            if (!final_stdout_ok || !final_stderr_ok) {
+                impl_->result.was_cancelled = true;
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
 
             DWORD code = 0;
             GetExitCodeProcess(impl_->process, &code);

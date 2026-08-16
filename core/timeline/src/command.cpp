@@ -239,6 +239,8 @@ std::size_t track_retained_size(const Track& track) noexcept {
     auto size = saturated_add(sizeof(Track), track.name().size());
     size = saturated_add(size,
                          saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
+    for (const auto& device : track.device_chain())
+        size = saturated_add(size, device.configuration.binding_key.size());
     for (const auto& clip : track.clips())
         size = saturated_add(size, clip_retained_size(clip));
     for (const auto& lane : track.automation_lanes())
@@ -431,6 +433,26 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertDevice>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.placement == right.placement &&
+                       left.before_device_id == right.before_device_id;
+            } else if constexpr (std::is_same_v<T, RemoveDevice>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.device_id == right.device_id;
+            } else if constexpr (std::is_same_v<T, MoveDevice>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.device_id == right.device_id &&
+                       left.expected_before_device_id == right.expected_before_device_id &&
+                       left.replacement_before_device_id == right.replacement_before_device_id;
+            } else if constexpr (std::is_same_v<T, RetargetDevice>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.device_id == right.device_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetDeviceState>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.device_id == right.device_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetTempoMap> || std::is_same_v<T, SetMeterMap>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, CreateAsset>) {
@@ -564,6 +586,12 @@ std::size_t retained_size(const Command& command) noexcept {
                                      detail::launcher_slot_list_owned_storage(value.scene.slots));
             if constexpr (std::is_same_v<T, InsertTrack>)
                 return saturated_add(sizeof(T), track_retained_size(value.track));
+            if constexpr (std::is_same_v<T, InsertDevice>)
+                return saturated_add(sizeof(T), value.placement.configuration.binding_key.size());
+            if constexpr (std::is_same_v<T, RetargetDevice>)
+                return saturated_add(sizeof(T),
+                                     saturated_add(value.expected.binding_key.size(),
+                                                   value.replacement.binding_key.size()));
             if constexpr (std::is_same_v<T, SetTrackName>)
                 return saturated_add(
                     sizeof(T), saturated_add(value.expected.size(), value.replacement.size()));

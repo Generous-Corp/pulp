@@ -19,18 +19,25 @@ permissions:
 jobs:
   freeze-check:
     name: Vellum freeze
-    # Read-only, unprivileged freeze validation may use the protected local
-    # Linux group. Fork PRs and an unset selector fall back to hosted Linux.
+    # Automatic same-repository and merge-group validation uses the restricted
+    # organization pool; trusted manual dispatch may use the repository pool.
+    # Fork PRs and an unset selector fall back to hosted Linux.
+    # See version-skill-check.yml: these are *_RUNS_ON_JSON variables, so every
+    # branch must stay JSON and be parsed. An unparsed array becomes one literal
+    # label no runner carries, and GitHub queues that job forever rather than
+    # failing it.
     runs-on: >-
-      ${{
+      ${{ fromJSON(
+        github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
+        github.event_name == 'workflow_dispatch' &&
+        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
         github.workflow_ref == format('{0}/.github/workflows/vellum-freeze-check.yml@refs/heads/main', github.repository) &&
         (github.event_name == 'merge_group' ||
-         github.event_name == 'workflow_dispatch' ||
          (github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository)) &&
-        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
-        'ubuntu-latest'
-      }}
+        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
+        '"ubuntu-latest"'
+      ) }}
     steps:
       - name: Check out the proposed merge tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
