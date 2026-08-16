@@ -77,6 +77,26 @@ runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build-vm-release"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
 ephemeral = true
 
+# Dedicated ephemeral sanitizer VM lane. Deliberately carries NEITHER
+# `pulp-build` nor `pulp-build-vm`: sanitizers.yml resolves each sanitizer with
+# deny-labels=pulp-build,pulp-build-vm so an advisory sanitizer can never land
+# on the pool serving the required `macos` gate. The supervisor IS installed
+# (on M1) but cannot currently serve this label, so an installed supervisor is
+# not evidence the lane is usable — only a real dispatch and teardown proof on
+# this exact label set is. The sanitizer variables stay hosted until then.
+[targets."sanitizer.macos-arm64-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-sanitizer-vm-macos"]
+ephemeral = true
+
+# Native Intel macOS on the Mac mini. Advisory compatibility work only; the
+# release darwin-x64 leg is cross-compiled on Apple Silicon and must not be
+# pointed here.
+[targets."macmini.macos-x64-native"]
+runs_on_json = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+[targets."github.macos-x64-intel"]
+runs_on_json = "macos-15-intel"
+
 [targets."github.macos-arm64"]
 runs_on_json = "macos-15"
 

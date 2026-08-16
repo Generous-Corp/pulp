@@ -1209,6 +1209,38 @@ python3 tools/scripts/runner_topology_check.py --mode=report
 python3 tools/scripts/runner_topology_check.py --mode=hint
 ```
 
+### An unset variable is not automatically a gap
+
+Four lanes read as broken in the contract while behaving exactly as intended,
+because "unset" and "hosted" each mean something specific per lane. Read the
+consuming workflow before calling one of these a black hole:
+
+- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is deliberately unset, and that is the
+  local-first state.** `release-cli.yml` resolves it, then
+  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, then Namespace (off for cost), then
+  `macos-15`. Leaving it unset therefore routes releases onto the self-hosted
+  pool that already backs the required gate — which is why hosted starvation
+  (2026-05-18, 2026-06-09) no longer blocks publishing. Setting it *overrides*
+  that chain, so it is only correct for a proven dedicated release lane.
+- **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is hosted on purpose.** Overflow
+  exists to add capacity when the local pool is saturated, so pointing it at
+  the same local labels is a no-op under the exact condition it must relieve.
+  `local-only` is a documented off-switch, not a label set.
+- **`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` is hosted because darwin-x64 is
+  cross-compiled on Apple Silicon**, not built on the native Intel image. The
+  Mac mini native-Intel lane (`PULP_NATIVE_INTEL_RUNS_ON_JSON`) is a separate
+  advisory lane and is not a substitute for this release leg.
+- **`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`** coordinates a release rather
+  than building one. It resolves to `PULP_LOCAL_LINUX_RUNS_ON_JSON` next, but
+  reaching the Mac Pro pool is not a selector decision alone: those runners sit
+  in a restricted org runner group, so the group's workflow-ref restriction
+  governs which workflows may use them.
+
+The general rule: a lane is only "missing" once you have read the fallback
+chain in its consuming workflow. A variable, a supervisor process, a runner-group
+row, and an idle VM are each individually consistent with a lane that works and
+with one that does not.
+
 ## macOS overflow routing (Plan B)
 
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
