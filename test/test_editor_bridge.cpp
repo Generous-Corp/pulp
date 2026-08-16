@@ -16,14 +16,19 @@
 
 #include "pulp/view/editor_bridge.hpp"
 #include "pulp/view/script_engine.hpp"
+#include "pulp/view/scripted_ui.hpp"
 #include "pulp/view/web_view.hpp"
+#include "pulp/view/widgets.hpp"
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -379,6 +384,7 @@ static_assert(!std::is_move_assignable_v<EditorBridge>,
 // the bridge's dispatch path. A minimal in-process WebViewPanel stub
 // exercises that wiring without requiring a real WebView backend.
 
+#if defined(PULP_BUILD_WEBVIEW) && PULP_BUILD_WEBVIEW
 namespace {
 
 class StubWebViewPanel : public pulp::view::WebViewPanel {
@@ -473,6 +479,7 @@ TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler"
     bridge.detach_webview(panel);
     CHECK_FALSE(panel.has_message_handler());
 }
+#endif
 
 TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
           "[editor_bridge][issue-709][issue-468]")
@@ -518,4 +525,61 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     const auto bad = engine.evaluate("__testEditorDispatch(42)");
     REQUIRE(bad.isString());
     CHECK(response_has_error(std::string(bad.getString()), "expects one JSON string"));
+}
+
+TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement",
+          "[editor_bridge][native_runtime][scripted_ui][reload]")
+{
+    namespace fs = std::filesystem;
+    const auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto temp_dir = fs::temp_directory_path()
+                        / ("pulp-editor-bridge-session-" + unique);
+    const auto script_path = temp_dir / "ui.js";
+    fs::create_directories(temp_dir);
+    const auto write_script = [&](float value) {
+        std::ofstream out(script_path);
+        out << "var response = JSON.parse(__testEditorDispatch(JSON.stringify("
+               "{type:'set_value',payload:{value:"
+            << value
+            << "}}))); createLabel('status', response.ok ? 'ok' : 'error', '');";
+    };
+    write_script(0.25f);
+
+    pulp::view::View root;
+    pulp::state::StateStore store;
+    EditorBridge bridge;
+    int calls = 0;
+    float received = 0.0f;
+    bridge.add_handler("set_value", [&](const auto& payload) {
+        ++calls;
+        received = EditorBridge::get_float(payload, "value", -1.0f);
+        return EditorBridge::ok_response();
+    });
+    pulp::view::ScriptedUiSession session(
+        root, store, {.script_path = script_path,
+                      .enable_hot_reload = false,
+                      .enable_theme_reload = false});
+
+    CHECK_THROWS_AS(bridge.attach_native_runtime(session, ""),
+                    std::invalid_argument);
+    bridge.attach_native_runtime(session, "__testEditorDispatch");
+    std::string error;
+    REQUIRE(session.load(&error));
+    CHECK(calls == 1);
+    CHECK(received == Approx(0.25f));
+    REQUIRE(dynamic_cast<pulp::view::Label*>(
+                session.bridge()->widget("status")) != nullptr);
+
+    write_script(0.75f);
+    REQUIRE(session.reload(&error));
+    CHECK(calls == 2);
+    CHECK(received == Approx(0.75f));
+
+    bridge.detach_native_runtime(session, "__testEditorDispatch");
+    write_script(1.0f);
+    CHECK_FALSE(session.reload(&error));
+    CHECK(calls == 2);
+
+    fs::remove_all(temp_dir);
 }

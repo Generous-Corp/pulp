@@ -110,6 +110,18 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
                                                    backend, &had_provider);
     if (had_provider) return via_provider;
 
+    if (backend == ScreenshotBackend::gpu) {
+#ifdef PULP_VIEW_HAS_GPU_CAPTURE
+        return render_to_png_gpu(root, width, height, scale);
+#else
+        // Some Web/WAM targets compile this portable Skia raster TU without
+        // linking screenshot_gpu.cpp.  An explicit GPU request must remain
+        // honest in those builds: return no bytes instead of either creating
+        // an undefined reference or silently painting through CPU Skia.
+        return {};
+#endif
+    }
+
     // The only built-in non-Apple backend is Skia raster; coregraphics is
     // Apple-only, so any requested backend maps to the Skia path here.
     uint32_t pw = 0, ph = 0;

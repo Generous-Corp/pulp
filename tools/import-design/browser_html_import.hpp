@@ -32,6 +32,7 @@ struct BrowserHtmlImportRequest {
     /// See BrowserCaptureIrOptions::native_panel_lowering — off by default
     /// because the capture is the A-side of the A/B, not a legacy path.
     bool native_panel_lowering = false;
+    bool materialized_canvas_composition = false;
 };
 
 struct BrowserHtmlNotApplicable {};

@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <system_error>
+#include <unordered_set>
 
 namespace pulp::import_design {
 
@@ -45,6 +47,23 @@ std::optional<float> strict_finite_float(std::string_view text) {
     } catch (const std::exception&) {
         return std::nullopt;
     }
+}
+
+std::string portable_source_file(std::string_view source_file) {
+    if (source_file.empty()) return {};
+
+    // Network provenance is already portable and should remain descriptive.
+    const auto scheme = source_file.find("://");
+    if (scheme != std::string_view::npos) return std::string(source_file);
+
+    const fs::path path(source_file);
+    if (!path.is_absolute()) return path.generic_string();
+
+    // DesignIR is packaged into relocatable SDK/product artifacts.  Retaining
+    // a developer-machine absolute path leaks local topology and makes the
+    // generated artifact fail the portability scanner; the leaf still gives
+    // useful source provenance without coupling runtime bytes to the importer.
+    return path.filename().generic_string();
 }
 
 double number_member(const choc::value::ValueView& object,
@@ -1043,8 +1062,9 @@ bool validate_interaction_report(
         const auto action = actions[static_cast<int>(index)];
         const auto name = string_member(action, "action");
         const bool allowed =
-            name == "click" || name == "type" || name == "wait-for" ||
-            name == "wait-ms";
+            name == "click" || name == "context-click" ||
+            name == "dispatch-event" || name == "type" ||
+            name == "wait-for" || name == "wait-ms";
         if (!action.isObject() || !allowed ||
             string_member(action, "status") != "completed" ||
             action.hasObjectMember("text") ||
@@ -1353,13 +1373,241 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         }
     }
 
+    if (options.native_panel_lowering &&
+        options.materialized_canvas_composition) {
+        result.error =
+            "native panel lowering and materialized canvas composition are "
+            "mutually exclusive";
+        return result;
+    }
+
     DesignIR ir;
     ir.source = options.source;
-    ir.source_file = options.source_file;
+    ir.source_file = portable_source_file(options.source_file);
     ir.capture_method = "chromium-cdp";
     ir.source_adapter = "browser-capture";
     ir.source_version = "pulp-browser-capture-v1";
     ir.asset_manifest.assets.push_back(std::move(backing));
+    struct CapturedCanvasLayer {
+        std::string asset_id;
+        float left = 0.0f;
+        float top = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+    std::vector<CapturedCanvasLayer> captured_canvas_layers;
+    std::optional<std::string> chrome_asset_id;
+    std::optional<std::string> canvas_composite_asset_id;
+    std::unordered_map<int, std::string> captured_element_assets;
+    std::unordered_set<std::string> captured_asset_ids{
+        "reference:browser"};
+    constexpr std::uint64_t kMaximumCapturedCanvasPixels =
+        64ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t kMaximumCapturedCanvases = 32;
+    std::uint64_t captured_canvas_pixels = 0;
+    std::size_t captured_canvas_count = 0;
+    if (envelope.hasObjectMember("assets") && envelope["assets"].isArray()) {
+        const auto assets = envelope["assets"];
+        for (uint32_t i = 0; i < assets.size(); ++i) {
+            const auto asset = assets[static_cast<int>(i)];
+            if (asset.isObject() &&
+                string_member(asset, "kind") == "chrome-screenshot") {
+                if (chrome_asset_id) {
+                    result.error =
+                        "browser capture has duplicate chrome screenshots";
+                    return result;
+                }
+                const auto id = string_member(asset, "id");
+                const auto path = string_member(asset, "path");
+                const auto mime = string_member(asset, "mime_type");
+                const double width = number_member(asset, "width_px", -1.0);
+                const double height = number_member(asset, "height_px", -1.0);
+                if (id.empty() || path.empty() || mime != "image/png" ||
+                    !std::isfinite(width) || std::trunc(width) != width ||
+                    width != logical_width * dpr ||
+                    !std::isfinite(height) || std::trunc(height) != height ||
+                    height != logical_height * dpr) {
+                    result.error =
+                        "browser chrome screenshot metadata is invalid";
+                    return result;
+                }
+                auto local = contained_sidecar(
+                    envelope_path, path, result.error);
+                if (!local) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*local) != hash) {
+                    result.error =
+                        "browser chrome PNG hash does not match capture envelope";
+                    return result;
+                }
+                if (!validate_png_header(
+                        *local, static_cast<int>(width),
+                        static_cast<int>(height), result.error))
+                    return result;
+                IRAssetRef chrome;
+                chrome.asset_id = id;
+                chrome.original_uri = "pulp-capture:///" + path;
+                chrome.local_path = local->string();
+                chrome.content_hash = hash;
+                chrome.mime = mime;
+                chrome.width = static_cast<int>(width);
+                chrome.height = static_cast<int>(height);
+                ir.asset_manifest.assets.push_back(std::move(chrome));
+                chrome_asset_id = id;
+                continue;
+            }
+            if (asset.isObject() &&
+                string_member(asset, "kind") ==
+                    "canvas-composite-evidence") {
+                if (canvas_composite_asset_id) {
+                    result.error =
+                        "browser capture has duplicate canvas composite evidence";
+                    return result;
+                }
+                const auto id = string_member(asset, "id");
+                const auto path = string_member(asset, "path");
+                const auto mime = string_member(asset, "mime_type");
+                const double width = number_member(asset, "width_px", -1.0);
+                const double height = number_member(asset, "height_px", -1.0);
+                const double changed =
+                    number_member(asset, "changed_pixels", -1.0);
+                if (id.empty() || path.empty() || mime != "image/png" ||
+                    !std::isfinite(width) || std::trunc(width) != width ||
+                    width != logical_width * dpr ||
+                    !std::isfinite(height) || std::trunc(height) != height ||
+                    height != logical_height * dpr ||
+                    !std::isfinite(changed) || std::trunc(changed) != changed ||
+                    changed < 0.0 || changed > width * height ||
+                    !captured_asset_ids.emplace(id).second) {
+                    result.error =
+                        "browser canvas composite evidence metadata is invalid";
+                    return result;
+                }
+                auto local = contained_sidecar(
+                    envelope_path, path, result.error);
+                if (!local) return result;
+                const auto hash = string_member(asset, "sha256");
+                if (hash.size() != 64 || file_sha256(*local) != hash) {
+                    result.error =
+                        "browser canvas composite PNG hash does not match capture envelope";
+                    return result;
+                }
+                if (!validate_png_header(
+                        *local, static_cast<int>(width),
+                        static_cast<int>(height), result.error))
+                    return result;
+                IRAssetRef composite;
+                composite.asset_id = id;
+                composite.original_uri = "pulp-capture:///" + path;
+                composite.local_path = local->string();
+                composite.content_hash = hash;
+                composite.mime = mime;
+                composite.width = static_cast<int>(width);
+                composite.height = static_cast<int>(height);
+                ir.asset_manifest.assets.push_back(std::move(composite));
+                canvas_composite_asset_id = id;
+                continue;
+            }
+            if (!asset.isObject() ||
+                string_member(asset, "kind") != "canvas-snapshot")
+                continue;
+            const auto id = string_member(asset, "id");
+            const auto path = string_member(asset, "path");
+            const auto mime = string_member(asset, "mime_type");
+            const double backend = number_member(asset, "backend_node_id", -1.0);
+            const double width = number_member(asset, "width_px", -1.0);
+            const double height = number_member(asset, "height_px", -1.0);
+            if (id.empty() || path.empty() || mime != "image/png" ||
+                !std::isfinite(backend) || std::trunc(backend) != backend ||
+                backend <= 0.0 || backend > std::numeric_limits<int>::max() ||
+                !std::isfinite(width) || std::trunc(width) != width ||
+                width <= 0.0 || width > std::numeric_limits<int>::max() ||
+                !std::isfinite(height) || std::trunc(height) != height ||
+                height <= 0.0 || height > std::numeric_limits<int>::max()) {
+                result.error = "browser canvas asset metadata is invalid";
+                return result;
+            }
+            if (!captured_asset_ids.emplace(id).second) {
+                result.error =
+                    "browser capture has duplicate canvas asset identifiers";
+                return result;
+            }
+            if (++captured_canvas_count > kMaximumCapturedCanvases) {
+                result.error =
+                    "browser capture exceeds the canvas asset count limit";
+                return result;
+            }
+            const auto canvas_pixels =
+                static_cast<std::uint64_t>(width) *
+                static_cast<std::uint64_t>(height);
+            if (canvas_pixels > kMaximumCapturedCanvasPixels ||
+                captured_canvas_pixels >
+                    kMaximumCapturedCanvasPixels - canvas_pixels) {
+                result.error =
+                    "browser capture exceeds the canvas pixel safety limit";
+                return result;
+            }
+            captured_canvas_pixels += canvas_pixels;
+            auto local = contained_sidecar(envelope_path, path, result.error);
+            if (!local) return result;
+            const auto hash = string_member(asset, "sha256");
+            if (hash.size() != 64 || file_sha256(*local) != hash) {
+                result.error = "browser canvas PNG hash does not match capture envelope";
+                return result;
+            }
+            if (!validate_png_header(*local, static_cast<int>(width),
+                                     static_cast<int>(height), result.error))
+                return result;
+            const int backend_id = static_cast<int>(backend);
+            if (!captured_element_assets.emplace(backend_id, id).second) {
+                result.error = "browser capture has duplicate canvas backend node assets";
+                return result;
+            }
+            const auto bounds = object_member(asset, "bounds");
+            const double left = number_member(bounds, "left", NAN);
+            const double top = number_member(bounds, "top", NAN);
+            const double logical_canvas_width =
+                number_member(bounds, "width", NAN);
+            const double logical_canvas_height =
+                number_member(bounds, "height", NAN);
+            if (options.materialized_canvas_composition) {
+                if (!std::isfinite(left) || !std::isfinite(top) ||
+                    !std::isfinite(logical_canvas_width) ||
+                    !std::isfinite(logical_canvas_height) ||
+                    logical_canvas_width <= 0.0 ||
+                    logical_canvas_height <= 0.0 ||
+                    left < -logical_width || top < -logical_height ||
+                    left + logical_canvas_width > logical_width * 2.0 ||
+                    top + logical_canvas_height > logical_height * 2.0) {
+                    result.error =
+                        "browser canvas composition bounds are invalid";
+                    return result;
+                }
+                captured_canvas_layers.push_back({
+                    id, static_cast<float>(left), static_cast<float>(top),
+                    static_cast<float>(logical_canvas_width),
+                    static_cast<float>(logical_canvas_height)});
+            }
+            IRAssetRef canvas;
+            canvas.asset_id = id;
+            canvas.original_uri = "pulp-capture:///" + path;
+            canvas.local_path = local->string();
+            canvas.content_hash = hash;
+            canvas.mime = mime;
+            canvas.width = static_cast<int>(width);
+            canvas.height = static_cast<int>(height);
+            ir.asset_manifest.assets.push_back(std::move(canvas));
+        }
+    }
+    if (options.materialized_canvas_composition &&
+        (!chrome_asset_id || !canvas_composite_asset_id ||
+         captured_canvas_layers.empty())) {
+        result.error =
+            "materialized canvas composition requires one chrome screenshot "
+            "one canvas composite evidence image, and at least one bounded "
+            "canvas snapshot";
+        return result;
+    }
     if (!load_token_report(
             *token_report, ir,
             static_cast<int>(number_member(tokens, "color_count", -1.0)),
@@ -1402,6 +1650,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // nothing to draw FROM, and silently falling back to the photograph would
     // report a native panel that is a picture.
     const bool native_lowering = options.native_panel_lowering;
+    const bool materialized_composition =
+        options.materialized_canvas_composition;
     if (native_lowering && !captured_styles) {
         result.error =
             "native panel lowering requires a DOM snapshot with computed "
@@ -1411,7 +1661,67 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    if (native_lowering) {
+    if (materialized_composition) {
+        // Chromium's canvas-free chrome is the immutable paint authority.
+        // Executable canvas targets are layered over it and share the retained
+        // Canvas2D command streams authored by the materialized React realm.
+        // This keeps the accepted typography/layout pixel-exact without
+        // freezing dynamic analyzer/filter content into a screenshot.
+        ir.root.style.width = static_cast<float>(logical_width);
+        ir.root.style.height = static_cast<float>(logical_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+
+        const auto append_layer = [&](const std::string& name,
+                                      const std::string& anchor,
+                                      const std::string& asset_id,
+                                      float left, float top, float width,
+                                      float height, bool paint_authority) {
+            pulp::view::IRNode layer;
+            layer.type = paint_authority ? "image" : "canvas";
+            layer.name = name;
+            layer.style.position = "absolute";
+            layer.style.left = left;
+            layer.style.top = top;
+            layer.style.width = width;
+            layer.style.height = height;
+            layer.style.object_fit = "fill";
+            // Chromium's accepted chrome stays on screen. The CanvasWidgets
+            // above it are real executable paint layers: the
+            // materialized behavior runtime shares each live Canvas2D command
+            // stream with its stable DesignIR anchor.
+            layer.attributes["asset_ref"] = asset_id;
+            layer.attributes["materialized_role"] =
+                paint_authority ? "captured-paint-authority"
+                                : "executable-canvas-target";
+            layer.stable_anchor_id = anchor;
+            layer.anchor_strategy = "adapter";
+            layer.source_adapter = "browser-capture";
+            layer.source_version = "pulp-browser-capture-v1";
+            ir.root.children.push_back(std::move(layer));
+        };
+
+        append_layer(
+            "Accepted Chromium chrome", "browser:paint-authority", *chrome_asset_id,
+            0.0f, 0.0f, static_cast<float>(logical_width),
+            static_cast<float>(logical_height), true);
+        for (std::size_t i = 0; i < captured_canvas_layers.size(); ++i) {
+            const auto& canvas = captured_canvas_layers[i];
+            append_layer(
+                "Browser canvas " + std::to_string(i + 1),
+                "browser:canvas:" + std::to_string(i), canvas.asset_id,
+                canvas.left, canvas.top, canvas.width,
+                canvas.height, false);
+        }
+        ir.root.attributes["materialized_canvas_layers"] =
+            std::to_string(captured_canvas_layers.size());
+        ir.root.attributes["materialized_visual_authority"] =
+            "browser:chrome+native-canvases";
+        ir.root.attributes["materialized_chrome_diagnostic_asset"] =
+            *chrome_asset_id;
+        ir.root.attributes["materialized_canvas_validation_asset"] =
+            *canvas_composite_asset_id;
+    } else if (native_lowering) {
         // No backdrop at all. The panel is its nodes.
         ir.root.style.width = static_cast<float>(
             crop_to_surface ? surface_width : logical_width);
@@ -1458,11 +1768,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
     ir.root.source_version = "pulp-browser-capture-v1";
-    if (native_lowering) {
-        // The reference PNG stays in the asset manifest as the A/B oracle, but
-        // it is no longer what the root renders. Naming it `asset_ref` here
-        // would hand the manifest pass a root that reads as an image and put
-        // the photograph back on screen through the side door.
+    if (native_lowering || materialized_composition) {
+        // The reference stays a diagnostic-only root attribute. Native
+        // lowering draws the whole panel; materialized composition gives the
+        // reference its own explicitly ordered authority child. In neither
+        // case should the root itself become an implicit image.
         ir.root.attributes["browser_reference_asset"] = reference_id;
     } else {
         // The typed capture_asset_id is the render contract. asset_ref keeps
@@ -1489,7 +1799,13 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // belongs to rather than under it.
     if (native_lowering) {
         const auto tree = lower_painted_tree(
-            *captured_styles, control_dx, control_dy, ir.root);
+            *captured_styles, control_dx, control_dy, ir.root,
+            captured_element_assets,
+            // A captured canvas can interleave with pseudo-elements and DOM
+            // ancestors in Chromium's paint list. Preserve hierarchy for
+            // ordinary native panels; switch to the exact flat compositor only
+            // when executable canvas paint was captured as an image layer.
+            /*flatten_to_paint_order=*/!captured_element_assets.empty());
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =
@@ -1617,11 +1933,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     }
 
     int styled_controls = 0;
-    const int lowered = lower_semantic_controls(
-        *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
-        captured_styles ? &*captured_styles : nullptr, native_lowering,
-        styled_controls, undeclared_paint_boxes, result.error);
-    if (lowered < 0) return result;
+    int lowered = 0;
+    if (!materialized_composition) {
+        lowered = lower_semantic_controls(
+            *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
+            captured_styles ? &*captured_styles : nullptr, native_lowering,
+            styled_controls, undeclared_paint_boxes, result.error);
+        if (lowered < 0) return result;
+    }
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
     // Recorded so a capture that silently lost its solved appearance is
     // visible as a number rather than as a flat-looking panel nobody can

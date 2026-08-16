@@ -234,3 +234,21 @@ The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST
 inventory may reduce comment/private-detail churn only if its version and
 toolchain are pinned and mutation tests retain add/remove/change detection.
+
+Because the fingerprint covers full bytes, **editing only comments in a
+capability header is a surface change** and `--write` will refuse it twice
+before it succeeds. The declared fingerprint lives in the catalog source, not
+just the generated JSON, so the order is: edit the header, then replace every
+occurrence of the old digest in the owning `agent_capability_catalog_*.py`
+(one per binding, so a single header can hold a dozen copies), then raise
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`, then run `--write` once.
+
+Derive both counters from the CURRENT protected base every time. A capability
+transaction can land while yours waits in the merge queue, which takes the
+numbers you reserved and leaves your branch conflicting on exactly those two
+constant lines. Re-read them from main and regenerate rather than resolving
+that conflict by hand.
+
+Regenerate exactly once from final header bytes. Each `--write` appends a full
+entry to `contract-history.json`, so editing the header again after a
+successful `--write` leaves two entries for one logical change.

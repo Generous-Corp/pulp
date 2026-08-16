@@ -37,8 +37,8 @@ list(APPEND PULP_SDK_TARGETS
     pulp-sample-bank-manifest pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
-    pulp-osc pulp-canvas pulp-view-core pulp-view
-    pulp-standalone pulp-dsl pulp-native-components
+    pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
+    pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
@@ -52,6 +52,9 @@ endif()
 # so it is only required in the export set then.
 if(PULP_ENABLE_JS)
     list(APPEND PULP_SDK_TARGETS pulp-view-script)
+endif()
+if(PULP_BUILD_WEBVIEW)
+    list(APPEND PULP_SDK_TARGETS pulp-view-webview)
 endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
@@ -559,6 +562,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacosArchiveFloor.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPkgConfigImports.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkProvenance.cmake"

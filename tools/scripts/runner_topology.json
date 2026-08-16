@@ -58,6 +58,23 @@
       "severity": "required"
     },
     {
+      "variable": "PULP_ALIAS_RUNS_ON_JSON",
+      "purpose": "Required-check alias job for `macos`. It is the LAST job in a build.yml run and does one terminal jobs-API read, so starving it does not merely delay a check: the run never reaches a terminal state, holds this ref's concurrency group, and leaves the next push's run at status `pending` with zero jobs. The `linux` and `windows` aliases already report from the self-hosted preamble for that reason; this lane gives `macos` the same protection without borrowing preamble capacity when a dedicated alias pool exists.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-preamble"
+      ],
+      "unset_fallback": "ubuntu-latest",
+      "provisioning": "persistent",
+      "severity": "required",
+      "hosts": [
+        "pulp-preamble-m3",
+        "pulp-preamble-m5"
+      ]
+    },
+    {
       "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
       "purpose": "Cheap preamble/probe legs that gate the heavier build jobs.",
       "expect": [
@@ -77,19 +94,21 @@
     },
     {
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
-      "purpose": "macOS build overflow is deliberately disabled. The `local-only` sentinel keeps saturated required work on the fast local JIT pool; unsetting the variable would re-enable the hosted macos-15 fallback.",
-      "expect": "local-only",
+      "purpose": "macOS build overflow for saturated required work. Operative value is GitHub-hosted macos-15: overflow exists to ADD capacity when the local JIT pool is full, so pointing it at the same local labels would be a no-op under the exact saturation it must relieve. The `local-only` sentinel remains the documented off-switch (build.yml) for deliberately pinning overflow work to the local pool; it is a disable flag, not a label set.",
+      "expect": [
+        "macos-15"
+      ],
       "unset_fallback": [
         "macos-15"
       ],
       "require_explicit_value": true,
-      "provisioning": "ephemeral",
+      "provisioning": "github-hosted",
       "severity": "required",
       "hosts": []
     },
     {
       "variable": "PULP_RELEASE_MACOS_RUNS_ON_JSON",
-      "purpose": "release-cli arm64 macOS build lane. A black hole here blocks binary releases.",
+      "purpose": "release-cli arm64 macOS build lane. Deliberately UNSET: release-cli.yml resolves PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so leaving it unset routes releases to the self-hosted Studio/M5 pool that already backs the required `macos` gate. That IS the local-first state and is why the hosted pool starving release-cli for hours (2026-05-18, 2026-06-09) no longer blocks publishing; release-cli is tag-only and checkout runs clean:true, so it neither starves the gate nor inherits a warm dir. Setting this variable overrides that chain and is only correct for a proven dedicated release lane.",
       "expect": [
         "self-hosted",
         "macOS",
@@ -97,20 +116,36 @@
         "pulp-build-vm-release"
       ],
       "provisioning": "ephemeral",
+      "severity": "required",
+      "hosts": [],
+      "unset_fallback": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-gate-fast"
+      ]
+    },
+    {
+      "variable": "PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON",
+      "purpose": "release-cli Intel/universal macOS leg, and the LOWEST-priority fallback in the darwin-x64 chain (PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON -> PULP_RELEASE_MACOS_RUNS_ON_JSON -> this). Contracted to hosted macos-15 because darwin-x64 is CROSS-COMPILED on an Apple-Silicon runner rather than built on the native macos-15-intel image, which CPU-pegs and never shipped an artifact. The Mac mini native-Intel lane is PULP_NATIVE_INTEL_RUNS_ON_JSON and is a separate, advisory, still-unproven lane; it is not a substitute for this release leg.",
+      "expect": [
+        "macos-15"
+      ],
+      "provisioning": "github-hosted",
       "severity": "required",
       "hosts": []
     },
     {
-      "variable": "PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON",
-      "purpose": "release-cli Intel/universal macOS build lane.",
-      "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-build-vm-release"
+      "variable": "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
+      "purpose": "Control-plane Linux job for release-cli.yml and sign-and-release.yml (resolve/publish coordination, not a binary build). Resolution is PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON -> PULP_LOCAL_LINUX_RUNS_ON_JSON -> ubuntu-latest, so the Mac Pro Linux x64 lane is the next preference in the chain. Contracted hosted today: this job coordinates a release, and pointing it at the local lane is not a variable decision alone \u2014 the Mac Pro runners live in a RESTRICTED org runner group, so whether a given workflow may use them is governed by that group's workflow-ref restriction as well as by the selector. Set this only with a dispatch proof recorded for this specific consuming workflow.",
+      "expect": "ubuntu-latest",
+      "unset_fallback": [
+        "ubuntu-latest"
       ],
-      "provisioning": "ephemeral",
-      "severity": "required",
+      "provisioning": "github-hosted",
+      "severity": "advisory",
       "hosts": []
     },
     {
@@ -177,7 +212,7 @@
         "pulp-host-macpro"
       ],
       "provisioning": "ephemeral",
-        "trusted_workflow_only": true,
+      "trusted_workflow_only": true,
       "severity": "advisory",
       "supervisor": "proxmox-systemd",
       "hosts": [

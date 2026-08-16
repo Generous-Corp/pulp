@@ -221,6 +221,8 @@ modules:
       with IME, TreeView, ProgressBar, Tooltip. Web-compat JS prelude. FrameClock animation with
       motion tokens. Hot-reload, inspector, app framework, design export. Multi-window framework.
       Pointer events, gestures, Apple Pencil. JS engine abstraction (QuickJS/JSC/V8).
+      The view-native and standalone-native targets retain scripted Skia/Dawn UI
+      while excluding the optional view-webview/WebKit backend.
       Per-source design-import parsers under core/view/src/design_import_*.cpp feed the
       pulp import-design pipeline; design_import_designmd.cpp adds the Google DESIGN.md
       (Apache-2.0) reader, parsed via vendored yaml-cpp (MIT) — see

@@ -220,8 +220,20 @@ struct ProcessContext {
     /// bit means the corresponding value is only its compatibility default.
     /// Format adapters publish this mask from their host APIs; a host that does
     /// not supply transport leaves it empty.
-    /// Kept at the end of the data members so existing field offsets do not move.
+    /// Kept after the original data members so existing field offsets do not move.
     TransportValidity transport_validity{};
+
+    /// True when the adapter classified this block's `transport_jump` as the
+    /// expected backward move from a stable host loop end to its loop start.
+    /// `transport_jump` deliberately remains true: timeline-driven processors
+    /// still need to observe that discontinuity. Streaming effects can use this
+    /// narrower signal to preserve delay, overlap-add, and reverb history across
+    /// an ordinary cycle while continuing to clear it on a real seek.
+    ///
+    /// Classification is conservative. It is only true when the host supplied a
+    /// coherent loop range plus enough beat/tempo timing to predict the wrapped
+    /// position. Missing or inconsistent metadata leaves it false.
+    bool ordinary_loop_wrap = false;
 
     constexpr bool has_transport(TransportField field) const noexcept {
         return transport_validity.has(field);
@@ -246,6 +258,15 @@ struct ProcessContext {
     /// delay history, or tempo-grid caches before rendering the block.
     bool should_reset_dsp_state() const noexcept {
         return reset_requested || transport_jump;
+    }
+
+    /// True when continuous audio-stream history should be cleared. Unlike
+    /// `should_reset_dsp_state()`, an ordinary host loop wrap is not destructive:
+    /// audio is still arriving continuously, so clearing a delay line or WOLA
+    /// overlap state would manufacture a gap at every cycle boundary. Explicit
+    /// host resets always win, including when they coincide with a loop wrap.
+    bool should_reset_stream_history() const noexcept {
+        return reset_requested || (transport_jump && !ordinary_loop_wrap);
     }
 
     /// True when this block is not a normal input-driven render but the host is

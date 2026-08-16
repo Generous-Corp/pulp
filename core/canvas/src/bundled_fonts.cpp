@@ -31,6 +31,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(PULP_HAS_WOFF2_DECODER) && PULP_HAS_WOFF2_DECODER
+#include <woff2/decode.h>
+#endif
+
 #include "include/core/SkData.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontParameters.h"
@@ -614,15 +618,9 @@ bool is_font_registered(const std::string& family) {
 
 // WOFF2 runtime decoding.
 //
-// Pulp doesn't currently vendor Brotli or the Google `woff2` library,
-// and the prebuilt Skia we ship is configured without its WOFF2
-// converter exposed as a public symbol. That means the actual
-// decompression step is gated on `__has_include(<woff2/decode.h>)` —
-// if a downstream build vendors `external/woff2/` and links it into
-// `pulp-canvas`, the real path lights up automatically; otherwise the
-// surface stays at "structural-detect + fail cleanly", so callers can
-// distinguish "not a WOFF2 file" from
-// "WOFF2 file but no decoder linked" via `woff2_decoder_available()`.
+// Pulp compiles pinned Brotli + Google woff2 decoder sources directly into
+// pulp-canvas. The explicit build definition keeps reduced/non-Skia builds
+// fail-closed while avoiding a private static dependency in installed SDKs.
 //
 // WOFF2 file signature is the 4-byte tag 'wOF2' = 0x77_4F_46_32 read
 // big-endian at offset 0. See W3C WOFF2 §3, table 1.
@@ -630,8 +628,7 @@ namespace {
 constexpr std::uint32_t kWoff2Magic = 0x774F4632u; // 'wOF2'
 } // namespace
 
-#if __has_include(<woff2/decode.h>)
-#include <woff2/decode.h>
+#if defined(PULP_HAS_WOFF2_DECODER) && PULP_HAS_WOFF2_DECODER
 #define PULP_WOFF2_DECODER 1
 #else
 #define PULP_WOFF2_DECODER 0
@@ -650,7 +647,8 @@ bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
     // Null or too-short to hold the 4-byte signature → not a WOFF2
     // file at all. Reject before we even probe the decoder so that
     // truncated/garbage input returns false on every build.
-    if (!woff2_data || size < 4) return false;
+    constexpr std::size_t kMaxCompressed = 16u * 1024u * 1024u;
+    if (!woff2_data || size < 4 || size > kMaxCompressed) return false;
 
     const std::uint32_t magic =
         (static_cast<std::uint32_t>(woff2_data[0]) << 24)

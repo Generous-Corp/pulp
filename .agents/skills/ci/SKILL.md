@@ -123,6 +123,17 @@ fail on download, checksum, extraction, or executable discovery.  Do **not**
 convert a missing browser into a skipped fidelity test: that would let a PR
 claim source-to-native validation that never occurred.
 
+Browser-capture Node coverage has three distinct CTest entries. Keep the
+dependency-free unit aggregate separate from the real-Chromium integration
+file, whose serial browser cases have their own 600-second bound. The
+esbuild-backed materialized-runtime canonicalization test is registered only
+when `tools/import-design/jsx-runtime/node_modules/esbuild` exists, so the
+required Linux `build.yml` leg must run the locked `npm ci --prefix
+tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
+integration file back into the unit aggregate or remove that install step: the
+former exhausts the aggregate deadline before later tests run, while the latter
+turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
 
@@ -444,6 +455,44 @@ measured baseline as a must-stay-quiet case and will fail a tuning that
 re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
+
+### Gotcha: a `*_RUNS_ON_JSON` variable read WITHOUT `fromJSON` becomes one literal label
+
+Same silent-queue failure as below, but the black hole is created by the
+*workflow*, not by fleet drift — so the topology checker cannot see it. The lane
+reconciles green, every runner carries every contracted label, and the job still
+queues forever.
+
+The value of a `*_RUNS_ON_JSON` variable is a JSON **array**. Interpolating it
+straight into `runs-on:` does not expand it; GitHub takes the whole string as a
+**single label**:
+
+```
+labels: ["[\"self-hosted\",\"Linux\",\"X64\",\"pulp-build-linux-x64\",\"pulp-host-macpro\"]"]
+```
+
+No runner can ever carry a label whose text is a JSON array, so the job is
+queued, not failed. Found live 2026-08-16: setting `PULP_LOCAL_LINUX_RUNS_ON_JSON`
+left a dispatched `Enforce version & skill sync` job queued exactly like that
+while an **idle** Mac Pro runner carried all five of those labels.
+`version-skill-check.yml` and `vellum-freeze-check.yml` read the variable
+directly; `build.yml`, `nightly-intel.yml`, and `examples-validation.yml` wrap it
+in `fromJSON`. Both required gates are now wrapped too.
+
+Two rules when touching a `runs-on` that references one of these variables:
+
+- **Parse it.** `runs-on: ${{ fromJSON(...) }}`, never a bare interpolation.
+- **Keep every branch JSON.** Inside `fromJSON(...)` a bare `'ubuntu-latest'`
+  fails to parse and takes the gate down with it — write `'"ubuntu-latest"'`.
+
+`tools/scripts/test_resolve_linux_route.py` enforces both: one test sweeps every
+workflow for an unparsed selector, the other pins the JSON-quoted fallbacks.
+Diagnose a suspected instance by reading the queued job's labels — a one-element
+array containing bracket characters is conclusive:
+
+```bash
+ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
+```
 
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
@@ -1006,7 +1055,8 @@ uses, or the golden warms a cache the real jobs never touch.
   `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
-- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has both Linux and macOS receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for the two receipt artifacts before changing `codecov.yml`.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, and Python-tools receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for all three receipt artifacts before changing `codecov.yml`.
+- **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
   path-scoped, advisory four-leg matrix builds production-stripped plug-ins on
@@ -1830,14 +1880,14 @@ supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
 The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
-~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 150-min job
+~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 210-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
 staleness watchdog keys off a *successful run*, not per-OS Codecov flags — so a
 red Windows leg would otherwise keep a healthy full run red forever. **The
 subtle trap (verified by canary):** job-level `continue-on-error` does NOT
 neutralize a `timeout-minutes` *cancellation* — a cancelled job still makes the
 run conclude `cancelled`. It DOES neutralize a normal job *failure*. So the
-coverage suite step self-terminates at an **internal budget (135 min) below the
+coverage suite step self-terminates at an **internal budget (180 min) below the
 job cap**, turning the would-be cancellation into a normal non-zero exit that
 the job-level `continue-on-error: matrix.os=='windows'` then absorbs → the run
 concludes `success`. Don't "simplify" this to bare `continue-on-error`; it will
@@ -1845,7 +1895,7 @@ silently stop closing the watchdog. **And the watchdog that enforces the budget
 must separate its steps with `;`, NOT `&&`** — if the kill is `&&`-gated behind
 a `: > marker` write (which can fail on a Windows `RUNNER_TEMP` backslash path),
 a failed marker write short-circuits the chain and the suite is never killed,
-so the job hits the 150-min cap and is *cancelled* anyway. The kill is
+so the job hits the 210-min cap and is *cancelled* anyway. The kill is
 mandatory; the marker is best-effort (cleanup of any partial Cobertura also
 triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
@@ -2835,6 +2885,66 @@ cost or safety fence—Luna must still return the exact `needs_sol_fix`
 classification before the single networkless Sol-medium repair step can run,
 and the GitHub-hosted publisher independently revalidates the exact head,
 assignment epoch, and blocker fingerprint before applying any patch.
+
+**The recovery worker has two model lanes: Codex primary, Claude fallback.**
+Codex Luna/low triage and Sol/medium repair run first and are unchanged. Each
+now carries `continue-on-error` so that a failing model does not abort the job
+before the bounded fallback can run. The fallback is deliberately *reactive*,
+gated on `steps.triage.outcome == 'failure'` and
+`steps.repair.outcome == 'failure'`, because **a Subrouter lease mints
+successfully even when its account is out of quota** — exhaustion only surfaces
+when the model actually runs, so no preflight probe can detect it. This was
+proven on 2026-08-16 when all five Codex accounts hit their weekly limit and the
+recovery canary failed 44 seconds into `luna-triage` with every fence, lease,
+and teardown behaving correctly.
+
+Four rules govern the fallback lane:
+
+- **Mint it model-unbound.** Subrouter rejects any request whose body model
+  differs from a bound lease, and Claude Code issues background calls on a small
+  fast model. Send `provider:"claude"` with no `model` field; an empty model
+  short-circuits that validation, but an empty provider *and* empty model
+  defaults the lease back to Codex.
+- **Consume the lease through the environment.** A Claude lease returns
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, and
+  `CLOUDMUX_SUBROUTER_LEASE_TOKEN`. The base URL is bare — only Codex, Kimi, and
+  ZAI leases get path suffixes. There is no `--base-url` flag.
+- **Keep the context deliberately minimal.** A default Claude Code launch loads
+  plugin and MCP context that dwarfs the bounded recovery prompt (roughly 60k
+  cache-creation tokens versus 35k for an isolated launch), so the lane pins
+  `--strict-mcp-config`, an empty `--mcp-config`, `--settings
+  '{"disableAllHooks":true}'`, `--no-session-persistence`, and an isolated
+  `CLAUDE_CONFIG_DIR`.
+- **Install the platform package by name.** `@anthropic-ai/claude-code`'s
+  `bin/claude` is a wrapper that resolves its native binary during
+  `postinstall`, and the lane installs with `--ignore-scripts`, so the base
+  package alone yields `claude native binary not installed` — this failed a live
+  recovery job on 2026-08-16, 15 seconds in. Install
+  `@anthropic-ai/claude-code-darwin-arm64` explicitly, integrity-pin it like the
+  base package, and `ln -sf` the real binary onto `bin/claude`. Do **not** fix
+  this by dropping `--ignore-scripts`: the install runs on a disposable runner
+  moments before it holds a broker lease, so a script-free install is the point.
+  Codex's own install is not a template here — it ships its platform binary
+  differently.
+- **Strip `$schema` before passing a schema to `--json-schema`.** The CLI's
+  validator cannot resolve `"$schema": "https://json-schema.org/draft/2020-12/schema"`
+  and rejects the committed file verbatim with `no schema with key or ref` —
+  this failed a live recovery job on 2026-08-16. Pass
+  `jq -c 'del(."$schema")' <file>`; every constraint is preserved and the fenced
+  validator re-checks the payload against the full schema afterwards. Note the
+  trap that hid it: a hand-written inline schema in a local probe has no
+  `$schema` key, so rehearsing with a lookalike passes while the real artifact
+  fails. Rehearse with the committed file.
+- **Re-validate the output locally.** `claude --json-schema` validates upstream
+  but leaves no trusted local proof, so
+  `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That
+  path is inside the `FORBIDDEN_PREFIXES` fence on purpose: a validator living
+  outside the fence could be weakened by the very repair model it constrains.
+
+If both lanes fail the job errors rather than reporting a green tick with no
+classification, and the publisher's commit trailers record the lane that
+actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
+trail never misattributes a repair.
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
@@ -3881,7 +3991,7 @@ the correct fix; they bound runs regardless of `cancel-in-progress`.
 `tools/scripts/classify_changes.py --mode=diff`, outputs
 `native_build_required`). Skip-safe PRs (docs / planning `*.md` only —
 classifier fails *closed*, any uncertainty → `true`) skip the
-`coverage` matrix (150 min/leg); docs-only PRs also skip
+`coverage` matrix (210 min/leg); docs-only PRs also skip
 `android-kotlin-coverage`. The Android Kotlin lane is additionally
 guarded with `github.event_name != 'pull_request'`, so it never allocates
 a runner on PRs. No coverage runner is allocated on a docs PR.

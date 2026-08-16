@@ -350,6 +350,17 @@ if(PULP_HAS_VST3)
 endif()
 
 if(PULP_HAS_VST3)
+    # The in-process VST3 host must publish a continuous sample timeline. A
+    # stationary projectTimeSamples value while kPlaying is set is decoded by
+    # conforming plug-ins as a transport jump on every block.
+    add_executable(pulp-test-vst3-host-process-clock
+        test_vst3_host_process_clock.cpp)
+    target_link_libraries(pulp-test-vst3-host-process-clock
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-vst3-host-process-clock
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-vst3-host-process-clock)
+
     # Host-side VST3 separated-controller state sync
     # (pulp::host::detail::vst3_serialize_state / vst3_restore_state). The fakes
     # inherit the SDK's Component / EditController; vsteditcontroller.cpp is

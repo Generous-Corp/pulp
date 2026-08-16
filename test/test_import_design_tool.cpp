@@ -3377,7 +3377,8 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     const auto r = run_import_design({"--from", "html", "--file", input.string(),
                                       "--emit", "ir-json", "--output", output.string(),
                                       "--screenshot-backend", "skia", "--strict-fidelity",
-                                      "--fail-below", "85"});
+                                      "--fail-below", "85"},
+                                     120000);
     REQUIRE_FALSE(r.timed_out);
     INFO(r.stdout_output << "\n" << r.stderr_output);
     CHECK(r.exit_code == 0);

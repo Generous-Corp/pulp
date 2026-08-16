@@ -17,10 +17,21 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
+
+#if PULP_HAS_SKIA
+#include "include/core/SkString.h"
+#include "include/core/SkTypeface.h"
+#endif
 
 using pulp::canvas::register_font_woff2;
 using pulp::canvas::woff2_decoder_available;
@@ -33,6 +44,13 @@ constexpr std::array<std::uint8_t, 4> kWoff2Magic = {0x77, 0x4F, 0x46, 0x32};
 // TrueType (sfnt) magic — definitely NOT WOFF2. register_font_woff2
 // must reject these even though they're a perfectly valid sfnt.
 constexpr std::array<std::uint8_t, 4> kSfntMagic  = {0x00, 0x01, 0x00, 0x00};
+
+std::vector<std::uint8_t> read_fixture(const char* path) {
+    std::ifstream input(path, std::ios::binary);
+    REQUIRE(input.good());
+    return {std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()};
+}
 
 } // namespace
 
@@ -97,6 +115,13 @@ TEST_CASE("register_font_woff2: exact magic without header payload is rejected",
     REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Tiny WOFF2"));
 }
 
+TEST_CASE("register_font_woff2: compressed input is bounded before decoding",
+          "[font][woff2][materialized-import]") {
+    std::vector<std::uint8_t> bytes(16u * 1024u * 1024u + 1u, 0);
+    std::copy(kWoff2Magic.begin(), kWoff2Magic.end(), bytes.begin());
+    REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Oversized"));
+}
+
 TEST_CASE("register_font_woff2: valid magic + truncated payload is rejected",
           "[font][woff2][issue-2163]") {
     // The magic is correct so the structural pre-check passes, but
@@ -132,3 +157,72 @@ TEST_CASE("woff2_decoder_available: returns a stable bool",
     not_woff2.resize(32, 0);
     REQUIRE_FALSE(register_font_woff2(not_woff2.data(), not_woff2.size(), ""));
 }
+
+#if PULP_HAS_SKIA
+TEST_CASE("captured WOFF2 bytes decode and register under their CSS family",
+          "[font][woff2][materialized-import]") {
+    REQUIRE(woff2_decoder_available());
+    std::ifstream input(PULP_TEST_WOFF2_FIXTURE, std::ios::binary);
+    REQUIRE(input.good());
+    const std::vector<std::uint8_t> bytes{
+        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    REQUIRE(bytes.size() > 4);
+    REQUIRE(register_font_woff2(bytes.data(), bytes.size(),
+                                "Pulp Captured Inter"));
+    REQUIRE(pulp::canvas::is_font_registered("Pulp Captured Inter"));
+}
+
+TEST_CASE("materialized fonts resolve exact captured faces across families",
+          "[font][materialized-import][skia]") {
+    struct Fixture {
+        const char* path;
+        const char* runtime_family;
+        const char* postscript_name;
+    };
+    const std::array fixtures{
+        Fixture{PULP_TEST_INTER_FIXTURE,
+                "Inter [pulp-materialized-asset-test-inter]", "Inter-Regular"},
+        Fixture{PULP_TEST_JOST_FIXTURE,
+                "Jost [pulp-materialized-asset-test-jost]", "Jost-Regular"},
+        Fixture{PULP_TEST_JETBRAINS_FIXTURE,
+                "JetBrains Mono [pulp-materialized-asset-test-jetbrains]",
+                "JetBrainsMono-Regular"},
+    };
+
+    std::array<float, fixtures.size()> widths{};
+    for (std::size_t i = 0; i < fixtures.size(); ++i) {
+        const auto bytes = read_fixture(fixtures[i].path);
+        REQUIRE_FALSE(bytes.empty());
+        REQUIRE(pulp::canvas::register_font(
+            bytes.data(), bytes.size(), fixtures[i].runtime_family));
+
+        const auto face = pulp::canvas::match_registered_typeface(
+            fixtures[i].runtime_family, SkFontStyle::Normal());
+        REQUIRE(face);
+        SkString postscript;
+        REQUIRE(face->getPostScriptName(&postscript));
+        CHECK(std::string(postscript.c_str(), postscript.size()) ==
+              fixtures[i].postscript_name);
+
+        const std::string family_stack =
+            std::string{"\""} + fixtures[i].runtime_family + "\", sans-serif";
+        CHECK(pulp::canvas::resolved_face_identity(family_stack, 400.0f) ==
+              fixtures[i].postscript_name);
+
+        const auto shaped = pulp::canvas::global_text_shaper().prepare(
+            "Ill1 Spectral", family_stack, 14.0f, 400, 0, 0.8f);
+        REQUIRE(shaped.metrics_are_real());
+        REQUIRE(shaped.total_width() > 0.0f);
+        REQUIRE(shaped.ascent() > 0.0f);
+        REQUIRE(shaped.descent() >= 0.0f);
+        widths[i] = shaped.total_width();
+    }
+
+    // These faces have intentionally different glyph designs and advances.
+    // Equal measurements would strongly indicate that the shaper silently
+    // fell back to one platform face instead of consuming each captured font.
+    CHECK(std::abs(widths[0] - widths[1]) > 0.5f);
+    CHECK(std::abs(widths[0] - widths[2]) > 0.5f);
+    CHECK(std::abs(widths[1] - widths[2]) > 0.5f);
+}
+#endif

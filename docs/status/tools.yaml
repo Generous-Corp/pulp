@@ -359,6 +359,17 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: materialized-runtime-transform
+    path: tools/import-design/jsx-runtime/materialized-runtime-transform.mjs
+    category: design-import
+    use_when: Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority.
+    invocation: node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs --help
+    inputs: A browser-capture materialized-document.json, its DesignIR, and an optional product-owned runtime prelude.
+    outputs: A self-contained native @pulp/react behavior bundle for ScriptedUiSession.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   # ── Import roundtrip lanes — end-to-end per source ────────────────────────
   - name: roundtrip-figma
     path: tools/import-validation/figma-roundtrip.sh

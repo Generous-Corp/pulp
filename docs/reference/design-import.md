@@ -40,7 +40,7 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
 | `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides path env, mode, managed, and system selection. | — |
-| `--browser-interactions <json>` | Apply a versioned bounded click/type/wait plan before browser evidence capture. | initial state |
+| `--browser-interactions <json>` | Apply a versioned bounded click/context-click/type/wait plan before browser evidence capture. | initial state |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. | off |
 | `--allow-browser-network` | Permit only the source document's declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
@@ -69,8 +69,10 @@ Either `--file` or `--url` is required (or `--directory` for `--detect-only`). W
 
 For a secondary prototype screen, pass
 `--browser-interactions <plan.json>`. The versioned
-`pulp-browser-interactions-v1` document accepts only bounded `click`, `type`,
-`wait-for`, and `wait-ms` actions. Selectors and action results are saved in
+`pulp-browser-interactions-v1` document accepts only bounded `click`,
+`context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
+dispatches a real secondary-button press/release at an exposed point so a
+captured context menu follows the same path as a user gesture. Selectors and action results are saved in
 the capture evidence; typed text is represented only by its length, with
 neither plaintext nor a per-action text hash in the interaction report. Typed
 text remains rendered page state and may appear in screenshots, DOM/semantic

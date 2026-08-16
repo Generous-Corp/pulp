@@ -109,7 +109,64 @@ void BridgeRegistrars::register_layout_grid_api(WidgetBridge& self) {
 void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "setFlex", [&self](choc::javascript::ArgumentList args) {
+    // Preserve every CSS dimension unit that FlexStyle::Dimension can carry.
+    // Viewport-relative units must remain symbolic until Yoga layout time:
+    // resolving `90vh` once in JavaScript makes a subsequently resized plugin
+    // retain the stale pixel cap. Percent also stays typed so Yoga can resolve
+    // it against the owning containing block rather than the root viewport.
+    const auto read_dimension = [](choc::javascript::ArgumentList args,
+                                   Dimension& dimension,
+                                   float& scalar,
+                                   bool allow_auto) {
+        auto string_value = args.get<std::string>(2, "");
+        if (!string_value.empty()) {
+            const auto first = string_value.find_first_not_of(" \t\r\n");
+            const auto last = string_value.find_last_not_of(" \t\r\n");
+            if (first == std::string::npos) return false;
+            string_value = string_value.substr(first, last - first + 1);
+            if (string_value == "auto") {
+                if (!allow_auto) return false;
+                dimension = {0.0f, DimensionUnit::auto_};
+                scalar = 0.0f;
+                return true;
+            }
+            size_t consumed = 0;
+            double parsed_value = 0.0;
+            try {
+                parsed_value = std::stod(string_value, &consumed);
+            } catch (...) {
+                return false;
+            }
+            constexpr auto kFloatMax =
+                static_cast<double>(std::numeric_limits<float>::max());
+            if (!std::isfinite(parsed_value) ||
+                std::abs(parsed_value) > kFloatMax) return false;
+            auto suffix = string_value.substr(consumed);
+            const auto suffix_first = suffix.find_first_not_of(" \t\r\n");
+            const auto suffix_last = suffix.find_last_not_of(" \t\r\n");
+            suffix = suffix_first == std::string::npos
+                ? std::string{}
+                : suffix.substr(suffix_first, suffix_last - suffix_first + 1);
+            if (suffix != "" && suffix != "px" && suffix != "%" &&
+                suffix != "vw" && suffix != "vh" && suffix != "vmin" &&
+                suffix != "vmax") return false;
+            const auto parsed = Dimension::parse(string_value);
+            if (!std::isfinite(parsed.value)) return false;
+            dimension = parsed;
+            scalar = parsed.unit == DimensionUnit::px ? parsed.value : 0.0f;
+            return true;
+        }
+        const auto number_value = args.get<double>(2, 0.0);
+        constexpr auto kFloatMax =
+            static_cast<double>(std::numeric_limits<float>::max());
+        if (!std::isfinite(number_value) ||
+            std::abs(number_value) > kFloatMax) return false;
+        dimension = {static_cast<float>(number_value), DimensionUnit::px};
+        scalar = static_cast<float>(number_value);
+        return true;
+    };
+
+    register_bridge_function(api, "setFlex", [&self, read_dimension](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
         View* v = id.empty() ? &self.root_ : self.widget(id);
@@ -247,16 +304,8 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
                 f.dim_width.unit = pulp::view::DimensionUnit::auto_;
                 f.dim_width.value = 0;
                 f.preferred_width = 0;
-            } else if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_width.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_width.unit = pulp::view::DimensionUnit::percent;
-                    f.preferred_width = 0;  // disambiguate: percent path
-                } catch (...) { /* keep current state on parse fail */ }
             } else {
-                f.preferred_width = (float)val;
-                f.dim_width.value = (float)val;
-                f.dim_width.unit = pulp::view::DimensionUnit::px;
+                read_dimension(args, f.dim_width, f.preferred_width, false);
             }
         }
         else if (key == "height") {
@@ -265,77 +314,25 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
                 f.dim_height.unit = pulp::view::DimensionUnit::auto_;
                 f.dim_height.value = 0;
                 f.preferred_height = 0;
-            } else if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_height.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_height.unit = pulp::view::DimensionUnit::percent;
-                    f.preferred_height = 0;
-                } catch (...) { /* keep current state on parse fail */ }
             } else {
-                f.preferred_height = (float)val;
-                f.dim_height.value = (float)val;
-                f.dim_height.unit = pulp::view::DimensionUnit::px;
+                read_dimension(args, f.dim_height, f.preferred_height, false);
             }
         }
         // min/max width/height accept either a number ("100" -> px) or a
-        // percentage string ("50%" -> percent of parent). Units are stored on
-        // FlexStyle::dim_*; yoga_layout.cpp dispatches to Yoga's percent path
-        // or the existing px API.
+        // typed CSS dimension. Units are stored on FlexStyle::dim_*; Yoga keeps
+        // percentages relative to their containing block and resolves
+        // viewport units from the live root bounds on each layout pass.
         else if (key == "min_width") {
-            auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_min_width.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_min_width.unit = pulp::view::DimensionUnit::percent;
-                    f.min_width = 0;
-                } catch (...) { /* keep current */ }
-            } else {
-                f.min_width = (float)val;
-                f.dim_min_width.value = (float)val;
-                f.dim_min_width.unit = pulp::view::DimensionUnit::px;
-            }
+            read_dimension(args, f.dim_min_width, f.min_width, false);
         }
         else if (key == "min_height") {
-            auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_min_height.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_min_height.unit = pulp::view::DimensionUnit::percent;
-                    f.min_height = 0;
-                } catch (...) { /* keep current */ }
-            } else {
-                f.min_height = (float)val;
-                f.dim_min_height.value = (float)val;
-                f.dim_min_height.unit = pulp::view::DimensionUnit::px;
-            }
+            read_dimension(args, f.dim_min_height, f.min_height, false);
         }
         else if (key == "max_width") {
-            auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_max_width.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_max_width.unit = pulp::view::DimensionUnit::percent;
-                    f.max_width = 0;
-                } catch (...) { /* keep current */ }
-            } else {
-                f.max_width = (float)val;
-                f.dim_max_width.value = (float)val;
-                f.dim_max_width.unit = pulp::view::DimensionUnit::px;
-            }
+            read_dimension(args, f.dim_max_width, f.max_width, false);
         }
         else if (key == "max_height") {
-            auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
-                try {
-                    f.dim_max_height.value = std::stof(sval.substr(0, sval.size() - 1));
-                    f.dim_max_height.unit = pulp::view::DimensionUnit::percent;
-                    f.max_height = 0;
-                } catch (...) { /* keep current */ }
-            } else {
-                f.max_height = (float)val;
-                f.dim_max_height.value = (float)val;
-                f.dim_max_height.unit = pulp::view::DimensionUnit::px;
-            }
+            read_dimension(args, f.dim_max_height, f.max_height, false);
         }
         // Aspect ratio is the width/height ratio. Any non-finite or
         // non-positive value clears the slot, matching CSS `aspect-ratio: auto`;
@@ -657,15 +654,16 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
 
 
     // getLayoutRect(id) -> {x, y, width, height, top, right, bottom, left}
-    // Returns layout-resolved bounds in root-relative coordinates.
+    // Returns the presentation-space AABB in root viewport coordinates,
+    // matching DOM getBoundingClientRect().
     //
-    // Force a fresh layout pass before reading bounds. Spectr's editor and any
+    // Force a fresh layout pass before reading bounds. Imported editors and any
     // React-imported tree call this via
     // Element.getBoundingClientRect() in mount-time effects to size
     // a canvas / SVG / drawing surface. If the JS commit that mounted
     // the React tree hasn't yet been followed by a yoga_layout pass,
     // the bounds read back as the View's stale default (0×0) — which
-    // gates the entire canvas paint pipeline (drawSpectrum/drawRulers
+    // gates the entire canvas paint pipeline (for example analyzer/ruler draws
     // bail at getBoundingClientRect == 0). Forcing layout here closes
     // that timing gap. Layout is internally idempotent if nothing has
     // changed, so the cost is bounded to one tree walk per call.
@@ -674,6 +672,18 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
         self.root_.layout_children();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_rect_value(v);
+    });
+
+    // getLayoutBoxMetrics(id) -> {localX, localY, offsetWidth, offsetHeight,
+    // clientWidth, clientHeight, border*Width, margin*}. These values remain in the view's
+    // untransformed local coordinate space. offset*/client* match the DOM box
+    // model; localX/localY are an importer-only extension used to translate
+    // owner-relative captured evidence onto generated native paint children.
+    register_bridge_function(api, "getLayoutBoxMetrics", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        self.root_.layout_children();
+        View* v = id.empty() ? &self.root_ : self.widget(id);
+        return make_layout_box_metrics_value(v);
     });
 
 

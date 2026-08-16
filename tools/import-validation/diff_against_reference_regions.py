@@ -49,16 +49,19 @@ SPECTR_REGIONS = {
     "title_chrome": {
         "x": 0.00, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.80,
+        "edge_threshold": 0.42,
         "notes": "SPECTR title + ZOOMABLE FILTER BANK",
     },
     "mode_toggles": {
         "x": 0.30, "y": 0.00, "w": 0.40, "h": 0.05,
         "threshold": 0.75,
+        "edge_threshold": 0.42,
         "notes": "LIVE / PRECISION / IIR / FFT / HYBRID buttons",
     },
     "band_dropdown": {
         "x": 0.70, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.75,
+        "edge_threshold": 0.42,
         "notes": "64 bands dropdown + zoom indicator",
     },
     "central_canvas": {
@@ -69,6 +72,7 @@ SPECTR_REGIONS = {
     "bottom_toolbar": {
         "x": 0.00, "y": 0.90, "w": 1.00, "h": 0.10,
         "threshold": 0.75,
+        "edge_threshold": 0.42,
         "notes": "CLEAR/SCULPT/PEAK/PRESETS/SNAPSHOT/A/B + morph slider",
     },
 }
@@ -127,6 +131,32 @@ def mean_pixel_distance(a: Image.Image, b: Image.Image) -> float:
     return 1.0 - (avg / 441.7)
 
 
+def edge_overlap(a: Image.Image, b: Image.Image) -> float:
+    """Return a tolerant edge IoU for layout-sensitive chrome.
+
+    Histogram and mean-pixel scores are intentionally forgiving of raster
+    differences, but that also lets vertically shifted labels, clipped copy,
+    and missing icons pass inside a mostly-dark toolbar.  Edge overlap makes
+    those geometric failures visible while a one-pixel dilation keeps Skia
+    and Chromium antialiasing differences from becoming false failures.
+    """
+    Image = _image_module()
+    from PIL import ImageFilter
+
+    def mask(img: Image.Image) -> list[bool]:
+        edges = img.convert("L").filter(ImageFilter.FIND_EDGES)
+        edges = edges.filter(ImageFilter.MaxFilter(3))
+        return [value >= 24 for value in edges.getdata()]
+
+    ma = mask(a)
+    mb = mask(b if b.size == a.size else b.resize(a.size, Image.Resampling.LANCZOS))
+    union = sum(x or y for x, y in zip(ma, mb))
+    if union == 0:
+        return 1.0
+    intersection = sum(x and y for x, y in zip(ma, mb))
+    return intersection / union
+
+
 def is_blank(img: Image.Image, dark_threshold: int = 30) -> bool:
     pixels = list(img.getdata())
     if not pixels:
@@ -142,19 +172,30 @@ def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) ->
     cand_crop = crop_region(cand_full, region)
     hist = histogram_similarity(ref_crop, cand_crop)
     pix = mean_pixel_distance(ref_crop, cand_crop)
+    edge_threshold = region.get("edge_threshold")
+    edges = edge_overlap(ref_crop, cand_crop) if edge_threshold is not None else 1.0
     score = (hist * 0.4) + (pix * 0.6)
     blank_cand = is_blank(cand_crop)
     blank_ref = is_blank(ref_crop)
     threshold = region.get("threshold", 0.75)
-    passed = score >= threshold and not blank_cand
+    # A deliberately empty/dark gutter is valid when the reference is empty
+    # too.  The safety gate exists to catch missing candidate content, not to
+    # reject matching negative space around a faithfully imported panel.
+    blank_mismatch = blank_cand and not blank_ref
+    edge_passed = edge_threshold is None or edges >= edge_threshold
+    passed = score >= threshold and edge_passed and not blank_mismatch
     return {
         "score": round(score, 4),
         "histogram_similarity": round(hist, 4),
         "pixel_similarity": round(pix, 4),
+        "edge_overlap": round(edges, 4),
         "threshold": threshold,
+        "edge_threshold": edge_threshold,
+        "edge_passed": edge_passed,
         "passed": passed,
         "blank_candidate": blank_cand,
         "blank_reference": blank_ref,
+        "blank_mismatch": blank_mismatch,
         "rect_pct": {k: region[k] for k in ("x", "y", "w", "h")},
         "notes": region.get("notes", ""),
     }
@@ -196,11 +237,13 @@ def load_regions(path: Path | None) -> dict:
                     file=sys.stderr,
                 )
                 sys.exit(2)
-        if "threshold" in region:
-            thr = region["threshold"]
+        for threshold_name in ("threshold", "edge_threshold"):
+            if threshold_name not in region:
+                continue
+            thr = region[threshold_name]
             if isinstance(thr, bool) or not isinstance(thr, (int, float)) or not (0.0 <= float(thr) <= 1.0):
                 print(
-                    f"error: region '{name}' has invalid threshold={thr!r} (expected number in 0..1)",
+                    f"error: region '{name}' has invalid {threshold_name}={thr!r} (expected number in 0..1)",
                     file=sys.stderr,
                 )
                 sys.exit(2)

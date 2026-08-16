@@ -29,8 +29,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
     endif()
-    if(NOT _PULP_VIEW_TARGET)
-        message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 GUI targets require ${_PULP_VIEW_TARGET}")
+    if(NOT PULP_${target}_VIEW_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 GUI targets require a Pulp view target")
     endif()
 
     # Platform entry point sources
@@ -69,7 +69,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     target_link_libraries(${target}_VST3 PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         ${_PULP_VST3_SDK_TARGET}
     )
     target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
@@ -157,7 +157,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     if(NOT _PULP_CLAP_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP requested but the CLAP SDK is unavailable")
     endif()
-    if(NOT _PULP_VIEW_TARGET)
+    if(NOT PULP_${target}_VIEW_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
     endif()
 
@@ -180,7 +180,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     target_link_libraries(${target}_CLAP PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         ${_PULP_CLAP_TARGET}
     )
     target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
@@ -258,6 +258,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
     target_link_libraries(${target}_LV2 PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         ${_PULP_LV2_TARGET}
     )
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -306,6 +307,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     target_link_libraries(${target}_AAX PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         pulp-aax-library
     )
     target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -365,7 +367,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     if(NOT _PULP_AUSDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
-    if(NOT _PULP_VIEW_TARGET)
+    if(NOT PULP_${target}_VIEW_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU GUI targets require Pulp::view")
     endif()
 
@@ -383,7 +385,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     target_link_libraries(${target}_AU PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         ${_PULP_AUSDK_TARGET}
         "-framework AudioToolbox"
         "-framework CoreFoundation"

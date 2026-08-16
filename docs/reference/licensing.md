@@ -14,6 +14,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
+| **Brotli** | MIT | Decompression backend for native WOFF2 font registration used by Chromium-materialized imports | [github.com/google/brotli](https://github.com/google/brotli) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **cpp-httplib** | MIT | HTTP client (GET/POST/download) used by `pulp-runtime` | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
@@ -26,6 +27,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **pugixml** | MIT | XML parsing and generation | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
 | **SheenBidi** | Apache-2.0 | Unicode Bidirectional Algorithm engine for Arabic / Hebrew / mixed-direction text in `core/canvas::BidiAnalyzer` (independent of system ICU) | [github.com/Tehreer/SheenBidi](https://github.com/Tehreer/SheenBidi) |
 | **TweetNaCl** | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | [tweetnacl.cr.yp.to](https://tweetnacl.cr.yp.to/) |
+| **WOFF2** | MIT | WOFF2-to-sfnt decoder used to register the exact packaged web fonts captured by Chromium | [github.com/google/woff2](https://github.com/google/woff2) |
 | **yaml-cpp** | MIT | YAML frontmatter parser for the DESIGN.md import pipeline (gated to `--from designmd`) | [github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) |
 | **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 

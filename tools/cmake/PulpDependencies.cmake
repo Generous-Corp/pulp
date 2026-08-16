@@ -719,6 +719,31 @@ FetchContent_MakeAvailable(SheenBidi)
 set(PULP_HAS_SHEENBIDI TRUE)
 message(STATUS "Pulp: SheenBidi bidi engine enabled (v3.0.0)")
 
+# Brotli + Google's WOFF2 decoder (MIT licenses) — captured browser imports
+# commonly package their exact @font-face payloads as WOFF2. Native import must
+# decode those same bytes rather than silently substituting a system face.
+pulp_register_fetchcontent_source(brotli REF v1.2.0)
+FetchContent_Declare(
+    brotli
+    GIT_REPOSITORY https://github.com/google/brotli.git
+    GIT_TAG 028fb5a23661f123017c060daa546b55cf4bde29
+    SOURCE_SUBDIR pulp-fetch-only
+)
+FetchContent_MakeAvailable(brotli)
+
+pulp_register_fetchcontent_source(woff2 REF fb9c3379f2605b10f3e8f1d9636664ab5576775c)
+FetchContent_Declare(
+    woff2
+    GIT_REPOSITORY https://github.com/google/woff2.git
+    GIT_TAG fb9c3379f2605b10f3e8f1d9636664ab5576775c
+    SOURCE_SUBDIR pulp-fetch-only
+)
+FetchContent_MakeAvailable(woff2)
+set(PULP_WOFF2_SOURCE_DIR "${woff2_SOURCE_DIR}")
+set(PULP_BROTLI_SOURCE_DIR "${brotli_SOURCE_DIR}")
+set(PULP_HAS_WOFF2_DECODER TRUE)
+message(STATUS "Pulp: captured WOFF2 font decoder enabled")
+
 # yaml-cpp (MIT license) — YAML parser used by the DESIGN.md import pipeline
 # Note: yaml-cpp 0.8.0's CMakeLists declares cmake_minimum_required(3.4),
 # which CMake 4.x refuses. Set CMAKE_POLICY_VERSION_MINIMUM in the
