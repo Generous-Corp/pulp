@@ -87,6 +87,13 @@ a type-only row or one aggregate probe cannot establish that installed
 consumers can execute density, fill, set-algebra, ID, and morph operations.
 Keep scheduling, clocks, note ownership, and publication outside this manifest.
 
+For bounded sampled-target FIR design, register the public
+`pulp/signal/fir_design.hpp` entry point as `signal.fir-design`, keep it
+offline-only, and have the generated compile fixture invoke an empty-target
+request in addition to taking the exact function pointer. This preserves the
+contract's proof that the published binding is operational rather than merely
+type-visible.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
