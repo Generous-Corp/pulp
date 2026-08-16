@@ -946,6 +946,57 @@ Pulp's `.shipyard/config.toml` defines three:
 
 `shipyard config profiles` lists what is installed locally and which one is active.
 
+### Interrupted-build guard on the POSIX profiles
+
+All three build profiles reuse a warm `build/`, and that directory is shared
+with whatever the agent or human is building in the same checkout. A validation
+killed mid-compile — which is how `timeout_secs` ends a run, with a SIGKILL that
+executes no trap or exit handler — leaves partial object files behind. The next
+incremental build links those against freshly compiled ones, mixing object
+layouts, and the result is heap corruption and SEGFAULTs in tests unrelated to
+the change. Each timeout seeded the next run's failure, so once the pattern
+started it sustained itself, and every symptom read like a bad diff.
+
+The POSIX `configure` stages therefore run:
+
+```
+tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build …'
+```
+
+and their `build` stages finish with `tools/ci/build-dir-sentinel.sh clear build`.
+`guard` arms the marker, runs configure, and recreates the directory on the next
+run if the marker survived; `clear` removes it once the build finishes. Windows
+profiles are excluded — they run under PowerShell, where the wrapper's path
+assumptions do not hold.
+
+`guard` distinguishes a stage that **failed** from one that was **killed**, and
+the difference is worth real money here. A configure that exits non-zero on its
+own — a dependency-floor mismatch, a missing toolchain — produced no object
+files, so wiping its directory buys nothing and costs a cold rebuild, which is
+precisely what pushes the next run over the cap. Those clear the marker and keep
+the warm tree. A stage killed by a signal keeps it. The test for this is
+specific: the wrapper can outlive a kill that reaches only its child, so
+"we reached the line after the command" is not evidence of a clean exit — the
+shell's 128+signum convention is what the check reads.
+
+Two things are deliberate and worth preserving:
+
+- **It is a file, not a handler.** Nothing runs at kill time, so anything that
+  must execute to record the failure is structurally blind to it. The marker is
+  written beforehand and removed afterwards, so abnormal termination leaves it
+  behind by default.
+- **It is armed before `cmake`, not after.** `build.yml`'s macOS lane arms its
+  equivalent after configure; a run killed *during* configure escapes that, and a
+  half-written `CMakeCache.txt` is its own kind of broken.
+
+**Do not lift this into a lane whose timeout the build cannot finish under.**
+Arming a sentinel against a too-short cap produces an infinite
+wipe → cold rebuild → timeout → wipe loop, roughly an hour of a shared machine
+per cycle. `[targets.mac] timeout_secs` is `7200` for this reason; check it
+before changing either number. `tools/scripts/test_build_dir_sentinel.py` asserts
+both directions plus the arm/clear pairing — a profile that arms without clearing
+wipes its build dir on every run.
+
 ### Auto-selecting the parser profile
 
 `tools/scripts/validation_profile_select.py` classifies the current diff

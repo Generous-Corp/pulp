@@ -252,3 +252,45 @@ that conflict by hand.
 Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
+
+## A STALE verdict on a tree you did not touch is a base problem, not a you problem
+
+If `--check` reports these on a clean checkout whose diff touches no capability
+file, stop and look at the base before touching anything:
+
+```
+agent-capabilities: STALE: capability history is not append-only relative to the protected base
+agent-capabilities: STALE: manifest changed without a manifest_revision increase
+agent-capabilities: STALE: public surface changed without an inventory_version increase
+```
+
+The check is not wrong — it is answering correctly against the wrong reference.
+The protected base **must be an ancestor of the commit under validation**, or
+"append-only relative to the base" is ill-posed: measured against a tip that
+carries commits your branch does not have, every correct branch looks
+non-append-only.
+
+Naming a moving ref makes that routine. The build hosts run ~134 worktrees off
+one shared `.git`, so a `git fetch` in **any** sibling advances `origin/main`
+for all of them — mid-validation included, with your session issuing no fetch.
+`_resolve_local_base` therefore checks ancestry and steps back to the merge-base
+when the ref has moved past you. The merge-base does not move when the tip
+advances, which is what makes the verdict reproducible.
+
+Two consequences worth knowing:
+
+* **Re-running does not help.** The tip keeps moving, so the failure reproduces
+  and reads like a real defect. It is the failure mode most likely to send you
+  editing correct generated files.
+* **"Don't fetch during a validation" cannot fix it** and is not the rule. The
+  ref was observed moving with the validating session issuing no fetch at all;
+  discipline is blind to peers sharing the `.git`.
+
+To pin the base explicitly — for a bisect, or to reproduce a CI verdict exactly:
+
+```sh
+PULP_AGENT_CAPABILITY_BASE_REF=<sha> python3 tools/scripts/agent_capability_manifest.py --check
+```
+
+That path is deliberately literal: an explicit ref is used as given, without the
+ancestry fallback.
