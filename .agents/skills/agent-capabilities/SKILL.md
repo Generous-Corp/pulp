@@ -201,6 +201,37 @@ require one owning build-tree library per target, and an old consumer-smoke
 fixtures aside and rerun the same test before changing capability code or
 weakening the archive check.
 
+### Publishing a capability on a NEW public header: four coordinated edits
+
+`--write` validates one precondition at a time and stops at the first failure, so
+a new-header capability looks like four unrelated errors in sequence rather than
+one checklist. Expect all four, in this order, and make them before regenerating:
+
+1. **Catalog entry** — a `capability(...)` block in the domain catalog
+   (`agent_capability_catalog_<domain>.py`).
+2. **Registry header ownership** — add `"pulp/<domain>/<new>.hpp": "Pulp::<domain>",`
+   to the header→target map in `agent_capability_registry.py`. Without it the
+   error is `bindings[N] include has no covered public target owner`, which names
+   the binding rather than the missing map entry.
+3. **Umbrella fingerprint** — adding the new header's `#include` to the domain
+   umbrella (`signal.hpp`, `music.hpp`, …) changes that umbrella's digest. The
+   declared value lives in `agent_capability_registry.py` and must be updated to
+   the `got sha256:` value the error reports. The stale digest also appears in
+   `contract-history.json`; **do not edit those** — history is append-only and old
+   entries legitimately record old digests.
+4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` in
+   `agent_capability_manifest.py`. They are reported as two separate errors.
+
+**Regenerate exactly once, at the end.** Each `--write` that changes the contract
+appends to `contract-history.json`, so fixing preconditions by re-running `--write`
+between edits leaves several history entries for one logical change. Fix all four,
+then write once, then confirm the history diff is a single append and shows zero
+deletions.
+
+**The declared `header_fingerprint` in a binding is not `sha256` of the header
+file.** Do not "fix" it by hashing the file — the two legitimately differ. Take the
+value the tooling reports, or carry the reviewed one forward unchanged.
+
 Run:
 
 ```bash
