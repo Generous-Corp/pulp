@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 42,
+  "inventory_version": 43,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 425,
-    "reviewed_headers": 128,
+    "public_headers": 426,
+    "reviewed_headers": 129,
     "legacy_unreviewed_headers": 297,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 81,
+      "capability_entrypoint": 82,
       "capability_support": 38,
       "infrastructure": 7,
       "legacy_unreviewed": 297,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 246,
-        "reviewed_headers": 86,
+        "public_headers": 247,
+        "reviewed_headers": 87,
         "legacy_unreviewed_headers": 160,
         "unsupported_headers": 2
       },
@@ -2574,6 +2574,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/fir_design.hpp",
+      "fingerprint": "sha256:5bca92ea3c99cd128602d0518b1469b143a91956dbc48955f56dbd8137967759",
+      "include": "pulp/signal/fir_design.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.fir-design"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/fir_filter.hpp",
       "fingerprint": "sha256:0b5b3413b8a1e91a3b0adc26f1bc1fb153e24416b622e9e5e003ef8cc9989188",
       "include": "pulp/signal/fir_filter.hpp",
@@ -3492,7 +3503,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:6a28b95cbbbab06543097273312efde14ce03abbedafc063e3950e3694bee56a",
+      "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

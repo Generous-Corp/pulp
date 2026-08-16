@@ -27,6 +27,14 @@ route = importlib.util.module_from_spec(_SPEC)
 assert _SPEC.loader is not None
 _SPEC.loader.exec_module(route)
 
+_AUDIT_SPEC = importlib.util.spec_from_file_location(
+    "runner_selector_audit_under_test",
+    Path(__file__).parent / "workflow_runner_selector_audit.py",
+)
+runner_selector_audit = importlib.util.module_from_spec(_AUDIT_SPEC)
+assert _AUDIT_SPEC.loader is not None
+_AUDIT_SPEC.loader.exec_module(runner_selector_audit)
+
 
 def test_dispatch_uses_configured_self_hosted_selector() -> None:
     metadata = route.resolve_route(
@@ -312,21 +320,21 @@ def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:
     PULP_LOCAL_LINUX_RUNS_ON_JSON left a dispatched `Enforce version & skill
     sync` job queued with
     labels=['["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'].
+
+    This delegates to `workflow_runner_selector_audit`, which matches
+    parentheses per variable. The check originally inlined here decided per
+    block with `if "fromJSON" in block: continue` — a presence test, not a
+    coverage test. It therefore false-negatived on the exact shape the required
+    workflows have: two variables in one selector, where wrapping the first
+    makes the guard skip the block without ever looking at the second. See
+    `test_workflow_runner_selector_audit.py` for the controls, including the
+    known-bad input that the substring form passes.
     """
-    workflow_dir = BUILD_WORKFLOW.parent
-    offenders = []
-    for workflow in sorted(workflow_dir.glob("*.yml")):
-        text = workflow.read_text(encoding="utf-8")
-        for block in re.findall(r"^\s*runs-on:.*?(?=^\s*\S+:|\Z)", text, re.M | re.S):
-            if "_RUNS_ON_JSON" not in block:
-                continue
-            if "fromJSON" in block:
-                continue
-            offenders.append(f"{workflow.name}: {' '.join(block.split())[:110]}")
+    offenders = runner_selector_audit.audit_directory(BUILD_WORKFLOW.parent)
     assert not offenders, (
         "runs-on interpolates a *_RUNS_ON_JSON variable without fromJSON; "
         "setting that variable would queue the job forever:\n  "
-        + "\n  ".join(offenders)
+        + "\n  ".join(offender.describe() for offender in offenders)
     )
 
 

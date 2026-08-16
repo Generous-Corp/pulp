@@ -86,6 +86,28 @@ def validate(payload: Any, schema: dict[str, Any], where: str = "result") -> Non
             _check_value(payload[name], subschema, f"{where}.{name}")
 
 
+def _envelope_digest(document: dict[str, Any]) -> str:
+    """Summarise a rejected envelope without leaking the prompt.
+
+    A bare "not valid JSON" message is undiagnosable after the fact, because the
+    raw envelope is deliberately excluded from the published artifact. Report the
+    envelope's own self-description plus a bounded excerpt so the next failure
+    explains itself. Only model-supplied status fields and a short prefix of the
+    result are included; the prompt and lease material never appear here.
+    """
+    parts = [f"keys={sorted(document)}"]
+    for field in ("is_error", "subtype", "stop_reason", "api_error_status"):
+        if field in document:
+            parts.append(f"{field}={document[field]!r}")
+    raw = document.get("result")
+    if isinstance(raw, str):
+        excerpt = raw[:280].replace("\n", " ")
+        parts.append(f"result[:280]={excerpt!r}")
+    elif raw is not None:
+        parts.append(f"result_type={type(raw).__name__}")
+    return "; ".join(parts)
+
+
 def load_structured_output(path: Path) -> Any:
     """Extract the structured object from a Claude ``--output-format json`` run.
 
@@ -97,10 +119,15 @@ def load_structured_output(path: Path) -> Any:
         document = json.load(handle)
     if not isinstance(document, dict):
         _fail("model output must be a JSON object")
+    if document.get("is_error"):
+        _fail(f"model reported an error envelope: {_envelope_digest(document)}")
     if "structured_output" in document:
         structured = document["structured_output"]
         if structured is None:
-            _fail("model returned no structured output")
+            _fail(
+                "model returned a null structured output: "
+                + _envelope_digest(document)
+            )
         return structured
     if "result" in document and "type" in document and "usage" in document:
         raw = document["result"]
@@ -109,7 +136,17 @@ def load_structured_output(path: Path) -> Any:
         try:
             return json.loads(raw)
         except json.JSONDecodeError as error:
-            _fail(f"model envelope result was not valid JSON: {error}")
+            _fail(
+                f"model envelope result was not valid JSON ({error}): "
+                + _envelope_digest(document)
+            )
+    if "result" in document or "usage" in document:
+        # An envelope shaped like a CLI run but missing structured_output
+        # entirely — the case that stalled the 2026-08-16 canary opaquely.
+        _fail(
+            "model envelope carried no structured output: "
+            + _envelope_digest(document)
+        )
     return document
 
 

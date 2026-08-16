@@ -101,11 +101,27 @@ versioning_config   = "tools/scripts/versioning.json"
 # here is a MIS-CALIBRATED GATE, not a reason to flip the lane: see
 # test/test_yoga_layout_bench.cpp, whose timing assertion was sized for -O3 and is
 # now `#ifdef NDEBUG`-gated. Guarded by tools/scripts/test_odr_macro_gated_headers.py.
+# ── Interrupted-build sentinel ───────────────────────────────────────────────
+#
+# The POSIX lanes below reuse a warm `build/`. A run killed mid-compile — which
+# is how a timeout ends, with no trap or exit handler running — leaves partial
+# object files that the next incremental build happily links against, producing
+# heap corruption and SEGFAULTs in tests unrelated to the diff. Each timeout
+# therefore seeded the next run's failure, and the loop sustained itself.
+#
+# `tools/ci/build-dir-sentinel.sh arm` recreates the dir when the previous run
+# left its marker behind; `clear` removes the marker on a clean build. It is
+# armed BEFORE configure so a run killed during configure is caught too.
+#
+# This is only safe because `[targets.mac] timeout_secs` is 7200. Arming a
+# sentinel on a cap the build cannot finish under yields an infinite
+# wipe → cold rebuild → timeout → wipe loop. Check that first if you change
+# either number.
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\""
-build     = "tools/ci/governed-build.sh cmake --build build"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
+build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
 # `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
 # cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
 #   * `slow`       — e.g. `cmake-ios-auv3-configure` (~25-30 min iOS try-compile).
@@ -184,8 +200,8 @@ setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base
 # [validation.default].
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
-build     = "tools/ci/governed-build.sh cmake --build build"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF'"
+build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
 test      = "ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
 
 [validation.parser.overrides.windows]
@@ -202,8 +218,8 @@ test      = "ctest --test-dir build -C Release --output-on-failure --label-inclu
 # stages for clearer per-stage failure messages.
 stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
-build     = "tools/ci/governed-build.sh cmake --build build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && tools/ci/governed-build.sh cmake --build smoke/build"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF'"
+build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && tools/ci/governed-build.sh cmake --build smoke/build"
 
 [validation.smoke.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"

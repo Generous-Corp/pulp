@@ -59,6 +59,93 @@ class ConfigureProxmoxCiNetworkTests(unittest.TestCase):
             3,
         )
 
+    EXPECTED_POLICY = [
+        "DROP -i vmbr-ci200 -d 10.0.0.0/8",
+        "DROP -i vmbr-ci200 -d 172.16.0.0/12",
+        "DROP -i vmbr-ci200 -d 192.168.0.0/16",
+        "ACCEPT -i vmbr-ci200 -o vmbr0",
+        "ACCEPT -o vmbr-ci200 -m conntrack --ctstate ESTABLISHED,RELATED",
+        "DROP -i vmbr-ci200",
+    ]
+
+    def _filter_specs(self, bridge: str = "vmbr-ci200") -> list[str]:
+        result = subprocess.run(
+            ["/bin/bash", "-c", f"source {SCRIPT!s}; filter_specs {bridge}"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [line for line in result.stdout.splitlines() if line]
+
+    def test_egress_policy_denies_rfc1918_before_allowing_the_uplink(self) -> None:
+        self.assertEqual(self._filter_specs(), self.EXPECTED_POLICY)
+
+    def test_egress_policy_ends_in_a_catch_all_deny(self) -> None:
+        """Default-deny must not rely on the FORWARD chain's own policy.
+
+        Proxmox ships `-P FORWARD ACCEPT`, so a guest packet matching no earlier
+        rule is accepted unless the policy terminates in its own DROP.
+        """
+        specs = self._filter_specs()
+        self.assertEqual(specs[-1], "DROP -i vmbr-ci200")
+        uplink = specs.index("ACCEPT -i vmbr-ci200 -o vmbr0")
+        for rfc1918 in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"):
+            with self.subTest(subnet=rfc1918):
+                self.assertLess(
+                    specs.index(f"DROP -i vmbr-ci200 -d {rfc1918}"),
+                    uplink,
+                    "RFC1918 must be denied before the uplink is allowed",
+                )
+
+    def _count_with_stub_table(self, rules: list[str]) -> str:
+        """Run count_filter_rules against a stubbed iptables-save table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = pathlib.Path(tmp) / "iptables-save"
+            body = "\n".join(rules)
+            stub.write_text(f"#!/bin/sh\ncat <<'TABLE'\n{body}\nTABLE\n", encoding="utf-8")
+            stub.chmod(0o755)
+            result = subprocess.run(
+                [
+                    "/bin/bash",
+                    "-c",
+                    f'PATH="{tmp}:$PATH"; source {SCRIPT!s}; count_filter_rules vmbr-ci200',
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+    def test_verify_detects_a_single_removed_deny_rule(self) -> None:
+        """The count must drop when one rule is missing, or verify cannot fail.
+
+        A checker that only proves a bridge exists would go green on today's
+        state: bridges up, NAT present, and no egress filtering at all.
+        """
+        full = [
+            f'-A FORWARD {spec.split(" ", 1)[1]} -m comment '
+            f'--comment "pulp-ci-isolation:vmbr-ci200" -j {spec.split(" ", 1)[0]}'
+            for spec in self.EXPECTED_POLICY
+        ]
+        self.assertEqual(self._count_with_stub_table(full), str(len(self.EXPECTED_POLICY)))
+        sabotaged = [r for r in full if "10.0.0.0/8" not in r]
+        self.assertEqual(
+            self._count_with_stub_table(sabotaged),
+            str(len(self.EXPECTED_POLICY) - 1),
+            "removing one DROP rule must change the count verify asserts on",
+        )
+        self.assertEqual(self._count_with_stub_table([]), "0")
+
+    def test_verify_asserts_the_egress_policy_not_just_the_bridge(self) -> None:
+        self.assertTrue(
+            "is not default-deny" in self.script,
+            "verify_live must fail when the egress policy is incomplete",
+        )
+        self.assertTrue(
+            "ensure_one_filter" in self.script and "remove_one_filter" in self.script,
+            "the per-bridge hooks must restore and remove the egress policy",
+        )
+
     def test_route_assertion_matches_real_iproute2_output(self) -> None:
         """The verify route check must accept iproute2's actual spacing.
 
