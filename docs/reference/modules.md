@@ -594,6 +594,35 @@ allocation-free during evaluation:
   coordinate-keyed decision over seed, cycle, lane, and step, so evaluation
   order cannot change the result.
 
+### Fixed-capacity pattern development
+
+`pattern_development.hpp` adds a pure record-development layer above the binary
+pattern kernels. `DevelopmentPattern<MaxEvents>` defaults to 64 events, keeps
+records in canonical onset order, and requires unique nonzero `PatternEventId`
+values and unique exact-tick onsets. Each record names an `anchor`, `primary`,
+`ornament`, or `fill` role and an integer `0..1000` accent.
+
+- `make_pattern_event_id()` derives a stable nonzero ID from a seed and
+  `RandomCoordinate`.
+- `pattern_set()` provides onset union, intersection, difference, and symmetric
+  difference. Conflicting records at one union onset and capacity overflow fail
+  without returning a partial pattern.
+- `select_pattern_density()` returns exactly the requested event count, rejects
+  a target below the anchor count, and ranks other events by their complete
+  musical coordinate. Counts are nested: a selection of `k` is always a subset
+  of the same recipe at `k+1`.
+- `apply_regional_fill()` changes only a half-open tick region. Events outside
+  it are retained exactly, anchors inside it are mandatory, and base plus fill
+  candidates use the same exact nested density rule.
+- `morph_patterns()` accepts an integer amount from 0 through 1000. The
+  endpoints return A and B exactly. Shared event IDs interpolate exact integer
+  ticks and accents; unique records disappear or appear at stable
+  coordinate-keyed thresholds.
+
+These operations are bounded, allocation-free, `constexpr`, `noexcept`, and
+compatible with `-fno-exceptions`. They do not schedule events, own notes,
+advance a clock, capture live input, quantize, humanize, or retime audio.
+
 Random words are mapped to bounded choices with full-domain multiply-high
 reduction rather than remainder reduction.
 

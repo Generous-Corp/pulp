@@ -26,6 +26,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/music.hpp": "Pulp::music",
     "pulp/music/pitch.hpp": "Pulp::music",
     "pulp/music/pattern.hpp": "Pulp::music",
+    "pulp/music/pattern_development.hpp": "Pulp::music",
     "pulp/music/rhythm_relationship.hpp": "Pulp::music",
     "pulp/music/spelling.hpp": "Pulp::music",
     "pulp/music/voicing.hpp": "Pulp::music",
@@ -419,7 +420,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/music/music.hpp",
-        "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
+        "fingerprint": "sha256:4c95583dd9992f762edb2a00191ecd785ba3fac600d5528adf24167ad13a389e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
