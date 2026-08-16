@@ -133,16 +133,10 @@
     },
     {
       "variable": "PULP_SANITIZER_TSAN_RUNS_ON_JSON",
-      "purpose": "TSan sanitizer lane, routed to a dedicated VM to keep ODR-prone lanes off the warm Studio build dirs.",
-      "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-sanitizer-vm-macos"
-      ],
-      "provisioning": "ephemeral",
-      "severity": "advisory",
-      "hosts": []
+      "purpose": "TSan lane, GitHub-hosted and clean per run, matching ASan and RTSan. The dedicated ephemeral VM lane (pulp-sanitizer-vm-macos) stays CONTRACTED OFF until its host passes a real dispatch proof: the supervisor host must carry the pulp-build-runner macOS golden, its GitHub queue scan must authenticate, and the tartci idle gate must be armed so the lane yields to the required macOS gate. Pointing this variable at the VM labels before that proof is a silent hang, not a failure: GitHub queues TSan forever and reports no error. See docs/guides/local-ci.md for the proof procedure.",
+      "expect": "macos-15",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
     },
     {
       "variable": "PULP_SANITIZER_ASAN_RUNS_ON_JSON",
