@@ -43,7 +43,15 @@ public:
 
     bool paint_rotary(canvas::Canvas& canvas, const RotaryPaintState& state,
                       View& source) override {
+        // A design that authored neither a value ring nor a pointer gets
+        // neither: the authored body beneath this widget is the control's
+        // entire appearance, exactly as the browser captured it. Returning
+        // true is still the contract — the stock body must stay suppressed.
+        if (!skin_.draw_ring && !skin_.draw_indicator) return true;
+
         painters::KnobStyle style;
+        style.draw_track_and_fill = skin_.draw_ring;
+        style.draw_indicator = skin_.draw_indicator;
         // Resolved from the control itself, so a design whose palette was
         // projected into the theme colours its own ring rather than getting a
         // built-in accent that belongs to no one.

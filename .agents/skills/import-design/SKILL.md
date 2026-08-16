@@ -1927,11 +1927,26 @@ Checks worth doing before believing a designed-control skin works:
   `painter()` and not `effective_painter()` for the install assertion, because
   the latter walks up to an ancestor and will pass on a widget that was never
   skinned itself.
-- A designed control's **Chrome-relative pixel diff is not a success metric.**
-  The design authors a bare track or a bare disc and the widget supplies the
-  value layer, so the oracle has no fill, no thumb and no arc to match. Fixing a
-  designed fader makes that region score WORSE against Chrome while being more
-  correct. Judge it by what the widget stopped overpainting, not by the number.
+- A designed FADER's **Chrome-relative pixel diff is not a success metric.**
+  The design authors a bare track and the widget supplies the fill/thumb, so the
+  oracle has nothing to match there. Judge a fader by what the widget stopped
+  overpainting, not by the number. A designed KNOB is the opposite (next point):
+  its value layer is authored-gated, so its Chrome diff IS the metric.
+
+**A designed knob's value layer is authored-gated — no authored ring/pointer,
+no pixels.** The skin used to synthesize the full arc gauge (accent value arc +
+grey track + derived tick) on every designed knob. On a captured panel whose
+knobs are plain gradient dials (`data-pulp-paint`, no `data-pulp-indicator`)
+that painted arcs the reference never shows, riding OUTSIDE the authored dial —
+the single largest bucket (~42%) of a real strict-fidelity failure. Now
+`apply_designed_body_skin` sets `DesignedControlSkin::draw_ring` only when the
+design declared a ring (`design_ring_radius > 0`) and `draw_indicator` only for
+an authored pointer (`knob_ind_r_out > 0`) or that declared ring; with neither,
+`paint_rotary` still returns true (the stock body stays suppressed) but emits
+nothing, so the authored body beneath is the whole appearance. A design that
+wants a moving part must author `data-pulp-indicator` — Pulp never substitutes
+its own knob art. (`paint_mod_ring_knob` grew matching `draw_track_and_fill` /
+`draw_indicator` flags, default true, so stock knobs are untouched.)
 
 **The control's box IS the design's body box.** It comes from the author's
 `[data-pulp-paint]` rect (`browser_capture/semantics.mjs`, `paintBox`), which in
