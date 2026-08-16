@@ -127,6 +127,54 @@ class ResultCheckTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(destination.read_text()), VALID_TRIAGE)
 
+    def test_a_rejected_envelope_explains_itself(self) -> None:
+        """A bare "not valid JSON" is undiagnosable after the fact, because the
+        raw envelope is excluded from the published artifact by design. The
+        rejection must carry the envelope's own status fields and a bounded
+        excerpt — this cost a full canary cycle on 2026-08-16."""
+        path = _write(
+            {
+                "type": "result",
+                "usage": {"input_tokens": 1},
+                "subtype": "success",
+                "stop_reason": "end_turn",
+                "result": "I cannot complete this request.",
+            }
+        )
+        with self.assertRaises(checker.ResultError) as caught:
+            checker.load_structured_output(path)
+        message = str(caught.exception)
+        self.assertIn("stop_reason", message)
+        self.assertIn("I cannot complete this request.", message)
+        self.assertIn("keys=", message)
+
+    def test_an_error_envelope_is_named_as_such(self) -> None:
+        path = _write(
+            {
+                "type": "result",
+                "usage": {},
+                "is_error": True,
+                "subtype": "error_during_execution",
+                "result": "upstream refused",
+            }
+        )
+        with self.assertRaises(checker.ResultError) as caught:
+            checker.load_structured_output(path)
+        self.assertIn("error envelope", str(caught.exception))
+        self.assertIn("error_during_execution", str(caught.exception))
+
+    def test_the_digest_never_carries_the_whole_result(self) -> None:
+        path = _write(
+            {
+                "type": "result",
+                "usage": {},
+                "result": "x" * 5000,
+            }
+        )
+        with self.assertRaises(checker.ResultError) as caught:
+            checker.load_structured_output(path)
+        self.assertLess(len(str(caught.exception)), 900)
+
     def test_the_validator_is_inside_the_recovery_fence(self) -> None:
         # A validator outside the fence could be weakened by the very model it
         # constrains, so its own path must match a forbidden prefix.
