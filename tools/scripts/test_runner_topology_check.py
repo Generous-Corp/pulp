@@ -17,6 +17,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1007,17 +1008,158 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class TestSelectorParsing(unittest.TestCase):
+    """Capacity is not the only way a lane fails to route.
+
+    On 2026-08-16 a required check hung repo-wide because a `runs-on`
+    interpolated a lane variable without `fromJSON`, collapsing the JSON array
+    into one literal label. The value was HOSTED, so no amount of self-hosted
+    capacity was relevant — and this tool reported green throughout, because
+    its workflow attribution is a substring search that cannot tell a parsed
+    reference from an interpolated one.
+    """
+
+    def _workflows(self, body: str) -> Path:
+        directory = Path(tempfile.mkdtemp(prefix="pulp-topology-selectors-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        (directory / "gate.yml").write_text(body)
+        return directory
+
+    def test_unwrapped_second_variable_is_an_error(self):
+        # The shape the required workflows actually use: two variables in one
+        # selector. Wrapping only the first is what made the previous guard
+        # skip the block entirely.
+        directory = self._workflows(
+            "jobs:\n"
+            "  gate:\n"
+            "    runs-on: >-\n"
+            "      ${{ fromJSON(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '\"ubuntu-latest\"') ||\n"
+            "          (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || 'ubuntu-latest') }}\n"
+            "    steps:\n"
+            "      - run: true\n"
+        )
+        findings = gate.check(contract([]), runners(), {}, [], directory)
+        selectors = [f for f in findings if f.kind == "unparsed-selector"]
+        self.assertEqual(len(selectors), 1, findings)
+        self.assertEqual(selectors[0].variable, "PULP_AUTO_LINUX_RUNS_ON_JSON")
+        self.assertEqual(selectors[0].level, gate.ERROR)
+
+    def test_wrapped_selector_is_clean(self):
+        # The control. Without it, a check that flagged everything would look
+        # identical to a check that works.
+        directory = self._workflows(
+            "jobs:\n"
+            "  gate:\n"
+            "    runs-on: >-\n"
+            "      ${{ fromJSON(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '\"ubuntu-latest\"') }}\n"
+            "    steps:\n"
+            "      - run: true\n"
+        )
+        findings = gate.check(contract([]), runners(), {}, [], directory)
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+
+    def test_live_workflow_tree_is_clean(self):
+        findings = gate.check(
+            gate.load_contract(gate.DEFAULT_CONTRACT), runners(), {}, [],
+            Path(__file__).resolve().parents[2] / ".github" / "workflows",
+        )
+        self.assertEqual(
+            [f.detail for f in findings if f.kind == "unparsed-selector"], [])
+
+    def test_offline_fixture_runs_without_a_workflow_tree(self):
+        # workflows_dir is optional so fixture-driven runs keep working; a
+        # missing tree must be silent rather than a fabricated finding.
+        findings = gate.check(contract([]), runners(), {}, [], None)
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+        findings = gate.check(contract([]), runners(), {}, [], Path("/nonexistent"))
+        self.assertEqual([f for f in findings if f.kind == "unparsed-selector"], [])
+
+
+class TestRunnerInventoryScope(unittest.TestCase):
+    """A repo-scoped query cannot see org runner groups.
+
+    Pulp's Linux capacity lives in an org group, so a repo-only inventory
+    reports zero Linux runners on a healthy fleet — and this inventory feeds
+    black-hole adjudication, which would then condemn a lane that is being
+    served perfectly well.
+    """
+
+    ORG_RUNNER = {
+        "name": "pulp-auto-ephemeral-200", "status": "online",
+        "labels": ["self-hosted", "Linux", "X64", "pulp-auto-linux-x64"],
+    }
+
+    def _api_returning(self, repo_payload, org_payload):
+        def fake(args):
+            payload = repo_payload if args[0].startswith("repos/") else org_payload
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
+        return fake
+
+    def test_org_runners_are_included(self):
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 0, "runners": []},
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+        )):
+            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual([r.name for r in runners], ["pulp-auto-ephemeral-200"])
+        self.assertEqual(warnings, [])
+
+    def test_a_repo_runner_is_not_duplicated_by_the_org_scope(self):
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+            {"total_count": 1, "runners": [self.ORG_RUNNER]},
+        )):
+            runners, _ = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(runners), 1)
+
+    def test_org_permission_failure_warns_instead_of_silently_degrading(self):
+        # Falling back to repo-only WITHOUT saying so would reproduce exactly
+        # the misreading this scope-union exists to prevent.
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 0, "runners": []},
+            subprocess.CalledProcessError(1, "ghapp", stderr="HTTP 403"),
+        )):
+            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(runners, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("orgs/Generous-Corp", warnings[0])
+        self.assertIn("403", warnings[0])
+
+    def test_row_count_disagreeing_with_total_count_is_flagged(self):
+        # An empty rendered list next to total_count=3 reads as "no runners"
+        # but means "you did not receive them".
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            {"total_count": 3, "runners": []},
+            {"total_count": 0, "runners": []},
+        )):
+            _, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("total_count=3", warnings[0])
+
+    def test_repo_endpoint_failure_still_propagates(self):
+        # Only the ORG scope degrades gracefully. Losing the repo scope means
+        # the inventory is unknown, which must reach main()'s exit-2 path.
+        with mock.patch.object(gate, "_api", side_effect=self._api_returning(
+            subprocess.CalledProcessError(1, "ghapp", stderr="boom"), None,
+        )):
+            with self.assertRaises(subprocess.CalledProcessError):
+                gate.fetch_runner_inventory("Generous-Corp/pulp")
+
+
 class TestApiFailureHandling(unittest.TestCase):
     def test_api_failure_does_not_report_a_false_green(self):
         # A check that says OK because the API was unreachable is worse than
         # no check: exit 2 is distinct from both pass (0) and violation (1).
-        with mock.patch.object(gate, "fetch_runners",
+        with mock.patch.object(gate, "fetch_runner_inventory",
                                side_effect=subprocess.CalledProcessError(
                                    1, "ghapp", stderr="boom")):
             self.assertEqual(gate.main(["--mode", "report"]), 2)
 
     def test_missing_ghapp_is_advisory_in_hint_mode(self):
-        with mock.patch.object(gate, "fetch_runners", side_effect=FileNotFoundError):
+        with mock.patch.object(gate, "fetch_runner_inventory",
+                               side_effect=FileNotFoundError):
             self.assertEqual(gate.main(["--mode", "hint"]), 0)
 
 
