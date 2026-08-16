@@ -6,6 +6,7 @@
 
 #ifndef _WIN32
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -173,17 +174,26 @@ struct SensitiveInputBytes {
 // Read available bytes from a non-blocking fd.
 // Appends to full_output (for ProcessResult), and to line_buf (for
 // line-by-line callback splitting). The two buffers are independent.
-size_t drain_pipe(int fd, std::string& full_output, std::string& line_buf,
-                  size_t max_bytes,
-                  const std::function<void(std::string_view)>& line_cb) {
-    if (fd < 0) return 0;
+struct DrainResult {
+    size_t bytes = 0;
+    bool eof = false;
+};
+
+DrainResult drain_pipe(int fd, std::string& full_output, std::string& line_buf,
+                       size_t max_bytes,
+                       const std::function<void(std::string_view)>& line_cb) {
+    if (fd < 0) return {};
     char chunk[4096];
-    size_t total = 0;
+    DrainResult result;
     while (true) {
         auto n = read(fd, chunk, sizeof(chunk));
-        if (n <= 0) break;
+        if (n == 0) {
+            result.eof = true;
+            break;
+        }
+        if (n < 0) break;
         auto bytes = static_cast<size_t>(n);
-        total += bytes;
+        result.bytes += bytes;
         // Always accumulate into full_output (capped)
         if (full_output.size() < max_bytes)
             full_output.append(chunk, std::min(bytes, max_bytes - full_output.size()));
@@ -202,7 +212,7 @@ size_t drain_pipe(int fd, std::string& full_output, std::string& line_buf,
         }
         if (pos > 0) line_buf.erase(0, pos);
     }
-    return total;
+    return result;
 }
 
 }  // namespace
@@ -716,10 +726,16 @@ ProcessResult ChildProcess::wait() {
     while (true) {
         // Drain pipes — full output goes to stdout_full/stderr_full,
         // line splitting goes to lines_buf (independent buffers)
-        drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
-                   impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
-        drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
-                   impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
+        const auto stdout_drain =
+            drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                       impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
+        const auto stderr_drain =
+            drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                       impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
+        if (stdout_drain.eof)
+            impl_->stdout_pipe.close_read();
+        if (stderr_drain.eof)
+            impl_->stderr_pipe.close_read();
 
         // Check if process exited (use cached result from is_running() if available)
         int status = 0;
@@ -771,7 +787,21 @@ ProcessResult ChildProcess::wait() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (stdout_drain.bytes == 0 && stderr_drain.bytes == 0) {
+            std::array<pollfd, 2> ready{{
+                {.fd = impl_->stdout_pipe.read_end(), .events = POLLIN, .revents = 0},
+                {.fd = impl_->stderr_pipe.read_end(), .events = POLLIN, .revents = 0},
+            }};
+            (void)::poll(ready.data(), ready.size(), 1);
+            const auto stream_finished = [](const pollfd& descriptor) {
+                return (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0 &&
+                       (descriptor.revents & POLLIN) == 0;
+            };
+            if (stream_finished(ready[0]))
+                impl_->stdout_pipe.close_read();
+            if (stream_finished(ready[1]))
+                impl_->stderr_pipe.close_read();
+        }
     }
 
     impl_->stdout_pipe.close_read();

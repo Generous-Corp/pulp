@@ -596,6 +596,7 @@ and tests support:
 |---|---|---|---|---|---|
 | `audio.instrument-voice-allocator` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Integer, fixed-slot event state machine; no floating-point or external history |
 | `midi.mpe-voice-tracker` | `not_promised` | `not_applicable` | `same_build` | `irrelevant` | Synchronous event state machine, but floating expression normalization has neither a published numerical bound nor a whole-sequence repeatability proof |
+| `music.pattern-development` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Fixed-capacity integer event records with coordinate-keyed selection and exact integer morph endpoints |
 | `sequence.host-transport-projector` | `not_promised` | `fixed_partition_only` | `same_build` | `input` | Floating beat/tick projection depends on callback partition and prior transport state, without a published repeatability bound or repeated-history proof |
 | `signal.saturator` | `bit_exact` | `not_applicable` | `same_build` | `irrelevant` | Per-sample API whose reset/re-render test is bit-identical across every shape and alias policy; same-build scope contains platform math-library variance |
 | `timebase.swing` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Pure rational/integer tick transform with tested bounded integer recovery |
@@ -607,6 +608,12 @@ allocation-free integer lookup operations needed by scheduling generators. Its
 same-build determinism claim is proved with independently compiled installed-SDK
 consumers for every binding; cursor and fractional helpers are deliberately not
 part of v1.0.
+
+`music.pattern-development` exposes every stable event/configuration/result
+type plus five independently executable operations: nonzero ID derivation,
+onset-set algebra, exact nested density, base-anchor-preserving regional fills,
+and integer A/B morphing. It is a pure design-time algebra; scheduling, clocks,
+note ownership, live capture, humanization, and audio retiming are excluded.
 
 The first inventory covers representative public signal processing, instrument
 voice allocation, MPE note ownership, exact tick/swing timebase types, and host
