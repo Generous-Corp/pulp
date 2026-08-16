@@ -2915,6 +2915,17 @@ Four rules govern the fallback lane:
   `--strict-mcp-config`, an empty `--mcp-config`, `--settings
   '{"disableAllHooks":true}'`, `--no-session-persistence`, and an isolated
   `CLAUDE_CONFIG_DIR`.
+- **Install the platform package by name.** `@anthropic-ai/claude-code`'s
+  `bin/claude` is a wrapper that resolves its native binary during
+  `postinstall`, and the lane installs with `--ignore-scripts`, so the base
+  package alone yields `claude native binary not installed` — this failed a live
+  recovery job on 2026-08-16, 15 seconds in. Install
+  `@anthropic-ai/claude-code-darwin-arm64` explicitly, integrity-pin it like the
+  base package, and `ln -sf` the real binary onto `bin/claude`. Do **not** fix
+  this by dropping `--ignore-scripts`: the install runs on a disposable runner
+  moments before it holds a broker lease, so a script-free install is the point.
+  Codex's own install is not a template here — it ships its platform binary
+  differently.
 - **Re-validate the output locally.** `claude --json-schema` validates upstream
   but leaves no trusted local proof, so
   `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That

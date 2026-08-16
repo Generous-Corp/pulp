@@ -66,6 +66,7 @@ jobs:
       CODEX_RECOVERY_DARWIN_ARM64_INTEGRITY: 'sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw=='
       CLAUDE_FALLBACK_VERSION: '2.1.233'
       CLAUDE_FALLBACK_PACKAGE_INTEGRITY: 'sha512-WS0ZSsNu2zkQonC+rW7HdByMCkPQ2l+hO1G0LdvWTj40kiYr0qAiSJjCBNRIbi0foBol4IFTCKwLHAN83qxxUQ=='
+      CLAUDE_FALLBACK_DARWIN_ARM64_INTEGRITY: 'sha512-mB2FyJQ0a+FTWbBTSQ3ZTAmm6Qxr5fSU2jA8JpHQ7XslcoKzmDV+/zN8CdGkshwY3kRLx432kDiHcBoTQuc/Dg=='
       CLAUDE_FALLBACK_MODEL: 'claude-haiku-4-5-20251001'
       CLAUDE_FALLBACK_REPAIR_MODEL: 'claude-sonnet-4-5'
 
@@ -106,10 +107,24 @@ jobs:
           set -euo pipefail
           package_integrity=$(npm view \
             "@anthropic-ai/claude-code@${CLAUDE_FALLBACK_VERSION}" dist.integrity)
+          platform_integrity=$(npm view \
+            "@anthropic-ai/claude-code-darwin-arm64@${CLAUDE_FALLBACK_VERSION}" \
+            dist.integrity)
           [ "$package_integrity" = "$CLAUDE_FALLBACK_PACKAGE_INTEGRITY" ]
+          [ "$platform_integrity" = "$CLAUDE_FALLBACK_DARWIN_ARM64_INTEGRITY" ]
           install_root="$RUNNER_TEMP/claude-cli"
+          # The platform package must be named explicitly. The base package's
+          # wrapper resolves its native binary in a postinstall step, and
+          # --ignore-scripts deliberately skips that, so the wrapper exits with
+          # "claude native binary not installed" — observed live on 2026-08-16.
+          # Linking bin/claude straight at the real binary keeps the install
+          # script-free, which is what we want on a runner about to hold a lease.
           npm install --global --ignore-scripts --prefix "$install_root" \
-            "@anthropic-ai/claude-code@${CLAUDE_FALLBACK_VERSION}"
+            "@anthropic-ai/claude-code@${CLAUDE_FALLBACK_VERSION}" \
+            "@anthropic-ai/claude-code-darwin-arm64@${CLAUDE_FALLBACK_VERSION}"
+          native="$install_root/lib/node_modules/@anthropic-ai/claude-code-darwin-arm64/claude"
+          [ -x "$native" ]
+          ln -sf "$native" "$install_root/bin/claude"
           [ "$("$install_root/bin/claude" --version)" = \
             "${CLAUDE_FALLBACK_VERSION} (Claude Code)" ]
           echo "$install_root/bin" >> "$GITHUB_PATH"
