@@ -72,6 +72,8 @@ on:
       - 'tools/shipyard/repair-result.schema.json'
       - 'tools/scripts/shipyard_recovery_worker.py'
       - 'tools/scripts/shipyard_recovery_repair.py'
+      - 'tools/scripts/shipyard_recovery_result_check.py'
+      - 'tools/scripts/test_shipyard_recovery_result_check.py'
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
@@ -135,6 +137,8 @@ on:
       - 'tools/shipyard/repair-result.schema.json'
       - 'tools/scripts/shipyard_recovery_worker.py'
       - 'tools/scripts/shipyard_recovery_repair.py'
+      - 'tools/scripts/shipyard_recovery_result_check.py'
+      - 'tools/scripts/test_shipyard_recovery_result_check.py'
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
@@ -238,6 +242,7 @@ jobs:
           python3 tools/scripts/test_shipyard_recovery_dispatch.py
           python3 tools/scripts/test_shipyard_recovery_worker.py
           python3 tools/scripts/test_shipyard_recovery_repair.py
+          python3 tools/scripts/test_shipyard_recovery_result_check.py
           python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)

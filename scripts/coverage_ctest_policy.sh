@@ -6,7 +6,7 @@
 # whitespace-tokenized environment variable.
 
 : "${PULP_COVERAGE_CTEST_LABEL_EXCLUDE:=validation|slow|performance|bench|quality-lab}"
-: "${PULP_COVERAGE_CTEST_NAME_EXCLUDE:=(fdn.*bounded.*parameter.*vector|saturating.*self-oscillate|physical.*sub-unity.*oscillation|drift.*pitch.*commanded.*RMS|Analog.*VCF.*worst-case.*oversampling|OSC-WT.*worst)}"
+: "${PULP_COVERAGE_CTEST_NAME_EXCLUDE:=(fdn.*bounded.*parameter.*vector|saturating.*self-oscillate|physical.*sub-unity.*oscillation|drift.*pitch.*commanded.*RMS|Analog.*VCF.*worst-case.*oversampling|OSC-WT.*worst|modal.*throughput.*large.*banks.*real.*time|matrix:.*realtime.*factor.*quality.*low-latency|deferred.*compiler.*ten.*thousand.*clips|PulpSampler.*sinc.*continuous.*pitch.*modulation)}"
 
 PULP_COVERAGE_CTEST_DEFAULT_ARGS=(
     -LE "${PULP_COVERAGE_CTEST_LABEL_EXCLUDE}"

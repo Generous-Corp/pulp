@@ -177,11 +177,14 @@ struct SensitiveInputBytes {
 struct DrainResult {
     size_t bytes = 0;
     bool eof = false;
+    bool callback_ok = true;
+
+    operator bool() const noexcept { return callback_ok; }
 };
 
 DrainResult drain_pipe(int fd, std::string& full_output, std::string& line_buf,
                        size_t max_bytes,
-                       const std::function<void(std::string_view)>& line_cb) {
+                       std::function<void(std::string_view)>* line_cb) {
     if (fd < 0) return {};
     char chunk[4096];
     DrainResult result;
@@ -198,16 +201,23 @@ DrainResult drain_pipe(int fd, std::string& full_output, std::string& line_buf,
         if (full_output.size() < max_bytes)
             full_output.append(chunk, std::min(bytes, max_bytes - full_output.size()));
         // If line callback, also accumulate into line_buf for splitting (capped)
-        if (line_cb && line_buf.size() < max_bytes)
+        if (line_cb && *line_cb && line_buf.size() < max_bytes)
             line_buf.append(chunk, std::min(bytes, max_bytes - line_buf.size()));
     }
     // Fire callbacks for complete lines
-    if (line_cb && !line_buf.empty()) {
+    if (line_cb && *line_cb && !line_buf.empty()) {
         size_t pos = 0;
         while (pos < line_buf.size()) {
             auto nl = line_buf.find('\n', pos);
             if (nl == std::string::npos) break;
-            line_cb(std::string_view(line_buf).substr(pos, nl - pos));
+            try {
+                (*line_cb)(std::string_view(line_buf).substr(pos, nl - pos));
+            } catch (...) {
+                *line_cb = {};
+                line_buf.clear();
+                result.callback_ok = false;
+                return result;
+            }
             pos = nl + 1;
         }
         if (pos > 0) line_buf.erase(0, pos);
@@ -555,12 +565,26 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                     std::lock_guard<std::recursive_mutex> drain_lock(impl_->mutex);
                     if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
                         break;
-                    drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
-                               impl_->stdout_lines_buf, impl_->options.max_output_bytes,
-                               impl_->options.on_stdout_line);
-                    drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
-                               impl_->stderr_lines_buf, impl_->options.max_output_bytes,
-                               impl_->options.on_stderr_line);
+                    const bool stdout_ok =
+                        drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                                   impl_->stdout_lines_buf, impl_->options.max_output_bytes,
+                                   &impl_->options.on_stdout_line);
+                    if (!stdout_ok) {
+                        impl_->options.on_stdout_line = {};
+                        impl_->options.on_stderr_line = {};
+                    }
+                    const bool stderr_ok =
+                        drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                                   impl_->stderr_lines_buf, impl_->options.max_output_bytes,
+                                   &impl_->options.on_stderr_line);
+                    if (!stdout_ok || !stderr_ok) {
+                        output_drain_failed.store(true, std::memory_order_release);
+                        impl_->result.was_cancelled = true;
+                        impl_->options.on_stdout_line = {};
+                        impl_->options.on_stderr_line = {};
+                        cancel();
+                        break;
+                    }
                 } catch (...) {
                     output_drain_failed.store(true, std::memory_order_release);
                     break;
@@ -578,13 +602,14 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         }
         session_finished.store(true, std::memory_order_release);
         output_drainer.join();
-        const bool drain_failed = output_drain_failed.load(std::memory_order_acquire);
-        if (drain_failed)
+        const bool callback_failed = output_drain_failed.load(std::memory_order_acquire);
+        if (callback_failed)
             completed = false;
         lock.lock();
         if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
             return false;
-        if (drain_failed) {
+        if (callback_failed) {
+            impl_->result.was_cancelled = true;
             impl_->options.on_stdout_line = {};
             impl_->options.on_stderr_line = {};
         }
@@ -628,17 +653,34 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         std::thread writer([input_handle, input_bytes, deadline, completion] {
             completion->set_value(write_all(input_handle, input_bytes, deadline));
         });
+        bool output_drain_failed = false;
         while (completed.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
-            drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full, impl_->stdout_lines_buf,
-                       options.max_output_bytes, options.on_stdout_line);
-            drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full, impl_->stderr_lines_buf,
-                       options.max_output_bytes, options.on_stderr_line);
+            const bool stdout_ok =
+                drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                           impl_->stdout_lines_buf, options.max_output_bytes,
+                           &impl_->options.on_stdout_line);
+            if (!stdout_ok) {
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
+            const bool stderr_ok =
+                drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                           impl_->stderr_lines_buf, options.max_output_bytes,
+                           &impl_->options.on_stderr_line);
+            if (!stdout_ok || !stderr_ok) {
+                output_drain_failed = true;
+                impl_->result.was_cancelled = true;
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+                ::shutdown(input_handle, SHUT_RDWR);
+                break;
+            }
         }
         writer.join();
         const bool delivered = completed.get();
         ::shutdown(impl_->standard_input.parent, SHUT_WR);
         impl_->standard_input.close_parent();
-        if (!delivered) {
+        if (output_drain_failed || !delivered) {
             cancel();
             (void)wait();
             return false;
@@ -728,10 +770,22 @@ ProcessResult ChildProcess::wait() {
         // line splitting goes to lines_buf (independent buffers)
         const auto stdout_drain =
             drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
-                       impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
+                       impl_->stdout_lines_buf, max_bytes, &impl_->options.on_stdout_line);
+        if (!stdout_drain) {
+            impl_->options.on_stdout_line = {};
+            impl_->options.on_stderr_line = {};
+        }
         const auto stderr_drain =
             drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
-                       impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
+                       impl_->stderr_lines_buf, max_bytes,
+                       &impl_->options.on_stderr_line);
+        if (!stdout_drain || !stderr_drain) {
+            impl_->result.was_cancelled = true;
+            impl_->options.on_stdout_line = {};
+            impl_->options.on_stderr_line = {};
+            cancel();
+            return impl_->result;
+        }
         if (stdout_drain.eof)
             impl_->stdout_pipe.close_read();
         if (stderr_drain.eof)
@@ -759,10 +813,23 @@ ProcessResult ChildProcess::wait() {
         }
         if (exited) {
             // Process exited — drain remaining output
-            drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
-                       impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
-            drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
-                       impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
+            const bool final_stdout_ok =
+                drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                           impl_->stdout_lines_buf, max_bytes,
+                           &impl_->options.on_stdout_line);
+            if (!final_stdout_ok) {
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
+            const bool final_stderr_ok =
+                drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                           impl_->stderr_lines_buf, max_bytes,
+                           &impl_->options.on_stderr_line);
+            if (!final_stdout_ok || !final_stderr_ok) {
+                impl_->result.was_cancelled = true;
+                impl_->options.on_stdout_line = {};
+                impl_->options.on_stderr_line = {};
+            }
 
             impl_->finished = true;
             impl_->result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
