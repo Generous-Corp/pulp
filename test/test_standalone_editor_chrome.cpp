@@ -1160,6 +1160,43 @@ TEST_CASE("Standalone design viewport applies proportional window resize",
     REQUIRE(window.aspect_ratio_ == Catch::Approx(900.0f / 520.0f));
 }
 
+TEST_CASE("Standalone viewport can exceed its initial window without clipping",
+          "[standalone][chrome][resize][authored-viewport]") {
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+
+    ViewSize hints{
+        990, 645, 792, 516, 2640, 1720, 990.0 / 645.0, 1320, 860,
+    };
+    configure_standalone_design_viewport(window, hints, chrome);
+
+    REQUIRE(window.design_width_ == Catch::Approx(1320.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(860.0f));
+    REQUIRE(window.aspect_ratio_ == Catch::Approx(990.0f / 645.0f));
+}
+
+TEST_CASE("Standalone responsive editor locks aspect without design transform",
+          "[standalone][chrome][resize][responsive]") {
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+
+    ViewSize hints{
+        990, 645, 792, 516, 2640, 1720, 1320.0 / 860.0, 1320, 860,
+    };
+    hints.viewport_policy = ViewportPolicy::Responsive;
+    configure_standalone_design_viewport(window, hints, chrome);
+
+    REQUIRE(window.design_width_ == Catch::Approx(0.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(0.0f));
+    REQUIRE(window.aspect_ratio_ == Catch::Approx(1320.0f / 860.0f));
+}
+
 TEST_CASE("Standalone design viewport includes settings chrome height",
           "[standalone][chrome][resize][proportional]") {
     StubWindowHost window;
@@ -1183,6 +1220,8 @@ namespace {
 
 class ResizeProcessor : public Processor {
 public:
+    explicit ResizeProcessor(bool responsive = false)
+        : responsive_(responsive) {}
     PluginDescriptor descriptor() const override { return {}; }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const PrepareContext&) override {}
@@ -1193,8 +1232,15 @@ public:
         pulp::midi::MidiBuffer&,
         const ProcessContext&) override {}
     ViewSize view_size() const override {
-        return {900, 520, 320, 240, 1800, 1040, 900.0 / 520.0};
+        auto hints = ViewSize{
+            900, 520, 320, 240, 1800, 1040, 900.0 / 520.0,
+            1320, 860,
+        };
+        if (responsive_) hints.viewport_policy = ViewportPolicy::Responsive;
+        return hints;
     }
+private:
+    bool responsive_ = false;
 };
 
 }  // namespace
@@ -1249,6 +1295,27 @@ TEST_CASE("Standalone editor resize drives bridge and owned window",
     REQUIRE_FALSE(processor.request_editor_resize(800, 600));
 }
 
+TEST_CASE("Standalone responsive editor resize preserves live-layout policy",
+          "[standalone][chrome][resize][editor-request][responsive]") {
+    ResizeProcessor processor(true);
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    REQUIRE(bridge.set_preferred_size(640, 480));
+    StubWindowHost window;
+    int owner = 0;
+
+    install_standalone_editor_resize_handler(
+        processor, &owner, window, bridge);
+
+    REQUIRE(processor.request_editor_resize(720, 480));
+    CHECK(window.design_width_ == 0.0f);
+    CHECK(window.design_height_ == 0.0f);
+    CHECK(window.aspect_ratio_ == Catch::Approx(1.5f));
+    REQUIRE(window.content_size_requests_.size() == 1);
+    CHECK(window.content_size_requests_[0].width == 720);
+    CHECK(window.content_size_requests_[0].height == 480);
+}
+
 TEST_CASE("Standalone tab resizing follows the bridge's current preferred size",
           "[standalone][chrome][resize][editor-request]") {
     ResizeProcessor processor;
@@ -1282,6 +1349,36 @@ TEST_CASE("Standalone tab resizing follows the bridge's current preferred size",
         nullptr, nullptr, nullptr, {});
     configure_standalone_tab_resizing(window, editor_only, bridge);
     REQUIRE_FALSE(editor_only.tab_panel());
+}
+
+TEST_CASE("Standalone responsive tab round trip never pins a design viewport",
+          "[standalone][chrome][resize][responsive]") {
+    ResizeProcessor processor(true);
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+
+    configure_standalone_tab_resizing(window, chrome, bridge);
+    REQUIRE(chrome.tab_panel());
+    const int editor = chrome.tab_panel()->find_tab("Editor");
+    const int settings = chrome.tab_panel()->find_tab("Settings");
+    REQUIRE(editor >= 0);
+    REQUIRE(settings >= 0);
+
+    chrome.tab_panel()->on_tab_change(settings);
+    CHECK(window.design_width_ == 0.0f);
+    CHECK(window.design_height_ == 0.0f);
+    CHECK(window.aspect_ratio_ == Catch::Approx(
+        900.0f / static_cast<float>(SettingsPanel::preferred_height())));
+
+    chrome.tab_panel()->on_tab_change(editor);
+    CHECK(window.design_width_ == 0.0f);
+    CHECK(window.design_height_ == 0.0f);
+    CHECK(window.aspect_ratio_ == Catch::Approx(900.0f / 520.0f));
+    REQUIRE(window.content_size_requests_.back().width == 900);
+    REQUIRE(window.content_size_requests_.back().height == 520);
 }
 
 TEST_CASE("Standalone log helper formats the chrome mode",

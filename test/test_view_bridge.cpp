@@ -266,6 +266,31 @@ TEST_CASE("ViewBridge keeps a processor-declared size over the AutoUi fit",
     bridge.close();
 }
 
+TEST_CASE("responsive viewport policy preserves aspect lock without pinning",
+          "[view_bridge][resize][responsive]") {
+    format::ViewSize hints{
+        990, 645, 792, 516, 2640, 1720, 1320.0 / 860.0, 1320, 860,
+    };
+    hints.viewport_policy = format::ViewportPolicy::Responsive;
+
+    CHECK_FALSE(format::should_pin_design_viewport(hints));
+    CHECK(format::should_lock_view_aspect(hints));
+    CHECK(hints.aspect_ratio == Catch::Approx(1320.0 / 860.0));
+    // Authored dimensions remain available as provenance; Responsive means
+    // hosts must not use them as a paint transform.
+    CHECK(format::design_viewport_width(hints) == 1320);
+    CHECK(format::design_viewport_height(hints) == 860);
+}
+
+TEST_CASE("fixed viewport policy can pin independently of aspect locking",
+          "[view_bridge][resize][viewport-policy]") {
+    format::ViewSize hints{990, 645, 792, 516, 2640, 1720, 0.0, 1320, 860};
+    hints.viewport_policy = format::ViewportPolicy::FixedDesign;
+
+    CHECK(format::should_pin_design_viewport(hints));
+    CHECK_FALSE(format::should_lock_view_aspect(hints));
+}
+
 TEST_CASE("ViewBridge re-applies the AutoUi fit on close + reopen",
           "[view_bridge][auto_ui]") {
     // Daniel's exact repro: the default editor fit correctly on the FIRST open,

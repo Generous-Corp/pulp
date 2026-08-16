@@ -197,13 +197,21 @@ bool VisualizationBridge::poll() {
         const double finite_floor_power = std::isfinite(floor_power)
             && floor_power > 0.0 ? floor_power : 1.0e-12;
         for (int bin = 0; bin < spec.num_bins; ++bin) {
+            // A real FFT has one copy of DC and Nyquist, but positive- and
+            // negative-frequency copies for every interior bin. Remove the
+            // analysis window's coherent gain and fold each interior pair so
+            // the result is peak-amplitude dBFS rather than raw FFT-bin gain.
+            const bool edge_bin = bin == 0 || bin == config_.fft_size / 2;
+            const double amplitude_scale = edge_bin
+                ? spectrum_edge_scale_ : spectrum_interior_scale_;
             double power = 0.0;
             for (int ch = 0; ch < analysis_channels; ++ch) {
                 const auto& stft = channel_stfts_[static_cast<std::size_t>(ch)];
                 const float magnitude = stft.latest_frame().magnitude[bin];
                 const double finite_magnitude = std::isfinite(magnitude)
                     ? static_cast<double>(magnitude) : 0.0;
-                power += finite_magnitude * finite_magnitude;
+                const double amplitude = finite_magnitude * amplitude_scale;
+                power += amplitude * amplitude;
             }
             power /= static_cast<double>(analysis_channels);
             const double db = 10.0 * std::log10(std::max(power, finite_floor_power));

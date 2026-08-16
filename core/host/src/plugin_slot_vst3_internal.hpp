@@ -21,10 +21,42 @@
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
+#include <pluginterfaces/vst/ivstprocesscontext.h>
 
+#include <cstdint>
 #include <memory>
 
 namespace pulp::host {
+
+/// Monotonic transport owned by Pulp's in-process VST3 host. A non-null VST3
+/// ProcessContext makes projectTimeSamples authoritative, so publishing zero
+/// for every block is a seek on every block and forces streaming processors to
+/// clear their history continuously.
+class Vst3HostProcessClock {
+public:
+    void prepare(double sample_rate) noexcept {
+        sample_rate_ = sample_rate;
+        sample_position_ = 0;
+    }
+
+    void write(Steinberg::Vst::ProcessContext& context) const noexcept {
+        context.sampleRate = sample_rate_;
+        context.projectTimeSamples = sample_position_;
+        context.state = Steinberg::Vst::ProcessContext::kPlaying;
+    }
+
+    void advance(int num_samples) noexcept {
+        if (num_samples > 0)
+            sample_position_ += static_cast<std::int64_t>(num_samples);
+    }
+
+    double sample_rate() const noexcept { return sample_rate_; }
+    std::int64_t sample_position() const noexcept { return sample_position_; }
+
+private:
+    double sample_rate_ = 44100.0;
+    std::int64_t sample_position_ = 0;
+};
 
 /// Build a VST3 slot around already-created interfaces. `controller` may be the
 /// same object as `component` (a combined plug-in) or a separate one; the slot

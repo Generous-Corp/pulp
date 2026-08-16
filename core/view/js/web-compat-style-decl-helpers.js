@@ -50,7 +50,7 @@ var __cssProperties__ = [
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
     "paddingInline", "paddingBlock",
     "paddingHorizontal", "paddingVertical",
-    "backgroundColor", "color",
+    "backgroundColor", "color", "accentColor",
     "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
     "textAlign", "textTransform",
     // Text-decoration shorthand plus longhands.

@@ -637,55 +637,67 @@ void parse_path(const std::string& data, std::vector<SvgPathSegment>& out) {
 void SvgPathWidget::set_path(std::string data) {
     path_data_ = std::move(data);
     reparse();
+    request_repaint();
 }
 
 void SvgPathWidget::set_viewbox(float w, float h) {
     viewbox_w_ = w;
     viewbox_h_ = h;
+    request_repaint();
 }
 
 void SvgPathWidget::set_fill_color(canvas::Color c) {
     fill_color_ = c;
     has_fill_ = true;
+    request_repaint();
 }
 
 void SvgPathWidget::clear_fill() {
     has_fill_ = false;
+    request_repaint();
 }
 
 void SvgPathWidget::set_fill_gradient(std::string css_linear_gradient) {
     fill_gradient_ = std::move(css_linear_gradient);
     has_fill_ = true;  // gradient is a fill source — re-enable filling.
+    request_repaint();
 }
 
 void SvgPathWidget::clear_fill_gradient() {
     fill_gradient_.clear();
+    request_repaint();
 }
 
 void SvgPathWidget::set_stroke_color(canvas::Color c) {
     stroke_color_ = c;
     has_stroke_ = true;
+    request_repaint();
 }
 
 void SvgPathWidget::clear_stroke() {
     has_stroke_ = false;
+    request_repaint();
 }
 
 void SvgPathWidget::set_stroke_gradient(std::string css_linear_gradient) {
     stroke_gradient_ = std::move(css_linear_gradient);
     has_stroke_ = true;  // gradient is a stroke source — enable stroking.
+    request_repaint();
 }
 
 void SvgPathWidget::clear_stroke_gradient() {
     stroke_gradient_.clear();
+    request_repaint();
 }
 
 void SvgPathWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
+    request_repaint();
 }
 
 void SvgPathWidget::set_fill_rule(canvas::FillRule rule) {
     fill_rule_ = rule;
+    request_repaint();
 }
 
 void SvgPathWidget::reparse() {

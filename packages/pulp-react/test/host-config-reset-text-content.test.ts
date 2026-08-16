@@ -60,6 +60,15 @@ describe('host-config resetTextContent', () => {
         expect(c[0].args).toEqual(['s1', '']);
     });
 
+    it('clears the generated text child of a styled HTML button', () => {
+        const inst = makeInstance('button1', 'button' as PulpInstance['type']);
+        inst.textTargetId = 'button1__text';
+        fn!(inst);
+        const c = callsOf(bridge, 'setText');
+        expect(c).toHaveLength(1);
+        expect(c[0].args).toEqual(['button1__text', '']);
+    });
+
     it('calling on multiple instances dispatches setText for each', () => {
         fn!(makeInstance('a', 'span' as PulpInstance['type']));
         fn!(makeInstance('b', 'p' as PulpInstance['type']));

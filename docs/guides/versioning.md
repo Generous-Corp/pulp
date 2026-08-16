@@ -425,8 +425,8 @@ to avoid ENOSPC without shrinking the measured test surface. Build and CTest
 parallelism are separate in the shared script: low-memory consumers can bound
 link workers while the default eight test workers prevent suite growth from
 consuming the upload window on GitHub-hosted, local, and SSH coverage. The native
-suite's 120-minute internal budget reserves the final 30 minutes of the
-150-minute job for report generation, side-language coverage, artifacts, and
+suite's 180-minute internal budget reserves the final 30 minutes of the
+210-minute job for report generation, side-language coverage, artifacts, and
 receipts, avoiding a hard job cancellation after a nominal budget hit.
 
 ---

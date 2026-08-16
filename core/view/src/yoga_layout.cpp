@@ -109,7 +109,8 @@ static YGJustify to_yg_justify(FlexJustify j) {
 // Yoga shrink an absolute-with-explicit-dimension child to fit a flex
 // neighbor's slot. Direction / align / justify still describe the absolute
 // box's own inner layout, so those stay.
-static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute) {
+static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute,
+                             float viewport_width, float viewport_height) {
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));
     YGNodeStyleSetAlignItems(node, to_yg_align(f.align_items));
     YGNodeStyleSetAlignSelf(node, to_yg_align(f.align_self));
@@ -277,10 +278,20 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // contents", v0 intrinsic-sizing cards, Claude Design responsive
     // containers). The explicit Auto API matches user intent and keeps the
     // requested auto sizing explicit in the Yoga tree.
+    const auto resolve_viewport_dimension = [viewport_width, viewport_height](const Dimension& dim) {
+        return dim.resolve(0.0f, viewport_width, viewport_height);
+    };
+    const auto is_viewport_dimension = [](DimensionUnit unit) {
+        return unit == DimensionUnit::vw || unit == DimensionUnit::vh ||
+               unit == DimensionUnit::vmin || unit == DimensionUnit::vmax;
+    };
+
     if (f.dim_width.unit == DimensionUnit::auto_) {
         YGNodeStyleSetWidthAuto(node);
     } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value >= 0) {
         YGNodeStyleSetWidthPercent(node, f.dim_width.value);
+    } else if (is_viewport_dimension(f.dim_width.unit)) {
+        YGNodeStyleSetWidth(node, resolve_viewport_dimension(f.dim_width));
     } else if (f.preferred_width > 0) {
         YGNodeStyleSetWidth(node, f.preferred_width);
     }
@@ -288,6 +299,8 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         YGNodeStyleSetHeightAuto(node);
     } else if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value >= 0) {
         YGNodeStyleSetHeightPercent(node, f.dim_height.value);
+    } else if (is_viewport_dimension(f.dim_height.unit)) {
+        YGNodeStyleSetHeight(node, resolve_viewport_dimension(f.dim_height));
     } else if (f.preferred_height > 0) {
         YGNodeStyleSetHeight(node, f.preferred_height);
     }
@@ -295,15 +308,23 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // for the percent path; existing px path stays for numeric values.
     if (f.dim_min_width.unit == DimensionUnit::percent && f.dim_min_width.value >= 0) {
         YGNodeStyleSetMinWidthPercent(node, f.dim_min_width.value);
+    } else if (is_viewport_dimension(f.dim_min_width.unit)) {
+        YGNodeStyleSetMinWidth(node, resolve_viewport_dimension(f.dim_min_width));
     } else if (f.min_width > 0) YGNodeStyleSetMinWidth(node, f.min_width);
     if (f.dim_min_height.unit == DimensionUnit::percent && f.dim_min_height.value >= 0) {
         YGNodeStyleSetMinHeightPercent(node, f.dim_min_height.value);
+    } else if (is_viewport_dimension(f.dim_min_height.unit)) {
+        YGNodeStyleSetMinHeight(node, resolve_viewport_dimension(f.dim_min_height));
     } else if (f.min_height > 0) YGNodeStyleSetMinHeight(node, f.min_height);
     if (f.dim_max_width.unit == DimensionUnit::percent && f.dim_max_width.value >= 0) {
         YGNodeStyleSetMaxWidthPercent(node, f.dim_max_width.value);
+    } else if (is_viewport_dimension(f.dim_max_width.unit)) {
+        YGNodeStyleSetMaxWidth(node, resolve_viewport_dimension(f.dim_max_width));
     } else if (f.max_width > 0) YGNodeStyleSetMaxWidth(node, f.max_width);
     if (f.dim_max_height.unit == DimensionUnit::percent && f.dim_max_height.value >= 0) {
         YGNodeStyleSetMaxHeightPercent(node, f.dim_max_height.value);
+    } else if (is_viewport_dimension(f.dim_max_height.unit)) {
+        YGNodeStyleSetMaxHeight(node, resolve_viewport_dimension(f.dim_max_height));
     } else if (f.max_height > 0) YGNodeStyleSetMaxHeight(node, f.max_height);
 
     // Aspect ratio: Yoga sizes the cross axis from the main
@@ -533,7 +554,8 @@ void     yoga_layout_reset_stats() {
 }
 
 static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
-                               YGConfigRef config, bool& wants_subpixel) {
+                               YGConfigRef config, bool& wants_subpixel,
+                               float viewport_width, float viewport_height) {
     ++node_tally;
     if (view.subpixel_layout()) wants_subpixel = true;
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
@@ -544,7 +566,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
 
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
-    apply_flex_style(node, view.flex(), is_absolute);
+    apply_flex_style(node, view.flex(), is_absolute, viewport_width, viewport_height);
     apply_border_widths(node, view);
     // Wire View::Overflow through to Yoga so the engine knows about clipping
     // context. Yoga's overflow has 3
@@ -624,7 +646,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
         YGNodeRef ygChild = YGNodeNewWithConfig(config);
-        build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel);
+        build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel,
+                           viewport_width, viewport_height);
         YGNodeInsertChild(node, ygChild, static_cast<uint32_t>(i));
     }
 }
@@ -674,7 +697,8 @@ void yoga_layout(View& root) {
     YGNodeRef ygRoot = YGNodeNewWithConfig(ygConfig);
     YGNodeStyleSetWidth(ygRoot, rootBounds.width);
     YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel);
+    build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel,
+                       rootBounds.width, rootBounds.height);
     // 0 disables the pixel-grid pass entirely, preserving the fractional
     // solved geometry (see View::set_subpixel_layout for why imported
     // designs need this). Default 1.0f keeps Yoga's stock whole-pixel

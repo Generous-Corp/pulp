@@ -19,6 +19,15 @@ mutable global browser, but the workflow must fail if the pinned archive cannot
 be downloaded, verified, extracted, or executed; a skipped browser comparison
 is not a passing fidelity gate.
 
+The browser-capture Node tests are intentionally split by execution contract:
+dependency-free units, the serial real-Chromium integration file (with its own
+600-second CTest timeout), and the esbuild-backed materialized-runtime
+canonicalization case. The required Linux leg runs the locked
+`npm ci --prefix tools/import-design/jsx-runtime` step before CMake configure,
+which makes the dependency-backed case visible to CTest. Source-only or offline
+configurations without that `node_modules/esbuild` installation still register
+the dependency-free suites, but they do not claim the canonicalization proof.
+
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
 request whose head branch lives in **another repository**,
@@ -438,10 +447,37 @@ gh variable set PULP_LOCAL_IWYU_RUNS_ON_JSON \
   --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
 ```
 
+**A label match is not enough: check the runner group first.** The Mac Pro pool
+registers into a restricted organization runner group, and a group that does not
+list a workflow will never assign a job to it. The label set above is a subset of
+what the pool advertises, so the job looks routable and then queues forever. The
+two installed pool roles and what their groups admit:
+
+| Pool role | Extra label | Group | Group admits |
+|---|---|---|---|
+| `proxmox-trusted-ephemeral-runner-linux.sh` | `pulp-auto-linux-x64` | `pulp-trusted-build` | `build.yml`, `vellum-freeze-check.yml`, `version-skill-check.yml`, each at `refs/heads/main` |
+| `proxmox-pr-safe-ephemeral-runner-linux.sh` | `pulp-pr-safe-linux-x64` | `pulp-pr-safe-build` | `pr-safe-linux.yml@refs/heads/main` |
+
+Neither group lists `iwyu.yml`, `header-self-contained.yml`, or
+`gcc-compile-gate.yml`, so setting one of the three variables above routes that
+lane into a group that cannot admit it. Before flipping one, confirm the
+consuming workflow is in the group's selected workflows:
+
+```sh
+ghapp api orgs/Generous-Corp/actions/runner-groups/3 --jq '.selected_workflows'
+ghapp api orgs/Generous-Corp/actions/runner-groups/3/runners --jq '.total_count'
+```
+
 Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
-Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
-remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
-against each other before they queue against GitHub.
+Check capacity first with `ssh macpro /usr/local/sbin/macpro-governor.sh status`.
+Slot count is live host state, not a constant: individual `@N` slots get masked
+and unmasked as the fleet is worked on, and every routed lane queues behind
+`Linux (x64)` for whatever slots exist before it queues against GitHub. Read the
+count at the moment you flip rather than trusting any number written here:
+
+```sh
+ssh macpro 'systemctl list-units "*ephemeral-pool@*" --all'
+```
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -1198,6 +1234,18 @@ a false green.
 
 ### Changing a lane
 
+A lane that omits `unset_fallback` is declaring that the consuming workflow has
+no route when the variable is unset, which the checker escalates to an error.
+Read the consuming workflow's whole resolution chain before believing that: an
+unset variable is frequently a deliberate state rather than a stalled lane, and
+the fallback is not always hosted. `release-cli.yml` resolves
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` through `PULP_LOCAL_MACOS_RUNS_ON_JSON`
+before it ever reaches `macos-15`, so leaving it unset routes releases to the
+self-hosted pool. Reading only the last element of such a chain produces a
+confident and wrong conclusion in both directions. Record the real terminus as
+`unset_fallback` so the report keeps naming only the lanes that would genuinely
+have nowhere to run.
+
 Edit the variable **and** its lane in `runner_topology.json` in the same change —
 the drift check exists to make that atomic. Then:
 
@@ -1208,6 +1256,38 @@ python3 tools/scripts/runner_topology_check.py --mode=report
 # Advisory (never fails), useful while iterating.
 python3 tools/scripts/runner_topology_check.py --mode=hint
 ```
+
+### An unset variable is not automatically a gap
+
+Four lanes read as broken in the contract while behaving exactly as intended,
+because "unset" and "hosted" each mean something specific per lane. Read the
+consuming workflow before calling one of these a black hole:
+
+- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is deliberately unset, and that is the
+  local-first state.** `release-cli.yml` resolves it, then
+  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, then Namespace (off for cost), then
+  `macos-15`. Leaving it unset therefore routes releases onto the self-hosted
+  pool that already backs the required gate — which is why hosted starvation
+  (2026-05-18, 2026-06-09) no longer blocks publishing. Setting it *overrides*
+  that chain, so it is only correct for a proven dedicated release lane.
+- **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is hosted on purpose.** Overflow
+  exists to add capacity when the local pool is saturated, so pointing it at
+  the same local labels is a no-op under the exact condition it must relieve.
+  `local-only` is a documented off-switch, not a label set.
+- **`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` is hosted because darwin-x64 is
+  cross-compiled on Apple Silicon**, not built on the native Intel image. The
+  Mac mini native-Intel lane (`PULP_NATIVE_INTEL_RUNS_ON_JSON`) is a separate
+  advisory lane and is not a substitute for this release leg.
+- **`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`** coordinates a release rather
+  than building one. It resolves to `PULP_LOCAL_LINUX_RUNS_ON_JSON` next, but
+  reaching the Mac Pro pool is not a selector decision alone: those runners sit
+  in a restricted org runner group, so the group's workflow-ref restriction
+  governs which workflows may use them.
+
+The general rule: a lane is only "missing" once you have read the fallback
+chain in its consuming workflow. A variable, a supervisor process, a runner-group
+row, and an idle VM are each individually consistent with a lane that works and
+with one that does not.
 
 ## macOS overflow routing (Plan B)
 

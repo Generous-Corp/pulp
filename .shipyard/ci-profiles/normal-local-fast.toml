@@ -20,9 +20,27 @@ strategy = "ordered-fallback"
 targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"]
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
+# Automatic pull-request Linux stays hosted. The protected local route exists
+# (.github/workflows/pr-safe-linux.yml, fail-closed admission + 15-minute health
+# lease + ubuntu-latest fallback) but no workflow calls it yet, and build.yml's
+# inline automatic gate additionally requires the run's workflow_ref to be
+# build.yml@refs/heads/main. Declaring macpro here before that is proven would
+# describe a route no PR can take.
 [repo."Generous-Corp/pulp".pr.linux]
 strategy = "github-only"
 targets = ["github.linux-x64"]
+
+# Operator-dispatched Linux. Proven 2026-08-16: build.yml run 31931976717's
+# `Linux (x64) [local]` leg was assigned to ephemeral runner
+# pulp-auto-ephemeral-200 on the macpro Proxmox pool. Every consumer of this
+# variable gates it on `github.event_name == 'workflow_dispatch'`
+# (version-skill-check, vellum-freeze-check, examples-validation, and build.yml's
+# EXPLICIT_LINUX_RUNNER_SELECTOR_JSON), so it cannot alter a required
+# pull-request or merge-group check. Unsetting it restores ubuntu-latest.
+[repo."Generous-Corp/pulp".dispatch.linux]
+strategy = "ordered-fallback"
+targets = ["macpro.linux-x64-vm", "github.linux-x64"]
+github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"
@@ -76,6 +94,26 @@ runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build-vm-release"]
 [targets."macstudio.macos-arm64-coverage-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
 ephemeral = true
+
+# Dedicated ephemeral sanitizer VM lane. Deliberately carries NEITHER
+# `pulp-build` nor `pulp-build-vm`: sanitizers.yml resolves each sanitizer with
+# deny-labels=pulp-build,pulp-build-vm so an advisory sanitizer can never land
+# on the pool serving the required `macos` gate. The supervisor IS installed
+# (on M1) but cannot currently serve this label, so an installed supervisor is
+# not evidence the lane is usable — only a real dispatch and teardown proof on
+# this exact label set is. The sanitizer variables stay hosted until then.
+[targets."sanitizer.macos-arm64-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-sanitizer-vm-macos"]
+ephemeral = true
+
+# Native Intel macOS on the Mac mini. Advisory compatibility work only; the
+# release darwin-x64 leg is cross-compiled on Apple Silicon and must not be
+# pointed here.
+[targets."macmini.macos-x64-native"]
+runs_on_json = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+[targets."github.macos-x64-intel"]
+runs_on_json = "macos-15-intel"
 
 [targets."github.macos-arm64"]
 runs_on_json = "macos-15"

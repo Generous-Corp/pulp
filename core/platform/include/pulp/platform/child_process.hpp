@@ -37,8 +37,10 @@ struct ProcessOptions {
     bool capture_stdout = true;
     bool capture_stderr = true;
     /// Called for each complete captured line on stdout while output is drained.
+    /// An exception is treated as cancellation and never escapes ChildProcess.
     std::function<void(std::string_view line)> on_stdout_line;
     /// Called for each complete captured line on stderr while output is drained.
+    /// An exception is treated as cancellation and never escapes ChildProcess.
     std::function<void(std::string_view line)> on_stderr_line;
     int standard_input_timeout_ms = 3000;  ///< Bound inherited-input delivery
     size_t max_standard_input_provider_bytes = 1 << 20;  ///< Cap provider-returned bytes

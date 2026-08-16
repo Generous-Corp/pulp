@@ -93,6 +93,9 @@ public:
     void attach_webview        (WebViewPanel& panel);
     void detach_webview        (WebViewPanel& panel);
     void attach_native_runtime (JsRuntime& runtime, std::string_view handler_name);
+    void attach_native_runtime (ScriptEngine& engine, std::string_view handler_name);
+    void attach_native_runtime (ScriptedUiSession& session, std::string_view handler_name);
+    void detach_native_runtime (ScriptedUiSession& session, std::string_view handler_name);
 
     // Static value-coercion helpers (never throw).
     static float       get_float (const choc::value::ValueView&, const char* key, float dflt) noexcept;
@@ -156,6 +159,22 @@ const response = JSON.parse(__editorDispatch(JSON.stringify({
 The bridge must outlive calls through the registered function. The older
 `JsRuntime` overload remains a no-op compatibility seam until that separate
 runtime type has a concrete callback surface.
+
+For a `ScriptedUiSession`, use the session overload instead of borrowing or
+exposing its engine:
+
+```cpp
+bridge.attach_native_runtime(session, "__editorDispatch");
+// ... before bridge or captured handler state is destroyed:
+bridge.detach_native_runtime(session, "__editorDispatch");
+```
+
+The session installs the endpoint before the live script executes and
+reinstalls it whenever hot reload replaces the JS realm. Reload's throwaway
+validation realm receives a fail-closed stub under the same name, so validation
+can resolve the global without replaying processor mutations; only the
+committed realm invokes the bridge. Detaching removes the endpoint from future
+realms and replaces the current global with a detached error response.
 
 ## Usage example
 

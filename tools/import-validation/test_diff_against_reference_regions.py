@@ -333,16 +333,27 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertTrue(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 96 + [(255, 255, 255)] * 4)))
         self.assertFalse(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 94 + [(255, 255, 255)] * 6)))
 
-    def test_region_score_uses_default_threshold_and_blank_candidate_gate(self) -> None:
+    def test_region_score_accepts_matching_blank_negative_space(self) -> None:
         ref = FakeImage([(0, 0, 0)] * 100)
         cand = FakeImage([(0, 0, 0)] * 100)
         result = regions_mod.region_score(ref, cand, {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
         self.assertEqual(result["threshold"], 0.75)
-        self.assertFalse(result["passed"])
+        self.assertTrue(result["passed"])
         self.assertEqual(result["score"], 1.0)
         self.assertTrue(result["blank_candidate"])
         self.assertTrue(result["blank_reference"])
+        self.assertFalse(result["blank_mismatch"])
         self.assertEqual(result["rect_pct"], {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
+
+    def test_region_score_rejects_blank_candidate_when_reference_has_content(self) -> None:
+        ref = FakeImage([(255, 255, 255)] * 100)
+        cand = FakeImage([(0, 0, 0)] * 100)
+        result = regions_mod.region_score(
+            ref, cand,
+            {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "threshold": 0.0},
+        )
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["blank_mismatch"])
 
     def test_region_score_passes_non_blank_matching_region_with_notes(self) -> None:
         img = FakeImage([(255, 255, 255)] * 100)

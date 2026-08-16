@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pathlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ TRUSTED_SERVICE = ROOT / "tools" / "ci" / "pulp-trusted-ephemeral-pool@.service"
 PR_SAFE_SERVICE = ROOT / "tools" / "ci" / "pulp-pr-safe-ephemeral-pool@.service"
 GENERIC_SERVICE = ROOT / "tools" / "ci" / "proxmox-ephemeral-pool@.service"
 QUALITY_TESTS = ROOT / "test" / "cmake" / "quality_tests.cmake"
+ENGINE = ROOT / "tools" / "ci" / "pulp-ephemeral-runner.sh"
 
 
 class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
@@ -166,7 +168,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.trusted_service,
         )
         self.assertIn(
-            "ExecStart=/usr/local/sbin/pulp-trusted-ephemeral-runner.sh",
+            "ExecStart=/usr/local/sbin/proxmox-trusted-ephemeral-runner-linux.sh",
             self.trusted_service,
         )
         self.assertIn(
@@ -174,7 +176,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.pr_safe_service,
         )
         self.assertIn(
-            "ExecStart=/usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh",
+            "ExecStart=/usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh",
             self.pr_safe_service,
         )
         self.assertNotIn("EnvironmentFile=-", self.trusted_service)
@@ -975,6 +977,62 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         ):
             self.assertIn(f"OUT DROP -dest {subnet}", self.script)
         self.assertIn('rm -f -- "$firewall_file"', self.script)
+
+    def test_every_referenced_delegate_is_carried_by_the_repository(self) -> None:
+        """A wrapper or unit may only invoke a script this tree actually carries.
+
+        The rest of this file asserts that a wrapper *mentions* its delegate. That
+        is not the same as the delegate existing, and the difference was load
+        bearing: `pulp-ephemeral-runner.sh` was referenced by both wrappers, both
+        units, and two assertions here while living only on one host's disk, so
+        the protected Linux lane depended on a file no commit contained and no
+        fresh host could reproduce. Asserting the reference string alone cannot
+        fail in the way that matters, so resolve every reference instead.
+        """
+        referenced: list[tuple[str, str]] = []
+        for label, text in (
+            ("trusted wrapper", self.trusted_wrapper),
+            ("pr-safe wrapper", self.pr_safe_wrapper),
+            ("generic supervisor", self.script),
+        ):
+            for name in re.findall(r'exec\s+"\$SCRIPT_DIR/([^"]+)"', text):
+                referenced.append((label, name))
+        for label, text in (
+            ("trusted unit", self.trusted_service),
+            ("pr-safe unit", self.pr_safe_service),
+            ("generic unit", self.generic_service),
+            ("pool unit", self.service),
+        ):
+            for name in re.findall(r"ExecStart=/usr/local/sbin/(\S+)", text):
+                referenced.append((label, name))
+
+        self.assertTrue(referenced, "no delegate references found — regex drifted")
+        missing = sorted(
+            {
+                f"{label} -> tools/ci/{name}"
+                for label, name in referenced
+                if not (ROOT / "tools" / "ci" / name).is_file()
+            }
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "referenced delegate(s) missing from the repository; they would exist "
+            "only as unversioned host state: " + ", ".join(missing),
+        )
+
+    def test_engine_is_present_and_syntactically_valid(self) -> None:
+        """The engine both wrappers exec must be committed, executable, and parse."""
+        self.assertTrue(
+            ENGINE.is_file(),
+            "tools/ci/pulp-ephemeral-runner.sh is missing; the Linux lane's "
+            "execution engine must be versioned, not host-only state",
+        )
+        self.assertTrue(os.access(ENGINE, os.X_OK), f"{ENGINE} must be executable")
+        result = subprocess.run(
+            ["/bin/bash", "-n", str(ENGINE)], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

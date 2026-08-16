@@ -11,6 +11,15 @@
 
 namespace pulp::format {
 
+/// Controls whether a host paints an editor through a fixed authored
+/// coordinate space or lets the root lay itself out at the live host size.
+/// `Automatic` preserves the historical behavior for existing plug-ins.
+enum class ViewportPolicy : uint8_t {
+    Automatic,
+    FixedDesign,
+    Responsive,
+};
+
 /// Editor size hints (in logical pixels). preferred is used for the
 /// initial window size; min/max bound interactive resizing. A zero
 /// max dimension means unbounded in that axis.
@@ -28,7 +37,26 @@ struct ViewSize {
     /// freely within [min, max]. Typical values: 16.0/9.0, 4.0/3.0,
     /// preferred_width/preferred_height.
     double aspect_ratio = 0.0;
+
+    /// Optional authored coordinate space. This is distinct from preferred:
+    /// an imported 1320x860 design may intentionally open in a 990x645 host
+    /// while retaining its captured layout coordinates and scaling uniformly.
+    /// Zero preserves the historical preferred-size viewport behavior.
+    uint32_t design_width = 0;
+    uint32_t design_height = 0;
+
+    /// The viewport/layout policy is independent of `aspect_ratio`: a
+    /// responsive editor may still ask the host to preserve a fixed aspect.
+    ViewportPolicy viewport_policy = ViewportPolicy::Automatic;
 };
+
+constexpr uint32_t design_viewport_width(const ViewSize& hints) {
+    return hints.design_width > 0 ? hints.design_width : hints.preferred_width;
+}
+
+constexpr uint32_t design_viewport_height(const ViewSize& hints) {
+    return hints.design_height > 0 ? hints.design_height : hints.preferred_height;
+}
 
 /// Build a ViewSize from a design-import preferred size with sensible
 /// derived bounds. Used by `Processor::view_size()`'s default when
@@ -72,12 +100,77 @@ constexpr ViewSize view_size_from_design(uint32_t preferred_width,
 ///     pin viewport + lock aspect (design-import path).
 ///   - resizable + aspect_ratio==0: free drag within [min,max] — NO pin, NO
 ///     aspect lock; the root reflows via Yoga at the host size.
-/// True == the editor host should call set_design_viewport(preferred) +
+/// True == the editor host should call set_design_viewport(authored-or-preferred) +
 /// set_fixed_aspect_ratio(preferred_w / preferred_h).
 constexpr bool should_pin_design_viewport(const ViewSize& hints) {
+    if (hints.viewport_policy == ViewportPolicy::Responsive) return false;
+    if (hints.viewport_policy == ViewportPolicy::FixedDesign) {
+        return design_viewport_width(hints) > 0 &&
+               design_viewport_height(hints) > 0;
+    }
     const bool resizable = hints.min_width > 0 && hints.min_height > 0;
     const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
     return hints.preferred_width > 0 && hints.preferred_height > 0 && !free_resize;
+}
+
+/// Aspect locking and viewport pinning are deliberately separate. A responsive
+/// root can reflow at the live host bounds while the host still constrains the
+/// resize gesture to the declared aspect ratio.
+constexpr bool should_lock_view_aspect(const ViewSize& hints) {
+    return hints.aspect_ratio > 0.0;
+}
+
+/// Resolve the native host constraint while preserving the legacy fixed-editor
+/// contract. Older plug-ins commonly leave `aspect_ratio` at zero because the
+/// adapters historically derived it from the pinned viewport. Responsive
+/// editors keep zero as "no host aspect constraint".
+constexpr double native_view_aspect_ratio(const ViewSize& hints) {
+    if (should_lock_view_aspect(hints)) return hints.aspect_ratio;
+    if (!should_pin_design_viewport(hints)) return 0.0;
+    const auto width = design_viewport_width(hints);
+    const auto height = design_viewport_height(hints);
+    return width > 0 && height > 0
+        ? static_cast<double>(width) / static_cast<double>(height)
+        : 0.0;
+}
+
+/// Apply the declared viewport policy to a newly-created native host.  Keeping
+/// this decision here prevents format adapters from accidentally coupling
+/// responsive layout to aspect locking.
+template <typename NativeHost>
+void configure_native_viewport(NativeHost& host, const ViewSize& hints) {
+    if (should_pin_design_viewport(hints)) {
+        host.set_design_viewport(
+            static_cast<float>(design_viewport_width(hints)),
+            static_cast<float>(design_viewport_height(hints)));
+    }
+    const double aspect_ratio = native_view_aspect_ratio(hints);
+    if (aspect_ratio > 0.0) {
+        host.set_fixed_aspect_ratio(static_cast<float>(aspect_ratio));
+    }
+}
+
+/// Commit viewport state after an editor-initiated host resize succeeds.  A
+/// fixed-design editor adopts the explicitly requested coordinate space (the
+/// historical behavior); a responsive editor changes only its host aspect and
+/// continues laying out against the live host bounds.
+template <typename NativeHost>
+void commit_editor_requested_viewport(NativeHost& host,
+                                      const ViewSize& hints,
+                                      uint32_t width,
+                                      uint32_t height) {
+    if (should_pin_design_viewport(hints)) {
+        host.set_design_viewport(static_cast<float>(width),
+                                 static_cast<float>(height));
+    }
+    const double aspect_ratio = should_lock_view_aspect(hints)
+        ? hints.aspect_ratio
+        : (should_pin_design_viewport(hints) && height > 0
+            ? static_cast<double>(width) / static_cast<double>(height)
+            : 0.0);
+    if (aspect_ratio > 0.0) {
+        host.set_fixed_aspect_ratio(static_cast<float>(aspect_ratio));
+    }
 }
 
 /// Plugin category — determines bus layout expectations and DAW behavior.

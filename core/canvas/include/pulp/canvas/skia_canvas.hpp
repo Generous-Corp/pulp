@@ -57,6 +57,8 @@ namespace pulp::canvas {
 // Uses Skia Graphite when available, falls back to Ganesh or CPU
 class SkiaCanvas : public Canvas {
 public:
+    RendererBackend renderer_backend() const noexcept override;
+    float backing_scale() const noexcept override;
     /// Renderer-owned backing store for cacheable layer textures.
     ///
     /// A live renderer creates one store and passes it to each per-frame
