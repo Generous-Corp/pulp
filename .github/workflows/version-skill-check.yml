@@ -43,18 +43,25 @@ jobs:
     # restricted to this workflow's protected default-branch ref. Trusted
     # manual dispatch may use the repository pool. Fork PRs and unset selectors
     # fall back to hosted Linux.
+    # The selectors are *_RUNS_ON_JSON: their value is a JSON array, so it must
+    # be parsed. Interpolating one directly yields a SINGLE label whose text is
+    # the literal `["self-hosted","Linux",...]`, which no runner can ever carry,
+    # and GitHub queues such a job forever instead of failing it. Keep every
+    # branch JSON — including the hosted fallbacks, hence the quoted form — so
+    # setting a local selector can never turn this required gate into a silent
+    # black hole.
     runs-on: >-
-      ${{
+      ${{ fromJSON(
         github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
         github.event_name == 'workflow_dispatch' &&
-        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
+        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
         github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
         (github.event_name == 'merge_group' ||
          (github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository)) &&
-        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || 'ubuntu-latest') ||
-        'ubuntu-latest'
-      }}
+        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
+        '"ubuntu-latest"'
+      ) }}
     name: Enforce version & skill sync
 
     env:
