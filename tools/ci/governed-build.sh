@@ -223,6 +223,32 @@ fi
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
 export CTEST_PARALLEL_LEVEL="$jobs"
 
+# Name an unresolvable build command before running it.
+#
+# A Shipyard dispatch runs in a NON-INTERACTIVE login shell, which does not read
+# the interactive profile that puts /opt/homebrew/bin on PATH. `cmake` then does
+# not resolve, and under the taskpolicy branch below the failure surfaces as
+# `taskpolicy: posix_spawn: No such file or directory` — a message that names
+# neither the missing tool nor PATH, and reads like a build failure rather than a
+# host misconfiguration. That killed a real validation run on 2026-08-15.
+#
+# Probing the caller's own shell is what makes this class hard to see: an
+# interactive probe resolves `cmake` fine and reports the mode cannot recur while
+# the dispatch shell still cannot find it. This check runs in the shell that will
+# actually spawn the command, so it cannot give that false pass.
+case "$1" in
+  */*) [ -x "$1" ] || { log "build command not executable: $1"; exit 127; } ;;
+  *)
+    if ! command -v "$1" >/dev/null 2>&1; then
+      log "build command not found on PATH: $1"
+      log "PATH=$PATH"
+      log "A Shipyard dispatch runs a non-interactive login shell, which does not"
+      log "read an interactive profile — /opt/homebrew/bin is a common omission."
+      exit 127
+    fi
+    ;;
+esac
+
 # Run the build as a CHILD (not exec) so the EXIT trap fires and the lease is
 # released even on failure. Background QoS on laptop-class hosts keeps a shared
 # machine's UI responsive (taskpolicy only re-prioritizes; the -j cap above is

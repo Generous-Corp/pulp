@@ -260,6 +260,38 @@ class GovernedBuildTests(unittest.TestCase):
         )
         self.assertEqual(r.returncode, 7, r.stderr)
 
+    # --- an unresolvable build command must name itself ----------------------
+    #
+    # A Shipyard dispatch runs a non-interactive login shell that does not read
+    # the interactive profile carrying /opt/homebrew/bin. Without this check the
+    # taskpolicy branch reports `taskpolicy: posix_spawn: No such file or
+    # directory`, which names neither the tool nor PATH and reads like a build
+    # failure rather than a host misconfiguration.
+
+    def test_missing_build_command_names_the_tool_and_path(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "definitely-not-a-real-build-tool", "--build"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+        self.assertIn("definitely-not-a-real-build-tool", r.stderr)
+        self.assertIn("PATH=", r.stderr)
+
+    def test_missing_absolute_build_command_is_named(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "/nonexistent/dir/cmake", "--build"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+        self.assertIn("/nonexistent/dir/cmake", r.stderr)
+
+    def test_resolvable_command_still_runs(self) -> None:
+        r = self._run(PULP_TARTCI_LEASES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertGreaterEqual(self._granted(r), 1)
+
     # --- script hygiene ------------------------------------------------------
 
     def test_script_exists_and_executable(self) -> None:
