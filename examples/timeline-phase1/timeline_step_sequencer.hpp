@@ -4,6 +4,10 @@
 #include "timeline_step_pattern_content.hpp"
 
 #include <pulp/state/sequencer_state_channel.hpp>
+#include <pulp/timeline/document_session.hpp>
+#include <pulp/timeline/transaction.hpp>
+
+#include <vector>
 
 #include <cstdint>
 #include <atomic>
@@ -33,6 +37,14 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     state::SequencerStateChannel& channel() noexcept { return channel_; }
     const state::Snapshot& pattern_snapshot() const noexcept { return pattern_; }
     bool engine_prepared() const noexcept { return engine_.prepared(); }
+    /// Live program identity, for acceptance oracles.
+    TimelineExampleEngine::ProgramIdentity program_identity() const noexcept {
+        return engine_.program_identity();
+    }
+    /// Shared owner of one compiled track, for pointer-identity oracles.
+    std::shared_ptr<const playback::TrackProgram> track_program(timeline::ItemId id) const {
+        return engine_.track_program(id);
+    }
     bool has_active_notes() const noexcept { return engine_.synth_has_active_notes(); }
     /// Control-thread pump: applies queued channel commands, rebuilds the typed
     /// persistent component, and publishes a lowered program to the stable graph.
@@ -58,6 +70,13 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     timeline::SchemaRegistry registry_;
     bool registry_ready_ = false;
     std::shared_ptr<const timeline::Project> persistent_project_;
+    // The live edit document. Edits after the first compile are real
+    // transactions against this session, so compilation is driven by an exact
+    // CommitResult rather than by rebuilding the project and declaring
+    // everything dirty.
+    std::unique_ptr<timeline::DocumentSession> session_;
+    timeline::WriterToken writer_;
+    std::int64_t session_duration_ticks_ = 0;
     double sample_rate_ = 0.0;
     std::uint32_t maximum_block_size_ = 0;
     std::atomic<std::uint8_t> active_pattern_{0};
