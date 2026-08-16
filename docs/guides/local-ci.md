@@ -447,10 +447,37 @@ gh variable set PULP_LOCAL_IWYU_RUNS_ON_JSON \
   --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
 ```
 
+**A label match is not enough: check the runner group first.** The Mac Pro pool
+registers into a restricted organization runner group, and a group that does not
+list a workflow will never assign a job to it. The label set above is a subset of
+what the pool advertises, so the job looks routable and then queues forever. The
+two installed pool roles and what their groups admit:
+
+| Pool role | Extra label | Group | Group admits |
+|---|---|---|---|
+| `proxmox-trusted-ephemeral-runner-linux.sh` | `pulp-auto-linux-x64` | `pulp-trusted-build` | `build.yml`, `vellum-freeze-check.yml`, `version-skill-check.yml`, each at `refs/heads/main` |
+| `proxmox-pr-safe-ephemeral-runner-linux.sh` | `pulp-pr-safe-linux-x64` | `pulp-pr-safe-build` | `pr-safe-linux.yml@refs/heads/main` |
+
+Neither group lists `iwyu.yml`, `header-self-contained.yml`, or
+`gcc-compile-gate.yml`, so setting one of the three variables above routes that
+lane into a group that cannot admit it. Before flipping one, confirm the
+consuming workflow is in the group's selected workflows:
+
+```sh
+ghapp api orgs/Generous-Corp/actions/runner-groups/3 --jq '.selected_workflows'
+ghapp api orgs/Generous-Corp/actions/runner-groups/3/runners --jq '.total_count'
+```
+
 Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
-Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
-remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
-against each other before they queue against GitHub.
+Check capacity first with `ssh macpro /usr/local/sbin/macpro-governor.sh status`.
+Slot count is live host state, not a constant: individual `@N` slots get masked
+and unmasked as the fleet is worked on, and every routed lane queues behind
+`Linux (x64)` for whatever slots exist before it queues against GitHub. Read the
+count at the moment you flip rather than trusting any number written here:
+
+```sh
+ssh macpro 'systemctl list-units "*ephemeral-pool@*" --all'
+```
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -1206,6 +1233,18 @@ and violation (`1`), so a missing token scope fails loudly instead of reporting
 a false green.
 
 ### Changing a lane
+
+A lane that omits `unset_fallback` is declaring that the consuming workflow has
+no route when the variable is unset, which the checker escalates to an error.
+Read the consuming workflow's whole resolution chain before believing that: an
+unset variable is frequently a deliberate state rather than a stalled lane, and
+the fallback is not always hosted. `release-cli.yml` resolves
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` through `PULP_LOCAL_MACOS_RUNS_ON_JSON`
+before it ever reaches `macos-15`, so leaving it unset routes releases to the
+self-hosted pool. Reading only the last element of such a chain produces a
+confident and wrong conclusion in both directions. Record the real terminus as
+`unset_fallback` so the report keeps naming only the lanes that would genuinely
+have nowhere to run.
 
 Edit the variable **and** its lane in `runner_topology.json` in the same change —
 the drift check exists to make that atomic. Then:

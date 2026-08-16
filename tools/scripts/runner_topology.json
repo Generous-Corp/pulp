@@ -58,6 +58,23 @@
       "severity": "required"
     },
     {
+      "variable": "PULP_ALIAS_RUNS_ON_JSON",
+      "purpose": "Required-check alias job for `macos`. It is the LAST job in a build.yml run and does one terminal jobs-API read, so starving it does not merely delay a check: the run never reaches a terminal state, holds this ref's concurrency group, and leaves the next push's run at status `pending` with zero jobs. The `linux` and `windows` aliases already report from the self-hosted preamble for that reason; this lane gives `macos` the same protection without borrowing preamble capacity when a dedicated alias pool exists.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-preamble"
+      ],
+      "unset_fallback": "ubuntu-latest",
+      "provisioning": "persistent",
+      "severity": "required",
+      "hosts": [
+        "pulp-preamble-m3",
+        "pulp-preamble-m5"
+      ]
+    },
+    {
       "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
       "purpose": "Cheap preamble/probe legs that gate the heavier build jobs.",
       "expect": [
