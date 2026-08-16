@@ -219,6 +219,16 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # Live-build check: reports a governed build running in THIS checkout, which
+    # Shipyard's local mac backend does by design. Its one job is to tell a live
+    # marker from the one a killed build necessarily leaves behind, so the test
+    # asserts both directions — a presence-keyed check would pass a one-way test
+    # while warning on every dead build until nobody reads it. Pure Python, no
+    # lease store, no build.
+    add_test(NAME live-build-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_live_build_check.py")
+    set_tests_properties(live-build-check-selftest PROPERTIES TIMEOUT 120)
+
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs
     # and the multi-plugin nested outline without using credentials or bundles.
