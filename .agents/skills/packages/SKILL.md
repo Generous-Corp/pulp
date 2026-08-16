@@ -396,3 +396,17 @@ the shared contract in
 - [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
+
+## JS-engine attribution in the dependency inventory
+
+`DEPENDENCIES.md`, `NOTICE.md`, and `tools/deps/manifest.json` describe which JS
+engine a build actually links, so their wording is an attribution claim rather
+than a description. Keep them on the real contract: QuickJS is the default,
+JSC is **opt-in** on Apple (`PULP_JS_ENGINE=jsc`) and is a system framework that
+must never be implied by "Apple" alone, and V8 is an optional sealed prebuilt
+that is unavailable on iOS because JIT is forbidden there. Phrasing such as
+"default is QuickJS, JSC on Apple" or "iOS is JSC-only" overstates what is
+linked and misattributes a framework the build may not use at all. When the
+engine contract changes, update all three together; `python3 tools/deps/audit.py
+--strict` checks pins and notice coverage, not whether the prose matches the
+build.
