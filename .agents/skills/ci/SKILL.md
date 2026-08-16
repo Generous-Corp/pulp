@@ -2836,6 +2836,46 @@ classification before the single networkless Sol-medium repair step can run,
 and the GitHub-hosted publisher independently revalidates the exact head,
 assignment epoch, and blocker fingerprint before applying any patch.
 
+**The recovery worker has two model lanes: Codex primary, Claude fallback.**
+Codex Luna/low triage and Sol/medium repair run first and are unchanged. Each
+now carries `continue-on-error` so that a failing model does not abort the job
+before the bounded fallback can run. The fallback is deliberately *reactive*,
+gated on `steps.triage.outcome == 'failure'` and
+`steps.repair.outcome == 'failure'`, because **a Subrouter lease mints
+successfully even when its account is out of quota** — exhaustion only surfaces
+when the model actually runs, so no preflight probe can detect it. This was
+proven on 2026-08-16 when all five Codex accounts hit their weekly limit and the
+recovery canary failed 44 seconds into `luna-triage` with every fence, lease,
+and teardown behaving correctly.
+
+Four rules govern the fallback lane:
+
+- **Mint it model-unbound.** Subrouter rejects any request whose body model
+  differs from a bound lease, and Claude Code issues background calls on a small
+  fast model. Send `provider:"claude"` with no `model` field; an empty model
+  short-circuits that validation, but an empty provider *and* empty model
+  defaults the lease back to Codex.
+- **Consume the lease through the environment.** A Claude lease returns
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, and
+  `CLOUDMUX_SUBROUTER_LEASE_TOKEN`. The base URL is bare — only Codex, Kimi, and
+  ZAI leases get path suffixes. There is no `--base-url` flag.
+- **Keep the context deliberately minimal.** A default Claude Code launch loads
+  plugin and MCP context that dwarfs the bounded recovery prompt (roughly 60k
+  cache-creation tokens versus 35k for an isolated launch), so the lane pins
+  `--strict-mcp-config`, an empty `--mcp-config`, `--settings
+  '{"disableAllHooks":true}'`, `--no-session-persistence`, and an isolated
+  `CLAUDE_CONFIG_DIR`.
+- **Re-validate the output locally.** `claude --json-schema` validates upstream
+  but leaves no trusted local proof, so
+  `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That
+  path is inside the `FORBIDDEN_PREFIXES` fence on purpose: a validator living
+  outside the fence could be weakened by the very repair model it constrains.
+
+If both lanes fail the job errors rather than reporting a green tick with no
+classification, and the publisher's commit trailers record the lane that
+actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
+trail never misattributes a repair.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
