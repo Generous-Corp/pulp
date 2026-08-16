@@ -264,8 +264,26 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertIn("assignment.json", paths)
         self.assertIn("checks.json", paths)
         self.assertIn("recovery-result.json", paths)
-        for forbidden in ("prompt.txt", "failed-checks.txt", "session-lease"):
+        for forbidden in (
+            "prompt.txt",
+            "failed-checks.txt",
+            "session-lease",
+            # The fallback lane mints its own lease and writes a raw model
+            # envelope; neither may ride out in the artifact.
+            "fallback-lease",
+            "recovery-result-fallback",
+            "repair-result-fallback",
+        ):
             self.assertNotIn(forbidden, paths)
+        # Every lease file the job can create must be removed by its release
+        # step, so a failed run leaves no broker credential on the VM.
+        for lease in (
+            "session-lease.json",
+            "fallback-lease.json",
+            "repair-lease.json",
+            "fallback-repair-lease.json",
+        ):
+            self.assertIn(f'rm -f "$RUNNER_TEMP/{lease}"', self.text)
 
 
 if __name__ == "__main__":
