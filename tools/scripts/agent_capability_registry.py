@@ -44,6 +44,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/dynamics_contract.hpp": "Pulp::signal",
     "pulp/signal/explicit_q_resonator_bank.hpp": "Pulp::signal",
     "pulp/signal/expander.hpp": "Pulp::signal",
+    "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
@@ -519,7 +520,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:6a28b95cbbbab06543097273312efde14ce03abbedafc063e3950e3694bee56a",
+        "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
