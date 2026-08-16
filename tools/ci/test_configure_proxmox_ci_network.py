@@ -59,6 +59,42 @@ class ConfigureProxmoxCiNetworkTests(unittest.TestCase):
             3,
         )
 
+    def test_route_assertion_matches_real_iproute2_output(self) -> None:
+        """The verify route check must accept iproute2's actual spacing.
+
+        `ip -o -4 route get` emits a single space between the device name and
+        `src`. A pattern that closes the device literal with its own trailing
+        space cannot then match a `src` literal that opens with one, so the
+        check fails against a topology that is in fact correct.
+        """
+        route = "10.240.200.2 dev vmbr-ci200 src 10.240.200.1 uid 0 \\    cache "
+        probe = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                'bridge=vmbr-ci200; expected_address=10.240.200.1/30; '
+                'route="$1"; '
+                'case "$route" in '
+                '*" dev $bridge src ${expected_address%/30} "*) echo match ;; '
+                '*) echo no-match ;; '
+                'esac',
+                "_",
+                route,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        self.assertEqual(probe.stdout.strip(), "match")
+        self.assertTrue(
+            '*" dev $bridge src ${expected_address%/30} "*' in self.script,
+            "verify must use the single-space device/src literal",
+        )
+        self.assertFalse(
+            '*" dev $bridge "*" src ${expected_address%/30} "*' in self.script,
+            "the two-space pattern can never match iproute2 output",
+        )
+
     def test_custom_vmid_range_renders_disjoint_point_to_point_bridge(self) -> None:
         result = subprocess.run(
             ["/bin/bash", "-c", f"source {SCRIPT!s}; render_interfaces"],
