@@ -3024,6 +3024,15 @@ Four rules govern the fallback lane:
   moments before it holds a broker lease, so a script-free install is the point.
   Codex's own install is not a template here — it ships its platform binary
   differently.
+- **Strip `$schema` before passing a schema to `--json-schema`.** The CLI's
+  validator cannot resolve `"$schema": "https://json-schema.org/draft/2020-12/schema"`
+  and rejects the committed file verbatim with `no schema with key or ref` —
+  this failed a live recovery job on 2026-08-16. Pass
+  `jq -c 'del(."$schema")' <file>`; every constraint is preserved and the fenced
+  validator re-checks the payload against the full schema afterwards. Note the
+  trap that hid it: a hand-written inline schema in a local probe has no
+  `$schema` key, so rehearsing with a lookalike passes while the real artifact
+  fails. Rehearse with the committed file.
 - **Re-validate the output locally.** `claude --json-schema` validates upstream
   but leaves no trusted local proof, so
   `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That

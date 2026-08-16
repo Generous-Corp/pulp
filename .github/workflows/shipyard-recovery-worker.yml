@@ -392,6 +392,12 @@ jobs:
           # no session persistence, and read-only planning permissions.
           # The prompt carries bounded untrusted evidence, so it goes over stdin
           # rather than argv, where any local process could read it.
+          # `--json-schema` rejects the committed schema verbatim: its
+          # `"$schema": ".../draft/2020-12/schema"` key is not resolvable by the
+          # CLI's validator ("no schema with key or ref"), observed live on
+          # 2026-08-16. Strip only that key — every constraint is preserved, and
+          # the fenced validator re-checks the payload against the full schema
+          # afterwards regardless.
           cd worktree
           claude --print \
             --output-format json \
@@ -401,7 +407,8 @@ jobs:
             --no-session-persistence \
             --permission-mode plan \
             --model "$CLAUDE_FALLBACK_MODEL" \
-            --json-schema "$(cat "$GITHUB_WORKSPACE/control/tools/shipyard/recovery-result.schema.json")" \
+            --json-schema "$(jq -c 'del(."$schema")' \
+              "$GITHUB_WORKSPACE/control/tools/shipyard/recovery-result.schema.json")" \
             < "$RUNNER_TEMP/recovery-input/prompt.txt" \
             > "$RUNNER_TEMP/recovery-result-fallback.json"
           cd "$GITHUB_WORKSPACE"
@@ -608,7 +615,8 @@ jobs:
             --no-session-persistence \
             --permission-mode acceptEdits \
             --model "$CLAUDE_FALLBACK_REPAIR_MODEL" \
-            --json-schema "$(cat "$GITHUB_WORKSPACE/control/tools/shipyard/repair-result.schema.json")" \
+            --json-schema "$(jq -c 'del(."$schema")' \
+              "$GITHUB_WORKSPACE/control/tools/shipyard/repair-result.schema.json")" \
             < "$RUNNER_TEMP/recovery-input/repair-prompt.txt" \
             > "$RUNNER_TEMP/repair-result-fallback.json"
           cd "$GITHUB_WORKSPACE"
