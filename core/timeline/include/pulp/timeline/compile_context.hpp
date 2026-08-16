@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace pulp::timeline {
 
@@ -31,13 +32,29 @@ namespace pulp::timeline {
 ///
 /// Adding a kind is a data change here plus a reverse-index case in the
 /// compiler; it is never a reason for a consumer to widen an invalidation.
+/// The reserved kinds below carry a constraint the first two do not. ChordScale
+/// and Groove are read from a sequence the reader already sits under, so the
+/// compile order is a tree walk. Dynamics, CrossTrackRhythm, and EnsembleSkeleton
+/// are peer-edge kinds: a reader can subscribe to context produced by a sibling
+/// track rather than an ancestor. That makes the compile order a DAG, and the
+/// DAG must stay acyclic — two tracks that each read the other's context have no
+/// valid order and would either deadlock a compile or silently resolve against
+/// a stale peer. Whoever gives one of these kinds a producer owns proving the
+/// acyclicity, because the bitset here cannot express it: subscription records
+/// *what* a reader reads, never *when* it may be compiled.
 enum class CompileContextKind : std::uint8_t {
     ChordScale,
     Groove,
+    /// Reserved. Slot only: no producer, no consumer, no semantics (P0-15).
+    Dynamics,
+    /// Reserved, peer-edge. See the acyclicity note above.
+    CrossTrackRhythm,
+    /// Reserved, peer-edge. See the acyclicity note above.
+    EnsembleSkeleton,
 };
 
 /// Number of CompileContextKind values represented by the subscription bitset.
-inline constexpr std::size_t kCompileContextKindCount = 2;
+inline constexpr std::size_t kCompileContextKindCount = 5;
 
 /// The declared set of context kinds one content renderer reads.
 ///
@@ -56,7 +73,7 @@ class CompileContextSubscriptions {
 
     /// Adds `kind` to this set and returns this object for chaining.
     constexpr CompileContextSubscriptions& subscribe(CompileContextKind kind) noexcept {
-        bits_ = static_cast<std::uint8_t>(bits_ | mask(kind));
+        bits_ = static_cast<Bits>(bits_ | mask(kind));
         return *this;
     }
 
@@ -74,16 +91,23 @@ class CompileContextSubscriptions {
     constexpr bool operator==(const CompileContextSubscriptions&) const noexcept = default;
 
   private:
-    static constexpr std::uint8_t mask(CompileContextKind kind) noexcept {
-        return static_cast<std::uint8_t>(1u << static_cast<std::uint8_t>(kind));
+    /// One bit per kind. Widened to 16 bits when the vocabulary grew past its
+    /// original two, rather than at the eighth kind: the widening is invisible
+    /// to every caller (the set is in-memory only and never serialized), so
+    /// doing it early costs a byte per subscription and removes the chance that
+    /// whoever adds a ninth kind discovers the ceiling by tripping it.
+    using Bits = std::uint16_t;
+
+    static constexpr Bits mask(CompileContextKind kind) noexcept {
+        return static_cast<Bits>(Bits{1} << static_cast<unsigned>(kind));
     }
 
-    std::uint8_t bits_ = 0;
-};
+    Bits bits_ = 0;
 
-static_assert(kCompileContextKindCount <= 8,
-              "CompileContextSubscriptions stores one bit per kind in a std::uint8_t. Widen the "
-              "storage before adding a ninth context kind.");
+    static_assert(kCompileContextKindCount <= std::numeric_limits<Bits>::digits,
+                  "CompileContextSubscriptions stores one bit per kind. Widen Bits before adding "
+                  "a kind past the storage width.");
+};
 
 /// The read side of the contract: a read-only window onto one pinned snapshot's
 /// context, narrowed to what its owner declared.

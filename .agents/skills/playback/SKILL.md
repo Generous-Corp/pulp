@@ -1153,3 +1153,20 @@ the seam and binding to this engine specifically.
 (It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
 proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
 adapter work above the row rather than a change to it.)
+
+## `kCompileContextKindCount` is an array dimension, so changing it is a struct-layout change
+
+The invalidation index stores `std::array<std::vector<ItemId>,
+kCompileContextKindCount>` in two structs in `compile_invalidation_internal.hpp`,
+and the subscriber walk loops to the same constant. That is convenient — adding
+a context kind needs no new reverse-index case, and no exhaustive switch to
+extend — but it means bumping the count silently resizes those structs.
+
+Treat it as a struct-layout change: build **all** targets, not just the timeline
+and playback ones. Stray positional initializers fail closed at compile time, so
+they are safe, but only a full build surfaces them, and a partial build pushes
+that discovery to CI.
+
+Before assuming a new kind needs reverse-index work, check for an exhaustive
+`switch` over `CompileContextKind` — at time of writing there is none, and the
+count-parameterised arrays are why.
