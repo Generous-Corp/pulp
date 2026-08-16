@@ -6,6 +6,7 @@
 #include <pulp/view/design_ir.hpp>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::import_design {
@@ -158,6 +159,9 @@ struct PaintedTreeCounts {
 PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      double dx,
                                      double dy,
-                                     pulp::view::IRNode& root);
+                                     pulp::view::IRNode& root,
+                                     const std::unordered_map<int, std::string>&
+                                         captured_element_assets = {},
+                                     bool flatten_to_paint_order = false);
 
 }  // namespace pulp::import_design

@@ -195,7 +195,10 @@ REQUIRED_CLAIMS = {
 REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
         "add_subdirectory(inspect)",
-        "target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)",
+        "function(_pulp_configure_standalone_target target view_target)",
+        "target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)",
+        "_pulp_configure_standalone_target(pulp-standalone pulp::view)",
+        "_pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)",
     ),
     "inspect/CMakeLists.txt": (
         "if(NOT PULP_ENABLE_INSPECTOR)\n    return()\nendif()",

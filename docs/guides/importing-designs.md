@@ -52,6 +52,53 @@ Only custom properties whose active computed value is visible on
 `documentElement` or `body` are promoted; component-scoped values remain in the
 captured source evidence rather than being misrepresented as global tokens.
 
+For an executable React/Claude import, keep the accepted Chromium frame as the
+initial visible DesignIR paint authority and materialize the captured app's
+behavior separately:
+
+```bash
+pulp import-design --from claude --file editor.html --mode baked \
+  --emit ir-json --materialized-canvas-composition \
+  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --render-size 1320x860 --output editor.ir.json --validate
+
+node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs \
+  --in editor.ir-browser-capture/materialized-document.json \
+  --design-ir editor.ir.json \
+  --state-atlas editor.ir-browser-capture/captured-states.json \
+  --portable-state-assets \
+  --out editor-behavior.js
+
+pulp-screenshot --script editor-behavior.js --design-ir editor.ir.json \
+  --width 1320 --height 860 --scale 2 --backend skia \
+  --settle-frames 64 --output editor-native.png
+```
+
+This is not a WebView or a hand-built visual approximation: native Skia draws
+the hash-verified Chromium frame, while transparent native CanvasWidget targets
+receive pointer input and retain the original materialized closures. The full
+frame and every canvas snapshot come from the same frozen Chromium transaction.
+Dropdowns, settings, preset managers, and other interaction states use the same
+contract: each state-atlas entry names the activation event, a semantic match,
+and its same-transaction Chromium paint. The live materialized application
+still performs the state change; native Skia selects the captured visual state
+only after the semantic match succeeds. A state whose activation fails or whose
+captured paint is missing fails closed rather than displaying an approximation.
+When a state remains live native UI rather than a captured paint plane, attach
+that capture's `materialized-document.json` as the entry's
+`materialized_document`. The transformer then reapplies the Chromium-resolved
+layout, font, line-box, and text contracts to the live state after its semantic
+match. This is the preferred contract for interactive menus and dialogs whose
+contents must remain selectable and editable; it is not permission to hand-tune
+an approximate native layout.
+Do not substitute executable canvas paint for the accepted pixels until that
+paint independently passes the same-frame visual gate. Keep the chrome-only and
+per-canvas captures as diagnostic evidence for that later handoff.
+For an installed app or plug-in, place the atlas and its images beneath the
+runtime output directory and pass `--portable-state-assets`. The transformer
+then embeds package-relative image references and rejects symlinks or paths
+that escape that runtime directory; never ship absolute capture-machine paths.
+
 Local relative assets load from the input folder. External requests are denied
 by default. If the health report identifies a reviewed CDN dependency, retry
 with `--allow-browser-network`. That consent is limited to public HTTPS origins
@@ -105,8 +152,9 @@ pulp import-design --file prototype.html \
   --browser-interactions patch-composer.json
 ```
 
-The `pulp-browser-interactions-v1` JSON plan supports `click`, `type`,
-`wait-for`, and `wait-ms`. Prefer `wait-for` with a visible selector after a
+The `pulp-browser-interactions-v1` JSON plan supports `click`, `context-click`,
+`type`, `wait-for`, and `wait-ms`. Use `context-click` for a real secondary-
+button context-menu gesture. Prefer `wait-for` with a visible selector after a
 click; strings in hidden or inert DOM are not proof that a screen rendered.
 Each completed action is recorded in `interaction-report.json`; typed text is
 represented only by its length, without plaintext or a per-action text hash.

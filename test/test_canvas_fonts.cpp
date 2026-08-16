@@ -50,6 +50,7 @@ using namespace pulp::canvas;
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_run_planner.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/canvas/text_font_context.hpp>
 #include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFont.h"
@@ -57,6 +58,12 @@ using namespace pulp::canvas;
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 #include "include/encode/SkPngEncoder.h"
+#include "modules/skparagraph/include/FontCollection.h"
+#include "modules/skparagraph/include/Paragraph.h"
+#include "modules/skparagraph/include/ParagraphBuilder.h"
+#include "modules/skparagraph/include/ParagraphStyle.h"
+#include "modules/skparagraph/include/TextStyle.h"
+#include "../core/canvas/src/skia_unicode.hpp"
 #include <cstdlib>
 #include <string>
 #if defined(__APPLE__)
@@ -725,6 +732,66 @@ TEST_CASE("registered fonts are visible to the SkParagraph font collection",
     // (The collection rebuild itself is exercised end-to-end by the embed
     // smoke + import-design --validate render, which route Label text
     // through SkParagraph.)
+}
+
+TEST_CASE("SkParagraph shapes a tracked materialized label with the registered asset",
+          "[canvas][skia][fonts][materialized]") {
+    const std::string alias = "JetBrains Mono [pulp-materialized-asset-test]";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             alias));
+
+    auto collection = pulp::canvas::TextFontContext::shared()->font_collection();
+    REQUIRE(collection);
+    const std::vector<SkString> families = {
+        SkString(alias.c_str()), SkString("JetBrains Mono"),
+        SkString("ui-monospace"), SkString("monospace")};
+    const SkFontStyle requested{600, SkFontStyle::kNormal_Width,
+                                SkFontStyle::kUpright_Slant};
+    const auto matches = collection->findTypefaces(families, requested);
+    REQUIRE_FALSE(matches.empty());
+    REQUIRE(matches.front());
+
+    SkString family;
+    matches.front()->getFamilyName(&family);
+    INFO("SkParagraph selected family: " << family.c_str());
+    INFO("SkParagraph selected weight: " << matches.front()->fontStyle().weight());
+    REQUIRE(std::string(family.c_str()) == "Funnel Display");
+    REQUIRE(matches.front()->fontStyle().weight() == 600);
+
+    skia::textlayout::TextStyle text_style;
+    text_style.setFontFamilies(families);
+    text_style.setFontSize(14.0f);
+    text_style.setFontStyle(requested);
+    text_style.setLetterSpacing(2.0f);
+    skia::textlayout::ParagraphStyle paragraph_style;
+    paragraph_style.setTextStyle(text_style);
+    auto builder = skia::textlayout::ParagraphBuilder::make(
+        paragraph_style, collection, pulp::canvas::shared_sk_unicode());
+    REQUIRE(builder);
+    builder->addText("SETTINGS", 8);
+    auto paragraph = builder->Build();
+    REQUIRE(paragraph);
+    paragraph->layout(SK_ScalarInfinity);
+    const auto used_fonts = paragraph->getFonts();
+    REQUIRE(used_fonts.size() == 1);
+    REQUIRE(used_fonts.front().fFont.getTypeface());
+    SkString used_family;
+    used_fonts.front().fFont.getTypeface()->getFamilyName(&used_family);
+    REQUIRE(std::string(used_family.c_str()) == "Funnel Display");
+    REQUIRE(used_fonts.front().fFont.getTypeface()->fontStyle().weight() == 600);
+
+    // Eight glyphs at Funnel Display's measured advance plus seven explicit
+    // tracking gaps must be wider than the same paragraph without tracking.
+    text_style.setLetterSpacing(0.0f);
+    paragraph_style.setTextStyle(text_style);
+    auto untracked_builder = skia::textlayout::ParagraphBuilder::make(
+        paragraph_style, collection, pulp::canvas::shared_sk_unicode());
+    REQUIRE(untracked_builder);
+    untracked_builder->addText("SETTINGS", 8);
+    auto untracked = untracked_builder->Build();
+    REQUIRE(untracked);
+    untracked->layout(SK_ScalarInfinity);
+    REQUIRE(paragraph->getLongestLine() > untracked->getLongestLine() + 13.5f);
 }
 
 // ── Font-manager coverage across every supported platform ──────────────────

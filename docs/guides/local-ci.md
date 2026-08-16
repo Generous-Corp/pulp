@@ -19,6 +19,15 @@ mutable global browser, but the workflow must fail if the pinned archive cannot
 be downloaded, verified, extracted, or executed; a skipped browser comparison
 is not a passing fidelity gate.
 
+The browser-capture Node tests are intentionally split by execution contract:
+dependency-free units, the serial real-Chromium integration file (with its own
+600-second CTest timeout), and the esbuild-backed materialized-runtime
+canonicalization case. The required Linux leg runs the locked
+`npm ci --prefix tools/import-design/jsx-runtime` step before CMake configure,
+which makes the dependency-backed case visible to CTest. Source-only or offline
+configurations without that `node_modules/esbuild` installation still register
+the dependency-free suites, but they do not claim the canonicalization proof.
+
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
 request whose head branch lives in **another repository**,

@@ -35,7 +35,7 @@ function selectorProbeExpression(selector, operation) {
     if (!element) return { ok: false, state: "detached" };
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    const paintHitAt = (x, y) => {
+    const visualPaintHitAt = (x, y) => {
       const override = document.createElement("style");
       override.textContent =
         "*,:before,:after{pointer-events:auto!important}";
@@ -58,12 +58,12 @@ function selectorProbeExpression(selector, operation) {
         break;
       }
     }
-    const hasUncoveredPoint = (candidate) => {
+    const uncoveredPoint = (candidate, hitAt) => {
       const left = Math.max(0, candidate.left);
       const top = Math.max(0, candidate.top);
       const right = Math.min(innerWidth, candidate.right);
       const bottom = Math.min(innerHeight, candidate.bottom);
-      if (right <= left || bottom <= top) return false;
+      if (right <= left || bottom <= top) return null;
       const insetX = Math.min(1, (right - left) / 4);
       const insetY = Math.min(1, (bottom - top) / 4);
       const points = [
@@ -73,16 +73,19 @@ function selectorProbeExpression(selector, operation) {
         [left + insetX, bottom - insetY],
         [right - insetX, bottom - insetY],
       ];
-      return points.some(([x, y]) => {
-        const hit = paintHitAt(x, y);
-        return Boolean(hit && (element === hit || element.contains(hit)));
-      });
+      for (const [x, y] of points) {
+        const hit = hitAt(x, y);
+        if (hit && (element === hit || element.contains(hit))) return { x, y };
+      }
+      return null;
     };
     const visible = visualTreeVisible && rect.width > 0 && rect.height > 0;
     if (${JSON.stringify(operation)} === "observe") {
       return {
         ok: true,
-        state: visible && hasUncoveredPoint(rect) ? "visible" : "hidden"
+        state: visible && uncoveredPoint(rect, visualPaintHitAt)
+          ? "visible"
+          : "hidden"
       };
     }
     if (!visible) return { ok: false, state: "hidden" };
@@ -124,11 +127,56 @@ function selectorProbeExpression(selector, operation) {
     if (element.matches(":disabled") || style.pointerEvents === "none") {
       return { ok: false, error: "target is disabled or ignores pointer events" };
     }
-    const hit = paintHitAt(x, y);
-    if (!hit || !(element === hit || element.contains(hit))) {
+    // Dispatch at a point a real pointer can reach. Decorative texture and
+    // glow overlays commonly use pointer-events:none and therefore do not
+    // block a user; forcing those layers pointer-active here made otherwise
+    // usable controls impossible to drive. Partial interactive overlays still
+    // count, so probe the centre and four inset corners and use the first
+    // genuinely exposed point.
+    const clickPoint = uncoveredPoint(
+      positioned, (pointX, pointY) => document.elementFromPoint(pointX, pointY));
+    if (!clickPoint) {
       return { ok: false, error: "target is covered by another rendered element" };
     }
-    return { ok: true, x, y };
+    return { ok: true, x: clickPoint.x, y: clickPoint.y };
+  })()`;
+}
+
+function dispatchEventExpression(selector, event) {
+  return `(() => {
+    const selector = ${JSON.stringify(selector)};
+    let element;
+    try {
+      element = document.querySelector(selector);
+    } catch (cause) {
+      return { ok: false, permanent: true,
+        error: "invalid CSS selector: " + cause.message };
+    }
+    if (!element) return { ok: false, state: "detached" };
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { ok: false, state: "hidden" };
+    }
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const EventConstructor = ${JSON.stringify(event)} === "pointerdown"
+      ? PointerEvent
+      : MouseEvent;
+    const dispatched = element.dispatchEvent(new EventConstructor(
+      ${JSON.stringify(event)}, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX,
+        clientY,
+        button: 2,
+        buttons: 2,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+    return { ok: true, canceled: !dispatched };
   })()`;
 }
 
@@ -162,6 +210,7 @@ function publicActionEvidence(action) {
   if (action.selector !== undefined) evidence.selector = action.selector;
   if (action.timeout_ms !== undefined) evidence.timeout_ms = action.timeout_ms;
   if (action.state !== undefined) evidence.state = action.state;
+  if (action.event !== undefined) evidence.event = action.event;
   if (action.milliseconds !== undefined) {
     evidence.milliseconds = action.milliseconds;
   }
@@ -288,17 +337,27 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
           return result?.state === "hidden" || result?.state === "detached";
         },
         wait);
-    } else if (action.action === "click") {
+    } else if (action.action === "click" || action.action === "context-click") {
       const target = await probeUntil(
         cdp, action, index, "click", (result) => result?.ok === true, wait);
+      const button = action.action === "context-click" ? "right" : "left";
       await cdp.call("Input.dispatchMouseEvent", {
         type: "mousePressed", x: target.x, y: target.y,
-        button: "left", buttons: 1, clickCount: 1,
+        button, buttons: action.action === "context-click" ? 2 : 1, clickCount: 1,
       });
       await cdp.call("Input.dispatchMouseEvent", {
         type: "mouseReleased", x: target.x, y: target.y,
-        button: "left", buttons: 0, clickCount: 1,
+        button, buttons: 0, clickCount: 1,
       });
+      await settle();
+    } else if (action.action === "dispatch-event") {
+      const result = await evaluate(
+        cdp, dispatchEventExpression(action.selector, action.event));
+      if (!result?.ok) {
+        throw actionError(index, action,
+          result?.error ?? `selector ${JSON.stringify(action.selector)} ` +
+            `did not accept ${action.event}`);
+      }
       await settle();
     } else if (action.action === "type") {
       await probeUntil(

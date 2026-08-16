@@ -123,6 +123,17 @@ fail on download, checksum, extraction, or executable discovery.  Do **not**
 convert a missing browser into a skipped fidelity test: that would let a PR
 claim source-to-native validation that never occurred.
 
+Browser-capture Node coverage has three distinct CTest entries. Keep the
+dependency-free unit aggregate separate from the real-Chromium integration
+file, whose serial browser cases have their own 600-second bound. The
+esbuild-backed materialized-runtime canonicalization test is registered only
+when `tools/import-design/jsx-runtime/node_modules/esbuild` exists, so the
+required Linux `build.yml` leg must run the locked `npm ci --prefix
+tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
+integration file back into the unit aggregate or remove that install step: the
+former exhausts the aggregate deadline before later tests run, while the latter
+turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
 

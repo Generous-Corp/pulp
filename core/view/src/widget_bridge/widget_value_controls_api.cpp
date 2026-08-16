@@ -5,6 +5,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <string>
 
@@ -133,9 +134,9 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // setAccentColor(id, "#hex" | "rgb(...)" | "")
-    // Empty string clears the override and returns to the active theme's
-    // `control.fill` / `control.thumb` tokens.
+    // setAccentColor(id, CSS color | "")
+    // Empty string clears the override and returns the active fill to the
+    // theme. The thumb remains an independent opaque platform color.
     register_bridge_function(api, "setAccentColor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
@@ -143,23 +144,7 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
             if (hex.empty()) {
                 range->clear_accent_color();
             } else {
-                // Inline hex parse, self-contained so this setter carries no
-                // dependency on registration order.
-                canvas::Color c = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
-                if (!hex.empty() && hex[0] == '#') {
-                    if (hex.size() == 4) {
-                        c.r = static_cast<float>(std::stoul(std::string(2, hex[1]), nullptr, 16)) / 255.0f;
-                        c.g = static_cast<float>(std::stoul(std::string(2, hex[2]), nullptr, 16)) / 255.0f;
-                        c.b = static_cast<float>(std::stoul(std::string(2, hex[3]), nullptr, 16)) / 255.0f;
-                    } else if (hex.size() >= 7) {
-                        c.r = static_cast<float>(std::stoul(hex.substr(1,2), nullptr, 16)) / 255.0f;
-                        c.g = static_cast<float>(std::stoul(hex.substr(3,2), nullptr, 16)) / 255.0f;
-                        c.b = static_cast<float>(std::stoul(hex.substr(5,2), nullptr, 16)) / 255.0f;
-                        if (hex.size() >= 9)
-                            c.a = static_cast<float>(std::stoul(hex.substr(7,2), nullptr, 16)) / 255.0f;
-                    }
-                }
-                range->set_accent_color(c);
+                range->set_accent_color(parse_bridge_css_color(hex));
             }
         }
         return choc::value::Value();

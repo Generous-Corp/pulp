@@ -74,6 +74,32 @@ if(PULP_HAS_TEXT_SHAPING)
     target_compile_definitions(pulp-canvas PRIVATE PULP_HAS_TEXT_SHAPING=1)
 endif()
 
+if(PULP_HAS_WOFF2_DECODER)
+    target_sources(pulp-canvas PRIVATE
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/constants.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/context.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/dictionary.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/platform.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/shared_dictionary.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/common/transform.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/bit_reader.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/decode.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/huffman.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/prefix.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/state.c
+        ${PULP_BROTLI_SOURCE_DIR}/c/dec/static_init.c
+        ${PULP_WOFF2_SOURCE_DIR}/src/table_tags.cc
+        ${PULP_WOFF2_SOURCE_DIR}/src/variable_length.cc
+        ${PULP_WOFF2_SOURCE_DIR}/src/woff2_common.cc
+        ${PULP_WOFF2_SOURCE_DIR}/src/woff2_dec.cc
+        ${PULP_WOFF2_SOURCE_DIR}/src/woff2_out.cc)
+    target_include_directories(pulp-canvas PRIVATE
+        ${PULP_BROTLI_SOURCE_DIR}/c/include
+        ${PULP_WOFF2_SOURCE_DIR}/include
+        ${PULP_WOFF2_SOURCE_DIR}/src)
+    target_compile_definitions(pulp-canvas PRIVATE PULP_HAS_WOFF2_DECODER=1)
+endif()
+
 # SheenBidi-backed BidiAnalyzer. PULP_HAS_SHEENBIDI is set by
 # tools/cmake/PulpDependencies.cmake when the FetchContent step
 # succeeds. When undefined, bidi.cpp compiles to a single-run pass-

@@ -586,6 +586,20 @@ per-event registration callback should only keep the native channel alive. Do
 not dispatch the same DOM event there too: one wheel tick will otherwise reach
 every listener twice even though engine-specific tests may still look healthy.
 
+This includes append-time auto-registration for React root delegation:
+`__pulpRegisterAutoDomEvents__` installs no-op click/pointer callbacks solely to
+arm native delivery. `__dispatch__` owns the only Element dispatch, while the
+native pointer registrar emits the matching mouse event as a separate channel.
+
+Direct `@pulp/react` handlers return the internal
+`__pulpEventPropagation` marker from their synthetic-event wrapper. Pointer
+payloads carry a per-native-dispatch token so `__dispatchCallbackOnly__` can
+suppress later native ancestor callbacks. Keep the token scoped and reentrant,
+and key cancellation by both token and event name: cancelling `pointerdown`
+must not silently cancel its independent compatibility `mousedown`. Level 1
+(`stopPropagation`) still allows remaining same-target listeners; level 2
+(`stopImmediatePropagation`) does not.
+
 ## ESM support per engine
 
 | Engine | Public ESM API | Status |

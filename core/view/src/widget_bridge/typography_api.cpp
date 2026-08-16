@@ -21,6 +21,14 @@ namespace pulp::view {
 void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
+    const auto finite_float = [](double value, float& result) {
+        constexpr auto kFloatMax =
+            static_cast<double>(std::numeric_limits<float>::max());
+        if (!std::isfinite(value) || std::abs(value) > kFloatMax) return false;
+        result = static_cast<float>(value);
+        return true;
+    };
+
     // setFontFamily(id, family) wires web-compat font-family declarations
     // through to Label::set_font_family(); Label::paint() honors it via
     // canvas.set_font_full().
@@ -53,8 +61,12 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
     // workaround this replaces.
     register_bridge_function(api, "setFontWeight", [&self](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));
-        int w = static_cast<int>(args.get<double>(1, 400));
-        if (!v) return choc::value::Value();
+        const auto requested = args.get<double>(1, 400);
+        if (!v || !std::isfinite(requested) ||
+            requested < static_cast<double>(std::numeric_limits<int>::min()) ||
+            requested > static_cast<double>(std::numeric_limits<int>::max()))
+            return choc::value::Value();
+        const auto w = static_cast<int>(requested);
         if (auto* l = dynamic_cast<Label*>(v)) l->set_font_weight(w);
         else v->set_inheritable_font_weight(w);
         return choc::value::Value();
@@ -74,18 +86,21 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setLetterSpacing", [&self](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setLetterSpacing", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));
-        auto sp = static_cast<float>(args.get<double>(1, 0));
-        if (!v) return choc::value::Value();
+        float sp = 0.0f;
+        if (!v || !finite_float(args.get<double>(1, 0), sp))
+            return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) l->set_letter_spacing(sp);
         else v->set_inheritable_letter_spacing(sp);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setLineHeight", [&self](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setLineHeight", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));
-        auto lh = static_cast<float>(args.get<double>(1, 0));
+        float lh = 0.0f;
+        if (!v || !finite_float(args.get<double>(1, 0), lh) || lh < 0.0f)
+            return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) l->set_line_height(lh);
         return choc::value::Value();
     });
@@ -128,19 +143,21 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setCapturedLineBoxes", [&self](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setCapturedLineBoxes", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* label = dynamic_cast<Label*>(self.widget(args.get<std::string>(0, "")));
         if (!label || args.numArgs < 4 || !args[1] || !args[1]->isArray())
             return choc::value::Value();
 
-        const auto basis_width = static_cast<float>(args.get<double>(2, 0.0));
+        float basis_width = 0.0f;
+        if (!finite_float(args.get<double>(2, 0.0), basis_width))
+            return choc::value::Value();
         const auto basis_face = args.get<std::string>(3, "");
         const bool wrap_on_cache_miss =
             args.numArgs >= 5 && args.get<double>(4, 0.0) > 0.5;
         auto& entries = *args[1];
         if (entries.size() == 0 || entries.size() > 4096 ||
             !std::isfinite(basis_width) || basis_width <= 0.0f ||
-            basis_face.empty())
+            basis_face.empty() || basis_face.size() > 1024)
             return choc::value::Value();
 
         std::vector<Label::CachedLineBox> boxes;
@@ -182,11 +199,20 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setFontSize", [&self](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearCapturedLineBoxes", [&self](choc::javascript::ArgumentList args) {
+        if (auto* label = dynamic_cast<Label*>(
+                self.widget(args.get<std::string>(0, "")))) {
+            label->clear_cached_line_boxes();
+        }
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "setFontSize", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto size = static_cast<float>(args.get<double>(1, 14));
+        float size = 0.0f;
         auto* v = self.widget(id);
-        if (!v) return choc::value::Value();
+        if (!v || !finite_float(args.get<double>(1, 14), size) || size <= 0.0f)
+            return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_font_size(size);
         } else if (auto* e = dynamic_cast<TextEditor*>(v)) {

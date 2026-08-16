@@ -13,11 +13,14 @@ export const MAX_TOTAL_WAIT_MS = 30_000;
 
 const ACTION_FIELDS = {
   click: new Set(["action", "selector", "timeout_ms"]),
+  "context-click": new Set(["action", "selector", "timeout_ms"]),
+  "dispatch-event": new Set(["action", "selector", "event", "timeout_ms"]),
   type: new Set(["action", "selector", "text", "timeout_ms"]),
   "wait-for": new Set(["action", "selector", "state", "timeout_ms"]),
   "wait-ms": new Set(["action", "milliseconds"]),
 };
 const WAIT_FOR_STATES = new Set(["attached", "detached", "visible", "hidden"]);
+const DISPATCH_EVENTS = new Set(["contextmenu", "pointerdown"]);
 
 function fail(message) {
   const error = new Error(`invalid browser interaction plan: ${message}`);
@@ -100,7 +103,8 @@ export function parseInteractionPlan(raw) {
     plainObject(candidate, label);
     const allowed = ACTION_FIELDS[candidate.action];
     if (!allowed) {
-      fail(`${label}.action must be click, type, wait-for, or wait-ms`);
+      fail(`${label}.action must be click, context-click, dispatch-event, type, ` +
+           `wait-for, or wait-ms`);
     }
     exactFields(candidate, allowed, label);
 
@@ -123,6 +127,11 @@ export function parseInteractionPlan(raw) {
              `${MAX_TYPE_TEXT_LENGTH} characters`);
       }
       normalized.text = candidate.text;
+    } else if (candidate.action === "dispatch-event") {
+      normalized.event = candidate.event;
+      if (!DISPATCH_EVENTS.has(normalized.event)) {
+        fail(`${label}.event must be contextmenu or pointerdown`);
+      }
     } else if (candidate.action === "wait-for") {
       normalized.state = candidate.state ?? "visible";
       if (!WAIT_FOR_STATES.has(normalized.state)) {

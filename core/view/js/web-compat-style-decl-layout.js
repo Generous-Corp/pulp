@@ -18,6 +18,20 @@
 // boundaries; the dispatcher only references it at call time.
 
 function _applyLayoutProp(decl, id, key, resolved, value) {
+    // Preserve dimensions whose meaning depends on a later layout context.
+    // Resolving viewport units to a naked number here turns `90vh` into 90px
+    // and freezes responsive imports at the wrong size. The native bridge
+    // understands these units and Yoga resolves them from the current root
+    // viewport on every layout pass.
+    function nativeDimensionValue(dimension) {
+        if (!dimension) return null;
+        if (dimension.unit === "%" || dimension.unit === "vw" ||
+            dimension.unit === "vh" || dimension.unit === "vmin" ||
+            dimension.unit === "vmax") {
+            return dimension.value + dimension.unit;
+        }
+        return dimension.value;
+    }
     switch (key) {
         // Display / flex direction
         case "display":
@@ -188,8 +202,7 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             var w = resolveCSSLength(resolved);
             if (!w) return true;
             if (w.unit === "auto") setFlex(id, "width", "auto");
-            else if (w.unit === "%") setFlex(id, "width", w.value + "%");
-            else setFlex(id, "width", w.value);
+            else setFlex(id, "width", nativeDimensionValue(w));
             return true;
         }
         case "height": {
@@ -197,8 +210,7 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             var h = resolveCSSLength(resolved);
             if (!h) return true;
             if (h.unit === "auto") setFlex(id, "height", "auto");
-            else if (h.unit === "%") setFlex(id, "height", h.value + "%");
-            else setFlex(id, "height", h.value);
+            else setFlex(id, "height", nativeDimensionValue(h));
             return true;
         }
         // These min/max length properties use resolveCSSLength's unified
@@ -206,26 +218,22 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         // percent setters.
         case "minWidth": {
             var mw = resolveCSSLength(resolved);
-            if (mw) setFlex(id, "min_width",
-                mw.unit === "%" ? (mw.value + "%") : mw.value);
+            if (mw) setFlex(id, "min_width", nativeDimensionValue(mw));
             return true;
         }
         case "minHeight": {
             var mh = resolveCSSLength(resolved);
-            if (mh) setFlex(id, "min_height",
-                mh.unit === "%" ? (mh.value + "%") : mh.value);
+            if (mh) setFlex(id, "min_height", nativeDimensionValue(mh));
             return true;
         }
         case "maxWidth": {
             var xw = resolveCSSLength(resolved);
-            if (xw) setFlex(id, "max_width",
-                xw.unit === "%" ? (xw.value + "%") : xw.value);
+            if (xw) setFlex(id, "max_width", nativeDimensionValue(xw));
             return true;
         }
         case "maxHeight": {
             var xh = resolveCSSLength(resolved);
-            if (xh) setFlex(id, "max_height",
-                xh.unit === "%" ? (xh.value + "%") : xh.value);
+            if (xh) setFlex(id, "max_height", nativeDimensionValue(xh));
             return true;
         }
 

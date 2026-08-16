@@ -538,10 +538,9 @@ inline void install_editor_resize_handler(
             if (!accepted) return false;
 
             if (plugin.editor_host) {
-                plugin.editor_host->set_design_viewport(
-                    static_cast<float>(width), static_cast<float>(height));
-                plugin.editor_host->set_fixed_aspect_ratio(
-                    static_cast<float>(width) / static_cast<float>(height));
+                commit_editor_requested_viewport(
+                    *plugin.editor_host, plugin.bridge->size_hints(),
+                    width, height);
             }
             return true;
         });
@@ -592,18 +591,7 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
         //     NO viewport, NO aspect lock; the root reflows via Yoga at the host
         //     size and adjust_size only clamps min/max.
         // `resizable` follows gui_can_resize's convention (min>0 on both axes).
-        const bool resizable =
-            hints.min_width > 0 && hints.min_height > 0;
-        const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
-        if (hints.preferred_width > 0 && hints.preferred_height > 0 &&
-            !free_resize) {
-            p->editor_host->set_design_viewport(
-                static_cast<float>(hints.preferred_width),
-                static_cast<float>(hints.preferred_height));
-            p->editor_host->set_fixed_aspect_ratio(
-                static_cast<float>(hints.preferred_width) /
-                static_cast<float>(hints.preferred_height));
-        }
+        configure_native_viewport(*p->editor_host, hints);
         // Editor-INITIATED resize: let the editor ask the DAW to resize the
         // plugin window (e.g. a chrome-hiding mode wanting a smaller shape).
         // Publish the new hints optimistically because a host may synchronously

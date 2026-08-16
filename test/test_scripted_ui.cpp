@@ -30,6 +30,9 @@ static_assert(offsetof(ScriptedUiOptions, granted_capabilities)
 
 namespace {
 
+fs::path make_temp_dir(const char* stem);
+void write_text(const fs::path& path, const std::string& content);
+
 TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
           "[view][scripted-ui][compat]") {
     ScriptedUiOptions options{
@@ -38,7 +41,48 @@ TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
     REQUIRE(options.enable_hot_reload);
     REQUIRE_FALSE(options.enable_theme_reload);
     REQUIRE(options.granted_capabilities.has(ReloadCapability::Exec));
+    REQUIRE_FALSE(options.enable_runtime_import);
 }
+
+#if PULP_HAS_DESIGN_IMPORT
+TEST_CASE("ScriptedUiSession installs materialized runtime import before each realm load",
+          "[view][scripted-ui][runtime-import]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-runtime-import");
+    const auto script_path = temp_dir / "main.js";
+    const std::string sidecar = R"json({"schema":"pulp-materialized-browser-document-v1","version":1,"html":"<html><body><script>createLabel('materialized-status','first','');<\/script></body></html>","assets":[]})json";
+    write_text(script_path,
+               "__pulpRuntimeImport__(String.raw`" + sidecar
+                   + "`, 'materialized-browser');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store,
+                              {.script_path = script_path,
+                               .enable_hot_reload = false,
+                               .enable_theme_reload = false,
+                               .enable_runtime_import = true});
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+    auto* first = dynamic_cast<Label*>(session.bridge()->widget("materialized-status"));
+    REQUIRE(first != nullptr);
+    REQUIRE(first->text() == "first");
+
+    const std::string replacement = R"json({"schema":"pulp-materialized-browser-document-v1","version":1,"html":"<html><body><script>createLabel('materialized-status','second','');<\/script></body></html>","assets":[]})json";
+    write_text(script_path,
+               "__pulpRuntimeImport__(String.raw`" + replacement
+                   + "`, 'materialized-browser');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(error.empty());
+    auto* second = dynamic_cast<Label*>(session.bridge()->widget("materialized-status"));
+    REQUIRE(second != nullptr);
+    REQUIRE(second->text() == "second");
+
+    fs::remove_all(temp_dir);
+}
+#endif
 
 fs::path make_temp_dir(const char* stem) {
     auto unique = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -333,6 +377,41 @@ TEST_CASE("ScriptedUiSession resolves reviewed kit asset roots", "[view][scripte
     REQUIRE(traversal != nullptr);
     REQUIRE(traversal->text() == "404");
 
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession resolves a sidecar beside its entry script",
+          "[view][scripted-ui][assets]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-sidecar");
+    const auto script_path = temp_dir / "ui" / "main.js";
+    fs::create_directories(script_path.parent_path());
+    write_text(script_path.parent_path() / "document.json", R"({"schema":"sidecar"})");
+    write_text(temp_dir / "outside.json", R"({"name":"outside"})");
+    write_text(script_path, R"JS(
+        var documentAsset = __loadAssetSync__('document.json');
+        var traversal = __loadAssetSync__('../outside.json');
+        createLabel('document', documentAsset.ok ? documentAsset.text : 'missing', '');
+        createLabel('traversal', traversal.ok ? 'leaked' : String(traversal.status), '');
+    )JS");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script_path,
+        .enable_hot_reload = false,
+        .enable_theme_reload = false,
+    });
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+    auto* document = dynamic_cast<Label*>(session.bridge()->widget("document"));
+    auto* traversal = dynamic_cast<Label*>(session.bridge()->widget("traversal"));
+    REQUIRE(document != nullptr);
+    REQUIRE(document->text() == R"({"schema":"sidecar"})");
+    REQUIRE(traversal != nullptr);
+    REQUIRE(traversal->text() == "404");
     fs::remove_all(temp_dir);
 }
 

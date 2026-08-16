@@ -19,7 +19,12 @@ import type {
     IntrinsicElementName,
 } from './types.js';
 import { requestLayoutFlush } from './layout-flush.js';
-import { applyAllProps, applyChangedProps, normalizeHostProps } from './prop-applier.js';
+import {
+    applyAllProps,
+    applyChangedProps,
+    clearMaterializedEventCallbacks,
+    normalizeHostProps,
+} from './prop-applier.js';
 
 type Type = IntrinsicElementName;
 type Props = Record<string, unknown>;
@@ -45,9 +50,36 @@ let currentUpdatePriority: EventPriority = NoEventPriority;
 // references would bind once at module load and miss the mocks.
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
+type DomRegistry = Map<string, Record<string, unknown>>;
+const domRegistry = (): DomRegistry => {
+    const host = globalThis as unknown as Record<string, unknown>;
+    const windowProxy = host.window as Record<string, unknown> | undefined;
+    const hostRegistry = host.__pulpReactDomRegistry__ instanceof Map
+        ? host.__pulpReactDomRegistry__ as DomRegistry : null;
+    const proxyRegistry = windowProxy?.__pulpReactDomRegistry__ instanceof Map
+        ? windowProxy.__pulpReactDomRegistry__ as DomRegistry : null;
+    const registry = hostRegistry ?? proxyRegistry ?? new Map<string, Record<string, unknown>>();
+    if (hostRegistry && proxyRegistry && hostRegistry !== proxyRegistry) {
+        for (const [id, node] of proxyRegistry) if (!hostRegistry.has(id)) hostRegistry.set(id, node);
+    }
+    host.__pulpReactDomRegistry__ = registry;
+    if (windowProxy) windowProxy.__pulpReactDomRegistry__ = registry;
+    const values = () => Array.from(registry.values());
+    host.__pulpReactDomRegistryValues__ = values;
+    if (windowProxy) windowProxy.__pulpReactDomRegistryValues__ = values;
+    return registry;
+};
 let _hc_count = 0;
 function call(name: string, ...args: unknown[]): unknown {
-    const fn = g[name];
+    // A materialized browser document may legitimately define globals such as
+    // `createCanvas` while installing its DOM compatibility layer.  Those
+    // browser helpers must not shadow the renderer bridge functions captured
+    // before the document booted. Ordinary native applications do not install
+    // this table and retain the direct-global fast path.
+    const nativeBridge = (g as Record<string, unknown>).__pulpNativeBridgeFunctions__ as
+        | Record<string, AnyFn | undefined>
+        | undefined;
+    const fn = nativeBridge?.[name] ?? g[name];
     if (typeof fn !== 'function') {
         const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
         if (typeof lg === 'function') lg('[host-config] bridge fn missing: ' + name);
@@ -156,20 +188,45 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 }
                 case 'button': {
                     const text = asText(props.children) ?? (props.text as string ?? '');
-                    if (typeof g.createButton === 'function') {
-                        call('createButton', id, text, parentId);
-                    } else {
-                        call('createPanel', id, parentId);
-                        call('createLabel', id + '_l', text, id);
-                    }
+                    // A lowercase HTML <button> is a CSS-styled DOM box, not
+                    // Pulp's opinionated stock TextButton. Lower it to a
+                    // generic native View so Chromium-captured background,
+                    // border, padding, typography and nested SVG/span content
+                    // remain authoritative. Explicit <Button> continues to
+                    // use createButton above for native application authors.
+                    // Browser buttons establish an inline formatting row and
+                    // center their content in both axes by default.  Preserve
+                    // that semantic default for nested SVG/span children;
+                    // captured/computed display, alignment, and positioning
+                    // styles remain free to override it afterwards.
+                    call('createRow', id, parentId);
+                    call('setFlex', id, 'align_items', 'center');
+                    call('setFlex', id, 'justify_content', 'center');
+                    const textId = id + '__text';
+                    call('createLabel', textId, text, id);
+                    // The browser's text line boxes are relative to the
+                    // complete button box. Give the Label that same box so
+                    // captured offsets/baselines remain directly usable.
+                    // Always create it—even for nested markup—so a dynamic
+                    // nested↔plain-text React update has a stable target.
+                    call('setPosition', textId, 'absolute');
+                    call('setTop', textId, 0);
+                    call('setRight', textId, 0);
+                    call('setBottom', textId, 0);
+                    call('setLeft', textId, 0);
+                    call('setPointerEvents', textId, 'none');
                     return;
                 }
                 case 'input': {
                     const inputType = String(props.type ?? 'text').toLowerCase();
                     if (inputType === 'range') {
-                        const orient = (props['aria-orientation'] === 'vertical')
-                            ? 'vertical' : 'horizontal';
-                        call('createFader', id, orient, parentId);
+                        // HTML range inputs use the browser-shaped control:
+                        // a compact track and circular thumb with raw
+                        // min/max/step values.  Fader is Pulp's opinionated
+                        // audio control (large slab/pill thumb, normalized
+                        // value) and cannot faithfully replay Chromium's
+                        // range-control geometry.
+                        call('createRangeSlider', id, parentId);
                     } else if (inputType === 'checkbox') {
                         call('createCheckbox', id, parentId);
                     } else {
@@ -320,6 +377,37 @@ function asText(children: unknown): string | undefined {
     return undefined;
 }
 
+function isDomSemanticProp(key: string): boolean {
+    return key === 'role' || key === 'title' || key === 'name'
+        || key === 'className'
+        || key.startsWith('aria-') || key.startsWith('data-');
+}
+
+function syncDomSemanticProps(
+    shim: Record<string, unknown>,
+    oldProps: Record<string, unknown>,
+    newProps: Record<string, unknown>,
+): void {
+    const setAttribute = shim.setAttribute as
+        | ((name: string, value: unknown) => void) | undefined;
+    const removeAttribute = shim.removeAttribute as
+        | ((name: string) => void) | undefined;
+    if (typeof setAttribute !== 'function') return;
+    const keys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
+    for (const key of keys) {
+        if (!isDomSemanticProp(key) || oldProps[key] === newProps[key]) continue;
+        const attribute = key === 'className' ? 'class' : key;
+        const value = newProps[key];
+        if (value === undefined || value === null || value === false) {
+            if (typeof removeAttribute === 'function') {
+                removeAttribute.call(shim, attribute);
+            }
+        } else {
+            setAttribute.call(shim, attribute, value === true ? '' : value);
+        }
+    }
+}
+
 /// Element types that lower their string children to setText / createLabel
 /// rather than to a child node. shouldSetTextContent reads this set.
 ///
@@ -410,6 +498,22 @@ export const PulpHostConfig: HostConfig<
                 | undefined;
             if (typeof ElementCtor === 'function') {
                 const shim = new ElementCtor(type, id);
+                // Preserve semantic DOM attributes on the public Element
+                // shim before marking it native. Imported application logic
+                // uses selectors such as `[data-settings-open]` and
+                // `[aria-label="Settings"]` to identify the same controls
+                // Chromium did. These attributes are behavior identity, not
+                // a second hand-authored control map.
+                syncDomSemanticProps(shim, {}, props as Record<string, unknown>);
+                const initialText = asText(normalizedProps.children)
+                    ?? (normalizedProps.text as string | undefined);
+                // React's host text fast-path does not append a Text node, so
+                // the public Element shim cannot infer textContent from its
+                // child list. Publish the same flattened text that native
+                // createLabel/setText receives. Chromium materialization uses
+                // this DOM-shaped value to attach captured line boxes to the
+                // real native paint target after every commit.
+                shim._textContent = initialText ?? '';
                 shim._nativeCreated = true;
                 shim.__pulpId = id;
                 // The Element constructor seeds internal `_id`, but the
@@ -418,6 +522,7 @@ export const PulpHostConfig: HostConfig<
                 // `ref.current.id` aligned with the native widget id.
                 shim.id = id;
                 domShim = shim;
+                domRegistry().set(id, shim);
             }
         } catch { /* Element shim not available — pure-JS test path */ }
         return {
@@ -429,6 +534,8 @@ export const PulpHostConfig: HostConfig<
             onBridge: false,
             pendingChildren: [],
             _dom: domShim,
+            textTargetId: String(type) === 'button'
+                ? id + '__text' : undefined,
         };
     },
 
@@ -454,6 +561,7 @@ export const PulpHostConfig: HostConfig<
             childIds: [],
             onBridge: false,
             pendingChildren: [],
+            anonymousTextTarget: true,
         } as unknown as TextInstance;
     },
 
@@ -465,15 +573,12 @@ export const PulpHostConfig: HostConfig<
         if (!TEXT_BEARING.has(type)) return false;
         const children = props?.children;
         if (children == null) return true;  // empty container is text-able
-        if (typeof children === 'string' || typeof children === 'number') return true;
-        if (Array.isArray(children)) {
-            for (const c of children) {
-                if (c == null) continue;
-                if (typeof c !== 'string' && typeof c !== 'number') return false;
-            }
-            return true;
-        }
-        return false;
+        // Keep this decision identical to createWidget()/commitUpdate's
+        // asText() contract. React commonly leaves null/boolean sentinels in
+        // children arrays for conditional decorations. Treating those as
+        // element content here while asText() flattened them caused both an
+        // owning Label and a child TextInstance to paint the same caption.
+        return asText(children) !== undefined;
     },
 
     // ── First-mount attachment ──────────────────────────────────────
@@ -530,6 +635,8 @@ export const PulpHostConfig: HostConfig<
     removeChildFromContainer(_container, child) {
         // Detach from root and let the bridge clean up the subtree.
         if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
+        unregisterDomSubtree(child);
+        child.parentId = undefined;
     },
 
     clearContainer(_container) {
@@ -552,12 +659,27 @@ export const PulpHostConfig: HostConfig<
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
         applyChangedProps(instance, oldN, newN);
         instance.props = { ...newN };
+        if (instance._dom && typeof instance._dom === 'object') {
+            syncDomSemanticProps(
+                instance._dom as Record<string, unknown>,
+                oldProps as Record<string, unknown>,
+                newProps as Record<string, unknown>,
+            );
+            const dom = instance._dom as Record<string, unknown>;
+            const committedText = asText(newN.children)
+                ?? (newN.text as string | undefined);
+            if (committedText !== undefined) dom._textContent = committedText;
+            if (instance.textTargetId) dom.__pulpTextTargetId = instance.textTargetId;
+            else delete dom.__pulpTextTargetId;
+        }
         // Re-apply text children if changed (Label/Button special-case).
         if (TEXT_BEARING.has(instance.type)) {
             const oldText = asText(oldN.children) ?? (oldN.text as string | undefined);
             const newText = asText(newN.children) ?? (newN.text as string | undefined);
             if (oldText !== newText && newText !== undefined) {
-                if (typeof g.setText === 'function') call('setText', instance.id, newText);
+                if (typeof g.setText === 'function') {
+                    call('setText', instance.textTargetId ?? instance.id, newText);
+                }
             }
         }
     },
@@ -572,12 +694,28 @@ export const PulpHostConfig: HostConfig<
     // <span><em>hi</em></span>. Clear stale text before the new child
     // element mounts.
     resetTextContent(instance) {
-        if (typeof g.setText === 'function') call('setText', instance.id, '');
+        if (typeof g.setText === 'function') {
+            call('setText', instance.textTargetId ?? instance.id, '');
+        }
     },
 
     // ── Per-commit flush ───────────────────────────────────────────
     prepareForCommit(_container) { return null; },
     resetAfterCommit(_container) {
+        // Materialized imports may install renderer-neutral Chromium evidence
+        // (captured text line boxes today, with room for other stable metadata
+        // later). Apply it only after React has committed the complete native
+        // host tree, so structural paths see siblings in their final order.
+        // The hook is optional: ordinary @pulp/react applications remain
+        // independent of the import pipeline.
+        const metadataHook = g.__pulpApplyMaterializedImportMetadata__;
+        if (typeof metadataHook === 'function') metadataHook();
+        // Semantic captured-state matching is commit-driven: menus, dialogs,
+        // and selected controls only change after a React commit. Let the
+        // importer refresh here instead of walking every selector on every
+        // animation frame while the editor is idle.
+        const stateHook = g.__pulpRefreshMaterializedState__;
+        if (typeof stateHook === 'function') stateHook();
         // Own commit-time layout/repaint flush. The bridge's individual
         // setX calls don't all self-flush layout, so we trigger one
         // explicit pass per React commit. Mirrors Ink's resetAfterCommit.
@@ -628,6 +766,50 @@ function attach(parent: Instance, child: Instance, index?: number): void {
     } else {
         parent.childIds.splice(insertIdx, 0, child.id);
     }
+    // Keep the public DOM shims in the same hierarchy React committed without
+    // calling Element.appendChild(): that method would create/reparent native
+    // widgets a second time. Selector-backed imported behavior (menus,
+    // dialogs, closest/contains/outside-click) still needs a truthful parent
+    // chain even though host-config owns native attachment itself.
+    const parentDom = parent._dom as Record<string, unknown> | null | undefined;
+    const childDom = child._dom as Record<string, unknown> | null | undefined;
+    if (parentDom && child.anonymousTextTarget) {
+        if (!Array.isArray(parentDom.__pulpAnonymousTextTargets)) {
+            parentDom.__pulpAnonymousTextTargets = [];
+        }
+        const targets = parentDom.__pulpAnonymousTextTargets as Array<{
+            id: string; text: string;
+        }>;
+        const target = {
+            id: child.id,
+            text: String(child.props.text ?? child.props.children ?? ''),
+        };
+        const oldTarget = targets.findIndex(entry => entry.id === child.id);
+        if (oldTarget >= 0) targets.splice(oldTarget, 1);
+        // React's insertion index counts element and text children alike,
+        // whereas this renderer-neutral list contains text targets only.
+        // Preserve the text-node order by counting preceding text instances.
+        let textIndex = 0;
+        for (let childIndex = 0; childIndex < insertIdx; ++childIndex) {
+            const siblingId = parent.childIds[childIndex];
+            if (siblingId === child.id) continue;
+            if (targets.some(entry => entry.id === siblingId)) ++textIndex;
+        }
+        targets.splice(Math.min(textIndex, targets.length), 0, target);
+    }
+    if (parentDom && childDom) {
+        const oldParent = childDom._parentElement as Record<string, unknown> | null;
+        if (oldParent && Array.isArray(oldParent._children)) {
+            const oldIndex = oldParent._children.indexOf(childDom);
+            if (oldIndex >= 0) oldParent._children.splice(oldIndex, 1);
+        }
+        childDom._parentElement = parentDom;
+        if (!Array.isArray(parentDom._children)) parentDom._children = [];
+        const children = parentDom._children as unknown[];
+        const existing = children.indexOf(childDom);
+        if (existing >= 0) children.splice(existing, 1);
+        children.splice(Math.min(insertIdx, children.length), 0, childDom);
+    }
 
     if (wasAttachedElsewhere && child.onBridge) {
         // Existing on-bridge widget being moved between parents.
@@ -661,7 +843,37 @@ function attachToRoot(container: Container, child: Instance, _index = -1, _befor
 /// Emit createX + applyAllProps for a single child whose parent is on
 /// the bridge, then recursively drain the child's pendingChildren.
 function materialize(parent: Instance, child: Instance): void {
+    child.inheritedSvgViewBox = svgViewportFor(parent);
     materializeUnder(parent.id, child);
+}
+
+function parseSvgViewBox(value: unknown): [number, number] | undefined {
+    if (Array.isArray(value) && value.length >= 2) {
+        const width = Number(value[value.length === 4 ? 2 : 0]);
+        const height = Number(value[value.length === 4 ? 3 : 1]);
+        if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+            return [width, height];
+        }
+        return undefined;
+    }
+    if (typeof value !== 'string') return undefined;
+    const tokens = value.trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+    const width = tokens.length === 4 ? tokens[2] : tokens.length === 2 ? tokens[0] : NaN;
+    const height = tokens.length === 4 ? tokens[3] : tokens.length === 2 ? tokens[1] : NaN;
+    return width > 0 && height > 0 ? [width, height] : undefined;
+}
+
+function svgViewportFor(instance: Instance): [number, number] | undefined {
+    if (String(instance.type).toLowerCase() === 'svg') {
+        return parseSvgViewBox(instance.props.viewBox) ?? instance.inheritedSvgViewBox;
+    }
+    return instance.inheritedSvgViewBox;
+}
+
+function isSvgPrimitive(type: Type): boolean {
+    const lower = String(type).toLowerCase();
+    return lower === 'path' || lower === 'circle' || lower === 'rect' || lower === 'line'
+        || type === 'SvgPath' || type === 'SvgRect' || type === 'SvgLine';
 }
 
 /// Forward React's dev-mode `__source` prop to the native `setSource`
@@ -683,7 +895,18 @@ function bindSourceLocation(child: Instance): void {
 function materializeUnder(parentId: string, child: Instance): void {
     if (child.onBridge) return;
     createWidget(child.type, child.id, parentId, child.props);
+    if (child._dom && typeof child._dom === 'object' && child.textTargetId) {
+        (child._dom as Record<string, unknown>).__pulpTextTargetId = child.textTargetId;
+    }
     applyAllProps(child);
+    // Native SVG primitives own their viewBox transform. Raw JSX instead
+    // places viewBox on the surrounding `<svg>`, so explicitly inherit it.
+    // A primitive-authored viewBox remains authoritative.
+    if (isSvgPrimitive(child.type) && !parseSvgViewBox(child.props.viewBox)
+        && child.inheritedSvgViewBox) {
+        call('setSvgViewBox', child.id,
+            child.inheritedSvgViewBox[0], child.inheritedSvgViewBox[1]);
+    }
     bindSourceLocation(child);
     child.onBridge = true;
     // Drain any pending grand-children that were queued before this
@@ -692,6 +915,7 @@ function materializeUnder(parentId: string, child: Instance): void {
         const drained = child.pendingChildren;
         child.pendingChildren = [];
         for (const { child: gc } of drained) {
+            gc.inheritedSvgViewBox = svgViewportFor(child);
             materializeUnder(child.id, gc);
         }
     }
@@ -701,7 +925,36 @@ function detach(parent: Instance, child: Instance): void {
     const idx = parent.childIds.indexOf(child.id);
     if (idx >= 0) parent.childIds.splice(idx, 1);
     if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
+    const parentDom = parent._dom as Record<string, unknown> | null | undefined;
+    const childDom = child._dom as Record<string, unknown> | null | undefined;
+    if (parentDom && childDom && Array.isArray(parentDom._children)) {
+        const domIndex = parentDom._children.indexOf(childDom);
+        if (domIndex >= 0) parentDom._children.splice(domIndex, 1);
+        childDom._parentElement = null;
+    }
+    unregisterDomSubtree(child);
     child.parentId = undefined;
+}
+
+function unregisterDomSubtree(instance: Instance): void {
+    const registry = domRegistry();
+    const rootDom = instance._dom as Record<string, unknown> | null | undefined;
+    const visit = (node: Record<string, unknown>): void => {
+        const children = Array.isArray(node._children)
+            ? [...node._children] as Array<Record<string, unknown>> : [];
+        for (const child of children) visit(child);
+        const id = node.__pulpId ?? node.id;
+        if (typeof id === 'string' && id.length > 0) {
+            registry.delete(id);
+            clearMaterializedEventCallbacks(id);
+        }
+        node._parentElement = null;
+    };
+    if (rootDom) visit(rootDom);
+    else {
+        registry.delete(instance.id);
+        clearMaterializedEventCallbacks(instance.id);
+    }
 }
 
 // ── Auto-ID generation ─────────────────────────────────────────────

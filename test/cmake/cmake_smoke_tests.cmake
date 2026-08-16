@@ -268,6 +268,15 @@ set_tests_properties(cmake-pulp-minos-consumer-pin PROPERTIES
     LABELS "cmake;min-os"
     TIMEOUT 60)
 if(APPLE)
+    add_test(NAME cmake-pulp-macos-archive-floor
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/macos-archive-floor
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_macos_archive_floor.cmake)
+    set_tests_properties(cmake-pulp-macos-archive-floor PROPERTIES
+        LABELS "cmake;min-os;macos;prebuilt"
+        TIMEOUT 60)
+
     # Compile the std::format call shape used by runtime/log.hpp at the declared
     # floor against the active SDK. Apple has changed the floating-point
     # std::to_chars availability annotation across SDK releases; this catches a

@@ -69,10 +69,10 @@ std::vector<uint8_t> render_fill_raster(const std::string& img, float value) {
     return render_to_png(*view, 48, 48, 1.0f, ScreenshotBackend::skia);
 }
 
-// GPU (offscreen Dawn+Skia Graphite) render via capture_view. NOTE: plain
-// render_to_png(..., ScreenshotBackend::gpu) falls through to CoreGraphics on
-// mac — only capture_view on a requires_gpu_host tree routes to the real
-// Graphite HeadlessSurface (the path that used to drop the masked fill).
+// GPU (offscreen Dawn+Skia Graphite) render via capture_view. Explicit
+// render_to_png(..., ScreenshotBackend::gpu) now routes to the same real
+// Graphite HeadlessSurface; capture_view remains useful here for its honest
+// availability/content diagnostics.
 std::vector<uint8_t> render_fill_gpu(const std::string& img, float value,
                                      const char* dump = nullptr) {
     auto view = make_fill_view(img, value);

@@ -816,37 +816,20 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         if (root->dispatch_gesture_pointer_event(me)) continue;
         auto it = _dragTargets.find(pid);
         if (it == _dragTargets.end()) continue;
-        const auto live_target = [&]() -> pulp::view::View* {
-            auto current = _dragTargets.find(pid);
-            return current == _dragTargets.end()
-                       ? nullptr
-                       : current->second.live_in(*root);
-        };
-        pulp::view::View* target = live_target();
+        pulp::view::View* target = it->second.live_in(*root);
         if (!target) { _dragTargets.erase(it); continue; }
-        me.position = ios_root_to_local(me.window_position, target);
-        target->on_mouse_drag(me.position);
-        target = live_target();
-        if (!target) { _dragTargets.erase(pid); continue; }
-        auto target_move = target->on_pointer_move;
-        if (target_move) target_move(me);
-        target = live_target();
-        if (!target) { _dragTargets.erase(pid); continue; }
-        std::vector<pulp::view::ViewCapture> bubble;
-        for (auto* parent = target->parent(); parent; parent = parent->parent()) {
-            pulp::view::ViewCapture captured;
-            captured.set(parent);
-            bubble.push_back(std::move(captured));
-        }
-        for (auto& captured : bubble) {
-            auto* parent = captured.live_in(*root);
-            if (!parent) continue;
-            auto parent_move = parent->on_pointer_move;
-            if (!parent_move) continue;
-            pulp::view::MouseEvent bme = me;
-            bme.position = ios_root_to_local(me.window_position, parent);
-            parent_move(bme);
-        }
+        const pulp::view::PointerAttributes pointer{
+            .type = me.pointer_type,
+            .pressure = me.pressure,
+            .pointer_id = pid,
+            .altitude_angle = me.altitude_angle,
+            .azimuth_angle = me.azimuth_angle,
+        };
+        pulp::view::deliver_mouse_drag(
+            *root, target, me.window_position, me.modifiers,
+            static_cast<int>(me.click_count), pulp::view::MouseButton::left,
+            pointer);
+        if (!it->second.live_in(*root)) _dragTargets.erase(pid);
       } catch (const std::exception& e) {
         std::fprintf(stderr, "[plugin-gpu-host] touchesMoved handler threw: %s\n", e.what());
       } catch (...) {

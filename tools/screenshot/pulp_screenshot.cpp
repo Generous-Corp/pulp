@@ -6,12 +6,17 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/design_codegen.hpp>
+#include <pulp/view/design_import.hpp>
+#include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/viewport_reconcile.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <cstdlib>
 
@@ -49,6 +54,7 @@ using namespace pulp::state;
 static void print_usage() {
     std::cerr << "Usage: pulp-screenshot [options]\n";
     std::cerr << "  --script <file.js>   JS UI script to render\n";
+    std::cerr << "  --design-ir <file>   Mount a captured DesignIR as the visible native tree\n";
     std::cerr << "  --output <file.png>  Output PNG path (default: screenshot.png)\n";
     std::cerr << "  --width <px>         Width in points (default: 400)\n";
     std::cerr << "  --height <px>        Height in points (default: 300)\n";
@@ -57,6 +63,9 @@ static void print_usage() {
     std::cerr << "  --backend <name>     Render backend: auto, skia, coregraphics, gpu (default: auto — smart: native-overlay refuse / GPU view / raster)\n";
     std::cerr << "  --runtime-trace <file.json>\n";
     std::cerr << "                       Dump JS listener/callback trace after settle\n";
+    std::cerr << "  --settle-frames <n>  Pump n runtime frames before capture (default: 64)\n";
+    std::cerr << "  --canvas-id <id>     Capture only the matching live CanvasWidget program\n";
+    std::cerr << "  --canvas-occurrence <n>  Select the nth matching CanvasWidget (default: 1)\n";
     std::cerr << "  --base64             Output base64-encoded PNG to stdout\n";
     std::cerr << "  --demo               Render a demo UI (no script needed)\n";
     std::cerr << "  --compare A.png B.png [--threshold 0.85] [--diff D.png]  Parity check: print similarity, exit 0 if >= threshold\n";
@@ -95,6 +104,7 @@ static std::string base64_encode(const std::vector<uint8_t>& data) {
 
 struct ScreenshotCliOptions {
     std::string script_path;
+    std::string design_ir_path;
     std::string output_path = "screenshot.png";
     uint32_t width = 400;
     uint32_t height = 300;
@@ -107,6 +117,9 @@ struct ScreenshotCliOptions {
     std::string backend_name = "coregraphics";
 #endif
     std::string runtime_trace_path;
+    std::string canvas_id;
+    uint32_t canvas_occurrence = 1;
+    uint32_t settle_frames = 64;
     bool backend_was_defaulted = true;
     bool output_base64 = false;
     bool demo = false;
@@ -131,6 +144,7 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--script" && i + 1 < argc) options.script_path = argv[++i];
+        else if (arg == "--design-ir" && i + 1 < argc) options.design_ir_path = argv[++i];
         else if (arg == "--output" && i + 1 < argc) options.output_path = argv[++i];
         else if (arg == "--width" && i + 1 < argc) options.width = static_cast<uint32_t>(std::stoi(argv[++i]));
         else if (arg == "--height" && i + 1 < argc) options.height = static_cast<uint32_t>(std::stoi(argv[++i]));
@@ -141,10 +155,100 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
             options.backend_was_defaulted = false;
         }
         else if (arg == "--runtime-trace" && i + 1 < argc) options.runtime_trace_path = argv[++i];
+        else if (arg == "--canvas-id" && i + 1 < argc) options.canvas_id = argv[++i];
+        else if (arg == "--canvas-occurrence" && i + 1 < argc)
+            options.canvas_occurrence = static_cast<uint32_t>(std::stoul(argv[++i]));
+        else if (arg == "--settle-frames" && i + 1 < argc)
+            options.settle_frames = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (arg == "--base64") options.output_base64 = true;
         else if (arg == "--demo") options.demo = true;
     }
     return options;
+}
+
+static std::string json_string(const std::string& text) {
+    std::ostringstream out;
+    out << '"';
+    for (const unsigned char c : text) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    constexpr char hex[] = "0123456789abcdef";
+                    out << "\\u00" << hex[(c >> 4) & 0xf] << hex[c & 0xf];
+                } else {
+                    out << static_cast<char>(c);
+                }
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
+static void append_canvas_programs(const View& view, std::ostringstream& out,
+                                   bool& first) {
+    if (const auto* canvas = dynamic_cast<const CanvasWidget*>(&view)) {
+        if (!first) out << ',';
+        first = false;
+        const auto bounds = canvas->bounds();
+        out << "{\"id\":" << json_string(canvas->id())
+            << ",\"command_count\":" << canvas->command_count()
+            << ",\"bounds\":{\"x\":" << bounds.x
+            << ",\"y\":" << bounds.y
+            << ",\"width\":" << bounds.width
+            << ",\"height\":" << bounds.height << "}}";
+    }
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        append_canvas_programs(*view.child_at(i), out, first);
+}
+
+static std::string canvas_program_report(const View& root) {
+    std::ostringstream out;
+    out << '[';
+    bool first = true;
+    append_canvas_programs(root, out, first);
+    out << ']';
+    return out.str();
+}
+
+static std::string canvas_program_frame_report(
+    const std::vector<std::string>& frame_programs) {
+    std::ostringstream out;
+    out << '[';
+    for (std::size_t i = 0; i < frame_programs.size(); ++i) {
+        if (i != 0) out << ',';
+        out << "{\"frame\":" << (i + 1)
+            << ",\"canvas_programs\":" << frame_programs[i] << '}';
+    }
+    out << ']';
+    return out.str();
+}
+
+static std::string label_line_break_report() {
+    const auto counts = Label::line_break_path_counts();
+    std::ostringstream out;
+    out << "{\"cached\":" << counts.cached
+        << ",\"reflowed\":" << counts.reflowed
+        << ",\"uncached\":" << counts.uncached << '}';
+    return out.str();
+}
+
+static CanvasWidget* find_canvas_by_id(View& view, const std::string& id,
+                                       uint32_t occurrence, uint32_t& seen) {
+    if (auto* canvas = dynamic_cast<CanvasWidget*>(&view); canvas && canvas->id() == id) {
+        ++seen;
+        if (seen == occurrence) return canvas;
+    }
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        if (auto* found = find_canvas_by_id(*view.child_at(i), id, occurrence, seen))
+            return found;
+    return nullptr;
 }
 
 static bool normalize_backend(ScreenshotCliOptions& options) {
@@ -218,6 +322,39 @@ static const char* runtime_trace_script() {
             if (value != null && typeof value !== 'function') out[key] = String(value);
         });
         return out;
+    }
+    function runtimeImportDiagnostics() {
+        var out = {};
+        [
+            '__pulpRuntimeImportErr__',
+            '__pulpEvalErr__',
+            '__pulpFlushSyncErr__',
+            '__pulpCreateRootRenderErr__',
+            '__pulpShimError__',
+            '__pulpShimLog__'
+        ].forEach(function (key) {
+            var value = globalThis[key];
+            if (value != null && String(value).length) out[key] = String(value);
+        });
+        keys(globalThis).forEach(function (key) {
+            if (key.indexOf('__pulpPayloadErr_') !== 0) return;
+            var value = globalThis[key];
+            if (value != null && String(value).length) out[key] = String(value);
+        });
+        return out;
+    }
+    function runtimeImportState() {
+        function typeOf(name) {
+            try { return typeof globalThis[name]; } catch (e) { return 'error'; }
+        }
+        return {
+            react: typeOf('React'),
+            react_dom: typeOf('ReactDOM'),
+            babel: typeOf('Babel'),
+            app: typeOf('App'),
+            root_element: (typeof document !== 'undefined' && document.getElementById)
+                ? !!document.getElementById('root') : false
+        };
     }
     function textPreview(el) {
         var text = el && el._textContent != null ? String(el._textContent) : '';
@@ -336,6 +473,27 @@ static const char* runtime_trace_script() {
             document_body_bounds: rectFor(body)
         };
     }
+    function materializedStateSummary() {
+        var activation = null;
+        var active = '';
+        try {
+            if (typeof globalThis.__pulpRequestedMaterializedActivation__ === 'function')
+                activation = globalThis.__pulpRequestedMaterializedActivation__();
+        } catch (e) {
+            activation = { error: String(e) };
+        }
+        try {
+            if (typeof globalThis.__pulpRefreshMaterializedState__ === 'function')
+                active = String(globalThis.__pulpRefreshMaterializedState__() || '');
+        } catch (e) {
+            active = 'error: ' + String(e);
+        }
+        return {
+            requested: String(globalThis.__pulpRequestedMaterializedState__ || ''),
+            active: active,
+            activation: activation
+        };
+    }
     var addEventLog = Array.isArray(globalThis.__pulpAddELLog__)
         ? globalThis.__pulpAddELLog__.map(function (entry) {
             return { op: String(entry.op || ''), type: String(entry.type || ''), fn: String(entry.fn || '') };
@@ -355,10 +513,20 @@ static const char* runtime_trace_script() {
         document_listeners: listenerSummary(globalThis.document),
         add_event_listener_log_count: addEventLog.length,
         add_event_listener_log: addEventLog,
+        runtime_import_diagnostics: runtimeImportDiagnostics(),
+        runtime_import_state: runtimeImportState(),
+        materialized_state: materializedStateSummary(),
         dispatch_hits: globalThis.__pulpDispatchHits__ || null,
+        materialized_metadata_diagnostics:
+            globalThis.__pulpMaterializedMetadataDiagnostics__ || null,
         native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0,
         native_bounds_count: nativeBounds.length,
-        native_bounds: nativeBounds
+        native_bounds: nativeBounds,
+        canvas_programs: Array.isArray(globalThis.__pulpCanvasPrograms__)
+            ? globalThis.__pulpCanvasPrograms__ : [],
+        canvas_program_frames: Array.isArray(globalThis.__pulpCanvasProgramFrames__)
+            ? globalThis.__pulpCanvasProgramFrames__ : [],
+        label_line_break_counts: globalThis.__pulpLabelLineBreakCounts__ || null
     }, null, 2);
 })()
 )JS";
@@ -431,8 +599,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!options.demo && options.script_path.empty()) {
-        std::cerr << "Error: --script or --demo required\n";
+    if (!options.demo && options.script_path.empty() && options.design_ir_path.empty()) {
+        std::cerr << "Error: --script, --design-ir, or --demo required\n";
         print_usage();
         return 1;
     }
@@ -488,25 +656,74 @@ int main(int argc, char* argv[]) {
         engine.evaluate("setValue('mix', 0.8)");
         engine.evaluate("setValue('volume', 0.7)");
     } else {
-        // Load library JS files from the same directory
-        auto js_dir = std::filesystem::path(options.script_path).parent_path();
-        // Import artifacts reference their assets relative to the script
-        // (assets/<file> next to ui.js); resolve those against the script's
-        // own directory rather than the process CWD.
-        bridge.set_script_base_dir(js_dir);
-        for (auto& lib : {"oklch.js"}) {
-            auto lib_path = js_dir / lib;
-            if (std::filesystem::exists(lib_path)) {
-                bridge.load_script(read_file(lib_path.string()));
+        if (!options.script_path.empty()) {
+            // Load library JS files from the same directory. Import artifacts
+            // reference assets relative to the script (assets/<file> next to
+            // ui.js), not relative to the process working directory.
+            auto js_dir = std::filesystem::path(options.script_path).parent_path();
+            bridge.set_script_base_dir(js_dir);
+            for (auto& lib : {"oklch.js"}) {
+                auto lib_path = js_dir / lib;
+                if (std::filesystem::exists(lib_path)) {
+                    bridge.load_script(read_file(lib_path.string()));
+                }
             }
+
+            auto code = read_file(options.script_path);
+            if (code.empty()) {
+                std::cerr << "Error: could not read " << options.script_path << "\n";
+                return 1;
+            }
+            bridge.load_script(code);
         }
 
-        auto code = read_file(options.script_path);
-        if (code.empty()) {
-            std::cerr << "Error: could not read " << options.script_path << "\n";
-            return 1;
+        // Runtime behavior materializes first because the original executable
+        // document legitimately replaces document.body while bootstrapping.
+        // Mount the Chromium-computed DesignIR only after that replacement,
+        // then bind behavior into its stable native paint slots. This ordering
+        // makes the imported geometry/style the final visible authority.
+        if (!options.design_ir_path.empty()) {
+            const auto ir_text = read_file(options.design_ir_path);
+            if (ir_text.empty()) {
+                std::cerr << "Error: could not read " << options.design_ir_path << "\n";
+                return 1;
+            }
+            try {
+                auto ir = parse_design_ir_json(ir_text);
+                const auto ir_base =
+                    std::filesystem::path(options.design_ir_path).parent_path();
+                // Bridge-JS generation consumes the node's resolved
+                // `asset_path`, whereas direct native materialization can
+                // resolve `asset_ref` through the manifest at runtime. Keep
+                // both DesignIR rendering lanes equivalent: a captured image
+                // must not degrade to an empty ImageView merely because the
+                // screenshot harness selected generated native JS.
+                enrich_imported_image_asset_metadata(
+                    ir, ir.asset_manifest, ir_base.string());
+                CodeGenOptions codegen;
+                codegen.mode = CodeGenMode::bridge_native_js;
+                // The executable document already owns `root`. Mount the
+                // visible DesignIR under a collision-free id so creating its
+                // Chromium paint tree cannot alias the hidden behavior tree.
+                codegen.root_variable = options.script_path.empty()
+                    ? "root" : "__pulp_design_ir_root__";
+                bridge.set_script_base_dir(
+                    std::filesystem::path(options.design_ir_path).parent_path());
+                const auto generated = generate_pulp_js(ir, codegen);
+                if (const char* dump = std::getenv("PULP_SHOT_DUMP_DESIGN_JS"))
+                    if (*dump) write_text_file(dump, generated);
+                bridge.load_script(generated);
+            } catch (const std::exception& e) {
+                std::cerr << "Error: invalid DesignIR: " << e.what() << "\n";
+                return 1;
+            }
         }
-        bridge.load_script(code);
+        if (!options.script_path.empty() && !options.design_ir_path.empty()) {
+            bridge.load_script(
+                "if (typeof __pulpBindMaterializedCanvases__ !== 'function') "
+                "throw new Error('script did not expose materialized canvas bindings'); "
+                "__pulpBindMaterializedCanvases__();");
+        }
 
         // After React mount, reconcile any oversize absolute descendants
         // with the viewport so bottom-anchored content lands within the
@@ -535,10 +752,60 @@ int main(int argc, char* argv[]) {
     // naturally, but pulp-screenshot's headless path has to pump
     // explicitly. __pulpRuntimeSettle__ is registered by WidgetBridge
     // exactly for this case (see widget_bridge.cpp:1144).
-    bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
+    std::vector<std::string> canvas_program_frames;
+    if (!options.runtime_trace_path.empty())
+        canvas_program_frames.reserve(options.settle_frames);
+    for (uint32_t remaining = options.settle_frames; remaining > 0;) {
+        // A runtime trace is an animation oracle, not merely a final snapshot:
+        // pump one frame at a time and retain the native command-list size at
+        // every boundary. This catches Canvas2D programs that accidentally
+        // append forever even when their last rendered frame looks correct.
+        const auto batch = options.runtime_trace_path.empty()
+            ? std::min<uint32_t>(remaining, 64) : 1u;
+        bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') "
+                           "__pulpRuntimeSettle__(" + std::to_string(batch) + ");");
+        if (!options.runtime_trace_path.empty())
+            canvas_program_frames.push_back(canvas_program_report(root));
+        remaining -= batch;
+    }
+    // A React commit during settling may replace a behavior-only CanvasWidget.
+    // Rebind after the final commit so the captured DesignIR canvas owns the
+    // current retained command stream and the hidden source does not also
+    // composite it. Live hosts perform the same rebinding at their frame
+    // boundary; this headless path has no event loop after settling.
+    if (!options.script_path.empty() && !options.design_ir_path.empty()) {
+        bridge.load_script(
+            "if (typeof __pulpBindMaterializedCanvases__ !== 'function') "
+            "throw new Error('script lost materialized canvas bindings'); "
+            "__pulpBindMaterializedCanvases__();");
+    }
+
+    // React component errors are reported to the generated JSX boundary after
+    // the initial render returns. Refuse the otherwise indistinguishable blank
+    // frame with the actual application exception instead of reducing it to a
+    // generic capture failure.
+    try {
+        const auto jsx_error = engine.evaluate(
+            "typeof globalThis.__pulpJsxError__ === 'string'"
+            " ? globalThis.__pulpJsxError__ : ''").toString();
+        if (!jsx_error.empty()) {
+            std::cerr << "Error: native JSX runtime failed: " << jsx_error << "\n";
+            return 3;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: native JSX error inspection failed: " << e.what() << "\n";
+        return 3;
+    }
 
     if (!options.runtime_trace_path.empty()) {
         try {
+            engine.evaluate("globalThis.__pulpCanvasPrograms__ = " +
+                            canvas_program_report(root) + ";");
+            engine.evaluate("globalThis.__pulpCanvasProgramFrames__ = " +
+                            canvas_program_frame_report(canvas_program_frames) + ";");
+            // The counters are paint-path evidence, so publish them only
+            // after capture below. Publishing here reports zeros even when
+            // every Label uses its captured Chromium line boxes.
             auto trace = engine.evaluate(runtime_trace_script()).toString();
             if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
                 std::cerr << "Error: could not write runtime trace " << options.runtime_trace_path << "\n";
@@ -546,6 +813,17 @@ int main(int argc, char* argv[]) {
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: runtime trace failed: " << e.what() << "\n";
+            return 1;
+        }
+    }
+
+    View* capture_root = &root;
+    if (!options.canvas_id.empty()) {
+        uint32_t seen = 0;
+        capture_root = find_canvas_by_id(
+            root, options.canvas_id, options.canvas_occurrence, seen);
+        if (!capture_root) {
+            std::cerr << "Error: live CanvasWidget not found: " << options.canvas_id << "\n";
             return 1;
         }
     }
@@ -559,7 +837,7 @@ int main(int argc, char* argv[]) {
     std::string used_label = options.backend_name;
     if (smart) {
         CaptureResult cap =
-            capture_view(root, options.width, options.height, options.scale, backend);
+            capture_view(*capture_root, options.width, options.height, options.scale, backend);
         if (!cap.ok) {
             std::cerr << "Error: capture is not trustworthy — " << cap.reason << "\n";
             return 3;  // native overlay / blank / no backend
@@ -569,9 +847,26 @@ int main(int argc, char* argv[]) {
                      : (cap.used == ScreenshotBackend::coregraphics) ? "coregraphics"
                                                                      : "skia";
     } else {
-        png = render_to_png(root, options.width, options.height, options.scale, backend);
+        png = render_to_png(*capture_root, options.width, options.height, options.scale, backend);
         if (png.empty()) {
             std::cerr << "Error: rendering failed\n";
+            return 1;
+        }
+    }
+
+    if (!options.runtime_trace_path.empty()) {
+        try {
+            engine.evaluate("globalThis.__pulpLabelLineBreakCounts__ = " +
+                            label_line_break_report() + ";");
+            auto trace = engine.evaluate(runtime_trace_script()).toString();
+            if (!write_text_file(options.runtime_trace_path, trace + "\n")) {
+                std::cerr << "Error: could not update runtime trace "
+                          << options.runtime_trace_path << "\n";
+                return 1;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: runtime trace paint evidence failed: "
+                      << e.what() << "\n";
             return 1;
         }
     }

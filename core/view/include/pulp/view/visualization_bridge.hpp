@@ -37,7 +37,13 @@ struct PerfCounters;
 
 namespace pulp::view {
 
-/// Published spectrum data (lock-free via TripleBuffer).
+/// Published one-sided amplitude spectrum (lock-free via TripleBuffer).
+/// `magnitude_db` is calibrated in peak-amplitude dBFS: a full-scale,
+/// bin-centered sinusoid reads 0 dBFS at an interior bin. DC and Nyquist use
+/// their single-sided normalization. Multiple channels are combined by
+/// averaging their normalized linear power, so one active side of a stereo
+/// stream reads 3.0103 dB below the same signal on both sides. Values above
+/// 0 dBFS are valid when the analyzed signal exceeds full scale.
 struct SpectrumData {
     static constexpr int kMaxBins = 4097; // FFT 8192 → 4097 bins
 
@@ -142,6 +148,17 @@ public:
         channel_stfts_.resize(static_cast<std::size_t>(
             config_.num_channels));
         for (auto& stft : channel_stfts_) stft.configure(stft_cfg);
+        spectrum_edge_scale_ = 1.0;
+        spectrum_interior_scale_ = 1.0;
+        if (!channel_stfts_.empty()) {
+            const double window_sum = static_cast<double>(
+                channel_stfts_.front().window_sum());
+            if (std::isfinite(window_sum)
+                && std::abs(window_sum) > 1.0e-12) {
+                spectrum_edge_scale_ = 1.0 / window_sum;
+                spectrum_interior_scale_ = 2.0 / window_sum;
+            }
+        }
 
         // Configure meter
         meter_.prepare(config_.sample_rate, config_.num_channels);
@@ -280,6 +297,10 @@ private:
     std::vector<float> consumer_storage_;
     std::vector<float*> consumer_channels_;
     int consumer_chunk_frames_ = 0;
+    // Coherent-gain correction for the one-sided real FFT. Calculated only in
+    // quiescent configure(); poll() applies it after the audio-thread copy.
+    double spectrum_edge_scale_ = 1.0;
+    double spectrum_interior_scale_ = 1.0;
 
     // Multi-channel meter (audio thread)
     signal::MultiChannelMeter meter_;
