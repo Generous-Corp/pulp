@@ -2446,6 +2446,35 @@ enrollment survived `update-branch` (`already queued to merge`) where the
 auto-merge arm did not. Prefer enrolling; treat a bare arm as the weaker
 fallback, and one you must verify.
 
+**`autoMergeRequest: null` is ambiguous — read `isInMergeQueue` before reacting.**
+On a queue-governed branch, enrollment **supersedes** the arm, so a PR that is
+queued and progressing normally reads `armed=false`. That is indistinguishable
+from the disarm above if you look at `autoMergeRequest` alone, and re-arming on it
+means fighting the queue rather than fixing anything. Query both:
+
+```bash
+ghapp api graphql -f query='query{repository(owner:"OWNER",name:"REPO"){
+  pullRequest(number:NNNN){isInMergeQueue mergeQueueEntry{state position}}}}'
+```
+
+`isInMergeQueue: true` → armed=false is expected; leave it alone. `false` **and**
+`armed=false` → genuinely unarmed, and the read-back rule above applies.
+
+**A queued branch is push-locked, which matters when the fix is on your side.**
+GitHub rejects a push to a branch with a queued PR (`GH006 … Branches that are
+queued for merging cannot be updated`), so landing a correction means dequeuing
+first. Note `gh pr merge --disable-auto` does **not** dequeue an already-queued PR
+— it clears the arm and reports `already queued to merge`. The dequeue is a
+GraphQL mutation, and its input field is `id`, not `pullRequestId`:
+
+```bash
+ghapp api graphql -f query='mutation{dequeuePullRequest(input:{id:"PR_kwDO..."}){
+  mergeQueueEntry{state}}}'
+```
+
+Treat that as an authority action on someone's queued work, not a routine step —
+`ghapp` guards it deliberately.
+
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 
 Shipyard can validate every target and still fail its own merge call: a
