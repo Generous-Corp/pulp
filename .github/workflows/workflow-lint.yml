@@ -48,6 +48,8 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/test_api_contracts_workflow.py'
+      - 'tools/build-api-docs.sh'
       - 'tools/scripts/verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
@@ -113,6 +115,8 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/test_api_contracts_workflow.py'
+      - 'tools/build-api-docs.sh'
       - 'tools/scripts/verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
@@ -233,6 +237,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_shipyard_merge_steward_workflow.py
           python3 tools/scripts/test_shipyard_provenance_label_plan.py
           python3 tools/scripts/test_shipyard_pull_request_run_cleanup.py

@@ -78,6 +78,74 @@ available_cores() {
   return 0
 }
 
+# Print who currently holds the host's cores, and whether each holder's process
+# is still alive.
+#
+# A denial and a lie look identical from here: both produce a slow build and one
+# log line. They are not the same event. A denial is the governor working — the
+# host really is busy. A lie is a lease left behind by a VM or build that died
+# uncleanly, and nothing reconciles the store against reality, so those cores
+# stay spoken for indefinitely. On 2026-08-16 two dead VMs held 12 of 14 cores
+# and pinned a critical-path build to the floor for its whole run; the store read
+# 0/14 minutes later.
+#
+# `alive=no` is the tell, and it is the reason this prints the owning pid rather
+# than only the core counts: a holder whose process is gone is a stale lease, and
+# the correct response is to reap and restart rather than to wait. An incremental
+# `cmake --build` loses no objects across a restart.
+#
+# Diagnostics only: never fails, never changes the build's parallelism or its
+# exit status.
+log_lease_holders() {
+  local status
+  status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || return 0
+  [ -n "$status" ] || return 0
+
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$status" | python3 -c '
+import json, os, sys
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
+leases = payload.get("leases") or []
+capacity = payload.get("capacity") or {}
+print("[governed-build] denial detail: used_cores=%s/%s non_gate_available=%s holders=%d"
+      % (capacity.get("used_cores", "?"), capacity.get("total_cores", "?"),
+         capacity.get("non_gate_available_cores", "?"), len(leases)))
+stale = 0
+for lease in leases:
+    pid = lease.get("pid")
+    alive = "unknown"
+    if isinstance(pid, int) and pid > 0:
+        try:
+            os.kill(pid, 0)
+            alive = "yes"
+        except ProcessLookupError:
+            alive = "no"
+            stale += 1
+        except PermissionError:
+            alive = "yes"
+    print("[governed-build]   holder id=%s kind=%s cores=%s owner=%s pid=%s alive=%s created=%s"
+          % (lease.get("id", "?"), lease.get("command_kind", "?"),
+             lease.get("lease_size_cores", "?"), lease.get("owner", "?"),
+             pid, alive, lease.get("created_at", "?")))
+if stale:
+    print("[governed-build] %d holder(s) reference a process that no longer exists — "
+          "this denial is likely stale, not real contention. Reap the store "
+          "(`tartci leases reap`) and restart the build to re-acquire." % stale)
+' >&2 || true
+  else
+    # No python3: dump whatever the human-readable view says. Less precise (no
+    # liveness), but still names the holders instead of leaving the operator
+    # with a bare "denied".
+    "$TARTCI_BIN" leases status 2>/dev/null | sed 's/^/[governed-build]   /' >&2 || true
+  fi
+  return 0
+}
+
 find_tartci() {
   if [ -n "${PULP_TARTCI_BIN:-}" ] && [ -x "${PULP_TARTCI_BIN}" ]; then
     echo "${PULP_TARTCI_BIN}"; return 0
@@ -135,6 +203,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
         LEASE_ID=""
         jobs="$(min_jobs)"
         log "lease denied at available capacity — proceeding leaseless at -j$jobs (floor)"
+        log_lease_holders
       fi
     else
       # Zero free cores, or the store did not report capacity. Either way this
@@ -142,6 +211,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
       LEASE_ID=""
       jobs="$(min_jobs)"
       log "lease denied, no capacity reported — proceeding leaseless at -j$jobs (floor)"
+      log_lease_holders
     fi
   fi
 else

@@ -5,8 +5,26 @@
 # Injects the current SDK version from CMakeLists.txt (`project(Pulp VERSION x.y.z)`)
 # as Doxygen's PROJECT_NUMBER so `/api/` always shows the right version instead
 # of the stale literal baked into docs/doxygen/Doxyfile.
+#
+# `--contract-only` stops after the strict API-contract pass and skips the
+# published HTML render. The contract pass is seconds of work and decides
+# whether a public symbol may merge; the HTML render is a preview artifact that
+# takes an order of magnitude longer. Splitting them lets the contract run as
+# its own fast check without dragging the site build onto the critical path.
 
 set -euo pipefail
+
+CONTRACT_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --contract-only) CONTRACT_ONLY=1 ;;
+        *)
+            echo "Error: unknown argument: $arg" >&2
+            echo "Usage: build-api-docs.sh [--contract-only]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -46,7 +64,11 @@ if [ -z "$SDK_VERSION" ]; then
     echo "Warning: could not parse SDK VERSION from CMakeLists.txt; using Doxyfile literal"
 fi
 
-echo "Generating API reference (Pulp ${SDK_VERSION:-unknown})..."
+if [ "$CONTRACT_ONLY" -eq 1 ]; then
+    echo "Checking API contracts only (Pulp ${SDK_VERSION:-unknown})..."
+else
+    echo "Generating API reference (Pulp ${SDK_VERSION:-unknown})..."
+fi
 mkdir -p "$ROOT/build"
 
 # Run Doxygen from the docs/doxygen directory so relative paths resolve.
@@ -144,6 +166,11 @@ if ! python3 "$ROOT/tools/scripts/timeline_api_docs_check.py" \
     --html-config "$DOXYFILE" \
     ${TRUSTED_BASELINE_ARGS[@]+"${TRUSTED_BASELINE_ARGS[@]}"}; then
     exit 1
+fi
+
+if [ "$CONTRACT_ONLY" -eq 1 ]; then
+    echo "API contracts OK (--contract-only: published HTML render skipped)"
+    exit 0
 fi
 
 if [ -n "$SDK_VERSION" ]; then

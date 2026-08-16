@@ -1,0 +1,56 @@
+# Public API-contract gate.
+#
+# This check decides whether a public symbol under the catalogued module roots
+# may reach main. It is deliberately a workflow of its own rather than a step
+# inside `docs-material.yml`, for two reasons:
+#
+#   1. The contract pass is seconds of work; the Material preview site around it
+#      is ~50s. A gate that can block a merge has no business carrying a preview
+#      artifact build on its critical path.
+#   2. A check that reports a main-breaking defect but cannot prevent it turns
+#      one bad merge into N misleading red checks on innocent PRs. Splitting the
+#      fast half out is what makes it promotable to a required context.
+#
+# NO `paths:` FILTER ON `pull_request` — ON PURPOSE. A path-filtered workflow
+# does not report at all on PRs that miss the filter, and GitHub treats a
+# required context that never reports as permanently pending, which blocks the
+# PR forever. The check is cheap enough to run unconditionally, so it does.
+name: API contracts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A required context must also report on a queued merge group, or the queue
+  # entry waits on a check that will never arrive. `merge_group` does not
+  # support `paths` filters at all, which is a second reason this workflow has
+  # none.
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-contracts:
+    name: api-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # `build-api-docs.sh` reads the reviewed contract-debt baseline from
+          # the trusted `origin/main` ref, so the history must be fetchable.
+          fetch-depth: 0
+
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen
+
+      - name: Check public API contracts
+        run: |
+          chmod +x tools/build-api-docs.sh
+          tools/build-api-docs.sh --contract-only
