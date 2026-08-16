@@ -445,6 +445,44 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### Gotcha: a `*_RUNS_ON_JSON` variable read WITHOUT `fromJSON` becomes one literal label
+
+Same silent-queue failure as below, but the black hole is created by the
+*workflow*, not by fleet drift — so the topology checker cannot see it. The lane
+reconciles green, every runner carries every contracted label, and the job still
+queues forever.
+
+The value of a `*_RUNS_ON_JSON` variable is a JSON **array**. Interpolating it
+straight into `runs-on:` does not expand it; GitHub takes the whole string as a
+**single label**:
+
+```
+labels: ["[\"self-hosted\",\"Linux\",\"X64\",\"pulp-build-linux-x64\",\"pulp-host-macpro\"]"]
+```
+
+No runner can ever carry a label whose text is a JSON array, so the job is
+queued, not failed. Found live 2026-08-16: setting `PULP_LOCAL_LINUX_RUNS_ON_JSON`
+left a dispatched `Enforce version & skill sync` job queued exactly like that
+while an **idle** Mac Pro runner carried all five of those labels.
+`version-skill-check.yml` and `vellum-freeze-check.yml` read the variable
+directly; `build.yml`, `nightly-intel.yml`, and `examples-validation.yml` wrap it
+in `fromJSON`. Both required gates are now wrapped too.
+
+Two rules when touching a `runs-on` that references one of these variables:
+
+- **Parse it.** `runs-on: ${{ fromJSON(...) }}`, never a bare interpolation.
+- **Keep every branch JSON.** Inside `fromJSON(...)` a bare `'ubuntu-latest'`
+  fails to parse and takes the gate down with it — write `'"ubuntu-latest"'`.
+
+`tools/scripts/test_resolve_linux_route.py` enforces both: one test sweeps every
+workflow for an unparsed selector, the other pins the JSON-quoted fallbacks.
+Diagnose a suspected instance by reading the queued job's labels — a one-element
+array containing bracket characters is conclusive:
+
+```bash
+ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
+```
+
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
 The trap behind step 3. Before concluding "the pool is saturated", check that the

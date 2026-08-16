@@ -303,6 +303,54 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
     assert 'cmake --build "$PULP_BUILD_DIR" --config Release\n' not in text
 
 
+def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:
+    """A `runs-on` that interpolates a *_RUNS_ON_JSON variable without
+    `fromJSON` yields ONE label whose text is the literal JSON array. No runner
+    can carry that label, and GitHub queues such a job forever instead of
+    failing it, so the symptom is an invisible hang on a required gate rather
+    than an error. Observed live on 2026-08-16: setting
+    PULP_LOCAL_LINUX_RUNS_ON_JSON left a dispatched `Enforce version & skill
+    sync` job queued with
+    labels=['["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'].
+    """
+    workflow_dir = BUILD_WORKFLOW.parent
+    offenders = []
+    for workflow in sorted(workflow_dir.glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8")
+        for block in re.findall(r"^\s*runs-on:.*?(?=^\s*\S+:|\Z)", text, re.M | re.S):
+            if "_RUNS_ON_JSON" not in block:
+                continue
+            if "fromJSON" in block:
+                continue
+            offenders.append(f"{workflow.name}: {' '.join(block.split())[:110]}")
+    assert not offenders, (
+        "runs-on interpolates a *_RUNS_ON_JSON variable without fromJSON; "
+        "setting that variable would queue the job forever:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_json_selector_fallbacks_stay_json_quoted() -> None:
+    """Wrapping the expression in `fromJSON` is only safe when EVERY branch is
+    JSON. A bare `'ubuntu-latest'` fallback inside `fromJSON(...)` fails to
+    parse and takes the required gate down with it, so the hosted fallbacks
+    must be written as the quoted JSON string `'"ubuntu-latest"'`.
+    """
+    for name in ("version-skill-check.yml", "vellum-freeze-check.yml"):
+        text = (BUILD_WORKFLOW.parent / name).read_text(encoding="utf-8")
+        block = re.search(r"runs-on: >-\n(.*?\n)\s*(?:name:|steps:)", text, re.S)
+        assert block, f"{name}: could not locate the runs-on block"
+        body = block.group(1)
+        assert "fromJSON(" in body, f"{name}: selector is not parsed"
+        assert "|| 'ubuntu-latest'" not in body, (
+            f"{name}: bare 'ubuntu-latest' fallback inside fromJSON would fail "
+            "to parse; use the JSON-quoted form"
+        )
+        assert body.count("'\"ubuntu-latest\"'") >= 3, (
+            f"{name}: every branch must carry a JSON-quoted hosted fallback"
+        )
+
+
 def _all_tests() -> list:
     return [
         value
