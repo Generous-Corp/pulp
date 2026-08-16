@@ -153,17 +153,15 @@ class WorkflowBuildDirTests(unittest.TestCase):
 
         self.assertIn("std::jthread", text)
         self.assertIn("std::stop_token", text)
-        self.assertIn(
-            "set_target_properties(InstalledControlStandalone_Core PROPERTIES",
-            text,
-        )
+        self.assertIn("set(CMAKE_CXX_STANDARD 20)", text)
         self.assertIn("CXX_STANDARD 20", text)
         self.assertIn("CXX_STANDARD_REQUIRED ON", text)
+        self.assertIn("CMAKE_CXX_EXTENSIONS OFF", text)
         self.assertIn(
             "target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)",
             text,
-            "the generated consumer uses C++20 threading and must pin the "
-            "language level instead of inheriting a provider compiler default",
+            "the generated consumer uses C++20 threading and must set a "
+            "directory-wide language contract before importing Pulp",
         )
 
     def test_event_pinned_fetch_repairs_a_shallow_pull_request_checkout(self) -> None:

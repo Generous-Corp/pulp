@@ -72,6 +72,14 @@ file(WRITE "${_consumer_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(PulpControlSdkConsumer LANGUAGES CXX)
 
+# The installed consumer exercises C++20 library facilities in every target,
+# including the Standalone processor object library created in a subdirectory.
+# Set the language contract at directory scope before importing Pulp so no
+# provider or toolchain default can leave a generated target in C++17 mode.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 find_package(Pulp REQUIRED COMPONENTS
     inspect-protocol
     inspect-control
@@ -328,9 +336,6 @@ pulp_add_plugin(InstalledControlStandalone
         dev.pulp.runtime/evaluate@1)
 target_compile_definitions(InstalledControlStandalone_Core PRIVATE
     INSTALLED_PARITY_UI_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/ui.js")
-set_target_properties(InstalledControlStandalone_Core PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON)
 target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)
 ]=])
 
