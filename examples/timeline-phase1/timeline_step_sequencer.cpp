@@ -1,5 +1,7 @@
 #include "timeline_step_sequencer.hpp"
 
+#include <variant>
+
 #include <pulp/state/step_edit_reducer.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/model.hpp>
@@ -182,8 +184,8 @@ apply_active_extent_step_edit(state::Snapshot& snapshot,
     return {std::move(echo), true, false};
 }
 
-std::shared_ptr<const timeline::Project>
-make_playback_pattern_project(const state::Snapshot& pattern) {
+std::vector<timeline::NoteEvent>
+build_pattern_notes(const state::Snapshot& pattern) {
     std::vector<timeline::NoteEvent> notes;
     notes.reserve(64);
     std::uint64_t next_note_id = 10;
@@ -208,6 +210,44 @@ make_playback_pattern_project(const state::Snapshot& pattern) {
                              0});
         }
     }
+    return notes;
+}
+
+// A second track that no edit ever touches. Sparse compilation is only
+// observable when at least one track is outside the dirty set, so the example
+// carries a permanently clean one: its TrackProgram must survive an edit to the
+// pattern track by pointer, not by value.
+// The clip's notes as the document actually stores them. MidiContent::create
+// SORTS on construction, so a locally tracked copy in build order will never
+// match SetNoteEvents' `expected` array. Reading the snapshot is the only
+// source that agrees with the reducer.
+std::vector<timeline::NoteEvent>
+current_clip_notes(const timeline::Project& project) {
+    const auto* sequence = project.find_sequence({3});
+    if (!sequence)
+        return {};
+    const auto* track = sequence->find_track({4});
+    if (!track)
+        return {};
+    for (const auto& clip : track->clips()) {
+        if (clip.id() != timeline::ItemId{5})
+            continue;
+        if (const auto* midi = std::get_if<timeline::MidiContent>(&clip.content()))
+            return {midi->notes().begin(), midi->notes().end()};
+    }
+    return {};
+}
+
+// Deliberately EMPTY. The sentinel exists to be compiled and then reused by
+// pointer, not to be heard: giving it notes would add audio to every existing
+// render assertion in this suite and make the oracle's cost the suite's cost.
+std::vector<timeline::NoteEvent> build_sentinel_notes() {
+    return {};
+}
+
+std::shared_ptr<const timeline::Project>
+make_playback_pattern_project(const state::Snapshot& pattern) {
+    auto notes = build_pattern_notes(pattern);
     auto content = value_or_none(timeline::MidiContent::create(std::move(notes)));
     if (!content)
         return {};
@@ -220,15 +260,28 @@ make_playback_pattern_project(const state::Snapshot& pattern) {
         {4}, "Step pattern", {std::move(*clip)}));
     if (!track)
         return {};
+    auto sentinel_content = value_or_none(timeline::MidiContent::create(build_sentinel_notes()));
+    if (!sentinel_content)
+        return {};
+    auto sentinel_clip = value_or_none(timeline::Clip::create(
+        {7}, {0}, {duration}, std::move(*sentinel_content)));
+    if (!sentinel_clip)
+        return {};
+    auto sentinel_track = value_or_none(timeline::Track::create(
+        {6}, "Clean sentinel", {std::move(*sentinel_clip)}));
+    if (!sentinel_track)
+        return {};
+    std::vector<timeline::Track> tracks;
+    tracks.push_back(std::move(*track));
+    tracks.push_back(std::move(*sentinel_track));
     auto sequence = value_or_none(timeline::Sequence::create(
-        {3}, "Step pattern", timebase::TickDuration{duration},
-        std::vector<timeline::Track>{std::move(*track)}));
+        {3}, "Step pattern", timebase::TickDuration{duration}, std::move(tracks)));
     if (!sequence)
         return {};
     timeline::ProjectInput input;
     input.id = {1};
     input.name = "Timeline step sequencer";
-    input.next_item_id = next_note_id;
+    input.next_item_id = 10'000;
     input.root_sequence_id = {3};
     input.sequences = {std::move(*sequence)};
     auto project = value_or_none(timeline::Project::create(std::move(input)));
@@ -349,12 +402,94 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
     request.audio_assets = std::move(assets).value();
     request.audio_limits.max_channels = 2;
     request.audio_limits.max_block_frames = maximum_block_size_;
-    if (!replace_engine && engine_.prepared()) {
-        if (!engine_.recompile(std::move(request)))
+    // A note edit keeps the clip's time range, so it can be expressed as a
+    // SetNoteEvents transaction against the live document. A change to pattern
+    // LENGTH also moves the clip and sequence duration, which this transaction
+    // does not carry — taking the sparse path there would compile notes against
+    // a stale duration. Structural changes therefore fall back to a full
+    // rebuild and reopen the session on the new project.
+    const bool structural_change =
+        session_ && pattern_duration_ticks(snapshot) != session_duration_ticks_;
+    bool sparse_published = false;
+    if (!replace_engine && engine_.prepared() && session_ && !structural_change) {
+        // Live edit: express the change as a real document transaction and let
+        // its exact CommitResult drive compilation. The clean sentinel track is
+        // outside the commit's dirty set, so its TrackProgram is reused by
+        // pointer instead of rebuilt.
+        auto notes = build_pattern_notes(snapshot);
+        timeline::Transaction transaction;
+        // The writer owns identity allocation; hand-rolled ids are not valid
+        // TransactionId/CommandId values (both carry a WriterId, not a bare
+        // counter) and the session rejects them.
+        transaction.id = writer_.allocate_transaction_id();
+        transaction.expected_revision = session_->revision();
+        timeline::SetNoteEvents edit;
+        edit.sequence_id = {3};
+        edit.track_id = {4};
+        edit.clip_id = {5};
+        edit.expected = current_clip_notes(*session_->snapshot());
+        edit.replacement = notes;
+        transaction.commands.push_back({writer_.allocate_command_id(), edit});
+        // Best effort. A note edit reduces to SetNoteEvents; a bulk operation
+        // (clear, randomize, pattern resync) can rewrite note identity in ways
+        // the reducer rejects as a model invariant. Sparse compilation is an
+        // optimisation, so a rejected transaction falls through to the full
+        // rebuild below rather than failing the edit.
+        if (auto committed = session_->submit(writer_, transaction)) {
+            if (engine_.recompile_committed(committed.value()))
+                sparse_published = true;
+        }
+    }
+    if (!sparse_published) {
+        // The compiler enforces two exact identities on a sparse recompile: the
+        // request's revision must equal the commit's, and the commit's
+        // predecessor snapshot must be POINTER-equal to the published project.
+        // A session created by value owns its own copy, so the engine has to
+        // compile the session's snapshot rather than the project we built here.
+        auto session = timeline::DocumentSession::create(*request.project);
+        if (!session)
             return false;
-    } else {
+        auto opened = std::move(session).value();
+        auto writer = opened->register_writer();
+        if (!writer)
+            return false;
+        auto opened_writer = std::move(writer).value();
+        bool primed = false;
+        // Revision zero is not a valid compile revision, so prime the session
+        // to revision one with a semantically empty edit (the notes replaced by
+        // themselves). That makes the published revision and the session's
+        // revision the same line, so the next real edit advances past it.
+        {
+            timeline::Transaction prime;
+            prime.id = opened_writer.allocate_transaction_id();
+            prime.expected_revision = opened->revision();
+            timeline::SetNoteEvents noop;
+            noop.sequence_id = {3};
+            noop.track_id = {4};
+            noop.clip_id = {5};
+            noop.expected = current_clip_notes(*opened->snapshot());
+            noop.replacement = noop.expected;
+            prime.commands.push_back({opened_writer.allocate_command_id(), noop});
+            primed = static_cast<bool>(opened->submit(opened_writer, prime));
+        }
+        // Priming can legitimately fail — a cleared pattern has no notes, so the
+        // self-replacing edit has nothing to reduce. Without it the session and
+        // the program cannot share a revision line, so rather than publish an
+        // inconsistent pair this falls back to the original whole-project
+        // behaviour and simply does not offer a sparse path afterwards.
+        if (primed) {
+            request.project = opened->snapshot();
+            request.document_revision = opened->revision().value;
+        }
         if (!engine_.prepare(std::move(request), sample_rate_, maximum_block_size_, true))
             return false;
+        if (primed) {
+            session_ = std::move(opened);
+            writer_ = std::move(opened_writer);
+        } else {
+            session_.reset();
+        }
+        session_duration_ticks_ = pattern_duration_ticks(snapshot);
     }
     if (engine_.set_loop_samples(true, 0, pattern_end) != playback::TransportError::None)
         return false;
