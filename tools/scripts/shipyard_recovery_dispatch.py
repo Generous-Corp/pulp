@@ -18,7 +18,7 @@ from typing import Any
 
 
 CONTEXT = "shipyard/recovery-dispatch"
-RECOVERY_ACTIONS = {"needs_update"}
+RECOVERY_ACTIONS = {"needs_update", "required_failed"}
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
