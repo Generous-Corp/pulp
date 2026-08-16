@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/pulp/linux-pr-safe-runner-group.env
-ExecStart=/usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
+ExecStart=/usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh
 Restart=always
 RestartSec=30
 RestartPreventExitStatus=
