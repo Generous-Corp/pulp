@@ -2156,6 +2156,25 @@ LaunchAgent loaded and the tartci idle-gate present) **before** setting
 `tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (ships
 parked — see its header for the load/quiet-window preconditions).
 
+**A loaded LaunchAgent is not the proof.** The supervisor can be running and
+still be unable to serve, in which case TSan queues forever with no error
+because GitHub does not reject an unsatisfiable label set. Before flipping the
+variable, check all three on the supervisor host, not just the process:
+
+- the `pulp-build-runner` macOS golden is present in the agent's `TART_HOME`
+  (`tart list`); without it the lane can never boot a guest;
+- the supervisor's log shows queue scans succeeding, not repeated
+  `SCAN BLIND (gh queue scan failed)`, which means its GitHub auth is dead and
+  it cannot see queued work at all;
+- `running_macos_vms` is not already saturated by an unrelated guest. The
+  counter is host-wide by design, so a Linux VM parked on the same host can pin
+  a `cap=1` lane at full and silently starve it.
+
+`PULP_SANITIZER_TSAN_RUNS_ON_JSON` therefore stays at its hosted value until a
+dispatch proof records a real assignment. `runner_topology.json` contracts the
+hosted value so the checker fails loudly if the variable is flipped ahead of
+that proof.
+
 `coverage.yml` accepts `linux_runner_selector_json`,
 `macos_runner_selector_json`, and `windows_runner_selector_json` inputs. The
 macOS Tart coverage proof path is:
