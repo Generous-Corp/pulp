@@ -640,13 +640,19 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         // --render-size is Chromium's initial responsive viewport. Validation
         // must use the settled portable canvas to avoid cropping tall or fixed
         // documents and reporting a false low similarity.
+        // The canvas may only GROW the viewport. Its purpose is to stop a
+        // tall or fixed document being cropped; a canvas SMALLER than the
+        // captured viewport is a malformed lowering (a root narrower than its
+        // own child), and adopting it silently rescales the reference onto a
+        // smaller render, so every glyph and edge resamples and a faithful
+        // design scores ~97%.
         if (design_ir.root.style.width &&
             design_ir.root.style.height) {
             render_width = std::max(
-                1, static_cast<int>(
+                render_width, static_cast<int>(
                        std::lround(*design_ir.root.style.width)));
             render_height = std::max(
-                1, static_cast<int>(
+                render_height, static_cast<int>(
                        std::lround(*design_ir.root.style.height)));
         }
 
