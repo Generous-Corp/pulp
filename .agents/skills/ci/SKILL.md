@@ -752,6 +752,14 @@ organization credential, or the exact root-owned non-group/world-writable
 `/usr/local/bin/ghapp` helper. Capability labels without the verified
 organization group are rejected.
 
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+The organization runner group, registration, inventory, and deletion APIs need
+the organization-capable controller credential; the repository runner token is
+not that credential.
+
 Protected clones require `configure-proxmox-ci-network.sh --apply` and
 `--verify` before service activation. It creates no-uplink
 `vmbr-ci200..202` bridges with controller `10.240.<VMID>.1/30`, guest
