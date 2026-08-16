@@ -1,6 +1,7 @@
-#include <pulp/signal/signal.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
+#include <pulp/signal/signal.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -54,5 +55,12 @@ int main() {
     processor_config.frame.analysis_hop = 64;
     processor_config.frame.channels = 1;
     processor_config.frame.max_block = 64;
-    return processor.prepare(processor_config) ? 0 : 15;
+    if (!processor.prepare(processor_config))
+        return 15;
+    const std::array<pulp::signal::FirDesignPoint, 2> points{
+        pulp::signal::FirDesignPoint{0.0, 1.0, 1.0},
+        pulp::signal::FirDesignPoint{3.141592653589793, 0.0, 1.0}};
+    const auto design = pulp::signal::design_fir_least_squares(
+        points, {.tap_count = 3u, .type = pulp::signal::LinearPhaseFirType::type_i_symmetric_odd});
+    return design ? 0 : 16;
 }

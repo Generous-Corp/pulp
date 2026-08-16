@@ -1157,6 +1157,96 @@ def exercise_compatibility(canonical: dict) -> int:
     return 4
 
 
+def _git(repo: pathlib.Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", *arguments],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+
+
+def exercise_base_drift() -> int:
+    """The protected base must not move when a shared `origin/main` advances.
+
+    ~134 worktrees share one `.git` on the build hosts, so a fetch in any
+    sibling advances `origin/main` for every one of them, mid-validation
+    included. Resolving the base from that moving tip made a clean pinned tree
+    report three STALE lines it had no way to cause, and re-running never
+    helped because the tip kept moving — reproducible, but misattributed.
+
+    Both directions are asserted here. A check that stopped failing would
+    "pass" this fix while silently losing its teeth, so the tampered-base case
+    matters as much as the drift case.
+    """
+    checks = 0
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-base-drift-") as temp:
+        repo = pathlib.Path(temp)
+        _git(repo, "init", "--quiet", "--initial-branch=main", ".")
+        _git(repo, "config", "user.email", "test@pulp.invalid")
+        _git(repo, "config", "user.name", "pulp test")
+        (repo / "seed.txt").write_text("seed\n")
+        _git(repo, "add", "seed.txt")
+        _git(repo, "commit", "--quiet", "-m", "seed")
+        fork_point = _git(repo, "rev-parse", "HEAD")
+
+        # A feature branch forks here and stops. Nothing it does afterwards can
+        # depend on commits that land on main later.
+        _git(repo, "checkout", "--quiet", "-b", "feature")
+        (repo / "feature.txt").write_text("feature\n")
+        _git(repo, "add", "feature.txt")
+        _git(repo, "commit", "--quiet", "-m", "feature work")
+        feature_head = _git(repo, "rev-parse", "HEAD")
+
+        # Meanwhile main advances, exactly as a sibling worktree's fetch does.
+        _git(repo, "checkout", "--quiet", "main")
+        (repo / "later.txt").write_text("later\n")
+        _git(repo, "add", "later.txt")
+        _git(repo, "commit", "--quiet", "-m", "main moves on")
+        advanced_tip = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "update-ref", "refs/remotes/origin/main", advanced_tip)
+        _git(repo, "checkout", "--quiet", "feature")
+
+        assert advanced_tip != fork_point
+        resolved = capability_history._resolve_local_base(repo, "origin/main")
+        assert resolved == fork_point, (
+            "protected base must fall back to the merge-base when the shared "
+            f"origin/main advances; got {resolved!r}, wanted {fork_point!r}"
+        )
+        assert resolved != advanced_tip
+        checks += 1
+
+        # Advancing the tip again must not move the answer. This is the
+        # property the whole fix exists for: a validation pinned to one commit
+        # gets one base, no matter what the fleet does to the ref meanwhile.
+        (repo / "later2.txt").write_text("later again\n")
+        _git(repo, "add", "later2.txt")
+        _git(repo, "checkout", "--quiet", "main")
+        _git(repo, "commit", "--quiet", "-m", "main moves again")
+        _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD"))
+        _git(repo, "checkout", "--quiet", "feature")
+        assert capability_history._resolve_local_base(repo, "origin/main") == fork_point
+        checks += 1
+
+        # A base that IS an ancestor is already well-posed and must be used
+        # verbatim — the merge-base fallback is for drift, not a blanket rewrite.
+        _git(repo, "update-ref", "refs/remotes/origin/main", fork_point)
+        assert capability_history._resolve_local_base(repo, "origin/main") == fork_point
+        checks += 1
+
+        # HEAD itself resolves to HEAD, so a checkout sitting on the base still
+        # gets a real comparison rather than a skipped one.
+        assert capability_history._resolve_local_base(repo, "HEAD") == feature_head
+        checks += 1
+
+        # An unresolvable ref stays unresolvable: the fallback must not
+        # manufacture a base out of an operator's typo.
+        assert capability_history._resolve_local_base(repo, "origin/nonexistent") is None
+        checks += 1
+    return checks
+
+
 def main() -> int:
     result = run("--json")
     assert result.returncode == 0, result.stderr
@@ -1173,6 +1263,7 @@ def main() -> int:
         checks += 1
 
     checks += exercise_compatibility(canonical)
+    checks += exercise_base_drift()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0
 

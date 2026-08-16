@@ -28,6 +28,8 @@ on:
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
       - 'tools/scripts/test_resolve_linux_route.py'
+      - 'tools/scripts/workflow_runner_selector_audit.py'
+      - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
@@ -47,6 +49,9 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/ci/build-dir-sentinel.sh'
+      - 'tools/scripts/test_build_dir_sentinel.py'
+      - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
@@ -93,6 +98,8 @@ on:
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
       - 'tools/scripts/test_resolve_linux_route.py'
+      - 'tools/scripts/workflow_runner_selector_audit.py'
+      - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
@@ -112,6 +119,9 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/ci/build-dir-sentinel.sh'
+      - 'tools/scripts/test_build_dir_sentinel.py'
+      - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
@@ -278,12 +288,22 @@ jobs:
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py
           python3 tools/scripts/test_resign_macos_release_tree.py
           python3 tools/scripts/test_workflow_build_dirs.py
+          # The interrupted-build sentinel and its Shipyard wiring. `arm`
+          # and `clear` are a matched pair split across two stages; a lane
+          # that arms without clearing wipes its build dir every run.
+          python3 tools/scripts/test_build_dir_sentinel.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_required_macos_alias.py
           python3 tools/scripts/test_preamble_python_stable_cwd.py
           python3 tools/scripts/test_advisory_macos_runner_policy.py
           python3 tools/scripts/test_resolve_linux_route.py
+          # A runs-on that interpolates a *_RUNS_ON_JSON variable without
+          # fromJSON yields one label no runner carries, so GitHub queues
+          # the job forever instead of failing it. Substring guards could
+          # not see the two-variable shape these selectors actually use;
+          # this one matches parentheses per variable.
+          python3 tools/scripts/test_workflow_runner_selector_audit.py
           # Keep the authoritative Windows runtime suite pinned independently
           # from moving latest-toolchain release/coverage/nightly lanes.
           python3 tools/scripts/test_windows_runner_policy.py

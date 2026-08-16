@@ -37,6 +37,7 @@
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/fir_filter.hpp>
+#include <pulp/signal/fir_design.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/log_ramped_value.hpp>
