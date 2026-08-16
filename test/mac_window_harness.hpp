@@ -87,6 +87,14 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 /// empty on capture failure — the harness does not raise).
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 
+/// Read the host content view's real AppKit bounds, in points. This is the
+/// authority a window host's own `get_content_size()` must agree with: AppKit
+/// can constrain a requested frame (screen visibleFrame, content min-size,
+/// window style), so the request is not evidence of the resulting size.
+/// Returns {0, 0} when the handle is missing. Must be called on the main thread.
+pulp::view::WindowHost::ContentSize content_view_bounds(
+    pulp::view::WindowHost& host);
+
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a
 /// test-only seam for same-logical-size Retina transitions, which cannot be

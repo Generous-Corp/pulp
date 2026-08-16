@@ -930,6 +930,31 @@ TEST_CASE("mac harness honors caller-provided window options size",
     REQUIRE(content.height >= 400);
 }
 
+TEST_CASE("mac window host reports the real content bounds, not the request",
+          "[mac][platform-harness][sizing]") {
+    View root;
+    WindowOptions opts;
+    // Far larger than any display, so AppKit must constrain the frame. The
+    // host used to seed its GPU stack from the REQUEST, which left
+    // get_content_size() reporting a size the window never had until the
+    // first windowDidResize — the first frame then painted at the wrong
+    // size with truncated content, and the editor bridge's initial resize
+    // was handed the same wrong numbers.
+    opts.width = 20000;
+    opts.height = 20000;
+
+    auto host = pt::make_test_window(root, opts);
+    REQUIRE(host != nullptr);
+
+    const auto actual = pt::content_view_bounds(*host);
+    REQUIRE(actual.width > 0);
+    REQUIRE(actual.height > 0);
+
+    const auto reported = host->get_content_size();
+    REQUIRE(reported.width == actual.width);
+    REQUIRE(reported.height == actual.height);
+}
+
 // ── Regression contract: scroll deltas + button routing ──────────────────
 //
 // These tests pin two platform-harness contracts:
