@@ -382,6 +382,74 @@ ReducedTransaction remove_track(const Project& before, ItemId track_id) {
 
 } // namespace
 
+TEST_CASE("Subscription bitset stores more than eight kinds",
+          "[playback][compile-context][subscription]") {
+    // The storage was widened when the vocabulary grew past two, not when it
+    // reached the old eight-bit ceiling, so a ninth kind must already be
+    // representable rather than trip a static_assert on the day it is added.
+    // Slots beyond the named vocabulary are exercised by value: the enum has a
+    // fixed uint8_t underlying type, so every value in that range is valid.
+    static constexpr auto kNinthSlot = static_cast<CompileContextKind>(8);
+    static constexpr auto kSixteenthSlot = static_cast<CompileContextKind>(15);
+
+    auto wide = CompileContextSubscriptions::none();
+    wide.subscribe(kNinthSlot);
+    REQUIRE(wide.reads(kNinthSlot));
+    REQUIRE(wide.any());
+
+    // The ninth bit must not alias a low slot — the failure a too-narrow mask
+    // would produce is a silent collision, not a compile error.
+    REQUIRE_FALSE(wide.reads(CompileContextKind::ChordScale));
+    REQUIRE_FALSE(wide.reads(CompileContextKind::Groove));
+
+    wide.subscribe(kSixteenthSlot);
+    REQUIRE(wide.reads(kNinthSlot));
+    REQUIRE(wide.reads(kSixteenthSlot));
+
+    // Every named kind stays independently addressable alongside them.
+    auto named = CompileContextSubscriptions::none();
+    named.subscribe(CompileContextKind::EnsembleSkeleton);
+    REQUIRE(named.reads(CompileContextKind::EnsembleSkeleton));
+    REQUIRE_FALSE(named.reads(kNinthSlot));
+}
+
+TEST_CASE("Undeclared context kind reads as absent after widening",
+          "[playback][compile-context][subscription]") {
+    // The declaration is load-bearing at the point of the read: widening the
+    // storage must not make an undeclared kind start reading as present, and
+    // the reserved slots must read absent until something declares them.
+    auto reads_harmony = CompileContextSubscriptions::none();
+    reads_harmony.subscribe(CompileContextKind::ChordScale);
+
+    REQUIRE(reads_harmony.reads(CompileContextKind::ChordScale));
+    REQUIRE_FALSE(reads_harmony.reads(CompileContextKind::Groove));
+    REQUIRE_FALSE(reads_harmony.reads(CompileContextKind::Dynamics));
+    REQUIRE_FALSE(reads_harmony.reads(CompileContextKind::CrossTrackRhythm));
+    REQUIRE_FALSE(reads_harmony.reads(CompileContextKind::EnsembleSkeleton));
+
+    // An empty set reads absent for every kind in the widened vocabulary.
+    const auto nothing = CompileContextSubscriptions::none();
+    REQUIRE_FALSE(nothing.any());
+    for (std::size_t kind = 0; kind < kCompileContextKindCount; ++kind)
+        REQUIRE_FALSE(nothing.reads(static_cast<CompileContextKind>(kind)));
+
+    // Existing two-kind behaviour is bit-identical: the pre-widening pair still
+    // compares equal, and subscribing a reserved kind is a distinct set.
+    auto before = CompileContextSubscriptions::none();
+    before.subscribe(CompileContextKind::ChordScale);
+    before.subscribe(CompileContextKind::Groove);
+    auto same = CompileContextSubscriptions::none();
+    same.subscribe(CompileContextKind::Groove);
+    same.subscribe(CompileContextKind::ChordScale);
+    REQUIRE(before == same);
+
+    auto widened = same;
+    widened.subscribe(CompileContextKind::Dynamics);
+    REQUIRE_FALSE(before == widened);
+    REQUIRE(widened.reads(CompileContextKind::ChordScale));
+    REQUIRE(widened.reads(CompileContextKind::Groove));
+}
+
 TEST_CASE("a context registry refuses an empty or duplicate content type",
           "[playback][compile-context][subscription]") {
     CompileContextRegistry registry;

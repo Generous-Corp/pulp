@@ -264,4 +264,45 @@ def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
             if fetched.returncode != 0:
                 return None
         return candidate.lower()
-    return _git_output(root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
+    return _resolve_local_base(root, base_ref)
+
+def _resolve_local_base(root: pathlib.Path, base_ref: str) -> str | None:
+    """Resolve the protected base for a checkout with no CI event to read.
+
+    The protected base must be an **ancestor** of the commit under validation,
+    or "append-only relative to the base" is ill-posed: relative to a tip that
+    carries commits this checkout does not have, every correct branch looks
+    non-append-only.
+
+    Naming a moving ref makes that failure routine rather than exotic. This
+    fleet runs ~134 worktrees off one shared `.git`, so a `git fetch` in any
+    sibling advances `origin/main` for all of them — including mid-validation,
+    with the validating session issuing no fetch of its own. A run pinned to an
+    exact commit then gets a base that moves underneath it and reports STALE
+    against a tree it never examined.
+
+    So resolve the ref, and if it is not an ancestor of HEAD, step back to the
+    merge-base — the newest commit the two genuinely share. That point does not
+    move when the tip advances, which is what makes the answer reproducible.
+    Falls back to the raw tip when there is no merge-base (unrelated histories,
+    or a shallow clone whose graph cannot answer), preserving prior behaviour
+    rather than failing closed on a checkout the check simply cannot reason about.
+    """
+    tip = _git_output(root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
+    if tip is None:
+        return None
+    head = _git_output(root, ["rev-parse", "--verify", "HEAD^{commit}"])
+    if head is None:
+        return tip
+    if _git_succeeds(root, ["merge-base", "--is-ancestor", tip, head]):
+        return tip
+    return _git_output(root, ["merge-base", head, tip]) or tip
+
+def _git_succeeds(root: pathlib.Path, arguments: list[str]) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", *arguments], cwd=root, text=True, capture_output=True
+        )
+    except OSError:
+        return False
+    return result.returncode == 0

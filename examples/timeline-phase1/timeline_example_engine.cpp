@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 namespace pulp::examples::timeline_phase1 {
 namespace {
@@ -129,6 +130,12 @@ class ExampleSineSynthSlot final : public host::PluginSlot {
 } // namespace
 
 struct TimelineExampleEngine::Impl {
+    // One registry for the engine's whole life. CompileInvalidationInput pins a
+    // registry generation at construction and the compiler rejects a request
+    // whose generation does not match, so a fresh registry per recompile would
+    // defeat sparse compilation even when the document delta is exact.
+    std::shared_ptr<const playback::CompileContextRegistry> registry =
+        std::make_shared<const playback::CompileContextRegistry>();
     playback::PlaybackProgramStore store;
     InlineCompileExecutor executor;
     playback::PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
@@ -146,10 +153,18 @@ struct TimelineExampleEngine::Impl {
             return false;
         maximum_block_size = max_block_size;
         request.dirty.all = true;
+        request.content_compilers = registry;
+        // baseline() is the only form allowed to pair with dirty.all: it pins
+        // registry state without claiming a document delta.
+        request.invalidation = playback::CompileInvalidationInput::baseline(
+            registry, request.project, request.document_revision);
         if (!compiler.submit(std::move(request)) || compiler.status().has_error)
             return false;
         auto program = store.read();
-        if (!program || program->tracks().size() != 1)
+        // One or two tracks: the audible pattern track, plus (in the step
+        // sequencer) a permanently clean sentinel track that exists so sparse
+        // compilation has something outside the dirty set to reuse.
+        if (!program || program->tracks().empty() || program->tracks().size() > 2)
             return false;
 
         graph.set_parallel_routing_enabled(false);
@@ -168,8 +183,17 @@ struct TimelineExampleEngine::Impl {
         if (!graph.prepare(sample_rate, static_cast<int>(max_block_size)))
             return false;
 
-        const std::array routes{host::TimelineTrackGraphRoute{
-            program->tracks().front()->id(), output_node, 0, synth_node}};
+        // Every compiled track needs a route or the binding cannot prepare.
+        // Both route to the same destination; the sentinel track carries no
+        // notes, so it contributes no audio and cannot perturb any existing
+        // render assertion.
+        std::vector<host::TimelineTrackGraphRoute> routes;
+        routes.reserve(program->tracks().size());
+        for (const auto& track : program->tracks()) {
+            if (!track)
+                return false;
+            routes.push_back({track->id(), output_node, 0, synth_node});
+        }
         host::TimelineGraphBindingConfig config;
         config.audio_channels = 2;
         config.maximum_note_events_per_track_per_block = 256;
@@ -188,6 +212,34 @@ struct TimelineExampleEngine::Impl {
         last_transport.sample_rate = program->tempo_map().sample_rate();
         ready = true;
         return true;
+    }
+
+    bool recompile_committed(const timeline::CommitResult& committed) {
+        if (!ready || !committed.snapshot)
+            return false;
+        auto live = store.read();
+        if (!live)
+            return false;
+        playback::ProgramCompileRequest request;
+        request.project = committed.snapshot;
+        request.sequence_id = {3};
+        // Carry the live compile context forward verbatim. A new tempo map or a
+        // new asset pool would change identity the compiler keys reuse on, so an
+        // exact document delta would still rebuild every track.
+        request.tempo_map = live->tempo_map_owner();
+        request.sample_rate = request.tempo_map->sample_rate();
+        request.audio_assets = live->audio_assets_owner();
+        request.content_compilers = registry;
+        request.document_revision = committed.revision.value;
+        request.audio_limits.max_channels = 2;
+        request.audio_limits.max_block_frames = maximum_block_size;
+        // dirty is deliberately left unset: the compiler resolves the dirty
+        // track set from the commit, which is what keeps untouched tracks
+        // pointer-identical.
+        request.invalidation = playback::CompileInvalidationInput{registry, committed};
+        if (!compiler.submit(std::move(request)) || compiler.status().has_error)
+            return false;
+        return static_cast<bool>(binding.adopt_latest_program());
     }
 
     bool recompile(playback::ProgramCompileRequest request) {
@@ -221,6 +273,36 @@ bool TimelineExampleEngine::prepare(playback::ProgramCompileRequest request, dou
 
 bool TimelineExampleEngine::recompile(playback::ProgramCompileRequest request) {
     return impl_ && impl_->recompile(std::move(request));
+}
+
+bool TimelineExampleEngine::recompile_committed(const timeline::CommitResult& committed) {
+    return impl_ && impl_->recompile_committed(committed);
+}
+
+TimelineExampleEngine::ProgramIdentity
+TimelineExampleEngine::program_identity() const noexcept {
+    if (!impl_)
+        return {};
+    auto program = impl_->store.read();
+    if (!program)
+        return {};
+    return {program->generation(), program->document_revision(), true};
+}
+
+std::shared_ptr<const playback::TrackProgram>
+TimelineExampleEngine::track_program(timeline::ItemId id) const {
+    if (!impl_)
+        return nullptr;
+    auto program = impl_->store.read();
+    if (!program)
+        return nullptr;
+    // tracks() is the public owner view; find_track_owner() is private to
+    // PlaybackProgram and this example must not reach into core to observe it.
+    for (const auto& track : program->tracks()) {
+        if (track && track->id() == id)
+            return track;
+    }
+    return nullptr;
 }
 
 host::TimelineGraphProcessResult

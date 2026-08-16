@@ -157,11 +157,68 @@ export CTEST_PARALLEL_LEVEL="$jobs"
 # released even on failure. Background QoS on laptop-class hosts keeps a shared
 # machine's UI responsive (taskpolicy only re-prioritizes; the -j cap above is
 # the real bound).
+# Record the machine's state alongside the build's, so a failure carries the
+# evidence needed to tell "your diff is broken" from "the host was melting".
+#
+# Without it the two are indistinguishable, and the tempting reading is the
+# wrong one. Measured cases: an installed-SDK matrix that timed out at 1200s
+# under load 163 and passed in 646s on the SAME commit once the host was quiet;
+# a mac lane reporting `Stage 'configure' failed` after 3382s in configure —
+# normally minutes — while GitHub's check passed on that same commit. Each of
+# those cost a full diagnosis cycle, and the natural next step ("my change
+# broke configure") sends someone editing correct code.
+#
+# The floor case matters most. Parallelism is negotiated ONCE, at startup, so a
+# build that starts while the host is busy stays pinned at the floor for its
+# entire life even after the host goes quiet — which is how a build that fits
+# the cap on a quiet machine blows through it anyway.
+load_average() {
+  local raw
+  if [ -r /proc/loadavg ]; then
+    cut -d' ' -f1-3 < /proc/loadavg
+    return
+  fi
+  # macOS: `vm.loadavg` prints `{ 1.23 4.56 7.89 }`.
+  if raw="$(sysctl -n vm.loadavg 2>/dev/null)" && [ -n "$raw" ]; then
+    echo "$raw" | tr -d '{}' | awk '{print $1, $2, $3}'
+    return
+  fi
+  echo "unknown"
+}
+
+start_load="$(load_average)"
+start_epoch="$(date +%s 2>/dev/null || echo 0)"
+
 rc=0
 if [ "$qos" = "background" ] && command -v taskpolicy >/dev/null 2>&1 \
     && [ "${PULP_TARTCI_TASKPOLICY:-}" != "0" ]; then
   taskpolicy -b "$@" || rc=$?
 else
   "$@" || rc=$?
+fi
+
+if [ "$rc" -ne 0 ]; then
+  end_epoch="$(date +%s 2>/dev/null || echo 0)"
+  elapsed=$(( end_epoch - start_epoch ))
+  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)"
+  floor="$(min_jobs)"
+  log "build failed rc=$rc after ${elapsed}s"
+  log "  host: cores=$cores load(start)=[$start_load] load(now)=[$(load_average)]"
+  log "  build: -j$jobs (floor=$floor) lease=${LEASE_ID:-none}"
+  # One-minute load is the first field; compare it against the core count.
+  now_one="$(load_average | awk '{print $1}')"
+  contended=0
+  if [ "$jobs" = "$floor" ]; then contended=1; fi
+  if [ "$cores" -gt 0 ] 2>/dev/null && [ "$now_one" != "unknown" ]; then
+    if awk -v l="$now_one" -v c="$cores" 'BEGIN { exit !(l > c * 1.5) }'; then
+      contended=1
+    fi
+  fi
+  if [ "$contended" -eq 1 ]; then
+    log "  VERDICT: the host was contended (build pinned at the parallelism"
+    log "  floor and/or load well above core count). Confirm against a quiet"
+    log "  host before concluding the diff is at fault — this signature has"
+    log "  passed on re-run with no code change."
+  fi
 fi
 exit "$rc"
