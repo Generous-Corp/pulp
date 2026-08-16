@@ -151,10 +151,25 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         self.assertTrue(
             job["env"]["CLAUDE_FALLBACK_PACKAGE_INTEGRITY"].startswith("sha512-")
         )
+        self.assertTrue(
+            job["env"]["CLAUDE_FALLBACK_DARWIN_ARM64_INTEGRITY"].startswith("sha512-")
+        )
         install = job["steps"][2]["run"]
         self.assertIn("npm view", install)
         self.assertIn("--global --ignore-scripts --prefix", install)
         self.assertIn('"${CLAUDE_FALLBACK_VERSION} (Claude Code)"', install)
+        # The platform package must be installed by name and bin/claude linked
+        # straight at its binary. The base package alone leaves a wrapper that
+        # resolves the native binary in a postinstall step, which
+        # --ignore-scripts skips, so it exits "claude native binary not
+        # installed" — this failed a live recovery job on 2026-08-16.
+        self.assertIn(
+            '"@anthropic-ai/claude-code-darwin-arm64@${CLAUDE_FALLBACK_VERSION}"',
+            install,
+        )
+        self.assertIn("claude-code-darwin-arm64/claude", install)
+        self.assertIn('ln -sf "$native" "$install_root/bin/claude"', install)
+        self.assertIn('[ -x "$native" ]', install)
 
     def test_fallback_is_reactive_bounded_and_never_preempts_the_primary(self) -> None:
         steps = {step["name"]: step for step in self.doc["jobs"]["luna-triage"]["steps"]}
