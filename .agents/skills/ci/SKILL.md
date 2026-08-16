@@ -686,13 +686,33 @@ repository-scoped, uses the five generic labels and legacy network, and loads
 only its optional per-slot `/etc/pulp/linux-runner-group-%i.env`. Retain
 generic operator-dispatch capacity.
 
+For another repository, use `proxmox-ephemeral-pool@.service` with a distinct
+root-owned mode-0600 profile under `/etc/pulp/proxmox-runner/`. The profile must
+set `TARTCI_RUNNER_REPO`, exact group id/name and protected-main workflow,
+repository-specific labels and runner prefix, VM name prefix, golden, and a
+disjoint VMID range, plus an explicit GitHub authentication mode and
+repository-specific organization credential path. Generic profiles never
+inherit Pulp's auth mode or credential paths; either omission fails before
+provisioning.
+`verify_linux_runner_group.py` then proves that the named
+non-default group contains only that repository and selects exactly that
+workflow. Cross-repository profiles cannot reuse `pulp-*` labels, and the Pulp
+repository continues to accept only its built-in trusted or PR-safe policies.
+
+The supervisor uses a generation-unique JIT registration, transfers the
+mode-0600 encoded configuration over stdin, and bounds both GitHub-visible
+readiness and broker heartbeat. Preserve the `/30` isolated bridge,
+controller-only SSH ingress, L2 firewall proof, network-before-VMID lock order,
+and generation-fenced deferred cleanup when extending this path. Enable a
+repository's local selector only after a live eligible claim and exact
+deregistration/VM/firewall teardown proof.
+
 This is provider provisioning, not workflow routing. Keep protected PR and
 merge-group Linux hosted until a separate routing change is reviewed and
 enabled; an online role service is not authorization to set an automatic
 selector. GitHub cannot retarget a queued local-label job, so hosted fallback
 must be chosen before dispatch. Never route `pull_request_target` or
-secret-bearing work to the generic pool, and do not claim these Pulp-scoped
-roles are a generic cross-repository provider. Exact installation, activation,
+secret-bearing work to the generic pool. Exact installation, activation,
 verification, and rollback commands live in `docs/guides/local-ci.md`.
 The existing fork-routing regression test is defense in depth, not proof that a
 runner is inaccessible to untrusted workflow revisions.

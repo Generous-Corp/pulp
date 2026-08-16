@@ -1,5 +1,23 @@
 # Self-hosted GitHub Actions runner setup
 
+## Disposable Proxmox runner for another repository
+
+For a protected Linux lane, use the repository-agnostic
+`tools/ci/proxmox-ephemeral-runner-linux.sh` and
+`tools/ci/proxmox-ephemeral-pool@.service`; do not copy Pulp's persistent
+runner setup, group, labels, or credentials. Each root-owned mode-0600 slot
+profile supplies the repository, exact restricted group and protected-main
+workflow, labels, generation-name prefix, VM-name prefix, golden, and a
+disjoint VMID range. See
+[`local-ci.md`](local-ci.md#add-an-isolated-lane-for-another-repository) for the
+complete profile and live proof gate.
+
+The provider transfers a one-use JIT configuration over mode-0600 stdin, waits
+for GitHub-visible readiness with a bounded watchdog, and destroys the isolated
+clone after its one job. Do not enable a repository's local workflow selector
+until the exact claim, deregistration, VM teardown, and firewall cleanup have
+all been observed.
+
 This guide covers setting up a Mac (or any machine) as a persistent
 Pulp CI runner. The payoff is getting sanitizer + build jobs off
 GitHub-hosted runners onto your own hardware — usually 4-8× faster,
