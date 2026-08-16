@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <ctime>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -104,6 +105,26 @@ struct InheritableSentinel {
 };
 
 } // namespace
+
+#ifndef _WIN32
+TEST_CASE("wait blocks without spinning after captured output closes",
+          "[child_process][output][lifecycle]") {
+    ChildProcess child;
+    ProcessOptions options;
+    options.timeout_ms = 2000;
+    REQUIRE(child.start(PULP_CHILD_PROCESS_INPUT_FIXTURE, {"--close-output-then-exit"}, options));
+
+    const auto cpu_started_at = std::clock();
+    const auto wall_started_at = std::chrono::steady_clock::now();
+    const auto result = child.wait();
+    const auto cpu_elapsed = static_cast<double>(std::clock() - cpu_started_at) / CLOCKS_PER_SEC;
+    const auto wall_elapsed = std::chrono::steady_clock::now() - wall_started_at;
+
+    CHECK(result.exit_code == 0);
+    CHECK(wall_elapsed >= std::chrono::milliseconds(400));
+    CHECK(cpu_elapsed < 0.2);
+}
+#endif
 
 TEST_CASE("post-spawn input provider binds bytes to the actual blocked child",
           "[child_process][standard-input][process-id]") {
