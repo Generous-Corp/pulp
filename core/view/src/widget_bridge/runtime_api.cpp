@@ -23,9 +23,26 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         self.engine_.evaluate(
             "var __frameCallbacks__ = {};"
             "var __frameNextId__ = 1;"
-            "function __invokeFrame__(id) {"
+            "function __resolveFrameTimestamp__() {"
+            "  var nativeNow = (typeof __performanceNow__ === 'function')"
+            "    ? __performanceNow__()"
+            "    : ((typeof performance !== 'undefined' && performance"
+            "        && typeof performance.now === 'function')"
+            "      ? performance.now()"
+            "      : ((typeof Date !== 'undefined' && typeof Date.now === 'function')"
+            "          ? Date.now() : 0));"
+            "  var provider = (typeof globalThis !== 'undefined')"
+            "    ? globalThis.__pulpAnimationFrameTimestamp__ : undefined;"
+            "  var resolved = (typeof provider === 'function')"
+            "    ? provider(nativeNow) : nativeNow;"
+            "  return Number.isFinite(resolved) ? resolved : nativeNow;"
+            "}"
+            "function __invokeFrame__(id, now) {"
             "  var fn = __frameCallbacks__[id];"
-            "  if (fn) { delete __frameCallbacks__[id]; fn(); }"
+            "  if (fn) {"
+            "    delete __frameCallbacks__[id];"
+            "    fn(now);"
+            "  }"
             "}"
             // Timer registry for native setTimeout / setInterval. Callbacks
             // live in JS (CHOC's NativeFunction can't carry JSValue
@@ -80,6 +97,12 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         // "<script_id>:<callback_id>". One callback at a time so the
         // ambient slot is correct per-invocation.
         const bool stamp = !self.active_script_id_.empty();
+        // Browser requestAnimationFrame gives every callback in one rendered
+        // frame the same DOMHighResTimeStamp. Resolve it once per service pass
+        // so captured executable-canvas programs replay deterministically and
+        // ordinary runtimes retain browser-compatible callback semantics.
+        self.engine_.evaluate(
+            "var __pulpFrameTimestamp__ = __resolveFrameTimestamp__();void 0;");
         // RAII guard so an exception in `__invokeFrame__` doesn't leave
         // stale ambient provenance behind, corrupting attribution for
         // every subsequent publish until something else clears it.
@@ -95,7 +118,8 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
                 p.source_id = self.active_script_id_ + ":" + std::to_string(id);
                 motion::set_ambient_provenance(std::move(p));
             }
-            std::string call = "__invokeFrame__(" + std::to_string(id) + ");void 0;";
+            std::string call = "__invokeFrame__(" + std::to_string(id)
+                + ",__pulpFrameTimestamp__);void 0;";
             self.engine_.evaluate(call);
             // guard's dtor runs on normal and exception paths.
         }

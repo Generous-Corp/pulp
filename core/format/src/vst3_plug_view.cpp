@@ -93,14 +93,7 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     //
     // Set AFTER attach succeeds so a failed attach doesn't install the
     // pointTransform block on a host that's about to be destroyed.
-    if (should_pin_design_viewport(hints)) {
-        editor_host_->set_design_viewport(
-            static_cast<float>(hints.preferred_width),
-            static_cast<float>(hints.preferred_height));
-        editor_host_->set_fixed_aspect_ratio(
-            static_cast<float>(hints.preferred_width) /
-            static_cast<float>(hints.preferred_height));
-    }
+    configure_native_viewport(*editor_host_, hints);
 
     // Editor-INITIATED resize: let the editor ask the DAW to resize the plugin
     // window (e.g. a chrome-hiding mode wanting a smaller shape). The handler
@@ -129,10 +122,8 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
             if (!accepted) return false;
 
             if (editor_host_) {
-                editor_host_->set_design_viewport(
-                    static_cast<float>(w), static_cast<float>(h));
-                editor_host_->set_fixed_aspect_ratio(
-                    static_cast<float>(w) / static_cast<float>(h));
+                commit_editor_requested_viewport(
+                    *editor_host_, bridge_.size_hints(), w, h);
             }
             return true;
         });

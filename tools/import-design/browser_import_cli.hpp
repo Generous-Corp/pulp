@@ -41,6 +41,7 @@ struct BrowserImportCliRequest {
     /// Draw the panel natively from the captured DOM rather than composite the
     /// captured bitmap. Opt-in; the bitmap lane stays the default.
     bool native_panel_lowering = false;
+    bool materialized_canvas_composition = false;
     /// Browser capture always runs its required A/B proof. This records an
     /// explicit --validate request to additionally publish convenience render
     /// and diff files beside the primary output.

@@ -1458,6 +1458,30 @@ TEST_CASE("CLAP editor resize negotiates through the host and rolls back refusal
     REQUIRE_FALSE(data.processor->request_editor_resize(720, 540));
 }
 
+TEST_CASE("CLAP responsive editor resize never re-pins the design viewport",
+          "[clap][entry][gui][resize][editor-request][responsive]") {
+    using namespace pulp::format::clap_generic;
+
+    ViewSize hints{400, 300, 200, 150, 800, 600, 4.0 / 3.0,
+                   1320, 860};
+    hints.viewport_policy = pulp::format::ViewportPolicy::Responsive;
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    make_clap_plugin_with_size(data, hints);
+    FakeClapGuiHost host;
+    data.host = &host.host;
+    auto editor_host = std::make_unique<FakePluginViewHost>();
+    auto* editor_host_ptr = editor_host.get();
+    data.editor_host = std::move(editor_host);
+    install_editor_resize_handler(data);
+
+    REQUIRE(data.processor->request_editor_resize(640, 480));
+    CHECK(editor_host_ptr->design_width == 0.0f);
+    CHECK(editor_host_ptr->design_height == 0.0f);
+    CHECK_THAT(editor_host_ptr->aspect_ratio, WithinAbs(4.0 / 3.0, 0.001));
+
+    gui_destroy(&data.plugin);
+}
+
 TEST_CASE("CLAP editor resize handler fails closed after bridge teardown",
           "[clap][entry][gui][resize][editor-request]") {
     using namespace pulp::format::clap_generic;

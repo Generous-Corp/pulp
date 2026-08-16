@@ -30,6 +30,9 @@ function plan(actions) {
 test("interaction plan accepts the bounded public action vocabulary", () => {
   const parsed = plan([
     { action: "click", selector: "#open" },
+    { action: "context-click", selector: "#band" },
+    { action: "dispatch-event", selector: "#band", event: "contextmenu" },
+    { action: "dispatch-event", selector: "#surface", event: "pointerdown" },
     { action: "type", selector: "[name=query]", text: "delay" },
     {
       action: "wait-for",
@@ -39,7 +42,7 @@ test("interaction plan accepts the bounded public action vocabulary", () => {
     },
     { action: "wait-ms", milliseconds: 25 },
   ]);
-  assert.equal(parsed.actions.length, 4);
+  assert.equal(parsed.actions.length, 7);
   assert.equal(parsed.actions[0].timeout_ms, 5000);
   assert.match(parsed.sha256, /^[0-9a-f]{64}$/);
 });
@@ -59,8 +62,8 @@ test("published interaction schema matches enforced parser bounds", async () => 
   const definitions = Object.fromEntries(actions.items.oneOf.map(
     (definition) => [definition.properties.action.const, definition]));
   assert.deepEqual(Object.keys(definitions).sort(),
-    ["click", "type", "wait-for", "wait-ms"]);
-  for (const name of ["click", "type", "wait-for"]) {
+    ["click", "context-click", "dispatch-event", "type", "wait-for", "wait-ms"]);
+  for (const name of ["click", "context-click", "dispatch-event", "type", "wait-for"]) {
     assert.equal(
       definitions[name].properties.selector.maxLength,
       MAX_SELECTOR_LENGTH);
@@ -79,7 +82,10 @@ test("published interaction schema matches enforced parser bounds", async () => 
 test("interaction plan rejects executable or unbounded inputs", () => {
   assert.throws(() => plan([
     { action: "script", source: "document.body.remove()" },
-  ]), /must be click, type, wait-for, or wait-ms/);
+  ]), /must be click, context-click, dispatch-event, type, wait-for, or wait-ms/);
+  assert.throws(() => plan([
+    { action: "dispatch-event", selector: "#band", event: "click" },
+  ]), /event must be contextmenu or pointerdown/);
   assert.throws(() => plan([
     { action: "click", selector: "#open", script: "alert(1)" },
   ]), /unknown field "script"/);
@@ -119,6 +125,9 @@ test("executor records reproducible evidence without typed plaintext", async () 
   let settles = 0;
   const report = await executeInteractionPlan(cdp, plan([
     { action: "click", selector: "#open" },
+    { action: "context-click", selector: "#band" },
+    { action: "dispatch-event", selector: "#band", event: "contextmenu" },
+    { action: "dispatch-event", selector: "#surface", event: "pointerdown" },
     { action: "type", selector: "input", text: "private draft" },
     { action: "wait-for", selector: "#screen", state: "visible" },
     { action: "wait-ms", milliseconds: 2 },
@@ -127,15 +136,29 @@ test("executor records reproducible evidence without typed plaintext", async () 
     settle: async () => { settles += 1; },
   });
 
-  assert.equal(report.action_count, 4);
-  assert.equal(report.actions[1].text_length, 13);
-  assert.equal("text_sha256" in report.actions[1], false);
-  assert.equal("text" in report.actions[1], false);
+  assert.equal(report.action_count, 7);
+  assert.equal(report.actions[4].text_length, 13);
+  assert.equal("text_sha256" in report.actions[4], false);
+  assert.equal("text" in report.actions[4], false);
   assert.equal(JSON.stringify(report).includes("private draft"), false);
-  assert.equal(settles, 2);
+  assert.equal(settles, 5);
   assert.equal(
     calls.filter(({ method }) => method === "Input.dispatchMouseEvent").length,
-    2);
+    4);
+  const pointerCalls = calls.filter(
+    ({ method }) => method === "Input.dispatchMouseEvent");
+  assert.deepEqual(pointerCalls.map(({ params }) => params.button),
+    ["left", "left", "right", "right"]);
+  assert.deepEqual(pointerCalls.map(({ params }) => params.buttons),
+    [1, 0, 2, 0]);
+  assert.equal(calls.some(({ method, params }) =>
+    method === "Runtime.evaluate" &&
+    params.expression.includes("EventConstructor") &&
+    params.expression.includes('"contextmenu"')), true);
+  assert.equal(calls.some(({ method, params }) =>
+    method === "Runtime.evaluate" &&
+    params.expression.includes("PointerEvent") &&
+    params.expression.includes('"pointerdown"')), true);
   assert.deepEqual(
     calls.find(({ method }) => method === "Input.insertText").params,
     { text: "private draft" });

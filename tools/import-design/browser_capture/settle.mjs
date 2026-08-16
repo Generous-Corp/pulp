@@ -104,6 +104,23 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function visualStabilityKey(sample) {
+  let parsed;
+  try {
+    parsed = JSON.parse(sample);
+  } catch {
+    return sample;
+  }
+  // React applications may continuously replace equivalent DOM attributes or
+  // nodes while their resolved presentation remains unchanged. The mutation
+  // epoch is diagnostic evidence, not visual evidence: requiring it to stop
+  // makes a stable menu or modal impossible to capture. Geometry, visibility,
+  // text and document extent still have to agree here, and the later
+  // byte-identical screenshot tail independently proves compositor stillness.
+  delete parsed.mutationEpoch;
+  return JSON.stringify(parsed);
+}
+
 const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
   const timeouts = new Set();
   const intervals = new Set();
@@ -116,6 +133,10 @@ const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
     window.requestAnimationFrame.bind(window);
   const nativeCancelAnimationFrame =
     window.cancelAnimationFrame.bind(window);
+  // The accepted pixels are a particular animation frame, not just a stable
+  // DOM layout. Preserve its presentation timestamp so native replay can
+  // render the same canonical frame before switching to its live clock.
+  globalThis.__pulpLastAnimationFrameTimestamp = 0;
   window.setTimeout = (callback, ...args) => {
     let handle;
     const trackedCallback = (...callbackArgs) => {
@@ -145,6 +166,8 @@ const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
     let handle;
     handle = nativeRequestAnimationFrame((timestamp) => {
       frames.delete(handle);
+      if (Number.isFinite(timestamp))
+        globalThis.__pulpLastAnimationFrameTimestamp = timestamp;
       callback(timestamp);
     });
     frames.add(handle);
@@ -284,12 +307,16 @@ export async function waitForStable(cdp, options = {}) {
   let previous = "";
   let stableRounds = 0;
   let rounds = 0;
+  const recentSamples = [];
   for (; rounds < maximumRounds; rounds++) {
     const evaluated = await cdp.call("Runtime.evaluate", {
       expression: SAMPLE_EXPRESSION,
       returnByValue: true,
     });
     const sample = evaluated.result?.value ?? "";
+    const stabilityKey = visualStabilityKey(sample);
+    recentSamples.push(sample);
+    if (recentSamples.length > 3) recentSamples.shift();
     let parsed;
     try {
       parsed = JSON.parse(sample);
@@ -298,16 +325,17 @@ export async function waitForStable(cdp, options = {}) {
     }
     const ready = parsed.ready === "complete" && parsed.fonts === "loaded" &&
       networkIdle();
-    if (ready && sample === previous) stableRounds += 1;
+    if (ready && stabilityKey === previous) stableRounds += 1;
     else stableRounds = 0;
-    previous = sample;
+    previous = stabilityKey;
     if (stableRounds >= stableRoundsRequired &&
         Date.now() - started >= minimumElapsedMs) break;
     await delay(intervalMs);
   }
   if (stableRounds < stableRoundsRequired) {
     const error = new Error(
-      `document did not settle after ${maximumRounds} rounds`);
+      `document did not settle after ${maximumRounds} rounds; recent samples: ` +
+      recentSamples.join(" -> "));
     error.code = "capture-not-stable";
     throw error;
   }

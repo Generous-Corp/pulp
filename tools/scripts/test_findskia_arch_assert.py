@@ -30,6 +30,7 @@ import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FINDSKIA = REPO / "tools/cmake/FindSkia.cmake"
+MACOS_DEPLOYMENT_TARGET = "13.4"
 
 
 def _toolchain_ready():
@@ -52,8 +53,20 @@ class FindSkiaArchAssert(unittest.TestCase):
         src = self.tmp / "s.c"
         src.write_text("int pulp_skia_stub(void){return 0;}\n")
         obj = self.tmp / "s.o"
-        subprocess.run(["clang", "-arch", "x86_64", "-c", str(src), "-o", str(obj)],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [
+                "clang",
+                "-arch",
+                "x86_64",
+                f"-mmacosx-version-min={MACOS_DEPLOYMENT_TARGET}",
+                "-c",
+                str(src),
+                "-o",
+                str(obj),
+            ],
+            check=True,
+            capture_output=True,
+        )
         for lib in ("libskia.a", "libdawn_combined.a"):
             subprocess.run(["ar", "crs", str(libdir / lib), str(obj)],
                            check=True, capture_output=True)
@@ -79,7 +92,8 @@ class FindSkiaArchAssert(unittest.TestCase):
         build = self.proj / f"build-{arch}"
         r = subprocess.run(
             ["cmake", "-S", str(self.proj), "-B", str(build),
-             f"-DCMAKE_OSX_ARCHITECTURES={arch}"],
+             f"-DCMAKE_OSX_ARCHITECTURES={arch}",
+             f"-DCMAKE_OSX_DEPLOYMENT_TARGET={MACOS_DEPLOYMENT_TARGET}"],
             capture_output=True, text=True)
         return r.returncode, (r.stdout + r.stderr)
 

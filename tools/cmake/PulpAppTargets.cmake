@@ -5,7 +5,7 @@
 # `pulp_add_plugin(... FORMATS standalone)`) and `pulp_add_app`
 # (generic non-plugin Pulp apps) live here.
 function(_pulp_add_standalone target name bundle_id version processor_factory)
-    if(NOT _PULP_STANDALONE_TARGET)
+    if(NOT PULP_${target}_STANDALONE_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested but Pulp::standalone is unavailable")
     endif()
 
@@ -26,7 +26,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             ${standalone_entry}
         )
     endif()
-    set(_standalone_target "${_PULP_STANDALONE_TARGET}")
+    set(_standalone_target "${PULP_${target}_STANDALONE_TARGET}")
     if(NOT _standalone_target)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")

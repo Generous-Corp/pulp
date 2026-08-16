@@ -1088,6 +1088,43 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         REQUIRE(saw_svg);
         REQUIRE(saw_font);
     }
+
+    SECTION("resource-hint origins are not materialized as assets") {
+        auto ir = parse_claude_html(R"html(
+            <!doctype html>
+            <html>
+            <head>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link href="https://fonts.gstatic.com" rel="dns-prefetch">
+              <link rel="stylesheet" href="theme.css">
+            </head>
+            <body><img src="meter.png"></body>
+            </html>
+        )html");
+
+        DesignIrAssetOptions options;
+        auto manifest = collect_design_ir_assets(ir, options);
+        REQUIRE(manifest.assets.size() == 2);
+        CHECK(std::none_of(manifest.assets.begin(), manifest.assets.end(), [](const auto& asset) {
+            return asset.original_uri == "https://fonts.googleapis.com"
+                || asset.original_uri == "https://fonts.gstatic.com";
+        }));
+        CHECK(std::any_of(manifest.assets.begin(), manifest.assets.end(), [](const auto& asset) {
+            return asset.original_uri == "theme.css";
+        }));
+        CHECK(std::any_of(manifest.assets.begin(), manifest.assets.end(), [](const auto& asset) {
+            return asset.original_uri == "meter.png";
+        }));
+
+        DesignIR runtime_ir;
+        runtime_ir.root.type = "frame";
+        IRNode runtime_link;
+        runtime_link.type = "link";
+        runtime_link.attributes["rel"] = "preconnect";
+        runtime_link.attributes["href"] = "https://fonts.googleapis.com";
+        runtime_ir.root.children.push_back(std::move(runtime_link));
+        CHECK(collect_design_ir_assets(runtime_ir, options).assets.empty());
+    }
 }
 
 TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes asset ids",

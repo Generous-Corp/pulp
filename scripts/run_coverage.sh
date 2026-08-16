@@ -177,11 +177,11 @@ echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-# Use one merge-enabled profile per instrumented binary. The full suite runs
-# thousands of one-test Catch2 processes; per-PID profiles are noisy, can hit
-# shell argv limits during cleanup, and are vulnerable to PID reuse over a long
-# coverage run.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
+# Use a merge pool per instrumented binary. `%Nm` is LLVM's concurrency-safe
+# online merge form: the runtime selects and locks one of N shards. Plain `%m`
+# means N=1, which corrupts that sole shard when parallel CTest processes exit
+# together on Linux. Keep the pool equal to the capped CTest concurrency while
+# avoiding per-PID file growth and PID-reuse collisions.
 
 # Regression guard for #317: track the test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its partial coverage
@@ -203,6 +203,7 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"
 if [[ -n "${TESTS_REGEX}" ]]; then
     ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
@@ -217,8 +218,29 @@ echo "=== Merging profiles ==="
 # on some OSes; feed via find -print0 | xargs.
 mkdir -p "${REPORT_DIR}"
 PROFDATA="${REPORT_DIR}/pulp.profdata"
-find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
-    | xargs -0 llvm-profdata merge -sparse -o "${PROFDATA}"
+MERGE_LOG="${REPORT_DIR}/llvm-profdata-merge.log"
+PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+    echo "run_coverage.sh: no raw profile shards were produced" >&2
+    exit 1
+fi
+# A timed-out or aborted test can leave its pool shard truncated. Keep every
+# valid shard instead of letting llvm-profdata's default failure-mode=any
+# blackhole the whole report, but fail closed if corruption is systemic.
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
+    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
+        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+    cat "${MERGE_LOG}" >&2
+    exit 1
+fi
+cat "${MERGE_LOG}" >&2
+INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
+if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
+    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+    exit 1
+fi
+echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # Gather binaries for llvm-cov's -object multi-arg form.
 #

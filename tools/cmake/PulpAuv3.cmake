@@ -90,7 +90,7 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     target_link_libraries(${fw_target} PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreAudioKit"
@@ -332,7 +332,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     target_link_libraries(${target}_AUv3 PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreAudioKit"

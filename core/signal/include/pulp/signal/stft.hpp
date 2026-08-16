@@ -69,6 +69,8 @@ public:
         fft_ = FftT<SampleType>(config.fft_size);
         window_ = WindowFunction::generate<SampleType>(
             config.fft_size, config.window, static_cast<SampleType>(config.window_param));
+        window_sum_ = SampleType{0};
+        for (const auto coefficient : window_) window_sum_ += coefficient;
         num_bins_ = config.fft_size / 2 + 1;
 
         // The complete oldest-to-newest analysis history remains contiguous.
@@ -112,6 +114,11 @@ public:
 
     /// Number of frequency bins (fft_size/2 + 1).
     int num_bins() const { return num_bins_; }
+
+    /// Sum of the configured analysis-window coefficients. Consumers that
+    /// need absolute amplitude calibration can divide DC/Nyquist magnitudes by
+    /// this value and other one-sided real-FFT magnitudes by half this value.
+    SampleType window_sum() const { return window_sum_; }
 
     /// Current FFT size.
     int fft_size() const { return config_.fft_size; }
@@ -173,6 +180,7 @@ private:
     StftConfig config_;
     FftT<SampleType> fft_{1024};
     std::vector<SampleType> window_;
+    SampleType window_sum_ = SampleType{1};
     int num_bins_ = 0;
 
     // Single-thread sample history; not a producer/consumer queue.

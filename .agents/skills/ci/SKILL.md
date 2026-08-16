@@ -123,6 +123,17 @@ fail on download, checksum, extraction, or executable discovery.  Do **not**
 convert a missing browser into a skipped fidelity test: that would let a PR
 claim source-to-native validation that never occurred.
 
+Browser-capture Node coverage has three distinct CTest entries. Keep the
+dependency-free unit aggregate separate from the real-Chromium integration
+file, whose serial browser cases have their own 600-second bound. The
+esbuild-backed materialized-runtime canonicalization test is registered only
+when `tools/import-design/jsx-runtime/node_modules/esbuild` exists, so the
+required Linux `build.yml` leg must run the locked `npm ci --prefix
+tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
+integration file back into the unit aggregate or remove that install step: the
+former exhausts the aggregate deadline before later tests run, while the latter
+turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
 
@@ -445,6 +456,44 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### Gotcha: a `*_RUNS_ON_JSON` variable read WITHOUT `fromJSON` becomes one literal label
+
+Same silent-queue failure as below, but the black hole is created by the
+*workflow*, not by fleet drift — so the topology checker cannot see it. The lane
+reconciles green, every runner carries every contracted label, and the job still
+queues forever.
+
+The value of a `*_RUNS_ON_JSON` variable is a JSON **array**. Interpolating it
+straight into `runs-on:` does not expand it; GitHub takes the whole string as a
+**single label**:
+
+```
+labels: ["[\"self-hosted\",\"Linux\",\"X64\",\"pulp-build-linux-x64\",\"pulp-host-macpro\"]"]
+```
+
+No runner can ever carry a label whose text is a JSON array, so the job is
+queued, not failed. Found live 2026-08-16: setting `PULP_LOCAL_LINUX_RUNS_ON_JSON`
+left a dispatched `Enforce version & skill sync` job queued exactly like that
+while an **idle** Mac Pro runner carried all five of those labels.
+`version-skill-check.yml` and `vellum-freeze-check.yml` read the variable
+directly; `build.yml`, `nightly-intel.yml`, and `examples-validation.yml` wrap it
+in `fromJSON`. Both required gates are now wrapped too.
+
+Two rules when touching a `runs-on` that references one of these variables:
+
+- **Parse it.** `runs-on: ${{ fromJSON(...) }}`, never a bare interpolation.
+- **Keep every branch JSON.** Inside `fromJSON(...)` a bare `'ubuntu-latest'`
+  fails to parse and takes the gate down with it — write `'"ubuntu-latest"'`.
+
+`tools/scripts/test_resolve_linux_route.py` enforces both: one test sweeps every
+workflow for an unparsed selector, the other pins the JSON-quoted fallbacks.
+Diagnose a suspected instance by reading the queued job's labels — a one-element
+array containing bracket characters is conclusive:
+
+```bash
+ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
+```
+
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
 The trap behind step 3. Before concluding "the pool is saturated", check that the
@@ -648,53 +697,74 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
-The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
-that means a dedicated organization runner group containing only its ephemeral
-runners, repository access granted only to `Generous-Corp/pulp`, and workflow
-access restricted to the protected default-branch copy of
-`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
-a PR changing its own workflow cannot target the group before enabling
-automatic PR or merge-group routing. Until that exists, do not add another
-private pool to automatic `pull_request` routing. In particular, the Mac Pro
-Linux pool and example-validation advisory macOS selector remain
-`workflow_dispatch`-only.
-For a future automatic Mac Pro pool, use the supervisor's distinct
-`pulp-auto-linux-x64` label only after its live organization group verifier
-passes. Automatic clones also require an enabled Proxmox firewall and a per-VM
-IP/ARP source filter plus an egress policy that permits DNS to the LAN gateway
-but denies private, link-local, carrier-grade NAT, multicast, reserved, and IPv6
-destinations. Policy write, compile, and active-state failures must stop the VM
-before registration.
-The automatic selector must require all six labels exactly:
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`.
-GitHub matches requested labels as a subset, so the older five-label selector
-does not exclude repository-scoped runners. Keep that dispatch/release selector
-in `PULP_LOCAL_LINUX_RUNS_ON_JSON`; use the six-label
-`PULP_AUTO_LINUX_RUNS_ON_JSON` only in workflows admitted by the restricted
-group. `build.yml` must fail closed to hosted Linux when the automatic selector
-omits the automatic-only label.
-Treat checked-out pull-request source as untrusted even when a protected
-workflow orchestrates it. Runner inventory and cleanup must paginate the full
-organization result set, reclaim only exact slot-scoped offline idle
-registrations, and fail closed for online, busy, duplicate, or unknown states.
-Use a separate organization-capable controller token for organization runner
-group, registration, inventory, and deletion APIs; the repository runner token
-is not that credential.
-Configure group membership per systemd slot with
-`/etc/pulp/linux-runner-group-<slot>.env`, never a shared pool environment.
-Reserve at least one repository-scoped slot for release and operator workflows
-that the restricted group does not admit. Serialize VM destruction and firewall
-policy removal under the same VMID lock so cleanup cannot delete a successor
-clone's policy after id reuse.
-A healthy runner is not a hosted fallback: once `runs-on` selects local labels,
-GitHub cannot retarget a queued job, and the required `macos` alias currently
-waits for the whole build matrix. Keep PR and merge-group Linux hosted until
-that dependency is split and an external health controller can unset the
-selector before dispatch; never route `pull_request_target` or secret-bearing
-work to the generic pool.
-The existing fork-routing regression test verifies defense-in-depth behavior;
-it must never be cited as proof that a runner is inaccessible to untrusted
-workflow revisions.
+The external trust boundary lives outside PR-controlled YAML. Pulp now ships two
+distinct protected Proxmox provider roles in addition to the existing generic
+repository-scoped pool:
+
+- `pulp-trusted-ephemeral-pool@.service` loads
+  `/etc/pulp/linux-trusted-runner-group.env`, selects the `trusted` policy,
+  uses prefix `pulp-ci-ephemeral`, and adds `pulp-auto-linux-x64`. The live
+  group must be exactly `pulp-trusted-build`, contain only
+  `Generous-Corp/pulp`, and admit only protected-main `build.yml`,
+  `pr-safe-linux.yml`, `vellum-freeze-check.yml`, and
+  `version-skill-check.yml`.
+- `pulp-pr-safe-ephemeral-pool@.service` loads
+  `/etc/pulp/linux-pr-safe-runner-group.env`, selects `pr-safe`, uses prefix
+  `pulp-pr-safe-ephemeral`, and adds `pulp-pr-safe-linux-x64`. Its exact
+  `pulp-pr-safe-build` group admits only protected-main `pr-safe-linux.yml`
+  for the same single repository.
+
+Both roles fail closed unless `verify_linux_runner_group.py` proves the exact
+name, repository, and selected workflows. Use a root-owned mode-0600
+organization credential, or the exact root-owned non-group/world-writable
+`/usr/local/bin/ghapp` helper. Capability labels without the verified
+organization group are rejected.
+
+Protected clones require `configure-proxmox-ci-network.sh --apply` and
+`--verify` before service activation. It creates no-uplink
+`vmbr-ci200..202` bridges with controller `10.240.<VMID>.1/30`, guest
+`10.240.<VMID>.2/30`, and source-scoped NAT while preserving `vmbr0`.
+The supervisor proves controller-only SSH ingress, default-deny ingress,
+private/reserved and IPv6 egress denial, and L2/IP source isolation before
+registration. Stop the protected units and wait for their guests to disappear
+before `--rollback`; rollback refuses attached bridges and restores the prior
+forwarding state.
+
+Do not alter the generic `pulp-ephemeral-pool@.service` contract: it remains
+repository-scoped, uses the five generic labels and legacy network, and loads
+only its optional per-slot `/etc/pulp/linux-runner-group-%i.env`. Retain
+generic operator-dispatch capacity.
+
+For another repository, use `proxmox-ephemeral-pool@.service` with a distinct
+root-owned mode-0600 profile under `/etc/pulp/proxmox-runner/`. The profile must
+set `TARTCI_RUNNER_REPO`, exact group id/name and protected-main workflow,
+repository-specific labels and runner prefix, VM name prefix, golden, and a
+disjoint VMID range, plus an explicit GitHub authentication mode and
+repository-specific organization credential path. Generic profiles never
+inherit Pulp's auth mode or credential paths; either omission fails before
+provisioning.
+`verify_linux_runner_group.py` then proves that the named
+non-default group contains only that repository and selects exactly that
+workflow. Cross-repository profiles cannot reuse `pulp-*` labels, and the Pulp
+repository continues to accept only its built-in trusted or PR-safe policies.
+
+The supervisor uses a generation-unique JIT registration, transfers the
+mode-0600 encoded configuration over stdin, and bounds both GitHub-visible
+readiness and broker heartbeat. Preserve the `/30` isolated bridge,
+controller-only SSH ingress, L2 firewall proof, network-before-VMID lock order,
+and generation-fenced deferred cleanup when extending this path. Enable a
+repository's local selector only after a live eligible claim and exact
+deregistration/VM/firewall teardown proof.
+
+This is provider provisioning, not workflow routing. Keep protected PR and
+merge-group Linux hosted until a separate routing change is reviewed and
+enabled; an online role service is not authorization to set an automatic
+selector. GitHub cannot retarget a queued local-label job, so hosted fallback
+must be chosen before dispatch. Never route `pull_request_target` or
+secret-bearing work to the generic pool. Exact installation, activation,
+verification, and rollback commands live in `docs/guides/local-ci.md`.
+The existing fork-routing regression test is defense in depth, not proof that a
+runner is inaccessible to untrusted workflow revisions.
 ## Re-running a wedged required check
 
 `macos` and `Enforce version & skill sync` can be re-dispatched
@@ -985,7 +1055,8 @@ uses, or the golden warms a cache the real jobs never touch.
   `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
-- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has both Linux and macOS receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for the two receipt artifacts before changing `codecov.yml`.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, and Python-tools receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for all three receipt artifacts before changing `codecov.yml`.
+- **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
   path-scoped, advisory four-leg matrix builds production-stripped plug-ins on
@@ -1809,14 +1880,14 @@ supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
 The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
-~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 150-min job
+~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 210-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
 staleness watchdog keys off a *successful run*, not per-OS Codecov flags — so a
 red Windows leg would otherwise keep a healthy full run red forever. **The
 subtle trap (verified by canary):** job-level `continue-on-error` does NOT
 neutralize a `timeout-minutes` *cancellation* — a cancelled job still makes the
 run conclude `cancelled`. It DOES neutralize a normal job *failure*. So the
-coverage suite step self-terminates at an **internal budget (135 min) below the
+coverage suite step self-terminates at an **internal budget (180 min) below the
 job cap**, turning the would-be cancellation into a normal non-zero exit that
 the job-level `continue-on-error: matrix.os=='windows'` then absorbs → the run
 concludes `success`. Don't "simplify" this to bare `continue-on-error`; it will
@@ -1824,7 +1895,7 @@ silently stop closing the watchdog. **And the watchdog that enforces the budget
 must separate its steps with `;`, NOT `&&`** — if the kill is `&&`-gated behind
 a `: > marker` write (which can fail on a Windows `RUNNER_TEMP` backslash path),
 a failed marker write short-circuits the chain and the suite is never killed,
-so the job hits the 150-min cap and is *cancelled* anyway. The kill is
+so the job hits the 210-min cap and is *cancelled* anyway. The kill is
 mandatory; the marker is best-effort (cleanup of any partial Cobertura also
 triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
@@ -2815,6 +2886,66 @@ classification before the single networkless Sol-medium repair step can run,
 and the GitHub-hosted publisher independently revalidates the exact head,
 assignment epoch, and blocker fingerprint before applying any patch.
 
+**The recovery worker has two model lanes: Codex primary, Claude fallback.**
+Codex Luna/low triage and Sol/medium repair run first and are unchanged. Each
+now carries `continue-on-error` so that a failing model does not abort the job
+before the bounded fallback can run. The fallback is deliberately *reactive*,
+gated on `steps.triage.outcome == 'failure'` and
+`steps.repair.outcome == 'failure'`, because **a Subrouter lease mints
+successfully even when its account is out of quota** — exhaustion only surfaces
+when the model actually runs, so no preflight probe can detect it. This was
+proven on 2026-08-16 when all five Codex accounts hit their weekly limit and the
+recovery canary failed 44 seconds into `luna-triage` with every fence, lease,
+and teardown behaving correctly.
+
+Four rules govern the fallback lane:
+
+- **Mint it model-unbound.** Subrouter rejects any request whose body model
+  differs from a bound lease, and Claude Code issues background calls on a small
+  fast model. Send `provider:"claude"` with no `model` field; an empty model
+  short-circuits that validation, but an empty provider *and* empty model
+  defaults the lease back to Codex.
+- **Consume the lease through the environment.** A Claude lease returns
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, and
+  `CLOUDMUX_SUBROUTER_LEASE_TOKEN`. The base URL is bare — only Codex, Kimi, and
+  ZAI leases get path suffixes. There is no `--base-url` flag.
+- **Keep the context deliberately minimal.** A default Claude Code launch loads
+  plugin and MCP context that dwarfs the bounded recovery prompt (roughly 60k
+  cache-creation tokens versus 35k for an isolated launch), so the lane pins
+  `--strict-mcp-config`, an empty `--mcp-config`, `--settings
+  '{"disableAllHooks":true}'`, `--no-session-persistence`, and an isolated
+  `CLAUDE_CONFIG_DIR`.
+- **Install the platform package by name.** `@anthropic-ai/claude-code`'s
+  `bin/claude` is a wrapper that resolves its native binary during
+  `postinstall`, and the lane installs with `--ignore-scripts`, so the base
+  package alone yields `claude native binary not installed` — this failed a live
+  recovery job on 2026-08-16, 15 seconds in. Install
+  `@anthropic-ai/claude-code-darwin-arm64` explicitly, integrity-pin it like the
+  base package, and `ln -sf` the real binary onto `bin/claude`. Do **not** fix
+  this by dropping `--ignore-scripts`: the install runs on a disposable runner
+  moments before it holds a broker lease, so a script-free install is the point.
+  Codex's own install is not a template here — it ships its platform binary
+  differently.
+- **Strip `$schema` before passing a schema to `--json-schema`.** The CLI's
+  validator cannot resolve `"$schema": "https://json-schema.org/draft/2020-12/schema"`
+  and rejects the committed file verbatim with `no schema with key or ref` —
+  this failed a live recovery job on 2026-08-16. Pass
+  `jq -c 'del(."$schema")' <file>`; every constraint is preserved and the fenced
+  validator re-checks the payload against the full schema afterwards. Note the
+  trap that hid it: a hand-written inline schema in a local probe has no
+  `$schema` key, so rehearsing with a lookalike passes while the real artifact
+  fails. Rehearse with the committed file.
+- **Re-validate the output locally.** `claude --json-schema` validates upstream
+  but leaves no trusted local proof, so
+  `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That
+  path is inside the `FORBIDDEN_PREFIXES` fence on purpose: a validator living
+  outside the fence could be weakened by the very repair model it constrains.
+
+If both lanes fail the job errors rather than reporting a green tick with no
+classification, and the publisher's commit trailers record the lane that
+actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
+trail never misattributes a repair.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
@@ -2914,23 +3045,18 @@ shipyard run --resume-from build
 
 ### Linux self-hosted routing (opt-in) and Windows x64 authority
 
-`build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
-configured selector and the selector authorized for the current event. A
-`workflow_dispatch` input has highest precedence, then the five-label
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` operator selector. Protected pull-request and
-merge-group events use the separate six-label `PULP_AUTO_LINUX_RUNS_ON_JSON`
-only through the restricted runner group; an unset or invalid automatic
-selector falls back to GitHub-hosted Linux.
+`workflow_dispatch` retains the existing five-label
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` operator selector and the repository-scoped
+Proxmox pool. The protected trusted and PR-safe provider roles are installed
+separately, but this provider-only change does not consume their labels from
+`build.yml` or merge-group routing. Protected automatic events therefore remain
+GitHub-hosted until a later workflow-routing change explicitly opts in.
 
-The automatic Mac Pro selector is
-`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro","pulp-auto-linux-x64"]`;
-the dispatch/release selector omits the final automatic-only label. Both are
-served by the Proxmox ephemeral pool described in
-`docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
-`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
-the displayed Linux provider from the selector that actually resolved. A
-dispatch using the configured selector fails loudly if it resolves hosted; a
-successfully assigned self-hosted job still has no live capacity fallback.
+Do not set a protected automatic selector as part of provider installation.
+When a later routing change is reviewed, it must use the role-specific sixth
+label and exact restricted group described in `docs/guides/local-ci.md`; the
+five-label generic selector is not a trust boundary. A successfully assigned
+self-hosted job has no live capacity fallback.
 
 Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
 proof during hosted saturation. Its default remains true so ordinary manual
@@ -3865,7 +3991,7 @@ the correct fix; they bound runs regardless of `cancel-in-progress`.
 `tools/scripts/classify_changes.py --mode=diff`, outputs
 `native_build_required`). Skip-safe PRs (docs / planning `*.md` only —
 classifier fails *closed*, any uncertainty → `true`) skip the
-`coverage` matrix (150 min/leg); docs-only PRs also skip
+`coverage` matrix (210 min/leg); docs-only PRs also skip
 `android-kotlin-coverage`. The Android Kotlin lane is additionally
 guarded with `github.event_name != 'pull_request'`, so it never allocates
 a runner on PRs. No coverage runner is allocated on a docs PR.

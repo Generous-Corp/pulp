@@ -54,7 +54,14 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from gate_common import git_diff_names
-from version_bump_surfaces import Config, Surface, load_config, version_at_base, write_version
+from version_bump_surfaces import (
+    LEVELS,
+    Config,
+    Surface,
+    load_config,
+    version_at_base,
+    write_version,
+)
 from version_bump_heuristics import assess_surfaces, filter_generated
 from version_bump_apply import bump_version
 
@@ -182,17 +189,89 @@ def drain_base(repo: Path, head: str, fallback: str | None = None) -> str:
     return f"{head}~1"
 
 
+def _is_on_first_parent_chain(repo: Path, candidate: str, head: str) -> bool:
+    """Whether ``candidate`` is a first-parent ancestor of ``head``."""
+    chain = _git(repo, "rev-list", "--first-parent", head).stdout.splitlines()
+    return candidate in chain
+
+
+def _first_parent_boundary(repo: Path, base: str, head: str) -> str:
+    """Map a PR-route marker commit to its first-parent integration commit.
+
+    A version-bump PR's marker lives on the PR source commit, while protected
+    main records a merge commit whose second parent is that source commit. If
+    we started per-PR assessment directly at the source commit, the merge that
+    integrated the already-applied version files would look like fresh plugin
+    work and be bumped again. Return that integration merge as the boundary.
+
+    Direct-route markers already live on main's first-parent chain and pass
+    through unchanged.
+    """
+    base_sha = _rev_parse(repo, base)
+    if _is_on_first_parent_chain(repo, base_sha, head):
+        return base_sha
+
+    candidates = _git(
+        repo, "rev-list", "--first-parent", "--reverse", f"{base_sha}..{head}",
+    ).stdout.splitlines()
+    for candidate in candidates:
+        if _git(repo, "merge-base", "--is-ancestor", base_sha, candidate,
+                check=False).returncode == 0:
+            return candidate
+    return base_sha
+
+
 def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Assignment]:
-    """Concrete plan over a drain window: the changed-file set across
-    `base..head` (three-dot, generated files filtered) fed to the live
-    `assess_surfaces` heuristic, bumping each surface FROM its version at
-    `base` (see `plan_assignments` / `_current_at_base`).
+    """Concrete plan over a drain window, assessed one landed unit at a time.
+
+    Each commit on protected main's first-parent chain represents one direct
+    push or one merged PR. Assess its introduced diff and its own unique commit
+    range together, then retain the highest required level per surface across
+    the whole undrained window. This boundary is release-critical: applying
+    ``Version-Bump: sdk=skip`` from one PR to the aggregate multi-PR range would
+    otherwise suppress real SDK work in a later PR and strand that release.
+
+    The final assignment still bumps each surface exactly once FROM its version
+    at `base` (see `_current_at_base`), preserving the existing highest-wins
+    drain semantics.
 
     The drain range's `base` is supplied by `drain_base` (the last
     `Version-Bump-Applied` marker, or the caller's fallback), so the window is
     exactly what this bot has not yet accounted for."""
-    changed = filter_generated(git_diff_names(base, head), config.generated_globs)
-    return plan_assignments(config, changed, base, head, repo)
+    boundary = _first_parent_boundary(repo, base, head)
+    unit_heads = _git(
+        repo, "rev-list", "--first-parent", "--reverse", f"{boundary}..{head}",
+    ).stdout.splitlines()
+
+    highest: dict[str, str] = {}
+    for unit_head in unit_heads:
+        unit_base = _rev_parse(repo, f"{unit_head}^1")
+        changed = filter_generated(
+            git_diff_names(unit_base, unit_head), config.generated_globs,
+        )
+        for verdict in assess_surfaces(
+                config, changed, unit_base, unit_head, repo):
+            level = verdict.final_level
+            if level == "none":
+                continue
+            previous = highest.get(verdict.surface.name, "none")
+            if LEVELS.index(level) > LEVELS.index(previous):
+                highest[verdict.surface.name] = level
+
+    assignments: list[Assignment] = []
+    for surface in config.surfaces:
+        level = highest.get(surface.name)
+        if level is None:
+            continue
+        current = _current_at_base(base, surface)
+        if current is None:
+            current = _current_at_base(head, surface)
+        if not current:
+            continue
+        assignments.append(Assignment(
+            surface.name, level, current, bump_version(current, level),
+        ))
+    return assignments
 
 
 # Derived files that embed a version this bot writes, and so go stale the
@@ -453,7 +532,23 @@ def _arm_auto_merge(repo: Path, ref: str) -> bool:
     contract, .agents/contract.toml, requires `--merge` so the bump-marker
     commit is preserved and does not trip an auto-release false alarm).
     Idempotent — re-arming an already-armed PR is a safe no-op, so any drain
-    that finds an open-but-unarmed bump PR self-heals it. Returns success."""
+    that finds an open-but-unarmed bump PR self-heals it. Drafts fail closed:
+    they are an explicit release hold and must be closed or made ready by their
+    owner before a replacement may be generated. Returns success."""
+    draft = _gh(repo, "pr", "view", ref, "--json", "isDraft",
+                "--jq", ".isDraft", check=False)
+    if draft.returncode != 0:
+        sys.stderr.write(f"version-at-land: cannot verify draft state for {ref}; "
+                         "refusing to arm auto-merge.\n")
+        return False
+    if draft.stdout.strip() == "true":
+        sys.stderr.write(f"version-at-land: bump PR {ref} is draft; preserving "
+                         "the explicit hold and refusing to arm it.\n")
+        return False
+    if draft.stdout.strip() != "false":
+        sys.stderr.write(f"version-at-land: unknown draft state for {ref}; "
+                         "refusing to arm auto-merge.\n")
+        return False
     res = _gh(repo, "pr", "merge", ref, "--auto", "--merge", check=False)
     if res.returncode != 0:
         sys.stderr.write(f"version-at-land: arming auto-merge on {ref} failed "

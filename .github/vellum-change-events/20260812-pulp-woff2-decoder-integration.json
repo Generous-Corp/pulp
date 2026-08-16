@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260812-pulp-woff2-decoder-integration",
+  "kind": "change",
+  "created_at": "2026-08-12T16:30:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Pulp's installed static SDK now compiles its pinned Brotli and Google woff2 decoder sources directly into pulp-canvas so a product plug-in can register browser-authored WOFF2 fonts without rediscovering or linking a private decoder target. The implementation preserves the existing bundled-font API and validation contract, adds a compressed-input size bound, and remains a Pulp packaging and dependency-integration choice rather than a change to Vellum's canvas semantics or source authority.",
+  "tests": [
+    "Vellum freeze",
+    "pulp-test-font-woff2",
+    "pulp-test-installed-sdk-capabilities",
+    "pulp-test-native-ui-link-floor"
+  ],
+  "disposition": "pulp-only"
+}

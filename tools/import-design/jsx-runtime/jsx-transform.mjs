@@ -152,6 +152,25 @@ _g.ReactDOM = {
     }
 };
 
+class NativeImportBoundary extends ReactNS.Component {
+    constructor(props) {
+        super(props);
+        this.state = { failed: false };
+    }
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+    componentDidCatch(error) {
+        const detail = error && error.message ? error.message : String(error);
+        const errMsg = '[pulp-jsx] component failed: ' + detail;
+        _g.__pulpJsxError__ = errMsg;
+        if (typeof console !== 'undefined' && console.error) console.error(errMsg);
+    }
+    render() {
+        return this.state.failed ? null : this.props.children;
+    }
+}
+
 function mount() {
     let mountEl = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById('root') : null;
     if (!mountEl && typeof document !== 'undefined') {
@@ -164,7 +183,11 @@ function mount() {
     }
     try {
         const root = ReactDOMClient.createRoot(mountEl);
-        root.render(ReactNS.createElement(UserComponent));
+        root.render(ReactNS.createElement(
+            NativeImportBoundary,
+            null,
+            ReactNS.createElement(UserComponent)
+        ));
         _g.__pulpJsxMounted__ = ${JSON.stringify(componentName)};
     } catch (e) {
         const errMsg = '[pulp-jsx] mount failed: ' + (e && e.message ? e.message : String(e));

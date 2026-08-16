@@ -196,3 +196,33 @@ TEST_CASE("point_to_local peels a scaled ScrollView root before scrolling",
     CHECK_THAT(local.x, WithinAbs(10.0, 1e-4));
     CHECK_THAT(local.y, WithinAbs(10.0, 1e-4));
 }
+
+TEST_CASE("point_to_local inverts a captured authored-surface affine exactly once",
+          "[view][input][materialized-coordinate]") {
+    View root;
+    root.set_bounds({0, 0, 1320, 860});
+    root.set_transform_origin(0.0f, 0.0f);
+    constexpr float scale = 800.0f / 860.0f;
+    root.set_transform_matrix(scale, 0.0f, 0.0f, scale,
+                              26.0465116f, 0.0f);
+
+    auto button = std::make_unique<View>();
+    auto* button_ptr = button.get();
+    button->set_bounds({688, 11, 48, 22});
+    root.add_child(std::move(button));
+
+    const Point local = point_to_local(
+        {26.0465116f + scale * 712.0f, scale * 22.0f}, button_ptr, &root);
+    CHECK_THAT(local.x, WithinAbs(24.0, 1e-4));
+    CHECK_THAT(local.y, WithinAbs(11.0, 1e-4));
+    REQUIRE(root.hit_test({26.0465116f + scale * 712.0f,
+                           scale * 22.0f}) == button_ptr);
+}
+
+TEST_CASE("singular affine transforms fail closed for pointer localization",
+          "[view][input][materialized-coordinate]") {
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_transform_matrix(1, 0, 2, 0, 0, 0);
+    CHECK(root.hit_test({10, 10}) == nullptr);
+}

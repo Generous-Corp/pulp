@@ -10,10 +10,39 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace pulp::view {
+
+/// Per-paint metadata for native, retained CanvasWidget content.
+struct NativeCanvasPaintContext {
+    canvas::Canvas& canvas;
+    Rect local_bounds;
+    float backing_scale = 1.0f;
+    std::uint64_t frame_id = 0;
+    canvas::RendererBackend backend = canvas::RendererBackend::unknown;
+};
+
+/// Retained native painter installed on a CanvasWidget.
+///
+/// Ownership is shared deliberately: CanvasWidget takes a strong snapshot at
+/// paint entry, so replacing/resetting the painter from a callback cannot
+/// destroy the object while its paint method is on the stack.
+class NativeCanvasPainter {
+public:
+    virtual ~NativeCanvasPainter() = default;
+    virtual void paint(const NativeCanvasPaintContext& context) = 0;
+};
+
+enum class NativeCanvasBackendRequirement {
+    any,
+    /// Production paints require Graphite-on-Dawn; RecordingCanvas remains
+    /// accepted so deterministic command fixtures can exercise the painter.
+    skia_dawn_allow_recording,
+    skia_dawn,
+};
 
 /// A draw command recorded from JS for replay in paint().
 /// Maps to CanvasRenderingContext2D methods.
@@ -169,7 +198,15 @@ struct CanvasDrawCmd {
 /// JS fills the command list via bridge functions, then the widget
 /// renders them each frame. Hot-reloadable — JS rebuilds commands on reload.
 class CanvasWidget : public View {
+private:
+    struct RecordedCommands;
+    struct RepaintObserver {
+        CanvasWidget* owner = nullptr;
+        RecordedCommands* stream = nullptr;
+    };
+
 public:
+    enum class ContentMode { recorded_commands, native_painter };
     struct NativeGpuTextureFrame {
         void* texture_handle = nullptr;
         uint32_t width = 0;
@@ -179,9 +216,44 @@ public:
     };
     using NativeGpuTextureProvider = std::function<NativeGpuTextureFrame()>;
 
-    CanvasWidget() = default;
+    CanvasWidget()
+        : repaint_observer_(std::make_shared<RepaintObserver>()) {
+        repaint_observer_->owner = this;
+        observe_recorded_commands();
+    }
+    ~CanvasWidget() override {
+        repaint_observer_->owner = nullptr;
+        repaint_observer_->stream = nullptr;
+    }
 
-    void clear_commands() { commands_.clear(); }
+    void set_native_painter(
+        std::shared_ptr<NativeCanvasPainter> painter,
+        NativeCanvasBackendRequirement requirement =
+            NativeCanvasBackendRequirement::any) {
+        native_painter_ = std::move(painter);
+        native_backend_requirement_ = requirement;
+        content_mode_ = native_painter_ ? ContentMode::native_painter
+                                        : ContentMode::recorded_commands;
+        request_repaint();
+    }
+    void reset_native_painter() {
+        native_painter_.reset();
+        native_backend_requirement_ = NativeCanvasBackendRequirement::any;
+        content_mode_ = ContentMode::recorded_commands;
+        request_repaint();
+    }
+    ContentMode content_mode() const noexcept { return content_mode_; }
+    bool last_native_paint_succeeded() const noexcept {
+        return last_native_paint_succeeded_;
+    }
+    canvas::RendererBackend last_native_paint_backend() const noexcept {
+        return last_native_paint_backend_;
+    }
+
+    void clear_commands() {
+        recorded_commands_->commands.clear();
+        notify_recorded_command_consumers();
+    }
     /// NaN / ±Infinity defense at the recording
     /// boundary. JS callers can produce non-finite numerics from any
     /// arithmetic mishap (divide-by-zero on a zero parent rect during a
@@ -206,14 +278,26 @@ public:
         cmd.y3      = sanitize_finite(cmd.y3);
         cmd.extra   = sanitize_finite(cmd.extra);
         for (auto& p : cmd.gradient_positions) p = sanitize_finite(p);
-        commands_.push_back(std::move(cmd));
+        recorded_commands_->commands.push_back(std::move(cmd));
     }
-    size_t command_count() const { return commands_.size(); }
+    size_t command_count() const { return recorded_commands_->commands.size(); }
     /// Accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
     /// clear_commands. Callers must not retain the reference past the next
     /// add_command / clear_commands call.
-    const std::vector<CanvasDrawCmd>& commands() const { return commands_; }
+    const std::vector<CanvasDrawCmd>& commands() const {
+        return recorded_commands_->commands;
+    }
+    /// Make this canvas replay the same retained command stream as `source`.
+    /// The shared stream deliberately outlives either View so a materialized
+    /// DesignIR canvas can remain visible while the hidden React realm that
+    /// authors its Canvas2D program is replaced during reload.
+    void share_recorded_commands_from(CanvasWidget& source) {
+        if (recorded_commands_ == source.recorded_commands_) return;
+        recorded_commands_ = source.recorded_commands_;
+        observe_recorded_commands();
+        request_repaint();
+    }
     bool last_native_gpu_texture_draw_succeeded() const { return last_native_gpu_texture_draw_succeeded_; }
     void set_native_gpu_texture_provider(NativeGpuTextureProvider provider) {
         native_gpu_texture_provider_ = std::move(provider);
@@ -251,7 +335,36 @@ private:
         return std::isfinite(v) ? v : 0.0f;
     }
 
-    std::vector<CanvasDrawCmd> commands_;
+    struct RecordedCommands {
+        std::vector<CanvasDrawCmd> commands;
+        std::vector<std::weak_ptr<RepaintObserver>> observers;
+    };
+    void observe_recorded_commands() {
+        repaint_observer_->stream = recorded_commands_.get();
+        recorded_commands_->observers.emplace_back(repaint_observer_);
+    }
+    void notify_recorded_command_consumers() {
+        auto& observers = recorded_commands_->observers;
+        observers.erase(std::remove_if(observers.begin(), observers.end(),
+            [this](const std::weak_ptr<RepaintObserver>& weak) {
+                auto observer = weak.lock();
+                if (!observer) return true;
+                if (observer->owner && observer->stream == recorded_commands_.get())
+                    observer->owner->request_repaint();
+                return false;
+            }), observers.end());
+    }
+    std::shared_ptr<RecordedCommands> recorded_commands_ =
+        std::make_shared<RecordedCommands>();
+    std::shared_ptr<RepaintObserver> repaint_observer_;
+    std::shared_ptr<NativeCanvasPainter> native_painter_;
+    NativeCanvasBackendRequirement native_backend_requirement_ =
+        NativeCanvasBackendRequirement::any;
+    ContentMode content_mode_ = ContentMode::recorded_commands;
+    std::uint64_t native_frame_id_ = 0;
+    bool last_native_paint_succeeded_ = false;
+    canvas::RendererBackend last_native_paint_backend_ =
+        canvas::RendererBackend::unknown;
     NativeGpuTextureProvider native_gpu_texture_provider_;
     bool last_native_gpu_texture_draw_succeeded_ = false;
     // Curated named GPU post-effect state (see set_shader_effect). Sticky

@@ -1,7 +1,7 @@
 #include "pulp/view/editor_bridge.hpp"
 
 #include "pulp/view/script_engine.hpp"
-#include "pulp/view/web_view.hpp"
+#include "pulp/view/scripted_ui.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -104,16 +104,6 @@ std::string EditorBridge::dispatch_webview_message(std::string_view type,
     return dispatch(type, payload);
 }
 
-void EditorBridge::attach_webview(WebViewPanel& panel) {
-    panel.set_message_handler([this](const WebViewMessage& m) {
-        return dispatch_webview_message(m.type, m.payload_json);
-    });
-}
-
-void EditorBridge::detach_webview(WebViewPanel& panel) {
-    panel.set_message_handler({});
-}
-
 void EditorBridge::attach_native_runtime(JsRuntime& /*runtime*/,
                                          std::string_view /*handler_name*/) {
     // Stub for pulp #468 (Claude Design import lane). The full wiring
@@ -135,6 +125,23 @@ void EditorBridge::attach_native_runtime(ScriptEngine& engine,
             }
             return choc::value::Value(dispatch_json(args[0].getString()));
         });
+}
+
+void EditorBridge::attach_native_runtime(ScriptedUiSession& session,
+                                         std::string_view handler_name) {
+    if (handler_name.empty())
+        throw std::invalid_argument("native editor bridge handler name must not be empty");
+
+    session.attach_native_message_handler(
+        std::string(handler_name),
+        [this](std::string_view envelope_json) {
+            return dispatch_json(envelope_json);
+        });
+}
+
+void EditorBridge::detach_native_runtime(ScriptedUiSession& session,
+                                         std::string_view handler_name) {
+    session.detach_native_message_handler(handler_name);
 }
 
 // ── Static helpers ──────────────────────────────────────────────────────

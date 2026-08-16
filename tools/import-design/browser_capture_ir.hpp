@@ -47,6 +47,13 @@ struct BrowserCaptureIrOptions {
     /// permanent CI oracle — native ships per panel only once it has been shown
     /// to pass against the picture, so the picture cannot be removed first.
     bool native_panel_lowering = false;
+    /// Preserve Chromium's accepted full frame as the initial visible paint
+    /// authority and emit each captured canvas as a separately anchored,
+    /// transparent native interaction target. The materialized runtime binds
+    /// the original canvas closures to those targets without reimplementing
+    /// solved text, SVG, font, layout, or canvas geometry. Executable canvas
+    /// paint may replace the accepted pixels only after a separate parity gate.
+    bool materialized_canvas_composition = false;
 };
 
 /// Parse and validate a capture envelope, reject sidecar paths that escape its
