@@ -29,6 +29,8 @@
 #include <thread>
 #include <vector>
 
+static_assert(false, "shipyard M5 recovery fallback canary");
+
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
