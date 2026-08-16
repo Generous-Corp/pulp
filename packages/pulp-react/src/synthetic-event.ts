@@ -90,10 +90,47 @@ export interface SyntheticElementWrapper {
     style: Record<string, unknown>;
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
+    getBoundingClientRect: () => SyntheticLayoutRect;
+    readonly offsetWidth: number;
+    readonly offsetHeight: number;
+    readonly clientWidth: number;
+    readonly clientHeight: number;
+    setPointerCapture: (pointerId: number) => void;
+    releasePointerCapture: (pointerId: number) => void;
+}
+
+export interface SyntheticLayoutRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+}
+
+const emptyLayoutRect = (): SyntheticLayoutRect => ({
+    x: 0, y: 0, width: 0, height: 0,
+    top: 0, right: 0, bottom: 0, left: 0,
+});
+
+function publicElementFor(id: string): SyntheticElementWrapper | null {
+    const host = globalThis as unknown as {
+        __pulpReactDomRegistry__?: Map<string, unknown>;
+        window?: { __pulpReactDomRegistry__?: Map<string, unknown> };
+    };
+    const registry = host.__pulpReactDomRegistry__ ??
+        host.window?.__pulpReactDomRegistry__;
+    const candidate = registry?.get(id) as Partial<SyntheticElementWrapper> | undefined;
+    return candidate && typeof candidate.getBoundingClientRect === 'function'
+        ? candidate as SyntheticElementWrapper : null;
 }
 
 function makeElementWrapper(id: string): SyntheticElementWrapper {
-    return {
+    const publicElement = publicElementFor(id);
+    if (publicElement) return publicElement;
+    const wrapper = {
         id,
         _id: id, // mirrors web-compat Element naming for cross-compat consumers
         style: makeStyleProxy(id),
@@ -103,7 +140,45 @@ function makeElementWrapper(id: string): SyntheticElementWrapper {
         // write path.
         setAttribute(_name: string, _value: string): void { /* no-op */ },
         getAttribute(_name: string): string | null { return null; },
-    };
+        getBoundingClientRect(): SyntheticLayoutRect {
+            const rect = g().getLayoutRect?.(id) as Partial<SyntheticLayoutRect> | undefined;
+            if (!rect) return emptyLayoutRect();
+            const x = Number(rect.x ?? rect.left ?? 0);
+            const y = Number(rect.y ?? rect.top ?? 0);
+            const width = Number(rect.width ?? 0);
+            const height = Number(rect.height ?? 0);
+            return {
+                x, y, width, height,
+                top: Number(rect.top ?? y),
+                right: Number(rect.right ?? x + width),
+                bottom: Number(rect.bottom ?? y + height),
+                left: Number(rect.left ?? x),
+            };
+        },
+        get offsetWidth(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { offsetWidth?: number } | undefined;
+            return Number(metrics?.offsetWidth ?? this.getBoundingClientRect().width);
+        },
+        get offsetHeight(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { offsetHeight?: number } | undefined;
+            return Number(metrics?.offsetHeight ?? this.getBoundingClientRect().height);
+        },
+        get clientWidth(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { clientWidth?: number } | undefined;
+            return Number(metrics?.clientWidth ?? this.offsetWidth);
+        },
+        get clientHeight(): number {
+            const metrics = g().getLayoutBoxMetrics?.(id) as { clientHeight?: number } | undefined;
+            return Number(metrics?.clientHeight ?? this.offsetHeight);
+        },
+        setPointerCapture(pointerId: number): void {
+            callBridge('nativeSetPointerCapture', id, pointerId);
+        },
+        releasePointerCapture(pointerId: number): void {
+            callBridge('nativeReleasePointerCapture', id, pointerId);
+        },
+    } satisfies SyntheticElementWrapper;
+    return wrapper;
 }
 
 /// Shape used by the bridge's `pointer*` and `gesture*` data payloads.
@@ -148,6 +223,9 @@ export interface SyntheticEvent {
     nativeEvent: { rawArgs: unknown[] };
     preventDefault: () => void;
     stopPropagation: () => void;
+    stopImmediatePropagation: () => void;
+    isPropagationStopped: () => boolean;
+    isImmediatePropagationStopped: () => boolean;
     defaultPrevented: boolean;
     // Position
     clientX: number;
@@ -216,6 +294,8 @@ export function makeSyntheticEvent(
     rawArgs: unknown[],
 ): SyntheticEvent {
     const target = makeElementWrapper(id);
+    let propagationStopped = false;
+    let immediatePropagationStopped = false;
     const evt: SyntheticEvent = {
         type: eventName,
         currentTarget: target,
@@ -223,7 +303,13 @@ export function makeSyntheticEvent(
         nativeEvent: { rawArgs },
         defaultPrevented: false,
         preventDefault() { evt.defaultPrevented = true; },
-        stopPropagation() { /* no-op — JSX handlers attach via on() with no bubble chain */ },
+        stopPropagation() { propagationStopped = true; },
+        stopImmediatePropagation() {
+            propagationStopped = true;
+            immediatePropagationStopped = true;
+        },
+        isPropagationStopped() { return propagationStopped; },
+        isImmediatePropagationStopped() { return immediatePropagationStopped; },
         clientX: 0, clientY: 0, offsetX: 0, offsetY: 0, button: 0,
         pointerId: 0, pointerType: 'mouse', isPrimary: true, pressure: 0.5,
         ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,

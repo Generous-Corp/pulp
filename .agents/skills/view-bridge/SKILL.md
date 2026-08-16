@@ -23,6 +23,19 @@ times to be worth remembering.
 | Hand the built view to an external container (TabPanel, WindowHost) | Yes — call `ViewBridge::release_view()` |
 | Ship a paint-only overlay | No — the legacy standalone inspector runtime was removed; compose canonical control separately |
 
+### Native scripted UI is not a WebView
+
+`ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` execute through Pulp's JS
+engine and native Skia/Dawn view tree; they do not require `WebViewPanel`. In an
+SDK configured with `PULP_BUILD_WEBVIEW=ON`, use `pulp::view-native` (or
+`pulp_add_plugin(... NATIVE_UI)`, which also selects
+`pulp::standalone-native`) when the shipped artifact must not link WebKit,
+WebView2, or WebKitGTK. The legacy `pulp::view` and `pulp::standalone` targets
+remain the compatibility composition for products that instantiate
+`WebViewPanel`. Do not put WebView sources or framework links back onto
+`pulp-view-core`, `pulp-view-script`, or `pulp-format`; static-library private
+links propagate to the final consumer and silently contaminate native plugins.
+
 `Processor`'s editor hooks (`create_view`, `view_size`, `on_view_*`) are
 part of the node ABI surface. When adding a new view lifecycle hook, append
 the virtual at the tail of `Processor`; never insert, remove, reorder, or
@@ -842,9 +855,23 @@ Key invariants:
 - **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
   `attach_native_runtime(JsRuntime&, "<handler_name>")` for the low-level
   native runtime, or `attach_native_runtime(ScriptEngine&, "<handler_name>")`
-  when a product owns Pulp's public engine wrapper. Both native overloads
-  register one global function that accepts a JSON envelope string and returns
-  the JSON response string; same handler registrations and error vocabulary.
+  when a product owns Pulp's public engine wrapper. A product built on
+  `ScriptedUiSession` must use
+  `attach_native_runtime(session, "<handler_name>")`: the session owns the
+  attachment, installs it before the live script runs, and reinstalls it after
+  every realm replacement without exposing or borrowing the replaceable
+  `ScriptEngine`. Native overloads register one global function that accepts a
+  JSON envelope string and returns the JSON response string; they share the
+  same handler registrations and error vocabulary.
+- **Session attachment has explicit teardown.** An `EditorBridge` attached to
+  a `ScriptedUiSession` must outlive the attachment. Call
+  `detach_native_runtime(session, "<handler_name>")` before either the bridge
+  or a handler capture expires. The live realm's symbol then fails closed, and
+  future realm replacements omit it.
+- **Reload validation does not replay product effects.** A scripted reload
+  first executes code in a probe realm. That realm receives fail-closed native
+  message stubs so script validation can resolve the globals without calling
+  processor handlers twice; only the committed live realm dispatches messages.
 - **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
@@ -913,10 +940,9 @@ strings MUST guarantee:
 ### Native-side registrars MUST be idempotent
 
 `registerPointer(id)` / `registerWheel(id)` (and any future
-`registerX(id)`) wrap the previous `on_pointer_event` lambda. If a React
-re-render re-issues the registration, each call stacks a new wrapper —
-N renders → N firings per event. Always gate the registration with a
-per-id set (e.g. `pointer_registered_`, `wheel_registered_`) and
+`registerX(id)`) install View callbacks. If a React re-render re-issues the
+registration, replacing or stacking those callbacks can multiply delivery or
+silently change callback ownership. Always gate registration per id/channel and
 early-return on duplicates.
 
 Wheel delivery has two distinct JS channels and must preserve both without
@@ -931,6 +957,22 @@ boundary for both searches; a registration on that scroller receives the tick,
 matching an `overflow:auto` DOM element, while registrations above it do not
 receive a tick the scroller consumes.
 
+Pointer delivery follows the same single-origin rule. Native dispatch walks the
+hit path, selects the deepest View with `on_dom_pointer_event` (or
+`on_dom_pointer_move_event`) as the sole full `__dispatch__` origin, and calls
+`__dispatchCallbackOnly__` for registered native ancestors. The origin's
+Element event performs the JS capture/bubble walk; full-dispatching an ancestor
+would enter that walk twice. This callback-only ancestor lane preserves direct
+`@pulp/react` `on(id, event, fn)` behavior without duplicating web-compat DOM
+listeners. Native `registerPointer` emits the corresponding mouse event; the JS
+DOM dispatcher must not synthesize a second one.
+
+Propagation cancellation is part of this boundary: `stopPropagation()` allows
+remaining listeners on the current target but prevents ancestor and document
+delivery; `stopImmediatePropagation()` also stops remaining listeners on the
+current target. Pointer document fanout occurs only when the Element dispatch
+did not stop propagation.
+
 ### macOS host-side bubbling
 
 `core/view/platform/mac/window_host_mac.mm` is the dispatch source for
@@ -939,10 +981,10 @@ mouse / pointer / wheel on macOS. Every dispatcher MUST:
 - Set `me.window_position = pt` for wheel events (clientX/Y derives from
   this). Without it JSX `e.clientX - rect.left` for anchor-frequency
   zoom gives the wrong anchor.
-- Bubble `on_pointer_event` up the parent chain (W3C bubbling) so a
-  wrap-div with `registerPointer` subscribed gets events from canvas
-  children that win `hit_test`. The Spectr FilterBank band-drawer is
-  this exact pattern.
+- Route pointer events through the shared dispatcher. It performs one full DOM
+  dispatch at the deepest registered origin, then callback-only native ancestor
+  delivery. Do not full-dispatch every registered ancestor: JavaScript already
+  performs W3C capture/bubbling from the origin.
 - Leave `on_mouse_down` / `on_mouse_drag` / `on_mouse_up` deepest-wins
   (those are the JUCE-style click channel, not the W3C bubbling channel).
 
@@ -983,6 +1025,8 @@ imported designs.
 - "Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws"
 - "Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}"
 - "Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)"
+- `pulp-test-widget-bridge-dispatch-document-event` `[pointer-semantics]`:
+  exact one-delivery, document bubbling, and stop/stopImmediate behavior
 
 Run with: `./build/test/pulp-test-widget-bridge "[contract]"`
 
@@ -1440,6 +1484,8 @@ this boundary. Parameter text and custom state have matching containment in
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
 - `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
+- `core/view/include/pulp/view/scripted_ui.hpp` — session-owned native message
+  attachment and realm-replacement persistence
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference

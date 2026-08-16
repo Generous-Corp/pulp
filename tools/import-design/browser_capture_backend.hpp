@@ -169,7 +169,11 @@ struct CaptureRequest {
     int initial_width = 1280;
     int initial_height = 800;
     int device_scale_factor = kDefaultDeviceScaleFactor;
-    int timeout_ms = 60000;
+    // Interaction-rich state captures can legitimately spend most of a minute
+    // executing their audited plan before the final multi-frame compositor
+    // proof begins. Keep enough deadline for that proof without weakening any
+    // of its byte-identical stability requirements.
+    int timeout_ms = 90000;
     bool allow_network = false;
 };
 

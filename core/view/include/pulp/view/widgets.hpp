@@ -255,6 +255,14 @@ public:
     void set_cached_line_boxes(std::vector<CachedLineBox> boxes,
                                float basis_width, std::string basis_face,
                                bool wrap_on_cache_miss = false);
+    /// Drop browser-captured line geometry when a responsive layout
+    /// intentionally changes typography. The label returns to native shaping
+    /// at its current font metrics and bounds.
+    void clear_cached_line_boxes() {
+        cached_line_boxes_.clear();
+        shaped_cache_valid_ = false;
+        invalidate_layout();
+    }
     const std::vector<CachedLineBox>& cached_line_boxes() const {
         return cached_line_boxes_;
     }
@@ -445,6 +453,11 @@ private:
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
         int max_lines = 0;         // attributed nowrap uses one; wrap is unlimited
+        // Captured browser line positions and native reflow can have identical
+        // shaping inputs but different x/y origins. Eligibility may change as
+        // imported ancestor styles settle, so it is part of the cache key,
+        // not merely a branch taken on cache construction.
+        bool captured_positions = false;
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
@@ -454,6 +467,7 @@ private:
                    letter_spacing == o.letter_spacing &&
                    width == o.width && line_height == o.line_height &&
                    break_mode == o.break_mode && max_lines == o.max_lines &&
+                   captured_positions == o.captured_positions &&
                    font_gen == o.font_gen;
         }
     };
@@ -497,7 +511,6 @@ private:
     canvas::PreparedText attributed_prepare_cache_;
     std::uint64_t attributed_prepare_font_gen_ = 0;
     bool attributed_prepare_valid_ = false;
-
 public:
     /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).
     void set_text_direction(canvas::TextDirection d) { text_direction_ = d; }
@@ -840,14 +853,16 @@ public:
     /// core center on the [-135°,+135°] arc — and skips the synthetic notch, so
     /// the moving line rides the disc's baked min/center/max reference ticks.
     void set_captured_indicator(float r_in, float r_out, float width_px,
-                                canvas::Color color) {
+                                canvas::Color color, float phase_rad = 0.0f) {
         ind_r_in_ = r_in; ind_r_out_ = r_out;
         ind_width_ = width_px; ind_color_ = color;
+        ind_phase_rad_ = phase_rad;
         has_captured_indicator_ = true;
     }
     bool has_captured_indicator() const { return has_captured_indicator_; }
     float captured_indicator_r_in() const { return ind_r_in_; }
     float captured_indicator_r_out() const { return ind_r_out_; }
+    float captured_indicator_phase_rad() const { return ind_phase_rad_; }
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
@@ -859,6 +874,7 @@ private:
     float ind_r_in_ = 0.0f;
     float ind_r_out_ = 0.0f;
     float ind_width_ = 0.0f;
+    float ind_phase_rad_ = 0.0f;
     canvas::Color ind_color_ = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
@@ -1215,9 +1231,9 @@ public:
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
 
-    /// Override the accent color for the active fill and handle. Empty
-    /// (the default) means the widget pulls `control.fill` / `control.thumb`
-    /// from the active theme.
+    /// Override the accent color for the active fill.  CSS `accent-color`
+    /// does not recolor the range thumb: an enabled accented control keeps
+    /// the opaque light platform handle used by native HTML range controls.
     void set_accent_color(canvas::Color c) {
         accent_color_ = c;
         has_accent_color_ = true;
@@ -1226,7 +1242,7 @@ public:
     bool has_accent_color() const { return has_accent_color_; }
     canvas::Color accent_color() const { return accent_color_; }
 
-    /// Track thickness in pixels (default 4). Anything in 4–6 matches
+    /// Track thickness in pixels (default 5). Anything in 4–6 matches
     /// the visual weight of common HTML range styling.
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
     float track_thickness() const { return track_thickness_; }
@@ -1290,7 +1306,7 @@ private:
     float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::horizontal;
     bool dragging_ = false;
-    float track_thickness_ = 4.0f;
+    float track_thickness_ = 5.0f;
     canvas::Color accent_color_{};
     bool has_accent_color_ = false;
 };

@@ -6,12 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Migration fallback for hosts configured before per-slot policy. Remove this
-# file only after every enabled instance has a numbered policy file.
-EnvironmentFile=-/etc/pulp/linux-runner-group.env
-# Optional, per slot, and loaded last so it can override the migration value.
-# Set an empty PULP_LINUX_RUNNER_GROUP_ID for a repository-dispatch slot, or a
-# reviewed group ID for a workflow-restricted organization slot.
+# Optional. Setting PULP_LINUX_RUNNER_GROUP_ID changes registration from the
+# dispatch-only repository pool to the verified workflow-restricted org group.
+# Pool roles are per slot. A shared file would eventually move every
+# Restart=always instance into the restricted group and remove the
+# repository-scoped capacity used by release and operator workflows.
 EnvironmentFile=-/etc/pulp/linux-runner-group-%i.env
 # One job per invocation: the runner is --ephemeral, so run.sh exits when the job
 # completes and the clone is destroyed on the way out. systemd restarts us, which

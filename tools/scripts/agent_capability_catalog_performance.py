@@ -668,6 +668,169 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="music.pattern-development",
+        domain="music",
+        summary=(
+            "Fixed-capacity exact-tick event-set development with stable IDs, nested density, "
+            "regional fills, and deterministic integer A/B morphing."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "value-initialization",
+            "release": "none",
+        },
+        state_model=(
+            "Pure operations over trivially copyable fixed-capacity event records; no hidden "
+            "state, allocation, scheduler, clock, or note ownership."
+        ),
+        seed_model=(
+            "explicit seed plus exact tick, lane, cycle, stream, and stable event ID "
+            "coordinates"
+        ),
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "up to 64 canonical exact-tick event records per input, onset-set operation, "
+            "target count, half-open tick region, seed coordinates, and integer morph amount"
+        ),
+        output_domain="up to 64 canonical exact-tick event records or an explicit error",
+        units=["ticks", "event count", "integer accent", "integer morph amount", "seed"],
+        latency="zero",
+        tail="none",
+        scheduling="pure caller-clocked whole-pattern development",
+        bindings=[
+            binding(
+                role="event-id", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternEventId", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="event-role", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternEventRole", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="event-record", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternEvent", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="error", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternDevelopmentError", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="pattern", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::DevelopmentPattern<>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="result", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternDevelopmentResult<>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="set-operation", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternSetOperation", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="density-selection", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::DensitySelection", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="regional-fill-selection", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::RegionalFillSelection", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="morph-selection", kind="cpp_type",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::PatternMorphSelection", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="make-event-id", kind="cpp_function",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::make_pattern_event_id", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="set-algebra", kind="cpp_function",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::pattern_set<64>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="density", kind="cpp_function",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::select_pattern_density<64>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="regional-fill", kind="cpp_function",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::apply_regional_fill<64>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+            binding(
+                role="morph", kind="cpp_function",
+                include="pulp/music/pattern_development.hpp",
+                qualified_name="pulp::music::morph_patterns<64>", target="Pulp::music",
+                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+            ),
+        ],
+        _link_probes=[
+            {"role": "event-id", "binding": "pulp::music::PatternEventId",
+             "operation": "construct", "arguments": "1"},
+            {"role": "event-role", "binding": "pulp::music::PatternEventRole",
+             "operation": "construct", "arguments": "pulp::music::PatternEventRole::anchor"},
+            {"role": "event-record", "binding": "pulp::music::PatternEvent",
+             "operation": "construct", "arguments": "1, pulp::timebase::TickPosition{0}, 1000, pulp::music::PatternEventRole::anchor"},
+            {"role": "error", "binding": "pulp::music::PatternDevelopmentError",
+             "operation": "construct", "arguments": "pulp::music::PatternDevelopmentError::none"},
+            {"role": "pattern", "binding": "pulp::music::DevelopmentPattern<>",
+             "operation": "member_call", "member": "size", "arguments": ""},
+            {"role": "result", "binding": "pulp::music::PatternDevelopmentResult<>",
+             "operation": "construct", "arguments": ""},
+            {"role": "set-operation", "binding": "pulp::music::PatternSetOperation",
+             "operation": "construct", "arguments": "pulp::music::PatternSetOperation::set_union"},
+            {"role": "density-selection", "binding": "pulp::music::DensitySelection",
+             "operation": "construct", "arguments": ""},
+            {"role": "regional-fill-selection", "binding": "pulp::music::RegionalFillSelection",
+             "operation": "construct", "arguments": "pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{1}, 0, 0, pulp::timebase::RandomCoordinate{}"},
+            {"role": "morph-selection", "binding": "pulp::music::PatternMorphSelection",
+             "operation": "construct", "arguments": ""},
+            {"role": "make-event-id", "binding": "pulp::music::make_pattern_event_id",
+             "operation": "function_call", "arguments": "0, pulp::timebase::RandomCoordinate{}"},
+            {"role": "set-algebra", "binding": "pulp::music::pattern_set<64>",
+             "operation": "function_call", "arguments": "pulp::music::DevelopmentPattern<>{}, pulp::music::DevelopmentPattern<>{}, pulp::music::PatternSetOperation::set_union"},
+            {"role": "density", "binding": "pulp::music::select_pattern_density<64>",
+             "operation": "function_call", "arguments": "pulp::music::DevelopmentPattern<>{}, pulp::music::DensitySelection{}"},
+            {"role": "regional-fill", "binding": "pulp::music::apply_regional_fill<64>",
+             "operation": "function_call", "arguments": "pulp::music::DevelopmentPattern<>{}, pulp::music::DevelopmentPattern<>{}, pulp::music::RegionalFillSelection{{0}, {1}, 0, 0, {}}"},
+            {"role": "morph", "binding": "pulp::music::morph_patterns<64>",
+             "operation": "function_call", "arguments": "pulp::music::DevelopmentPattern<>{}, pulp::music::DevelopmentPattern<>{}, pulp::music::PatternMorphSelection{}"},
+        ],
+    ),
+    capability(
         key="music.rhythm-relationship",
         domain="music",
         summary=(

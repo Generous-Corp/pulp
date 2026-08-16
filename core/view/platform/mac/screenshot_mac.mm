@@ -226,6 +226,10 @@ std::vector<uint8_t> render_to_png(View& root,
         actual = ScreenshotBackend::coregraphics;
     }
 
+    if (actual == ScreenshotBackend::gpu) {
+        return render_to_png_gpu(root, width, height, scale);
+    }
+
 #ifdef PULP_HAS_SKIA
     if (actual == ScreenshotBackend::skia) {
         return render_to_png_skia(root, width, height, scale);

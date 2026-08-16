@@ -14,15 +14,26 @@ from pathlib import Path
 SCRIPT = Path(__file__).parent / "resolve_linux_route.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+PR_SAFE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-safe-linux.yml"
+VELLUM_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
+VERSION_SKILL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 MAC_PRO_SELECTOR = (
     '["self-hosted","Linux","X64","pulp-build-linux-x64",'
-    '"pulp-host-macpro"]'
+    '"pulp-host-macpro","pulp-auto-linux-x64"]'
 )
 
 _SPEC = importlib.util.spec_from_file_location("linux_route_under_test", SCRIPT)
 route = importlib.util.module_from_spec(_SPEC)
 assert _SPEC.loader is not None
 _SPEC.loader.exec_module(route)
+
+_AUDIT_SPEC = importlib.util.spec_from_file_location(
+    "runner_selector_audit_under_test",
+    Path(__file__).parent / "workflow_runner_selector_audit.py",
+)
+runner_selector_audit = importlib.util.module_from_spec(_AUDIT_SPEC)
+assert _AUDIT_SPEC.loader is not None
+_AUDIT_SPEC.loader.exec_module(runner_selector_audit)
 
 
 def test_dispatch_uses_configured_self_hosted_selector() -> None:
@@ -35,7 +46,7 @@ def test_dispatch_uses_configured_self_hosted_selector() -> None:
     )
     assert metadata["linux_route_reason"] == "explicit-dispatch"
     assert metadata["linux_provider"] == "local"
-    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-host-macpro"
+    assert json.loads(metadata["configured_selector_json"])[-1] == "pulp-auto-linux-x64"
     assert metadata["event_authorized_selector_json"] == metadata["configured_selector_json"]
 
 
@@ -239,14 +250,48 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     configured = re.search(
         r"(?m)^\s+CONFIGURED_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
     )
+    automatic = re.search(
+        r"(?m)^\s+AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
+    )
     authorized = re.search(
         r"(?m)^\s+EXPLICIT_LINUX_RUNNER_SELECTOR_JSON:\s*(.+)$", text
     )
     assert configured is not None
+    assert automatic is not None
     assert authorized is not None
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in configured.group(1)
+    assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" in automatic.group(1)
     assert "github.event_name == 'workflow_dispatch'" in authorized.group(1)
     assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in authorized.group(1)
+    assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" not in authorized.group(1)
+    assert '"pulp-auto-linux-x64"' in text
+    assert "automatic_local_linux_selector" in text
+    assert "parseable_automatic_linux_selector" in text
+    assert "isinstance(parsed_local_linux_selector, (str, list))" in text
+    assert "configured Linux selector lacks the exact" in text
+    trusted_dispatcher = PR_SAFE_WORKFLOW.read_text(encoding="utf-8")
+    assert (
+        "TRUSTED_SELECTOR_JSON: "
+        "${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}"
+        in trusted_dispatcher
+    )
+    assert (
+        "TRUSTED_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
+        not in trusted_dispatcher
+    )
+
+
+def test_protected_automatic_workflows_use_restricted_linux_selector() -> None:
+    for workflow in (VELLUM_WORKFLOW, VERSION_SKILL_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        assert "runs-on: >-" in text, workflow
+        expression = text.split("runs-on: >-", 1)[1].split("\n    steps:", 1)[0]
+        assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" in expression, workflow
+        assert "github.event_name == 'workflow_dispatch'" in expression, workflow
+        assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in expression, workflow
+        assert expression.index("github.event_name == 'workflow_dispatch'") < expression.index(
+            "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
+        ), workflow
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
@@ -264,6 +309,54 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
         'cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4' in text
     )
     assert 'cmake --build "$PULP_BUILD_DIR" --config Release\n' not in text
+
+
+def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:
+    """A `runs-on` that interpolates a *_RUNS_ON_JSON variable without
+    `fromJSON` yields ONE label whose text is the literal JSON array. No runner
+    can carry that label, and GitHub queues such a job forever instead of
+    failing it, so the symptom is an invisible hang on a required gate rather
+    than an error. Observed live on 2026-08-16: setting
+    PULP_LOCAL_LINUX_RUNS_ON_JSON left a dispatched `Enforce version & skill
+    sync` job queued with
+    labels=['["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'].
+
+    This delegates to `workflow_runner_selector_audit`, which matches
+    parentheses per variable. The check originally inlined here decided per
+    block with `if "fromJSON" in block: continue` — a presence test, not a
+    coverage test. It therefore false-negatived on the exact shape the required
+    workflows have: two variables in one selector, where wrapping the first
+    makes the guard skip the block without ever looking at the second. See
+    `test_workflow_runner_selector_audit.py` for the controls, including the
+    known-bad input that the substring form passes.
+    """
+    offenders = runner_selector_audit.audit_directory(BUILD_WORKFLOW.parent)
+    assert not offenders, (
+        "runs-on interpolates a *_RUNS_ON_JSON variable without fromJSON; "
+        "setting that variable would queue the job forever:\n  "
+        + "\n  ".join(offender.describe() for offender in offenders)
+    )
+
+
+def test_json_selector_fallbacks_stay_json_quoted() -> None:
+    """Wrapping the expression in `fromJSON` is only safe when EVERY branch is
+    JSON. A bare `'ubuntu-latest'` fallback inside `fromJSON(...)` fails to
+    parse and takes the required gate down with it, so the hosted fallbacks
+    must be written as the quoted JSON string `'"ubuntu-latest"'`.
+    """
+    for name in ("version-skill-check.yml", "vellum-freeze-check.yml"):
+        text = (BUILD_WORKFLOW.parent / name).read_text(encoding="utf-8")
+        block = re.search(r"runs-on: >-\n(.*?\n)\s*(?:name:|steps:)", text, re.S)
+        assert block, f"{name}: could not locate the runs-on block"
+        body = block.group(1)
+        assert "fromJSON(" in body, f"{name}: selector is not parsed"
+        assert "|| 'ubuntu-latest'" not in body, (
+            f"{name}: bare 'ubuntu-latest' fallback inside fromJSON would fail "
+            "to parse; use the JSON-quoted form"
+        )
+        assert body.count("'\"ubuntu-latest\"'") >= 3, (
+            f"{name}: every branch must carry a JSON-quoted hosted fallback"
+        )
 
 
 def _all_tests() -> list:

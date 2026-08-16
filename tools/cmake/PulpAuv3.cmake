@@ -90,7 +90,7 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     target_link_libraries(${fw_target} PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreAudioKit"
@@ -332,7 +332,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     target_link_libraries(${target}_AUv3 PRIVATE
         ${target}_Core
         ${_PULP_FORMAT_TARGET}
-        ${_PULP_VIEW_TARGET}
+        ${PULP_${target}_VIEW_TARGET}
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreAudioKit"
@@ -571,6 +571,14 @@ function(pulp_add_ios_auv3)
     endif()
 
     set(target "${AUV3_NAME}")
+
+    # The iOS-only helper bypasses pulp_add_plugin(), so establish the same
+    # production shipping declaration before _pulp_add_auv3() attaches its
+    # per-format manifest and scanner. Without this, the manifest directory is
+    # empty and CMake resolves `${target}.AUv3Extension.json` against `/`.
+    _pulp_cache_control_declarations(${target} production-stripped "" FALSE)
+    _pulp_configure_control_shipping(
+        ${target} "${AUV3_BUNDLE_ID}" "${AUV3_NAME}")
 
     if(AUV3_SOURCES)
         add_library(${target}_Core OBJECT ${AUV3_SOURCES})

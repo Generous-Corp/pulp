@@ -48,20 +48,36 @@ CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
 
+# shellcheck source=../../scripts/coverage_ctest_policy.sh
+source "${REPO_ROOT}/scripts/coverage_ctest_policy.sh"
+
 # Diff coverage is a local pre-push mirror of the required PR gate, not the
-# full/nightly test lane. Keep its CTest selection aligned with the required
-# gate so a coverage check cannot spend tens of minutes in an unrelated slow
-# platform smoke or validator. Full/nightly/main CI invoke CTest separately and
-# continue to run these labels.
-DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-validation|slow|performance|bench|quality-lab}"
+# full/nightly test lane. Source the same CTest policy as run_coverage.sh so
+# local and SSH hooks cannot spend tens of minutes in an unrelated slow
+# platform smoke or validator. Full/nightly/main CI invoke CTest separately.
+DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-${PULP_COVERAGE_CTEST_LABEL_EXCLUDE}}"
+DIFF_COVER_CTEST_NAME_EXCLUDE="${PULP_DIFF_COVER_CTEST_NAME_EXCLUDE:-${PULP_COVERAGE_CTEST_NAME_EXCLUDE}}"
+DIFF_COVER_TEST_JOBS="${PULP_DIFF_COVER_TEST_JOBS:-${PULP_COVERAGE_TEST_JOBS:-8}}"
+DIFF_COVER_PER_TEST_TIMEOUT="${PULP_DIFF_COVER_CTEST_TIMEOUT:-${PULP_COVERAGE_CTEST_TIMEOUT:-600}}"
+if ! [[ "${DIFF_COVER_TEST_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[local_diff_cover] invalid PULP_DIFF_COVER_TEST_JOBS: '${DIFF_COVER_TEST_JOBS}'" >&2
+    return 2 2>/dev/null || exit 2
+fi
+if [[ "${DIFF_COVER_TEST_JOBS}" -gt 8 ]]; then DIFF_COVER_TEST_JOBS=8; fi
 
 run_coverage_ctest() {
     local build_dir="$1"
     local test_regex="${2:-}"
+    # Match scripts/run_coverage.sh and the primary CI lanes: enough parallelism
+    # to avoid launching nearly 19k discovered Catch2 cases serially, without
+    # oversubscribing memory on M1/M3 or SSH/self-hosted builders.
     local args=(
         --test-dir "${build_dir}"
         --output-on-failure
         --label-exclude "${DIFF_COVER_CTEST_LABEL_EXCLUDE}"
+        --exclude-regex "${DIFF_COVER_CTEST_NAME_EXCLUDE}"
+        --parallel "${DIFF_COVER_TEST_JOBS}"
+        --timeout "${DIFF_COVER_PER_TEST_TIMEOUT}"
     )
     if [ -n "${test_regex}" ]; then
         echo "[local_diff_cover] limiting ctest to regex: ${test_regex}" >&2
@@ -407,11 +423,11 @@ fi
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
-# Use LLVM's module-signature placeholder so all invocations of the same
-# instrumented binary merge into one profile file. The full CTest registry
-# launches thousands of one-case Catch2 processes; a per-PID pattern creates
-# enough files to hit ARG_MAX and can lose useful coverage when PIDs recycle.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
+# Use LLVM's `%Nm` merge pool, sized to the bounded CTest concurrency above.
+# Plain `%m` is a one-file pool; parallel exits corrupted that sole file on
+# Linux. A pool preserves online merging without the unbounded file count and
+# PID-reuse risk of `%p`.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${DIFF_COVER_TEST_JOBS}m.profraw"
 
 echo "=== Running tests ==="
 run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" || \
@@ -444,8 +460,26 @@ fi
 PROFDATA="${BUILD_DIR}/coverage/pulp.profdata"
 mkdir -p "${BUILD_DIR}/coverage"
 echo "=== Merging profiles ==="
-find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
-    | xargs -0 llvm-profdata merge -sparse -o "${PROFDATA}"
+MERGE_LOG="${BUILD_DIR}/coverage/llvm-profdata-merge.log"
+PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+    echo "[local_diff_cover] no raw profile shards were produced" >&2
+    exit 1
+fi
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
+    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
+        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+    cat "${MERGE_LOG}" >&2
+    exit 1
+fi
+cat "${MERGE_LOG}" >&2
+INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
+if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
+    echo "[local_diff_cover] ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+    exit 1
+fi
+echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # ── Gather binaries for llvm-cov -object ────────────────────────────────────
 # Mirror scripts/run_coverage.sh's binary discovery so we cover the same

@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace pulp::render {
@@ -40,12 +41,20 @@ struct ScriptedUiOptions {
     /// explicit empty or reviewed set. Appended to preserve the public
     /// aggregate's legacy positional layout.
     CapabilitySet granted_capabilities = CapabilitySet::all();
+    /// Install the native runtime-design import endpoint before evaluating the
+    /// session bundle. Opt-in keeps ordinary scripted UIs unchanged while
+    /// allowing a generated @pulp/react bundle to materialize a captured,
+    /// executable browser document in this exact live realm.
+    bool enable_runtime_import = false;
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and
 // standalone hot reload semantics with widget value preservation.
 class ScriptedUiSession {
 public:
+    using NativeMessageHandler =
+        std::function<std::string(std::string_view envelope_json)>;
+
     ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options);
     ~ScriptedUiSession();
 
@@ -88,6 +97,23 @@ public:
     /// The callback must not retain pre-reset View pointers or perform another
     /// inspector evaluation (which would immediately owe another reset).
     void set_post_evaluation_reset_callback(std::function<void()> cb);
+    /// Attach a renderer-neutral native message endpoint to this session's JS
+    /// realm. The named global accepts one JSON envelope string and returns the
+    /// handler's JSON response string. The endpoint is installed immediately
+    /// when a realm is live and reinstalled on every successful realm rebuild.
+    ///
+    /// Attachments are session-owned so callers never borrow the replaceable
+    /// ScriptEngine. The handler and every object it captures must outlive the
+    /// attachment; call detach_native_message_handler() before either expires.
+    /// Owner/UI thread only. Throws std::invalid_argument for an empty name or
+    /// handler.
+    void attach_native_message_handler(std::string handler_name,
+                                       NativeMessageHandler handler);
+    /// Remove a named native message endpoint from this and future realms. A
+    /// live realm keeps the global symbol but replaces it with a fail-closed
+    /// detached response so cached JS call sites cannot reach an expired
+    /// handler. Owner/UI thread only.
+    void detach_native_message_handler(std::string_view handler_name);
     /// Replace the live JS console sink and retain it across hot reloads.
     /// This is the primary application-owned sink; secondary scoped observers
     /// installed with add_log_callback() are preserved.
@@ -162,6 +188,10 @@ public:
     bool theme_reload_enabled() const { return theme_reload_enabled_; }
 
 private:
+    struct NativeMessageAttachment {
+        NativeMessageHandler handler;
+    };
+
     const std::uint64_t identity_;
     View& root_;
     state::StateStore& store_;
@@ -173,6 +203,7 @@ private:
     CapabilitySet granted_capabilities_ = CapabilitySet::all();
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
+    bool runtime_import_enabled_ = false;
     ValueChannelAccess value_channel_access_;
 
     std::unique_ptr<ScriptEngine> engine_;
@@ -204,6 +235,8 @@ private:
     bool post_evaluation_reset_callback_pending_ = false;
     LogCallback log_callback_;
     std::unordered_map<std::uint64_t, LogCallback> log_subscribers_;
+    std::unordered_map<std::string, std::shared_ptr<NativeMessageAttachment>>
+        native_message_handlers_;
     std::uint64_t next_log_subscription_ = 0;
     render::GpuSurface* gpu_surface_ = nullptr;
 
@@ -231,6 +264,12 @@ private:
     std::string reset_after_runtime_evaluation(
         ScriptInspectorBridge::EvaluationDeadline deadline);
     LogCallback engine_log_callback();
+    void install_native_message_handlers(ScriptEngine& engine,
+                                         bool validation_realm) const;
+    static void install_native_message_handler(
+        ScriptEngine& engine, const std::string& name,
+        std::shared_ptr<NativeMessageAttachment> attachment,
+        bool validation_realm);
     void dispatch_log(std::string_view level, std::string_view message);
 
     static std::string read_text_file(const std::filesystem::path& path);

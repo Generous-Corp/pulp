@@ -26,6 +26,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/music.hpp": "Pulp::music",
     "pulp/music/pitch.hpp": "Pulp::music",
     "pulp/music/pattern.hpp": "Pulp::music",
+    "pulp/music/pattern_development.hpp": "Pulp::music",
     "pulp/music/rhythm_relationship.hpp": "Pulp::music",
     "pulp/music/spelling.hpp": "Pulp::music",
     "pulp/music/voicing.hpp": "Pulp::music",
@@ -44,6 +45,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/explicit_q_resonator_bank.hpp": "Pulp::signal",
     "pulp/signal/expander.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",
@@ -104,9 +106,35 @@ EXPORTS = [
     *SIGNAL_EXPORTS,
 ]
 
+# Reviewed public signal APIs that intentionally remain outside the legacy
+# generator-facing vocabulary compatibility projection.
+LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
+    "pulp/signal/waveset_transformer.hpp",
+}
+
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/audio/planar_audio_ring_buffer.hpp",
+        "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Lock-free SPSC sample transport and overrun accounting used by realtime "
+            "capture paths; it is bounded infrastructure rather than a generator DSP claim."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_probe.hpp",
+        "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Optional prepared output-boundary diagnostics and capture plumbing; "
+            "it is a reusable observability surface rather than a generator DSP claim."
+        ),
+    },
     {
         "include": "pulp/signal/freeze_loop_sampler.hpp",
         "fingerprint": "sha256:fa2406081bd7e78a0097eab797da14d2e1854cd0a6972cf6971728050b19348a",
@@ -393,7 +421,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/music/music.hpp",
-        "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
+        "fingerprint": "sha256:4c95583dd9992f762edb2a00191ecd785ba3fac600d5528adf24167ad13a389e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -437,7 +465,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/stft.hpp",
-        "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
+        "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
         "disposition": "capability_support",
         "capability_keys": [
             "signal.bounded-sample-history",
@@ -492,7 +520,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:cf36559168b3f108277cd9106604ec16670b9cbae863813d468f4ab0363d3aff",
+        "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -509,6 +537,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "The harmonizer is a public DSP API, but it does not yet have the "
             "typed bindings, lifecycle contract, parameter semantics, and link "
             "probe required for a generator-facing capability claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/waveset_transformer.hpp",
+        "fingerprint": "sha256:9d0dcf5f66673d434f93481081be084dcfa7674613b801bb3d731117463aa267",
+        "disposition": "unsupported_capability",
+        "capability_keys": [],
+        "rationale": (
+            "The bounded WavesetTransformer is a signal-only public DSP API; it has no "
+            "typed generator binding and makes no installed agent capability claim."
         ),
     },
 ]

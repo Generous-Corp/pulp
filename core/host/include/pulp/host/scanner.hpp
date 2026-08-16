@@ -20,11 +20,13 @@ namespace pulp::host {
 // ── Plugin format identifier ────────────────────────────────────────────
 
 enum class PluginFormat {
-    VST3,
-    AudioUnit,     // AU v2 (macOS)
-    AudioUnitV3,   // AUv3 (macOS/iOS)
-    CLAP,
-    LV2,
+    VST3 = 0,
+    AudioUnit = 1,   // AU v2 (macOS)
+    AudioUnitV3 = 2, // AUv3 (macOS/iOS)
+    CLAP = 3,
+    LV2 = 4,
+    /// Pulp-owned, pathless device resolved without external discovery.
+    BuiltIn = 5,
 };
 
 // ── Plugin descriptor from scanning ─────────────────────────────────────

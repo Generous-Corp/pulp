@@ -131,6 +131,55 @@ if(EXISTS "${_pulp_sdk_provenance}")
         set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
         set(PULP_SDK_AUDIO_PROBES_ENABLED FALSE)
         set(PULP_SDK_INSPECTOR_ENABLED "${_pulp_sdk_inspector}")
+
+        # WidgetBridge owns callback-lifetime state in its public class layout,
+        # while event dispatch is implemented by pulp-view-script. Mixing a
+        # stale installed header with a fresh archive can therefore link cleanly
+        # and crash on the first click. Official SDKs bind those two files in
+        # the release provenance marker and fail before any consumer compiles.
+        if(NOT _pulp_sdk_version VERSION_LESS "0.807.0" AND
+           _pulp_sdk_platform MATCHES "^windows-")
+            set(_pulp_sdk_view_script_path "lib/pulp-view-script.lib")
+        elseif(NOT _pulp_sdk_version VERSION_LESS "0.807.0")
+            set(_pulp_sdk_view_script_path "lib/libpulp-view-script.a")
+        endif()
+        if(NOT _pulp_sdk_version VERSION_LESS "0.807.0")
+            set(_pulp_sdk_integrity_paths
+                "include/pulp/view/widget_bridge.hpp"
+                "${_pulp_sdk_view_script_path}")
+            string(JSON _pulp_sdk_integrity_schema ERROR_VARIABLE _pulp_sdk_integrity_schema_error
+                   GET "${_pulp_sdk_provenance_json}" integrity schema)
+            string(JSON _pulp_sdk_integrity_algorithm ERROR_VARIABLE _pulp_sdk_integrity_algorithm_error
+                   GET "${_pulp_sdk_provenance_json}" integrity algorithm)
+            if(_pulp_sdk_integrity_schema_error OR _pulp_sdk_integrity_algorithm_error OR
+               NOT _pulp_sdk_integrity_schema STREQUAL "pulp.sdk-integrity.v1" OR
+               NOT _pulp_sdk_integrity_algorithm STREQUAL "sha256")
+                message(FATAL_ERROR
+                    "Pulp SDK provenance at ${_pulp_sdk_provenance} has no valid "
+                    "WidgetBridge coherence contract; refusing to consume it.")
+            endif()
+            foreach(_pulp_sdk_integrity_path IN LISTS _pulp_sdk_integrity_paths)
+                string(JSON _pulp_sdk_expected_hash ERROR_VARIABLE _pulp_sdk_hash_error
+                       GET "${_pulp_sdk_provenance_json}" integrity files
+                       "${_pulp_sdk_integrity_path}")
+                set(_pulp_sdk_integrity_file "${PULP_SDK_DIR}/${_pulp_sdk_integrity_path}")
+                if(_pulp_sdk_hash_error OR
+                   NOT _pulp_sdk_expected_hash MATCHES "^[0-9a-f]+$" OR
+                   NOT EXISTS "${_pulp_sdk_integrity_file}")
+                    message(FATAL_ERROR
+                        "Pulp SDK coherence member ${_pulp_sdk_integrity_path} is "
+                        "missing or unauthenticated; refusing to consume it.")
+                endif()
+                string(LENGTH "${_pulp_sdk_expected_hash}" _pulp_sdk_expected_hash_length)
+                file(SHA256 "${_pulp_sdk_integrity_file}" _pulp_sdk_actual_hash)
+                if(NOT _pulp_sdk_expected_hash_length EQUAL 64 OR
+                   NOT _pulp_sdk_actual_hash STREQUAL _pulp_sdk_expected_hash)
+                    message(FATAL_ERROR
+                        "Pulp SDK coherence mismatch for ${_pulp_sdk_integrity_path}; "
+                        "reinstall the complete SDK instead of swapping headers or libraries.")
+                endif()
+            endforeach()
+        endif()
     else()
         message(FATAL_ERROR
             "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
@@ -209,3 +258,15 @@ unset(_pulp_sdk_source_ref_type)
 unset(_pulp_sdk_source_ref_type_error)
 unset(_pulp_sdk_platform_type)
 unset(_pulp_sdk_platform_type_error)
+unset(_pulp_sdk_view_script_path)
+unset(_pulp_sdk_integrity_paths)
+unset(_pulp_sdk_integrity_schema)
+unset(_pulp_sdk_integrity_schema_error)
+unset(_pulp_sdk_integrity_algorithm)
+unset(_pulp_sdk_integrity_algorithm_error)
+unset(_pulp_sdk_integrity_path)
+unset(_pulp_sdk_expected_hash)
+unset(_pulp_sdk_hash_error)
+unset(_pulp_sdk_integrity_file)
+unset(_pulp_sdk_expected_hash_length)
+unset(_pulp_sdk_actual_hash)

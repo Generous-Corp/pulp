@@ -3,12 +3,19 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <cerrno>
+#include <signal.h>
+#endif
 
 using namespace pulp::platform;
 
@@ -71,6 +78,116 @@ TEST_CASE("line callback fires per line", "[child_process]") {
     REQUIRE(lines[1] == "line2");
     REQUIRE(lines[2] == "line3");
 }
+
+TEST_CASE("line callback exceptions cancel the child during wait",
+          "[child_process][lifecycle]") {
+    std::atomic<bool> callback_entered{false};
+    ProcessOptions options;
+    options.timeout_ms = 5000;
+    options.on_stdout_line = [&](std::string_view) {
+        callback_entered.store(true, std::memory_order_release);
+        throw std::runtime_error("callback failure");
+    };
+
+    ChildProcess child;
+#ifdef _WIN32
+    REQUIRE(child.start("cmd", {"/c", "echo callback-line"}, options));
+#else
+    REQUIRE(child.start("/bin/sh", {"-c", "printf 'callback-line\\n'"}, options));
+#endif
+    while (child.is_running())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    ProcessResult result;
+    REQUIRE_NOTHROW(result = child.wait());
+    CHECK(callback_entered.load(std::memory_order_acquire));
+    CHECK(result.was_cancelled);
+    CHECK(result.exit_code == 0);
+    CHECK(result.stdout_output.find("callback-line") != std::string::npos);
+}
+
+TEST_CASE("line callback failure preserves the other output stream during cancellation",
+          "[child_process][lifecycle]") {
+    std::atomic<bool> callback_entered{false};
+    std::atomic<bool> stderr_callback_entered{false};
+    ProcessOptions options;
+    options.timeout_ms = 5000;
+    options.on_stdout_line = [&](std::string_view) {
+        callback_entered.store(true, std::memory_order_release);
+        throw std::runtime_error("callback failure");
+    };
+    options.on_stderr_line = [&](std::string_view) {
+        stderr_callback_entered.store(true, std::memory_order_release);
+    };
+
+    ChildProcess child;
+#ifdef _WIN32
+    REQUIRE(child.start(
+        "cmd",
+        {"/c", "echo stderr-line 1>&2 & echo callback-line & ping -n 6 127.0.0.1 >nul"},
+        options));
+#else
+    REQUIRE(child.start(
+        "/bin/sh",
+        {"-c", "printf 'stderr-line\\n' >&2; printf 'callback-line\\n'; sleep 5"},
+        options));
+#endif
+
+    ProcessResult result;
+    REQUIRE_NOTHROW(result = child.wait());
+    CHECK(callback_entered.load(std::memory_order_acquire));
+    CHECK(result.was_cancelled);
+    CHECK(result.stdout_output.find("callback-line") != std::string::npos);
+    CHECK(result.stderr_output.find("stderr-line") != std::string::npos);
+    CHECK_FALSE(stderr_callback_entered.load(std::memory_order_acquire));
+}
+
+#ifndef _WIN32
+TEST_CASE("line callback exceptions cancel a child during input-channel setup",
+          "[child_process][lifecycle][standard-input]") {
+    std::atomic<bool> callback_entered{false};
+    std::atomic<bool> stderr_callback_entered{false};
+    std::atomic<bool> session_observed_child_exit{false};
+    ProcessOptions options;
+    options.standard_input_timeout_ms = 2000;
+    options.timeout_ms = 5000;
+    options.on_stdout_line = [&](std::string_view) {
+        callback_entered.store(true, std::memory_order_release);
+        throw std::runtime_error("callback failure");
+    };
+    options.on_stderr_line = [&](std::string_view) {
+        stderr_callback_entered.store(true, std::memory_order_release);
+    };
+
+    ChildProcess child;
+    const bool started = child.start_with_standard_input_channel(
+        "/bin/sh",
+        {"-c",
+         "printf 'stderr-line\\n' >&2; printf 'callback-line\\n'; IFS= read -r ignored"},
+        [&](int child_process_id, ChildProcessInputChannel channel,
+            std::chrono::steady_clock::time_point deadline) {
+            (void)channel;
+            while (std::chrono::steady_clock::now() < deadline) {
+                errno = 0;
+                if (::kill(child_process_id, 0) != 0 && errno == ESRCH) {
+                    session_observed_child_exit.store(true, std::memory_order_release);
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            return false;
+        },
+        options);
+
+    CHECK(callback_entered.load(std::memory_order_acquire));
+    CHECK(session_observed_child_exit.load(std::memory_order_acquire));
+    CHECK_FALSE(started);
+    const auto result = child.wait();
+    CHECK(result.was_cancelled);
+    CHECK(result.stderr_output.find("stderr-line") != std::string::npos);
+    CHECK_FALSE(stderr_callback_entered.load(std::memory_order_acquire));
+}
+#endif
 
 TEST_CASE("cancel terminates process", "[child_process]") {
     ChildProcess cp;

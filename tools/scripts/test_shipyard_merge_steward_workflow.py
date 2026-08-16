@@ -19,7 +19,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
         cls.doc = yaml.load(cls.text, Loader=yaml.BaseLoader)
 
-    def test_first_rollout_is_manual_only_and_serialized(self) -> None:
+    def test_proof_stage_is_manual_only_and_serialized(self) -> None:
         triggers = self.doc["on"]
         self.assertEqual(set(triggers), {"workflow_dispatch"})
         concurrency = self.doc["concurrency"]
@@ -45,6 +45,8 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         )
         self.assertIn("secrets.SHIPYARD_APP_ID", self.text)
         self.assertIn("secrets.SHIPYARD_APP_PRIVATE_KEY", self.text)
+        self.assertIn("permission-administration: read", self.text)
+        self.assertIn("permission-contents: write", self.text)
         self.assertIn("permission-merge-queues: write", self.text)
         self.assertIn("steps.shipyard-app-token.outputs.token", self.text)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.text)
@@ -97,10 +99,93 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
     def test_apply_is_explicit_and_no_model_is_launched(self) -> None:
         workflow_dispatch = self.doc["on"]["workflow_dispatch"]
         self.assertEqual(workflow_dispatch["inputs"]["apply"]["default"], "false")
+        self.assertEqual(
+            workflow_dispatch["inputs"]["dispatch_recovery"]["default"], "false"
+        )
         self.assertIn("args+=(--apply)", self.text)
         lowered = self.text.lower()
         for launcher in ("codex exec", "claude -p", "openai api"):
             self.assertNotIn(launcher, lowered)
+
+    def test_exception_outbox_is_durable_and_health_failure_is_preserved(self) -> None:
+        self.assertIn("permission-issues: write", self.text)
+        steps = self.doc["jobs"]["reconcile"]["steps"]
+        for name in ("Collect open PR facts", "Sync durable GitHub exception issue"):
+            step = next(step for step in steps if step.get("name") == name)
+            self.assertEqual(
+                step["env"]["GH_TOKEN"],
+                "${{ steps.shipyard-app-token.outputs.token }}",
+            )
+        self.assertIn("shipyard_steward_outbox.py", self.text)
+        self.assertIn("shipyard:steward-outbox", self.text)
+        self.assertIn("gh issue create", self.text)
+        self.assertIn("gh issue reopen", self.text)
+        self.assertIn("gh issue close", self.text)
+        self.assertIn("Preserve outbox renderer failure", self.text)
+        self.assertIn("steps.outbox.outcome != 'success'", self.text)
+        self.assertIn("select(.title ==", self.text)
+        self.assertIn("Preserve unhealthy controller result", self.text)
+        self.assertIn('steps.reconcile.outputs.exit_code', self.text)
+
+    def test_recovery_dispatch_is_exact_head_deduplicated_and_bounded(self) -> None:
+        self.assertIn("shipyard_recovery_dispatch.py", self.text)
+        self.assertIn("recovery-statuses.json", self.text)
+        self.assertIn(".candidates[0] // empty", self.text)
+        self.assertIn("shipyard/recovery-dispatch", self.text)
+        self.assertIn("state=pending", self.text)
+        self.assertIn("worker=pool", self.text)
+        self.assertIn("recovery_url=$(gh workflow run", self.text)
+        self.assertIn("actions/runs/${run_id}/cancel", self.text)
+        self.assertIn("dispatch_failed attempt=${attempt}", self.text)
+        self.assertIn("gh workflow run shipyard-recovery-worker.yml", self.text)
+        self.assertIn("-f expected_head=\"$head\"", self.text)
+        self.assertIn("-f assignment_epoch=\"$epoch\"", self.text)
+        self.assertIn("-f blocker_fingerprint=\"$fingerprint\"", self.text)
+        self.assertIn("-f publish_status=true", self.text)
+        self.assertIn("-f attempt_repair=true", self.text)
+        self.assertNotIn("actions/runners?per_page=100", self.text)
+        self.assertNotIn("shipyard_recovery_worker_select.py", self.text)
+        self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)
+
+    def test_stale_merge_group_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
+        self.assertIn("shipyard_merge_queue_run_cleanup.py", self.text)
+        self.assertIn("actions/runs?event=merge_group&status=${status}&per_page=100", self.text)
+        self.assertIn("--limit 20", self.text)
+        self.assertIn("merge-group-cleanup-plan.json", self.text)
+        self.assertIn(".candidates[]", self.text)
+        self.assertIn("head ${head} is current again", self.text)
+        self.assertIn(".event == \"merge_group\"", self.text)
+        self.assertIn(".head_sha == $head", self.text)
+        self.assertIn("actions/runs/${run_id}/cancel", self.text)
+        self.assertIn("inputs.apply && steps.merge_group_cleanup_plan.outcome", self.text)
+        self.assertIn("steps.merge_group_cleanup_apply.outcome", self.text)
+
+    def test_superseded_pull_request_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
+        self.assertIn("shipyard_pull_request_run_cleanup.py", self.text)
+        self.assertIn("actions/runs?event=pull_request&status=${status}&per_page=100", self.text)
+        self.assertIn("for status in in_progress pending queued requested waiting", self.text)
+        self.assertIn("pulls?state=open&per_page=100", self.text)
+        self.assertIn("--limit 20", self.text)
+        self.assertIn("pull-request-cleanup-plan.json", self.text)
+        self.assertIn("PR head ${head} is current again", self.text)
+        self.assertIn('.event == "pull_request"', self.text)
+        self.assertIn(".head_sha == $head", self.text)
+        self.assertIn("actions/runs/${run_id}/cancel", self.text)
+        self.assertIn("inputs.apply && steps.pull_request_cleanup_plan.outcome", self.text)
+        self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
+        self.assertNotIn('.event == "pull_request_target"', self.text)
+
+    def test_unlabeled_prs_receive_only_a_truthful_exact_head_sentinel(self) -> None:
+        self.assertIn("shipyard_provenance_label_plan.py", self.text)
+        self.assertIn("provenance-label-plan.json", self.text)
+        self.assertIn("shipyard:provenance-missing", self.text)
+        self.assertIn('.state == "open" and .head.sha == $head', self.text)
+        self.assertIn('if [ "$mutation" = add ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -eq 0 ] || continue', self.text)
+        self.assertIn('elif [ "$mutation" = remove ]', self.text)
+        self.assertIn('[ "${#labels[@]}" -gt 1 ] || continue', self.text)
+        self.assertIn("inputs.apply && steps.provenance_label_plan.outcome", self.text)
+        self.assertIn("steps.provenance_label_apply.outcome", self.text)
 
 
 if __name__ == "__main__":

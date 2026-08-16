@@ -69,6 +69,24 @@
 
 namespace pulp::canvas {
 
+RendererBackend SkiaCanvas::renderer_backend() const noexcept {
+#if PULP_CANVAS_GRAPHITE
+    if (recorder_ != nullptr) return RendererBackend::skia_dawn;
+#endif
+#if PULP_CANVAS_GANESH
+    if (gr_context_ != nullptr) return RendererBackend::skia_ganesh;
+#endif
+    return RendererBackend::skia_raster;
+}
+
+float SkiaCanvas::backing_scale() const noexcept {
+    const auto m = current_transform();
+    const float sx = std::hypot(m.a, m.b);
+    const float sy = std::hypot(m.c, m.d);
+    const float scale = std::max(sx, sy);
+    return std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
+}
+
 // Compatibility shim defined in skia_canvas_fonts.cpp.
 sk_sp<SkFontMgr> get_font_manager();
 

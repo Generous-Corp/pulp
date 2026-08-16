@@ -10,6 +10,8 @@
 #include <pulp/view/widgets.hpp>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -43,7 +45,34 @@ void usage() {
     std::cerr
         << "Usage: pulp-design-ir-observe --input <design.ir.json> "
            "--render <png> --layout <json> --width <px> --height <px> "
-           "[--scale <factor>]\n";
+           "[--scale <factor>] [--set-value <anchor>=<normalized>]...\n";
+}
+
+std::optional<std::pair<std::string, float>> parse_value_override(
+    std::string_view text) {
+    const auto separator = text.rfind('=');
+    if (separator == std::string_view::npos || separator == 0 ||
+        separator + 1 == text.size())
+        return std::nullopt;
+    try {
+        std::size_t consumed = 0;
+        const std::string value_text{text.substr(separator + 1)};
+        const float value = std::stof(value_text, &consumed);
+        if (consumed != value_text.size() || value < 0.0f || value > 1.0f)
+            return std::nullopt;
+        return std::pair{std::string{text.substr(0, separator)}, value};
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+pulp::view::View* find_by_anchor(pulp::view::View& root,
+                                 std::string_view anchor) {
+    if (root.anchor_id() == anchor) return &root;
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        if (auto* found = find_by_anchor(*root.child_at(i), anchor))
+            return found;
+    return nullptr;
 }
 
 }  // namespace
@@ -55,6 +84,7 @@ int main(int argc, char** argv) {
     float width = 0.0f;
     float height = 0.0f;
     float scale = 2.0f;
+    std::vector<std::pair<std::string, float>> value_overrides;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (i + 1 >= argc) {
@@ -68,6 +98,15 @@ int main(int argc, char** argv) {
         else if (arg == "--width" && parse_positive(value, width)) {}
         else if (arg == "--height" && parse_positive(value, height)) {}
         else if (arg == "--scale" && parse_positive(value, scale)) {}
+        else if (arg == "--set-value") {
+            auto parsed = parse_value_override(value);
+            if (!parsed) {
+                std::cerr << "Error: --set-value expects "
+                             "<anchor>=<normalized 0..1>\n";
+                return 2;
+            }
+            value_overrides.push_back(std::move(*parsed));
+        }
         else {
             usage();
             return 2;
@@ -94,6 +133,24 @@ int main(int argc, char** argv) {
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;
+    }
+    for (const auto& [anchor, value] : value_overrides) {
+        auto* view = find_by_anchor(*root, anchor);
+        if (!view) {
+            std::cerr << "Error: no imported view has anchor '" << anchor
+                      << "'\n";
+            return 1;
+        }
+        if (auto* knob = dynamic_cast<pulp::view::Knob*>(view))
+            knob->set_value(value);
+        else if (auto* fader = dynamic_cast<pulp::view::Fader*>(view))
+            fader->set_value(value);
+        else {
+            std::cerr << "Error: imported view '" << anchor
+                      << "' is not a knob or fader\n";
+            return 1;
+        }
+        std::cerr << "value override: " << anchor << '=' << value << "\n";
     }
     root->set_bounds({0.0f, 0.0f, width, height});
     // Which line-breaking path each Label took. Reported unconditionally

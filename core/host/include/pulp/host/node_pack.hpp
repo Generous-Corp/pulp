@@ -20,7 +20,96 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace pulp::host {
+
+enum class GeneratedDevicePlatform : std::uint8_t {
+    Desktop,
+    Android,
+    Ios,
+    Web,
+};
+
+enum class GeneratedDeviceArtifact : std::uint8_t {
+    DeclarativeGraph,
+    InterpretedProgram,
+    NativePack,
+    WebAssembly,
+    FrozenAudio,
+    Recipe,
+    GeneratedUi,
+};
+
+enum class GeneratedDeviceOrigin : std::uint8_t {
+    AppBundled,
+    RuntimeDownloaded,
+};
+
+struct GeneratedDeviceAdmission {
+    bool allowed = false;
+    bool requires_separate_origin = false;
+    bool universal_fallback_part = false;
+};
+
+[[nodiscard]] constexpr GeneratedDevicePlatform build_generated_device_platform() noexcept {
+#if defined(__ANDROID__)
+    return GeneratedDevicePlatform::Android;
+#elif defined(__EMSCRIPTEN__)
+    return GeneratedDevicePlatform::Web;
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    return GeneratedDevicePlatform::Ios;
+#else
+    return GeneratedDevicePlatform::Desktop;
+#endif
+}
+
+/// Returns the platform policy before any executable artifact is opened.
+/// Frozen audio plus its recipe is the portable fallback on every platform.
+[[nodiscard]] constexpr GeneratedDeviceAdmission
+generated_device_admission(GeneratedDevicePlatform platform,
+                           GeneratedDeviceArtifact artifact,
+                           GeneratedDeviceOrigin origin) noexcept {
+    if (platform < GeneratedDevicePlatform::Desktop ||
+        platform > GeneratedDevicePlatform::Web ||
+        artifact < GeneratedDeviceArtifact::DeclarativeGraph ||
+        artifact > GeneratedDeviceArtifact::GeneratedUi ||
+        (origin != GeneratedDeviceOrigin::AppBundled &&
+         origin != GeneratedDeviceOrigin::RuntimeDownloaded)) {
+        return {};
+    }
+    if (artifact == GeneratedDeviceArtifact::FrozenAudio ||
+        artifact == GeneratedDeviceArtifact::Recipe) {
+        return {true, false, true};
+    }
+    if (artifact == GeneratedDeviceArtifact::DeclarativeGraph) {
+        return {true, false, false};
+    }
+    if (artifact == GeneratedDeviceArtifact::InterpretedProgram) {
+        const bool supported = platform == GeneratedDevicePlatform::Desktop ||
+                               platform == GeneratedDevicePlatform::Ios ||
+                               platform == GeneratedDevicePlatform::Web;
+        return {supported, false, false};
+    }
+    if (artifact == GeneratedDeviceArtifact::GeneratedUi) {
+        const bool supported = platform == GeneratedDevicePlatform::Desktop ||
+                               platform == GeneratedDevicePlatform::Web;
+        return {supported, supported, false};
+    }
+    if (artifact == GeneratedDeviceArtifact::WebAssembly) {
+        const bool supported = platform == GeneratedDevicePlatform::Web;
+        return {supported, false, false};
+    }
+    if (artifact == GeneratedDeviceArtifact::NativePack) {
+        const bool supported = platform == GeneratedDevicePlatform::Desktop ||
+                               (platform == GeneratedDevicePlatform::Android &&
+                                origin == GeneratedDeviceOrigin::AppBundled);
+        return {supported, false, false};
+    }
+    return {};
+}
 
 // One node declared by a pack manifest (for host-side discovery before load).
 struct NodePackEntry {
@@ -72,6 +161,8 @@ struct NodePackHostPolicy {
     std::uint32_t max_block_size = 0;  // 0 means unlimited/host-specific
     std::uint64_t max_persistent_bytes = 0;
     std::uint64_t max_scratch_bytes = 0;
+    GeneratedDevicePlatform platform = build_generated_device_platform();
+    GeneratedDeviceOrigin origin = GeneratedDeviceOrigin::RuntimeDownloaded;
 };
 
 enum class NodePackError {
@@ -85,6 +176,7 @@ enum class NodePackError {
     SymbolMissing = 7,     // no pulp_node_v1_entry export
     UnsupportedRequirements = 8, // capabilities / RT / resource needs unsupported
     NodeMetadataMismatch = 9, // manifest node declarations != loaded descriptor
+    PlatformPolicyDenied = 10, // native artifact is forbidden on this platform/origin
 };
 
 struct NodePackLoadResult {

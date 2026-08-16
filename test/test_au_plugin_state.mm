@@ -424,6 +424,9 @@ struct AUv2TransportCallbackState {
     double measure_downbeat = 0.0;
     Boolean is_playing = true;
     Float64 sample_position = 0.0;
+    Boolean is_cycling = false;
+    Float64 cycle_start = 0.0;
+    Float64 cycle_end = 0.0;
 };
 
 OSStatus auv2_test_beat_and_tempo(void* user_data,
@@ -461,9 +464,9 @@ OSStatus auv2_test_transport_state(void* user_data,
     if (out_is_playing) *out_is_playing = state->is_playing;
     if (out_transport_state_changed) *out_transport_state_changed = false;
     if (out_current_sample) *out_current_sample = state->sample_position;
-    if (out_is_cycling) *out_is_cycling = false;
-    if (out_cycle_start) *out_cycle_start = 0.0;
-    if (out_cycle_end) *out_cycle_end = 0.0;
+    if (out_is_cycling) *out_is_cycling = state->is_cycling;
+    if (out_cycle_start) *out_cycle_start = state->cycle_start;
+    if (out_cycle_end) *out_cycle_end = state->cycle_end;
     return noErr;
 }
 
@@ -819,6 +822,55 @@ TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
     REQUIRE(jumped.transport_jump);
     REQUIRE(jumped.should_reset_dsp_state());
     REQUIRE(jumped.position_samples == 4096);
+}
+
+TEST_CASE("AU v2 host callbacks distinguish an ordinary cycle wrap from a seek",
+          "[au][auv2][transport][loop-wrap]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AUv2TransportCallbackState transport;
+    transport.is_cycling = true;
+    transport.cycle_start = 4.0;
+    transport.cycle_end = 8.0;
+    HostCallbackInfo callbacks{};
+    callbacks.hostUserData = &transport;
+    callbacks.beatAndTempoProc = auv2_test_beat_and_tempo;
+    callbacks.musicalTimeLocationProc = auv2_test_musical_time;
+    callbacks.transportStateProc = auv2_test_transport_state;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_HostCallbacks,
+                                       kAudioUnitScope_Global, 0,
+                                       &callbacks, sizeof(callbacks)) == noErr);
+
+    // At 48 kHz / 120 BPM, 480 samples advance the playhead by 0.02 beats.
+    constexpr UInt32 kFrames = 480;
+    pulp::format::detail::PlayheadSnapshot previous;
+    transport.beat = 7.99;
+    transport.sample_position = 191760.0;
+    auto before_wrap =
+        pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        before_wrap, effect, previous);
+
+    transport.beat = 4.01;
+    transport.sample_position = 96240.0;
+    auto wrapped =
+        pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        wrapped, effect, previous);
+    REQUIRE(wrapped.transport_jump);
+    REQUIRE(wrapped.ordinary_loop_wrap);
+    REQUIRE(wrapped.should_reset_dsp_state());
+    REQUIRE_FALSE(wrapped.should_reset_stream_history());
+
+    // Staying in cycle mode does not make an arbitrary reposition a wrap.
+    transport.beat = 6.0;
+    transport.sample_position = 144000.0;
+    auto seek = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(seek, effect, previous);
+    REQUIRE(seek.transport_jump);
+    REQUIRE_FALSE(seek.ordinary_loop_wrap);
+    REQUIRE(seek.should_reset_stream_history());
 }
 
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",

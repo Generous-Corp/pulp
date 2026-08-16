@@ -50,7 +50,17 @@ case "$cmd" in
       printf '%s\n' "${SHIM_EXISTING_KEYCHAINS:-    \"/login.keychain-db\"}"
     fi
     ;;
-  create-keychain|unlock-keychain|set-keychain-settings|import|set-key-partition-list) : ;;
+  set-key-partition-list)
+    [ "${SHIM_PARTITION_FAIL:-0}" = "1" ] && exit 1
+    ;;
+  unlock-keychain)
+    last="${@: -1}"
+    [[ -n "${SHIM_UNLOCK_FAIL_PATH:-}" && "$last" == "$SHIM_UNLOCK_FAIL_PATH" ]] && exit 1
+    ;;
+  create-keychain)
+    : > "${@: -1}"
+    ;;
+  set-keychain-settings|import) : ;;
   find-generic-password) exit 1 ;;
   *) : ;;
 esac
@@ -65,6 +75,14 @@ exit 0
 SH
 
 chmod +x "$SHIMBIN/security" "$SHIMBIN/xcrun"
+
+cat > "$SHIMBIN/codesign" <<'SH'
+#!/usr/bin/env bash
+[ -n "${SHIM_LOG:-}" ] && echo "codesign $*" >> "$SHIM_LOG"
+[ "${SHIM_CODESIGN_FAIL:-0}" = "1" ] && exit 1
+exit 0
+SH
+chmod +x "$SHIMBIN/codesign"
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 make_secrets() {   # $1 = dir ; writes keychain.env (+ notary.env if $2=with-notary)
@@ -123,11 +141,11 @@ run_doctor "$S" 0 0
   && ok "no identity => NOT READY exit1" \
   || bad "no identity => NOT READY exit1 (rc=$RC)"$'\n'"$OUT"
 
-# 4. login-keychain fallback => READY but warns about a possible prompt
+# 4. login-keychain fallback is refused before a prompt-capable codesign
 S="$TMP/s4"; mkdir -p "$S"   # no keychain.env at all
 run_doctor "$S" 0 1
-{ [ "$RC" -eq 0 ] && grep -q "falls back to the login keychain" <<<"$OUT"; } \
-  && ok "login fallback => READY + prompt warning" \
+{ [ "$RC" -eq 1 ] && grep -q "refusing prompt-capable fallback" <<<"$OUT"; } \
+  && ok "login fallback is refused fail-closed" \
   || bad "login fallback case (rc=$RC)"$'\n'"$OUT"
 
 # 5. --print-env emits identity/keychain/keypath and NO secret values
@@ -269,6 +287,50 @@ if [ -s "$TMP/stable13b" ]; then STABLE="$TMP/stable13b"; else STABLE="$TMP/stab
   && ! grep -Fxq "$GONE13" "$STABLE" && [ -z "$(sort "$STABLE" | uniq -d)" ]; } \
   && ok "search-list convergence is idempotent (N runs == 1 run)" \
   || bad "search list grew / retained dangling across repeated runs"$'\n'"stable:"$'\n'"$(cat "$STABLE")"
+
+# 14. Partition authorization is the prompt-prevention boundary. Its failure
+#     must stop before the signing probe.
+S="$TMP/s14"; make_secrets "$S"
+LOG="$TMP/log14"; RC=0
+OUT="$(SHIM_LOG="$LOG" SHIM_PARTITION_FAIL=1 PATH="$SHIMBIN:$PATH" \
+       PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet 2>&1)" || RC=$?
+{ [ "$RC" -eq 1 ] && grep -q "set-key-partition-list failed" <<<"$OUT" \
+  && ! grep -q '^codesign ' "$LOG"; } \
+  && ok "partition-list failure stops before codesign" \
+  || bad "partition failure reached codesign (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
+
+# 15. A configured identity is not READY until a real timestamped probe and
+#     strict verification both succeed.
+S="$TMP/s15"; make_secrets "$S"
+LOG="$TMP/log15"; RC=0
+OUT="$(SHIM_LOG="$LOG" SHIM_CODESIGN_FAIL=1 PATH="$SHIMBIN:$PATH" \
+       PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet 2>&1)" || RC=$?
+{ [ "$RC" -eq 1 ] && grep -q "timestamped codesign probe failed" <<<"$OUT" \
+  && grep -q -- '--options runtime --timestamp' "$LOG"; } \
+  && ok "failed timestamped probe is NOT READY" \
+  || bad "failed signing probe was accepted (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
+
+# 16. A stale legacy keychain password is repaired without deleting the legacy
+#     file or falling back to login: build and prove a stable sibling from P12.
+S="$TMP/s16"; make_secrets "$S"
+LEGACY16="$S/pulp-signing.keychain-db"; : > "$LEGACY16"
+REPAIRED16="$S/pulp-signing-unattended.keychain-db"
+LOG="$TMP/log16"; RC=0
+OUT="$(SHIM_LOG="$LOG" SHIM_UNLOCK_FAIL_PATH="$LEGACY16" \
+       PATH="$SHIMBIN:$PATH" PULP_SECRETS_DIR="$S" \
+       SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet --print-env 2>&1)" || RC=$?
+{ [ "$RC" -eq 0 ] && [ -f "$LEGACY16" ] && [ -f "$REPAIRED16" ] \
+  && grep -q "PULP_SIGN_KEYCHAIN=$REPAIRED16" <<<"$OUT" \
+  && grep -q "security create-keychain .* $REPAIRED16" "$LOG" \
+  && grep -q "codesign .*--keychain $REPAIRED16" "$LOG"; } \
+  && ok "stale legacy password preserves old keychain and rebuilds unattended sibling" \
+  || bad "legacy keychain repair failed (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
 
 echo ""
 echo "passed: $PASS   failed: $FAIL"

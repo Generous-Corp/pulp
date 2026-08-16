@@ -33,6 +33,7 @@ void draw_knob_indicator_notch(canvas::Canvas& canvas,
 void draw_knob_captured_pointer(canvas::Canvas& canvas,
                                 float cx, float cy,
                                 float r_in, float r_out, float width,
-                                canvas::Color color, float value);
+                                canvas::Color color, float value,
+                                float phase_rad = 0.0f);
 
 }  // namespace pulp::view

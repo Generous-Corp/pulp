@@ -126,6 +126,9 @@ std::uint64_t PlanarAudioRingBuffer::write_impl(BufferView<SampleType> source,
     copy_source_segment(source, start_2, static_cast<std::uint64_t>(size_1), size_2);
     fifo_->finish_write(static_cast<int>(written));
 
+    // Stats describe the completed write; they are not a publication handshake.
+    // Consumers that require whole-block continuity must preflight capacity or
+    // carry a separate generation protocol, as VisualizationBridge does.
     if (written < requested) {
         const auto dropped = requested - written;
         overrun_frames_.fetch_add(dropped, std::memory_order_relaxed);

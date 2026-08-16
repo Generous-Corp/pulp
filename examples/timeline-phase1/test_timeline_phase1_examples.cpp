@@ -360,3 +360,91 @@ TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
     REQUIRE(after.left == before.left);
     REQUIRE(after.right == before.right);
 }
+
+// P1-6: a live edit must be a real document transaction whose exact commit
+// drives compilation. The load-bearing oracle is the clean sentinel track: a
+// sparse compile reuses its TrackProgram BY POINTER, while a blanket
+// `dirty.all = true` rebuilds it into a new object with identical contents.
+// Pointer identity is therefore the only assertion that can tell the two apart
+// — comparing values would pass under both and prove nothing.
+TEST_CASE("timeline step sparse recompile reuses the clean sentinel track by pointer") {
+    auto submit_step_four_pitch = [](TimelineStepSequencerProcessor& processor) {
+        state::StepEditCommand command;
+        command.client_sequence = 7;
+        command.transaction_id = 7;
+        command.kind = state::StepEditKind::SetCell;
+        command.payload.set_cell.pattern = 0;
+        command.payload.set_cell.lane = 1;
+        command.payload.set_cell.step = 4;
+        command.payload.set_cell.cell =
+            processor.pattern_snapshot().patterns[0].lanes[1][4];
+        command.payload.set_cell.cell.pitch_offset = 7;
+        return processor.channel().ui_try_submit(command);
+    };
+
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+
+    const auto before = processor.program_identity();
+    REQUIRE(before.valid);
+    const auto pattern_before = processor.track_program({4});
+    const auto sentinel_before = processor.track_program({6});
+    REQUIRE(pattern_before);
+    REQUIRE(sentinel_before);
+
+    // Play into the pattern so the edit lands against a live, non-zero cursor.
+    for (int block = 0; block < 8; ++block) {
+        StereoBlock warm(128);
+        process_direct(processor, warm);
+    }
+    const auto prior = processor.last_transport();
+    REQUIRE(prior.range_count == 1);
+    const auto prior_end = prior.ranges[0].timeline_sample_start.value +
+                           prior.ranges[0].frame_count;
+
+    REQUIRE(submit_step_four_pitch(processor));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+
+    const auto after = processor.program_identity();
+    REQUIRE(after.valid);
+
+    // Generation and document revision both advance.
+    REQUIRE(after.generation > before.generation);
+    REQUIRE(after.document_revision > before.document_revision);
+
+    const auto pattern_after = processor.track_program({4});
+    const auto sentinel_after = processor.track_program({6});
+    REQUIRE(pattern_after);
+    REQUIRE(sentinel_after);
+
+    // The edited track is genuinely replaced.
+    REQUIRE(pattern_after.get() != pattern_before.get());
+    // The untouched track is reused by pointer. This is the assertion the
+    // production control flips.
+    REQUIRE(sentinel_after.get() == sentinel_before.get());
+
+    // Adoption stays callback-contiguous across the sparse publish.
+    StereoBlock next(128);
+    process_direct(processor, next);
+    REQUIRE(processor.last_transport().range_count == 1);
+    REQUIRE(processor.last_transport().ranges[0].timeline_sample_start.value == prior_end);
+
+    // A second sparse edit keeps reusing the same sentinel object, so reuse is a
+    // property of the path rather than an artifact of the first publish.
+    state::StepEditCommand second;
+    second.client_sequence = 8;
+    second.transaction_id = 8;
+    second.kind = state::StepEditKind::SetCell;
+    second.payload.set_cell.pattern = 0;
+    second.payload.set_cell.lane = 1;
+    second.payload.set_cell.step = 5;
+    second.payload.set_cell.cell = processor.pattern_snapshot().patterns[0].lanes[1][5];
+    second.payload.set_cell.cell.pitch_offset = 3;
+    REQUIRE(processor.channel().ui_try_submit(second));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+
+    const auto sentinel_third = processor.track_program({6});
+    REQUIRE(sentinel_third);
+    REQUIRE(sentinel_third.get() == sentinel_before.get());
+}

@@ -73,7 +73,15 @@ export function render(element: ReactElement, container?: PulpContainer): PulpCo
         rec = { container: c, fiberRoot };
         rootsByContainer.set(c, rec);
     }
+    // `LegacyRoot` normally commits synchronously in browser-hosted React, but
+    // the standalone reconciler can still enqueue the legacy callback when it
+    // is driven by a non-browser JS engine.  Imported applications need the
+    // documented contract here: once render() returns, every host instance is
+    // present on WidgetBridge (canvas programs are bound immediately after
+    // mounting).  Own that contract explicitly instead of depending on the
+    // scheduler implementation chosen by the embedding engine.
     reconciler.updateContainer(element, rec.fiberRoot, null, null);
+    reconciler.flushSync();
     return c;
 }
 

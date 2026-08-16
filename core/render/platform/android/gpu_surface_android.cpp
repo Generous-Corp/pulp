@@ -8,6 +8,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -970,7 +971,7 @@ void android_touch_down(int pointer_id, float px_x, float px_y, float pressure) 
         auto ev = make_touch_event(local, pt, pointer_id, pressure, true);
         ev.click_count = click_count;
         ev.phase = view::MousePhase::press;
-        target->on_mouse_event(ev);
+        view::dispatch_dom_pointer_event(*g_root_view, target, ev, false);
         // Dispatch legacy event (Knob drag_start_y_, Toggle on/off)
         target->on_mouse_down(local);
         g_captured_view = target;
@@ -993,6 +994,9 @@ void android_touch_move(int pointer_id, float px_x, float px_y, float pressure) 
     if (!g_captured_view) return;
 
     auto local = to_local(g_captured_view, dp_x, dp_y);
+    auto ev = make_touch_event(local, pt, pointer_id, pressure, true);
+    ev.phase = view::MousePhase::drag;
+    view::dispatch_dom_pointer_event(*g_root_view, g_captured_view, ev, true);
     g_captured_view->on_mouse_drag(local);
 }
 
@@ -1015,7 +1019,7 @@ void android_touch_up(int pointer_id, float px_x, float px_y) {
     auto local = to_local(g_captured_view, dp_x, dp_y);
     auto ev = make_touch_event(local, {dp_x, dp_y}, pointer_id, 0.0f, false);
     ev.phase = view::MousePhase::release;
-    g_captured_view->on_mouse_event(ev);
+    view::dispatch_dom_pointer_event(*g_root_view, g_captured_view, ev, false);
     g_captured_view->on_mouse_up(local);
     g_captured_view = nullptr;
 }

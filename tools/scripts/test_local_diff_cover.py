@@ -34,6 +34,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "tools" / "scripts" / "local_diff_cover.sh"
 CONFIG = REPO_ROOT / "tools" / "scripts" / "coverage_config.json"
 CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
+CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 
 
 class ConfigTests(unittest.TestCase):
@@ -463,17 +464,25 @@ class TargetedCtestTests(unittest.TestCase):
     def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${DIFF_COVER_TEST_JOBS}m.profraw"',
             text,
-            "local_diff_cover.sh should use LLVM's module-signature merge "
-            "placeholder so thousands of one-test Catch2 runs merge per binary.",
+            "local_diff_cover.sh should use LLVM's bounded merge pool so "
+            "parallel Catch2 invocations cannot corrupt one shared profile.",
         )
+        self.assertNotIn('pulp-%m.profraw', text)
         self.assertNotIn(
             "pulp-%p-%m.profraw",
             text,
             "per-PID profraw files are too noisy for the full CTest registry "
             "and can lose attribution when PIDs recycle.",
         )
+
+    def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("--failure-mode=all", text)
+        self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
+        self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
+        self.assertIn("PROFILE_SHARDS * 5", text)
 
 
 class RequiredGateCtestSelectionTests(unittest.TestCase):
@@ -494,6 +503,8 @@ class RequiredGateCtestSelectionTests(unittest.TestCase):
             '"raise SystemExit(1)")\n'
             "set_tests_properties([=[slow-platform-smoke]=] PROPERTIES "
             'LABELS "slow")\n'
+            f'add_test([=[OSC-WT worst alias swept to the top of every band]=] "{python}" "-c" '
+            '"raise SystemExit(1)")\n'
         )
 
     def tearDown(self) -> None:
@@ -529,6 +540,48 @@ class RequiredGateCtestSelectionTests(unittest.TestCase):
             result.stdout,
             "the local diff-coverage lane selected a slow platform smoke",
         )
+        self.assertNotIn(
+            "OSC-WT worst alias swept to the top of every band",
+            result.stdout,
+            "local diff coverage bypassed the shared name exclusion policy",
+        )
+
+    def test_local_and_full_coverage_source_the_same_policy(self) -> None:
+        local = SCRIPT.read_text()
+        full = CI_SCRIPT.read_text()
+        self.assertIn("scripts/coverage_ctest_policy.sh", local)
+        self.assertIn("coverage_ctest_policy.sh", full)
+
+    def test_local_ctest_uses_bounded_parallelism_and_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as fake_bin_raw:
+            fake_bin = pathlib.Path(fake_bin_raw)
+            fake_ctest = fake_bin / "ctest"
+            fake_ctest.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_ctest.chmod(0o755)
+            env = os.environ.copy()
+            env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+            env["PULP_DIFF_COVER_TEST_JOBS"] = "3"
+            env["PULP_DIFF_COVER_CTEST_TIMEOUT"] = "77"
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'source "{SCRIPT}"\nrun_coverage_ctest "{self.test_dir}"',
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        args = result.stdout.splitlines()
+        self.assertEqual(args[args.index("--parallel") + 1], "3")
+        self.assertEqual(args[args.index("--timeout") + 1], "77")
 
     def test_negative_control_fails_when_slow_exclusion_is_removed(self) -> None:
         result = self._run_fixture("__matches_no_test_label__")
@@ -728,8 +781,12 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     """
     root = tmp / name
     (root / "tools" / "scripts").mkdir(parents=True)
+    (root / "scripts").mkdir(parents=True)
     dest = root / "tools" / "scripts" / "local_diff_cover.sh"
     dest.write_text(SCRIPT.read_text())
+    (root / "scripts" / "coverage_ctest_policy.sh").write_text(
+        CTEST_POLICY.read_text()
+    )
     return root
 
 

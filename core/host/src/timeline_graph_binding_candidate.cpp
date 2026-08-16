@@ -13,6 +13,39 @@
 namespace pulp::host {
 using namespace detail::timeline_graph_binding;
 
+NodeId TimelineGraphPlaybackBinding::device_node_for(timeline::ItemId placement_id) const noexcept {
+    auto state = state_.read();
+    if (!state)
+        return 0;
+    const auto found =
+        std::find_if(state->owned_devices.begin(), state->owned_devices.end(),
+                     [&](const auto& device) { return device.declaration.id == placement_id; });
+    return found == state->owned_devices.end() ? 0 : found->plugin_node;
+}
+
+namespace detail::timeline_graph_binding {
+
+TimelineGraphAdmission validate_owned_timeline_devices(
+    const playback::PlaybackProgram& program,
+    std::span<const TimelineGraphBoundDevice> devices) noexcept {
+    for (const auto& device : devices) {
+        TimelineGraphAdmission project_error;
+        const auto* track = timeline_project_track_for(program, device.track_id, project_error);
+        if (!track)
+            return project_error;
+        const auto found = std::find_if(track->device_chain().begin(), track->device_chain().end(),
+                                        [&](const auto& placement) {
+                                            return placement.id == device.declaration.id;
+                                        });
+        if (found == track->device_chain().end() || *found != device.declaration)
+            return reject(TimelineGraphAdmissionCode::UnsupportedDeviceChain, 0, 1,
+                          device.declaration.id, device.plugin_node);
+    }
+    return {};
+}
+
+} // namespace detail::timeline_graph_binding
+
 TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, int maximum_block_size) const {
@@ -177,54 +210,10 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
     next->automation_tracks.reserve(ordered.size());
     next->prepared_track_ids.reserve(ordered.size());
     next->post_device_routed_track_ids.reserve(ordered.size());
+    next->owned_devices.reserve(ordered.size());
 
     auto edit = graph_.begin_prepared_topology_edit();
-    std::vector<DetachedAudioEdge> desired_detached_bypasses;
-    for (const auto& route : ordered) {
-        if (route.post_device_audio_source == 0)
-            continue;
-        for (std::uint32_t channel = 0; channel < config.audio_channels; ++channel) {
-            const DetachedAudioEdge edge{
-                route.post_device_audio_source,
-                static_cast<PortIndex>(route.post_device_audio_source_first_port + channel),
-                route.post_mixer_audio_destination,
-                static_cast<PortIndex>(route.post_mixer_audio_destination_first_port + channel),
-            };
-            if (!contains_detached_audio_edge(desired_detached_bypasses, edge))
-                desired_detached_bypasses.push_back(edge);
-        }
-    }
-    if (previous) {
-        for (const auto& edge : previous->detached_post_device_bypasses) {
-            if (contains_detached_audio_edge(desired_detached_bypasses, edge))
-                continue;
-            if (edit->node(edge.source_node) == nullptr || edit->node(edge.dest_node) == nullptr)
-                continue;
-            const bool already_present =
-                std::any_of(edit->connections().begin(), edit->connections().end(),
-                            [&](const Connection& connection) {
-                                return is_plain_audio_edge(connection, edge);
-                            });
-            if (!already_present &&
-                !edit->connect(edge.source_node, edge.source_port, edge.dest_node, edge.dest_port))
-                return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0, {},
-                              edge.source_node);
-        }
-    }
-    for (const auto& edge : desired_detached_bypasses) {
-        const bool previously_detached =
-            previous && contains_detached_audio_edge(previous->detached_post_device_bypasses, edge);
-        const auto direct = std::find_if(
-            edit->connections().begin(), edit->connections().end(),
-            [&](const Connection& connection) { return is_plain_audio_edge(connection, edge); });
-        const bool detached_now = direct != edit->connections().end();
-        if (detached_now &&
-            !edit->disconnect(edge.source_node, edge.source_port, edge.dest_node, edge.dest_port))
-            return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0, {},
-                          edge.source_node);
-        if (previously_detached || detached_now)
-            next->detached_post_device_bypasses.push_back(edge);
-    }
+    std::vector<std::vector<TimelineDeviceGraphRoute>> generated_device_routes(ordered.size());
     if (previous) {
         for (const auto& track : previous->tracks) {
             if (std::none_of(ordered.begin(), ordered.end(),
@@ -242,7 +231,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
     }
 
     for (std::size_t route_index = 0; route_index < ordered.size(); ++route_index) {
-        const auto& route = ordered[route_index];
+        auto& route = ordered[route_index];
         std::shared_ptr<detail::TimelineGraphBoundTrack> track;
         if (previous) {
             const auto found = std::find_if(
@@ -339,6 +328,13 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
             }
         }
 
+        if (const auto resolved = resolve_timeline_device_route(
+                program, route, track, edit, previous.get(), timeline_device_factory_,
+                generated_device_routes[route_index], route_metadata[route_index],
+                claimed_device_nodes, next->owned_devices);
+            !resolved)
+            return resolved;
+
         std::shared_ptr<detail::TimelineGraphAutomationTrack> previous_automation;
         if (previous) {
             const auto found = std::find_if(
@@ -362,6 +358,15 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
         if (route.post_device_audio_source != 0)
             next->post_device_routed_track_ids.push_back(route.track_id);
     }
+
+    if (const auto removed =
+            remove_stale_timeline_devices(edit, previous.get(), next->owned_devices);
+        !removed)
+        return removed;
+    if (const auto bypasses =
+            reconcile_detached_post_device_bypasses(edit, previous.get(), ordered, *next);
+        !bypasses)
+        return bypasses;
 
     for (const auto& connection : edit->connections()) {
         if ((connection.automation || connection.audio_rate_modulation) &&

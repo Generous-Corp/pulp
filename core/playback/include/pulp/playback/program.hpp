@@ -217,6 +217,10 @@ class PlaybackProgram {
     timeline::ItemId sequence_id() const noexcept {
         return sequence_id_;
     }
+    /// Exact immutable document snapshot used to compile this program.
+    const std::shared_ptr<const timeline::Project>& project_owner() const noexcept {
+        return project_;
+    }
     const timebase::CompiledTempoMap& tempo_map() const noexcept {
         return *tempo_map_;
     }
@@ -253,6 +257,7 @@ class PlaybackProgram {
     friend class ProgramCompilerTask;
     PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                     timeline::ItemId project_id, timeline::ItemId sequence_id,
+                    std::shared_ptr<const timeline::Project> project,
                     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                     std::shared_ptr<const CompileContextRegistry> content_compilers,
                     std::shared_ptr<const void> content_compiler_generation,
@@ -267,6 +272,7 @@ class PlaybackProgram {
     std::uint64_t document_revision_ = 0;
     timeline::ItemId project_id_;
     timeline::ItemId sequence_id_;
+    std::shared_ptr<const timeline::Project> project_;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map_;
     std::shared_ptr<const CompileContextRegistry> content_compilers_;
     std::shared_ptr<const void> content_compiler_generation_;

@@ -98,12 +98,16 @@ jobs:
         env:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
           # Keep the configured selector distinct from the selector authorized
-          # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
-          # Mac Pro Proxmox pool:
+          # for this event. PULP_AUTO_LINUX_RUNS_ON_JSON configures the
+          # restricted automatic x64 Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
-          #       "pulp-host-macpro"].
-          # A workflow_dispatch input overrides it. Same-repository pull_request
-          # and protected merge_group events may use it after the trusted
+          #       "pulp-host-macpro","pulp-auto-linux-x64"].
+          # PULP_LOCAL_LINUX_RUNS_ON_JSON remains the five-label operator and
+          # release selector; keeping it separate prevents workflows outside
+          # the restricted group from targeting an ineligible runner. A
+          # workflow_dispatch input overrides that operator selector.
+          # Same-repository pull_request and protected merge_group events may
+          # use the automatic selector after the trusted
           # workflow-ref boundary is applied below; fork pull requests remain
           # hosted. If no local selector is configured, the resolver falls back
           # to GitHub-hosted Linux.
@@ -117,6 +121,7 @@ jobs:
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
@@ -509,9 +514,40 @@ jobs:
           # PR, pull_request_target, or a workflow with secrets to generic
           # self-hosted Linux. An unset local selector naturally falls back to
           # ubuntu-latest through resolve_runs_on.py.
-          local_linux_selector = (
+          operator_linux_selector = (
               os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON") or ""
           ).strip()
+          automatic_linux_selector = (
+              os.environ.get("AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON") or ""
+          ).strip()
+          automatic_linux_labels = {
+              "self-hosted", "linux", "x64", "pulp-build-linux-x64",
+              "pulp-host-macpro", "pulp-auto-linux-x64",
+          }
+          try:
+              parsed_local_linux_selector = json.loads(automatic_linux_selector)
+          except (json.JSONDecodeError, TypeError):
+              parsed_local_linux_selector = None
+          parseable_automatic_linux_selector = (
+              automatic_linux_selector
+              if isinstance(parsed_local_linux_selector, (str, list))
+              else ""
+          )
+          configured_linux_selector = (
+              operator_linux_selector
+              if EVENT_NAME == "workflow_dispatch"
+              else parseable_automatic_linux_selector
+          )
+          automatic_local_linux_selector = (
+              automatic_linux_selector
+              if isinstance(parsed_local_linux_selector, list)
+              and len(parsed_local_linux_selector) == len(automatic_linux_labels)
+              and all(isinstance(label, str) for label in parsed_local_linux_selector)
+              and all(label == label.strip() for label in parsed_local_linux_selector)
+              and {label.strip().lower() for label in parsed_local_linux_selector}
+                  == automatic_linux_labels
+              else ""
+          )
           trusted_local_linux_workflow = (
               WORKFLOW_REF
               == f"{_this_repo}/.github/workflows/build.yml@refs/heads/main"
@@ -526,12 +562,18 @@ jobs:
           if (
               not os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", "").strip()
               and trusted_local_linux_event
-              and local_linux_selector
+              and automatic_local_linux_selector
           ):
-              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = local_linux_selector
+              os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = automatic_local_linux_selector
               print(
                   "resolve-provider: trusted local Linux route enabled for "
-                  f"{EVENT_NAME}; selector={local_linux_selector}",
+                  f"{EVENT_NAME}; selector={automatic_local_linux_selector}",
+                  file=sys.stderr,
+              )
+          elif trusted_local_linux_event and automatic_linux_selector:
+              print(
+                  "resolve-provider: configured Linux selector lacks the exact "
+                  "automatic-pool label contract; using hosted Linux",
                   file=sys.stderr,
               )
 
@@ -549,7 +591,7 @@ jobs:
                   "--dispatch-selector-json",
                   os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR", ""),
                   "--configured-selector-json",
-                  os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  configured_linux_selector,
                   "--authorized-selector-json",
                   os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
                   "--resolved-selector-json", linux_runs_on,
@@ -939,6 +981,33 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      # Browser-source fidelity is a required macOS test, not a local-only
+      # convenience.  The self-hosted Mac images intentionally do not carry a
+      # mutable system Chrome, so fetch the same pinned archive the managed
+      # `pulp tool install chrome-for-testing` command verifies and pass its
+      # executable explicitly to the capture test.  A missing or mismatched
+      # archive must fail the job; skipping would turn source-to-native
+      # comparison back into an untested promise.
+      - name: Install pinned Chrome for browser-source fidelity (macOS ARM64)
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_root="$RUNNER_TEMP/pulp-chrome-for-testing-151.0.7922.47"
+          chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          if [ ! -x "$chrome" ]; then
+            archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
+            curl --fail --location --retry 3 --output "$archive" \
+              https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
+            expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
+            actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+            [ "$actual" = "$expected" ] || { echo "Chrome archive SHA-256 mismatch" >&2; exit 1; }
+            mkdir -p "$chrome_root"
+            unzip -q "$archive" -d "$chrome_root"
+          fi
+          [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
+          echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
       # Save scope is deliberately narrower than restore scope: GitHub-hosted
       # Linux/Windows only, and only on a push to main.
       #   - `runner.environment == 'github-hosted' && runner.os != 'macOS'`:
@@ -1044,6 +1113,10 @@ jobs:
           else
             echo "ccache not available; skipping config proof"
           fi
+
+      - name: Install materialized runtime Node test dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
 
       - name: Configure
         # On PR and Shipyard workflow_dispatch validation, skip the examples tree

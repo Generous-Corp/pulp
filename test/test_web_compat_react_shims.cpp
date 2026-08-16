@@ -854,6 +854,60 @@ TEST_CASE("requestAnimationFrame registers a frame callback that fires via servi
     REQUIRE(std::string(post.getString()) == "fired");
 }
 
+TEST_CASE("requestAnimationFrame callback receives a finite DOMHighResTimeStamp",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__raf_timestamp__ = null;
+        requestAnimationFrame(function (timestamp) {
+            globalThis.__raf_timestamp__ = timestamp;
+        });
+    )");
+
+    bridge.service_frame_callbacks();
+
+    auto result = engine.evaluate(
+        "String(typeof globalThis.__raf_timestamp__) + ':' + "
+        "String(Number.isFinite(globalThis.__raf_timestamp__));");
+    REQUIRE(std::string(result.getString()) == "number:true");
+}
+
+TEST_CASE("requestAnimationFrame callbacks in one frame share captured replay time",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__replay_calls__ = 0;
+        globalThis.__pulpAnimationFrameTimestamp__ = function (nativeNow) {
+            globalThis.__replay_calls__ += 1;
+            return 2424.3;
+        };
+        globalThis.__raf_times__ = [];
+        requestAnimationFrame(function (timestamp) {
+            globalThis.__raf_times__.push(timestamp);
+        });
+        requestAnimationFrame(function (timestamp) {
+            globalThis.__raf_times__.push(timestamp);
+        });
+    )");
+
+    bridge.service_frame_callbacks();
+
+    auto result = engine.evaluate(
+        "String(globalThis.__replay_calls__) + ':' + "
+        "String(globalThis.__raf_times__.length) + ':' + "
+        "String(globalThis.__raf_times__[0] === globalThis.__raf_times__[1]) + ':' + "
+        "String(globalThis.__raf_times__[0]);");
+    REQUIRE(std::string(result.getString()) == "1:2:true:2424.3");
+}
+
 TEST_CASE("cancelAnimationFrame removes a pending frame callback",
           "[view][web-compat][issue-915]") {
     ScriptEngine engine;

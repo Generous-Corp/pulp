@@ -143,14 +143,23 @@ static fs::path signing_doctor_script(const fs::path& root) {
     return root / "tools" / "scripts" / "ensure_signing_ready.sh";
 }
 
-// Best-effort, quiet, idempotent preflight: materialize the dedicated signing
-// keychain + validate the .p8 notary key so codesign/notarytool never pop a
-// keychain/1Password prompt. Never fails the caller — if the doctor reports
-// not-ready, the subsequent sign/notarize surfaces the real error itself.
-static void run_signing_preflight(const fs::path& root) {
+// Fail-closed, quiet, idempotent preflight: materialize and prove the dedicated
+// signing keychain before any production codesign invocation.  A failed
+// preflight must never fall through to login-keychain lookup, which can open a
+// GUI password dialog in an unattended session.
+static bool run_signing_preflight(const fs::path& root) {
     auto script = signing_doctor_script(root);
-    if (fs::exists(script))
-        run("/bin/bash " + shell_quote(script.string()) + " --quiet >/dev/null 2>&1 || true");
+    if (!fs::exists(script)) {
+        std::cerr << "pulp ship sign: missing unattended signing preflight: "
+                  << script.string() << "\n";
+        return false;
+    }
+    if (run("/bin/bash " + shell_quote(script.string()) + " --quiet") != 0) {
+        std::cerr << "pulp ship sign: unattended signing preflight failed; "
+                     "refusing to invoke codesign. Run `pulp ship doctor`.\n";
+        return false;
+    }
+    return true;
 }
 
 // Ship-time PULP_TRACING guard. Refuses to sign/package/release an artifact
@@ -257,7 +266,6 @@ static int ship_doctor(const std::vector<std::string>& args,
 static int ship_sign(const std::vector<std::string>& args,
                        const fs::path& root, const fs::path& build_dir) {
     const std::string sub = "sign";
-        run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
@@ -384,6 +392,9 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
+#ifdef __APPLE__
+            if (!run_signing_preflight(root)) return 1;
+#endif
             // Hardened runtime + secure timestamp are mandatory for
             // notarization. Entitlements only apply to executables, so we
             // only attach them for app/plugin bundles, never a `.dmg`.
@@ -399,27 +410,36 @@ static int ship_sign(const std::vector<std::string>& args,
             return 0;
         }
 
-        int signed_count = 0;
+        std::vector<fs::path> bundles;
         for (auto dir_name : {"VST3", "CLAP", "AU"}) {
             auto dir = build_dir / dir_name;
             if (!fs::exists(dir)) continue;
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
-                    std::cout << "Signing " << entry.path().filename().string() << "...\n";
-                    if (pulp::ship::codesign(entry.path().string(), identity,
-                                             entitlements)) {
-                        ++signed_count;
-                    } else {
-                        std::cerr << "  FAILED\n";
-                    }
+                    bundles.push_back(entry.path());
                 }
             }
         }
-        if (signed_count == 0)
+        if (bundles.empty()) {
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
-        else
-            std::cout << "Signed " << signed_count << " bundles.\n";
+            return 1;
+        }
+
+#ifdef __APPLE__
+        if (!run_signing_preflight(root)) return 1;
+#endif
+
+        int signed_count = 0;
+        for (const auto& bundle : bundles) {
+            std::cout << "Signing " << bundle.filename().string() << "...\n";
+            if (pulp::ship::codesign(bundle.string(), identity, entitlements)) {
+                ++signed_count;
+            } else {
+                std::cerr << "  FAILED\n";
+            }
+        }
+        std::cout << "Signed " << signed_count << " bundles.\n";
         return signed_count > 0 ? 0 : 1;
 }
 

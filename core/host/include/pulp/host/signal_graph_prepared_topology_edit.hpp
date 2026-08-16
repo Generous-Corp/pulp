@@ -55,6 +55,9 @@ class SignalGraph::PreparedTopologyEdit {
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
+    /// Transfers a pathless Pulp-owned slot into this disposable candidate.
+    NodeId add_owned_builtin_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs,
+                                         int num_outputs, const std::string& name);
     NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, int version,
                            const std::string& name = {});

@@ -984,6 +984,20 @@ TEST_CASE("view_size_from_design derives sensible bounds + aspect from preferred
     }
 }
 
+TEST_CASE("ViewSize distinguishes initial host size from authored coordinates",
+          "[format][view-size][design-viewport]") {
+    pulp::format::ViewSize hints{
+        990, 645, 792, 516, 2640, 1720, 990.0 / 645.0, 1320, 860,
+    };
+    CHECK(pulp::format::design_viewport_width(hints) == 1320);
+    CHECK(pulp::format::design_viewport_height(hints) == 860);
+
+    hints.design_width = 0;
+    hints.design_height = 0;
+    CHECK(pulp::format::design_viewport_width(hints) == 990);
+    CHECK(pulp::format::design_viewport_height(hints) == 645);
+}
+
 TEST_CASE("Processor has_editor override can disable default editor contract",
           "[format][processor-defaults][editor]") {
     EditorlessProcessor p;

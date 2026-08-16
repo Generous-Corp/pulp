@@ -212,9 +212,9 @@ static const char kOwnershipKey = 0;
     // Top-align like mac AUv3: AU cannot negotiate the pane aspect (no
     // checkSizeConstraint / gui_adjust_size), so slack collects as a single
     // bottom strip instead of floating the content between two bands.
-    if (format::should_pin_design_viewport(bridge->size_hints())) {
-        host->set_design_viewport(static_cast<float>(w), static_cast<float>(h));
-        host->set_fixed_aspect_ratio(static_cast<float>(w) / static_cast<float>(h));
+    const auto& hints = bridge->size_hints();
+    format::configure_native_viewport(*host, hints);
+    if (format::should_pin_design_viewport(hints)) {
         host->set_design_viewport_top_align(true);
     }
 
@@ -295,12 +295,13 @@ static const char kOwnershipKey = 0;
             [NSAnimationContext endGrouping];
             return false;
         },
-        [resize_host](uint32_t next_w, uint32_t next_h) {
-            resize_host->set_design_viewport(static_cast<float>(next_w),
-                                             static_cast<float>(next_h));
-            resize_host->set_fixed_aspect_ratio(
-                static_cast<float>(next_w) / static_cast<float>(next_h));
-            resize_host->set_design_viewport_top_align(true);
+        [resize_host, resize_bridge](uint32_t next_w, uint32_t next_h) {
+            format::commit_editor_requested_viewport(
+                *resize_host, resize_bridge->size_hints(), next_w, next_h);
+            if (format::should_pin_design_viewport(
+                    resize_bridge->size_hints())) {
+                resize_host->set_design_viewport_top_align(true);
+            }
         });
     bridge->notify_attached();
 

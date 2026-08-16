@@ -1021,7 +1021,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         }
         auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
             generation_, request_->document_revision, request_->project->id(),
-            request_->sequence_id, request_->tempo_map, content_compilers_,
+            request_->sequence_id, request_->project, request_->tempo_map, content_compilers_,
             content_compiler_generation_, content_compiler_revision_, request_->audio_assets,
             request_->audio_limits, request_->automation_limits, request_->project->next_item_id(),
             std::move(tracks_)));

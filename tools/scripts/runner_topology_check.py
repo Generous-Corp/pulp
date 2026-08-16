@@ -57,6 +57,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import workflow_runner_selector_audit  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONTRACT = HERE / "runner_topology.json"
 DEFAULT_REPO = "Generous-Corp/pulp"
@@ -196,8 +199,80 @@ def _api(args: list[str]) -> Any:
 
 
 def fetch_runners(repo: str) -> list[Runner]:
-    data = _api([f"repos/{repo}/actions/runners", "--paginate"])
-    return parse_runners(data)
+    """Every runner that can serve this repo — repo-level AND org-level.
+
+    The repo endpoint is structurally blind to runners registered in an ORG
+    runner group, and Pulp's Linux capacity lives in exactly such a group. A
+    repo-only query therefore reports zero Linux runners on a healthy fleet.
+    This is not hypothetical: on 2026-08-16 two independent sessions read a
+    repo-only result and concluded the Mac Pro Linux lane was dead. Neither
+    query could have seen it either way.
+
+    That blindness is worse here than in an ad-hoc probe, because this function
+    feeds black-hole adjudication: a lane served entirely by org runners would
+    be declared unroutable. Union both scopes so the verdict is about the
+    fleet rather than about which endpoint was asked.
+
+    An org query can legitimately fail on permissions. That degradation is
+    surfaced, never swallowed — a silent fallback to repo-only would reproduce
+    the exact failure this exists to prevent.
+    """
+    runners, _ = fetch_runner_inventory(repo)
+    return runners
+
+
+def fetch_runner_inventory(repo: str) -> tuple[list[Runner], list[str]]:
+    """Return `(runners, warnings)`; warnings name any scope that was skipped."""
+    warnings: list[str] = []
+    by_name: dict[str, Runner] = {}
+
+    repo_payload = _api([f"repos/{repo}/actions/runners", "--paginate"])
+    warnings.extend(_count_warnings(repo_payload, f"repos/{repo}"))
+    for runner in parse_runners(repo_payload):
+        by_name[runner.name] = runner
+
+    org = repo.split("/", 1)[0]
+    if org and "/" in repo:
+        try:
+            org_payload = _api([f"orgs/{org}/actions/runners", "--paginate"])
+        except subprocess.CalledProcessError as exc:
+            # Usually a token without org:admin. Say so: an operator who does
+            # not know the org scope was skipped will read a partial inventory
+            # as a complete one.
+            detail = (exc.stderr or "").strip().splitlines()
+            warnings.append(
+                f"org runner scope orgs/{org} was NOT read "
+                f"({detail[-1][:160] if detail else 'unknown error'}); "
+                "org-group runners are invisible to this run"
+            )
+        else:
+            warnings.extend(_count_warnings(org_payload, f"orgs/{org}"))
+            for runner in parse_runners(org_payload):
+                by_name.setdefault(runner.name, runner)
+
+    return list(by_name.values()), warnings
+
+
+def _count_warnings(payload: Any, scope: str) -> list[str]:
+    """Flag a payload whose rendered rows disagree with its own total_count.
+
+    A truncated or unpaginated response renders fewer rows than it reports, and
+    an empty render alongside a non-zero `total_count` reads as "no runners"
+    when it means "you did not receive them" — the misreading that cost a
+    session on 2026-08-16.
+    """
+    if not isinstance(payload, dict):
+        return []
+    total = payload.get("total_count")
+    rows = payload.get("runners")
+    if not isinstance(total, int) or not isinstance(rows, list):
+        return []
+    if len(rows) != total:
+        return [
+            f"{scope} returned {len(rows)} runner rows but reports "
+            f"total_count={total}; the inventory is incomplete"
+        ]
+    return []
 
 
 def parse_runners(data: Any) -> list[Runner]:
@@ -360,20 +435,68 @@ def static_evidence(served: list[set[str]]):
     return lambda _lane: served
 
 
+def check_selector_parsing(
+    contract: Contract, workflows_dir: Path
+) -> list[Finding]:
+    """Would setting a contracted lane's variable actually route, or hang?
+
+    Every other check here asks whether capacity exists. This one asks whether
+    the workflow can express the answer at all. A `runs-on` that interpolates a
+    lane variable without `fromJSON` collapses the JSON array into ONE literal
+    label; no runner carries it, and GitHub queues the job forever rather than
+    failing it. Capacity is irrelevant — the live incident on 2026-08-16 used a
+    HOSTED value and still hung a required check repo-wide.
+
+    This tool was green throughout that window because attribution is a
+    substring search: it answers "which workflows mention this variable", which
+    is a different question and cannot distinguish a parsed reference from an
+    interpolated one. The gap is narrow and specific, so this is additive — no
+    existing adjudication changes.
+    """
+    findings: list[Finding] = []
+    if not workflows_dir.is_dir():
+        return findings
+    offenders = workflow_runner_selector_audit.audit_directory(workflows_dir)
+    if not offenders:
+        return findings
+    declared = {lane.variable for lane in contract.lanes}
+    for offender in offenders:
+        # Report undeclared variables too. A lane absent from the contract is
+        # exactly the one nobody is watching, so staying silent about it would
+        # reproduce the failure this check exists for.
+        scope = "" if offender.variable in declared else " (not in the contract)"
+        findings.append(Finding(
+            ERROR, "unparsed-selector", offender.variable,
+            f"{offender.workflow}:{offender.line} interpolates this variable "
+            f"into `runs-on` without fromJSON{scope}. Setting it would yield "
+            "one literal JSON-array label that no runner carries, and GitHub "
+            "queues such a job forever instead of failing it.",
+        ))
+    return findings
+
+
 def check(
     contract: Contract,
     runners: list[Runner],
     variables: dict[str, str],
     evidence: Any,
+    workflows_dir: Path | None = None,
 ) -> list[Finding]:
     """`evidence` is a callable lane -> list of served label sets, invoked ONLY
     when an ephemeral lane has no live runner. A list is accepted for
     convenience and wrapped. Laziness matters: the scan costs API calls, and a
-    healthy fleet must not pay for them every sweep."""
+    healthy fleet must not pay for them every sweep.
+
+    `workflows_dir` enables the selector-parsing check. It is optional so that
+    offline fixture runs, which have no workflow tree, keep working unchanged.
+    """
     if not callable(evidence):
         evidence = static_evidence(evidence)
     findings: list[Finding] = []
     declared = {lane.variable for lane in contract.lanes}
+
+    if workflows_dir is not None:
+        findings.extend(check_selector_parsing(contract, workflows_dir))
 
     # Cost guard: a paid-overflow variable that is set at all.
     for name in contract.must_remain_unset:
@@ -656,6 +779,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     contract = load_contract(args.contract)
+    workflows_dir = args.workflows_dir or (
+        HERE.parent.parent / ".github" / "workflows"
+    )
 
     offline_inputs = bool(args.runners_json and args.variables_json)
     if offline_inputs:
@@ -666,7 +792,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.jobs_json else [])
     else:
         try:
-            runners = fetch_runners(args.repo)
+            runners, inventory_warnings = fetch_runner_inventory(args.repo)
+            for warning in inventory_warnings:
+                print(f"runner-topology: WARNING: {warning}", file=sys.stderr)
             variables = fetch_variables(args.repo)
         except FileNotFoundError:
             print(f"runner-topology: `{resolve_cli()}` not found; cannot read "
@@ -676,8 +804,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"runner-topology: GitHub API call failed: "
                   f"{exc.stderr.strip()[:400]}", file=sys.stderr)
             return 0 if args.mode == "hint" else 2
-
-        workflows_dir = args.workflows_dir or (HERE.parent.parent / ".github" / "workflows")
 
         def evidence(lane: Lane) -> list[set[str]]:
             # Called only when an ephemeral lane has no live runner, and scoped
@@ -690,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.repo, contract.lookback_hours, consumers,
                 contract.runs_per_workflow, manual_only=lane.dispatch_only)
 
-    findings = check(contract, runners, variables, evidence)
+    findings = check(contract, runners, variables, evidence, workflows_dir)
 
     if args.json:
         print(json.dumps([{

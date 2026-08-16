@@ -62,6 +62,15 @@ bool inherited_handle_is_open(std::string_view encoded_handle) {
 } // namespace
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    if (argc == 2 && std::string_view(argv[1]) == "--close-output-then-exit") {
+        ::close(STDOUT_FILENO);
+        ::close(STDERR_FILENO);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        return 0;
+    }
+#endif
+
     if (argc == 2 && std::string_view(argv[1]) == "--exit-immediately")
         return 0;
 

@@ -20,6 +20,7 @@ const char* format_to_string(PluginFormat f) {
         case PluginFormat::AudioUnitV3:  return "auv3";
         case PluginFormat::CLAP:         return "clap";
         case PluginFormat::LV2:          return "lv2";
+        case PluginFormat::BuiltIn:      return "builtin";
     }
     return "unknown";
 }
@@ -30,6 +31,7 @@ std::optional<PluginFormat> format_from_string(const std::string& s) {
     if (s == "auv3") return PluginFormat::AudioUnitV3;
     if (s == "clap") return PluginFormat::CLAP;
     if (s == "lv2") return PluginFormat::LV2;
+    if (s == "builtin") return PluginFormat::BuiltIn;
     return std::nullopt;
 }
 

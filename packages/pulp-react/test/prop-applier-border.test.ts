@@ -94,4 +94,42 @@ describe('prop-applier border setters route to per-attribute bridge fns', () => 
         const names = bridge.calls.map((c) => c.fn);
         expect(names).toContain('setBorder');
     });
+
+    it('CSS border shorthand preserves radius and resolves width style color', () => {
+        applyChangedProps(makeInstance(), {}, {
+            borderRadius: 13,
+            border: '1px solid rgba(255, 255, 255, 0.20)',
+        });
+        expect(bridge.calls.find(c => c.fn === 'setBorderColor')?.args)
+            .toEqual(['k', 'rgba(255, 255, 255, 0.20)']);
+        expect(bridge.calls.find(c => c.fn === 'setBorderWidth')?.args)
+            .toEqual(['k', 1]);
+        expect(bridge.calls.find(c => c.fn === 'setBorderStyle')?.args)
+            .toEqual(['k', 'solid']);
+        expect(bridge.calls.find(c => c.fn === 'setBorderRadius')?.args)
+            .toEqual(['k', 13]);
+        expect(bridge.calls.some(c => c.fn === 'setBorder')).toBe(false);
+    });
+
+    it('CSS none clears a uniform border without resetting radius', () => {
+        applyChangedProps(makeInstance(), {}, { border: 'none', borderRadius: 4 });
+        expect(bridge.calls.find(c => c.fn === 'setBorderWidth')?.args)
+            .toEqual(['k', 0]);
+        expect(bridge.calls.find(c => c.fn === 'setBorderStyle')?.args)
+            .toEqual(['k', 'none']);
+        expect(bridge.calls.some(c => c.fn === 'setBorder')).toBe(false);
+    });
+
+    it('CSS side shorthands preserve edge, alpha, style, and object compatibility', () => {
+        applyChangedProps(makeInstance(), {}, {
+            borderLeft: '2px dotted rgba(1, 2, 3, 0.4)',
+            borderRight: { width: 3, color: '#abcdef' },
+        });
+        expect(bridge.calls.find(c => c.fn === 'setBorderStyle')?.args)
+            .toEqual(['k', 'dotted']);
+        const sides = bridge.calls.filter(c => c.fn === 'setBorderSide')
+            .map(c => c.args);
+        expect(sides).toContainEqual(['k', 'left', 2, 'rgba(1, 2, 3, 0.4)']);
+        expect(sides).toContainEqual(['k', 'right', 3, '#abcdef']);
+    });
 });

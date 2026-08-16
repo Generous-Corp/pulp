@@ -337,6 +337,15 @@ wrong for a cross/Intel build on Apple Silicon).
   `CMAKE_OSX_ARCHITECTURES`) with "architecture mismatch … missing: <arch>" —
   one actionable error instead of a wall of ld64 "building for macOS-x86_64 but
   linking arm64" warnings + hundreds of undefined symbols.
+- **FindSkia also fails LOUD when an archive requires a newer macOS than the
+  consumer target.** A matching architecture is insufficient: ld64 only warns
+  when an object inside `libskia.a` or `libdawn_combined.a` carries a newer
+  `LC_BUILD_VERSION`, leaving a deceptively successful bundle. Configure now
+  runs `pulp_assert_macos_archive_floor` over every archive member and rejects
+  a floor above `CMAKE_OSX_DEPLOYMENT_TARGET`. If this fires, select/rebuild the
+  correct published slice or raise the product floor deliberately; do not
+  suppress the check or trust the link warning. The focused regression is
+  `test/cmake/test_macos_archive_floor.cmake`.
 - **wgpu-native has NO universal dylib.** For a universal build, Pulp fetches
   BOTH pinned mac wgpu zips, `lipo -create`s them, and — **REQUIRED** —
   `codesign -f -s -` re-signs the fat dylib (`PulpWgpuUniversal.cmake`, wired

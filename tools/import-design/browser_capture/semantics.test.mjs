@@ -394,6 +394,12 @@ const COMPUTED_DEFAULTS = {
   opacity: "1",
   cursor: "auto",
   backgroundColor: "rgba(0, 0, 0, 0)",
+  backgroundClip: "border-box",
+  clipPath: "none",
+  borderTopLeftRadius: "0px",
+  borderTopRightRadius: "0px",
+  borderBottomRightRadius: "0px",
+  borderBottomLeftRadius: "0px",
   color: "rgb(232, 232, 238)",
   fill: "rgb(0, 0, 0)",
   stroke: "none",
@@ -580,4 +586,28 @@ test("an indicator reports the colour it is actually painted in", () => {
     "an svg root paints nothing itself; its default black fill is not a colour");
   assert.equal(colourOf("SvgUnpaintedLine"), "",
     "a stroke-only shape with no stroke reports nothing, not its default fill");
+});
+
+test("a solid rectangular indicator reports that every box pixel moves", () => {
+  const candidates = runSemanticExpression([
+    knob("Opaque", element({
+      attrs: { "data-pulp-indicator": "" },
+      style: { backgroundColor: "rgb(255, 255, 255)" },
+    })),
+    knob("Rounded", element({
+      attrs: { "data-pulp-indicator": "" },
+      style: {
+        backgroundColor: "rgb(255, 255, 255)",
+        borderTopLeftRadius: "4px",
+      },
+    })),
+    knob("Transparent", element({
+      attrs: { "data-pulp-indicator": "" },
+    })),
+  ]);
+  const candidate = name =>
+    candidates.find(item => item.name === name);
+  assert.equal(candidate("Opaque").indicator_opaque_box, true);
+  assert.equal(candidate("Rounded").indicator_opaque_box, false);
+  assert.equal(candidate("Transparent").indicator_opaque_box, false);
 });
