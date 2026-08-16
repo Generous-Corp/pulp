@@ -4494,7 +4494,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.431.0",
+        "version": "0.431.1",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4509,13 +4509,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.431.0",
+        "catalog_version": "0.431.1",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.431.0",
+        "version": "0.431.1",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [
