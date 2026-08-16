@@ -1,0 +1,18 @@
+[Unit]
+Description=Pulp trusted ephemeral Linux CI runner slot %i
+Documentation=https://github.com/Generous-Corp/pulp/blob/main/docs/guides/local-ci.md
+After=network-online.target pve-guests.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/pulp/linux-trusted-runner-group.env
+ExecStart=/usr/local/sbin/pulp-trusted-ephemeral-runner.sh
+Restart=always
+RestartSec=30
+RestartPreventExitStatus=
+TimeoutStopSec=180
+User=root
+
+[Install]
+WantedBy=multi-user.target
