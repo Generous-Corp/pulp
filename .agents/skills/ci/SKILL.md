@@ -3024,6 +3024,15 @@ Four rules govern the fallback lane:
   moments before it holds a broker lease, so a script-free install is the point.
   Codex's own install is not a template here — it ships its platform binary
   differently.
+- **Strip `$schema` before passing a schema to `--json-schema`.** The CLI's
+  validator cannot resolve `"$schema": "https://json-schema.org/draft/2020-12/schema"`
+  and rejects the committed file verbatim with `no schema with key or ref` —
+  this failed a live recovery job on 2026-08-16. Pass
+  `jq -c 'del(."$schema")' <file>`; every constraint is preserved and the fenced
+  validator re-checks the payload against the full schema afterwards. Note the
+  trap that hid it: a hand-written inline schema in a local probe has no
+  `$schema` key, so rehearsing with a lookalike passes while the real artifact
+  fails. Rehearse with the committed file.
 - **Re-validate the output locally.** `claude --json-schema` validates upstream
   but leaves no trusted local proof, so
   `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That
@@ -3774,6 +3783,33 @@ For an already-corrupted dir (no sentinel yet), clean it once with the personal
 Pulp's local macOS runner runs through `actions-runner` (PIDs surfaced
 via `ps aux | grep Runner.Listener`); the daemon co-exists with the
 existing service.
+
+**Shipyard's local lanes carry the same guard, via
+`tools/ci/build-dir-sentinel.sh`.** For a long time they did not, which mattered
+because Shipyard's lane is the one that actually gets killed: a `timeout_secs`
+expiry is a SIGKILL, so no trap or exit handler runs, and 4 of 5 logged mac-lane
+runs on 2026-07-26/27 died that way with no compiler error in the log. Each
+timeout then seeded the next run's undefined-symbol failure, and the loop
+sustained itself. `.shipyard/config.toml`'s POSIX `configure` stages run
+`build-dir-sentinel.sh guard build '<configure command>'`; their `build` stages
+run `… clear build`. `guard` also tells a **failed** stage from a **killed** one:
+a configure that exits non-zero on its own wrote no object files, so it clears
+the marker and keeps the warm tree rather than forcing a needless cold rebuild.
+Only a signal exit (128+signum) stays armed.
+
+Two details differ from `build.yml` deliberately:
+
+* The sentinel is armed **before** configure, not after, so a run killed
+  *during* configure is caught too — a half-written `CMakeCache.txt` is its own
+  kind of broken.
+* Landing it required the timeout fix first. Arming a sentinel on a cap the
+  build cannot finish under produces an infinite wipe → cold rebuild → timeout →
+  wipe loop, ~1h of a shared machine per cycle. `[targets.mac] timeout_secs` is
+  7200 for this reason; check it before changing either number.
+
+`tools/scripts/test_build_dir_sentinel.py` asserts both directions (a stale
+marker wipes, a clean run does not) plus the arm/clear pairing across stages —
+a lane that arms without clearing wipes its build dir on every run.
 
 ### Prevent: ccache false-hit guard (#3504 follow-up)
 

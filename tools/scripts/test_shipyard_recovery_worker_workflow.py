@@ -220,6 +220,16 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         )
         self.assertNotIn('"$(cat "$RUNNER_TEMP/recovery-input/prompt.txt")"', self.text)
         self.assertNotIn("--add-dir", self.text)
+        # The CLI's --json-schema validator cannot resolve the committed
+        # schema's "$schema" draft/2020-12 key and rejects the file
+        # verbatim, which failed a live recovery job on 2026-08-16. Strip
+        # exactly that key; the fenced validator still checks the payload
+        # against the full schema afterwards.
+        self.assertEqual(self.text.count('del(."$schema")'), 2)
+        self.assertNotIn(
+            '--json-schema "$(cat "$GITHUB_WORKSPACE/control/tools/shipyard/',
+            self.text,
+        )
 
     def test_fallback_output_is_revalidated_by_a_fenced_checker(self) -> None:
         # The Claude CLI validates its own structured output upstream, which
