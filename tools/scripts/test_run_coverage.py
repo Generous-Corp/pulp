@@ -94,13 +94,20 @@ class ParallelismContractTests(unittest.TestCase):
         self.assertIsNotNone(match, "default CTest name exclusion must be one array item")
         exclusion = re.compile(match.group("pattern"))
         source = "\n".join(
-            (REPO_ROOT / "test" / name).read_text()
-            for name in (
-                "test_fdn_reverb.cpp",
-                "test_character_delay.cpp",
-                "test_osc_vco.cpp",
-                "test_analog_vcf.cpp",
-                "test_osc_wt.cpp",
+            path.read_text()
+            for path in (
+                REPO_ROOT / "test" / "test_fdn_reverb.cpp",
+                REPO_ROOT / "test" / "test_character_delay.cpp",
+                REPO_ROOT / "test" / "test_osc_vco.cpp",
+                REPO_ROOT / "test" / "test_analog_vcf.cpp",
+                REPO_ROOT / "test" / "test_osc_wt.cpp",
+                REPO_ROOT / "test" / "test_modal_bank.cpp",
+                REPO_ROOT / "test" / "test_spectral_matrix.cpp",
+                REPO_ROOT / "test" / "test_playback_program.cpp",
+                REPO_ROOT
+                / "examples"
+                / "PulpSampler"
+                / "test_pulp_sampler_streaming.cpp",
             )
         )
         expected_slow_cases = (
@@ -111,6 +118,10 @@ class ParallelismContractTests(unittest.TestCase):
             "Analog VCF stays finite at worst-case drive and oversampling",
             "OSC-WT worst alias swept to the top of every band",
             "OSC-WT worst-case alias is detection-floor-limited, not a fixed spur",
+            "modal bank throughput scales to large banks in real time",
+            "matrix: realtime factor reported for quality and low-latency modes",
+            "deferred compiler handles ten thousand clips and one hundred coalesced edits",
+            "PulpSampler sinc follows independent continuous pitch modulation controls",
         )
         for case in expected_slow_cases:
             self.assertIn(case, source, f"expected slow test was renamed: {case}")
@@ -289,17 +300,25 @@ class ObjectDiscoveryTests(unittest.TestCase):
     def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"',
             text,
-            "run_coverage.sh should use LLVM's module-signature merge "
-            "placeholder so repeated Catch2 invocations merge per binary.",
+            "run_coverage.sh should use LLVM's bounded merge pool so parallel "
+            "Catch2 invocations cannot corrupt one shared profile.",
         )
+        self.assertNotIn('pulp-%m.profraw', text)
         self.assertNotIn(
             "pulp-%p-%m.profraw",
             text,
             "per-PID profraw files are too noisy for the full coverage suite "
             "and are vulnerable to PID reuse.",
         )
+
+    def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("--failure-mode=all", text)
+        self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
+        self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
+        self.assertIn("PROFILE_SHARDS * 5", text)
 
 
 class StaleCacheTests(unittest.TestCase):

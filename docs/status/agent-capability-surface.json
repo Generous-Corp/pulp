@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 41,
+  "inventory_version": 42,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1605,7 +1605,7 @@
     {
       "domain": "music",
       "source": "core/music/include/pulp/music/pattern_development.hpp",
-      "fingerprint": "sha256:339c53311652ffdedb64851b9b7ee51129a01e98b05923f8139153ff80bfab58",
+      "fingerprint": "sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
       "include": "pulp/music/pattern_development.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
