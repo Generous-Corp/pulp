@@ -118,6 +118,13 @@ container and lowercase `path` creates the same `SvgPathWidget`, so
 imported SVG snippets do not need to be rewritten to the PascalCase
 intrinsic before they can render.
 
+`setSvgStretchToBounds` has no `<SvgPath>` prop yet. It is the bridge
+face of SVG's `preserveAspectRatio="none"` — the viewBox mapped onto the
+widget's bounds per axis instead of fitted and centred — and the design
+importer emits it for a stretched `<svg>`. Authored JSX still gets the
+default `xMidYMid meet` mapping; set the global directly if you need the
+stretch before the prop exists.
+
 `setSvgStrokeGradient` is the stroke mirror of `setSvgFillGradient`: a
 CSS `linear-gradient(...)` string parsed at paint time, with the solid
 stroke kept beside it as the parse-failure fallback (a later solid

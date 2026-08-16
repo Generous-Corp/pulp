@@ -2372,6 +2372,10 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (svg->viewbox_width() <= 0.0f && node.style.width && node.style.height) {
                 svg->set_viewbox(*node.style.width, *node.style.height);
             }
+            if (auto aspect = attr(node, "svg_preserve_aspect_ratio");
+                aspect && *aspect == "none") {
+                svg->set_stretch_to_bounds(true);
+            }
             apply_svg_paint(*svg, node);
             return svg;
         }
