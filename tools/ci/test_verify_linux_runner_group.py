@@ -82,5 +82,45 @@ class VerifyLinuxRunnerGroupTests(unittest.TestCase):
             MODULE.validate_policy(valid_group(), valid_repositories(), REPO, "pr-safe")
         )
 
+    def test_generic_repository_requires_exact_name_repository_and_workflow(self) -> None:
+        repo = "Generous-Corp/vellum"
+        workflow = ".github/workflows/build.yml"
+        group = valid_group()
+        group["name"] = "vellum-pr-safe-build"
+        group["selected_workflows"] = [f"{repo}/{workflow}@refs/heads/main"]
+        repositories = {"total_count": 1, "repositories": [{"full_name": repo}]}
+        self.assertEqual(
+            MODULE.validate_policy(
+                group,
+                repositories,
+                repo,
+                group_name="vellum-pr-safe-build",
+                workflow=workflow,
+            ),
+            [],
+        )
+        group["selected_workflows"].append(
+            f"{repo}/.github/workflows/release.yml@refs/heads/main"
+        )
+        self.assertTrue(
+            MODULE.validate_policy(
+                group,
+                repositories,
+                repo,
+                group_name="vellum-pr-safe-build",
+                workflow=workflow,
+            )
+        )
+
+    def test_generic_scope_arguments_are_atomic(self) -> None:
+        self.assertTrue(
+            MODULE.validate_policy(
+                valid_group(),
+                valid_repositories(),
+                REPO,
+                group_name="orphan-name",
+            )
+        )
+
 if __name__ == "__main__":
     unittest.main()

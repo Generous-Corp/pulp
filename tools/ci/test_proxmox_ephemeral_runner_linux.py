@@ -18,6 +18,7 @@ TRUSTED_WRAPPER = ROOT / "tools" / "ci" / "proxmox-trusted-ephemeral-runner-linu
 PR_SAFE_WRAPPER = ROOT / "tools" / "ci" / "proxmox-pr-safe-ephemeral-runner-linux.sh"
 TRUSTED_SERVICE = ROOT / "tools" / "ci" / "pulp-trusted-ephemeral-pool@.service"
 PR_SAFE_SERVICE = ROOT / "tools" / "ci" / "pulp-pr-safe-ephemeral-pool@.service"
+GENERIC_SERVICE = ROOT / "tools" / "ci" / "proxmox-ephemeral-pool@.service"
 QUALITY_TESTS = ROOT / "test" / "cmake" / "quality_tests.cmake"
 
 
@@ -30,6 +31,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         cls.pr_safe_wrapper = PR_SAFE_WRAPPER.read_text(encoding="utf-8")
         cls.trusted_service = TRUSTED_SERVICE.read_text(encoding="utf-8")
         cls.pr_safe_service = PR_SAFE_SERVICE.read_text(encoding="utf-8")
+        cls.generic_service = GENERIC_SERVICE.read_text(encoding="utf-8")
         cls.quality_tests = QUALITY_TESTS.read_text(encoding="utf-8")
 
     def test_shell_is_syntactically_valid(self) -> None:
@@ -47,21 +49,98 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
 
     def test_repository_registration_remains_the_default(self) -> None:
         self.assertIn('REGISTRATION_API="repos/${REPO}"', self.script)
-        self.assertIn('RUNNER_URL="https://github.com/${REPO}"', self.script)
-        self.assertIn('RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"', self.script)
+        self.assertIn('RUNNER_GROUP_ID="${TARTCI_RUNNER_GROUP_ID:-${PULP_LINUX_RUNNER_GROUP_ID:-}}"', self.script)
 
     def test_org_registration_requires_the_fail_closed_verifier(self) -> None:
         self.assertIn('REGISTRATION_API="orgs/${ORG}"', self.script)
-        self.assertIn('RUNNER_URL="https://github.com/${ORG}"', self.script)
         self.assertIn('--gh "$GH_CLI" --repo "$REPO"', self.script)
-        self.assertIn('--group-id "$RUNNER_GROUP_ID" --policy "$RUNNER_GROUP_POLICY"', self.script)
+        self.assertIn('--group-id "$RUNNER_GROUP_ID")', self.script)
         self.assertIn('--policy "$RUNNER_GROUP_POLICY"', self.script)
         self.assertIn('automatic Linux runner group policy is not fail-closed', self.script)
         self.assertIn('EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"', self.script)
         self.assertIn('EXPECTED_LABELS="${BASE_LABELS},pulp-pr-safe-linux-x64"', self.script)
         self.assertIn('runner labels do not match the exact policy', self.script)
         self.assertIn('runner name prefix does not match the exact policy', self.script)
-        self.assertIn('RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"', self.script)
+
+    def test_cross_repository_identity_is_explicit_and_pulp_policy_is_preserved(self) -> None:
+        for marker in (
+            "TARTCI_RUNNER_REPO",
+            "TARTCI_RUNNER_GROUP_NAME",
+            "TARTCI_RUNNER_WORKFLOW",
+            "TARTCI_RUNNER_LABELS",
+            "TARTCI_RUNNER_NAME_PREFIX",
+            "TARTCI_PROXMOX_VM_NAME_PREFIX",
+            "TARTCI_PROXMOX_GOLDEN",
+            "TARTCI_PROXMOX_CLONE_BASE",
+            "TARTCI_PROXMOX_CLONE_MAX",
+        ):
+            self.assertIn(marker, self.script)
+        self.assertIn('if [ "$REPO" = "Generous-Corp/pulp" ]; then', self.script)
+        self.assertIn("cross-repository labels must not reuse a Pulp capability label", self.script)
+        self.assertIn("/etc/pulp/proxmox-runner/%i.env", self.generic_service)
+        self.assertIn("pulp-ephemeral-runner.sh --once", self.generic_service)
+
+    def _generic_profile_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        for name in (
+            "TARTCI_RUNNER_GITHUB_AUTH_MODE",
+            "TARTCI_ORG_RUNNER_PAT_FILE",
+        ):
+            env.pop(name, None)
+        env.update(
+            {
+                "TARTCI_RUNNER_REPO": "Generous-Corp/vellum",
+                "TARTCI_RUNNER_GROUP_ID": "123",
+                "TARTCI_RUNNER_GROUP_NAME": "vellum-pr-safe-build",
+                "TARTCI_RUNNER_WORKFLOW": ".github/workflows/build.yml",
+                "TARTCI_RUNNER_LABELS": "self-hosted,Linux,X64,vellum-build-linux-x64,vellum-host-macpro",
+                "TARTCI_RUNNER_NAME_PREFIX": "vellum-ci",
+                "TARTCI_PROXMOX_VM_NAME_PREFIX": "vellum-ci",
+                "TARTCI_PROXMOX_GOLDEN": "9006",
+                "TARTCI_PROXMOX_CLONE_BASE": "203",
+                "TARTCI_PROXMOX_CLONE_MAX": "203",
+                "PULP_LINUX_GITHUB_AUTH_MODE": "token-file",
+                "PULP_LINUX_ORG_PAT_FILE": "/root/.config/pulp/secrets/gh-org-runner-pat",
+            }
+        )
+        return env
+
+    def test_cross_repository_rejects_pulp_credential_fallbacks(self) -> None:
+        result = subprocess.run(
+            ["/bin/bash", str(SCRIPT), "--once"],
+            capture_output=True,
+            text=True,
+            env=self._generic_profile_env(),
+            timeout=5,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "cross-repository routing requires explicit GitHub authentication and organization credential identity",
+            result.stdout,
+        )
+
+    def test_cross_repository_requires_each_explicit_credential_field(self) -> None:
+        explicit = {
+            "TARTCI_RUNNER_GITHUB_AUTH_MODE": "token-file",
+            "TARTCI_ORG_RUNNER_PAT_FILE": "/root/.config/pulp/secrets/vellum-org-runner-pat",
+        }
+        for omitted in explicit:
+            with self.subTest(omitted=omitted):
+                env = self._generic_profile_env()
+                env.update(explicit)
+                env.pop(omitted)
+                result = subprocess.run(
+                    ["/bin/bash", str(SCRIPT), "--once"],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=5,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "cross-repository routing requires explicit GitHub authentication and organization credential identity",
+                    result.stdout,
+                )
 
     def test_automatic_capabilities_require_an_org_group(self) -> None:
         self.assertIn(
@@ -188,11 +267,11 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('--service-type=oneshot', delegation)
         self.assertIn('--property=User=root', delegation)
         self.assertIn('--property=Restart=on-failure', delegation)
-        self.assertIn('--setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE"', delegation)
-        self.assertIn(
-            '--setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE"', delegation
-        )
-        self.assertIn('--setenv="PULP_LINUX_GH_CLI=$GH_CLI"', delegation)
+        self.assertIn('--setenv="TARTCI_RUNNER_REPO=', delegation)
+        self.assertIn('--setenv="TARTCI_ORG_RUNNER_PAT_FILE=', delegation)
+        self.assertIn('--setenv="TARTCI_RUNNER_GITHUB_AUTH_MODE=', delegation)
+        self.assertIn('--setenv="TARTCI_RUNNER_LABELS=${LABELS}"', delegation)
+        self.assertIn('--setenv="TARTCI_GH_CLI=', delegation)
         self.assertIn('--setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR"', delegation)
         self.assertIn('--deferred-cleanup "$VMID"', delegation)
         self.assertIn('runner is busy; delegated clone $VMID', delegation)
@@ -206,10 +285,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertIn('exact runner has invalid fenced busy state', cleanup)
         self.assertIn('a routing label survived dispatch fence', cleanup)
-        self.assertIn('pulp-auto-linux-x64', cleanup)
-        self.assertIn('pulp-pr-safe-linux-x64', cleanup)
-        self.assertIn('pulp-build-linux-x64', cleanup)
-        self.assertIn('pulp-host-macpro', cleanup)
+        self.assertIn('routing_label_survives "$runner_labels"', cleanup)
         self.assertIn('shutdown label is missing after dispatch fence', cleanup)
         self.assertIn("for fence_probe in 1 2; do", cleanup)
         self.assertIn('fenced dispatch for idle runner id $rid', cleanup)
@@ -233,9 +309,15 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
 
     def test_cleanup_fences_offline_runner_and_delegates_reconnect_race(self) -> None:
-        helper_start = self.script.index("\ndelegate_deferred_cleanup() {") + 1
-        helper = self.script[
-            helper_start : self.script.index("trap cleanup EXIT")
+        routing_helper = self.script[
+            self.script.index("routing_label_survives() {") : self.script.index(
+                "monitor_runner_heartbeat() {"
+            )
+        ]
+        helper = routing_helper + self.script[
+            self.script.index("delegate_deferred_cleanup() {") : self.script.index(
+                "trap cleanup EXIT"
+            )
         ]
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = pathlib.Path(raw_tmp)
@@ -259,10 +341,14 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "}\n"
                 "CLONED=1\nKEEP=0\nGITHUB_API_READY=1\n"
                 "VMID=200\nRUNNER_NAME='pulp-pr-safe-ephemeral-200-test'\n"
+                "REPO='Generous-Corp/pulp'\n"
+                "LABELS='self-hosted,Linux,X64,pulp-pr-safe-linux-x64'\n"
                 "REGISTRATION_API='orgs/Generous-Corp'\n"
                 "GITHUB_AUTH_MODE='app-helper'\n"
+                "PAT_FILE='/root/.config/pulp/secrets/gh-runner-pat'\n"
                 "ORG_PAT_FILE='/root/.config/pulp/secrets/gh-org-runner-pat'\n"
                 "GH_CLI='/usr/local/bin/ghapp'\n"
+                "CLONE_BASE=200\nCLONE_MAX=202\n"
                 f"FIREWALL_DIR='{tmp}'\n"
                 + helper
                 + "\ncleanup\n",
@@ -298,6 +384,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn("for fence_probe in 1 2; do", helper)
         self.assertIn("deferred-cleanup runner became busy before dispatch fence", helper)
         self.assertIn("shutdown label is missing after deferred-cleanup fence", helper)
+        self.assertIn('routing_label_survives "$labels"', helper)
         self.assertIn('exec 9>"$VMID_LOCK"', helper)
         self.assertIn('flock -w 300 9', helper)
         self.assertIn("description: pulp-runner-generation=", helper)
@@ -375,6 +462,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "configure_github_auth() { :; }\n"
                 "github_api() { :; }\n"
                 f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
+                "CLONE_BASE=200\nCLONE_MAX=202\n"
+                "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
                 f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
                 "GITHUB_AUTH_MODE='token-file'\n"
                 f"FIREWALL_DIR='{tmp}'\n"
@@ -398,7 +487,12 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             self.assertFalse(destroyed.exists())
 
     def test_deferred_cleanup_fences_offline_runner_before_reconnect_race(self) -> None:
-        helper = self.script[
+        routing_helper = self.script[
+            self.script.index("routing_label_survives() {") : self.script.index(
+                "monitor_runner_heartbeat() {"
+            )
+        ]
+        helper = routing_helper + self.script[
             self.script.index("deferred_cleanup() {") : self.script.index(
                 'if [ "${1:-}" = "--deferred-cleanup" ]'
             )
@@ -432,6 +526,8 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "  fi\n"
                 "}\n"
                 f"ORG='Generous-Corp'\nREPO='Generous-Corp/pulp'\n"
+                "CLONE_BASE=200\nCLONE_MAX=202\n"
+                "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
                 f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
                 "GITHUB_AUTH_MODE='token-file'\n"
                 f"FIREWALL_DIR='{tmp}'\n"
@@ -451,6 +547,68 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
                 "deferred-cleanup runner became busy before dispatch fence",
                 result.stdout,
             )
+            self.assertTrue(firewall.exists())
+            self.assertFalse(qm_called.exists())
+
+    def test_deferred_cleanup_preserves_clone_when_configured_routing_label_survives(self) -> None:
+        routing_helper = self.script[
+            self.script.index("routing_label_survives() {") : self.script.index(
+                "monitor_runner_heartbeat() {"
+            )
+        ]
+        helper = routing_helper + self.script[
+            self.script.index("deferred_cleanup() {") : self.script.index(
+                'if [ "${1:-}" = "--deferred-cleanup" ]'
+            )
+        ]
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            firewall = tmp / "200.fw"
+            firewall.write_text("protected", encoding="utf-8")
+            qm_called = tmp / "qm-called"
+            fake_qm = tmp / "qm"
+            fake_qm.write_text(
+                "#!/usr/bin/env bash\n"
+                f": > '{qm_called}'\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_qm.chmod(0o755)
+            harness = tmp / "harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -u\n"
+                "die() { printf '%s\\n' \"$*\"; exit 1; }\n"
+                "configure_github_auth() { :; }\n"
+                "github_api() {\n"
+                "  if [ \"${1:-}\" = --paginate ]; then\n"
+                "    printf '17\\tvellum-ephemeral-200-test\\tfalse\\toffline\\n'\n"
+                "  elif [ \"${1:-}\" = --method ]; then\n"
+                "    :\n"
+                "  else\n"
+                "    printf 'vellum-ephemeral-200-test\\tfalse\\toffline\\tpulp-shutdown-fenced,vellum-build-linux-x64\\n'\n"
+                "  fi\n"
+                "}\n"
+                "ORG='Generous-Corp'\nREPO='Generous-Corp/vellum'\n"
+                "LABELS='self-hosted,Linux,X64,vellum-build-linux-x64'\n"
+                "CLONE_BASE=200\nCLONE_MAX=202\n"
+                "vmid_in_range() { [ \"$1\" -ge \"$CLONE_BASE\" ] && [ \"$1\" -le \"$CLONE_MAX\" ]; }\n"
+                f"PAT_FILE='{tmp}/repo-token'\nORG_PAT_FILE='{tmp}/org-token'\n"
+                "GITHUB_AUTH_MODE='token-file'\n"
+                f"FIREWALL_DIR='{tmp}'\n"
+                + helper
+                + "\ndeferred_cleanup 200 vellum-ephemeral-200-test orgs/Generous-Corp\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(harness)],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("routing label survived deferred-cleanup fence", result.stdout)
             self.assertTrue(firewall.exists())
             self.assertFalse(qm_called.exists())
 
@@ -595,36 +753,76 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         )
         self.assertNotIn('Authorization: Bearer $PAT', self.script)
         self.assertIn('GH_TOKEN="$PAT" "$GH_CLI" api "$@"', self.script)
-        self.assertIn('RT="$(github_api --method POST', self.script)
+        self.assertIn("actions/runners/generate-jitconfig", self.script)
 
-    def test_registration_token_is_not_exposed_in_process_arguments(self) -> None:
+    def test_jit_configuration_is_mode_600_stdin_only(self) -> None:
         registration = self.script[
-            self.script.index('log "minting registration token"') : self.script.index(
+            self.script.index('log "minting JIT runner configuration"') : self.script.index(
                 "# ── run exactly one job"
             )
         ]
-        self.assertIn("printf '%s\\n' \"$RT\" | ssh", registration)
-        self.assertIn("IFS= read -r ACTIONS_RUNNER_INPUT_TOKEN", registration)
-        self.assertIn("export ACTIONS_RUNNER_INPUT_TOKEN", registration)
+        self.assertIn("umask 077", registration)
+        self.assertIn("install -m 600 /dev/stdin", registration)
+        self.assertIn("./run.sh --jitconfig", registration)
+        self.assertIn('RUNNER_NAME="${RUNNER_SLOT_ID}-$(cat /proc/sys/kernel/random/uuid)"', self.script)
+        self.assertNotIn("registration-token", registration)
+        self.assertNotIn("config.sh --unattended", registration)
         self.assertNotIn("--token", registration)
-        self.assertNotIn("${RT}", registration)
 
-    def test_runner_transport_failure_restarts_one_job_service(self) -> None:
-        run_block = self.script.split('log "waiting for one job', 1)[1]
-        self.assertIn("if ! ssh -o BatchMode=yes", run_block)
-        self.assertIn("runner transport failed before one-job completion", run_block)
-        self.assertLess(
-            run_block.index("runner transport failed before one-job completion"),
-            run_block.index('log "job finished on $VMID"'),
-        )
+    def test_jit_readiness_and_heartbeat_are_bounded(self) -> None:
+        self.assertIn("TARTCI_RUNNER_READY_TIMEOUT_SECONDS", self.script)
+        self.assertIn("JIT runner never became visible to GitHub", self.script)
+        self.assertIn("HEARTBEAT_FAILURE_FILE", self.script)
+        self.assertIn("misses=$((misses + 1))", self.script)
+        self.assertIn("JIT runner heartbeat failed before the job completed", self.script)
+        self.assertGreaterEqual(self.script.count("sanitize_runner_output"), 3)
         self.assertIn("Restart=always", self.trusted_service)
         self.assertIn("Restart=always", self.pr_safe_service)
 
+    def test_heartbeat_inventory_failures_preserve_the_runner(self) -> None:
+        helper = self.script[
+            self.script.index("monitor_runner_heartbeat() {") : self.script.index(
+                "credential_file_secure() {"
+            )
+        ]
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = pathlib.Path(raw_tmp)
+            killed = tmp / "killed"
+            inventory_calls = tmp / "inventory-calls"
+            harness = tmp / "harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -u\n"
+                f"kill() {{ if [ \"${{1:-}}\" = -0 ]; then count=$(wc -l < '{inventory_calls}' 2>/dev/null || echo 0); [ \"$count\" -lt 2 ]; else : > '{killed}'; fi; }}\n"
+                f"github_api() {{ printf 'call\\n' >> '{inventory_calls}'; return 1; }}\n"
+                "sleep() { :; }\n"
+                "RUNNER_PID=12345\n"
+                "RUNNER_NAME='vellum-ephemeral-200-test'\n"
+                "REGISTRATION_API='orgs/Generous-Corp'\n"
+                "RUNNER_HEARTBEAT_INTERVAL_SECONDS=0\n"
+                f"HEARTBEAT_FAILURE_FILE='{tmp}/heartbeat-failure'\n"
+                + helper
+                + "\nmonitor_runner_heartbeat\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["/bin/bash", str(harness)], capture_output=True, text=True, timeout=5
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(inventory_calls.read_text(encoding="utf-8").count("call"), 2)
+            self.assertFalse(killed.exists())
+            self.assertFalse((tmp / "heartbeat-failure").exists())
+
     def test_automatic_pool_can_use_the_root_owned_github_app_helper(self) -> None:
+        identity = self.script.split("GOVERNOR=", 1)[0]
+        self.assertIn('if [ "$REPO" = "Generous-Corp/pulp" ]; then', identity)
         self.assertIn(
-            'GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"',
-            self.script,
+            'GITHUB_AUTH_MODE="${TARTCI_RUNNER_GITHUB_AUTH_MODE:-${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}}"',
+            identity,
         )
+        self.assertIn('PAT_FILE="${TARTCI_RUNNER_PAT_FILE:-}"', identity)
+        self.assertIn('GITHUB_AUTH_MODE="${TARTCI_RUNNER_GITHUB_AUTH_MODE:-}"', identity)
+        self.assertIn('ORG_PAT_FILE="${TARTCI_ORG_RUNNER_PAT_FILE:-}"', identity)
         helper = self.script[
             self.script.index("app_helper_secure() {") : self.script.index(
                 "deferred_cleanup() {"

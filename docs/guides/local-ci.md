@@ -236,7 +236,8 @@ install -d -o root -g root -m 0755 /usr/local/lib/pulp
 install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
 install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
-  tools/ci/pulp-pr-safe-ephemeral-pool@.service /etc/systemd/system/
+  tools/ci/pulp-pr-safe-ephemeral-pool@.service \
+  tools/ci/proxmox-ephemeral-pool@.service /etc/systemd/system/
 ```
 
 Create separate root-owned role environments; never share one:
@@ -278,11 +279,73 @@ disposable guests to be absent, then run
 `configure-proxmox-ci-network --rollback`. Rollback refuses to remove a bridge
 with an attached guest and restores the prior IPv4-forwarding state.
 
-These are Pulp-scoped provider roles, not a generic cross-repository or Vellum
-provider. A healthy local runner is also not a fallback after labels have been
-assigned: GitHub cannot retarget a queued job. Hosted Linux remains the current
-protected-event default until the separate routing work lands; never route
-`pull_request_target` or secret-bearing jobs to the generic pool.
+### Add an isolated lane for another repository
+
+The same supervisor can serve another repository without sharing Pulp's group,
+labels, runner name, golden, or VM range. Install
+`proxmox-ephemeral-pool@.service`, then create one root-owned mode-0600 profile
+per slot under `/etc/pulp/proxmox-runner/`. A profile must set every identity
+explicitly:
+
+```ini
+TARTCI_RUNNER_REPO=Generous-Corp/vellum
+TARTCI_RUNNER_GROUP_ID=123
+TARTCI_RUNNER_GROUP_NAME=vellum-pr-safe-build
+TARTCI_RUNNER_WORKFLOW=.github/workflows/build.yml
+TARTCI_RUNNER_LABELS=self-hosted,Linux,X64,vellum-build-linux-x64,vellum-host-macpro
+TARTCI_RUNNER_NAME_PREFIX=vellum-ci
+TARTCI_PROXMOX_VM_NAME_PREFIX=vellum-ci
+TARTCI_PROXMOX_GOLDEN=9006
+TARTCI_PROXMOX_CLONE_BASE=203
+TARTCI_PROXMOX_CLONE_MAX=203
+TARTCI_RUNNER_GITHUB_AUTH_MODE=token-file
+TARTCI_ORG_RUNNER_PAT_FILE=/root/.config/pulp/secrets/vellum-org-runner-pat
+```
+
+The verifier requires the named non-default group to contain only that
+repository and allow exactly the named workflow at `refs/heads/main`. The
+labels must include `self-hosted,Linux,X64` and must not reuse a `pulp-*`
+capability label. VMIDs are restricted to `1..254` because the isolated address
+is derived as `10.240.<VMID>.2/30`; every repository receives a disjoint range
+and matching `vmbr-ci<VMID>` bridge.
+
+Both `TARTCI_RUNNER_GITHUB_AUTH_MODE` and
+`TARTCI_ORG_RUNNER_PAT_FILE` are mandatory for a non-Pulp profile. Generic
+profiles never inherit Pulp's authentication mode or organization PAT path;
+omitting either value fails before any runner or VM is created.
+
+The network helper owns one exact contiguous range. To expand it, first stop the
+protected role units, wait until every managed guest is absent, roll back the
+currently installed range, then apply the expanded range. Use that same range
+for later verification or rollback. For the example above, replace Pulp's
+three-bridge contract with the four-bridge contract that also contains 203:
+
+```sh
+systemctl stop 'pulp-trusted-ephemeral-pool@*' \
+  'pulp-pr-safe-ephemeral-pool@*'
+/usr/local/sbin/configure-proxmox-ci-network --rollback
+TARTCI_PROXMOX_CLONE_BASE=200 TARTCI_PROXMOX_CLONE_MAX=203 \
+  /usr/local/sbin/configure-proxmox-ci-network --dry-run
+TARTCI_PROXMOX_CLONE_BASE=200 TARTCI_PROXMOX_CLONE_MAX=203 \
+  /usr/local/sbin/configure-proxmox-ci-network --apply
+systemctl daemon-reload
+systemctl enable --now proxmox-ephemeral-pool@vellum-1.service
+```
+
+Runner registration uses GitHub's JIT endpoint. The management credential stays
+in a root-owned mode-0600 host file (or the verified root-owned GitHub App
+helper), and the one-use encoded configuration reaches the guest through a
+mode-0600 stdin transfer. Each boot appends a generation UUID to the stable slot
+prefix, avoiding stale-name registration conflicts while generation-fenced
+cleanup still binds deletion to the exact clone. Registration visibility and
+broker heartbeat waits are bounded, and diagnostic tails are credential-
+sanitized.
+
+Keep the repository's workflow selector hosted until a live proof records the
+exact eligible job claim, expected labels, one-job completion, deregistration,
+VM destruction, and firewall-policy removal. A healthy local runner is not a
+fallback after labels have been assigned: GitHub cannot retarget a queued job.
+Never route `pull_request_target` or secret-bearing jobs to this pool.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
@@ -304,7 +367,7 @@ Skia (`external/skia-build/.../libskia.a`), a warm ccache, the uncredentialed
 `PULP_SHARED_FETCHCONTENT_SOURCE_DIR`. That last one is not optional: with it
 empty, every job re-clones three.js (~2.2 GB of history) before it can compile.
 Each job gets a
-linked clone (copy-on-write, ~28 s to boot), registers a `--ephemeral` runner, takes
+linked clone (copy-on-write, ~28 s to boot), starts an ephemeral JIT runner, takes
 exactly one job, and the clone is destroyed. Nothing accumulates, so nothing needs
 cleaning — and the cache a job inherits cannot be poisoned by the job before it.
 This closes the reused-build-dir class outright, which matters because `build.yml`
@@ -344,7 +407,7 @@ assigned, `runs-on` has no live fallback.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
-`Administration: read/write`, minting a single-use registration token per job.
+`Administration: read/write`, minting a single-use JIT configuration per job.
 That host credential never enters a guest. Jobs that call `gh` authenticate with
 the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
 persistent `gh` login in any supported config or credential store.

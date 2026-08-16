@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pathlib
+import os
 import subprocess
 import tempfile
 import unittest
@@ -34,24 +35,46 @@ class ConfigureProxmoxCiNetworkTests(unittest.TestCase):
         self.assertIn("Usage:", result.stderr)
 
     def test_exact_three_slot_point_to_point_contract(self) -> None:
+        result = subprocess.run(
+            ["/bin/bash", "-c", f"source {SCRIPT!s}; render_interfaces"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
         for vmid in range(200, 203):
-            self.assertIn(f"vmbr-ci{vmid}", self.script)
-            self.assertIn(f"10.240.{vmid}.1/30", self.script)
-            self.assertIn(f"10.240.{vmid}.0/30", self.script)
-        self.assertNotIn("bridge-ports vmbr0", self.script)
-        self.assertIn("bridge-ports none", self.script)
+            self.assertIn(f"vmbr-ci{vmid}", result.stdout)
+            self.assertIn(f"10.240.{vmid}.1/30", result.stdout)
+        self.assertNotIn("bridge-ports vmbr0", result.stdout)
+        self.assertIn("bridge-ports none", result.stdout)
         self.assertEqual(
-            self.script.count(
+            result.stdout.count(
                 "post-up /usr/local/sbin/configure-proxmox-ci-network --ensure-nat"
             ),
             3,
         )
         self.assertEqual(
-            self.script.count(
+            result.stdout.count(
                 "pre-down /usr/local/sbin/configure-proxmox-ci-network --remove-nat"
             ),
             3,
         )
+
+    def test_custom_vmid_range_renders_disjoint_point_to_point_bridge(self) -> None:
+        result = subprocess.run(
+            ["/bin/bash", "-c", f"source {SCRIPT!s}; render_interfaces"],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "TARTCI_PROXMOX_CLONE_BASE": "203",
+                "TARTCI_PROXMOX_CLONE_MAX": "203",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("auto vmbr-ci203", result.stdout)
+        self.assertIn("address 10.240.203.1/30", result.stdout)
+        self.assertIn("--ensure-nat vmbr-ci203", result.stdout)
+        self.assertNotIn("vmbr-ci200", result.stdout)
 
     def test_apply_does_not_reload_or_reconfigure_management_bridge(self) -> None:
         apply_body = self.script.split("apply_network() {", 1)[1].split(

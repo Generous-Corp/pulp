@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure the Mac Pro's three no-uplink Proxmox CI bridges without touching
+# Configure the Mac Pro's exact no-uplink Proxmox CI bridge range without touching
 # its management bridge. Changes are explicit, reversible, and verified before
 # an automatic runner may be enabled.
 set -euo pipefail
@@ -10,10 +10,25 @@ STATE_FILE=/var/lib/pulp/ci-host-network.state
 LOCK_FILE=/var/lock/pulp-ci-host-network.lock
 VMID_LOCK_FILE=/var/lock/pulp-ephemeral-vmid.lock
 MANAGEMENT_BRIDGE=vmbr0
-BRIDGES=(vmbr-ci200 vmbr-ci201 vmbr-ci202)
-CONTROLLER_ADDRESSES=(10.240.200.1/30 10.240.201.1/30 10.240.202.1/30)
-SUBNETS=(10.240.200.0/30 10.240.201.0/30 10.240.202.0/30)
+CLONE_BASE="${TARTCI_PROXMOX_CLONE_BASE:-200}"
+CLONE_MAX="${TARTCI_PROXMOX_CLONE_MAX:-202}"
+BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
+BRIDGES=()
+CONTROLLER_ADDRESSES=()
+SUBNETS=()
 MODE="${1:-}"
+
+[[ "$CLONE_BASE" =~ ^[0-9]+$ && "$CLONE_MAX" =~ ^[0-9]+$ ]] \
+    && [ "$CLONE_BASE" -ge 1 ] && [ "$CLONE_MAX" -le 254 ] \
+    && [ "$CLONE_BASE" -le "$CLONE_MAX" ] \
+    || { printf 'ERROR: clone VMID range must be ordered within 1..254\n' >&2; exit 1; }
+[[ "$BRIDGE_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || { printf 'ERROR: isolated bridge prefix must be shell-safe\n' >&2; exit 1; }
+for vmid in $(seq "$CLONE_BASE" "$CLONE_MAX"); do
+    BRIDGES+=("${BRIDGE_PREFIX}${vmid}")
+    CONTROLLER_ADDRESSES+=("10.240.${vmid}.1/30")
+    SUBNETS+=("10.240.${vmid}.0/30")
+done
 
 usage() {
     cat <<'EOF'
@@ -32,33 +47,23 @@ render_interfaces() {
     cat <<'EOF'
 # Managed by Pulp configure-proxmox-ci-network.sh. Do not edit in place.
 # These bridges have no physical ports and never join vmbr0 or the LAN.
-auto vmbr-ci200
-iface vmbr-ci200 inet static
-    address 10.240.200.1/30
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-    post-up /usr/local/sbin/configure-proxmox-ci-network --ensure-nat
-    pre-down /usr/local/sbin/configure-proxmox-ci-network --remove-nat vmbr-ci200
-
-auto vmbr-ci201
-iface vmbr-ci201 inet static
-    address 10.240.201.1/30
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-    post-up /usr/local/sbin/configure-proxmox-ci-network --ensure-nat
-    pre-down /usr/local/sbin/configure-proxmox-ci-network --remove-nat vmbr-ci201
-
-auto vmbr-ci202
-iface vmbr-ci202 inet static
-    address 10.240.202.1/30
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-    post-up /usr/local/sbin/configure-proxmox-ci-network --ensure-nat
-    pre-down /usr/local/sbin/configure-proxmox-ci-network --remove-nat vmbr-ci202
 EOF
+    local index bridge address
+    for index in "${!BRIDGES[@]}"; do
+        bridge="${BRIDGES[$index]}"
+        address="${CONTROLLER_ADDRESSES[$index]}"
+        cat <<EOF
+auto ${bridge}
+iface ${bridge} inet static
+    address ${address}
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up /usr/local/sbin/configure-proxmox-ci-network --ensure-nat ${bridge}
+    pre-down /usr/local/sbin/configure-proxmox-ci-network --remove-nat ${bridge}
+
+EOF
+    done
 }
 
 render_sysctl() {
@@ -156,6 +161,25 @@ ensure_nat() {
     done
 }
 
+managed_bridge_network() {
+    local bridge="$1" vmid="${1#"$BRIDGE_PREFIX"}"
+    [ "$bridge" != "$vmid" ] && [[ "$vmid" =~ ^[0-9]+$ ]] \
+        && [ "$vmid" -ge 1 ] && [ "$vmid" -le 254 ] \
+        || die "invalid managed bridge"
+    printf '10.240.%s.0/30\n' "$vmid"
+}
+
+ensure_one_nat() {
+    local bridge="$1" subnet count
+    subnet="$(managed_bridge_network "$bridge")"
+    count="$(count_nat_rules "$subnet" "$bridge")"
+    [ "$count" = 0 ] || [ "$count" = 1 ] \
+        || die "$bridge has duplicate managed NAT rules"
+    [ "$count" = 1 ] || nat_rule -A "$subnet" "$bridge"
+    [ "$(count_nat_rules "$subnet" "$bridge")" = 1 ] \
+        || die "cannot prove exact managed NAT for $bridge"
+}
+
 lock_host_network_unless_inherited() {
     [ "${PULP_CI_HOST_NETWORK_LOCK_HELD:-0}" = 1 ] && return
     exec 9>"$LOCK_FILE" || die "cannot open $LOCK_FILE"
@@ -163,20 +187,16 @@ lock_host_network_unless_inherited() {
 }
 
 remove_one_nat() {
-    local requested_bridge="$1" index count
-    for index in "${!BRIDGES[@]}"; do
-        [ "${BRIDGES[$index]}" = "$requested_bridge" ] || continue
-        count="$(count_nat_rules "${SUBNETS[$index]}" "$requested_bridge")"
-        [[ "$count" =~ ^[0-9]+$ ]] || die "cannot count $requested_bridge NAT rules"
-        while [ "$count" -gt 0 ]; do
-            nat_rule -D "${SUBNETS[$index]}" "$requested_bridge"
-            count=$((count - 1))
-        done
-        [ "$(count_nat_rules "${SUBNETS[$index]}" "$requested_bridge")" = 0 ] \
-            || die "managed NAT rule survived removal for $requested_bridge"
-        return
+    local requested_bridge="$1" subnet count
+    subnet="$(managed_bridge_network "$requested_bridge")"
+    count="$(count_nat_rules "$subnet" "$requested_bridge")"
+    [[ "$count" =~ ^[0-9]+$ ]] || die "cannot count $requested_bridge NAT rules"
+    while [ "$count" -gt 0 ]; do
+        nat_rule -D "$subnet" "$requested_bridge"
+        count=$((count - 1))
     done
-    die "invalid managed bridge for NAT removal"
+    [ "$(count_nat_rules "$subnet" "$requested_bridge")" = 0 ] \
+        || die "managed NAT rule survived removal for $requested_bridge"
 }
 
 count_nat_rules() {
@@ -243,7 +263,9 @@ dry_run() {
     refuse_conflicts
     printf '%s\n' "Would install $INTERFACES_FILE:"; render_interfaces
     printf '%s\n' "Would install $SYSCTL_FILE:"; render_sysctl
-    printf '%s\n' 'Would activate only vmbr-ci200 vmbr-ci201 vmbr-ci202, enable IPv4 forwarding,'
+    printf 'Would activate only'
+    printf ' %s' "${BRIDGES[@]}"
+    printf '%s\n' ', enable IPv4 forwarding,'
     printf '%s\n' 'and add one source-scoped MASQUERADE rule per /30 through vmbr0.'
     printf '%s\n' 'Would verify the management address/default route remained byte-identical.'
 }
@@ -340,9 +362,10 @@ main() {
         --rollback) rollback_network ;;
         --ensure-nat)
             [ "$EUID" = 0 ] || die "--ensure-nat requires root"
+            [ "$#" = 2 ] || die "--ensure-nat requires one managed bridge"
             require_host
             lock_host_network_unless_inherited
-            ensure_nat
+            ensure_one_nat "$2"
             ;;
         --remove-nat)
             [ "$EUID" = 0 ] || die "--remove-nat requires root"

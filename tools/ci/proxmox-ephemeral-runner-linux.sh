@@ -22,9 +22,9 @@
 #
 set -uo pipefail
 
-GOLDEN=9005
-CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/102
-CLONE_MAX=202
+GOLDEN="${TARTCI_PROXMOX_GOLDEN:-${PULP_LINUX_GOLDEN:-9005}}"
+CLONE_BASE="${TARTCI_PROXMOX_CLONE_BASE:-200}" # pool slots, clear of persistent VMs
+CLONE_MAX="${TARTCI_PROXMOX_CLONE_MAX:-202}"
 GUEST_IPV4_PREFIX=10.240
 AUTOMATIC_GUEST_DNS_SERVER=1.1.1.1
 ISOLATED_BRIDGE_PREFIX="${PULP_LINUX_ISOLATED_BRIDGE_PREFIX:-vmbr-ci}"
@@ -33,19 +33,35 @@ LEGACY_GUEST_IPV4_FIRST_OCTET=251
 LEGACY_GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
-REPO="Generous-Corp/pulp"
+REPO="${TARTCI_RUNNER_REPO:-${PULP_RUNNER_REPO:-Generous-Corp/pulp}}"
 ORG="${REPO%%/*}"
 BASE_LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
-LABELS="${PULP_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
-RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
-RUNNER_GROUP_POLICY="${PULP_LINUX_RUNNER_GROUP_POLICY:-trusted}"
-PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
-ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
-GITHUB_AUTH_MODE="${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}"
+if [ -n "${TARTCI_RUNNER_LABELS:-}" ]; then
+    EFFECTIVE_RUNNER_LABELS="$TARTCI_RUNNER_LABELS"
+elif [ -n "${PULP_RUNNER_LABELS:-}" ]; then
+    EFFECTIVE_RUNNER_LABELS="$PULP_RUNNER_LABELS"
+else
+    EFFECTIVE_RUNNER_LABELS="$BASE_LABELS"
+fi
+LABELS="${EFFECTIVE_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
+RUNNER_NAME_PREFIX="${TARTCI_RUNNER_NAME_PREFIX:-${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}}"
+VM_NAME_PREFIX="${TARTCI_PROXMOX_VM_NAME_PREFIX:-pulp-ci-ephemeral}"
+RUNNER_GROUP_POLICY="${TARTCI_RUNNER_GROUP_POLICY:-${PULP_LINUX_RUNNER_GROUP_POLICY:-trusted}}"
+RUNNER_GROUP_NAME="${TARTCI_RUNNER_GROUP_NAME:-}"
+RUNNER_WORKFLOW="${TARTCI_RUNNER_WORKFLOW:-}"
+if [ "$REPO" = "Generous-Corp/pulp" ]; then
+    PAT_FILE="${TARTCI_RUNNER_PAT_FILE:-${PULP_RUNNER_PAT_FILE:-/root/.config/pulp/secrets/gh-runner-pat}}"
+    ORG_PAT_FILE="${TARTCI_ORG_RUNNER_PAT_FILE:-${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}}"
+    GITHUB_AUTH_MODE="${TARTCI_RUNNER_GITHUB_AUTH_MODE:-${PULP_LINUX_GITHUB_AUTH_MODE:-token-file}}"
+else
+    PAT_FILE="${TARTCI_RUNNER_PAT_FILE:-}"
+    ORG_PAT_FILE="${TARTCI_ORG_RUNNER_PAT_FILE:-}"
+    GITHUB_AUTH_MODE="${TARTCI_RUNNER_GITHUB_AUTH_MODE:-}"
+fi
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
-RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
-GROUP_VERIFIER="${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}"
-GH_CLI="${PULP_LINUX_GH_CLI:-gh}"
+RUNNER_GROUP_ID="${TARTCI_RUNNER_GROUP_ID:-${PULP_LINUX_RUNNER_GROUP_ID:-}}"
+GROUP_VERIFIER="${TARTCI_RUNNER_GROUP_VERIFIER:-${PULP_LINUX_GROUP_VERIFIER:-/usr/local/lib/pulp/verify_linux_runner_group.py}}"
+GH_CLI="${TARTCI_GH_CLI:-${PULP_LINUX_GH_CLI:-gh}}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
 VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock
@@ -54,10 +70,78 @@ AUTOMATIC_NETWORK_ISOLATION=0
 GITHUB_API_READY=0
 PAT=""
 KEEP=0
-[ "${1:-}" = "--keep" ] && KEEP=1
+RUNNER_READY_TIMEOUT_SECONDS="${TARTCI_RUNNER_READY_TIMEOUT_SECONDS:-120}"
+RUNNER_HEARTBEAT_INTERVAL_SECONDS="${TARTCI_RUNNER_HEARTBEAT_INTERVAL_SECONDS:-15}"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+
+vmid_in_range() {
+    local vmid="$1"
+    [[ "$vmid" =~ ^[0-9]+$ ]] \
+        && [ "$vmid" -ge "$CLONE_BASE" ] \
+        && [ "$vmid" -le "$CLONE_MAX" ]
+}
+
+sanitize_runner_output() {
+    sed -E \
+        -e 's/(token|authorization|credentials|jitconfig|encoded_jit_config)[=:][^[:space:]]+/\1=<redacted>/Ig' \
+        -e 's/(A[A-Za-z0-9_-]{20,})/<redacted>/g'
+}
+
+routing_label_survives() {
+    local observed_labels="$1" configured_label
+    local configured_labels=()
+    IFS=',' read -r -a configured_labels <<< "$LABELS"
+    for configured_label in "${configured_labels[@]}"; do
+        case "$configured_label" in
+            self-hosted|Linux|X64) continue ;;
+        esac
+        case ",$observed_labels," in
+            *",${configured_label},"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+monitor_runner_heartbeat() {
+    local misses=0 heartbeat_tsv heartbeat_lookup heartbeat_status heartbeat_busy
+    local match_count
+    while kill -0 "$RUNNER_PID" 2>/dev/null; do
+        if ! heartbeat_tsv="$(github_api --paginate \
+            "${REGISTRATION_API}/actions/runners?per_page=100" \
+            --jq '.runners[] | [.id,.name,.status,.busy] | @tsv' 2>/dev/null)"; then
+            sleep "$RUNNER_HEARTBEAT_INTERVAL_SECONDS"
+            continue
+        fi
+        heartbeat_lookup="$(printf '%s\n' "$heartbeat_tsv" | awk -F '\t' \
+            -v name="$RUNNER_NAME" '$2 == name')"
+        heartbeat_status=""
+        heartbeat_busy=""
+        if [ -n "$heartbeat_lookup" ]; then
+            match_count="$(printf '%s\n' "$heartbeat_lookup" | wc -l | tr -d ' ')"
+            if [ "$match_count" != 1 ]; then
+                sleep "$RUNNER_HEARTBEAT_INTERVAL_SECONDS"
+                continue
+            fi
+            IFS=$'\t' read -r _ _ heartbeat_status heartbeat_busy <<< "$heartbeat_lookup"
+        fi
+        if [ "$heartbeat_busy" = true ] || { [ "$heartbeat_status" = online ] && [ "$heartbeat_busy" = false ]; }; then
+            misses=0
+        elif [ -z "$heartbeat_lookup" ] \
+            || { [ "$heartbeat_status" = offline ] && [ "$heartbeat_busy" = false ]; }; then
+            misses=$((misses + 1))
+            if [ "$misses" -ge 2 ]; then
+                printf 'runner=%s status=%s busy=%s\n' \
+                    "$RUNNER_NAME" "${heartbeat_status:-missing}" "${heartbeat_busy:-unknown}" \
+                    >"$HEARTBEAT_FAILURE_FILE"
+                kill "$RUNNER_PID" 2>/dev/null || true
+                break
+            fi
+        fi
+        sleep "$RUNNER_HEARTBEAT_INTERVAL_SECONDS"
+    done
+}
 
 credential_file_secure() {
     local path="$1" metadata
@@ -122,7 +206,7 @@ verify_runner_group() {
 
 destroy_clone_and_firewall_policy() {
     local vmid="$1" firewall_file="$2" result=0
-    [[ "$vmid" =~ ^20[0-2]$ ]] || return 1
+    vmid_in_range "$vmid" || return 1
     exec 9>"$VMID_LOCK" || return 1
     flock -w 300 9 || return 1
     # The allocation path holds this same lock while selecting and cloning a
@@ -141,7 +225,7 @@ destroy_clone_and_firewall_policy() {
 deferred_cleanup() {
     local vmid="$1" runner_name="$2" registration_api="$3" legacy_credential="${4:-}"
     local expected_credential deadline runners_tsv runner_lookup rid _ busy status labels
-    [[ "$vmid" =~ ^20[0-2]$ ]] || die "invalid deferred-cleanup VMID"
+    vmid_in_range "$vmid" || die "invalid deferred-cleanup VMID"
     [[ "$runner_name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid deferred-cleanup runner name"
     case "$registration_api" in
         "repos/${REPO}") expected_credential="$PAT_FILE" ;;
@@ -197,11 +281,8 @@ deferred_cleanup() {
                     || die "deferred-cleanup runner became busy before dispatch fence"
                 { [ "$status" = online ] || [ "$status" = offline ]; } \
                     || die "invalid deferred-cleanup fenced runner status"
-                case ",$labels," in
-                    *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
-                        die "routing label survived deferred-cleanup fence"
-                        ;;
-                esac
+                routing_label_survives "$labels" \
+                    && die "routing label survived deferred-cleanup fence"
                 case ",$labels," in
                     *,pulp-shutdown-fenced,*) ;;
                     *) die "shutdown label is missing after deferred-cleanup fence" ;;
@@ -276,6 +357,58 @@ if [ "${1:-}" = "--deferred-cleanup" ]; then
     exit 0
 fi
 
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --keep) KEEP=1; shift ;;
+        --once) shift ;;
+        --help|-h) sed -n '2,24p' "$0"; exit 0 ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+
+case "$REPO" in
+    */*/*|/*|.*|*' '*) die "runner repository must be OWNER/REPO: $REPO" ;;
+esac
+[[ "$CLONE_BASE" =~ ^[0-9]+$ && "$CLONE_MAX" =~ ^[0-9]+$ ]] \
+    || die "clone VMID bounds must be numeric"
+[ "$CLONE_BASE" -ge 1 ] && [ "$CLONE_MAX" -le 254 ] \
+    && [ "$CLONE_BASE" -le "$CLONE_MAX" ] \
+    || die "clone VMID range must be ordered within 1..254"
+[[ "$RUNNER_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || die "runner name prefix must be shell-safe"
+[[ "$VM_NAME_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || die "VM name prefix must be shell-safe"
+
+if [ "$REPO" != "Generous-Corp/pulp" ]; then
+    [ -n "${TARTCI_RUNNER_REPO:-}" ] \
+        || die "cross-repository use requires TARTCI_RUNNER_REPO"
+    [ -n "${TARTCI_RUNNER_GROUP_ID:-}" ] \
+        || die "cross-repository automatic routing requires TARTCI_RUNNER_GROUP_ID"
+    [ -n "$RUNNER_GROUP_NAME" ] && [ -n "$RUNNER_WORKFLOW" ] \
+        || die "cross-repository routing requires an exact group name and workflow"
+    [ -n "${TARTCI_RUNNER_LABELS:-}" ] \
+        && [ -n "${TARTCI_RUNNER_NAME_PREFIX:-}" ] \
+        && [ -n "${TARTCI_PROXMOX_VM_NAME_PREFIX:-}" ] \
+        && [ -n "${TARTCI_PROXMOX_GOLDEN:-}" ] \
+        && [ -n "${TARTCI_PROXMOX_CLONE_BASE:-}" ] \
+        && [ -n "${TARTCI_PROXMOX_CLONE_MAX:-}" ] \
+        || die "cross-repository routing requires explicit labels, names, golden, and VMID range"
+    [ -n "${TARTCI_RUNNER_GITHUB_AUTH_MODE:-}" ] \
+        && [ -n "${TARTCI_ORG_RUNNER_PAT_FILE:-}" ] \
+        || die "cross-repository routing requires explicit GitHub authentication and organization credential identity"
+    [[ "$RUNNER_WORKFLOW" =~ ^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$ ]] \
+        || die "cross-repository workflow must be an exact workflow path"
+    for required_label in self-hosted Linux X64; do
+        case ",$LABELS," in
+            *",${required_label},"*) ;;
+            *) die "cross-repository labels must include self-hosted,Linux,X64" ;;
+        esac
+    done
+    case ",$LABELS," in
+        *,pulp-*) die "cross-repository labels must not reuse a Pulp capability label" ;;
+    esac
+fi
+
 command -v "$GH_CLI" >/dev/null 2>&1 \
     || die "$GH_CLI is not on PATH"
 
@@ -285,8 +418,6 @@ command -v "$GH_CLI" >/dev/null 2>&1 \
 # The extra label prevents a selector for the restricted pool from matching an
 # older repository-level worker during a staged rollout.
 REGISTRATION_API="repos/${REPO}"
-RUNNER_URL="https://github.com/${REPO}"
-RUNNER_GROUP_ARG=""
 if [ -n "$RUNNER_GROUP_ID" ]; then
     [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
         || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
@@ -295,8 +426,12 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -r "$GROUP_VERIFIER" ] \
         || die "runner-group verifier is missing at $GROUP_VERIFIER"
     configure_github_auth organization "$ORG_PAT_FILE"
-    GROUP_VERIFY_ARGS=(--gh "$GH_CLI" --repo "$REPO" \
-        --group-id "$RUNNER_GROUP_ID" --policy "$RUNNER_GROUP_POLICY")
+    GROUP_VERIFY_ARGS=(--gh "$GH_CLI" --repo "$REPO" --group-id "$RUNNER_GROUP_ID")
+    if [ "$REPO" = "Generous-Corp/pulp" ]; then
+        GROUP_VERIFY_ARGS+=(--policy "$RUNNER_GROUP_POLICY")
+    else
+        GROUP_VERIFY_ARGS+=(--group-name "$RUNNER_GROUP_NAME" --workflow "$RUNNER_WORKFLOW")
+    fi
     GROUP_NAME="$(verify_runner_group "${GROUP_VERIFY_ARGS[@]}")" \
         || die "automatic Linux runner group policy is not fail-closed"
     [ -n "$GROUP_NAME" ] || die "runner-group verifier returned an empty name"
@@ -311,26 +446,26 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     [ -d "$FIREWALL_DIR" ] \
         || die "automatic Linux runner firewall directory is missing"
     REGISTRATION_API="orgs/${ORG}"
-    RUNNER_URL="https://github.com/${ORG}"
-    RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
-    case "$RUNNER_GROUP_POLICY" in
-        trusted)
-            if [ "$LABELS" = "$BASE_LABELS" ]; then
-                LABELS="${LABELS},pulp-auto-linux-x64"
-            fi
-            EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"
-            EXPECTED_PREFIX="pulp-ci-ephemeral"
-            ;;
-        pr-safe)
-            EXPECTED_LABELS="${BASE_LABELS},pulp-pr-safe-linux-x64"
-            EXPECTED_PREFIX="pulp-pr-safe-ephemeral"
-            ;;
-        *) die "unsupported automatic Linux runner-group policy" ;;
-    esac
-    [ "$LABELS" = "$EXPECTED_LABELS" ] \
-        || die "$RUNNER_GROUP_POLICY runner labels do not match the exact policy"
-    [ "$RUNNER_NAME_PREFIX" = "$EXPECTED_PREFIX" ] \
-        || die "$RUNNER_GROUP_POLICY runner name prefix does not match the exact policy"
+    if [ "$REPO" = "Generous-Corp/pulp" ]; then
+        case "$RUNNER_GROUP_POLICY" in
+            trusted)
+                if [ "$LABELS" = "$BASE_LABELS" ]; then
+                    LABELS="${LABELS},pulp-auto-linux-x64"
+                fi
+                EXPECTED_LABELS="${BASE_LABELS},pulp-auto-linux-x64"
+                EXPECTED_PREFIX="pulp-ci-ephemeral"
+                ;;
+            pr-safe)
+                EXPECTED_LABELS="${BASE_LABELS},pulp-pr-safe-linux-x64"
+                EXPECTED_PREFIX="pulp-pr-safe-ephemeral"
+                ;;
+            *) die "unsupported automatic Linux runner-group policy" ;;
+        esac
+        [ "$LABELS" = "$EXPECTED_LABELS" ] \
+            || die "$RUNNER_GROUP_POLICY runner labels do not match the exact policy"
+        [ "$RUNNER_NAME_PREFIX" = "$EXPECTED_PREFIX" ] \
+            || die "$RUNNER_GROUP_POLICY runner name prefix does not match the exact policy"
+    fi
     AUTOMATIC_NETWORK_ISOLATION=1
 elif [[ ",$LABELS," == *,pulp-auto-linux-x64,* \
     || ",$LABELS," == *,pulp-pr-safe-linux-x64,* ]]; then
@@ -417,6 +552,8 @@ fi
 # zombie registration that collides with its replacement.
 RUNNER_SLOT_ID="${RUNNER_NAME_PREFIX}-${VMID}"
 RUNNER_NAME="${RUNNER_SLOT_ID}-$(cat /proc/sys/kernel/random/uuid)"
+[ "${#RUNNER_NAME}" -le 64 ] \
+    || die "generation-unique runner name exceeds GitHub's 64-character limit"
 
 reclaim_stale_slot_runners() {
     [ "$GITHUB_API_READY" = 1 ] || return 0
@@ -450,9 +587,17 @@ delegate_deferred_cleanup() {
             --service-type=oneshot --property=TimeoutStartSec=80min \
             --property=User=root \
             --property=Restart=on-failure --property=RestartSec=30s \
-            --setenv="PULP_LINUX_GITHUB_AUTH_MODE=$GITHUB_AUTH_MODE" \
-            --setenv="PULP_LINUX_ORG_PAT_FILE=$ORG_PAT_FILE" \
-            --setenv="PULP_LINUX_GH_CLI=$GH_CLI" \
+            --setenv="TARTCI_RUNNER_REPO=${REPO}" \
+            --setenv="TARTCI_RUNNER_GITHUB_AUTH_MODE=${GITHUB_AUTH_MODE}" \
+            --setenv="TARTCI_RUNNER_LABELS=${LABELS}" \
+            --setenv="TARTCI_RUNNER_PAT_FILE=${PAT_FILE}" \
+            --setenv="TARTCI_ORG_RUNNER_PAT_FILE=${ORG_PAT_FILE}" \
+            --setenv="TARTCI_GH_CLI=${GH_CLI}" \
+            --setenv="TARTCI_PROXMOX_CLONE_BASE=${CLONE_BASE}" \
+            --setenv="TARTCI_PROXMOX_CLONE_MAX=${CLONE_MAX}" \
+            --setenv="PULP_LINUX_GITHUB_AUTH_MODE=${GITHUB_AUTH_MODE}" \
+            --setenv="PULP_LINUX_ORG_PAT_FILE=${ORG_PAT_FILE}" \
+            --setenv="PULP_LINUX_GH_CLI=${GH_CLI}" \
             --setenv="PULP_LINUX_FIREWALL_DIR=$FIREWALL_DIR" \
             "$(readlink -f "$0")" --deferred-cleanup "$VMID" \
             "$RUNNER_NAME" "$REGISTRATION_API"; then
@@ -464,6 +609,9 @@ delegate_deferred_cleanup() {
 }
 
 cleanup() {
+    [ -z "${HEARTBEAT_PID:-}" ] || kill "$HEARTBEAT_PID" 2>/dev/null || true
+    rm -f -- "${JIT_REQUEST_FILE:-}" "${JIT_CONFIG_FILE:-}" \
+        "${RUNNER_OUTPUT_FILE:-}" "${HEARTBEAT_FAILURE_FILE:-}"
     # Guard: only tear down a VM this invocation actually created. Without this,
     # a failure before the clone lands makes cleanup destroy whatever now owns
     # that id — which is exactly how the race above corrupted a sibling slot.
@@ -518,12 +666,10 @@ cleanup() {
                         || { log "ERROR: exact runner has invalid fenced busy state; leaving clone $VMID for safe recovery"; return; }
                     { [ "$runner_status" = online ] || [ "$runner_status" = offline ]; } \
                         || { log "ERROR: exact runner has invalid fenced status; leaving clone $VMID for safe recovery"; return; }
-                    case ",$runner_labels," in
-                        *,pulp-auto-linux-x64,*|*,pulp-pr-safe-linux-x64,*|*,pulp-build-linux-x64,*|*,pulp-host-macpro,*)
-                            log "ERROR: a routing label survived dispatch fence; leaving clone $VMID for safe recovery"
-                            return
-                            ;;
-                    esac
+                    if routing_label_survives "$runner_labels"; then
+                        log "ERROR: a routing label survived dispatch fence; leaving clone $VMID for safe recovery"
+                        return
+                    fi
                     case ",$runner_labels," in
                         *,pulp-shutdown-fenced,*) ;;
                         *)
@@ -593,7 +739,7 @@ trap cleanup EXIT
 # Linked clone: near-instant and thin, because the golden's 120G disk is shared
 # copy-on-write. A full clone would copy 120G per job and defeat the purpose.
 log "linked-cloning golden $GOLDEN -> $VMID"
-if ! qm clone "$GOLDEN" "$VMID" --name "pulp-ci-ephemeral-$VMID" >/dev/null 2>&1; then
+if ! qm clone "$GOLDEN" "$VMID" --name "${VM_NAME_PREFIX}-${VMID}" >/dev/null 2>&1; then
     flock -u 9
     die "clone failed"
 fi
@@ -793,34 +939,107 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" '
         | grep -Eq "^[[:space:]-]*Token:"
 ' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
 
-# A registration token is minted per job and is single-use by design, which is
-# what makes --ephemeral viable: the runner takes exactly one job, deregisters
-# itself, and the clone is destroyed under it.
-log "minting registration token"
-# Keep the runner-management credential out of process arguments. gh reads it
-# from the child environment and prints only the single-use registration token.
-RT="$(github_api --method POST \
-    "${REGISTRATION_API}/actions/runners/registration-token" --jq .token)"
-[ -n "$RT" ] || die "could not mint a registration token (GitHub App/PAT permission or expiry?)"
+# GitHub's JIT endpoint creates one exact ephemeral registration. The
+# generation UUID in RUNNER_NAME prevents a stale registration from causing a
+# stable-name 409. Keep both request and response in mode-0600 files, and move
+# the encoded one-use configuration into the guest over stdin only.
+log "minting JIT runner configuration"
+umask 077
+JIT_REQUEST_FILE="$(mktemp)" || die "could not allocate JIT request file"
+JIT_CONFIG_FILE="$(mktemp)" || die "could not allocate JIT config file"
+python3 - "$JIT_REQUEST_FILE" "$RUNNER_NAME" "$RUNNER_GROUP_ID" "$LABELS" <<'PY'
+import json
+import pathlib
+import sys
 
-log "registering ephemeral runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
-# CommandSettings consumes and removes ACTIONS_RUNNER_INPUT_TOKEN before runner
-# configuration. Feed it over SSH stdin so neither the local ssh process nor
-# the remote config.sh / Runner.Listener argv exposes the organization token.
-printf '%s\n' "$RT" | ssh -o BatchMode=yes "ci@$GUEST_IP" "
-    IFS= read -r ACTIONS_RUNNER_INPUT_TOKEN
-    export ACTIONS_RUNNER_INPUT_TOKEN
+path, name, group_id, labels = sys.argv[1:]
+payload = {
+    "name": name,
+    "runner_group_id": int(group_id or "1"),
+    "labels": [label for label in labels.split(",") if label],
+    "work_folder": "_work",
+}
+pathlib.Path(path).write_text(json.dumps(payload, separators=(",", ":")))
+PY
+github_api --method POST \
+    "${REGISTRATION_API}/actions/runners/generate-jitconfig" \
+    --input "$JIT_REQUEST_FILE" --jq .encoded_jit_config >"$JIT_CONFIG_FILE" \
+    || die "could not mint JIT runner configuration"
+[ -s "$JIT_CONFIG_FILE" ] || die "JIT response did not contain encoded configuration"
+rm -f -- "$JIT_REQUEST_FILE"
+JIT_REQUEST_FILE=""
+
+log "starting ephemeral JIT runner ${RUNNER_NAME} (slot ${RUNNER_SLOT_ID}) on $VMID"
+JIT_GUEST_FILE=/tmp/tartci-jit-config
+ssh -o BatchMode=yes "ci@$GUEST_IP" \
+    "umask 077; install -m 600 /dev/stdin ${JIT_GUEST_FILE}" \
+    <"$JIT_CONFIG_FILE" \
+    || die "could not transfer the short-lived JIT configuration"
+rm -f -- "$JIT_CONFIG_FILE"
+JIT_CONFIG_FILE=""
+RUNNER_OUTPUT_FILE="$(mktemp)" || die "could not allocate runner output file"
+ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
-    ./config.sh --unattended --ephemeral --replace \
-      --url ${RUNNER_URL} ${RUNNER_GROUP_ARG} \
-      --name ${RUNNER_NAME} --labels ${LABELS} --work _work
-" >/dev/null 2>&1 || die "runner registration failed"
+    trap 'rm -f ${JIT_GUEST_FILE}' EXIT
+    encoded_jit_config=\$(cat ${JIT_GUEST_FILE})
+    ./run.sh --jitconfig \"\${encoded_jit_config}\"
+" >"$RUNNER_OUTPUT_FILE" 2>&1 &
+RUNNER_PID=$!
+
+# A live ssh child is not proof that GitHub can dispatch to the registration.
+# Bound the visibility wait and surface only a sanitized tail on failure.
+RUNNER_READY=0
+ready_deadline=$((SECONDS + RUNNER_READY_TIMEOUT_SECONDS))
+while [ "$SECONDS" -lt "$ready_deadline" ]; do
+    runners_tsv="$(github_api --paginate \
+        "${REGISTRATION_API}/actions/runners?per_page=100" \
+        --jq '.runners[] | [.id,.name,.status,.busy] | @tsv' 2>/dev/null)" \
+        || runners_tsv=""
+    runner_lookup="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
+        -v name="$RUNNER_NAME" '$2 == name')"
+    if [ -n "$runner_lookup" ]; then
+        [ "$(printf '%s\n' "$runner_lookup" | wc -l | tr -d ' ')" = 1 ] \
+            || die "duplicate generation-unique runner registrations"
+        IFS=$'\t' read -r _ _ ready_status ready_busy <<< "$runner_lookup"
+        if [ "$ready_status" = online ]; then
+            RUNNER_READY=1
+            log "JIT runner is visible to GitHub (online, busy=${ready_busy})"
+            break
+        fi
+    fi
+    kill -0 "$RUNNER_PID" 2>/dev/null || break
+    sleep 2
+done
+if [ "$RUNNER_READY" != 1 ]; then
+    kill "$RUNNER_PID" 2>/dev/null || true
+    wait "$RUNNER_PID" 2>/dev/null || true
+    tail -40 "$RUNNER_OUTPUT_FILE" 2>/dev/null | sanitize_runner_output >&2
+    die "JIT runner never became visible to GitHub"
+fi
+
+# Two consecutive absent/offline observations fail closed. A busy observation
+# resets the watchdog so cleanup never tears down a job that GitHub assigned.
+HEARTBEAT_FAILURE_FILE="$(mktemp)" || die "could not allocate heartbeat state"
+(
+    monitor_runner_heartbeat
+) &
+HEARTBEAT_PID=$!
+
+wait "$RUNNER_PID"
+runner_exit=$?
+kill "$HEARTBEAT_PID" 2>/dev/null || true
+wait "$HEARTBEAT_PID" 2>/dev/null || true
+HEARTBEAT_PID=""
+heartbeat_failure="$(cat "$HEARTBEAT_FAILURE_FILE" 2>/dev/null || true)"
+if [ -n "$heartbeat_failure" ]; then
+    log "ERROR: JIT runner lost GitHub heartbeat ($heartbeat_failure)"
+    die "JIT runner heartbeat failed before the job completed"
+fi
+if [ "$runner_exit" -ne 0 ]; then
+    tail -80 "$RUNNER_OUTPUT_FILE" 2>/dev/null | sanitize_runner_output >&2
+    die "JIT runner exited with status $runner_exit"
+fi
 
 # ── run exactly one job ──────────────────────────────────────────────────────
-# run.sh exits once the single job completes, because of --ephemeral.
-log "waiting for one job (runner exits when done)"
-if ! ssh -o BatchMode=yes "ci@$GUEST_IP" \
-    'cd ~/actions-runner && ./run.sh' 2>&1 | sed 's/^/    /'; then
-    die "runner transport failed before one-job completion"
-fi
-log "job finished on $VMID"
+log "one JIT job finished on $VMID"
+sanitize_runner_output <"$RUNNER_OUTPUT_FILE" | sed 's/^/    /'
