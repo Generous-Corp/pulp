@@ -22,12 +22,14 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/zip.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cstdio>
@@ -38,6 +40,7 @@
 #include <cctype>
 #include <functional>
 #include <regex>
+#include <unordered_set>
 #include <cmath>
 
 #include "design_import_internal.hpp"
@@ -302,7 +305,7 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
             // inflated (the heuristic initial buffer is `compressed_size *
             // 4` and the buffer-doubling retry loop on MZ_BUF_ERROR doesn't
             // recover for some inputs miniz produces partial output for).
-            // On canonical Spectr Claude exports that meant ReactDOM
+            // On canonical Claude React exports that meant ReactDOM
             // (1.08 MB) and Babel-standalone (3.14 MB) were silently
             // dropped during parsing, leaving only the React payload —
             // and inline `text/babel` scripts (the actual app code) had
@@ -335,6 +338,137 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
         }
     }
 
+    return bundle;
+}
+
+std::optional<ClaudeBundle> parse_materialized_browser_document(
+    const std::string& json) {
+    choc::value::Value root;
+    try { root = choc::json::parse(json); }
+    catch (...) { return std::nullopt; }
+    if (!root.isObject() || !root.hasObjectMember("schema") ||
+        !root["schema"].isString() ||
+        root["schema"].getString() != "pulp-materialized-browser-document-v1" ||
+        !root.hasObjectMember("version") || !root["version"].isInt() ||
+        root["version"].getInt64() != 1 ||
+        !root.hasObjectMember("html") || !root["html"].isString() ||
+        !root.hasObjectMember("assets") || !root["assets"].isArray()) {
+        return std::nullopt;
+    }
+
+    ClaudeBundle bundle;
+    bundle.template_html = std::string(root["html"].getString());
+    auto assets = root["assets"];
+    if (assets.size() > 256) return std::nullopt;
+    size_t total_bytes = 0;
+    std::unordered_set<std::string> asset_ids;
+    for (uint32_t i = 0; i < assets.size(); ++i) {
+        const auto item = assets[i];
+        if (!item.isObject() || !item.hasObjectMember("id") ||
+            !item["id"].isString() || !item.hasObjectMember("mime_type") ||
+            !item["mime_type"].isString() ||
+            !item.hasObjectMember("byte_length") ||
+            !item["byte_length"].isInt64() ||
+            !item.hasObjectMember("data_base64") ||
+            !item["data_base64"].isString() ||
+            !item.hasObjectMember("sha256") ||
+            !item["sha256"].isString()) {
+            return std::nullopt;
+        }
+        const std::string id(item["id"].getString());
+        const std::string digest(item["sha256"].getString());
+        if (digest.size() != 64 ||
+            !std::all_of(digest.begin(), digest.end(), [](char c) {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            }) || id != "pulp-materialized-asset-" + digest ||
+            !asset_ids.insert(id).second) {
+            return std::nullopt;
+        }
+        const auto encoded = item["data_base64"].getString();
+        // Reject before allocating decoded storage. Base64 for a 64 MiB
+        // payload is at most 89,478,488 bytes including padding.
+        if (encoded.size() > 89'478'488u) return std::nullopt;
+        auto decoded = pulp::runtime::base64_decode(encoded);
+        if (!decoded || item["byte_length"].getInt64() < 0 ||
+            static_cast<uint64_t>(item["byte_length"].getInt64()) !=
+                decoded->size() ||
+            pulp::runtime::sha256_hex(decoded->data(), decoded->size()) != digest) {
+            return std::nullopt;
+        }
+        constexpr size_t max_total_bytes = 64u * 1024u * 1024u;
+        if (decoded->size() > max_total_bytes - total_bytes)
+            return std::nullopt;
+        total_bytes += decoded->size();
+
+        ClaudeBundleAsset asset;
+        asset.uuid = id;
+        asset.mime = std::string(item["mime_type"].getString());
+        asset.data = std::move(*decoded);
+        bundle.assets.push_back(std::move(asset));
+    }
+
+    // Every captured blob URL must resolve to a packaged asset. Leaving one in
+    // the template would make the native result environment-dependent.
+    if (bundle.template_html.find("blob:") != std::string::npos) {
+        return std::nullopt;
+    }
+    static const std::regex asset_ref(
+        R"(pulp-materialized-asset-[0-9a-f]{64})");
+    for (std::sregex_iterator it(bundle.template_html.begin(),
+                                 bundle.template_html.end(), asset_ref), end;
+         it != end; ++it) {
+        if (!asset_ids.contains(it->str())) return std::nullopt;
+    }
+    if (root.hasObjectMember("font_bindings")) {
+        const auto bindings = root["font_bindings"];
+        if (!bindings.isArray() || bindings.size() > 256) return std::nullopt;
+        for (uint32_t i = 0; i < bindings.size(); ++i) {
+            const auto item = bindings[i];
+            if (!item.isObject() || !item.hasObjectMember("family") ||
+                !item["family"].isString() || !item.hasObjectMember("asset_id") ||
+                !item["asset_id"].isString()) return std::nullopt;
+            ClaudeBundleFontBinding binding;
+            binding.family = std::string(item["family"].getString());
+            const std::string asset_id(item["asset_id"].getString());
+            if (binding.family.empty() || binding.family.size() > 256 ||
+                asset_id.empty()) return std::nullopt;
+            auto asset = std::find_if(bundle.assets.begin(), bundle.assets.end(),
+                [&](const ClaudeBundleAsset& candidate) {
+                    return candidate.uuid == asset_id;
+                });
+            if (asset == bundle.assets.end() ||
+                (asset->mime != "font/woff2" && asset->mime != "font/ttf" &&
+                 asset->mime != "font/otf")) return std::nullopt;
+            binding.asset_index = static_cast<size_t>(asset - bundle.assets.begin());
+            if (item.hasObjectMember("weight") && item["weight"].isString())
+                binding.weight = std::string(item["weight"].getString());
+            if (item.hasObjectMember("style") && item["style"].isString())
+                binding.style = std::string(item["style"].getString());
+            if (item.hasObjectMember("unicode_range") &&
+                item["unicode_range"].isString())
+                binding.unicode_range =
+                    std::string(item["unicode_range"].getString());
+            if (item.hasObjectMember("runtime_family") &&
+                item["runtime_family"].isString())
+                binding.runtime_family =
+                    std::string(item["runtime_family"].getString());
+            if (binding.runtime_family.empty())
+                binding.runtime_family = binding.family;
+            if (binding.runtime_family.size() > 512 ||
+                binding.unicode_range.size() > 4096) return std::nullopt;
+            bundle.font_bindings.push_back(std::move(binding));
+        }
+    }
+    const auto srcs = extract_template_script_srcs(bundle.template_html);
+    for (const auto& src : srcs) {
+        for (size_t i = 0; i < bundle.assets.size(); ++i) {
+            if (bundle.assets[i].uuid == src &&
+                bundle.assets[i].mime == "text/javascript") {
+                bundle.javascript_indices.push_back(i);
+                break;
+            }
+        }
+    }
     return bundle;
 }
 
@@ -1597,6 +1731,34 @@ void WidgetBridge::evaluate_claude_bundle_in_live_engine(const ClaudeBundle& bun
     // replaces the offline DOM walker. Soft errors propagate via
     // globalThis.__pulpPayloadErr_<idx>__ / __pulpEvalErr__ slots, not
     // via a caller-side sink.
+    // Register captured @font-face bytes before React creates any Labels.
+    // This is intentionally part of the shared materialized-import runtime,
+    // not a product prelude: Chromium's resolved family and the packaged font
+    // must become the same native typeface for line-box evidence to validate.
+    for (const auto& binding : bundle.font_bindings) {
+        if (binding.asset_index >= bundle.assets.size()) {
+            engine_.evaluate(
+                "globalThis.__pulpRuntimeImportErr__ = "
+                "'captured font binding referenced a missing asset';void 0");
+            return;
+        }
+        const auto& asset = bundle.assets[binding.asset_index];
+        bool registered = false;
+        if (asset.mime == "font/woff2") {
+            registered = pulp::canvas::register_font_woff2(
+                asset.data.data(), asset.data.size(), binding.runtime_family);
+        } else {
+            registered = pulp::canvas::register_font(
+                asset.data.data(), asset.data.size(), binding.runtime_family);
+        }
+        if (!registered) {
+            engine_.evaluate(
+                "globalThis.__pulpRuntimeImportErr__ = "
+                "'captured font registration failed';void 0");
+            return;
+        }
+    }
+
     ImportShimConfig cfg;
     cfg.user_agent = "PulpImportRuntime/1.0";
     cfg.preserve_host_react = true;

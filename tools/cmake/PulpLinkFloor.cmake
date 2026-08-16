@@ -17,7 +17,8 @@
 #      mode that makes a floor check worthless.
 #   2. A plugin's link edges are not written down anywhere a parser can read.
 #      `pulp_add_plugin(StepSequencer FORMATS CLAP)` creates StepSequencer_CLAP
-#      inside a function, links `${_PULP_VIEW_TARGET}` — a variable chosen by
+#      inside a function, links the per-plugin view target — selected from
+#      `${_PULP_VIEW_TARGET}` or `${_PULP_NATIVE_VIEW_TARGET}` by NATIVE_UI —
 #      `_pulp_pick_target` — and only when PULP_HAS_CLAP. Following that from
 #      text means evaluating CMake variables, functions and conditionals, i.e.
 #      re-implementing CMake. The engine check gets away with text only because
@@ -107,7 +108,7 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # not write and cannot cut from its own CMakeLists account for all of it.
 #
 #   pulp-view — every plugin links the view stack whether or not it draws.
-#     VST3, CLAP and AU each link ${_PULP_VIEW_TARGET} unconditionally in
+#     VST3, CLAP and AU each link the plugin's selected view target in
 #     tools/cmake/PulpPluginFormats.cmake and FATAL_ERROR if it is absent. The
 #     stack reaches canvas but stops below plugin hosting and playback. `render`
 #     is NOT charged to that edge: pulp_add_plugin links it directly per format

@@ -13,6 +13,7 @@
 // constructing a real AudioComponentInstance.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 
@@ -85,6 +86,27 @@ TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract"
     ViewSize free_drag = locked;
     free_drag.aspect_ratio = 0.0;
     CHECK_FALSE(should_pin_design_viewport(free_drag));
+    CHECK(native_view_aspect_ratio(free_drag) == 0.0);
+
+    // Non-resizable legacy editors never had to spell out an aspect ratio;
+    // adapters derived it from the preferred/pinned viewport.
+    ViewSize legacy_fixed{};
+    legacy_fixed.preferred_width = 640;
+    legacy_fixed.preferred_height = 400;
+    CHECK(should_pin_design_viewport(legacy_fixed));
+    CHECK(native_view_aspect_ratio(legacy_fixed)
+          == Catch::Approx(1.6).margin(0.0001));
+
+    // Responsive + aspect-locked: constrain the host gesture but never apply
+    // a fixed paint transform. This is Spectr's native resize contract.
+    ViewSize responsive = locked;
+    responsive.design_width = 1320;
+    responsive.design_height = 860;
+    responsive.viewport_policy = pulp::format::ViewportPolicy::Responsive;
+    CHECK_FALSE(should_pin_design_viewport(responsive));
+    CHECK(pulp::format::should_lock_view_aspect(responsive));
+    CHECK(native_view_aspect_ratio(responsive)
+          == Catch::Approx(responsive.aspect_ratio).margin(0.0001));
 
     // Degenerate preferred size: never pin (avoids a 0-aspect viewport).
     ViewSize degenerate{};

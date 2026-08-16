@@ -1,5 +1,5 @@
-// Cross-platform WebView backend detector — always compiled into
-// pulp-view-core regardless of PULP_BUILD_WEBVIEW so callers can
+// Cross-platform WebView backend detector — compiled into the selected
+// view composition so callers can
 // distinguish "this build doesn't include WebView support" from
 // "this OS has no usable WebView backend installed" without first
 // trying to instantiate a WebViewPanel.

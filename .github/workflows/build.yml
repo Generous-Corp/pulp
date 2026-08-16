@@ -1114,6 +1114,10 @@ jobs:
             echo "ccache not available; skipping config proof"
           fi
 
+      - name: Install materialized runtime Node test dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
+
       - name: Configure
         # On PR and Shipyard workflow_dispatch validation, skip the examples tree
         # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /

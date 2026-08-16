@@ -42,6 +42,7 @@
 
 namespace pulp::view {
 
+#if !defined(PULP_BUILD_WEBVIEW) || PULP_BUILD_WEBVIEW
 namespace {
 
 // Probe-once cache so repeated `detect_webview_backend()` calls don't
@@ -71,13 +72,22 @@ const WebView2Probe& probe() {
 }
 
 } // namespace
+#endif
 
 std::string detect_webview_backend() {
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+    return "none";
+#else
     return probe().available ? "webview2" : "none";
+#endif
 }
 
 bool webview_backend_available() {
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+    return false;
+#else
     return probe().available;
+#endif
 }
 
 } // namespace pulp::view

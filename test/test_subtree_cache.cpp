@@ -27,6 +27,7 @@
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets/svg_rect.hpp>
 
 #include <memory>
 #include <vector>
@@ -266,6 +267,38 @@ TEST_CASE("Child mutation invalidates the cache and the pixels update",
     REQUIRE(frame3 != frame1);   // and the mutation is actually visible
 }
 
+TEST_CASE("SVG primitive mutation invalidates an already-recorded subtree",
+          "[view][subtree-cache][svg][skia][issue-6262]") {
+    auto build = [](float rect_x, Color fill) {
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, kW, kH});
+        root->set_subtree_cached(true);
+
+        auto rect = std::make_unique<pulp::view::SvgRectWidget>();
+        rect->set_bounds({0, 0, kW, kH});
+        rect->set_rect(rect_x, 20.0f, 24.0f, 32.0f);
+        rect->set_fill_color(fill);
+        auto* ptr = rect.get();
+        root->add_child(std::move(rect));
+        return std::pair{std::move(root), ptr};
+    };
+
+    auto [root, rect] = build(8.0f, Color::rgba8(30, 120, 200, 255));
+    const auto frame1 = render_view(*root);
+    render_view(*root);  // prove the first picture is resident before mutation
+
+    // These setters are invoked by materialized SVG state bindings. They must
+    // both dirty the surface and stale every cached ancestor; otherwise the
+    // C++ widget reports new geometry while Skia replays the old picture.
+    rect->set_rect(64.0f, 20.0f, 24.0f, 32.0f);
+    rect->set_fill_color(Color::rgba8(220, 60, 50, 255));
+    const auto frame3 = render_view(*root);
+
+    auto [reference, ignored] = build(64.0f, Color::rgba8(220, 60, 50, 255));
+    REQUIRE(frame3 == render_view(*reference));
+    REQUIRE(frame3 != frame1);
+}
+
 TEST_CASE("Structural change (add_child) invalidates the cache",
           "[view][subtree-cache][skia][issue-6262]") {
     CountingView* child = nullptr;
@@ -369,6 +402,37 @@ TEST_CASE("set_background_color invalidates the cache without a repaint call",
 
     auto ref = build(Color::rgba8(200, 60, 40, 255));
     REQUIRE(frame3 == render_view(*ref));
+}
+
+TEST_CASE("View transforms invalidate an already-recorded ancestor subtree",
+          "[view][subtree-cache][skia][transform]") {
+    auto build = [] {
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, kW, kH});
+        root->set_background_color(Color::rgba8(18, 20, 24, 255));
+        auto child = std::make_unique<View>();
+        child->set_bounds({20, 40, 28, 28});
+        child->set_background_color(Color::rgba8(235, 235, 240, 255));
+        auto* child_ptr = child.get();
+        root->add_child(std::move(child));
+        return std::pair{std::move(root), child_ptr};
+    };
+
+    auto [root, child] = build();
+    root->set_subtree_cached(true);
+    const auto frame1 = render_view(*root);
+    render_view(*root);  // establish a cache hit before the direct setter
+
+    child->set_transform_matrix(1, 0, 0, 1, 36, 0);
+    const auto moved = render_view(*root);
+    REQUIRE(moved != frame1);
+
+    auto [reference, reference_child] = build();
+    reference_child->set_transform_matrix(1, 0, 0, 1, 36, 0);
+    REQUIRE(moved == render_view(*reference));
+
+    child->clear_transform_matrix();
+    REQUIRE(render_view(*root) == frame1);
 }
 
 TEST_CASE("set_visible on a child invalidates the cached parent without a repaint",

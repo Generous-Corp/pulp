@@ -1149,10 +1149,11 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     if (opacity() < 1.0f)
         canvas.set_opacity(opacity());
 
-    // Background (re-implement from View since we can't call base partially)
-    if (has_background_color()) {
-        // Use the view's internal bg painting
-    }
+    // ScrollView owns the child traversal so it can inject the scroll offset,
+    // but its own CSS box still uses the exact same paint contract as View.
+    // View declares ScrollView as a friend specifically so this partial paint
+    // path can preserve backgrounds, borders, gradients, and rounded corners.
+    paint_background_and_border(canvas);
     // Paint children first, then scrollbar on top so it isn't occluded.
 
     float sx = smooth_scroll_x_.value();

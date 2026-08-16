@@ -1296,7 +1296,7 @@ commands:
         description: "Explicit Chromium/Chrome executable for browser-solved HTML import; overrides PULP_DESIGN_BROWSER, browser mode, managed Chrome for Testing, and system discovery"
       - name: --browser-interactions
         kind: option
-        description: "Versioned bounded click/type/wait JSON plan applied before browser evidence capture; defaults to the settled initial state"
+        description: "Versioned bounded click/context-click/type/wait JSON plan applied before browser evidence capture; defaults to the settled initial state"
       - name: --offline
         kind: flag
         description: "Explicitly use the lower-fidelity static HTML parser instead of Chromium"

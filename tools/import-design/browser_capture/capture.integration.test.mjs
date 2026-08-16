@@ -234,6 +234,218 @@ test("a panel without declared indicators reuses its exact screenshot",
     }
   });
 
+test("real browser capture preserves the executable pre-mount document",
+  { timeout: 20000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-materialized-document-"));
+    const input = path.join(root, "loader.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      const fontBase64 = (await readFile(fileURLToPath(new URL(
+        "../../../packages/pulp-web-player/src/theme/inter.woff2",
+        import.meta.url)))).toString("base64");
+      await writeFile(input, `<!doctype html><html><body>
+<script>
+  (async () => {
+    const source = 'window.__materializedAssetRan = true;';
+    const url = URL.createObjectURL(new Blob([source], {
+      type: 'text/javascript'
+    }));
+    const fontBytes = Uint8Array.from(atob(${JSON.stringify(fontBase64)}),
+      (character) => character.charCodeAt(0));
+    const fontUrl = URL.createObjectURL(new Blob([fontBytes], {
+      type: 'font/woff2'
+    }));
+    const html = '<!doctype html><html><body style="margin:0;background:#123">' +
+      '<style>@font-face{font-family:"Captured Inter";src:url("' + fontUrl +
+      '") format("woff2");font-weight:400;font-style:normal;' +
+      'unicode-range:U+0000-00FF,U+20AC}</style>' +
+      '<main style="width:320px;height:240px">' +
+      '<button style="width:120px;height:40px;font-family:&quot;Captured Inter&quot;"' +
+      ' onclick="void 0">READY</button>' +
+      '<svg width="16" height="16" style="color:#42b6f0">' +
+      '<rect width="16" height="16" fill="currentColor" /></svg>' +
+      '</main>' +
+      '<script src="' + url + '"><\\/script></body></html>';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.documentElement.replaceWith(doc.documentElement);
+    // Parsing a later helper document must not replace the executable source
+    // authority selected by the live-root installation above.
+    new DOMParser().parseFromString(
+      '<!doctype html><html><body>STALE HELPER</body></html>', 'text/html');
+    const replacement = document.createElement('script');
+    replacement.src = url;
+    document.body.appendChild(replacement);
+    await new Promise((resolve) => { replacement.onload = resolve; });
+    await document.fonts.load('16px "Captured Inter"');
+    await document.fonts.ready;
+    globalThis.__pulpCaptureReady = Promise.resolve();
+  })();
+</script></body></html>`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const materialized = JSON.parse(await readFile(
+        path.join(output, "materialized-document.json"), "utf8"));
+      assert.match(materialized.html, /<button[^>]*>READY<\/button>/);
+      assert.doesNotMatch(materialized.html, /STALE HELPER/);
+      assert.doesNotMatch(materialized.html, /blob:/);
+      assert.equal(materialized.assets.length, 2);
+      const scriptAsset = materialized.assets.find(
+        (asset) => asset.mime_type === "text/javascript");
+      const fontAsset = materialized.assets.find(
+        (asset) => asset.mime_type === "font/woff2");
+      assert.ok(scriptAsset);
+      assert.ok(fontAsset);
+      assert.match(scriptAsset.id,
+        /^pulp-materialized-asset-[0-9a-f]{64}$/);
+      assert.equal(materialized.html.includes(scriptAsset.id), true);
+      assert.equal(materialized.html.includes(fontAsset.id), true);
+      assert.equal("url" in scriptAsset, false);
+      assert.equal(
+        Buffer.from(scriptAsset.data_base64, "base64").toString(),
+        "window.__materializedAssetRan = true;");
+      assert.deepEqual(materialized.font_bindings, [{
+        family: "Captured Inter",
+        asset_id: fontAsset.id,
+        weight: "400",
+        style: "normal",
+        unicode_range: "U+0000-00FF,U+20AC",
+        runtime_family: `Captured Inter [${fontAsset.id}]`,
+      }]);
+      assert.equal(materialized.semantic_bindings.length, 1);
+      for (const binding of materialized.semantic_bindings) {
+        assert.equal(binding.anchor,
+          `chromium:backend-node:${binding.backend_node_id}`);
+        assert.ok(binding.backend_node_id > 0);
+        assert.ok(binding.bounds.width > 0);
+        assert.ok(binding.bounds.height > 0);
+      }
+      assert.equal(materialized.semantic_bindings[0].tag, "button");
+      assert.equal(materialized.semantic_bindings[0].name, "READY");
+      assert.equal(materialized.semantic_bindings[0].bounds.width, 120);
+      assert.equal(materialized.semantic_bindings[0].bounds.height, 40);
+      assert.ok(materialized.text_bindings.length >= 1);
+      assert.ok(Array.isArray(materialized.paint_bindings));
+      assert.ok(materialized.paint_bindings.length > 0,
+        'same-frame computed SVG paint must survive capture serialization');
+      const readyText = materialized.text_bindings.find(
+        (binding) => binding.text === "READY");
+      assert.ok(readyText);
+      assert.equal(readyText.anchor, "body");
+      assert.equal(readyText.path.at(-1).tag, "button");
+      assert.ok(readyText.basis.width > 0);
+      assert.ok(readyText.basis.resolved_face.length > 0);
+      assert.ok(readyText.boxes.length >= 1);
+      assert.ok(readyText.boxes.every((box) =>
+        Number.isFinite(box.left) && Number.isFinite(box.top) &&
+        box.width >= 0 && box.height > 0 && box.length > 0));
+      const envelope = JSON.parse(await readFile(
+        path.join(output, "capture.json"), "utf8"));
+      assert.equal(
+        envelope.provenance.source.materialized_document,
+        "materialized-document.json");
+      assert.equal(envelope.provenance.source.materialized_asset_count, 2);
+      assert.match(
+        envelope.provenance.source.materialized_document_sha256,
+        /^[0-9a-f]{64}$/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser capture separates authored geometry from its affine transform",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-authored-coordinate-space-"));
+    const input = path.join(root, "transformed.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><html><body><script>
+  const html = ${JSON.stringify(`<!doctype html><html><head><style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    #root {
+      position: absolute; left: 50%; top: 50%; width: 1320px; height: 860px;
+      transform: translate(-50%, -50%) scale(0.9302325581395349);
+      transform-origin: center center; background: #05070a;
+    }
+    button { position: absolute; left: 688px; top: 11px; width: 48px;
+      height: 22px; font: 12px sans-serif; }
+  </style></head><body><main id="root"><button>A</button></main>
+  </body></html>`)};
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  document.documentElement.replaceWith(doc.documentElement);
+  globalThis.__pulpCaptureReady = Promise.resolve();
+</script></body></html>`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "1280",
+        "--initial-height", "800",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const materialized = JSON.parse(await readFile(
+        path.join(output, "materialized-document.json"), "utf8"));
+      assert.equal(materialized.coordinate_space.authored_box.width, 1320);
+      assert.equal(materialized.coordinate_space.authored_box.height, 860);
+      const transform = materialized.coordinate_space.captured_transform;
+      assert.ok(Math.abs(transform.a - 800 / 860) < 1e-6);
+      assert.ok(Math.abs(transform.d - 800 / 860) < 1e-6);
+      assert.ok(Math.abs(transform.b) < 1e-9);
+      assert.ok(Math.abs(transform.c) < 1e-9);
+      assert.ok(Math.abs(transform.e - 26.0465116279) < 0.05);
+      assert.ok(Math.abs(transform.f) < 0.05);
+
+      const button = materialized.layout_bindings.find(
+        (binding) => binding.path.at(-1)?.tag === "button");
+      assert.ok(button);
+      assert.ok(Math.abs(button.box.left - 688) < 0.05);
+      assert.ok(Math.abs(button.box.top - 11) < 0.05);
+      assert.ok(Math.abs(button.box.width - 48) < 0.05);
+      assert.ok(Math.abs(button.box.height - 22) < 0.05);
+
+      const label = materialized.text_bindings.find(
+        (binding) => binding.text === "A");
+      assert.ok(label);
+      assert.ok(Math.abs(label.basis.width - 48) < 0.05);
+      assert.ok(label.boxes.every((box) => box.left >= -0.05 &&
+        box.top >= -0.05 && box.left + box.width <= 48.05 &&
+        box.top + box.height <= 22.05));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 // Pixels are read with virtual time running, so the JS freeze is the only
 // thing holding a canvas animation still. A page that repaints on every frame
 // without touching the DOM settles the document sample immediately and then
@@ -291,6 +503,55 @@ test("real browser capture freezes a canvas animation and names its browser",
         run.stderr,
         new RegExp(`\\[browser-capture\\] browser=[^/]+/${
           envelope.provenance.browser.version.replace(/\./g, "\\.")} `));
+      const snapshot = JSON.parse(
+        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const document = snapshot.documents[0];
+      const canvasIndex = document.nodes.nodeName.findIndex(
+        (name) => String(snapshot.strings[name]).toLowerCase() === "canvas");
+      assert.notEqual(canvasIndex, -1);
+      const backendNodeId = document.nodes.backendNodeId[canvasIndex];
+      const canvasAsset = envelope.assets.find(
+        (asset) => asset.kind === "canvas-snapshot");
+      assert.deepEqual(canvasAsset, {
+        id: `canvas:${backendNodeId}`,
+        kind: "canvas-snapshot",
+        mime_type: "image/png",
+        path: `canvas-${backendNodeId}.png`,
+        sha256: canvasAsset.sha256,
+        // Canvas evidence is a browser-composited viewport plane at capture
+        // DPR, not the element's untransformed backing-store bitmap.
+        width_px: 640,
+        height_px: 480,
+        backend_node_id: backendNodeId,
+        bounds: canvasAsset.bounds,
+      });
+      assert.match(canvasAsset.sha256, /^[0-9a-f]{64}$/);
+      const canvasPng = await readFile(path.join(output, canvasAsset.path));
+      assert.equal(
+        createHash("sha256").update(canvasPng).digest("hex"),
+        canvasAsset.sha256);
+      const [red, green, blue, alpha] = rgbaPixel(canvasPng, 40, 80);
+      assert.ok(red + green + blue > 80 && alpha > 240);
+
+      const compositeAsset = envelope.assets.find(
+        (asset) => asset.kind === "canvas-composite-evidence");
+      assert.deepEqual(compositeAsset, {
+        id: "evidence:browser-canvas-composite",
+        kind: "canvas-composite-evidence",
+        mime_type: "image/png",
+        path: "browser-canvas-composite.png",
+        sha256: compositeAsset.sha256,
+        width_px: 640,
+        height_px: 480,
+        changed_pixels: compositeAsset.changed_pixels,
+      });
+      assert.match(compositeAsset.sha256, /^[0-9a-f]{64}$/);
+      assert.ok(compositeAsset.changed_pixels > 0);
+      const compositePng = await readFile(
+        path.join(output, compositeAsset.path));
+      assert.equal(
+        createHash("sha256").update(compositePng).digest("hex"),
+        compositeAsset.sha256);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -399,8 +660,131 @@ test("real browser interactions capture a same-document secondary screen",
     }
   });
 
-test("real browser wait-for visible rejects invisible ancestors and overlays",
+test("real browser clicks pass decorative overlays and use exposed target points",
   { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-exposed-click-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html,body { margin:0;width:160px;height:120px;overflow:hidden }
+  button { position:absolute;left:20px;top:20px;width:120px;height:80px }
+  #texture { position:absolute;inset:0;z-index:3;pointer-events:none;
+    background:rgba(255,255,255,.02) }
+  #blocker { position:absolute;left:50px;top:40px;width:60px;height:40px;
+    z-index:2;background:#000 }
+</style>
+<button id="target" onclick="document.body.style.background='rgb(20,210,40)'">
+  Target
+</button>
+<div id="blocker"></div><div id="texture"></div>
+`);
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [{ action: "click", selector: "#target" }],
+      }));
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue] = rgbaPixel(screenshot, 10, 10);
+      assert.ok(red < 40 && green > 190 && blue < 60);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser context-click captures the rendered context menu",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-context-click-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html,body { margin:0;width:160px;height:120px;overflow:hidden;background:#101820 }
+  #band { position:absolute;left:20px;top:20px;width:40px;height:80px;background:#2be1ff }
+  #menu { display:none;position:absolute;left:70px;top:30px;width:70px;height:50px;background:rgb(210,40,80) }
+</style>
+<div id="band"></div><div id="menu">MENU</div>
+<script>
+  document.getElementById('band').addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    document.getElementById('menu').style.display = 'block';
+  });
+</script>
+`);
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [
+          { action: "context-click", selector: "#band" },
+          { action: "wait-for", selector: "#menu", state: "visible" },
+        ],
+      }));
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 200, 100);
+      assert.ok(red > 190 && green < 60 && blue > 60 && alpha > 240);
+      const report = JSON.parse(
+        await readFile(path.join(output, "interaction-report.json"), "utf8"));
+      assert.deepEqual(report.actions.map(({ action }) => action),
+        ["context-click", "wait-for"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser wait-for visible rejects invisible ancestors and overlays",
+  // Three independent browser captures run sequentially here. Materialized
+  // font/layout evidence makes each capture more expensive than the original
+  // screenshot-only probe, so bound the individual interaction at 4 seconds
+  // while allowing the three cold Chrome processes to finish.
+  { timeout: 60000 }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");

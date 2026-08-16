@@ -58,7 +58,46 @@ public:
 private:
     std::vector<uint8_t> png_;
 };
+
+class BackendProbeView : public View {
+public:
+    bool saw_gpu_canvas = false;
+
+    void paint(pulp::canvas::Canvas& canvas) override {
+        saw_gpu_canvas = canvas.supports(
+            pulp::canvas::CanvasCapability::sksl_draw);
+        canvas.set_fill_color(saw_gpu_canvas
+            ? pulp::canvas::Color::rgba8(40, 210, 120)
+            : pulp::canvas::Color::rgba8(230, 50, 70));
+        canvas.fill_rect(0, 0, bounds().width, bounds().height);
+    }
+};
 }  // namespace
+
+TEST_CASE("render_to_png honors an explicit GPU backend without raster fallback",
+          "[view][screenshot][gpu][routing]") {
+    BackendProbeView root;
+    if (!has_gpu_capture()) {
+        // Web/WAM and GPU-off targets can still compile the portable Skia
+        // screenshot backend without linking screenshot_gpu.cpp.  The direct
+        // GPU request must fail closed instead of painting a plausible CPU
+        // frame or leaving an undefined symbol for the final link.
+        REQUIRE(render_to_png(root, 64, 64, 1.0f,
+                              ScreenshotBackend::gpu).empty());
+        REQUIRE_FALSE(root.saw_gpu_canvas);
+        return;
+    }
+    const auto png = render_to_png(root, 64, 64, 1.0f,
+                                   ScreenshotBackend::gpu);
+    if (png.empty()) {
+        SUCCEED("GPU adapter unavailable on this machine");
+        return;
+    }
+    // Regression guard: screenshot_mac.mm used to accept `gpu` but silently
+    // fall through to CoreGraphics. That produced plausible PNGs whose fonts,
+    // clipping, shaders, and widget geometry were not the live Dawn/Skia path.
+    REQUIRE(root.saw_gpu_canvas);
+}
 
 TEST_CASE("capture_view refuses a native-overlay subtree with a reason",
           "[view][screenshot][gpu]") {

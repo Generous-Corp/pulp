@@ -1110,10 +1110,11 @@ public:
         first_box_shadow().blur = r;
         invalidate_subtree_caches_up();
     }
-
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
+    std::function<void(const MouseEvent&, bool)> on_dom_pointer_event;  ///< One DOM origin.
+    std::function<void(const MouseEvent&, bool)> on_dom_pointer_move_event;
     /// Bridge wheel delivery. `is_dom_origin` selects the one full DOM dispatch;
     /// registered ancestors receive only their low-level `on(id, "wheel", fn)`
     /// callback so Element bubbling is not duplicated.
@@ -1128,7 +1129,6 @@ public:
     /// only ever deliver one pointer can keep driving `on_drag`.
     std::function<void(const MouseEvent&)> on_pointer_move;
     std::function<void(const GestureEvent&)> on_gesture_cb;    ///< JS gesture event callback
-
     /// Right-click context menu callback. If set, called on right-click with view-local coords.
     /// Return a list of menu items; an empty return suppresses the menu.
     std::function<void(Point position)> on_context_menu;
@@ -1386,17 +1386,29 @@ public:
     bool clip_marker_tolerance() const { return clip_marker_tolerance_; }
 
     /// CSS transform properties
-    void set_scale(float s) { scale_ = s; }
+    void set_scale(float s) {
+        if (scale_ == s) return;
+        scale_ = s; invalidate_subtree_caches_up();
+    }
     float scale() const { return scale_; }
 
-    void set_translate(float x, float y) { translate_x_ = x; translate_y_ = y; }
+    void set_translate(float x, float y) {
+        if (translate_x_ == x && translate_y_ == y) return;
+        translate_x_ = x; translate_y_ = y; invalidate_subtree_caches_up();
+    }
     float translate_x() const { return translate_x_; }
     float translate_y() const { return translate_y_; }
 
-    void set_rotation(float deg) { rotation_deg_ = deg; }
+    void set_rotation(float deg) {
+        if (rotation_deg_ == deg) return;
+        rotation_deg_ = deg; invalidate_subtree_caches_up();
+    }
     float rotation() const { return rotation_deg_; }
 
-    void set_skew(float x_deg, float y_deg) { skew_x_ = x_deg; skew_y_ = y_deg; }
+    void set_skew(float x_deg, float y_deg) {
+        if (skew_x_ == x_deg && skew_y_ == y_deg) return;
+        skew_x_ = x_deg; skew_y_ = y_deg; invalidate_subtree_caches_up();
+    }
 
     /// Transform origin (0-1 normalized, default 0.5,0.5 = center).
     /// Also tracks an "explicitly set" flag so the affine matrix path only
@@ -1404,7 +1416,9 @@ public:
     /// setTransform() call sites that never set an origin would silently start
     /// anchoring at center.
     void set_transform_origin(float x, float y) {
+        if (origin_explicit_ && origin_x_ == x && origin_y_ == y) return;
         origin_x_ = x; origin_y_ = y; origin_explicit_ = true;
+        invalidate_subtree_caches_up();
     }
     float transform_origin_x() const { return origin_x_; }
     float transform_origin_y() const { return origin_y_; }
@@ -1423,6 +1437,11 @@ public:
     /// bounds.
     void set_transform_matrix(float a, float b, float c,
                               float d, float e, float f) {
+        if (has_transform_matrix_ && transform_matrix_a_ == a
+            && transform_matrix_b_ == b && transform_matrix_c_ == c
+            && transform_matrix_d_ == d && transform_matrix_e_ == e
+            && transform_matrix_f_ == f)
+            return;
         transform_matrix_a_ = a;
         transform_matrix_b_ = b;
         transform_matrix_c_ = c;
@@ -1430,8 +1449,13 @@ public:
         transform_matrix_e_ = e;
         transform_matrix_f_ = f;
         has_transform_matrix_ = true;
+        invalidate_subtree_caches_up();
     }
-    void clear_transform_matrix() { has_transform_matrix_ = false; }
+    void clear_transform_matrix() {
+        if (!has_transform_matrix_) return;
+        has_transform_matrix_ = false;
+        invalidate_subtree_caches_up();
+    }
     bool has_transform_matrix() const { return has_transform_matrix_; }
 
     /// True when this view paints under any non-identity render transform
@@ -2187,6 +2211,9 @@ private:
     friend class ScrollView;
     friend Point point_to_local(Point root_pos, View* target, View* root);
 
+    /// Invert this view's scalar and explicit affine paint transforms for
+    /// hit-testing/pointer localization. The historical name remains ABI/source
+    /// compatible; the contract now covers the complete 2D transform surface.
     bool inverse_scale_transform(Point& point) const noexcept;
 
     void begin_visibility_quarantine() noexcept {

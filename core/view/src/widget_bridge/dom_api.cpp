@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 #include "api_registry.hpp"
@@ -24,6 +25,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto parentId = args.get<std::string>(0, "");
         auto childId = args.get<std::string>(1, "");
         auto tag = args.get<std::string>(2, "div");
+        auto hint = args.get<std::string>(3, "");
         auto* existing = self.widget(childId);
         if (existing) {
             if (auto* p = existing->parent()) {
@@ -44,7 +46,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // semantics drift between the createElement+appendChild path and
         // the React-style commit path that goes through here.
         std::unique_ptr<View> child;
-        if (tag == "span" || tag == "p" || tag == "label" ||
+        if (hint == "scroll") {
+            auto scroll = std::make_unique<ScrollView>();
+            scroll->set_id(childId);
+            child = std::move(scroll);
+        } else if (tag == "span" || tag == "p" || tag == "label" ||
             tag == "h1" || tag == "h2" || tag == "h3" ||
             tag == "h4" || tag == "h5" || tag == "h6") {
             auto lbl = std::make_unique<Label>();
@@ -94,7 +100,6 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             // arg ("range:horizontal", "range:vertical", "checkbox", "text").
             // Without a hint, fall back to a plain View so the element
             // still receives child/style ops.
-            auto hint = args.get<std::string>(3, "");
             if (hint == "range:horizontal" || hint == "range:vertical") {
                 auto fader = std::make_unique<Fader>();
                 fader->set_id(childId);

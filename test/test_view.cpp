@@ -1028,11 +1028,10 @@ TEST_CASE("View transform composes — translateX(-50%) child lands at correct r
     REQUIRE_THAT(ty, WithinAbs(10.0f, 1e-5f));
 }
 
-TEST_CASE("View transform_matrix does not affect layout or hit testing",
+TEST_CASE("View transform_matrix leaves layout authored and aligns hit testing",
           "[view][transform][issue-930]") {
-    // Transforms are paint-only — Yoga and hit_test see the un-transformed
-    // bounds. This is the contract called out in the issue's acceptance
-    // criteria.
+    // Yoga remains untransformed, while input is inverted through the exact
+    // paint matrix so visible and interactive geometry agree.
     View root;
     root.set_bounds({0, 0, 200, 200});
 
@@ -1043,14 +1042,8 @@ TEST_CASE("View transform_matrix does not affect layout or hit testing",
 
     root.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 500.0f, 500.0f);
 
-    // hit_test at the un-transformed bounds still finds the child.
-    auto* hit = root.hit_test({30.0f, 30.0f});
-    REQUIRE(hit == child_ptr);
-
-    // hit_test where the transformed paint *would* land does NOT find anything
-    // — confirming the transform is paint-only and hit-testing ignores it.
-    auto* missed = root.hit_test({530.0f, 530.0f});
-    REQUIRE(missed != child_ptr);
+    REQUIRE(root.hit_test({530.0f, 530.0f}) == child_ptr);
+    REQUIRE(root.hit_test({30.0f, 30.0f}) == nullptr);
 }
 
 
@@ -1338,6 +1331,45 @@ TEST_CASE("View::paint_all routes background through path API when per-corner ra
     }
 }
 
+TEST_CASE("selected rounded segment fill covers its border box at 1x and Retina scale",
+          "[view][border][materialized][retina]") {
+    using namespace pulp::canvas;
+
+    // Chromium-selected chips use one rounded box for both the active fill and
+    // its hairline border. A one-logical-pixel inset in the fill becomes the
+    // two-device-pixel seam reported on Retina. Pin the renderer contract:
+    // the background owns the complete border box and the border is the only
+    // inset geometry (its stroke is centered inside the box).
+    for (const float device_scale : {1.0f, 2.0f}) {
+        RecordingCanvas rc;
+        rc.scale(device_scale, device_scale);
+        View selected;
+        selected.set_bounds({0, 0, 48, 24});
+        selected.set_background_color(Color::rgba8(255, 255, 255, 36));
+        selected.set_border(Color::rgba8(255, 255, 255, 26), 1.0f, 3.0f);
+        selected.paint_all(rc);
+
+        const DrawCommand* fill = nullptr;
+        const DrawCommand* border = nullptr;
+        for (const auto& command : rc.commands()) {
+            if (command.type == DrawCommand::Type::fill_rounded_rect) fill = &command;
+            if (command.type == DrawCommand::Type::stroke_rounded_rect) border = &command;
+        }
+        REQUIRE(fill != nullptr);
+        REQUIRE(border != nullptr);
+        CHECK(fill->f[0] == Catch::Approx(0.0f));
+        CHECK(fill->f[1] == Catch::Approx(0.0f));
+        CHECK(fill->f[2] == Catch::Approx(48.0f));
+        CHECK(fill->f[3] == Catch::Approx(24.0f));
+        CHECK(fill->f[4] == Catch::Approx(3.0f));
+        CHECK(border->f[0] == Catch::Approx(0.5f));
+        CHECK(border->f[1] == Catch::Approx(0.5f));
+        CHECK(border->f[2] == Catch::Approx(47.0f));
+        CHECK(border->f[3] == Catch::Approx(23.0f));
+        CHECK(border->f[4] == Catch::Approx(2.5f));
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // pulp #1321: window resize triggers root View Yoga relayout
 // ═══════════════════════════════════════════════════════════════════
@@ -1530,6 +1562,37 @@ TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
     REQUIRE(pr1_ptr->bounds().y == 0.0f);
     // Width should match the parent — inset left:0 + right:0 fills horizontally.
     REQUIRE(pr1_ptr->bounds().width == 1320.0f);
+}
+
+TEST_CASE("absolute inset is measured from a bordered parent's padding edge",
+          "[view][layout][absolute][border-box]") {
+    // CSS positions an absolute child from the containing block's padding
+    // edge. This is the geometry used by compact switch controls: a 1 px
+    // border plus top:1/left:19 places the 14 px knob at (20, 2) inside a
+    // 36 x 18 track, leaving the same 2 px visual inset at right and bottom.
+    View track;
+    track.set_bounds({0, 0, 36, 18});
+    track.set_border(Color::rgba8(255, 255, 255), 1.0f);
+
+    auto knob = std::make_unique<View>();
+    knob->set_position(View::Position::absolute);
+    knob->set_top(1.0f);
+    knob->set_left(19.0f);
+    knob->flex().preferred_width = 14.0f;
+    knob->flex().preferred_height = 14.0f;
+    auto* knob_ptr = knob.get();
+    track.add_child(std::move(knob));
+
+    track.layout_children();
+
+    CHECK(knob_ptr->bounds().x == Catch::Approx(20.0f));
+    CHECK(knob_ptr->bounds().y == Catch::Approx(2.0f));
+    CHECK(knob_ptr->bounds().width == Catch::Approx(14.0f));
+    CHECK(knob_ptr->bounds().height == Catch::Approx(14.0f));
+    CHECK(track.bounds().width - knob_ptr->bounds().right()
+          == Catch::Approx(2.0f));
+    CHECK(track.bounds().height - knob_ptr->bounds().bottom()
+          == Catch::Approx(2.0f));
 }
 
 TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",

@@ -467,7 +467,13 @@ var document = {
             event.preventDefault = function() { this.defaultPrevented = true; };
         }
         if (typeof event.stopPropagation !== 'function') {
-            event.stopPropagation = function() {};
+            event.stopPropagation = function() { this._stopped = true; };
+        }
+        if (typeof event.stopImmediatePropagation !== 'function') {
+            event.stopImmediatePropagation = function() {
+                this._stopped = true;
+                this._stoppedImmediate = true;
+            };
         }
         // Snapshot the list to tolerate handlers that
         // remove themselves during dispatch.
@@ -479,6 +485,7 @@ var document = {
                     __dispatchError__('document', event.type, String(e && e.stack ? e.stack : e));
                 }
             }
+            if (event._stoppedImmediate) break;
         }
         return !event.defaultPrevented;
     }
@@ -508,6 +515,16 @@ var window = {
         if (typeof __cancelFrame__ === "function") __cancelFrame__(id);
     }
 };
+
+// A browser classic-script realm has one Window object: `window`, `self`, and
+// `globalThis.window` must all observe the same property bag. WidgetBridge
+// evaluates compatibility modules independently, so relying on an engine's
+// top-level `var` mirroring rules can leave captured application scripts
+// writing to this lexical `window` while native runtime services read a
+// different object from `globalThis.window`.
+globalThis.window = window;
+globalThis.document = document;
+globalThis.self = window;
 
 function __installGlobalIfMissing(name, value) {
     if (typeof globalThis[name] === "undefined") {

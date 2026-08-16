@@ -13,6 +13,7 @@
 
 #include <pulp/format/processor.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -36,6 +37,8 @@ struct PlayheadSnapshot {
     bool is_playing = false;
     bool is_recording = false;
     bool is_looping = false;
+    double loop_start_beats = 0.0;
+    double loop_end_beats = 0.0;
     int64_t position_samples = 0;
     double position_beats = 0.0;
     double sample_rate = 0.0;
@@ -46,6 +49,76 @@ enum class TransportDiffMode : std::uint8_t {
     LegacyValues,
     FieldValidity,
 };
+
+/// Conservatively recognize the one backward timeline move that can preserve
+/// continuous audio history: arrival at the position predicted by a stable host
+/// loop range. The broader `transport_jump` flag remains untouched.
+inline bool classify_ordinary_loop_wrap(
+    const ProcessContext& ctx,
+    const PlayheadSnapshot& previous,
+    TransportDiffMode mode) noexcept {
+    if (!ctx.transport_jump || !ctx.is_playing || !previous.is_playing ||
+        !ctx.is_looping || !previous.is_looping || previous.num_samples <= 0 ||
+        !std::isfinite(previous.sample_rate) || previous.sample_rate <= 0.0 ||
+        !std::isfinite(previous.tempo_bpm) || previous.tempo_bpm <= 0.0 ||
+        !std::isfinite(ctx.tempo_bpm) || ctx.tempo_bpm <= 0.0 ||
+        !std::isfinite(previous.position_beats) ||
+        !std::isfinite(ctx.position_beats) ||
+        !std::isfinite(previous.loop_start_beats) ||
+        !std::isfinite(previous.loop_end_beats) ||
+        !std::isfinite(ctx.loop_start_beats) ||
+        !std::isfinite(ctx.loop_end_beats)) {
+        return false;
+    }
+
+    if (mode == TransportDiffMode::FieldValidity) {
+        constexpr auto has_all = [](TransportValidity validity) noexcept {
+            return validity.has(TransportField::Playing) &&
+                   validity.has(TransportField::Looping) &&
+                   validity.has(TransportField::LoopRange) &&
+                   validity.has(TransportField::BeatPosition) &&
+                   validity.has(TransportField::Tempo);
+        };
+        if (!has_all(ctx.transport_validity) ||
+            !has_all(previous.transport_validity)) {
+            return false;
+        }
+    }
+
+    const double loop_length = ctx.loop_end_beats - ctx.loop_start_beats;
+    if (!(loop_length > 0.0)) return false;
+
+    const double samples_to_beats =
+        (static_cast<double>(previous.num_samples) / previous.sample_rate) *
+        (previous.tempo_bpm / 60.0);
+    const double tolerance = std::max(
+        1.0e-9,
+        (2.0 / previous.sample_rate) * (previous.tempo_bpm / 60.0));
+
+    // A changing cycle range is a transport edit, not an ordinary wrap.
+    if (std::abs(previous.loop_start_beats - ctx.loop_start_beats) > tolerance ||
+        std::abs(previous.loop_end_beats - ctx.loop_end_beats) > tolerance) {
+        return false;
+    }
+
+    const auto inside_loop = [&](double beat) noexcept {
+        return beat >= ctx.loop_start_beats - tolerance &&
+               beat < ctx.loop_end_beats + tolerance;
+    };
+    if (!inside_loop(previous.position_beats) ||
+        !inside_loop(ctx.position_beats)) {
+        return false;
+    }
+
+    const double expected_unwrapped = previous.position_beats + samples_to_beats;
+    if (expected_unwrapped < ctx.loop_end_beats - tolerance) return false;
+
+    double relative = std::fmod(expected_unwrapped - ctx.loop_start_beats,
+                                loop_length);
+    if (relative < 0.0) relative += loop_length;
+    const double expected_wrapped = ctx.loop_start_beats + relative;
+    return std::abs(ctx.position_beats - expected_wrapped) <= tolerance;
+}
 
 /// Derive `ctx.bar` from `ctx.position_beats` + the active time
 /// signature, when the host does not supply a precomputed bar.
@@ -94,6 +167,7 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         ctx.time_sig_changed = false;
         ctx.transport_changed = false;
         ctx.transport_jump = false;
+        ctx.ordinary_loop_wrap = false;
         // A processor instantiated while the transport is already rolling has
         // no previous block to diff against, but this block still begins a run
         // from its point of view. Reporting no start here would leave a clock
@@ -229,6 +303,11 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         }
     }
 
+    if (snapshot.has_previous) {
+        ctx.ordinary_loop_wrap =
+            classify_ordinary_loop_wrap(ctx, snapshot, mode);
+    }
+
     snapshot.has_previous = true;
     snapshot.transport_validity = ctx.transport_validity;
     snapshot.tempo_bpm = ctx.tempo_bpm;
@@ -237,6 +316,8 @@ inline void compute_playhead_changes(ProcessContext& ctx,
     snapshot.is_playing = ctx.is_playing;
     snapshot.is_recording = ctx.is_recording;
     snapshot.is_looping = ctx.is_looping;
+    snapshot.loop_start_beats = ctx.loop_start_beats;
+    snapshot.loop_end_beats = ctx.loop_end_beats;
     snapshot.position_samples = ctx.position_samples;
     snapshot.position_beats = ctx.position_beats;
     snapshot.sample_rate = ctx.sample_rate;

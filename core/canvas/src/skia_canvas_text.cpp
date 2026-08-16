@@ -187,6 +187,32 @@ PreparedParagraph make_paragraph(const std::string& text,
     auto paragraph = pb->Build();
     if (!paragraph) return result;
     paragraph->layout(SK_ScalarInfinity);
+    // Diagnostic contract for imported typography. A non-empty value filters
+    // by text content ("*" traces every run) and reports the typeface that
+    // SkParagraph actually shaped with, rather than the requested CSS family
+    // or the separate Canvas2D resolver result.
+    if (const char* trace = std::getenv("PULP_PARAGRAPH_FONT_TRACE")) {
+        const std::string_view filter(trace);
+        if (filter == "*" || text.find(filter) != std::string::npos) {
+            const auto fonts = paragraph->getFonts();
+            for (const auto& info : fonts) {
+                auto face = sk_ref_sp(info.fFont.getTypeface());
+                SkString actual_family;
+                SkString postscript;
+                if (face) {
+                    face->getFamilyName(&actual_family);
+                    face->getPostScriptName(&postscript);
+                }
+                std::fprintf(stderr,
+                    "[paragraph-font] text='%s' requested='%s' size=%g weight=%d "
+                    "spacing=%g actual-family='%s' postscript='%s' actual-weight=%d\n",
+                    text.c_str(), family.c_str(), size, weight, letter_spacing,
+                    actual_family.c_str(), postscript.c_str(),
+                    info.fFont.getTypeface()
+                        ? info.fFont.getTypeface()->fontStyle().weight() : 0);
+            }
+        }
+    }
     // With an infinite layout width SkParagraph produces a single line.
     // `getLongestLine()` matches the painted line width on mixed
     // emoji/default runs where intrinsic width can under-report, but it

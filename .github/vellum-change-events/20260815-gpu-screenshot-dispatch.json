@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260815-gpu-screenshot-dispatch",
+  "kind": "change",
+  "created_at": "2026-08-15T16:00:00Z",
+  "slices": [
+    "capture-primitives"
+  ],
+  "rationale": "Pulp's native plug-in screenshot API accepted an explicit GPU backend but the two public render_to_png dispatchers fell through to their raster implementations after an optional provider declined the request. This change routes that existing explicit backend to render_to_png_gpu on Apple and non-Apple builds, preserving fail-closed backend selection and allowing Pulp's Spectr migration to prove that its native state atlas is rendered by Skia Graphite on Dawn rather than a raster substitute. This is Pulp-only plug-in validation and capture integration with no named immutable Vellum framework commit to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-screenshot-gpu"
+  ],
+  "disposition": "pulp-only"
+}

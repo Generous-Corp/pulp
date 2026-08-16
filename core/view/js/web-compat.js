@@ -478,19 +478,31 @@ Element.prototype.getBoundingClientRect = function() {
 // ── offsetWidth / offsetHeight ───────────────────────────────────────────────
 
 Object.defineProperty(Element.prototype, "offsetWidth", {
-    get: function() { var r = this.getBoundingClientRect(); return r.width; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetWidth : this.getBoundingClientRect().width;
+    }
 });
 
 Object.defineProperty(Element.prototype, "offsetHeight", {
-    get: function() { var r = this.getBoundingClientRect(); return r.height; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetHeight : this.getBoundingClientRect().height;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientWidth", {
-    get: function() { return this.offsetWidth; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientWidth : this.offsetWidth;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientHeight", {
-    get: function() { return this.offsetHeight; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientHeight : this.offsetHeight;
+    }
 });
 
 Object.defineProperty(Element.prototype, "ownerDocument", {
@@ -755,10 +767,8 @@ Element.prototype._registerNativeEvent = function(type) {
     var self = this;
     if (type === "click" || type === "mousedown" || type === "mouseup") {
         registerClick(id);
-        on(id, "click", function() {
-            var evt = _makeEvent("click", self);
-            self.dispatchEvent(evt);
-        });
+        // __dispatch__ owns the sole DOM entry for native clicks.
+        on(id, "click", function() {});
     } else if (type === "mouseenter" || type === "mouseleave") {
         registerHover(id);
         on(id, "mouseenter", function() {
@@ -867,7 +877,7 @@ function _fireListeners(el, event) {
     event.currentTarget = el;
     for (var i = 0; i < listeners.length; i++) {
         listeners[i].fn.call(el, event);
-        if (event._stoppedImmediate || event._stopped) break;
+        if (event._stoppedImmediate) break;
     }
 }
 
@@ -887,9 +897,10 @@ function _dispatchEvent(target, event) {
             for (var j = 0; j < listeners.length; j++) {
                 if (listeners[j].capture) {
                     listeners[j].fn.call(path[i], event);
-                    if (event._stopped) return;
+                    if (event._stoppedImmediate) break;
                 }
             }
+            if (event._stopped) return;
         }
     }
 
@@ -905,7 +916,7 @@ function _dispatchEvent(target, event) {
             for (var l = 0; l < listeners2.length; l++) {
                 if (!listeners2[l].capture) {
                     listeners2[l].fn.call(path[k], event);
-                    if (event._stopped) return;
+                    if (event._stoppedImmediate) break;
                 }
             }
         }
@@ -1183,6 +1194,12 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (txtColor) setTextColor(id, txtColor);
             break;
         }
+        case "accentColor": {
+            var accent = parseCSSColor(resolved);
+            if (accent && typeof setAccentColor === "function")
+                setAccentColor(id, accent);
+            break;
+        }
 
         // Typography
         case "fontSize": {
@@ -1421,7 +1438,7 @@ var __cssProperties__ = [
     "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
-    "backgroundColor", "color",
+    "backgroundColor", "color", "accentColor",
     "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight",
     "textAlign", "textTransform", "textDecoration", "textOverflow",
     "border", "borderColor", "borderWidth", "borderRadius",
@@ -1840,3 +1857,9 @@ var window = {
     // window.onerror
     onerror: null
 };
+
+// Keep the legacy monolithic compatibility bundle aligned with the split
+// WidgetBridge prelude: browser global aliases share one Window object.
+globalThis.window = window;
+globalThis.document = document;
+globalThis.self = window;

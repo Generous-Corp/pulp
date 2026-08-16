@@ -140,6 +140,8 @@ void WidgetBridge::forget_widget_event_state(View& view) {
     }
     view.on_click = {};
     view.on_pointer_event = {};
+    view.on_dom_pointer_event = {};
+    view.on_dom_pointer_move_event = {};
     view.on_dom_wheel_event = {};
     view.on_drag = {};
     view.on_pointer_move = {};

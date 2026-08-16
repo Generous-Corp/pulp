@@ -112,7 +112,12 @@ TEST_CASE("nested bridge callbacks defer retirement to the outer callback",
                 event.phase = MousePhase::press;
                 event.position = {5, 5};
                 event.window_position = {205, 25};
-                nested->on_mouse_event(event);
+                // This is an intentional nested bridge delivery, not a second
+                // platform hit-test walk. The outer pointer dispatch already
+                // owns the platform DOM token, so the historical
+                // on_mouse_event seam correctly suppresses re-entry.
+                if (nested->on_dom_pointer_event)
+                    nested->on_dom_pointer_event(event, true);
             }
             return choc::value::Value();
         });
