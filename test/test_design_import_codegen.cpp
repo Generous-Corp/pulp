@@ -2434,7 +2434,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
-    CHECK(cached_text->f[1] == Catch::Approx(24.2f).margin(0.01f));
+    CHECK(cached_text->f[1] == Catch::Approx(11.7f).margin(0.01f));
 
     live_single->set_text("01  SLOW");
     pulp::canvas::RecordingCanvas changed_text_canvas;

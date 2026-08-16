@@ -243,6 +243,7 @@ public:
             return false;
         }
         processor_->setProcessing(true);
+        process_clock_.prepare(sample_rate);
         max_block_size_ = max_block_size;
         active_ = true;
         // Reserve both pending-edit vectors so the audio-thread swap + drain
@@ -279,6 +280,8 @@ public:
                     std::memset(dst, 0, sizeof(float) * (size_t)num_samples);
                 }
             }
+            if (active_ && processor_)
+                process_clock_.advance(num_samples);
             return;
         }
 
@@ -304,8 +307,7 @@ public:
         out_bus.channelBuffers32 = out_ptrs_.data();
 
         Vst::ProcessContext ctx{};
-        ctx.sampleRate = sample_rate_;
-        ctx.state      = Vst::ProcessContext::kPlaying;
+        process_clock_.write(ctx);
 
         // Build the VST3 event list from Pulp's MidiBuffer. The current host
         // queue carries short MIDI messages, so this maps note_on/note_off
@@ -420,6 +422,7 @@ public:
                 }
             }
         }
+        process_clock_.advance(num_samples);
     }
 
     std::vector<HostParamInfo> parameters() const override { return params_; }
@@ -741,7 +744,7 @@ private:
     Vst::EventList in_events_;
     Vst::ParameterChanges in_param_changes_;
     std::atomic<bool> bypassed_{false};
-    double sample_rate_ = 44100.0;
+    Vst3HostProcessClock process_clock_;
     int max_block_size_ = 0;
     bool active_ = false;
 };

@@ -464,7 +464,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/stft.hpp",
-        "fingerprint": "sha256:9b1520fdb50618960b0ee63e78edb41f7649cfe07b9ad01e7227e4c91cc0204e",
+        "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
         "disposition": "capability_support",
         "capability_keys": [
             "signal.bounded-sample-history",

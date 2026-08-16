@@ -153,7 +153,7 @@ validation or debug reporting.
 - Generated bridge/source identity (`setAnchor`, source locations, tweak/lock
   contracts) belongs to codegen or inspector modules, not to the CLI facade.
 - Browser capture interaction must use a versioned declarative action plan with
-  bounded click/type/wait operations and evidence for every action. Keep it out
+  bounded click/context-click/type/wait operations and evidence for every action. Keep it out
   of browser discovery and process launch, and do not expose arbitrary
   JavaScript evaluation as an importer CLI option.
 

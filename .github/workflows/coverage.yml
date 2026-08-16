@@ -373,7 +373,7 @@ jobs:
     # self-hosted legs are handled by the explicit queue watchdog below,
     # because job-level timeouts do not start while GitHub is still waiting
     # for a matching runner.
-    timeout-minutes: 150
+    timeout-minutes: 210
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory
       # and we want every OS to attempt an upload independently so the
@@ -391,8 +391,8 @@ jobs:
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     # Windows coverage is best-effort and MUST NOT block a successful main
     # coverage run. The instrumented MSVC build + ~9k instrumented tests +
-    # llvm-cov over 1000+ objects genuinely exceeds the 150-min cap on
-    # GitHub-hosted windows-latest (it is ~1h on Linux/macOS), so the
+    # llvm-cov over 1000+ objects genuinely exceeds the 210-min cap on
+    # GitHub-hosted windows-latest, so the
     # os-windows leg times out. Its C++ coverage adds little unique signal
     # over the Linux/macOS legs (same sources via llvm-cov), and the
     # receipt-aware upload watchdog (#6252) requires exact Linux, macOS, and
@@ -578,7 +578,7 @@ jobs:
           # failure (#785) without losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
         # Bound the native suite with an INTERNAL budget that reserves 30
-        # minutes inside the job's `timeout-minutes: 150` for post-suite
+        # minutes inside the job's `timeout-minutes: 210` for post-suite
         # report verification, Python/Swift coverage, artifacts, and uploads.
         # The os-windows instrumented build + ~9k tests
         # + llvm-cov over 1000+ objects legitimately can't finish in the cap on
@@ -592,7 +592,7 @@ jobs:
         # finishes in ~1h; macOS now needs roughly 90 minutes as the suite has
         # grown to nearly 20k tests, so the budget preserves measured headroom.
         run: |
-          budget=$(( 120 * 60 ))  # leaves 30 min for post-suite work
+          budget=$(( 180 * 60 ))  # leaves 30 min for post-suite work
           budget_hit="${RUNNER_TEMP:-/tmp}/coverage-budget-hit"
           rm -f "${budget_hit}" 2>/dev/null || true
           coverage_args=()

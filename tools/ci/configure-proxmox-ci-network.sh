@@ -323,7 +323,7 @@ verify_live() {
             || die "$bridge does not own only $expected_address"
         route="$(ip -o -4 route get "$guest_ip")"
         case "$route" in
-            *" dev $bridge "*" src ${expected_address%/30} "*) ;;
+            *" dev $bridge src ${expected_address%/30} "*) ;;
             *) die "$guest_ip is not routed through $bridge from ${expected_address%/30}" ;;
         esac
         count="$(count_nat_rules "${SUBNETS[$index]}" "$bridge")"

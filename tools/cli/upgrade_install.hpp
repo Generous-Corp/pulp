@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -470,8 +469,7 @@ inline std::string browser_capture_runtime_install_name() {
 // Sized from the list, not by hand: a literal count and a literal list drift
 // apart silently, and the failure lands at capture time as a module that
 // cannot resolve rather than at install time as a short manifest.
-inline constexpr std::array<std::string_view, 14>
-    browser_capture_runtime_files{
+inline constexpr std::string_view browser_capture_runtime_files[]{
         "browser_process.mjs",
         "capture.mjs",
         "health.mjs",
@@ -479,6 +477,10 @@ inline constexpr std::array<std::string_view, 14>
         "interaction_plan.mjs",
         "interaction_plan_protocol.json",
         "lifecycle.mjs",
+        "materialized_layout_bindings.mjs",
+        "materialized_coordinate_space.mjs",
+        "materialized_paint_bindings.mjs",
+        "materialized_text_bindings.mjs",
         "network_dependencies.mjs",
         // The capture imports this for the per-node platform-font answer; an
         // upgraded install missing it fails module resolution at capture time,

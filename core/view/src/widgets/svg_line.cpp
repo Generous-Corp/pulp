@@ -9,19 +9,23 @@ void SvgLineWidget::set_line(float x1, float y1, float x2, float y2) {
     y1_ = y1;
     x2_ = x2;
     y2_ = y2;
+    request_repaint();
 }
 
 void SvgLineWidget::set_stroke_color(canvas::Color c) {
     stroke_color_ = c;
     has_stroke_ = true;
+    request_repaint();
 }
 
 void SvgLineWidget::clear_stroke() {
     has_stroke_ = false;
+    request_repaint();
 }
 
 void SvgLineWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
+    request_repaint();
 }
 
 void SvgLineWidget::paint(canvas::Canvas& canvas) {

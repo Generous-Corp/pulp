@@ -430,12 +430,10 @@ private:
     WidgetRegistry widgets_;
 
     // Idempotency guards for native-event registrations, one record per widget
-    // id. Each registrar (registerPointer / registerWheel / etc.) wraps the
-    // previous on_pointer_event so calling N times stacks N lambdas — every
-    // re-render of a React tree that re-runs the registration would multiply
-    // the dispatch cost by the render count. The claim_* helpers below gate the
-    // registrations so each (widget id, channel) wires the native hook exactly
-    // once, and forgetting an id is a single erase.
+    // id. Re-running a registrar on every React commit must not replace or stack
+    // its View callback. The claim_* helpers below gate registrations so each
+    // (widget id, channel) wires the native hook exactly once, and forgetting an
+    // id is a single erase.
     //
     // Keyed independently of `widgets_`: a registrar claims its channel BEFORE
     // resolving the widget, so an id can carry registration state with no live

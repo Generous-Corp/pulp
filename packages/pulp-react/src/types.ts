@@ -140,11 +140,11 @@ export interface StyleProps {
     backgroundAttachment?: 'scroll' | 'fixed' | 'local';
     backgroundClip?: 'border-box' | 'padding-box' | 'content-box' | 'text';
     backgroundOrigin?: 'border-box' | 'padding-box' | 'content-box';
-    border?: { color: string; width?: number; radius?: number };  // setBorder
-    borderTop?: { color: string; width: number };                  // setBorderSide
-    borderRight?: { color: string; width: number };
-    borderBottom?: { color: string; width: number };
-    borderLeft?: { color: string; width: number };
+    border?: { color: string; width?: number; radius?: number } | string;
+    borderTop?: { color: string; width: number } | string;
+    borderRight?: { color: string; width: number } | string;
+    borderBottom?: { color: string; width: number } | string;
+    borderLeft?: { color: string; width: number } | string;
     // Per-attribute (RN-style flat) border props. These map to bridge
     // setters that mutate one slot in isolation, unlike `border:` which
     // sets all three at once.
@@ -693,6 +693,11 @@ export interface PulpInstance {
     /// the bridge. Drained by attach() once onBridge flips true.
     /// Each entry is the child descriptor and the index it should land at.
     pendingChildren: Array<{ child: PulpInstance; index: number }>;
+    /// SVG viewport inherited from the nearest lowercase `<svg>` ancestor.
+    /// Raw imported SVG places `viewBox` on the container while native path
+    /// widgets own the actual coordinate transform, so host-config forwards
+    /// this pair when each primitive materializes.
+    inheritedSvgViewBox?: [number, number];
     /// DOM-shim element returned from `getPublicInstance`. Imported
     /// bundles call DOM-style methods
     /// (`getContext('2d')`, `getBoundingClientRect()`, `style.X=`,
@@ -704,6 +709,16 @@ export interface PulpInstance {
     /// `null` when the Element shim isn't available (e.g. pure-JS
     /// unit tests with no bridge engine).
     _dom?: unknown;
+    /// Native id that owns this element's rendered text when it differs from
+    /// the semantic DOM element id. Imported lowercase HTML controls are
+    /// styled DOM boxes, not opinionated stock Pulp widgets, so a plain-text
+    /// `<button>` owns a generated Label child while click/accessibility stay
+    /// on the complete button rectangle.
+    textTargetId?: string;
+    /// True for a React host text node synthesized as a Label. The owning DOM
+    /// element publishes these renderer targets by ordinal so Chromium text
+    /// evidence can address mixed content such as `<button><span>*</span>Save`.
+    anonymousTextTarget?: boolean;
 }
 
 // ── Container ──────────────────────────────────────────────────────

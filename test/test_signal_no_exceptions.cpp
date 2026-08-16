@@ -41,15 +41,18 @@ int main() {
     const auto output = expander.process(0.25f, -0.5f);
     if (!std::isfinite(output[0]) || !std::isfinite(output[1]))
         return 12;
+    const auto exp2 = pulp::signal::FastMath::exp2(0.5f);
+    if (!std::isfinite(exp2))
+        return 13;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
-        return 13;
+        return 14;
     pulp::signal::SpectralMaskProcessor processor;
     pulp::signal::SpectralMaskProcessorConfig processor_config;
     processor_config.frame.fft_size = 256;
     processor_config.frame.analysis_hop = 64;
     processor_config.frame.channels = 1;
     processor_config.frame.max_block = 64;
-    return processor.prepare(processor_config) ? 0 : 14;
+    return processor.prepare(processor_config) ? 0 : 15;
 }

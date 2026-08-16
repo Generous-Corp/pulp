@@ -31,6 +31,7 @@ function makeButton(id: string, children: unknown): PulpInstance {
         childIds: [],
         onBridge: true,
         pendingChildren: [],
+        textTargetId: id + '__text',
     };
 }
 
@@ -56,7 +57,7 @@ describe('host-config commitUpdate — array children on TEXT_BEARING', () => {
         );
         const c = callsOf(bridge, 'setText');
         expect(c).toHaveLength(1);
-        expect(c[0].args).toEqual(['bands_trigger', '56 bands ▾']);
+        expect(c[0].args).toEqual(['bands_trigger__text', '56 bands ▾']);
     });
 
     it('does not re-emit setText when array value is unchanged', () => {
@@ -82,7 +83,7 @@ describe('host-config commitUpdate — array children on TEXT_BEARING', () => {
         );
         const c = callsOf(bridge, 'setText');
         expect(c).toHaveLength(1);
-        expect(c[0].args).toEqual(['b1', '(beta) 56 bands']);
+        expect(c[0].args).toEqual(['b1__text', '(beta) 56 bands']);
     });
 
     it('flattens nested arrays of scalars', () => {
@@ -95,7 +96,7 @@ describe('host-config commitUpdate — array children on TEXT_BEARING', () => {
         );
         const c = callsOf(bridge, 'setText');
         expect(c).toHaveLength(1);
-        expect(c[0].args).toEqual(['b2', 'xyz']);
+        expect(c[0].args).toEqual(['b2__text', 'xyz']);
     });
 
     it('does NOT setText when an array contains a real element (bails — child path will mount it)', () => {

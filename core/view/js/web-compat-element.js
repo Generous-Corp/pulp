@@ -87,6 +87,22 @@ var __widgetTagFactory__ = {
     'native-view': function(id) { createNativeView(id, ""); }
 };
 
+// Container kind is fixed when the native widget is materialized. React sets
+// initial style props before appendChild, so honor overflow:auto/scroll here
+// and create a real ScrollView instead of a clipped, non-scrollable View.
+// Keep this predicate shared by _ensureNative, _reparentNative, and the
+// __domAppend hint path in web-compat-dom-ops.js.
+function __pulpElementWantsScrollView__(element) {
+    if (!element || !element.style || !element.style._props) return false;
+    var props = element.style._props;
+    var overflow = String(props.overflow || "").toLowerCase();
+    var overflowX = String(props.overflowX || "").toLowerCase();
+    var overflowY = String(props.overflowY || "").toLowerCase();
+    return overflow === "auto" || overflow === "scroll" ||
+           overflowX === "auto" || overflowX === "scroll" ||
+           overflowY === "auto" || overflowY === "scroll";
+}
+
 // Create the native widget based on tag + type
 Element.prototype._ensureNative = function() {
     if (this._nativeCreated) return;
@@ -97,7 +113,8 @@ Element.prototype._ensureNative = function() {
 
     if (tag === "div" || tag === "section" || tag === "article" || tag === "aside" ||
         tag === "header" || tag === "footer" || tag === "nav" || tag === "main") {
-        createCol(id, "");
+        if (__pulpElementWantsScrollView__(this)) createScrollView(id, "");
+        else createCol(id, "");
     } else if (tag === "span" || tag === "p" || tag === "label") {
         createLabel(id, "", "");
         if (tag === "label") {
@@ -1217,19 +1234,31 @@ Element.prototype.getBoundingClientRect = function() {
 // ── offsetWidth / offsetHeight ───────────────────────────────────────────────
 
 Object.defineProperty(Element.prototype, "offsetWidth", {
-    get: function() { var r = this.getBoundingClientRect(); return r.width; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetWidth : this.getBoundingClientRect().width;
+    }
 });
 
 Object.defineProperty(Element.prototype, "offsetHeight", {
-    get: function() { var r = this.getBoundingClientRect(); return r.height; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.offsetHeight : this.getBoundingClientRect().height;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientWidth", {
-    get: function() { return this.offsetWidth; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientWidth : this.offsetWidth;
+    }
 });
 
 Object.defineProperty(Element.prototype, "clientHeight", {
-    get: function() { return this.offsetHeight; }
+    get: function() {
+        var m = typeof getLayoutBoxMetrics === "function" ? getLayoutBoxMetrics(this._id) : null;
+        return m ? m.clientHeight : this.offsetHeight;
+    }
 });
 
 Object.defineProperty(Element.prototype, "ownerDocument", {
@@ -1285,7 +1314,8 @@ function _reparentNative(child, parentId) {
     // Re-create the widget under the new parent
     if (tag === "div" || tag === "section" || tag === "article" || tag === "aside" ||
         tag === "header" || tag === "footer" || tag === "nav" || tag === "main") {
-        createCol(id, parentId);
+        if (__pulpElementWantsScrollView__(child)) createScrollView(id, parentId);
+        else createCol(id, parentId);
     } else if (tag === "span" || tag === "p" || tag === "label" ||
                tag === "h1" || tag === "h2" || tag === "h3" ||
                tag === "h4" || tag === "h5" || tag === "h6") {

@@ -1380,6 +1380,39 @@ static void collect_font_face_asset_candidates(const std::string& css,
 static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string& html) {
     std::vector<HtmlAssetCandidate> assets;
 
+    // Resource hints name origins that the browser may connect to, not files
+    // that can be materialized into the DesignIR asset manifest.  Treating a
+    // preconnect/dns-prefetch href as an asset makes an otherwise self-contained
+    // export fail by trying to download e.g. `https://fonts.googleapis.com`.
+    std::unordered_set<std::string> resource_hint_uris;
+    static const std::regex link_tag_re(R"RX(<link\b[^>]*>)RX", std::regex::icase);
+    static const std::regex rel_attr_re(
+        R"RX(\brel\s*=\s*(['"])([^'"]+)\1)RX", std::regex::icase);
+    static const std::regex href_attr_re(
+        R"RX(\bhref\s*=\s*(['"])([^'"]+)\1)RX", std::regex::icase);
+    auto link_begin = std::sregex_iterator(html.begin(), html.end(), link_tag_re);
+    auto link_end = std::sregex_iterator();
+    for (auto it = link_begin; it != link_end; ++it) {
+        const auto tag = it->str();
+        std::smatch rel_match;
+        std::smatch href_match;
+        if (!std::regex_search(tag, rel_match, rel_attr_re)
+            || !std::regex_search(tag, href_match, href_attr_re)) {
+            continue;
+        }
+        auto rel = rel_match[2].str();
+        std::transform(rel.begin(), rel.end(), rel.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::istringstream rel_tokens(rel);
+        std::string token;
+        while (rel_tokens >> token) {
+            if (token == "preconnect" || token == "dns-prefetch") {
+                resource_hint_uris.insert(href_match[2].str());
+                break;
+            }
+        }
+    }
+
     static const std::regex style_block_re(
         R"RX(<style\b[^>]*>([\s\S]*?)</style>)RX",
         std::regex::icase);
@@ -1414,6 +1447,7 @@ static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string
     for (auto it = direct_begin; it != direct_end; ++it) {
         std::string uri = (*it)[2].str();
         if (uri.empty() || uri.front() == '#') continue;
+        if (resource_hint_uris.count(uri) != 0) continue;
         std::string lower = uri;
         std::transform(lower.begin(), lower.end(), lower.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1425,6 +1459,21 @@ static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string
 }
 
 static void collect_asset_uris_from_node(const IRNode& node, std::vector<std::string>& uris) {
+    const auto rel_it = node.attributes.find("rel");
+    bool is_resource_hint = false;
+    if (rel_it != node.attributes.end()) {
+        auto rel = rel_it->second;
+        std::transform(rel.begin(), rel.end(), rel.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::istringstream rel_tokens(rel);
+        std::string token;
+        while (rel_tokens >> token) {
+            if (token == "preconnect" || token == "dns-prefetch") {
+                is_resource_hint = true;
+                break;
+            }
+        }
+    }
     auto collect = [&](const std::optional<std::string>& value) {
         if (value) collect_url_tokens(*value, uris);
     };
@@ -1434,6 +1483,7 @@ static void collect_asset_uris_from_node(const IRNode& node, std::vector<std::st
     collect(node.style.filter);
     collect(node.style.backdrop_filter);
     for (const auto& [key, value] : node.attributes) {
+        if (is_resource_hint && key == "href") continue;
         const bool known_asset_key = is_asset_reference_key(key);
         if (known_asset_key || value.find("url(") != std::string::npos
             || is_data_uri(value) || is_network_url(value) || has_prefix(value, "file://")) {

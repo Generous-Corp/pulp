@@ -597,10 +597,11 @@ TEST_CASE("Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2"
 
     MouseEvent e{};
     e.is_down = true;
+    REQUIRE(s->on_dom_pointer_event);
 
-    e.button = MouseButton::left;   s->on_mouse_event(e);
-    e.button = MouseButton::middle; s->on_mouse_event(e);
-    e.button = MouseButton::right;  s->on_mouse_event(e);
+    e.button = MouseButton::left;   s->on_dom_pointer_event(e, true);
+    e.button = MouseButton::middle; s->on_dom_pointer_event(e, true);
+    e.button = MouseButton::right;  s->on_dom_pointer_event(e, true);
 
     // left=0, middle=1, right=2 — W3C order, NOT the enum order.
     REQUIRE(engine.evaluate("btn_log.join(',')").toString() == "0,1,2");
@@ -668,6 +669,27 @@ TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __glo
     bridge.forward_key_event(static_cast<int>(KeyCode::a),      0, true);
 
     REQUIRE(engine.evaluate("win_keys.join(',')").toString() == "Escape,a");
+}
+
+TEST_CASE("Classic-script window aliases share one browser global property bag",
+          "[view][bridge][web-compat][window]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        window.__captured_app_state__ = { analyzer_phase: 17 };
+        globalThis.window.__native_service_state__ = { mounted: true };
+    )");
+
+    REQUIRE(engine.evaluate("window === globalThis.window").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("self === window").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("document === globalThis.document").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("globalThis.window.__captured_app_state__.analyzer_phase")
+                .getWithDefault<int>(0) == 17);
+    REQUIRE(engine.evaluate("window.__native_service_state__.mounted")
+                .getWithDefault<bool>(false));
 }
 
 TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws",
@@ -742,7 +764,7 @@ TEST_CASE("Event contract: wheel dispatch carries coordinates and modifiers",
 
 TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)",
           "[view][bridge][events][contract]") {
-    // Pre-fix each call wrapped the previous on_pointer_event, so
+    // Pre-fix each call wrapped the previous pointer callback, so
     // re-renders multiplied dispatch cost by the render count and
     // every pointer event fired N times into the JS callback chain.
     ScriptEngine engine;
@@ -765,7 +787,8 @@ TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lamb
 
     MouseEvent down{};
     down.is_down = true;
-    s->on_mouse_event(down);
+    REQUIRE(s->on_dom_pointer_event);
+    s->on_dom_pointer_event(down, true);
 
     MouseEvent wheel{};
     wheel.is_wheel = true;

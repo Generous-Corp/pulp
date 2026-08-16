@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.807.0
+    VERSION 0.808.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -345,6 +345,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
+# This option must exist before core/format is configured: pulp-format's
+# ViewBridge conditionally closes over pulp-view-script. Declaring it only in
+# core/view (which is added later) made a clean configure silently omit that
+# static-library dependency even though the eventual cached value was ON.
+option(PULP_ENABLE_JS
+    "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
 add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/music)
@@ -414,17 +420,20 @@ set(_pulp_standalone_sources
     core/format/src/settings_panel.cpp)
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-function(_pulp_configure_standalone_target target)
+add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
+add_library(pulp::standalone-native ALIAS pulp-standalone-native)
+function(_pulp_configure_standalone_target target view_target)
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
         $<INSTALL_INTERFACE:include>)
     target_link_libraries(${target} PUBLIC
-        pulp::format pulp::view
+        pulp::format ${view_target}
         $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
         $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
+    target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)
 endfunction()
-_pulp_configure_standalone_target(pulp-standalone)
-target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
+_pulp_configure_standalone_target(pulp-standalone pulp::view)
+_pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
 # The control manifest and protocol registry are CPU-only audit data and remain
 # available even when live Inspector support is disabled. inspect/CMakeLists.txt
@@ -554,6 +563,14 @@ endif()
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
+
+# This fixture exercises the public pulp_add_plugin target-selection surface,
+# so configure it only after PulpUtils and PulpLinkFloor are available. The
+# ordinary unit-test owners above intentionally load before those public helper
+# modules.
+if(PULP_BUILD_TESTS)
+    add_subdirectory(test/fixtures/native_ui_link_floor)
+endif()
 
 # ── CLI Tool (desktop only) ────────────────────────────────────────────────
 # The CLI already requires the desktop GPU stack for render/audio authoring

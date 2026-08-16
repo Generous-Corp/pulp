@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 40,
+  "inventory_version": 42,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1605,7 +1605,7 @@
     {
       "domain": "music",
       "source": "core/music/include/pulp/music/pattern_development.hpp",
-      "fingerprint": "sha256:339c53311652ffdedb64851b9b7ee51129a01e98b05923f8139153ff80bfab58",
+      "fingerprint": "sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
       "include": "pulp/music/pattern_development.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3711,7 +3711,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/stft.hpp",
-      "fingerprint": "sha256:9b1520fdb50618960b0ee63e78edb41f7649cfe07b9ad01e7227e4c91cc0204e",
+      "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
       "include": "pulp/signal/stft.hpp",
       "disposition": "capability_support",
       "capability_keys": [

@@ -104,7 +104,13 @@ void WidgetBridge::install_runtime_import_handlers() {
                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
                 std::optional<ClaudeBundle> bundle;
-                if (source_lc == "v0" || source_lc == "v0.dev" || source_lc == "v0-dev") {
+                if (source_lc == "materialized-browser") {
+                    bundle = parse_materialized_browser_document(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: invalid materialized browser document");
+                        return choc::value::Value();
+                    }
+                } else if (source_lc == "v0" || source_lc == "v0.dev" || source_lc == "v0-dev") {
                     bundle = parse_v0_dev_react(html);
                     if (!bundle) {
                         set_err("__pulpRuntimeImport__: unsupported v0.dev React export (got '"

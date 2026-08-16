@@ -1,6 +1,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 
 #include <pulp/view/ui_components.hpp>  // ScrollView
+#include "pointer_dispatch_internal.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -82,6 +83,24 @@ std::vector<ViewCapture> capture_path_to_root(View* view) {
     return path;
 }
 
+void dispatch_dom_pointer_path(View& root,
+                               const std::vector<ViewCapture>& path,
+                               const MouseEvent& event,
+                               bool moving) {
+    bool has_origin = false;
+    for (const auto& capture : path) {
+        auto* view = capture.live_in(root);
+        if (!view) continue;
+        auto callback = moving ? view->on_dom_pointer_move_event
+                               : view->on_dom_pointer_event;
+        if (!callback) continue;
+        MouseEvent local_event = event;
+        local_event.position = point_to_local(event.window_position, view, &root);
+        callback(local_event, !has_origin);
+        has_origin = true;
+    }
+}
+
 // Blur every root-local focus holder except `keep`. Focus callbacks may
 // synchronously claim a replacement (IME commit is the common case), so a
 // single snapshot is insufficient. The bounded fallback guarantees hostile
@@ -139,6 +158,21 @@ bool drain_root_focus(View& root, const ViewCapture& protected_target,
     return !protected_target.has_value() || protected_target.live_in(root);
 }
 }  // namespace
+
+void dispatch_dom_pointer_event(View& root, View* target,
+                                const MouseEvent& event, bool moving,
+                                bool bubble) {
+    if (!target || !still_in_tree(target, &root)) return;
+    detail::ScopedDomPointerToken dispatch_token;
+    ViewCapture target_capture;
+    target_capture.set(target);
+    target->on_mouse_event(event);
+    target = target_capture.live_in(root);
+    if (!target) return;
+    auto path = capture_path_to_root(target);
+    if (!bubble && path.size() > 1) path.resize(1);
+    dispatch_dom_pointer_path(root, path, event, moving);
+}
 
 bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
                                    const MouseEvent& event, int click_count) {
@@ -223,7 +257,7 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
-    target->on_mouse_event(me);
+    dispatch_dom_pointer_event(root, target, me, true);
 
     // The legacy callbacks carry no button identity and historically mean the
     // primary/left button. Sending right or middle input through them would
@@ -302,7 +336,7 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
-    target->on_mouse_event(me);
+    dispatch_dom_pointer_event(root, target, me, false, bubble);
 
     // A modern handler may unmount the tree it was dispatched into. Re-validate
     // before the legacy hop and the bubble so no channel derefs a freed view.
@@ -324,6 +358,10 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
         for (const auto& capture : bubble_path) {
             auto* b = capture.live_in(root);
             if (!b) continue;
+            // Registered DOM ancestors already received their callback-only
+            // delivery in dispatch_dom_pointer_event(). This legacy bubble is
+            // only for ordinary C++ on_pointer_event consumers.
+            if (b->on_dom_pointer_event) continue;
             auto callback = b->on_pointer_event;
             if (!callback) continue;
             MouseEvent bme = me;
@@ -410,13 +448,14 @@ void deliver_pointer_terminal(View& root, View* target, Point root_pt,
         me.pointer_id = pointer.pointer_id;
         me.altitude_angle = pointer.altitude_angle;
         me.azimuth_angle = pointer.azimuth_angle;
-        target->on_mouse_event(me);
+        dispatch_dom_pointer_event(root, target, me, false);
 
         // 3. W3C pointerup bubble (mirrors the pointerdown bubble).
         if (target_capture.live_in(root)) {
             for (const auto& capture : bubble_path) {
                 auto* b = capture.live_in(root);
                 if (!b) continue;
+                if (b->on_dom_pointer_event) continue;
                 auto callback = b->on_pointer_event;
                 if (!callback) continue;
                 MouseEvent bme = me;

@@ -914,6 +914,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
+- Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority. → `tools/import-design/jsx-runtime/materialized-runtime-transform.mjs`
 - Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
 
 **import-roundtrip** — validate an import lane end to end

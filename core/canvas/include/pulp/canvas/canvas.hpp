@@ -17,6 +17,33 @@
 
 namespace pulp::canvas {
 
+/// Runtime identity of the concrete renderer receiving draw calls.
+///
+/// This is intentionally reported by Canvas itself, rather than supplied by a
+/// widget or application.  A native editor that requires Graphite-on-Dawn can
+/// therefore fail closed instead of accepting a caller-provided string which
+/// may not describe the renderer that is actually painting the frame.
+enum class RendererBackend {
+    unknown,
+    recording,
+    core_graphics,
+    skia_raster,
+    skia_ganesh,
+    skia_dawn,
+};
+
+constexpr const char* renderer_backend_name(RendererBackend backend) noexcept {
+    switch (backend) {
+        case RendererBackend::unknown: return "unknown";
+        case RendererBackend::recording: return "recording";
+        case RendererBackend::core_graphics: return "core_graphics";
+        case RendererBackend::skia_raster: return "skia_raster";
+        case RendererBackend::skia_ganesh: return "skia_ganesh";
+        case RendererBackend::skia_dawn: return "skia_dawn";
+    }
+    return "unknown";
+}
+
 // ── Color ────────────────────────────────────────────────────────────────────
 
 struct Color {
@@ -203,6 +230,16 @@ enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_t
 class Canvas {
 public:
     virtual ~Canvas() = default;
+
+    /// Identity of the renderer this canvas actually wraps.
+    virtual RendererBackend renderer_backend() const noexcept {
+        return RendererBackend::unknown;
+    }
+
+    /// Effective device pixels per local canvas unit at the current transform.
+    /// Backends with an inspectable CTM override this when necessary; the
+    /// default is correct for logical 1x recording/test canvases.
+    virtual float backing_scale() const noexcept { return 1.0f; }
 
     // ── State ────────────────────────────────────────────────────────────
     virtual void save() = 0;

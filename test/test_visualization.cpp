@@ -53,6 +53,24 @@ SpectrumData analyze_stereo(const std::vector<float>& left,
     return bridge.read_spectrum();
 }
 
+SpectrumData analyze_mono(const std::vector<float>& samples,
+                          WindowFunction::Type window = WindowFunction::Type::hann,
+                          float sample_rate = 48000.0f) {
+    VisualizationBridge bridge;
+    VisualizationConfig cfg;
+    cfg.fft_size = static_cast<int>(samples.size());
+    cfg.hop_size = cfg.fft_size;
+    cfg.window = window;
+    cfg.num_channels = 1;
+    cfg.sample_rate = sample_rate;
+    cfg.capture_waveform = false;
+    bridge.configure(cfg);
+    const float* channels[] = {samples.data()};
+    bridge.process(channels, 1, cfg.fft_size);
+    REQUIRE(bridge.poll());
+    return bridge.read_spectrum();
+}
+
 }  // namespace
 
 // ── VisualizationBridge Tests ───────────────────────────────────────────────
@@ -223,7 +241,7 @@ TEST_CASE("VisualizationBridge spectrum follows the input tone and silence",
 TEST_CASE("VisualizationBridge stereo spectrum is power-averaged",
           "[view][vizbridge][spectrum][stereo]") {
     constexpr int kFftSize = 1024;
-    auto tone = bin_sine(21, kFftSize, 0.75f);
+    auto tone = bin_sine(21, kFftSize);
     std::vector<float> silence(kFftSize, 0.0f);
     std::vector<float> inverted = tone;
     for (float& sample : inverted) sample = -sample;
@@ -239,9 +257,100 @@ TEST_CASE("VisualizationBridge stereo spectrum is power-averaged",
                  WithinAbs(right_only.magnitude_db[21], 1.0e-5f));
     REQUIRE_THAT(in_phase.magnitude_db[21],
                  WithinAbs(anti_phase.magnitude_db[21], 1.0e-5f));
+    REQUIRE_THAT(in_phase.magnitude_db[21],
+                 WithinAbs(0.0f, 0.02f));
+    REQUIRE_THAT(left_only.magnitude_db[21],
+                 WithinAbs(-3.0103f, 0.02f));
     // One active side contributes half the stereo power: -3.0103 dB.
     REQUIRE_THAT(in_phase.magnitude_db[21] - left_only.magnitude_db[21],
                  WithinAbs(3.0103f, 1.0e-3f));
+}
+
+TEST_CASE("VisualizationBridge dBFS calibration is window-independent",
+          "[view][vizbridge][spectrum][dbfs][window]") {
+    constexpr int kFftSize = 1024;
+    constexpr int kBin = 64;
+    const auto tone = bin_sine(kBin, kFftSize, 0.25f);
+    for (const auto window : {
+             WindowFunction::Type::rectangular,
+             WindowFunction::Type::hann,
+             WindowFunction::Type::hamming,
+             WindowFunction::Type::blackman,
+             WindowFunction::Type::flat_top,
+             WindowFunction::Type::kaiser,
+             WindowFunction::Type::blackman_harris,
+             WindowFunction::Type::blackman_nuttall}) {
+        INFO("window=" << static_cast<int>(window));
+        const auto spectrum = analyze_mono(tone, window);
+        CHECK_THAT(spectrum.magnitude_db[kBin],
+                   WithinAbs(20.0f * std::log10(0.25f), 0.03f));
+    }
+}
+
+TEST_CASE("VisualizationBridge normalizes DC and Nyquist as one-sided edges",
+          "[view][vizbridge][spectrum][dbfs][edge]") {
+    constexpr float kAmplitude = 0.25f;
+    constexpr float kExpectedDb = -12.0412f;
+    for (const int fft_size : {256, 2048, 8192}) {
+        INFO("fft_size=" << fft_size);
+        std::vector<float> dc(static_cast<std::size_t>(fft_size), kAmplitude);
+        std::vector<float> nyquist(static_cast<std::size_t>(fft_size));
+        for (int i = 0; i < fft_size; ++i) {
+            nyquist[static_cast<std::size_t>(i)] = (i & 1)
+                ? -kAmplitude : kAmplitude;
+        }
+
+        const auto dc_spectrum = analyze_mono(dc);
+        const auto nyquist_spectrum = analyze_mono(nyquist);
+        CHECK_THAT(dc_spectrum.magnitude_db[0],
+                   WithinAbs(kExpectedDb, 0.02f));
+        CHECK_THAT(nyquist_spectrum.magnitude_db[fft_size / 2],
+                   WithinAbs(kExpectedDb, 0.02f));
+    }
+}
+
+TEST_CASE("VisualizationBridge spectrum is calibrated in dBFS",
+          "[view][vizbridge][spectrum][dbfs][oracle]") {
+    constexpr std::array<float, 4> kExpectedLevelsDb{
+        0.0f, -6.0f, -30.0f, -60.0f};
+    for (const int fft_size : {256, 1024, 8192}) {
+        INFO("fft_size=" << fft_size);
+        const int bin = fft_size / 16;
+        std::array<float, kExpectedLevelsDb.size()> measured{};
+        for (std::size_t index = 0; index < kExpectedLevelsDb.size(); ++index) {
+            const float expected_db = kExpectedLevelsDb[index];
+            const float amplitude = std::pow(10.0f, expected_db / 20.0f);
+            const auto spectrum = analyze_mono(
+                bin_sine(bin, fft_size, amplitude));
+            measured[index] = spectrum.magnitude_db[bin];
+            INFO("expected_db=" << expected_db << " amplitude=" << amplitude);
+            CHECK_THAT(measured[index], WithinAbs(expected_db, 0.03f));
+        }
+
+        // This relative-level control is independent of FFT/window gain. It
+        // proves the oracle can recognize an otherwise-correct spectrum while
+        // the absolute assertions catch missing coherent-gain or single-sided
+        // normalization.
+        CHECK_THAT(measured[3] - measured[0], WithinAbs(-60.0f, 0.03f));
+    }
+}
+
+TEST_CASE("VisualizationBridge dBFS calibration is sample-rate independent",
+          "[view][vizbridge][spectrum][dbfs][sample-rate]") {
+    constexpr int kFftSize = 2048;
+    constexpr int kBin = 85;
+    constexpr float kAmplitude = 0.5f;
+    constexpr float kExpectedDb = -6.0206f;
+    const auto tone = bin_sine(kBin, kFftSize, kAmplitude);
+
+    for (const float sample_rate : {44100.0f, 48000.0f, 96000.0f, 192000.0f}) {
+        INFO("sample_rate=" << sample_rate);
+        const auto spectrum = analyze_mono(
+            tone, WindowFunction::Type::hann, sample_rate);
+        CHECK(spectrum.sample_rate == sample_rate);
+        CHECK_THAT(spectrum.magnitude_db[kBin],
+                   WithinAbs(kExpectedDb, 0.02f));
+    }
 }
 
 TEST_CASE("VisualizationBridge rejects capture topology mismatches",

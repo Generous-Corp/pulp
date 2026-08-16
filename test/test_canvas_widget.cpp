@@ -85,6 +85,61 @@ TEST_CASE("CanvasWidget: fill_text command", "[canvas_widget]") {
     REQUIRE(rc.commands().size() > 0);
 }
 
+TEST_CASE("CanvasWidget replays Canvas2D text baselines", "[canvas_widget][canvas2d][text]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd font;
+    font.type = CanvasDrawCmd::Type::set_font;
+    font.text = "Inter";
+    font.extra = 20.0f;
+    cw.add_command(font);
+
+    const auto add_baseline_text = [&](int baseline, float y, const char* text,
+                                       bool stroke = false) {
+        CanvasDrawCmd state;
+        state.type = CanvasDrawCmd::Type::set_text_baseline;
+        state.int_val = baseline;
+        cw.add_command(state);
+
+        CanvasDrawCmd draw;
+        draw.type = stroke ? CanvasDrawCmd::Type::stroke_text
+                           : CanvasDrawCmd::Type::fill_text;
+        draw.x = 10.0f;
+        draw.y = y;
+        draw.text = text;
+        draw.color = {255, 255, 255, 255};
+        cw.add_command(draw);
+    };
+
+    add_baseline_text(0, 10.0f, "top");
+    add_baseline_text(1, 40.0f, "middle");
+    add_baseline_text(2, 70.0f, "bottom");
+    add_baseline_text(0, 15.0f, "stroke-top", true);
+    cw.paint(rc);
+
+    std::vector<float> ys;
+    for (const auto& command : rc.commands()) {
+        if (command.type == DrawCommand::Type::fill_text)
+            ys.push_back(command.f[1]);
+    }
+    REQUIRE(ys.size() == 3);
+    // RecordingCanvas inherits Canvas's deterministic 75/25 font metrics:
+    // ascent=15, descent=5 for the active 20px font.
+    REQUIRE(ys[0] == Catch::Approx(25.0f));
+    REQUIRE(ys[1] == Catch::Approx(45.0f));
+    REQUIRE(ys[2] == Catch::Approx(65.0f));
+
+    std::vector<float> stroke_ys;
+    for (const auto& command : rc.commands()) {
+        if (command.type == DrawCommand::Type::stroke_text)
+            stroke_ys.push_back(command.f[1]);
+    }
+    REQUIRE(stroke_ys.size() == 1);
+    REQUIRE(stroke_ys[0] == Catch::Approx(30.0f));
+}
+
 TEST_CASE("CanvasWidget: clear command fills background", "[canvas_widget]") {
     RecordingCanvas rc;
     CanvasWidget cw;

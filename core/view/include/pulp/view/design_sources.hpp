@@ -189,12 +189,25 @@ struct ClaudeBundleAsset {
     std::vector<uint8_t> data; ///< already base64-decoded + gunzipped if compressed
 };
 
+/// One captured @font-face rule joined to a content-addressed bundle asset.
+/// Weight/style remain descriptive today; the font's own tables are the
+/// renderer authority for variant selection after registration.
+struct ClaudeBundleFontBinding {
+    std::string family;
+    std::string runtime_family;
+    size_t asset_index = 0;
+    std::string weight;
+    std::string style;
+    std::string unicode_range;
+};
+
 /// Result of unpacking a Claude Design bundle's `<script type="__bundler/manifest">`
 /// + `<script type="__bundler/template">` pair.
 struct ClaudeBundle {
     std::vector<ClaudeBundleAsset> assets;  ///< all assets (JS, fonts, etc.) in manifest order
     std::vector<size_t> javascript_indices; ///< indices into assets[] of MIME `text/javascript`,
                                             ///< in the order the template's <script src> tags reference them
+    std::vector<ClaudeBundleFontBinding> font_bindings; ///< captured @font-face assets
     std::string template_html;              ///< the unwrapped HTML template (with `<div id="root">` etc.)
 };
 
@@ -203,6 +216,14 @@ struct ClaudeBundle {
 /// Bundle parsing failures degrade gracefully: callers fall back to
 /// `parse_claude_html` for the static-HTML pipeline.
 std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
+
+/// Decode the deterministic pre-mount document emitted by Chromium browser
+/// capture. The sidecar records the exact HTML passed to DOMParser after an
+/// adapter has patched the source, plus every Blob-backed asset it references.
+/// Returned bundles use stable synthetic asset IDs and can be evaluated by the
+/// same native runtime path as a regular Claude bundle.
+std::optional<ClaudeBundle> parse_materialized_browser_document(
+    const std::string& json);
 
 /// Normalize a constrained v0.dev React TSX export into the runtime-import
 /// bundle payload shape. Accepts either a bare single-file TSX component or
