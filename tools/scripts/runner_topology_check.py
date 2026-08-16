@@ -195,9 +195,59 @@ def _api(args: list[str]) -> Any:
     return json.loads(out.stdout)
 
 
+# Set by fetch_runners. `None` means every runner the repo can use was
+# enumerated; a string is the reason enumeration was incomplete.
+RUNNER_VISIBILITY_GAP: str | None = None
+
+
+def set_runner_visibility_gap(reason: str | None) -> None:
+    """Record whether the runner census is complete. Exposed for tests."""
+    global RUNNER_VISIBILITY_GAP
+    RUNNER_VISIBILITY_GAP = reason
+
+
 def fetch_runners(repo: str) -> list[Runner]:
-    data = _api([f"repos/{repo}/actions/runners", "--paginate"])
-    return parse_runners(data)
+    """Enumerate every runner this repository can actually reach.
+
+    `repos/{repo}/actions/runners` returns ONLY repository-scoped runners.
+    Runners that live in organization runner groups are absent from it even
+    when the repository is authorized to use them, so a census built from that
+    endpoint alone cannot distinguish "no runner carries these labels" from
+    "the runners carrying them are org-scoped and I cannot see them". Those two
+    demand opposite responses, and reporting the second as the first puts a
+    false black-hole on exactly the org-group lanes an operator is onboarding.
+
+    Listing org runner groups needs organization self-hosted-runner read, which
+    the repo-scoped token may not carry. When it does not, record the gap
+    rather than silently returning a partial census.
+    """
+    set_runner_visibility_gap(None)
+    runners = parse_runners(_api([f"repos/{repo}/actions/runners", "--paginate"]))
+    org = repo.split("/", 1)[0]
+    try:
+        groups = _api([f"orgs/{org}/actions/runner-groups", "--paginate"])
+    except subprocess.CalledProcessError:
+        set_runner_visibility_gap(
+            f"cannot list runner groups for org `{org}` (needs organization "
+            "self-hosted-runner read); org-scoped runners are invisible")
+        return runners
+    seen = {r.name for r in runners}
+    ids = [g["id"] for g in (groups.get("runner_groups", groups) or [])
+           if isinstance(g, dict) and "id" in g]
+    for gid in ids:
+        try:
+            data = _api([f"orgs/{org}/actions/runner-groups/{gid}/runners",
+                         "--paginate"])
+        except subprocess.CalledProcessError:
+            set_runner_visibility_gap(
+                f"cannot list runners in org runner group {gid}; some "
+                "org-scoped runners are invisible")
+            continue
+        for runner in parse_runners(data):
+            if runner.name not in seen:
+                seen.add(runner.name)
+                runners.append(runner)
+    return runners
 
 
 def parse_runners(data: Any) -> list[Runner]:
@@ -586,6 +636,17 @@ def _check_target(
                 "within the lookback window: the provisioner is alive and idle.",
             ))
             return findings
+        if RUNNER_VISIBILITY_GAP is not None:
+            findings.append(Finding(
+                WARN, "visibility-incomplete", lane.variable,
+                f"{labels_str} matched no runner this checker could SEE, but the "
+                f"census was incomplete: {RUNNER_VISIBILITY_GAP}. That is not "
+                "evidence of a black hole. Verify by hand before treating this "
+                "lane as unserved, and note the inverse risk: a real black hole on "
+                "an org-scoped lane is indistinguishable from this message. "
+                f"Purpose: {lane.purpose}",
+            ))
+            return findings
         findings.append(Finding(
             _level_for(lane), "black-hole", lane.variable,
             f"{labels_str} is carried by NO registered runner and has served NO "
@@ -595,6 +656,17 @@ def _check_target(
         ))
         return findings
 
+    if RUNNER_VISIBILITY_GAP is not None:
+        findings.append(Finding(
+            WARN, "visibility-incomplete", lane.variable,
+            f"{labels_str} matched no runner this checker could SEE, but the "
+            f"census was incomplete: {RUNNER_VISIBILITY_GAP}. That is not "
+            "evidence of a black hole. Verify by hand before treating this "
+            "lane as unserved, and note the inverse risk: a real black hole on "
+            "an org-scoped lane is indistinguishable from this message. "
+            f"Purpose: {lane.purpose}",
+        ))
+        return findings
     findings.append(Finding(
         _level_for(lane), "black-hole", lane.variable,
         f"{labels_str} is carried by NO registered runner (online or offline). "

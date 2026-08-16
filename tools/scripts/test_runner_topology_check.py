@@ -214,6 +214,86 @@ class TestBlackHole(unittest.TestCase):
         self.assertEqual(kinds(f, gate.ERROR), [])
 
 
+class TestRunnerVisibility(unittest.TestCase):
+    """A census the checker could not complete is not proof of absence.
+
+    `repos/{repo}/actions/runners` omits org-scoped runners even when the
+    repository may use them, so "matched nothing I can see" and "nothing
+    exists" are different claims. Reporting the first as the second puts a
+    false black hole on precisely the org-group lanes an operator is
+    onboarding, and a checker that cries wolf there gets ignored — which is
+    how a genuine black hole survives in the same output.
+    """
+
+    def setUp(self):
+        gate.set_runner_visibility_gap(None)
+
+    def tearDown(self):
+        gate.set_runner_visibility_gap(None)
+
+    def _findings_for_unmatched_lane(self):
+        c = contract([lane(variable="PULP_X_RUNS_ON_JSON", expect=VM_LANE)])
+        return gate.check(
+            c, runners(), {"PULP_X_RUNS_ON_JSON": json.dumps(VM_LANE)}, [])
+
+    def test_incomplete_census_is_not_reported_as_a_black_hole(self):
+        gate.set_runner_visibility_gap("cannot list runner groups for org `x`")
+        f = self._findings_for_unmatched_lane()
+        self.assertEqual(kinds(f, gate.WARN), ["visibility-incomplete"])
+        self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_complete_census_still_reports_a_black_hole(self):
+        # The control. Without it the test above would also pass against a
+        # checker that had simply stopped reporting black holes at all.
+        f = self._findings_for_unmatched_lane()
+        self.assertEqual(kinds(f, gate.ERROR), ["black-hole"])
+
+    def test_visibility_finding_names_the_reason_and_the_inverse_risk(self):
+        gate.set_runner_visibility_gap("token lacks org runner read")
+        f = self._findings_for_unmatched_lane()
+        body = " ".join(x.detail for x in f)
+        self.assertIn("token lacks org runner read", body)
+        self.assertIn("not\nevidence of a black hole".replace("\n", " "), body)
+
+    def test_fetch_runners_merges_org_group_runners(self):
+        repo_payload = {"runners": [
+            {"name": "repo-scoped", "status": "online",
+             "labels": ["self-hosted", "macOS"]}]}
+        groups_payload = {"runner_groups": [{"id": 3}]}
+        group_payload = {"runners": [
+            {"name": "org-scoped", "status": "online",
+             "labels": ["self-hosted", "Linux", "X64"]}]}
+
+        def fake_api(args):
+            path = args[0]
+            if path.startswith("repos/"):
+                return repo_payload
+            if path.endswith("/runners"):
+                return group_payload
+            return groups_payload
+
+        with mock.patch.object(gate, "_api", side_effect=fake_api):
+            found = gate.fetch_runners("Generous-Corp/pulp")
+        self.assertEqual(
+            sorted(r.name for r in found), ["org-scoped", "repo-scoped"],
+            "an org-group runner the repo can use must appear in the census")
+        self.assertIsNone(gate.RUNNER_VISIBILITY_GAP)
+
+    def test_fetch_runners_records_a_gap_when_org_listing_is_denied(self):
+        def fake_api(args):
+            if args[0].startswith("repos/"):
+                return {"runners": []}
+            raise subprocess.CalledProcessError(1, "gh")
+
+        with mock.patch.object(gate, "_api", side_effect=fake_api):
+            found = gate.fetch_runners("Generous-Corp/pulp")
+        self.assertEqual(found, [])
+        self.assertIsNotNone(
+            gate.RUNNER_VISIBILITY_GAP,
+            "a denied org listing must be recorded, not silently partial")
+        self.assertIn("org", gate.RUNNER_VISIBILITY_GAP)
+
+
 # ── Three states: online, offline, ephemeral-idle ───────────────────────
 
 
