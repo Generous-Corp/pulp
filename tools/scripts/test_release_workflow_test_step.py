@@ -2067,5 +2067,60 @@ class SignAndReleaseMacosRoutingTest(unittest.TestCase):
         self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
 
 
+class ReleaseBuildParallelismExplicit(unittest.TestCase):
+    """Every release-path `cmake --build` must carry an explicit job count.
+
+    On the release runners nothing selects a generator, so CMake defaults to
+    Unix Makefiles — and `cmake --build` with no `--parallel`/`-j` under that
+    generator runs `make` with NO job flag: strictly serial. That shape
+    compiled ~1,700 release TUs single-threaded (~50 min of a ~55 min leg,
+    v0.806.1 logs) while build_parallelism_guard.py stayed green, because the
+    guard polices unbounded and whole-machine counts — not their silent
+    serial opposite. This test closes that gap for the release lanes: an
+    explicit count (a variable is fine) or a governed wrapper is required on
+    every build invocation in release-cli.yml and its dry-run rehearsal.
+    """
+
+    WORKFLOWS = {
+        "release-cli.yml": RELEASE_CLI,
+        "release-dry-run.yml": RELEASE_DRY_RUN,
+    }
+
+    @staticmethod
+    def _build_invocations(text: str) -> list[str]:
+        """Return each `cmake --build` invocation with continuations joined."""
+        joined = text.replace("\\\n", " ")
+        return [
+            line.strip()
+            for line in joined.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+
+    def test_release_builds_are_never_serial(self) -> None:
+        bounded = re.compile(r"(--parallel|-j)\s*\"?\S")
+        for name, path in self.WORKFLOWS.items():
+            self.assertTrue(path.exists(), f"missing workflow file: {path}")
+            invocations = self._build_invocations(path.read_text())
+            self.assertTrue(
+                invocations,
+                f"{name}: expected at least one `cmake --build` invocation — "
+                "if the build moved elsewhere, point this test at it rather "
+                "than deleting the assertion",
+            )
+            for line in invocations:
+                if "governed-build.sh" in line:
+                    continue  # the wrapper exports CMAKE_BUILD_PARALLEL_LEVEL
+                self.assertRegex(
+                    line,
+                    bounded,
+                    f"{name}: `{line}` has no --parallel/-j job count. Under "
+                    "the default Unix Makefiles generator this is a SERIAL "
+                    "build (make with no -j) — the exact shape that pinned "
+                    "every release leg to one core. Give it an explicit "
+                    "count (e.g. --parallel \"$jobs\") or route it through "
+                    "tools/ci/governed-build.sh.",
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
