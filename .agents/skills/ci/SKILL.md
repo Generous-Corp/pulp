@@ -193,6 +193,60 @@ Observed: no `editor window open` after 240 s. `man libgmalloc` confirms there
 is no size-scoping knob, so you cannot guard one size class and leave the rest
 fast. Use ASan for GPU apps; libgmalloc is only viable for headless tools.
 
+### Heap corruption that surfaces far from its cause — check the AUDIO thread
+
+Pulp has already shipped one bug of this exact shape, and the comment above
+`TEST_CASE("CoreAudio never requests more input frames than it allocated")` in
+`test/test_coreaudio_input_only.mm` records it: an ASan `heap-buffer-overflow`,
+a `WRITE of size 1880` from `AudioUnitRender` inside
+`CoreAudioDevice::render_callback`, **on the audio thread**. Nothing crashed
+there — the process "aborted later, in whatever unrelated code allocated next,
+which is why the same fault presented as three different bugs in CoreText,
+CFPreferences and CoreGraphics."
+
+That is the signature to recognise: an **in-place write into a live neighbouring
+allocation**, surfacing in whatever unrelated code touches that block next. It
+looks like a bug in the victim's subsystem and is not one. A 2026-08-17 crash
+hunt spent a morning characterising exactly this shape in a `std::function`
+closure on the paint path before the audio thread was considered.
+
+Two practical consequences:
+
+1. **Drive AUDIO as well as pointer input under ASan.** A synthetic repro that
+   only drags the mouse cannot provoke a write originating in the audio render
+   path. ~35 synthetic drag runs produced one crash; "the repro never exercised
+   the culprit" explains that far better than timing perturbation does.
+2. **Suspect the RT callback when a corruption victim is on another thread.**
+   The audio thread runs at high rate with fixed-size buffers, which is where
+   frame-count/buffer-size arithmetic errors live. Check every place a device
+   reports a frame count against the size actually allocated.
+
+### Screen capture returns black or "could not create image" — display sleep or a LOCKED session
+
+Three different-looking failures, two mundane causes, and both masquerade as
+"the app rendered nothing":
+
+| symptom | cause |
+|---|---|
+| `screencapture -l<id>` → "could not create image from window" | display asleep |
+| `screencapture -R x,y,w,h` → "could not create image from rect" | display asleep |
+| full-screen capture succeeds but is all black (max pixel 0) | display asleep |
+| capture succeeds, `mean_lum` ~120 on a dark UI, shows wallpaper + clock | session **locked** |
+
+Wake the display, then hold it awake — `-u` alone does not prevent re-sleep:
+
+```bash
+caffeinate -u -t 1                 # foreground; wakes the display now
+nohup caffeinate -d -i -t 400 &    # then holds it awake for the run
+```
+
+**Verify every capture with a luminance check before trusting it.** A dark app
+reading `mean_lum ≈ 0` is asleep; one reading `≈120` on a dark UI is the lock
+screen or somebody else's window, not your app. A locked session cannot be
+captured or driven at all — synthetic clicks and drags go to the lock screen, so
+any interaction run started while locked is invalid, not merely unphotographed.
+Only the logged-in user can clear it.
+
 ### Driving an instrumented GPU app: do not use AppleScript for the window rect
 
 `System Events … get {position, size} of window 1` goes through the
