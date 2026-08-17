@@ -2,10 +2,15 @@
 """
 Cross-check docs/status/support-matrix.yaml against docs/reference/capabilities.md.
 
-Pure-Python (no PyYAML dependency) — uses targeted regex extraction rather than
-a full YAML parse, which is sufficient for the drift checks we need today.
+The drift checks use targeted regex extraction rather than a full YAML parse,
+which is sufficient for what they need and keeps PyYAML out of the required
+dependency set. PyYAML is used only when already installed, and only to check
+that the files are syntactically valid at all — regex is just as happy to read a
+broken file as a valid one, so without that check a file can stop being loadable
+YAML with nothing here noticing.
 
 Rules enforced:
+0. Every docs/status/*.yaml parses as YAML (skipped, loudly, without PyYAML).
 1. Every `status:` value in support-matrix.yaml uses the allowed vocabulary.
 2. For platform_maturity.accessibility, every platform listed (macos/ios/android/
    windows/linux) has a matching row in the capabilities.md "Platform Maturity"
@@ -95,6 +100,39 @@ def parse_platform_maturity_rows(md_text: str) -> list[tuple[str, str, str]]:
     return rows
 
 
+def check_yaml_well_formed() -> list[str]:
+    """Parse every docs/status/*.yaml for syntax only.
+
+    Returns a list of problem strings. PyYAML is an optional dependency here:
+    the rest of this script is deliberately regex-based, so importing yaml is a
+    best-effort upgrade rather than a new hard requirement. A missing PyYAML
+    reports as an explicit skip, because a silent pass would be
+    indistinguishable from a real one.
+    """
+    try:
+        import yaml  # noqa: PLC0415 — optional, resolved at call time
+    except ImportError:
+        sys.stderr.write(
+            "note: PyYAML not installed; skipping docs/status/*.yaml syntax check "
+            "(install PyYAML to enable it)\n"
+        )
+        return []
+
+    problems: list[str] = []
+    status_dir = REPO_ROOT / "docs" / "status"
+    for path in sorted(status_dir.glob("*.yaml")):
+        try:
+            yaml.safe_load(path.read_text())
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f":{mark.line + 1}:{mark.column + 1}" if mark else ""
+            problem = getattr(e, "problem", None) or str(e).splitlines()[0]
+            problems.append(f"{path.name}{where}: not valid YAML: {problem}")
+        except Exception as e:  # unreadable file, permissions, decode
+            problems.append(f"{path.name}: could not be read for YAML check: {e}")
+    return problems
+
+
 def main() -> int:
     try:
         matrix_text = MATRIX_PATH.read_text()
@@ -108,6 +146,13 @@ def main() -> int:
         return 2
 
     problems: list[str] = []
+
+    # 0. Well-formedness. The drift checks below are regex-based on purpose (see
+    # the module docstring), and regex reads a syntactically broken file just as
+    # happily as a valid one — so a file can stop being loadable YAML without any
+    # check here noticing. PyYAML is optional: when it is importable we parse for
+    # syntax only, and when it is not we say so rather than passing silently.
+    problems.extend(check_yaml_well_formed())
 
     # 1. Status vocabulary
     for line_no, status in extract_all_statuses(matrix_text):

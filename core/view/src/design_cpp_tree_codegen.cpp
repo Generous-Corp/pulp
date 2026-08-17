@@ -38,6 +38,8 @@ std::string widget_make_expr(const IRNode& node,
             return "std::make_unique<pulp::view::ToggleButton>()";
         case NativeWidgetKind::segmented:
             return "std::make_unique<pulp::view::SegmentedControl>()";
+        case NativeWidgetKind::combo_box:
+            return "std::make_unique<pulp::view::ComboBox>()";
         case NativeWidgetKind::stepper:
             return "std::make_unique<pulp::view::Stepper>()";
         case NativeWidgetKind::knob:
@@ -65,6 +67,10 @@ std::string widget_make_expr(const IRNode& node,
         case NativeWidgetKind::view:
             return "std::make_unique<pulp::view::View>()";
     }
+    // This switch is exhaustive over NativeWidgetKind, so -Wswitch flags a newly
+    // added kind here. Keep it that way: an unhandled kind reaches the return
+    // below and bakes an empty View, which renders but does nothing, so the
+    // failure is silent in the generated plugin rather than at build time.
     (void)manifest;
     return "std::make_unique<pulp::view::View>()";
 }
@@ -255,6 +261,19 @@ void emit_widget_specific(std::ostringstream& out,
                           ");");
             if (body_is_painted_beneath(node))
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_designed_overlay(true);");
+            break;
+        }
+        case NativeWidgetKind::combo_box: {
+            std::string items = "{";
+            for (std::size_t i = 0; i < semantics.combo_items.size(); ++i) {
+                if (i) items += ", ";
+                items += cpp_string_literal(semantics.combo_items[i]);
+            }
+            items += "}";
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_items(std::vector<std::string>" + items + ");");
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_selected_silent(0);");
             break;
         }
         case NativeWidgetKind::stepper:
