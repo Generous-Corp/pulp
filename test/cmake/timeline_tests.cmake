@@ -292,6 +292,12 @@ endif()
 pulp_add_test_suite(pulp-test-timeline-context-lane
     SOURCES test_timeline_context_lane.cpp
     LIBRARIES pulp::timeline)
+# The intensity context lane on the same contract: its validation and curve
+# resolution, the read side that resolves it only for a renderer that declared
+# Dynamics, and the rebuild paths that must carry it.
+pulp_add_test_suite(pulp-test-timeline-dynamics-lane
+    SOURCES test_timeline_dynamics_lane.cpp
+    LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.

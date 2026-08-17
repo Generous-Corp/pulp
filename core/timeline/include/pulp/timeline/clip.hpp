@@ -68,6 +68,8 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidSessionStart,
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
+    InvalidDynamicsEvent,
+    UnorderedDynamicsLane,
     InvalidGrooveTemplate,
     InvalidNoteModifier,
     InvalidMidiLane,

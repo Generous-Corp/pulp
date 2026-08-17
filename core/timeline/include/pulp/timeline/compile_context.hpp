@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace pulp::timeline {
 
@@ -138,6 +139,18 @@ class CompileContextView {
     /// The harmony in force at `position`, or null when ChordScale was not
     /// declared, the lane is empty, or `position` precedes its first event.
     const ChordScaleEvent* chord_scale_at(timebase::TickPosition position) const noexcept;
+
+    /// The sequence's intensity lane, or null when Dynamics was not declared or
+    /// the sequence is not in this snapshot.
+    const DynamicsLane* dynamics_lane() const noexcept;
+
+    /// The interpolated intensity at `position`, or empty when Dynamics was not
+    /// declared, the lane is empty, or `position` precedes its first event.
+    ///
+    /// Empty is not zero: a reader that has not been told an intensity must
+    /// decide for itself, and handing back 0.0 would look like an authored
+    /// silence the document never states.
+    std::optional<float> dynamics_at(timebase::TickPosition position) const noexcept;
 
     /// The sequence's groove, or null when Groove was not declared or the
     /// sequence is not in this snapshot. A sequence that plays straight still
