@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 45,
+  "inventory_version": 46,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 427,
-    "reviewed_headers": 130,
+    "public_headers": 429,
+    "reviewed_headers": 132,
     "legacy_unreviewed_headers": 297,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 82,
+      "capability_entrypoint": 84,
       "capability_support": 38,
       "infrastructure": 8,
       "legacy_unreviewed": 297,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 248,
-        "reviewed_headers": 88,
+        "public_headers": 250,
+        "reviewed_headers": 90,
         "legacy_unreviewed_headers": 160,
         "unsupported_headers": 2
       },
@@ -1739,6 +1739,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/auto_ducked_send.hpp",
+      "fingerprint": "sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb",
+      "include": "pulp/signal/auto_ducked_send.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.auto-ducked-send"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/ballistics_filter.hpp",
       "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
       "include": "pulp/signal/ballistics_filter.hpp",
@@ -2353,6 +2364,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/early_reflections.hpp",
+      "fingerprint": "sha256:4e2c96110a97d359d96e1c3fbcd8f369024d8351579298729471f9ff4ebcd4d4",
+      "include": "pulp/signal/early_reflections.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.early-reflections"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3513,7 +3535,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:7af0956d5c3124fa132a54aff00c2d84c80b7a6d053c39addbe9180ec07f7272",
+      "fingerprint": "sha256:bc879a73eb268de2e20473aa41d1429e41e579fff6ec24855572988241e3bf90",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

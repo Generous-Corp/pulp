@@ -1289,4 +1289,56 @@ EXPORTS = [
             "operation": "member_call", "member": "reset", "arguments": "",
         }],
     ),
+    capability(
+        key="signal.early-reflections", domain="signal",
+        summary=(
+            "Bounded feed-forward early-reflection tap bank producing a stereo reflection pattern "
+            "from validated per-tap delay, gain, and pan."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control delay-line allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity delay history plus the committed tap list; feed-forward only, so no "
+            "recursive state accumulates."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded tap list of delay, gain, and pan",
+        output_domain="stereo early-reflection pattern",
+        units=["samples", "milliseconds", "linear gain"],
+        latency="per-tap delay", tail="longest configured tap",
+        scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/early_reflections.hpp",
+                         qualified_name="pulp::signal::EarlyReflectionsT<float>",
+                         target="Pulp::signal", header_fingerprint="sha256:4e2c96110a97d359d96e1c3fbcd8f369024d8351579298729471f9ff4ebcd4d4")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::EarlyReflectionsT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.auto-ducked-send", domain="signal",
+        summary=(
+            "Envelope-following send that ducks a wet path against a dry key signal with bounded "
+            "attack, release, threshold, and range."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control envelope setup",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Single envelope follower plus the committed duck configuration.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="wet and dry audio plus bounded threshold, range, attack, and release",
+        output_domain="ducked stereo send",
+        units=["samples", "decibels", "milliseconds"],
+        latency="zero", tail="envelope release", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/auto_ducked_send.hpp",
+                         qualified_name="pulp::signal::AutoDuckedSendT<float>",
+                         target="Pulp::signal", header_fingerprint="sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::AutoDuckedSendT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
 ]
