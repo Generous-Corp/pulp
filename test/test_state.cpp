@@ -30,6 +30,12 @@
 #include <vector>
 
 using namespace pulp::state;
+
+// The audio thread reads a parameter with a single relaxed load, so ParamValue
+// must stay within one 64-bit word for that load to remain lock-free on every
+// supported target. Guard the assumption at compile time.
+static_assert(sizeof(ParamValue) <= sizeof(std::uint64_t),
+              "ParamValue must stay within one 64-bit word for the lock-free audio path");
 using Catch::Matchers::WithinAbs;
 
 namespace {
