@@ -747,6 +747,11 @@ storage must run off the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
 
+`TiltEqT` provides fixed-state, pivot-normalized tonal slope in signed
+dB/octave with exact neutral bypass, transactional retuning, and no audio-thread
+allocation. Its full lifecycle and response-inspection surface is listed in the
+[advanced DSP API](advanced-dsp-api.md#tilteqtsampletype-channels).
+
 For synthesized percussion, including the complete voice API, recipes,
 provenance, and Forge bake-layer controls, see
 [Percussion synthesis](percussion-synthesis.md).
@@ -864,8 +869,11 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
+| Formant Filter Bank | `formant_filter_bank.hpp` | Fixed-capacity parallel resonant-peak filter with validated ordered recipes, A/E/I/O/U morphing, click-safe whole-bank retunes, normalized headroom, and zero latency |
+| Filter Morph | `filter_morph.hpp` | Stable parallel morph between validated second-order filter endpoints |
 | Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
+| Graphic EQ | `graphic_eq.hpp` | Fixed-capacity configurable peaking-band cascade with transactional retune and exact endpoint response |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
@@ -884,9 +892,11 @@ a working convolution and would hide the bug. Assert
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
 | [Reverse Buffer](reverse-buffer.md) | `reverse_buffer.hpp` | Prepared fixed-capacity streaming window reversal with transactional configuration, explicit raw or raised-cosine boundaries, hard-bypass state, startup latency, and finite tail |
+| [Early Reflections](early-reflections.md) | `early_reflections.hpp` | Fixed-capacity true-stereo caller-authored taps with fractional timing, equal-power pan/width routing, transactional publication, and explicit peak-normalized or raw headroom |
 | Beat Repeat Kernel | `beat_repeat_kernel.hpp` | Zero-latency tempo-map-quantized capture of exact recent dry history with bounded repeat, gate, forward/reverse/alternate playback, direct `trigger`/`stop`/`seek` gesture controls, and click-safe transitions. Pitch is not included: it remains gated on an interpolated immutable-span reader that does not duplicate the capture buffer. |
 | Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions; these are composable building blocks, not a complete instrument loop. |
 | Reed exciter | `waveguide_reed_exciter.hpp` | Bounded, allocation-free single-reed valve primitive for waveguide compositions; finite positive bore impedance is not model-capped, and the signed reverse-flow law means zero mouth pressure is not a passive closed termination. It does not own oversampling or the recursive loop. |
+| Comb Filter | `comb_filter.hpp` | Fixed-capacity feedforward, stable feedback, and Schroeder allpass combs with transactional configuration, exact integer delays, response inspection, and typed fault recovery |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |

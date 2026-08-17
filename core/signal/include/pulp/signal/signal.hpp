@@ -5,10 +5,14 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/formant_filter_bank.hpp>
+#include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/sos_cascade.hpp>
+#include <pulp/signal/tilt_eq.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
+#include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/waveguide_junction.hpp>
 #include <pulp/signal/waveguide_line.hpp>
@@ -16,9 +20,11 @@
 #include <pulp/signal/waveguide_reflection_filter.hpp>
 #include <pulp/signal/reed_waveguide_loop.hpp>
 #include <pulp/signal/beat_repeat_kernel.hpp>
+#include <pulp/signal/comb_filter.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/auto_ducked_send.hpp>
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
@@ -63,6 +69,7 @@
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/filter_design.hpp>
+#include <pulp/signal/filter_morph.hpp>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/stft.hpp>

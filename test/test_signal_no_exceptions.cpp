@@ -1,3 +1,5 @@
+#include <pulp/signal/early_reflections.hpp>
+#include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
@@ -6,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <span>
 
 int main() {
     pulp::signal::MirroredHistoryBuffer<float> mirrored_history;
@@ -70,14 +73,52 @@ int main() {
     if (!reverse.configure({.window_samples = 4}) || !reverse.prepare(8))
         return 17;
     const float reversed = reverse.process_sample(1.0f);
-    if (!std::isfinite(reversed))
+    if (!(std::isfinite(reversed)))
         return 18;
+    pulp::signal::EarlyReflections early_reflections;
+    const pulp::signal::EarlyReflections::Tap reflection{.delay_ms = 10.0};
+    if (!early_reflections.configure(std::span{&reflection, 1u}) ||
+        !early_reflections.prepare(48000.0, 100.0))
+        return 19;
+    float reflected_left = 0.0f;
+    float reflected_right = 0.0f;
+    early_reflections.process_sample(1.0f, -1.0f, reflected_left, reflected_right);
+    if (!std::isfinite(reflected_left) || !std::isfinite(reflected_right))
+        return 20;
+    pulp::signal::AutoDuckedSend ducked_send;
+    if (ducked_send.prepare(48000.0f) != pulp::signal::AutoDuckedSendStatus::ready)
+        return 21;
+    const auto send_output = ducked_send.process(0.25f, -0.5f, 1.0f, -1.0f);
+    if (!(std::isfinite(send_output[0]) && std::isfinite(send_output[1])))
+        return 22;
+    pulp::signal::CombFilter comb;
+    if (!comb.prepare(8u) || !comb.configure({pulp::signal::CombFilterMode::feedback, 4u, 0.5}))
+        return 23;
+    if (!comb.process(1.0f))
+        return 24;
+    pulp::signal::GraphicEqT<float, 4> graphic_eq;
+    if (graphic_eq.prepare(48000.0f, 4u) != pulp::signal::GraphicEqPrepareStatus::prepared)
+        return 25;
+    const pulp::signal::GraphicEqBandT<float> graphic_band{1000.0f, 3.0f, 1.0f};
+    if (graphic_eq.configure(std::span{&graphic_band, 1u}) !=
+        pulp::signal::GraphicEqConfigureStatus::configured)
+        return 26;
+    if (!std::isfinite(graphic_eq.process(0.25f)))
+        return 27;
+    pulp::signal::FormantFilterBank formants;
+    if (!formants.prepare(48000.0))
+        return 28;
+    const std::array<pulp::signal::FormantFilterBank::FormantSpec, 1> recipe{{
+        {800.0, 80.0, 0.0},
+    }};
+    if (formants.configure(recipe) != pulp::signal::FormantConfigureStatus::configured)
+        return 29;
 
     pulp::signal::TempoDelayTime tempo_delay;
     if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
-        return 19;
+        return 30;
     if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
         pulp::signal::TempoDelayError::none)
-        return 20;
-    return std::isfinite(tempo_delay.next()) ? 0 : 21;
+        return 31;
+    return std::isfinite(tempo_delay.next()) ? 0 : 32;
 }
