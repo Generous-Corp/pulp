@@ -219,6 +219,25 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # ODR macro-gated-header guard. A macro-gated inline/template function in a
+    # header, plus a TU that redefines that macro, is an ODR violation a Release
+    # lane provably CANNOT see: at -O3 each TU inlines its own copy so the A/B
+    # test appears to work, and Release is green by construction.
+    #
+    # `.shipyard/config.toml` states this class is "Guarded by
+    # tools/scripts/test_odr_macro_gated_headers.py". Until this registration
+    # that script ran NOWHERE — not a ctest, not a workflow, not check-docs.sh —
+    # so the claim was true of the file's existence and false of its execution.
+    # The only live enforcement was the Shipyard mac lane's Debug build, which is
+    # `backend = local` and so yields the signal only on hosts big enough to
+    # finish it; on a small one the class simply goes unchecked. A static check on
+    # the required gate makes the enforcement host-independent, which is what the
+    # config always implied. Stdlib-only and runs on Python 3.9, so it carries no
+    # false-green risk on the required macOS hosts.
+    add_test(NAME odr-macro-gated-headers COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_odr_macro_gated_headers.py")
+    set_tests_properties(odr-macro-gated-headers PROPERTIES TIMEOUT 120)
+
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs
     # and the multi-plugin nested outline without using credentials or bundles.
