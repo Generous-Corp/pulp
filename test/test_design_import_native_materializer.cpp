@@ -3887,3 +3887,54 @@ TEST_CASE("baked constraint and grid-flow output compiles",
     REQUIRE(compiled);
 #endif
 }
+
+// Precedence when a node carries BOTH an explicit margin and a constraint that
+// wants an auto margin on the same side.
+//
+// The script lane's comment asserts this combination "never arises in practice
+// — a flowing auto-layout child never carries constraints, and a constrained
+// child never carries these margins." That claim is inherited here, not
+// verified: nothing in the IR, the ingest normalizers, or the materializer
+// prevents a producer from emitting both. So rather than trust it, this pins
+// what actually happens. It DOCUMENTS the precedence; it does not endorse the
+// combination. If the claim is ever false the behavior is at least specified,
+// instead of an authored margin vanishing with nothing said.
+TEST_CASE("a resize constraint wins over an explicit margin on the same side",
+          "[view][import][native-materializer][parity]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    IRNode child;
+    child.type = "frame";
+    child.stable_anchor_id = "both";
+    child.style.width = 40.0f;
+    child.style.height = 20.0f;
+    child.layout.margin_left = 12.0f;
+    child.layout.margin_right = 12.0f;
+    child.layout.h_constraint = "center";
+    ir.root.children.push_back(std::move(child));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* view = root->child_at(0);
+    REQUIRE(view != nullptr);
+
+    // The constraint is applied last and wins on both sides. The float side is
+    // cleared to -1 so FlexStyle falls through to the Dimension rather than
+    // reading the authored 12.
+    CHECK(view->flex().dim_margin_left.unit == DimensionUnit::auto_);
+    CHECK(view->flex().dim_margin_right.unit == DimensionUnit::auto_);
+    CHECK(view->flex().margin_left == Catch::Approx(-1.0f));
+    CHECK(view->flex().margin_right == Catch::Approx(-1.0f));
+
+    // An authored margin on an axis the constraint does NOT touch survives
+    // intact — the constraint must not clear margins it has no opinion about.
+    DesignIR vertical = ir;
+    vertical.root.children[0].layout.margin_top = 9.0f;
+    auto vroot = build_native_view_tree(vertical, {}, {});
+    REQUIRE(vroot != nullptr);
+    auto* vview = vroot->child_at(0);
+    REQUIRE(vview != nullptr);
+    CHECK(vview->flex().margin_top == Catch::Approx(9.0f));
+    CHECK(vview->flex().dim_margin_top.unit != DimensionUnit::auto_);
+}
