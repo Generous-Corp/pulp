@@ -446,3 +446,93 @@ TEST_CASE("the render callback asks AudioUnitRender for the clamped count",
     CHECK(tail.find("in_frames") != std::string::npos);
     CHECK(tail.find("inNumberFrames") == std::string::npos);
 }
+
+// ── a duplex open must not pretend it has capture it cannot get ─────────────
+//
+// The default OUTPUT device on a stock Mac ("MacBook Pro Speakers") has no
+// input streams. A duplex open resolved that device and then enabled input on
+// AUHAL bus 1 of it, which succeeds and delivers digital silence forever. An
+// analyzer fed that silence renders a flat line at the noise floor, which reads
+// as a broken UI rather than a missing signal — it cost a day of hunting a
+// nonexistent rendering bug before anyone looked at the audio device.
+//
+// The rule: when input is requested, open() must consult the resolved device's
+// input capability, re-point at an input-capable device when one can serve both
+// directions, and otherwise SAY so rather than reporting a healthy channel
+// count. Asserted against the source so the guard cannot be deleted while an
+// arithmetic-only test keeps passing — the same reasoning as the clamp test.
+TEST_CASE("a duplex open reports silent capture instead of a phantom input bus",
+          "[audio][coreaudio][device][input]") {
+    NSString* path = [NSString stringWithUTF8String:PULP_COREAUDIO_DEVICE_SOURCE];
+    NSError* err = nil;
+    NSString* src = [NSString stringWithContentsOfFile:path
+                                              encoding:NSUTF8StringEncoding
+                                                 error:&err];
+    REQUIRE(src != nil);
+    const std::string s([src UTF8String]);
+
+    // Capability is consulted, not assumed.
+    REQUIRE(s.find("resolve_duplex_input_device") != std::string::npos);
+    REQUIRE(s.find("max_input_channels") != std::string::npos);
+
+    // A replacement device must cover BOTH directions; swapping to a bare
+    // microphone would trade a silent analyzer for silent playback.
+    const auto resolve = s.find("bool CoreAudioDevice::resolve_duplex_input_device");
+    REQUIRE(resolve != std::string::npos);
+    const auto body = s.substr(resolve, 1600);
+    INFO("resolve_duplex_input_device:\n" << body.substr(0, 700));
+    CHECK(body.find("max_output_channels > 0") != std::string::npos);
+
+    // The failure is announced, naming the device.
+    CHECK(s.find("warn_capture_will_be_silent") != std::string::npos);
+    CHECK(s.find("has no input streams") != std::string::npos);
+
+    // …and the one-line open() summary cannot read as healthy input.
+    CHECK(s.find("capture SILENT") != std::string::npos);
+}
+
+TEST_CASE("capture_expected_silent matches the resolved device's real input capability",
+          "[audio][coreaudio][device][input]") {
+    if (!audio_hardware_open_enabled()) {
+        SUCCEED("PULP_TEST_AUDIO_OPEN_HARDWARE unset — not opening a real device");
+        return;
+    }
+    auto sys = create_audio_system();
+    REQUIRE(sys);
+
+    DeviceInfo out_dev;
+    bool have_output = false;
+    for (const auto& d : sys->enumerate_devices()) {
+        if (d.max_output_channels > 0 && d.is_default_output && device_matches_pin(d)) {
+            out_dev = d;
+            have_output = true;
+            break;
+        }
+    }
+    if (!have_output) {
+        SUCCEED("no default output device available");
+        return;
+    }
+
+    auto dev = sys->create_device(out_dev.id);
+    REQUIRE(dev);
+    DeviceConfig cfg;
+    cfg.device_id = out_dev.id;
+    cfg.sample_rate = kAdoptCurrentRate;
+    cfg.buffer_size = 256;
+    cfg.input_channels = 2;
+    cfg.output_channels = 2;
+    REQUIRE(dev->open(cfg));
+
+    // Whatever device the resolution settled on, the flag must agree with that
+    // device's actual input streams — never with the requested channel count.
+    const DeviceInfo resolved = dev->info();
+    INFO("requested input=2 on default output '" << out_dev.name
+         << "' (in=" << out_dev.max_input_channels << "); resolved to '"
+         << resolved.name << "' (in=" << resolved.max_input_channels << ")");
+    auto* ca = dynamic_cast<pulp::audio::mac::CoreAudioDevice*>(dev.get());
+    REQUIRE(ca != nullptr);
+    CHECK(ca->capture_expected_silent() == (resolved.max_input_channels <= 0));
+
+    dev->close();
+}

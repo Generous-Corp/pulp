@@ -143,7 +143,23 @@ public:
     void set_workgroup_change_callback(WorkgroupChangeCallback callback) override;
     void quiesce_workgroup_changes() override;
 
+public:
+    /// True when input was requested but the resolved device has no input
+    /// streams, so capture is digital silence rather than a quiet signal. A
+    /// host can surface "no input device" instead of rendering an empty
+    /// analyzer that looks like a broken UI. Valid after open().
+    bool capture_expected_silent() const noexcept { return capture_expected_silent_; }
+
 private:
+    /// Duplex open: the device resolved from the system default OUTPUT may have
+    /// no input streams. Re-point at an input-capable device when one can serve
+    /// BOTH directions; returns false (leaving the output device bound, so
+    /// playback still works) when no single device can, after warning.
+    bool resolve_duplex_input_device();
+
+    /// One line naming the device, the consequence, and the remedy.
+    static void warn_capture_will_be_silent(const std::string& device_name);
+
     static OSStatus render_callback(
         void* inRefCon,
         AudioUnitRenderActionFlags* ioActionFlags,
@@ -192,6 +208,7 @@ private:
     bool is_open_ = false;
     bool is_running_ = false;
     bool input_enabled_ = false;
+    bool capture_expected_silent_ = false;
     // False for an input-only unit (output IO disabled, bus 0 render callback
     // never fires); the render callback then hands the caller an empty output.
     bool output_enabled_ = true;

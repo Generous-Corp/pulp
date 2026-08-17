@@ -129,6 +129,51 @@ void CoreAudioDevice::query_callback_workgroup() {
 #endif
 }
 
+void CoreAudioDevice::warn_capture_will_be_silent(const std::string& device_name) {
+    runtime::log_warn(
+        "CoreAudio: input requested but device '{}' has no input streams — "
+        "capture will be SILENT (an analyzer will show a flat line at the noise "
+        "floor). Pin an input-capable device, or make an input-capable device "
+        "the system default output.",
+        device_name.empty() ? "<unnamed>" : device_name);
+}
+
+bool CoreAudioDevice::resolve_duplex_input_device() {
+    const auto current = CoreAudioSystem::query_device_info(device_id_);
+    if (current.max_input_channels > 0)
+        return true;  // the default output is duplex; nothing to fix
+
+    // AUHAL drives exactly ONE device, so a replacement has to cover both
+    // directions. The system default input (a bare microphone) usually has no
+    // output streams, and binding an output-enabled unit to it is rejected
+    // outright (-10851, see the EnableIO note in open()) — that would trade a
+    // silent analyzer for silent playback plus a failed open.
+    const AudioDeviceID default_input = CoreAudioSystem::get_default_device(true);
+    if (default_input != kAudioObjectUnknown && default_input != device_id_) {
+        const auto candidate = CoreAudioSystem::query_device_info(default_input);
+        if (candidate.max_input_channels > 0 && candidate.max_output_channels > 0) {
+            runtime::log_info(
+                "CoreAudio: default output '{}' has no input streams; using "
+                "duplex default input device '{}' for both directions",
+                current.name, candidate.name);
+            device_id_ = default_input;
+            return true;
+        }
+        warn_capture_will_be_silent(current.name);
+        runtime::log_warn(
+            "CoreAudio: default input '{}' cannot serve output ({} in / {} out), "
+            "so it cannot replace '{}' on a single AUHAL unit. Playback is "
+            "preserved; capturing default-in while playing to default-out needs "
+            "an aggregate device.",
+            candidate.name, candidate.max_input_channels,
+            candidate.max_output_channels, current.name);
+        return false;
+    }
+
+    warn_capture_will_be_silent(current.name);
+    return false;
+}
+
 bool CoreAudioDevice::open(const DeviceConfig& config) {
     workgroup_changes_quiesced_ = false;
     config_ = config;
@@ -155,6 +200,7 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     // (DefaultOutput has no input bus).
     follow_default_ =
         (device_id_ == kAudioObjectUnknown) && config_.input_channels == 0;
+    const bool device_was_pinned = (device_id_ != kAudioObjectUnknown);
     if (device_id_ == kAudioObjectUnknown) {
         // An input-only open with no pinned device resolves the default INPUT
         // device; every other configuration resolves the default output.
@@ -164,6 +210,23 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
                 input_only ? "input" : "output");
             return false;
         }
+    }
+
+    // A duplex open resolves the default OUTPUT device (above), but that device
+    // need not have any input streams — on a stock Mac the default output is
+    // "MacBook Pro Speakers", which has none. AUHAL still lets us enable input
+    // on bus 1 of it, and then delivers digital silence forever. Nothing in the
+    // old code said so, and the failure is invisible: an analyzer renders a
+    // flat line at the noise floor and looks like a broken UI rather than a
+    // missing signal. Resolve it properly, and when it cannot be resolved, SAY
+    // so in one line naming the device, the consequence, and the remedy.
+    if (want_input && !input_only && !device_was_pinned) {
+        capture_expected_silent_ = !resolve_duplex_input_device();
+    } else if (want_input) {
+        const auto resolved = CoreAudioSystem::query_device_info(device_id_);
+        capture_expected_silent_ = (resolved.max_input_channels <= 0);
+        if (capture_expected_silent_)
+            warn_capture_will_be_silent(resolved.name);
     }
 
     // Create output audio unit (HALOutput, or DefaultOutput when following the
@@ -478,11 +541,14 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     }
 
     is_open_ = true;
-    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch, output {}ch{}",
+    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch, output {}ch{}{}",
         info().name, config_.sample_rate, config_.buffer_size,
         input_enabled_ ? config_.input_channels : 0,
         output_enabled_ ? config_.output_channels : 0,
-        follow_default_ ? " (follows system default)" : "");
+        follow_default_ ? " (follows system default)" : "",
+        // The channel count above is what was REQUESTED. Say plainly when no
+        // signal can arrive on it, so this line cannot read as healthy input.
+        capture_expected_silent_ ? " [capture SILENT: device has no input streams]" : "");
     return true;
 }
 
@@ -641,6 +707,7 @@ void CoreAudioDevice::close() {
     input_buffer_storage_.clear();
     input_ptrs_.clear();
     input_enabled_ = false;
+    capture_expected_silent_ = false;
     output_enabled_ = true;
     audio_io_timing_.reset();
     audio_io_timing_dirty_.store(true, std::memory_order_release);
