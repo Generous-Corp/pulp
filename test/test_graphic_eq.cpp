@@ -63,6 +63,22 @@ long double reference_magnitude(const std::array<Band, Size>& bands, std::size_t
     return result;
 }
 
+// Bounded from BOTH sides by measurement, not guessed.
+//
+// Lower bound: float accumulates real error through a recursive four-section
+// cascade, and the long double reference is wider on x86-64 (80-bit) than on
+// arm64 (64-bit), so the float path diverges further from it on x86-64. The
+// observed worst case there is 1.004e-4, which this must clear.
+//
+// Upper bound: the planted-mutation control below shows a 0.01 dB band-gain
+// error produces only 3.40e-4 of divergence. A tolerance at or above that would
+// be blind to it -- an earlier 5.0e-4 draft was, which is how this bound was
+// found.
+//
+// 2.0e-4 sits between the two with roughly 2x headroom over platform noise while
+// still rejecting a hundredth-of-a-decibel coefficient error.
+inline constexpr double kFloatReferenceTolerance = 2.0e-4;
+
 template <typename T> void require_processing_matches_independent_reference() {
     using Eq = pulp::signal::GraphicEqT<T, 8>;
     using Band = typename Eq::Band;
@@ -90,9 +106,16 @@ template <typename T> void require_processing_matches_independent_reference() {
         for (auto& section : reference)
             expected = section.process(expected);
         const T actual = eq.process(input);
+        // The reference cascade runs in long double, whose width is platform
+        // dependent: 80-bit on x86-64, 64-bit on arm64. The reference is
+        // therefore MORE precise on x86-64, so the float path's divergence from
+        // it is genuinely larger there. The float bound has to cover the wider
+        // of the two, not the arm64 value alone. The double path compares two
+        // 64-bit computations and stays tight.
         REQUIRE_THAT(
             static_cast<double>(actual),
-            WithinAbs(static_cast<double>(expected), std::is_same_v<T, float> ? 1.0e-4 : 2.0e-11));
+            WithinAbs(static_cast<double>(expected),
+                      std::is_same_v<T, float> ? kFloatReferenceTolerance : 2.0e-11));
     }
 }
 
@@ -204,6 +227,55 @@ TEST_CASE("GraphicEq processing matches an independent long-double realization",
           "[signal][graphic-eq]") {
     require_processing_matches_independent_reference<float>();
     require_processing_matches_independent_reference<double>();
+}
+
+// Negative control for the tolerance above. The float bound is loose enough to
+// absorb platform long-double width differences, so it must still be shown to
+// REJECT a real defect rather than merely passing. Planting a one-cent gain
+// error on a single band -- far smaller than any plausible coefficient bug --
+// drives the divergence past the bound, so a green run above is evidence about
+// the DSP and not about the tolerance.
+TEST_CASE("GraphicEq reference tolerance rejects a planted gain error",
+          "[signal][graphic-eq]") {
+    using Eq = pulp::signal::GraphicEqT<float, 8>;
+    using Band = Eq::Band;
+    constexpr std::array<Band, 4> bands{{
+        {63.0f, 5.5f, 0.8f},
+        {250.0f, -8.0f, 1.4f},
+        {1000.0f, 3.0f, 2.2f},
+        {8000.0f, -4.5f, 0.7f},
+    }};
+    // Same recipe, one band's gain perturbed by 0.01 dB.
+    constexpr std::array<Band, 4> planted{{
+        {63.0f, 5.5f, 0.8f},
+        {250.0f, -8.01f, 1.4f},
+        {1000.0f, 3.0f, 2.2f},
+        {8000.0f, -4.5f, 0.7f},
+    }};
+
+    Eq eq;
+    REQUIRE(eq.prepare(48000.0f, 8) == GraphicEqPrepareStatus::prepared);
+    REQUIRE(eq.configure(planted) == GraphicEqConfigureStatus::configured);
+
+    std::array<ReferenceSection, bands.size()> reference{};
+    for (std::size_t index = 0; index < bands.size(); ++index)
+        reference[index] = reference_peaking(bands[index], 48000.0L);
+
+    double worst = 0.0;
+    for (std::size_t sample = 0; sample < 4096; ++sample) {
+        const float input = static_cast<float>(
+            sample == 0 ? 1.0L
+                        : 0.4L * std::sin(0.017L * static_cast<long double>(sample)) +
+                              0.2L * std::cos(0.071L * static_cast<long double>(sample)));
+        long double expected = static_cast<long double>(input);
+        for (auto& section : reference)
+            expected = section.process(expected);
+        worst = std::max(worst,
+                         std::abs(static_cast<double>(eq.process(input)) -
+                                  static_cast<double>(expected)));
+    }
+    // The planted error must be visible at the bound the positive test uses.
+    REQUIRE(worst > kFloatReferenceTolerance);
 }
 
 TEST_CASE("GraphicEq response matches an independent long-double oracle", "[signal][graphic-eq]") {
