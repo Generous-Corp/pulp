@@ -190,8 +190,58 @@ def exercise_refuses_mid_merge() -> int:
     return 3
 
 
+def exercise_reset_is_write_path_only() -> int:
+    """Resetting the generated artifacts must not happen on a read-only run.
+
+    `--print` and `--no-write` exist to answer a question without touching the
+    tree; a reset that fired there would silently discard a merge resolution
+    someone was still inspecting.
+    """
+    checks = 0
+    # The reset covers exactly the three files --write regenerates. If a fourth
+    # generated artifact is ever added, this fails rather than silently leaving
+    # it merged-but-unreset — which is the defect this whole path exists to fix.
+    names = {str(a) for a in rederive.GENERATED_ARTIFACTS}
+    assert names == {
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface.json",
+        "tools/agent-capabilities/contract-history.json",
+    }, names
+    checks += 1
+
+    # On a CLEAN tree a reset is a no-op, so comparing git status before and
+    # after proves nothing — the first version of this test passed against a
+    # deliberately broken tool for exactly that reason. Give the reset something
+    # to destroy: a generated artifact that differs from the base, standing in
+    # for the merge resolution a read-only run must not discard.
+    artifact = ROOT / "docs/status/agent-capability-surface.json"
+    original = artifact.read_text(encoding="utf-8")
+    sentinel = original.replace("\n", "\n", 1) + "\n"  # trailing byte, still valid text
+    try:
+        for mode in ("--print", "--no-write"):
+            artifact.write_text(sentinel, encoding="utf-8")
+            subprocess.run(
+                [sys.executable, str(ROOT / "tools/scripts/agent_capability_rederive.py"), mode],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+            assert artifact.read_text(encoding="utf-8") == sentinel, (
+                f"{mode} reset a generated artifact; a read-only run must not "
+                "discard an in-progress merge resolution"
+            )
+            checks += 1
+    finally:
+        artifact.write_text(original, encoding="utf-8")
+    # --no-write rewrites the constants by design; restore them.
+    subprocess.run(
+        ["git", "checkout", "--", "tools/scripts/agent_capability_manifest.py"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    return checks
+
+
 def main() -> int:
     checks = 0
+    checks += exercise_reset_is_write_path_only()
     checks += exercise_refuses_mid_merge()
     checks += exercise_no_change()
     checks += exercise_manifest_only()

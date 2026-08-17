@@ -165,6 +165,43 @@ def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
     )
 
 
+GENERATED_ARTIFACTS = (
+    history.SNAPSHOT,
+    surface.SURFACE_SNAPSHOT,
+    history.HISTORY_FILE,
+)
+
+
+def _restore_generated_artifacts(root: pathlib.Path) -> list[str]:
+    """Reset the generated artifacts to the base before regenerating them.
+
+    `--write` compares its output against the artifacts ON DISK, not against the
+    protected base. After a merge those two disagree in a way that stalls it: if
+    the artifacts merged CLEANLY they already describe this cell, so the
+    regenerated material is identical to them, and the counter that legitimately
+    moved against the base reads as `manifest_revision changed without a manifest
+    change`. The cell is correct and the write refuses anyway.
+
+    Resetting first makes "previous" mean the base for both checks. It is safe
+    precisely because these three files are generated — `--write` rebuilds them
+    from the catalogs and headers, so discarding a merged intermediate loses
+    nothing that is not immediately recomputed.
+    """
+    restored: list[str] = []
+    base_ref = history.os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
+    tip = history._resolve_protected_tip(root, base_ref)
+    if tip is None:
+        return restored
+    for artifact in GENERATED_ARTIFACTS:
+        completed = subprocess.run(
+            ["git", "checkout", tip, "--", str(artifact)],
+            cwd=root, capture_output=True, text=True,
+        )
+        if completed.returncode == 0:
+            restored.append(str(artifact))
+    return restored
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -220,6 +257,10 @@ def main(argv: list[str]) -> int:
         print("  constants already correct for this base")
     if args.no_write:
         return 0
+
+    restored = _restore_generated_artifacts(root)
+    if restored:
+        print(f"  reset {len(restored)} generated artifact(s) to the protected base")
 
     completed = subprocess.run(
         [sys.executable, str(root / SCRIPT), "--write"], cwd=root
