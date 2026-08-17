@@ -31,6 +31,21 @@ For the end-to-end release pipeline that turns a merged PR into a published GitH
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
 - `sign-and-release.yml` and `release-cli.yml` both fire on the SAME `v*` tag and race. sign-and-release notarizes, then its "Attach appcast.xml" step POLLS `gh release view <tag>` for the draft that release-cli's `release` job creates at the very end of its build chain. Since the Intel `darwin-x64` cross-compile leg landed, that chain runs 60-90 min (the leg queues for a hosted macos-15 runner, then builds), so a too-short poll times out and the release ships without the Sparkle appcast → someone has to hand-publish. The poll window is bumped to 100 min (`seq 1 300`, 20s each). The deeper fix (not yet done — needs a real-tag validation): the poll runs ON the macOS notarize VM, holding a scarce self-hosted release VM for the whole wait, which also starves the lane; emit `appcast.xml` as an artifact and move the wait+attach to a cheap ubuntu job so the macOS VM frees right after notarization.
 
+**Release builds carry an explicit `--parallel` count — do not "simplify" it away.**
+`release-cli.yml`'s CLI and SDK build steps (and `release-dry-run.yml`'s mirror)
+compute `jobs` from the runner's visible cores and pass
+`cmake --build … --parallel "$jobs"`. Without it the default Unix Makefiles
+generator runs `make` with no `-j` — a strictly serial compile that cost ~50 min
+of every ~55 min release leg for months while `build_parallelism_guard.py`
+stayed green (it polices unbounded/whole-machine counts, not the serial
+opposite). Full visible cores is deliberate on this lane: release runners are
+ephemeral and single-tenant (GitHub-hosted images or dedicated release Tart
+VMs), so the shared-host governed-share rule does not apply; capacity is
+controlled by how many release VMs a host admits, not by throttling each build.
+`test_release_workflow_test_step.py::ReleaseBuildParallelismExplicit` enforces
+the shape; the steps also echo cores/RAM so an OOM or a small-VM allocation is
+diagnosable from the run log alone.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so
