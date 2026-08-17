@@ -98,6 +98,11 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // person can fix in a minute once they are told.
         contains(lower, "is missing something") ||
         contains(lower, "is not installed, so nothing can be generated") ||
+        // Kept deliberately even though no generator prints it during a BUILD:
+        // it is raised at import/setup, before a run starts, and matching it
+        // costs nothing. Removing it as "orphaned" made the app read that
+        // ending as ordinary progress.
+        contains(lower, "rack sdk not found") ||
         contains(lower, "the rack sdk is not installed") ||
         contains(lower, "could not download the rack sdk") ||
         contains(lower, "unknown setting") ||
