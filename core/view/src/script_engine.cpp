@@ -18,8 +18,24 @@ ScriptEngine::ScriptEngine(JsEngineType engine_type)
 
 ScriptEngine::~ScriptEngine() = default;
 
-ScriptEngine::ScriptEngine(ScriptEngine&&) noexcept = default;
-ScriptEngine& ScriptEngine::operator=(ScriptEngine&&) noexcept = default;
+// Move transfers the backend but NOT `alive_`: the token tracks each engine
+// object's storage, which is what a holder of a raw `ScriptEngine*` observes.
+// A defaulted move would hand the source's control block to the destination,
+// so a callback watching the moved-from engine would keep reporting "alive"
+// while pointing at a hollowed-out object — and would stop reporting alive when
+// the *destination* died, at an address it never held.
+ScriptEngine::ScriptEngine(ScriptEngine&& other) noexcept
+    : engine_(std::move(other.engine_)),
+      choc_context_(other.choc_context_) {
+}
+
+ScriptEngine& ScriptEngine::operator=(ScriptEngine&& other) noexcept {
+    if (this != &other) {
+        engine_ = std::move(other.engine_);
+        choc_context_ = other.choc_context_;
+    }
+    return *this;
+}
 
 choc::value::Value ScriptEngine::evaluate(const std::string& code) {
     return engine_->evaluate(code);

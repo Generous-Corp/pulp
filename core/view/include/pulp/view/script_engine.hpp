@@ -98,8 +98,25 @@ public:
     JsEngine& engine();
     const JsEngine& engine() const;
 
+    // Observation token for holders of a raw `ScriptEngine*`.
+    //
+    // The token tracks this engine OBJECT'S STORAGE: it is minted by every
+    // constructor and released by ~ScriptEngine, and a move leaves each side's
+    // own token alone (a moved-from engine is still a live object; `operator
+    // bool()` is what reports that it has no backend left). A holder that
+    // cannot own the engine — the widget bridge's deferred native callbacks,
+    // which capture `ScriptEngine*` and outlive at least one realm swap — keeps
+    // the weak half and must check `expired()` BEFORE dereferencing the raw
+    // pointer. Without it a callback cannot distinguish "engine alive" from
+    // "engine destroyed and its storage recycled", because nothing about the
+    // raw pointer changes when the engine dies.
+    std::weak_ptr<const void> liveness_token() const noexcept { return alive_; }
+
 private:
     std::unique_ptr<JsEngine> engine_;
+    // Never moved; see liveness_token(). Held by value so the token is minted
+    // before any fallible construction step can throw.
+    std::shared_ptr<const void> alive_ = std::make_shared<const char>('\0');
 
     // For QuickJS backward compatibility: WidgetBridge uses CHOC's Context directly
     // for the stack size hack and pimpl access. We keep a reference to the CHOC

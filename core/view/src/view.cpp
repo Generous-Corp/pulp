@@ -1150,8 +1150,14 @@ void View::dismiss_active_overlay() {
     if (RootInteractionState* s = victim->existing_interaction();
         s && s->active_overlay == victim)
         s->active_overlay = nullptr;
-    if (victim->on_overlay_dismissed) {
-        victim->on_overlay_dismissed();
+    // Invoke a COPY, never the member. The bridge's dismiss callback evaluates
+    // JS synchronously; a React `setOpen(false)` unmount reaches back through
+    // `releaseOverlay(id)`, which assigns `on_overlay_dismissed = nullptr` and
+    // frees the very closure whose body is running. Holding an owning copy for
+    // the duration of the call keeps that closure's captures (the callback-state
+    // shared_ptr, the engine pointer, the widget id) alive through the return.
+    if (auto dismissed = victim->on_overlay_dismissed) {
+        dismissed();
     }
 }
 

@@ -35,6 +35,22 @@ struct BridgeCallbackState {
     void retire(std::unique_ptr<View> widget);
     void detach_retirement_queues() noexcept;
 
+    // Start observing the engine every callback guarded by this state will
+    // dereference. `alive` alone tracks only the BRIDGE: the bridge holds
+    // `ScriptEngine&` — the engine is owned OUTSIDE it — so a host that
+    // destroys the engine first leaves `alive` true while every captured
+    // `ScriptEngine*` dangles. Called once from the bridge constructor.
+    void track_engine(std::weak_ptr<const void> token) noexcept {
+        engine_token_ = std::move(token);
+        engine_tracked_ = true;
+    }
+    // False only when a tracked engine has been destroyed. An untracked state
+    // (the always-alive state backing the known-valid-reference overloads)
+    // always reports true — it has no engine to outlive.
+    bool engine_alive() const noexcept {
+        return !engine_tracked_ || !engine_token_.expired();
+    }
+
 private:
     std::size_t callback_depth_ = 0;
     std::vector<std::unique_ptr<View>>* retired_widgets_ = nullptr;
@@ -43,6 +59,8 @@ private:
     // std::function::operator(). Move completed batches here and collect them
     // at the start of the next outer callback, after the prior one returned.
     std::vector<std::unique_ptr<View>>* collectable_widgets_ = nullptr;
+    std::weak_ptr<const void> engine_token_;
+    bool engine_tracked_ = false;
 };
 
 class BridgeCallbackScope {
@@ -67,8 +85,11 @@ std::string js_string_literal(std::string_view text);
 // arrives. Exceptions are swallowed and logged to stderr tagged with `context`.
 //
 // The alive-flag overload is a no-op when the bridge has been torn down (the
-// alive flag is cleared) or the engine is null/invalid; the no-flag overload
-// always runs and targets a known-valid engine reference.
+// alive flag is cleared), when the ENGINE the flag tracks has been destroyed
+// (see BridgeCallbackState::track_engine — the bridge does not own the engine,
+// so bridge liveness does not imply engine liveness), or when the engine is
+// null/invalid; the no-flag overload always runs and targets a known-valid
+// engine reference.
 void safe_dispatch_eval(const std::shared_ptr<BridgeCallbackState>& alive,
                         ScriptEngine* engine,
                         const std::string& js,

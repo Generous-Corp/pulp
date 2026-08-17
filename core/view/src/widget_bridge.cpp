@@ -401,6 +401,11 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
       widgets_(owned_widgets_),
       callback_alive_(std::make_shared<BridgeCallbackState>(
           &callback_retired_widgets_, &callback_collectable_widgets_)) {
+    // Every deferred native callback this bridge installs captures a raw
+    // `ScriptEngine*`. The engine is NOT owned here (`engine_` is a reference
+    // member), so `callback_alive_`'s bridge flag cannot speak for it — teach
+    // the guard to observe the engine's own storage as well.
+    callback_alive_->track_engine(engine.liveness_token());
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }

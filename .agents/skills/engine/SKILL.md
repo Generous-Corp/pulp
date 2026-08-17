@@ -367,6 +367,34 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+### A raw `ScriptEngine*` needs `liveness_token()`, not just an owner's alive flag
+
+`ScriptEngine` is owned by the host (`ScriptedUiSession` holds
+`unique_ptr<ScriptEngine> engine_`), while `WidgetBridge` only borrows it as a
+reference member. Every deferred native callback the bridge installs on a View
+therefore captures a raw `ScriptEngine*` that outlives at least one realm swap.
+
+Nothing about that pointer changes when the engine dies, and the bridge's own
+`BridgeCallbackState::alive` flag is flipped by `~WidgetBridge` — so it reports
+only that the BRIDGE survived. If a host destroys the engine before the bridge
+(or before the widget tree, which `root_` owns, not the bridge), the flag reads
+true and the next event calls a virtual through recycled storage:
+`ScriptEngine::operator bool()` is `engine_ && engine_->is_valid()`, so even the
+"is the engine valid?" check is itself a use-after-free.
+
+Rule: anything holding a `ScriptEngine*` it does not own must hold
+`ScriptEngine::liveness_token()` (a `weak_ptr<const void>` tracking the engine
+OBJECT'S STORAGE) and check `expired()` before dereferencing. The widget bridge
+does this once, centrally: the bridge constructor calls
+`BridgeCallbackState::track_engine()`, and `safe_dispatch_eval` — the single
+place a deferred callback dereferences an engine — checks it. Route new deferred
+engine access through those helpers rather than adding another raw capture.
+
+The token deliberately does NOT move with `ScriptEngine`'s move operations: it
+tracks the object's address, which is what a raw-pointer holder observes. A
+moved-from engine is still a live object with no backend, and `operator bool()`
+is what reports that.
+
 ### Three.js V8 builds use the pinned sealed libv8 (no Homebrew node)
 
 The native Three.js bridge needs V8. Use the pinned sealed `libv8` — fetch

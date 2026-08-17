@@ -5,6 +5,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
+#include <memory>
 #include <string>
 
 using namespace pulp::state;
@@ -262,4 +263,116 @@ TEST_CASE("throwing pointer dispatch still releases deferred widgets",
     bridge.widget("collector")->set_bounds({10, 10, 100, 80});
     root.simulate_click({20, 20});
     REQUIRE(removed_lifetime.expired());
+}
+
+// ── Engine lifetime ───────────────────────────────────────────────────────
+//
+// WidgetBridge holds `ScriptEngine&`: the engine is owned by the HOST, and
+// every deferred native callback the bridge installs captures a raw
+// `ScriptEngine*`. The callback-state flag those callbacks check is flipped by
+// ~WidgetBridge, so it proves only that the BRIDGE is still standing. Nothing
+// in the type system stops a host from destroying the engine first, and when it
+// does, the flag still reads true while the captured pointer dangles — the next
+// event dereferences recycled storage (ScriptEngine::operator bool() reads a
+// unique_ptr member and calls a virtual through it).
+
+TEST_CASE("a queued event after the engine dies is an inert no-op",
+          "[view][bridge][lifetime][engine]") {
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    auto engine = std::make_unique<ScriptEngine>();
+    auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
+
+    bridge->load_script(R"JS(
+        var hits = 0;
+        createLabel('btn', 'Btn', '');
+        on('btn', 'click', function () { hits += 1; });
+        registerClick('btn');
+    )JS");
+
+    auto* btn = bridge->widget("btn");
+    REQUIRE(btn != nullptr);
+    btn->set_bounds({10, 10, 100, 80});
+
+    // Control: the same click dispatches normally while the engine is alive, so
+    // a pass below cannot come from the event never reaching the callback.
+    root.simulate_click({20, 20});
+    REQUIRE(engine->evaluate("hits").getWithDefault<int>(0) == 1);
+
+    // Host teardown in the order the bridge cannot control. The widget tree and
+    // its installed on_click closure stay live under `root`.
+    engine.reset();
+
+    // Must be an inert no-op. Before the engine-liveness guard this reached
+    // `static_cast<bool>(*engine)` on freed storage.
+    root.simulate_click({20, 20});
+
+    REQUIRE(bridge->widget("btn") != nullptr);
+    REQUIRE(root.child_count() == 1);
+}
+
+TEST_CASE("the callback guard covers a destroyed engine and not only a torn-down bridge",
+          "[view][bridge][lifetime][engine]") {
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    auto engine = std::make_unique<ScriptEngine>();
+    WidgetBridge bridge(*engine, root, store);
+
+    bridge.load_script(R"JS(
+        var hits = 0;
+        createLabel('btn', 'Btn', '');
+        on('btn', 'click', function () { hits += 1; });
+        registerClick('btn');
+    )JS");
+    auto* btn = bridge.widget("btn");
+    REQUIRE(btn != nullptr);
+    btn->set_bounds({10, 10, 100, 80});
+
+    engine.reset();
+
+    // The bridge is untouched — its own alive flag is still true — so the only
+    // thing that can suppress this dispatch is engine liveness.
+    REQUIRE(bridge.widget("btn") == btn);
+    root.simulate_click({20, 20});
+    REQUIRE(root.child_count() == 1);
+}
+
+// ── Overlay dismiss ───────────────────────────────────────────────────────
+
+TEST_CASE("an overlay dismiss handler may release the overlay from inside itself",
+          "[view][bridge][lifetime][overlay]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The React shape this models: `onDismissed` flips setOpen(false), the
+    // popover unmounts, and the unmount calls releaseOverlay(id) — which
+    // assigns `on_overlay_dismissed = nullptr` and frees the closure whose body
+    // is still on the stack. dismiss_active_overlay() must hold its own copy.
+    bridge.load_script(R"JS(
+        var dismissed = 0;
+        createLabel('pop', 'Pop', '');
+        on('pop', 'dismiss', function () {
+            dismissed += 1;
+            releaseOverlay('pop');
+        });
+        claimOverlay('pop');
+    )JS");
+
+    auto* pop = bridge.widget("pop");
+    REQUIRE(pop != nullptr);
+    REQUIRE(View::active_overlay_ == pop);
+
+    View::dismiss_active_overlay();
+
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
+    REQUIRE(View::active_overlay_ == nullptr);
+    // The self-release cleared the slot, so a second dismiss is inert rather
+    // than re-entering the freed closure.
+    View::dismiss_active_overlay();
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
 }
