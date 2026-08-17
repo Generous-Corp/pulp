@@ -3302,6 +3302,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/parallel_dynamics.hpp",
+      "fingerprint": "sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e",
+      "include": "pulp/signal/parallel_dynamics.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.parallel-dynamics"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/particle_collision_exciter.hpp",
       "fingerprint": "sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
       "include": "pulp/signal/particle_collision_exciter.hpp",
@@ -3579,7 +3590,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:92344d759584d3070385ecc6a93e1cba05acfa23d7054744b6ab22c917fa2f8a",
+      "fingerprint": "sha256:e9b25b2ad86ecf31ffdf7138ee93a21647702dc9c2a931c7f69ba660ce8700ab",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3689,17 +3700,6 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.spectral-band-mask"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "signal",
-      "source": "core/signal/include/pulp/signal/spectral_cross_synthesis.hpp",
-      "fingerprint": "sha256:00860da91696473d18f8c276ac53a82788568640cb173b958eaa1dac9bbfee63",
-      "include": "pulp/signal/spectral_cross_synthesis.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "signal.spectral-cross-synthesis"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

@@ -53,6 +53,7 @@
 #include <pulp/signal/nonlinear_shaping.hpp>
 #include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/osc/minblep.hpp>
+#include <pulp/signal/parallel_dynamics.hpp>
 #include <pulp/signal/particle_collision_exciter.hpp>
 #include <pulp/signal/particle_percussion_voice.hpp>
 #include <pulp/signal/path_latency_aligner.hpp>
@@ -65,7 +66,6 @@
 #include <pulp/signal/sos_cascade.hpp>
 #include <pulp/signal/source_filter_analysis.hpp>
 #include <pulp/signal/spectral_band_mask.hpp>
-#include <pulp/signal/spectral_cross_synthesis.hpp>
 #include <pulp/signal/spectral_delay_matrix.hpp>
 #include <pulp/signal/spectral_gate_blur.hpp>
 #include <pulp/signal/spectral_mask_processor.hpp>
@@ -427,6 +427,11 @@ int main() {
         pulp::signal::NonlinearRingModulatorT<float> probe_value_2{}; (void)probe_value_2.reset();
     }
     {
+        // signal.parallel-dynamics
+        static_assert(sizeof(pulp::signal::ParallelDynamicsMixerT<float>) > 0);
+        pulp::signal::ParallelDynamicsMixerT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
         // signal.particle-percussion
         static_assert(sizeof(pulp::signal::ParticleCollisionExciterT<float>) > 0);
         static_assert(sizeof(pulp::signal::ParticlePercussionVoiceT<float>) > 0);
@@ -443,10 +448,10 @@ int main() {
     {
         // signal.routing-primitives
         static_assert(sizeof(pulp::signal::AudioMatrixMixerT<float>) > 0);
-        auto volatile binding_85 = static_cast<bool (*)(const float*, const float*, float*, float*, std::size_t) noexcept>(&pulp::signal::mid_side_encode_block<float>);
-        (void)binding_85;
-        auto volatile binding_86 = static_cast<bool (*)(float, std::span<float>) noexcept>(&pulp::signal::nway_constant_power_gains<float>);
+        auto volatile binding_86 = static_cast<bool (*)(const float*, const float*, float*, float*, std::size_t) noexcept>(&pulp::signal::mid_side_encode_block<float>);
         (void)binding_86;
+        auto volatile binding_87 = static_cast<bool (*)(float, std::span<float>) noexcept>(&pulp::signal::nway_constant_power_gains<float>);
+        (void)binding_87;
         static_assert(sizeof(pulp::signal::PathLatencyAlignerT<float>) > 0);
         static_assert(sizeof(pulp::signal::ClickFreePathSwitcherT<float>) > 0);
         pulp::signal::AudioMatrixMixerT<float> probe_value_0{}; (void)probe_value_0.reset();
@@ -487,23 +492,18 @@ int main() {
         static_assert(sizeof(pulp::signal::SpectralBandLayoutT<float>) > 0);
         static_assert(sizeof(pulp::signal::SpectralMaskTableT<float>) > 0);
         static_assert(sizeof(pulp::signal::SpectralBandResolutionT<float>) > 0);
-        auto volatile binding_98 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>(&pulp::signal::analyze_spectral_band_resolution<float>);
-        (void)binding_98;
-        auto volatile binding_99 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::build_spectral_mask<float>);
+        auto volatile binding_99 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>(&pulp::signal::analyze_spectral_band_resolution<float>);
         (void)binding_99;
-        auto volatile binding_100 = static_cast<bool (*)(std::complex<float>* const*, int, int, const pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::apply_spectral_mask<float>);
+        auto volatile binding_100 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::build_spectral_mask<float>);
         (void)binding_100;
+        auto volatile binding_101 = static_cast<bool (*)(std::complex<float>* const*, int, int, const pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::apply_spectral_mask<float>);
+        (void)binding_101;
         pulp::signal::SpectralBandLayoutT<float> probe_value_0{}; (void)probe_value_0;
         pulp::signal::SpectralMaskTableT<float> probe_value_1{}; (void)probe_value_1;
         pulp::signal::SpectralBandResolutionT<float> probe_value_2{}; (void)probe_value_2;
         (void)pulp::signal::analyze_spectral_band_resolution<float>(pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, []() -> pulp::signal::SpectralBandResolutionT<float>& { static pulp::signal::SpectralBandResolutionT<float> report; return report; }());
         (void)pulp::signal::build_spectral_mask<float>(pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, []() -> pulp::signal::SpectralMaskTableT<float>& { static pulp::signal::SpectralMaskTableT<float> table; return table; }());
         (void)pulp::signal::apply_spectral_mask<float>(nullptr, 0, 0, pulp::signal::SpectralMaskTableT<float>{});
-    }
-    {
-        // signal.spectral-cross-synthesis
-        static_assert(sizeof(pulp::signal::SpectralCrossSynthesisT<float>) > 0);
-        pulp::signal::SpectralCrossSynthesisT<float> probe_value_0{}; (void)probe_value_0.reset();
     }
     {
         // signal.spectral-delay-matrix

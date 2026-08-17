@@ -116,6 +116,10 @@ int main() {
     if (!(formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured))
         return 29;
 
+    pulp::signal::ParallelDynamicsMixer parallel_dynamics;
+    if (!parallel_dynamics.prepare(8u, 16u))
+        return 31;
+
     pulp::signal::SpectralCrossSynthesis cross_synthesis;
     pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
     cross_config.fft_size = 256;

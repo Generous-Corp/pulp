@@ -3509,6 +3509,65 @@
       "contract_digest": "sha256:f96ab0ee43fcf5bbfdea31592ddf9bb85873cba45d0b1fddfa3a749eee7c7a2a"
     },
     {
+      "key": "signal.parallel-dynamics",
+      "domain": "signal",
+      "summary": "Bounded parallel dynamics mixer blending a dry path against processed bands with latency-aligned summing and transactional configuration.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control buffer allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity per-band mix buffers plus the committed blend configuration; a rejected configuration leaves the previous blend in place.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus bounded per-band blend and alignment controls",
+      "output_domain": "summed parallel-processed audio",
+      "units": [
+        "samples",
+        "linear gain"
+      ],
+      "latency": "aligned across parallel paths",
+      "tail": "none",
+      "scheduling": "block-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/parallel_dynamics.hpp",
+          "qualified_name": "pulp::signal::ParallelDynamicsMixerT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f0d2930ecba77685d3bdf4743ea111eab1dd3b970366ca60a5d11f9a86a82921"
+    },
+    {
       "key": "signal.particle-percussion",
       "domain": "signal",
       "summary": "Deterministic depleted-energy particle collisions and prepared resonant percussion voices.",
@@ -4229,69 +4288,6 @@
         }
       },
       "contract_digest": "sha256:78f2687898c22099885e4815358233d7bf8c4c467709b7ca74bdd4500dd42841"
-    },
-    {
-      "key": "signal.spectral-cross-synthesis",
-      "domain": "signal",
-      "summary": "Prepared source-filter cross-synthesis that transfers a modulator cepstral envelope onto carrier phase and residual in the log-magnitude domain.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "control; allocates the analyzer, envelope history, and frame scratch",
-        "process": "audio frame owner",
-        "reset": "audio frame owner",
-        "release": "none"
-      },
-      "state_model": "Prepared channel/bin geometry and cepstral analyzer scratch plus per-channel smoothed carrier and modulator log-envelope history with validity flags; spectral frames are caller-owned. Rejected prepare and set_config calls are transactional and leave the committed configuration and history in place, and reset clears only the temporal envelope history.",
-      "seed_model": "none",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "not_applicable",
-        "platform_scope": "same_build",
-        "transport_history": "irrelevant"
-      },
-      "input_domain": "two coherent one-sided complex channel groups, carrier and modulator, plus a bounded envelope transfer amount, dry/wet mix, smoothing time in frames, symmetric transfer bound, and analysis magnitude floor",
-      "output_domain": "caller-owned complex spectra carrying the carrier phase and residual under the transferred modulator envelope, optionally RMS-matched to the carrier",
-      "units": [
-        "bins",
-        "channels",
-        "linear magnitude",
-        "decibels",
-        "frames",
-        "normalized amount"
-      ],
-      "latency": "zero additional frame-domain latency",
-      "tail": "none",
-      "scheduling": "one supplied coherent carrier and modulator frame pair per prepared channel group",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/signal/spectral_cross_synthesis.hpp",
-          "qualified_name": "pulp::signal::SpectralCrossSynthesisT<float>",
-          "target": "Pulp::signal",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:fe19d2fcb37e6de72060f390132ba214370d622927f936494763ad9f9395ff30"
     },
     {
       "key": "signal.spectral-delay-matrix",
@@ -10667,6 +10663,25 @@
             "enums": []
           }
         ],
+        "parallel_dynamics.hpp": [
+          {
+            "class": "ParallelDynamicsMixerT",
+            "qualified_name": "pulp::signal::ParallelDynamicsMixerT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t max_latency_samples, std::size_t max_block_size)",
+              "process(const SampleType* const* dry, const SampleType* const* wet, SampleType* const* output, std::size_t frames)",
+              "reset()",
+              "publish_config(const Config& config)",
+              "configure_latency_and_publish(const Config& config)",
+              "latency_samples()",
+              "tail_samples()",
+              "max_block_size()",
+              "prepared()"
+            ],
+            "enums": []
+          }
+        ],
         "particle_collision_exciter.hpp": [
           {
             "class": "ParticleCollisionExciterT",
@@ -11582,39 +11597,6 @@
             "template": "typename SampleType",
             "methods": [
               "fully_represented()"
-            ],
-            "enums": []
-          }
-        ],
-        "spectral_cross_synthesis.hpp": [
-          {
-            "class": "SpectralCrossSynthesisT",
-            "qualified_name": "pulp::signal::SpectralCrossSynthesisT",
-            "template": "typename SampleType = float",
-            "methods": [
-              "prepare(PrepareConfig config)",
-              "reset()",
-              "process(const std::complex<SampleType>* const* carrier, const std::complex<SampleType>* const* modulator, std::complex<SampleType>* const* output, int channels, int num_bins)",
-              "supports_configuration(const PrepareConfig& config)",
-              "set_config(const Config& config)",
-              "config()",
-              "prepared()",
-              "channels()",
-              "fft_size()",
-              "num_bins()",
-              "lifter_order()",
-              "retained_bytes()",
-              "added_latency_samples()",
-              "added_tail_samples()"
-            ],
-            "enums": []
-          },
-          {
-            "class": "ScaledSquares",
-            "qualified_name": "pulp::signal::ScaledSquares",
-            "template": null,
-            "methods": [
-              "add(SampleType value)"
             ],
             "enums": []
           }
