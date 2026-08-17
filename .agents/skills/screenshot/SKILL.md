@@ -294,6 +294,52 @@ or compositor/back-buffer capture.
   greens a whole file without running any of it. Keep one case that never skips
   and asserts the guard matches reality in both directions.
 
+- **Capturing or driving a LIVE app window: capture by window ID, never by
+  screen region.** `screencapture -R x,y,w,h` grabs whatever is topmost in that
+  rectangle, so any overlapping window silently substitutes itself for your app
+  and every number computed afterwards describes the wrong pixels. This is not
+  hypothetical: a Spectr session produced a "the canvas renders nothing"
+  conclusion from a capture that was actually a Finder window, and a separate
+  "drawing is broken" conclusion from synthetic clicks that landed on another
+  app entirely. Use `CGWindowListCopyWindowInfo` to resolve the owner's
+  `kCGWindowNumber` and capture with `screencapture -l<windowID>`, which is
+  z-order independent.
+
+  Two traps compound this. `open -a Foo.app` does **not** reliably raise the
+  window, and neither does AppleScript `set frontmost` (it can hang on an
+  accessibility prompt) — so synthetic `CGEvent` clicks go to whatever is
+  actually in front. Clicking the app's own window once to raise it works, but
+  only if you already know where it is. **Always assert the capture is your app
+  before trusting it**: one cheap check is mean luminance against the app's
+  known palette (a dark UI reading `mean_lum≈190` is somebody else's window).
+  An unverified capture is worse than no capture, because it produces confident
+  wrong findings.
+
+- **Whole-frame similarity lies on dark UIs; score ink-weighted and by region.**
+  A same-state audit of Spectr scored **91.06%** whole-frame while the plot,
+  rulers, spectrum and minimap were entirely absent — the design is mostly dark,
+  so background agreement swamped the missing content. The same comparison was
+  **24.90%** ink-weighted and **19.37%** over the canvas region. Threshold
+  luminance (e.g. `>28`) to get an ink fraction, diff per region, and compare
+  ink-per-region between reference and candidate. Never accept a whole-frame
+  percentage as evidence that content rendered.
+
+- **`sample <pid> N` must be allowed to finish before you tear the app down.**
+  The profiler writes its report at the end, so killing the process at N-2
+  seconds yields an empty file and looks like "profiling didn't work." Run
+  `sample` in the foreground (or `wait` on it) and only terminate the app after
+  it returns. Related: when profiling an interaction, drive the input from a
+  background loop and keep `sample` in front, not the other way round.
+
+- **Before blaming code for a UX-perceived slowdown, verify the build.** CLAUDE.md
+  already says check `CMAKE_BUILD_TYPE` *and* the target's real `CXX_FLAGS`; add
+  two checks for JS-driven UIs. Confirm the SDK the app links was itself built
+  Release (`strings libpulp-*.a | grep "Assertion failed"` should be empty), and
+  confirm which JS engine is linked (`otool -L` for JavaScriptCore, `nm` for
+  QuickJS symbols) — but note `PULP_JS_ENGINE=auto` resolves to **QuickJS
+  everywhere**, so QuickJS is the default, not evidence of a regression. Do this
+  first: it is minutes, and it prevents a long hunt through code that is fine.
+
 - **Absolute-positioned leaf views need `preferred_width`/`preferred_height`,
   not just `dim_width`.** `yoga_layout.cpp` applies an explicit px size from
   `FlexStyle::preferred_width/height`; `dim_width = {w, px}` only reaches Yoga
