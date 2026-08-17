@@ -784,9 +784,17 @@ jobs:
           # runner cannot stamp a 15.0 floor that would lock out macOS 13/14 Intel
           # Macs. Passing 13.0 here would only trip PulpMinOs's "below the floor,
           # raising it" warning.
+          # PULP_BUILD_EXAMPLES=OFF: the release ships no example binaries —
+          # nothing in package_cli.py, the SDK staging, or the product-matrix
+          # member lists references one — yet the option defaults ON and this
+          # build has no --target, so every leg was compiling ~89 example
+          # executables and discarding them. CMakeLists.txt names
+          # `-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF` as the intended
+          # stripped-build pairing; the release had only taken half of it.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $INSPECTOR \
             $REQUIRE_GPU \
@@ -1030,6 +1038,7 @@ jobs:
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $INSPECTOR \
             $REQUIRE_GPU \
