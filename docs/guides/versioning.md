@@ -182,6 +182,21 @@ invariants over Pulp's own source, both hard-failing:
 
 It also runs in the pre-push `gates.sh`, so a violation is caught before the push.
 
+### Action-major pins in the gate workflows
+
+The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts
+on a `actions/setup-python` step, so a retired action runtime degrades the
+enforcement layer itself. GitHub forces an obsolete major onto a newer Node
+runtime and reports it only as a deprecation annotation on a live run, which no
+local gate can see.
+
+The pin therefore lives in one asserted invariant rather than in each workflow:
+`tools/scripts/test_workflow_lint.py::ActionMajorPinTests` fails when any
+`actions/<name>@vN` in `.github/workflows` falls below `MINIMUM_MAJOR`, or when
+one action is pinned to two different majors across workflows. `setup-python`
+is pinned at **v6**. When bumping an action, raise `MINIMUM_MAJOR` — do not add
+a version assertion to an individual workflow's test.
+
 There is deliberately no bypass in CI other than the commit trailers. The audit trail lives in git, not in GitHub labels or PR-body text.
 
 ## CI cadence — macOS is the product (2026-07-17)
