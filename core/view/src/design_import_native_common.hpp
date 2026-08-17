@@ -71,6 +71,13 @@ struct ImportedWidgetSemantics {
     // or a badge inside the control into a fifth choice.
     std::vector<std::string> segments;
 
+    // A dropdown's option list. A static design defines no alternatives, so
+    // this holds just the shown value rather than fabricated placeholders; a
+    // design carrying component variants would source the full list from them.
+    // Lives on the shared model so runtime materialization and baked C++ build
+    // the same ComboBox instead of each scraping the tree their own way.
+    std::vector<std::string> combo_items;
+
     // A stepper's grid, declared by the author. 1 is the count case (voices,
     // octaves) and the only sensible default; a fractional grid has to be
     // stated because nothing about the range implies it.
