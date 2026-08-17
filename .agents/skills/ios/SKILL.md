@@ -953,6 +953,40 @@ section for the cross-platform contract and
 `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § Slice 1 for
 the full rationale.
 
+## CoreMIDI device and UMP backend
+
+iOS builds the same production CoreMIDI device and UMP translation units as
+macOS: `core/midi/platform/mac/{coremidi_device,ump_session_coremidi}.mm`.
+`create_midi_system()` therefore enumerates native CoreMIDI sources as Pulp
+inputs and destinations as Pulp outputs on both platforms. Ports share the
+process-wide client declared by `coremidi_shared_client.h`; never dispose that
+client from an individual port or test.
+
+The CoreMIDI event-list/UMP API is runtime-guarded at iOS 14. Pulp's supported
+iOS floor is newer, but retaining the guard prevents an installed-SDK consumer
+from weak-linking and calling the API on an older runtime. When unavailable,
+`UmpSession` stays virtual-endpoint-only.
+
+In the current Simulator gate, omitting `UIBackgroundModes=audio` from the
+harness bundle made virtual endpoint creation return `kMIDINotPermitted`, while
+the same oracle passed with the declaration. The harness therefore declares
+that mode in its CMake-generated Info.plist. Do not generalize this fixture
+requirement into production guidance: only claim background modes justified by
+the app's real behavior and Apple's current policy.
+
+The authoritative iOS proof is `test/cmake/test_ios_compile_gate.sh`. It builds
+`pulp-midi`, the shared-client compile contract, and an installable harness for
+both the Simulator and device SDKs. On the Simulator it creates uniquely named
+virtual CoreMIDI endpoints through the shared client, enumerates via production
+`create_midi_system()`, verifies id/name/direction, requires an active
+production `UmpSession`, opens its CoreMIDI endpoints, proves event-list input
+and output, exercises canonical UMP packet walking, disposes the endpoints while
+their production handles are open, and requires stale-handle failure plus
+disappearance. Its topology contract pairs only unambiguous one-source / one-
+destination entities and preserves every endpoint in a multi-endpoint entity.
+A source-syntax check or in-process
+`VirtualUmpEndpoint` does not replace this proof.
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.
