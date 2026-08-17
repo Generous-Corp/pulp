@@ -51,6 +51,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/formant_filter_bank.hpp": "Pulp::signal",
     "pulp/signal/graphic_eq.hpp": "Pulp::signal",
     "pulp/signal/tilt_eq.hpp": "Pulp::signal",
+    "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
@@ -548,7 +549,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:89d29a569c2803a56bd034b26a53cf48bcbc7b23c6271e6b9e6d1fb85ecc4beb",
+        "fingerprint": "sha256:a74d662d5ddf6af995f986ed90378e453ed7ed96fd9b727ca5df6b338a9344b4",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
