@@ -112,6 +112,38 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+### An advisory check that names a main-breaking defect is worse than none
+
+`api-contracts.yml` runs the public-header doc-contract pass on its own
+(`tools/build-api-docs.sh --contract-only`, ~3 s). It exists because that check
+used to live only inside `docs-material.yml`, a preview-site build that is not a
+required context. On 2026-08-16 it reported `FAILURE` on a PR **before** the
+merge, naming the exact undocumented symbols, and the PR merged anyway. Main's
+docs build then failed for eight hours and four unrelated PRs carried a red
+`build` none of them caused — so every agent triaging a red check in that window
+was debugging someone else's defect, and each one learned to trust red a little
+less.
+
+Two properties make it promotable to required, and both fail *silently* if
+someone tidies them away — `tools/scripts/test_api_contracts_workflow.py` pins
+them, so change the test deliberately or not at all:
+
+- **`merge_group` trigger.** A required context that does not report for a queued
+  group leaves the queue waiting on a result that never arrives.
+- **No `paths` filter.** GitHub treats a required context that never reports as
+  permanently pending, so a path-filtered required check blocks every PR outside
+  its filter. Run it unconditionally; it is cheap.
+
+It is still **advisory** until `api-contracts` is in `main`'s
+`required_status_checks`, which means today it can name the defect and not stop
+it — the same position the old check was in. The promotion command is in
+[docs/guides/test-lanes.md](../../../docs/guides/test-lanes.md).
+
+Do **not** promote the whole `docs-material.yml` workflow instead: its ~51 s
+Material-site render is a preview artifact and has no business on the merge
+critical path. That is the mistake this repo already made with example
+validators.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
@@ -719,6 +751,14 @@ name, repository, and selected workflows. Use a root-owned mode-0600
 organization credential, or the exact root-owned non-group/world-writable
 `/usr/local/bin/ghapp` helper. Capability labels without the verified
 organization group are rejected.
+
+Treat checked-out pull-request source as untrusted even when a protected
+workflow orchestrates it. Runner inventory and cleanup must paginate the full
+organization result set, reclaim only exact slot-scoped offline idle
+registrations, and fail closed for online, busy, duplicate, or unknown states.
+The organization runner group, registration, inventory, and deletion APIs need
+the organization-capable controller credential; the repository runner token is
+not that credential.
 
 Protected clones require `configure-proxmox-ci-network.sh --apply` and
 `--verify` before service activation. It creates no-uplink
@@ -2376,6 +2416,72 @@ session. Reap a stale local pile by hand with `shipyard ship-state list` →
 `shipyard ship-state discard <pr>` for each merged/closed PR (never discard an
 OPEN one). Full design: pulp
 `planning/2026-06-30-ship-queue-resilience-design.md`.
+
+### The arm is not armed until you read it back — `update-branch` disarms it silently
+
+An armed auto-merge is a backstop only if it is still armed. Two silent failures
+sit between "I ran the command" and "the PR will land", and both were confirmed
+on 2026-08-16 across two independent sessions:
+
+1. **Clearing `BEHIND` disarms auto-merge.** `gh pr update-branch` on a PR with
+   auto-merge armed leaves it `UNARMED` — observed on #7565, #7573, #7556, and
+   again on #7572, #7569, #7557. The treadmill this repo already has (strict
+   up-to-date protection, main advancing faster than the ~30-min gate) makes
+   `update-branch` routine, so this fires often. It turns a delay into a trap: an
+   agent walks away believing the PR lands on green, and it never does — sitting
+   green and unmerged with no failing signal to attract attention.
+2. **The obvious remedy also fails silently.** `update-branch` leaves the PR at
+   `mergeable: UNKNOWN` while GitHub recomputes, and under a saturated queue that
+   persists for minutes. Arming in that window **exits 0 and does nothing**:
+
+   ```
+   $ ghapp pr merge 7572 --auto ; echo "exit=$?"
+   exit=0
+   $ ghapp pr view 7572 --json mergeable,autoMergeRequest
+   {"mergeable":"UNKNOWN","autoMergeRequest":null}     # the arm did NOT take
+   ```
+
+**So: never trust the exit code. Read the arm back.** After arming — and again
+after any `update-branch` — verify, and retry while `mergeable` is `UNKNOWN`:
+
+```bash
+ghapp pr view <PR> --json mergeable,autoMergeRequest \
+  --jq '{mergeable, armed: (.autoMergeRequest != null)}'
+```
+
+**Merge-queue enrollment is the durable form.** In both sessions the queue
+enrollment survived `update-branch` (`already queued to merge`) where the
+auto-merge arm did not. Prefer enrolling; treat a bare arm as the weaker
+fallback, and one you must verify.
+
+**`autoMergeRequest: null` is ambiguous — read `isInMergeQueue` before reacting.**
+On a queue-governed branch, enrollment **supersedes** the arm, so a PR that is
+queued and progressing normally reads `armed=false`. That is indistinguishable
+from the disarm above if you look at `autoMergeRequest` alone, and re-arming on it
+means fighting the queue rather than fixing anything. Query both:
+
+```bash
+ghapp api graphql -f query='query{repository(owner:"OWNER",name:"REPO"){
+  pullRequest(number:NNNN){isInMergeQueue mergeQueueEntry{state position}}}}'
+```
+
+`isInMergeQueue: true` → armed=false is expected; leave it alone. `false` **and**
+`armed=false` → genuinely unarmed, and the read-back rule above applies.
+
+**A queued branch is push-locked, which matters when the fix is on your side.**
+GitHub rejects a push to a branch with a queued PR (`GH006 … Branches that are
+queued for merging cannot be updated`), so landing a correction means dequeuing
+first. Note `gh pr merge --disable-auto` does **not** dequeue an already-queued PR
+— it clears the arm and reports `already queued to merge`. The dequeue is a
+GraphQL mutation, and its input field is `id`, not `pullRequestId`:
+
+```bash
+ghapp api graphql -f query='mutation{dequeuePullRequest(input:{id:"PR_kwDO..."}){
+  mergeQueueEntry{state}}}'
+```
+
+Treat that as an authority action on someone's queued work, not a routine step —
+`ghapp` guards it deliberately.
 
 ### Shipyard validated green but could NOT merge — the sanctioned fallback
 

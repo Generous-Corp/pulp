@@ -40,6 +40,7 @@ FLOOR = 2
 #   STUB_FREE_CORES    non_gate_available_cores to report; unset → status fails
 #   STUB_MAX_GRANT     grant `leases acquire` iff --cores <= this; unset → deny
 #   STUB_FAIL_ALL      any value → every subcommand fails (a wedged store)
+#   STUB_HOLDER_PIDS   comma-separated pids to report as lease holders
 STUB = r"""#!/usr/bin/env bash
 [ -n "${STUB_FAIL_ALL:-}" ] && exit 3
 if [ "$1" = "host-profile" ]; then
@@ -50,8 +51,19 @@ if [ "$1" = "host-profile" ]; then
 fi
 if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
   [ -n "${STUB_FREE_CORES:-}" ] || exit 1
+  holders=""
+  if [ -n "${STUB_HOLDER_PIDS:-}" ]; then
+    sep=""
+    for pid in $(printf '%s' "${STUB_HOLDER_PIDS}" | tr ',' ' '); do
+      holders="${holders}${sep}{\"id\":\"vm-stub-${pid}\",\"command_kind\":\"tart-macos-vm\","
+      holders="${holders}\"lease_size_cores\":6,\"owner\":\"stub-vm\",\"pid\":${pid},"
+      holders="${holders}\"created_at\":\"2026-08-16T00:00:00Z\"}"
+      sep=","
+    done
+  fi
   printf '{"capacity":{"non_gate_available_cores":%s,' "${STUB_FREE_CORES}"
-  printf '"non_gate_limit_cores":12,"total_cores":26},"leases":[],"schema":2}\n'
+  printf '"non_gate_limit_cores":12,"total_cores":26,"used_cores":12},'
+  printf '"leases":[%s],"schema":2}\n' "$holders"
   exit 0
 fi
 if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
@@ -93,7 +105,8 @@ class GovernedBuildTests(unittest.TestCase):
             "PULP_GOVERNED_BUILD_MIN_JOBS": str(FLOOR),
         }
         for k in ("PULP_TARTCI_BIN", "PULP_TARTCI_LEASES", "STUB_PROFILE_JOBS",
-                  "STUB_FREE_CORES", "STUB_MAX_GRANT", "STUB_FAIL_ALL"):
+                  "STUB_FREE_CORES", "STUB_MAX_GRANT", "STUB_FAIL_ALL",
+                  "STUB_HOLDER_PIDS"):
             env.pop(k, None)
         env.update(stub_env)
         return subprocess.run(
@@ -160,6 +173,60 @@ class GovernedBuildTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), 2, r.stderr)
 
+    # --- a denial must say WHO holds the cores -------------------------------
+    #
+    # A real denial and a stale-lease lie both produced exactly one log line and
+    # a slow build, so an operator could not tell "the host is busy" from "the
+    # store is wrong" without three more commands. On 2026-08-16 two leases held
+    # on behalf of VMs that no longer existed pinned a critical-path build to the
+    # floor for its whole run. The holder's liveness is what separates the two.
+
+    @staticmethod
+    def _dead_pid() -> int:
+        """A pid that has certainly exited (spawned and reaped here)."""
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        try:
+            os.kill(proc.pid, 0)
+        except ProcessLookupError:
+            return proc.pid
+        raise unittest.SkipTest("could not obtain a reliably-dead pid")
+
+    def test_denial_names_the_holders(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_HOLDER_PIDS=str(os.getpid()))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("holder id=vm-stub-", r.stderr)
+        self.assertIn("kind=tart-macos-vm", r.stderr)
+        self.assertIn("cores=6", r.stderr)
+
+    def test_live_holder_reads_as_real_contention(self) -> None:
+        """A holder whose process is alive is the governor working. Say nothing more."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_HOLDER_PIDS=str(os.getpid()))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("alive=yes", r.stderr)
+        self.assertNotIn("likely stale", r.stderr)
+
+    def test_dead_holder_is_reported_as_stale(self) -> None:
+        """The 2026-08-16 shape: cores held on behalf of a process that is gone."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_HOLDER_PIDS=str(self._dead_pid()))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("alive=no", r.stderr)
+        self.assertIn("likely stale", r.stderr)
+
+    def test_holder_reporting_does_not_change_parallelism(self) -> None:
+        """Diagnostics are diagnostics: the floor is still the floor."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_HOLDER_PIDS=str(self._dead_pid()))
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+
+    def test_granted_lease_logs_no_holder_noise(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertNotIn("holder id=", r.stderr)
+
     # --- never fail the build over the lease store ---------------------------
 
     def test_wedged_lease_store_never_fails_the_build(self) -> None:
@@ -192,6 +259,38 @@ class GovernedBuildTests(unittest.TestCase):
             env={**os.environ, "PULP_TARTCI_LEASES": "0"},
         )
         self.assertEqual(r.returncode, 7, r.stderr)
+
+    # --- an unresolvable build command must name itself ----------------------
+    #
+    # A Shipyard dispatch runs a non-interactive login shell that does not read
+    # the interactive profile carrying /opt/homebrew/bin. Without this check the
+    # taskpolicy branch reports `taskpolicy: posix_spawn: No such file or
+    # directory`, which names neither the tool nor PATH and reads like a build
+    # failure rather than a host misconfiguration.
+
+    def test_missing_build_command_names_the_tool_and_path(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "definitely-not-a-real-build-tool", "--build"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+        self.assertIn("definitely-not-a-real-build-tool", r.stderr)
+        self.assertIn("PATH=", r.stderr)
+
+    def test_missing_absolute_build_command_is_named(self) -> None:
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "/nonexistent/dir/cmake", "--build"],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "PULP_TARTCI_LEASES": "0"},
+        )
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+        self.assertIn("/nonexistent/dir/cmake", r.stderr)
+
+    def test_resolvable_command_still_runs(self) -> None:
+        r = self._run(PULP_TARTCI_LEASES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertGreaterEqual(self._granted(r), 1)
 
     # --- script hygiene ------------------------------------------------------
 

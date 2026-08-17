@@ -19,6 +19,11 @@
     ".github/workflows/tracing-build.yml": 1
   },
   "exclusions": {
+    ".github/workflows/api-contracts.yml": {
+      "owner": "docs",
+      "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
+      "review_after": "2027-01-29"
+    },
     ".github/workflows/docs-deploy.yml": {
       "owner": "docs",
       "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
