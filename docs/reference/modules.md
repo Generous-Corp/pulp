@@ -903,7 +903,8 @@ a working convolution and would hide the bug. Assert
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
-| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
+| Transfer Curve | `transfer_curve.hpp` | Fixed-capacity arbitrary piecewise transfer curve using shared modulation shapes and transactional RT publication |
+| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion with five built-in curve formulas |
 
 #### Dynamics
 
@@ -915,6 +916,7 @@ a working convolution and would hide the bug. Assert
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | True-peak limiter | `true_peak_limiter.hpp` | Stereo look-ahead limiter with 8x intersample detection, a fixed 64-sample gain-scheduling horizon plus optional user lookahead, explicit channel linking, latency, tail, and gain-reduction telemetry; larger channel capacities require an explicit template specialization |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
+| Parallel Dynamics Mixer | `parallel_dynamics.hpp` | Transactional true-stereo dry/processed-wet blend with explicit latency and tail propagation |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
 

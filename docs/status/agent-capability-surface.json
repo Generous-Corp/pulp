@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 47,
+  "inventory_version": 49,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 434,
-    "reviewed_headers": 138,
+    "public_headers": 436,
+    "reviewed_headers": 140,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 89,
+      "capability_entrypoint": 91,
       "capability_support": 38,
       "infrastructure": 9,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 255,
-        "reviewed_headers": 96,
+        "public_headers": 257,
+        "reviewed_headers": 98,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -3302,6 +3302,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/parallel_dynamics.hpp",
+      "fingerprint": "sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e",
+      "include": "pulp/signal/parallel_dynamics.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.parallel-dynamics"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/particle_collision_exciter.hpp",
       "fingerprint": "sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
       "include": "pulp/signal/particle_collision_exciter.hpp",
@@ -3579,7 +3590,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:89d29a569c2803a56bd034b26a53cf48bcbc7b23c6271e6b9e6d1fb85ecc4beb",
+      "fingerprint": "sha256:e9b25b2ad86ecf31ffdf7138ee93a21647702dc9c2a931c7f69ba660ce8700ab",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3882,6 +3893,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/transfer_curve.hpp",
+      "fingerprint": "sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632",
+      "include": "pulp/signal/transfer_curve.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.transfer-curve"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

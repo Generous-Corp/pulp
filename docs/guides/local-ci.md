@@ -865,6 +865,38 @@ The same report calls out Tart disk-floor and ccache-size admission failures and
 merge-group Linux jobs left on `ubuntu-latest` while online self-hosted Linux x64
 capacity is idle.
 
+### Why the macOS gate hosts are not declared as expected hosts
+
+The three Apple Silicon Macs that serve the required `macos` gate (m3, m5, m1) are
+deliberately absent from `expected_host`, and the reason is the matching rule above:
+they carry no host-identifying label. Every gate runner on all three registers the
+same set — `self-hosted, macOS, ARM64, pulp-build, pulp-build-vm, pulp-gate-fast` —
+and the labels that vary between them (`pulp-build-studio`,
+`pulp-build-vm-secondary`) describe a *role*, not a machine. m1's and m5's gate
+runners are label-identical. There is no `pulp-host-m3` analogue to the
+`pulp-host-macpro` / `pulp-host-macmini` labels that make those two declarations work.
+
+So an `expected_host` entry per machine would match the same pool three times: all
+three rows report online whenever *any one* of the machines is serving. That is worse
+than no declaration, because it turns a genuine partial degradation — a pool at a
+third of capacity with one host dead — into three green rows. Raising `min_online`
+pool-wide fails in the opposite direction: the gate pool is ephemeral JIT, so a
+healthy but idle host has zero runners registered and would alarm on every quiet
+period.
+
+Per-host state for these three comes from the same report's `hosts[]` array instead,
+keyed by class (`m1`, `m5`, `studio`) and read from tartci host state over SSH rather
+than inferred from labels. It carries `routable`, `free`/`cap`, supervisor heartbeat
+age, and the disk-floor and ccache admission problems that keep a host from accepting
+work. `tools/scripts/runner_topology.json` owns the complementary question of which
+label set each lane is contracted to route to.
+
+One limit worth stating plainly: `fleet-status` is a manual-inspection view. No
+workflow or script consumes it, so a declaration here pages nobody on its own.
+Detecting a partially degraded gate pool needs capacity measured against demand —
+a busy pool and a pool at a third of capacity look alike from host presence — and
+nothing implements that today.
+
 ```bash
 # What would happen, without touching anything:
 python3 tools/scripts/shipyard_autoupdate.py --check --json

@@ -49,6 +49,9 @@ int main() {
     const auto exp2 = pulp::signal::FastMath::exp2(0.5f);
     if (!std::isfinite(exp2))
         return 13;
+    pulp::signal::TransferCurve transfer_curve;
+    if (transfer_curve.process(0.25f) != 0.25f)
+        return 30;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
@@ -110,5 +113,11 @@ int main() {
     const std::array<pulp::signal::FormantFilterBank::FormantSpec, 1> recipe{{
         {800.0, 80.0, 0.0},
     }};
-    return formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured ? 0 : 29;
+    if (!(formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured))
+        return 29;
+
+    pulp::signal::ParallelDynamicsMixer parallel_dynamics;
+    if (!parallel_dynamics.prepare(8u, 16u))
+        return 31;
+    return 0;
 }

@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 30,
+  "manifest_revision": 32,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 49
+        "capabilities": 51
       },
       "timebase": {
         "state": "partial",
@@ -3509,6 +3509,65 @@
       "contract_digest": "sha256:f96ab0ee43fcf5bbfdea31592ddf9bb85873cba45d0b1fddfa3a749eee7c7a2a"
     },
     {
+      "key": "signal.parallel-dynamics",
+      "domain": "signal",
+      "summary": "Bounded parallel dynamics mixer blending a dry path against processed bands with latency-aligned summing and transactional configuration.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control buffer allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity per-band mix buffers plus the committed blend configuration; a rejected configuration leaves the previous blend in place.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus bounded per-band blend and alignment controls",
+      "output_domain": "summed parallel-processed audio",
+      "units": [
+        "samples",
+        "linear gain"
+      ],
+      "latency": "aligned across parallel paths",
+      "tail": "none",
+      "scheduling": "block-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/parallel_dynamics.hpp",
+          "qualified_name": "pulp::signal::ParallelDynamicsMixerT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f0d2930ecba77685d3bdf4743ea111eab1dd3b970366ca60a5d11f9a86a82921"
+    },
+    {
       "key": "signal.particle-percussion",
       "domain": "signal",
       "summary": "Deterministic depleted-energy particle collisions and prepared resonant percussion voices.",
@@ -4856,6 +4915,65 @@
       "contract_digest": "sha256:483ac0f11b4aa8e69b02f074859103ad5cd7c6cc3a20b37f1cbeacbe1a777de5"
     },
     {
+      "key": "signal.transfer-curve",
+      "domain": "signal",
+      "summary": "Bounded monotonic transfer-curve shaper prepared from validated breakpoints, with typed rejection of non-monotonic or out-of-range input.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control curve preparation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "A prepared immutable curve table plus the committed breakpoint set; preparation is transactional so a rejected curve leaves the previous one in place.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded monotonic breakpoint list",
+      "output_domain": "shaped audio with typed prepare status",
+      "units": [
+        "samples",
+        "linear amplitude"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/transfer_curve.hpp",
+          "qualified_name": "pulp::signal::TransferCurveT<float, 32>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:ae540141fbc596e3a5dc72e58c6568b425fd97e0b3f902d2da21eb16787cf4af"
+    },
+    {
       "key": "signal.transient-designer",
       "domain": "signal",
       "summary": "Zero-latency attack and sustain shaping from independent peak envelopes.",
@@ -5840,14 +5958,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 82,
+    "total": 84,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 49,
+      "signal": 51,
       "timebase": 9
     }
   },
@@ -10545,6 +10663,25 @@
             "enums": []
           }
         ],
+        "parallel_dynamics.hpp": [
+          {
+            "class": "ParallelDynamicsMixerT",
+            "qualified_name": "pulp::signal::ParallelDynamicsMixerT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t max_latency_samples, std::size_t max_block_size)",
+              "process(const SampleType* const* dry, const SampleType* const* wet, SampleType* const* output, std::size_t frames)",
+              "reset()",
+              "publish_config(const Config& config)",
+              "configure_latency_and_publish(const Config& config)",
+              "latency_samples()",
+              "tail_samples()",
+              "max_block_size()",
+              "prepared()"
+            ],
+            "enums": []
+          }
+        ],
         "particle_collision_exciter.hpp": [
           {
             "class": "ParticleCollisionExciterT",
@@ -11909,6 +12046,23 @@
               "process_lowpass(SampleType input)",
               "process_highpass(SampleType input)",
               "process_allpass(SampleType input)"
+            ],
+            "enums": []
+          }
+        ],
+        "transfer_curve.hpp": [
+          {
+            "class": "TransferCurveT",
+            "qualified_name": "pulp::signal::TransferCurveT",
+            "template": "typename SampleType = float, std::size_t MaxPoints = 32",
+            "methods": [
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
+              "process(SampleType* samples, int num_samples)",
+              "reset()",
+              "publish_curve(std::span<const Point> points, SampleType input_min, SampleType input_max, SampleType output_min, SampleType output_max)",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }

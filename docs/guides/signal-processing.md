@@ -118,6 +118,52 @@ storage. Call them outside the audio callback. After `prepare()`, `push_dry()`,
 `mix_wet()`, `set_mix()`, `set_curve()`, and `reset()` are real-time safe for
 channel/block sizes within the prepared capacity.
 
+### ParallelDynamicsMixer
+
+`ParallelDynamicsMixer` wraps caller-owned dynamics processing with the pieces
+that parallel compression otherwise repeats: true-stereo path alignment, a
+declared mix law, output makeup gain, and latency/tail reporting. It does not
+own or construct a compressor.
+
+```cpp
+signal::ParallelDynamicsMixer mixer;
+mixer.prepare(/* max path latency */ 256, /* max block */ 512);
+mixer.configure_latency_and_publish({ // initial setup, while audio is stopped
+    .wet_mix = 0.35f,
+    .mix_law = signal::CrossfadeGainLaw::EqualGain,
+    .output_gain_db = 1.5f,
+    .dry_latency_samples = 0,
+    .wet_latency_samples = compressor.latency_samples(),
+    .dry_tail_samples = 0,
+    .wet_tail_samples = compressor.tail_samples(),
+});
+
+const float* dry[2] = {dry_left, dry_right};
+const float* wet[2] = {compressed_left, compressed_right};
+float* output[2] = {output_left, output_right};
+mixer.process(dry, wet, output, num_samples);
+```
+
+The linear `EqualGain` law is the default because dry and dynamics-processed
+wet signals are normally correlated; identical aligned paths retain unity
+gain at every mix. `EqualPower` is available when the wet path is decorrelated
+or deliberately phase-altered. Both laws have exact dry-only and wet-only
+endpoints. Output may exactly alias the corresponding dry or wet channel;
+partial and cross-channel overlap are rejected.
+
+Gain-, law-, and tail-only configuration publishes atomically at block
+boundaries through `publish_config()`. It rejects latency changes. Use
+`configure_latency_and_publish()` while audio is stopped to change declared
+path latency and clear alignment history. `latency_samples()` reports the
+greater declared path latency; `tail_samples()` includes compensation delay
+and reports the active path tail or their maximum while blended.
+
+**Caveat:** `prepare()`, `publish_config()`, and
+`configure_latency_and_publish()` are control-thread operations; latency
+configuration additionally requires stopped audio. `process()` and `reset()`
+allocate no memory after preparation. Consumers own any oversampling around
+the wet dynamics processor.
+
 ---
 
 ### Panner
@@ -878,6 +924,30 @@ shaper.process(buffer, num_samples);
 Default: `tanh_clip`, drive = 1.0.
 
 **Sample rate dependency:** None. Consider using `Oversampler` to reduce aliasing from nonlinear shaping.
+
+---
+
+### TransferCurve
+
+`TransferCurve` maps an explicit input domain through up to 32 ordered control
+points. Configuration is validated and published as one lock-free snapshot, so
+the audio thread never observes a partly edited curve. Inputs outside the
+domain clamp to the endpoint outputs, and non-finite samples recover to zero.
+
+```cpp
+std::array<signal::TransferCurvePoint, 3> points{{
+    {-1.0f, -1.0f}, {0.0f, 0.1f}, {1.0f, 1.0f}
+}};
+signal::TransferCurve curve;
+curve.publish_curve(points, -1.0f, 1.0f, -1.0f, 1.0f);
+curve.process(buffer, num_samples);
+```
+
+Each point's optional `curve_to_next` uses the shared modulation-curve shapes;
+two-field point initializers default to linear interpolation. The processor has
+zero latency and no tail. It intentionally does not choose an anti-aliasing
+policy: consumers applying nonlinear curves to audio own any required
+oversampling and can compose the curve with `OversamplerT`.
 
 ---
 

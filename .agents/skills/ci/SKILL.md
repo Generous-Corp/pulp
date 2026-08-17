@@ -770,6 +770,19 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
   /idle MCP) before building. `gates.sh` prints this banner advisorily on every
   pre-push.
+- **A live validation build in your checkout is now visible — `gates.sh` says so.**
+  Shipyard's `local` mac backend builds IN the checkout, so a validation run and
+  an agent editing the tree share one directory. Editing under a running CMake
+  does not fail cleanly: the build crawls and dies on the lane's `timeout_secs`,
+  reporting `Validation timed out` — the target, not the cause. `governed-build.sh`
+  writes `.pulp-build-active` at the source-tree root for the life of a build and
+  `gates.sh` surfaces it advisorily on every pre-push. **Heed it before a merge,
+  rebase, or branch switch** — a build dir can be wiped, a half-merged tree under
+  a running CMake cannot be un-mutated. It is advisory and never fails a push, and
+  because a push follows the damaging edit it *detects* rather than prevents; the
+  value is knowing which edit invalidated which run instead of debugging a
+  two-hour timeout. Distinct from `build-dir-sentinel.sh`, which guards the
+  inverse invariant (do not reuse a dirty build dir).
 - **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
   not the network.** When the diff touches a coverage surface (`core/`,
   `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local
@@ -3208,6 +3221,69 @@ classification, and the publisher's commit trailers record the lane that
 actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
 trail never misattributes a repair.
 
+**The repair-publication path is the part no canary has exercised.** Every live
+canary so far ended at triage (`no_action`), so the bundle/validate/commit/push
+steps have never run against a real model patch. Seven defects were found by
+reading it adversarially rather than by a red run, and each is a class that
+would have shipped a *wrong* repair while every check reported success:
+
+- **Diff against the fenced commit, never the index.** `git add
+  --intent-to-add --all` fully stages a DELETION, so a worktree-vs-index
+  `git diff` silently drops deleted and renamed files from *both* the patch and
+  the declared path list — and the publisher's parity check still passes,
+  because both lists are identically wrong. The lane force-pushes a "fix" that
+  does not delete what the model deleted. Use `git reset --mixed
+  "$EXPECTED_HEAD"` then `git diff HEAD`; resetting to the assignment's exact
+  head rather than `HEAD` also survives a model that committed.
+- **Reset the worktree before the fallback repair.** Both repair lanes edit the
+  same checkout, and the primary lane runs under `continue-on-error` — it can
+  fail *after* editing (a mid-task error, or tripping its own enum check).
+  Without `git reset --hard "$EXPECTED_HEAD" && git clean -qfd`, a failed
+  Codex attempt's partial edits are bundled into the fallback's patch and
+  attributed to Claude by the commit trailers.
+- **`--settings` does not stop project settings from loading.** cwd is inside
+  the untrusted PR head, so a PR-supplied `.claude/settings.json` is read unless
+  the lane pins `--setting-sources user`. Valid values are `user,project,local`;
+  the CLI rejects anything else, so the flag fails loudly if it ever changes.
+- **Keep the trailers one paragraph.** One `-m` per trailer makes each its own
+  paragraph and `git interpret-trailers --parse` reads only the last, so the
+  audit trail collapses to `Router: subrouter`. Build the message with `printf`
+  into a variable — a literal multi-line `-m` inside a `run: |` block dedents to
+  column zero and breaks the YAML block scalar.
+- **Pin `LC_ALL=C` on BOTH sorted path lists.** The worker and the publisher
+  run on different hosts and the parity check is a plain `diff -u` of the two.
+  C and `en_US.UTF-8` genuinely order `-`, `_`, and case differently for
+  ordinary source paths (`LC_ALL=C` gives `A-b a-b a_b ab`; `en_US.UTF-8` gives
+  `a_b a-b A-b ab`), so an unpinned sort rejects a correct patch on locale
+  alone. Pinning one side is worse than pinning neither.
+- **Whitespace is a warning on BOTH sides, or on neither.** Trailing whitespace
+  is not grounds to discard a repair that fixes a real blocker. Demoting only
+  the worker's `--check` moves the rejection to the publisher — *after* the
+  lease and model are already spent — instead of removing it. The security
+  fences (control-plane prefixes, path escape, size caps, exact
+  head/epoch/fingerprint revalidation, parity) are what protect this path;
+  whitespace is not one of them.
+- **`skipped` is not `failure` in the publisher's classification.** A repair the
+  model marked `fixed` whose push step never *ran* leaves
+  `steps.repair_push.outcome` as `skipped`; a bare `= failure` test falls
+  through to a success classification and tells the steward the dispatch
+  completed cleanly while the authorised repair evaporated. Gate the extra
+  clause on `repair_outcome = fixed`, not a blanket `!= success` — `skipped` is
+  legitimate when no repair was attempted.
+
+`tools/scripts/test_shipyard_recovery_worker_workflow.py` pins all seven. They
+are text assertions against a workflow that CI cannot execute end to end, so
+verify them by mutation: revert a fix, confirm exactly one test fails.
+
+Because the assertions are textual, they prove the workflow *says* the right
+thing, not that the path *works*. Rehearse the semantics separately in a
+scratch git repo: build a synthetic model patch that modifies, deletes,
+renames, and adds; run the real bundle commands and the real
+`shipyard_recovery_repair.py`; then apply the patch in a second checkout at the
+fenced head and compare. Under the pre-fix commands that rehearsal reports
+`validator: PASS` and `parity check: PASS` while leaving the deleted file in
+place — which is precisely why no amount of green CI would have caught it.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
@@ -3924,6 +4000,40 @@ registration; the planned MacBook Air is recorded with `active = false` until
 commissioned. Expected hosts match stable label subsets, never disposable runner
 names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
 not an intentional absence.
+
+**Do not "fix" the absence of m3/m5/m1 from `expected_host` — it is deliberate,
+and declaring them makes the view wrong.** The gap looks obvious and actionable
+(the three Macs that serve the required `macos` gate are not declared, so a dead
+one raises nothing), which is why it keeps getting re-proposed. Three things to
+check before spending a cycle on it, all readable in a minute:
+
+- **The gate hosts have no host-identifying label.** Matching is by label subset,
+  and every gate runner on all three registers the same `self-hosted, macOS,
+  ARM64, pulp-build, pulp-build-vm, pulp-gate-fast`; the labels that vary
+  (`pulp-build-studio`, `pulp-build-vm-secondary`) are role labels, and m1's and
+  m5's are label-identical. There is no `pulp-host-m3` analogue to
+  `pulp-host-macpro` / `pulp-host-macmini`. So three per-host entries match one
+  pool three times and all report online while a single machine serves — a real
+  partial degradation reads as three green rows. Confirm with the live label sets
+  before assuming otherwise:
+  `ghapp api "repos/Generous-Corp/pulp/actions/runners?per_page=100"`.
+- **Pool-wide `min_online` fails the other way.** The gate pool is ephemeral JIT,
+  so a healthy idle host has zero runners registered and would alarm on every
+  quiet period — the alarm gets muted within a week and the class returns.
+- **Nothing consumes `fleet-status`.** `grep -rl fleet-status .github/workflows
+  tools/` finds nothing; it is a manual-inspection view, so a declaration pages
+  no one on its own.
+
+The per-host question is already answered by the same report's `hosts[]` array —
+keyed by class (`m1`, `m5`, `studio`), read from tartci state over SSH rather than
+from labels, carrying `routable`, `free`/`cap`, supervisor heartbeat age, and disk
+/ ccache admission problems. Read that, not `expected_hosts[]`, when asking
+whether a specific Mac is serving. The genuinely open gap is narrower and nobody
+has built it: detecting a *partially* degraded pool needs capacity measured
+against demand, because a busy pool and a pool at a third of capacity are
+indistinguishable from host presence. Rationale in
+`docs/guides/local-ci.md`, "Why the macOS gate hosts are not declared as expected
+hosts".
 
 ### Prevent: build-dir ODR guard (interrupted-build sentinel)
 
