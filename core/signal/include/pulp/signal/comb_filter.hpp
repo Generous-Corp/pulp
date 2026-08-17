@@ -3,6 +3,7 @@
 /// @file comb_filter.hpp
 /// Prepared feedforward, feedback, and Schroeder allpass comb filters.
 
+#include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fractional_delay.hpp>
 
 #include <cmath>
@@ -179,7 +180,9 @@ template <typename SampleType = float> class CombFilterT {
         if (!std::isfinite(output) || !std::isfinite(stored) || std::abs(output) > limit ||
             std::abs(stored) > limit)
             return fail(CombFilterStatus::output_out_of_range);
-        if (history_.push(static_cast<SampleType>(stored)) != FractionalDelayStatus::ok)
+        // Snap the recursive state to zero so a decaying tail does not park the
+        // feedback and allpass paths in denormal arithmetic after input stops.
+        if (history_.push(snap_to_zero(static_cast<SampleType>(stored))) != FractionalDelayStatus::ok)
             return fail(CombFilterStatus::output_out_of_range);
         return {static_cast<SampleType>(output), CombFilterStatus::ok};
     }
