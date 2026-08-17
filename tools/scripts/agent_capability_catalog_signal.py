@@ -220,10 +220,10 @@ EXPORTS = [
         bindings=[
             binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
+                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
             binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
+                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
@@ -1294,10 +1294,6 @@ EXPORTS = [
         summary=(
             "Bounded feed-forward early-reflection tap bank producing a stereo reflection pattern "
             "from validated per-tap delay, gain, and pan."
-        key="signal.comb-filter", domain="signal",
-        summary=(
-            "Prepared feedforward, feedback, and Schroeder allpass comb filters with exact integer "
-            "delays, transactional configuration, and typed fault recovery."
         ),
         rt_class="audio",
         lifecycle={"construction": "control", "prepare": "control delay-line allocation",
@@ -1305,8 +1301,6 @@ EXPORTS = [
         state_model=(
             "Fixed-capacity delay history plus the committed tap list; feed-forward only, so no "
             "recursive state accumulates."
-            "Fixed-capacity fractional delay history plus the committed mode/delay/gain "
-            "configuration; recursive modes snap their stored state to zero."
         ),
         seed_model="none",
         determinism={"repeatability": "bit_exact", "block_partition": "invariant",
@@ -1345,6 +1339,24 @@ EXPORTS = [
                          qualified_name="pulp::signal::AutoDuckedSendT<float>",
                          target="Pulp::signal", header_fingerprint="sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::AutoDuckedSendT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.comb-filter", domain="signal",
+        summary=(
+            "Prepared feedforward, feedback, and Schroeder allpass comb filters with exact integer "
+            "delays, transactional configuration, and typed fault recovery."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control delay-line allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity fractional delay history plus the committed mode/delay/gain "
+            "configuration; recursive modes snap their stored state to zero."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
         input_domain="audio plus a bounded mode, integer delay, and stable feedback gain",
         output_domain="comb-filtered audio with typed status",
         units=["samples", "linear gain"],
