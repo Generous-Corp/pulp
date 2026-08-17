@@ -193,6 +193,61 @@ Observed: no `editor window open` after 240 s. `man libgmalloc` confirms there
 is no size-scoping knob, so you cannot guard one size class and leave the rest
 fast. Use ASan for GPU apps; libgmalloc is only viable for headless tools.
 
+### A frozen clock looks exactly like a broken renderer — check `performance.now()` FIRST
+
+Before investigating anything downstream of an animation, verify the clock it
+steps from actually advances:
+
+```js
+performance.now()   // call twice, a few frame ticks apart — it MUST increase
+```
+
+Every dt-driven animation in a scripted UI computes
+`dt = Math.min(0.05, (now - last) / 1e3)` and then `smooth(value, target, dt*k)`.
+If `now` never changes, `dt` is 0, `smooth()` is the identity, and **every
+animated value is pinned at its default forever** — while the frame pump ticks,
+rAF callbacks drain, no error is logged, and event-driven interactions (button
+clicks, toggles) keep working perfectly because they use no `dt`.
+
+**The failure presents as a rendering bug with the renderer entirely healthy.**
+
+Real case (2026-08-17, Spectr): a spectral editor drew no bands. A full day went
+into the paint-command protocol, revision idempotence, pointer-coordinate
+scaling, rAF starvation, presentation gaps, modifier routing, and CoreAudio
+capture — every one of them downstream of a clock that could not advance.
+
+The cause: **a materialized capture SHADOWED a global the live app depended on.**
+The generated runtime installed a deterministic replay clock so a captured
+document settles reproducibly, and pointed `globalThis.performance` at it:
+
+```js
+__pulpCapturedPresentationTime__ = 2422.6;
+__pulpCapturedReplayClock__ = { current: 0, target: 2422.6 };
+__pulpAnimationFrameTimestamp__ = function (_nativeNow) { /* ignores _nativeNow */ };
+performance = { now: () => __pulpCapturedReplayClock__.current };
+```
+
+It ramped to the capture's presentation time and froze at that ceiling. Pulp's
+own `__performanceNow__` was a correct monotonic `steady_clock` the whole time —
+the consumer bundle simply shadowed it.
+
+Generalise past this one bug:
+
+- **A materialized/captured document can shadow ANY global** the live app needs
+  (`performance`, `Date`, `requestAnimationFrame`, `Math.random`). Determinism
+  shims are correct during capture/replay and wrong in a live session. When a
+  materialized UI misbehaves, diff its globals against a live realm before
+  reading rendering code.
+- **Symptom asymmetry names the class.** Event-driven interactions working while
+  everything time-driven is frozen is the signature of a dead clock, not a dead
+  renderer. If clicks work and nothing animates, check the clock.
+- Ship the cheap guard: `performance.now()` must advance across two frame ticks,
+  and `requestAnimationFrame` must hand its callback an advancing timestamp.
+  Both live in `test/test_widget_bridge_animation.cpp` and were verified to fail
+  against a deliberately frozen `__performanceNow__`.
+- A test asserting *published* state passes while the screen stays blank. Assert
+  what the renderer READS (`renderState().gains`), not what the app sent.
+
 ### Heap corruption that surfaces far from its cause — check the AUDIO thread
 
 Pulp has already shipped one bug of this exact shape, and the comment above
