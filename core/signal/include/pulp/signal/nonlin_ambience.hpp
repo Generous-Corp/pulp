@@ -5,7 +5,6 @@
 /// topology live in nonlin_ambience_design.hpp.
 
 #include <pulp/signal/dither.hpp>
-#include <pulp/signal/detail/schroeder_allpass.hpp>
 #include <pulp/signal/nonlin_ambience_design.hpp>
 
 namespace pulp::signal {
@@ -355,10 +354,9 @@ public:
         const auto g = static_cast<SampleType>(diffusion_);
         for (int i = 0; i < nonlin_ambience::kNumAllpass; ++i) {
             const SampleType delayed = allpass_[i].read(allpass_len_[i] - 1);
-            const SampleType write =
-                snap_to_zero(detail::schroeder_allpass_write(d, delayed, g));
-            d = detail::schroeder_allpass_output(delayed, write, g);
-            allpass_[i].push(write);
+            const SampleType w = snap_to_zero(d + g * delayed);
+            d = -g * w + delayed;
+            allpass_[i].push(w);
         }
 
         ring_write_ = (ring_write_ + 1) & ring_mask_;

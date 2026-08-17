@@ -17,7 +17,6 @@
 
 #include <pulp/signal/character_delay/primitives.hpp>
 #include <pulp/signal/character_delay/tables.hpp>
-#include <pulp/signal/detail/schroeder_allpass.hpp>
 
 #include <algorithm>
 #include <array>
@@ -26,9 +25,7 @@
 
 namespace pulp::signal::chardelay {
 
-/// One modulated Schroeder allpass: y[n] = -g*x[n] + v[n-d],
-/// v[n] = x[n] + g*y[n]. The output-state form preserves live history when
-/// control-rate updates change the coefficient.
+/// One modulated Schroeder allpass: y[n] = −g·x[n] + v[n−d], v[n] = x[n] + g·y[n].
 class ModulatedAllpass {
 public:
     void prepare(std::size_t capacity_samples) { line_.prepare(capacity_samples); }
@@ -36,9 +33,9 @@ public:
 
     double process(double x, double delay_samples, double gain) noexcept {
         const double delayed = line_.read(delay_samples);
-        const auto step = detail::schroeder_allpass_output_state_step(x, delayed, gain);
-        line_.push(step.write);
-        return step.output;
+        const double y = -gain * x + delayed;
+        line_.push(x + gain * y);
+        return y;
     }
 
     double max_delay() const noexcept { return line_.max_delay(); }

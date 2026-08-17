@@ -53,6 +53,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/tilt_eq.hpp": "Pulp::signal",
     "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
     "pulp/signal/transfer_curve.hpp": "Pulp::signal",
+    "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
