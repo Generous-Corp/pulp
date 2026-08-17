@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 49,
+  "inventory_version": 50,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 436,
-    "reviewed_headers": 140,
+    "public_headers": 437,
+    "reviewed_headers": 141,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 91,
+      "capability_entrypoint": 92,
       "capability_support": 38,
       "infrastructure": 9,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 257,
-        "reviewed_headers": 98,
+        "public_headers": 258,
+        "reviewed_headers": 99,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -3590,7 +3590,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:e9b25b2ad86ecf31ffdf7138ee93a21647702dc9c2a931c7f69ba660ce8700ab",
+      "fingerprint": "sha256:88c3008841612b8cb3071cdea268291103a5bcc56fb64499fae56d0a9f0e1fde",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3700,6 +3700,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.spectral-band-mask"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_cross_synthesis.hpp",
+      "fingerprint": "sha256:00860da91696473d18f8c276ac53a82788568640cb173b958eaa1dac9bbfee63",
+      "include": "pulp/signal/spectral_cross_synthesis.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-cross-synthesis"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },
