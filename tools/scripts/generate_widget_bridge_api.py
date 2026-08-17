@@ -334,6 +334,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgStrokeWidth": "(id: string, width: number) => void",
     "setSvgStrokeGradient": "(id: string, value: string) => void",
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
+    "setSvgStretchToBounds": "(id: string, stretch: boolean) => void",
     "setTextRuns": "(id: string, runs: Array<{ start: number; end: number; fontWeight?: number; fontSize?: number; fontFamily?: string; color?: string; fontStyle?: string; letterSpacing?: number; textDecoration?: string }>) => void",
     "setCapturedLineBoxes": "(id: string, boxes: Array<{ left: number; top: number; width: number; height: number; start: number; length: number }>, basisWidth: number, basisFace: string, wrapOnCacheMiss?: boolean) => void",
     "clearCapturedLineBoxes": "(id: string) => void",
