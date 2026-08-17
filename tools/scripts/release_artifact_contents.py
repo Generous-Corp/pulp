@@ -141,6 +141,14 @@ class ProductMatrix:
     control_broker_floor: str
     control_standalone_host_floor: str
     platforms: tuple[str, ...]
+    # The subset of `platforms` a release currently BUILDS and PUBLISHES.
+    # `platforms` stays the full historical inventory (per-platform archive
+    # verification and library-stem merging key off it for every era), while
+    # `active_platforms` is the one-line shipping knob: remove a platform to
+    # stop building it, add it back piecemeal later. Absent in the matrix
+    # document means "everything" — the pre-knob contract — so historical
+    # matrices keep their meaning.
+    active_platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]
     common_cli_members: frozenset[str]
@@ -182,6 +190,9 @@ class ProductMatrix:
                     doc.get("control_standalone_host_floor", "999999.0.0")
                 ),
                 platforms=tuple(doc["platforms"]),
+                active_platforms=tuple(
+                    doc.get("active_platforms", doc["platforms"])
+                ),
                 cli_contract_declared=cli_contract_declared,
                 # Matrices versioned before the import-design CLI payload did
                 # not declare CLI members. Their release version selects the
@@ -206,6 +217,24 @@ class ProductMatrix:
             or not matrix.pulp_library_stems
         ):
             raise ContentError(f"invalid release product matrix {path}: empty contract")
+        if not matrix.active_platforms:
+            raise ContentError(
+                f"invalid release product matrix {path}: active_platforms is "
+                "empty — a release must ship at least one platform (delete the "
+                "field to mean all of them)"
+            )
+        unknown = set(matrix.active_platforms) - set(matrix.platforms)
+        if unknown:
+            raise ContentError(
+                f"invalid release product matrix {path}: active_platforms "
+                f"{sorted(unknown)} not in the platform inventory"
+            )
+        if not any(p.startswith("darwin-") for p in matrix.active_platforms):
+            raise ContentError(
+                f"invalid release product matrix {path}: active_platforms must "
+                "include a darwin platform — the Sparkle appcast is generated "
+                "from the darwin legs' min-OS floors"
+            )
         version_tuple(matrix.contract_floor)
         version_tuple(matrix.sdk_provenance_floor)
         version_tuple(matrix.capability_handoff_floor)
@@ -321,6 +350,20 @@ def cli_asset_name(platform: str) -> str:
 
 def sdk_asset_name(platform: str) -> str:
     return f"pulp-sdk-{platform}.tar.gz"
+
+
+def release_asset_names(matrix: ProductMatrix) -> tuple[str, ...]:
+    """Per-platform archive filenames the release publishes.
+
+    Derived from the ACTIVE platform subset so the exact-asset contract and
+    the build matrix can never disagree: both read the same field. Excludes
+    appcast.xml and SHA256SUMS, which are platform-independent.
+    """
+    names: list[str] = []
+    for platform in matrix.active_platforms:
+        names.append(cli_asset_name(platform))
+        names.append(sdk_asset_name(platform))
+    return tuple(names)
 
 
 def cli_binary_members(
@@ -945,7 +988,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         matrix = ProductMatrix.load(args.matrix)
-        platforms = matrix.platforms if args.all_platforms else (args.platform,)
+        # --all-platforms means "everything this release SHIPS", which is the
+        # active subset — the full `platforms` inventory keeps serving
+        # per-platform verification of any era's archives.
+        platforms = (
+            matrix.active_platforms if args.all_platforms else (args.platform,)
+        )
         if version_tuple(args.version) < version_tuple(matrix.contract_floor):
             print(
                 f"SKIP: {args.version} predates release-content contract "

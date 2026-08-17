@@ -67,26 +67,28 @@ VALIDATION_STEP_PREFIXES = (
 
 INCOMPLETE = "incomplete"    # published, but missing assets — unfixable by us
 
-# What every Pulp release must carry. Mirrors `required_assets` in
-# release-cli.yml's finalizer; SHA256SUMS is added by that step.
-REQUIRED_ASSETS = frozenset(
-    {
-        "appcast.xml",
-        "SHA256SUMS",
-        "pulp-darwin-arm64.tar.gz",
-        "pulp-darwin-x64.tar.gz",
-        "pulp-linux-arm64.tar.gz",
-        "pulp-linux-x64.tar.gz",
-        "pulp-windows-arm64.zip",
-        "pulp-windows-x64.zip",
-        "pulp-sdk-darwin-arm64.tar.gz",
-        "pulp-sdk-darwin-x64.tar.gz",
-        "pulp-sdk-linux-arm64.tar.gz",
-        "pulp-sdk-linux-x64.tar.gz",
-        "pulp-sdk-windows-arm64.tar.gz",
-        "pulp-sdk-windows-x64.tar.gz",
-    }
-)
+
+def _required_assets() -> frozenset[str]:
+    """What every Pulp release must carry.
+
+    Derived from release_product_matrix.json's active_platforms — the same
+    field release-cli.yml's finalizer derives its `--exact-required` contract
+    from — so pausing or reactivating a platform cannot desync the reconciler
+    from the publisher. Platform-independent assets (appcast, SHA256SUMS) are
+    always demanded; SHA256SUMS is added by the finalizer itself.
+
+    A release published while MORE platforms were active than today carries
+    extra assets, which is never flagged (only missing assets are). A release
+    published while FEWER were active can briefly flag INCOMPLETE after the
+    set grows back — until the next release publishes and supersedes it, which
+    at the current tag cadence is hours, not days.
+    """
+    from release_artifact_contents import DEFAULT_MATRIX, release_asset_names
+
+    return frozenset({"appcast.xml", "SHA256SUMS", *release_asset_names(DEFAULT_MATRIX)})
+
+
+REQUIRED_ASSETS = _required_assets()
 
 
 @dataclass(frozen=True)

@@ -31,6 +31,20 @@ For the end-to-end release pipeline that turns a merged PR into a published GitH
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
 - `sign-and-release.yml` and `release-cli.yml` both fire on the SAME `v*` tag and race. sign-and-release notarizes, then its "Attach appcast.xml" step POLLS `gh release view <tag>` for the draft that release-cli's `release` job creates at the very end of its build chain. Since the Intel `darwin-x64` cross-compile leg landed, that chain runs 60-90 min (the leg queues for a hosted macos-15 runner, then builds), so a too-short poll times out and the release ships without the Sparkle appcast → someone has to hand-publish. The poll window is bumped to 100 min (`seq 1 300`, 20s each). The deeper fix (not yet done — needs a real-tag validation): the poll runs ON the macOS notarize VM, holding a scarce self-hosted release VM for the whole wait, which also starves the lane; emit `appcast.xml` as an artifact and move the wait+attach to a cheap ubuntu job so the macOS VM frees right after notarization.
 
+**Which platforms a release ships is `active_platforms` in
+`release_product_matrix.json`** — one field consumed by the build/smoke matrix
+(`release_build_matrix.py`), the publish-time content verification, and the
+`--exact-required` asset list, so the built legs and the demanded assets
+cannot desync. Absent = full inventory; a subset (e.g. `["darwin-arm64"]`)
+pauses the other platforms' legs AND drops their archives from the asset
+contract in one edit. The publish step reads it from the default branch, so
+the flip governs re-dispatches and backfills too. Paused platforms are
+time-boxed by `release-platform-subset-check.yml` (7 days → tracking issue).
+The per-release asset table in docs/guides/release-pipeline.md describes the
+full inventory; a subset release legitimately carries fewer rows, and
+installers for paused platforms serve users from the last release that
+carried them.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so

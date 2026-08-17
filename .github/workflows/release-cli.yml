@@ -107,6 +107,18 @@ jobs:
       # platform -> runs-on. Every build/smoke leg indexes this by matrix.platform,
       # so routing is data, not a chain of ternaries in the `runs-on:` key.
       map: ${{ steps.resolve.outputs.map }}
+      # The platforms this release SHIPS and the matrix legs that build/smoke
+      # them — release_product_matrix.json's `active_platforms` (absent =
+      # every platform), expanded to `matrix.include` lists by the unit-tested
+      # release_build_matrix.py. Read from the DEFAULT branch's copy, the same
+      # authoritative source the publish-time asset contract imports, so the
+      # set of legs that build and the set of assets the finalizer demands can
+      # never disagree. A one-line edit to that field adds or removes a
+      # shipped platform for every subsequent run — tag pushes, re-dispatches,
+      # and old-tag backfills alike.
+      active_platforms: ${{ steps.active.outputs.active_platforms }}
+      build_include: ${{ steps.active.outputs.build_include }}
+      smoke_include: ${{ steps.active.outputs.smoke_include }}
     steps:
       # The resolver is a repo script (so it can be unit-tested), so it needs the
       # repo. Always resolve from the DEFAULT branch's copy, never the tag's: a
@@ -185,50 +197,36 @@ jobs:
           # tested (test_resolve_release_runners.py) rather than buried in YAML.
           python3 tools/scripts/resolve_release_runners.py --github-output >> "$GITHUB_OUTPUT"
 
+      - id: active
+        name: Resolve active release platforms and matrix legs
+        shell: bash
+        # This job checked out the DEFAULT branch (see above), so this reads
+        # the authoritative active_platforms — the same copy the publish-time
+        # verifier imports into its asset contract. ProductMatrix.load applies
+        # the subset/non-empty/darwin validation, so a malformed knob fails
+        # HERE, before any leg builds, not at publish time after the matrix
+        # already ran. Leg configuration (runner images, containers, artifact
+        # extensions, the darwin-x64 cross-compile rationale) lives in
+        # release_build_matrix.py where it is unit tested.
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/release_build_matrix.py --github-output | tee -a "$GITHUB_OUTPUT"
+
   build-cli:
     needs: resolve-macos-runner
     strategy:
       fail-fast: false
+      # The legs are DATA, derived by release_build_matrix.py (unit tested)
+      # from release_product_matrix.json's `active_platforms` — the same field
+      # the publish finalizer's exact-asset contract reads, so the platforms
+      # that build and the assets demanded at publish can never disagree.
+      # Shipping or pausing a platform is a one-line edit to that JSON field.
+      # Per-leg configuration and its rationale (the darwin-x64 cross-compile
+      # on Apple Silicon — never the flaky native macos-15-intel image — and
+      # the linux-x64 ubuntu:22.04 glibc-floor container, proven by the --elf
+      # floor check below) live in release_build_matrix.py's BUILD_LEGS.
       matrix:
-        include:
-          - os: macos-15
-            platform: darwin-arm64
-            artifact: pulp
-          # Intel Mac (darwin-x64): CROSS-COMPILED on the healthy Apple-Silicon
-          # runner, NOT the flaky native `macos-15-intel` image (which CPU-pegs
-          # and never shipped an artifact — see nightly-intel.yml, whose Job B
-          # universal cross-check exists precisely because the native Job A is
-          # unreliable). The `macos-15-xcompile` sentinel routes through the
-          # resolver map to the dedicated `pulp-build-vm-release` Tart pool,
-          # falling back to the legacy Intel selector and then `macos-15` only
-          # when the release-pool variables are unset. It never targets native
-          # Intel hardware; the Mac Mini remains an advisory/nightly canary.
-          # to keep Intel work off the self-hosted Studios that back the
-          # required `macos` gate. The x86_64 slice is produced by
-          # `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) plus
-          # `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI); the leg
-          # smoke-tests the thin binary under Rosetta. This is a REQUIRED leg
-          # (same reliability class as darwin-arm64), so Intel ships in every
-          # release. See docs/guides/intel-support.md.
-          - os: macos-15-xcompile
-            platform: darwin-x64
-            artifact: pulp
-          - os: ubuntu-24.04
-            platform: linux-x64
-            artifact: pulp
-            # Build the linux-x64 SDK inside an Ubuntu 22.04 container so Pulp's OWN
-            # objects don't re-leak the runner's glibc ~2.39 — matching the portable
-            # Skia/Dawn/V8 deps' 2.34 floor. Proven by the --elf floor check below.
-            container: "ubuntu:22.04"
-          - os: ubuntu-24.04-arm
-            platform: linux-arm64
-            artifact: pulp
-          - os: windows-latest
-            platform: windows-x64
-            artifact: pulp.exe
-          - os: windows-11-arm
-            platform: windows-arm64
-            artifact: pulp.exe
+        include: ${{ fromJSON(needs.resolve-macos-runner.outputs.build_include) }}
 
     # macos-15 → self-hosted/Namespace via resolve-macos-runner; macos-15-xcompile
     # (the Intel cross-compile leg) → pinned hosted arm64 pool via
@@ -1251,31 +1249,15 @@ jobs:
     needs: [build-cli, resolve-macos-runner]
     strategy:
       fail-fast: false
+      # Same data-derived legs as build-cli (release_build_matrix.py, filtered
+      # by active_platforms), minus the linux-x64 build container — the smoke
+      # deliberately runs each artifact on the bare runner image. The
+      # darwin-x64 leg (when active) smokes the thin x86_64 tarball on the
+      # same pinned Apple-Silicon pool as its build leg: the binary execs
+      # transparently under Rosetta, and the EXPECT_ARCH / dylib-arch asserts
+      # prove we shipped a real x86_64 slice (not an arm64 mislabel).
       matrix:
-        include:
-          - os: macos-15
-            platform: darwin-arm64
-            artifact: pulp
-          # Intel Mac (darwin-x64): smoke the thin x86_64 tarball on the same
-          # pinned Apple-Silicon pool as the build leg — the binary execs
-          # transparently under Rosetta, and the smoke steps' darwin-x64
-          # EXPECT_ARCH / dylib-arch asserts prove we shipped a real x86_64
-          # slice (not an arm64 mislabel).
-          - os: macos-15-xcompile
-            platform: darwin-x64
-            artifact: pulp
-          - os: ubuntu-24.04
-            platform: linux-x64
-            artifact: pulp
-          - os: ubuntu-24.04-arm
-            platform: linux-arm64
-            artifact: pulp
-          - os: windows-latest
-            platform: windows-x64
-            artifact: pulp.exe
-          - os: windows-11-arm
-            platform: windows-arm64
-            artifact: pulp.exe
+        include: ${{ fromJSON(needs.resolve-macos-runner.outputs.smoke_include) }}
     # Routing is DATA: resolve-macos-runner emits a platform -> runs-on map, and
     # each leg indexes it. Previously only the macOS legs were variable-driven and
     # everything else fell through to `|| matrix.os` — a literal GitHub-hosted
@@ -1647,9 +1629,20 @@ jobs:
           set -euo pipefail
           VERSION="${TAG#v}"
           DATE=$(date -u '+%a, %d %b %Y %H:%M:%S +0000')
-          ARM_FLOOR=artifacts/pulp-darwin-arm64/pulp-darwin-arm64.min-os
-          X64_FLOOR=artifacts/pulp-darwin-x64/pulp-darwin-x64.min-os
-          MACOS_MIN=$(python3 - "$ARM_FLOOR" "$X64_FLOOR" <<'PY'
+          # The min-OS floor comes from whichever darwin legs actually built
+          # (active_platforms decides — the matrix validation guarantees at
+          # least one darwin platform is always active). With both mac legs
+          # active this is max(arm64, x64) exactly as before; with one, its
+          # own floor. Zero floor files means the darwin artifacts are missing
+          # and the release must not publish an appcast that lies about them.
+          shopt -s nullglob
+          FLOOR_FILES=(artifacts/pulp-darwin-*/pulp-darwin-*.min-os)
+          shopt -u nullglob
+          if [ "${#FLOOR_FILES[@]}" -eq 0 ]; then
+            echo "::error::no darwin min-os floor artifacts found — cannot generate appcast"
+            exit 1
+          fi
+          MACOS_MIN=$(python3 - "${FLOOR_FILES[@]}" <<'PY'
           import sys
           from pathlib import Path
 
@@ -1657,7 +1650,7 @@ jobs:
           print(max(floors, key=lambda value: tuple(int(part) for part in value.split("."))))
           PY
           )
-          rm "$ARM_FLOOR" "$X64_FLOOR"
+          rm "${FLOOR_FILES[@]}"
           mkdir -p artifacts
           cat > artifacts/appcast.xml <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
@@ -1770,26 +1763,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Every asset a consumer is entitled to find on a Pulp release. The
-          # `--exact-required` check below fails closed: a missing asset OR an
-          # unexpected extra one aborts the publish and leaves a draft behind,
-          # rather than shipping a release that is quietly missing a platform.
-          required_assets=(
-            appcast.xml
-            pulp-darwin-arm64.tar.gz
-            pulp-darwin-x64.tar.gz
-            pulp-linux-arm64.tar.gz
-            pulp-linux-x64.tar.gz
-            pulp-windows-arm64.zip
-            pulp-windows-x64.zip
-            pulp-sdk-darwin-arm64.tar.gz
-            pulp-sdk-darwin-x64.tar.gz
-            pulp-sdk-linux-arm64.tar.gz
-            pulp-sdk-linux-x64.tar.gz
-            pulp-sdk-windows-arm64.tar.gz
-            pulp-sdk-windows-x64.tar.gz
-          )
-
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
           if [ "${state}" = "false" ]; then
             echo "::notice::${TAG} is already published — nothing to do."
@@ -1847,6 +1820,22 @@ jobs:
           selected["control_standalone_host_floor"] = authoritative[
               "control_standalone_host_floor"
           ]
+          # WHICH platforms ship is current shipping policy, not a historical
+          # artifact-membership fact, so it is imported from the trusted
+          # default branch like the floors above: the same active_platforms
+          # that selected the build legs decides the exact-asset contract, so
+          # the two cannot disagree. Intersected with the selected source's
+          # inventory so an old tag is never asked for a platform its era
+          # never defined. WHAT each platform's archives contain remains
+          # governed by the selected tag/source matrix.
+          authoritative_active = authoritative.get(
+              "active_platforms", authoritative["platforms"]
+          )
+          selected["active_platforms"] = [
+              platform
+              for platform in authoritative_active
+              if platform in set(selected["platforms"])
+          ]
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
@@ -1874,6 +1863,30 @@ jobs:
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
             --matrix "$publication_matrix" \
             "${control_registry_args[@]}"
+
+          # Every asset a consumer is entitled to find on this release,
+          # derived from the SAME publication matrix (active_platforms) that
+          # selected the build legs and drove the content verification above —
+          # one field, three consumers, no way to disagree. The
+          # `--exact-required` check below fails closed: a missing asset OR an
+          # unexpected extra one aborts the publish and leaves a draft behind,
+          # rather than shipping a release that is quietly missing a platform
+          # (or quietly shipping one the matrix says is paused).
+          required_assets=(appcast.xml)
+          while IFS= read -r asset; do
+            required_assets+=("${asset}")
+          done < <(python3 - "$publication_matrix" <<'PY'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools/scripts")
+          from release_artifact_contents import ProductMatrix, release_asset_names
+
+          for name in release_asset_names(ProductMatrix.load(Path(sys.argv[1]))):
+              print(name)
+          PY
+          )
+          echo "Exact-asset contract (${#required_assets[@]} assets): ${required_assets[*]}"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do

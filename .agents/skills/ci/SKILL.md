@@ -1739,6 +1739,41 @@ Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml` pin whenever a
 post-tag-hook feature depends on it. (Durable fix is for `hook install` to pin
 from `tools/shipyard.toml` — a Shipyard-side change.)
 
+### Release platforms are a one-line knob: `active_platforms`
+
+`release_product_matrix.json` carries two platform fields: `platforms` (the
+full historical inventory — per-platform archive verification and
+library-stem merging key off it for every era; do not shrink it) and
+`active_platforms` (the subset a release currently SHIPS; absent = all).
+Three consumers derive from `active_platforms`, which is the whole point —
+they can never disagree:
+
+1. `release-cli.yml`'s build/smoke `matrix.include` — expanded by
+   `release_build_matrix.py` in the `resolve-macos-runner` job (leg configs —
+   runner images, the darwin-x64 `macos-15-xcompile` sentinel, the linux-x64
+   glibc container — live in that script, unit tested).
+2. The publish-time `--all-platforms` content verification.
+3. The finalizer's `--exact-required` asset list.
+
+The publish step imports `active_platforms` from the DEFAULT branch's matrix
+(like the policy floors), so a one-line edit on main governs every subsequent
+run — tag pushes, re-dispatches, old-tag backfills. Flip back by deleting the
+field, or re-add platforms piecemeal. Guardrails: the subset must be
+non-empty, within the inventory, and contain a darwin platform (the appcast
+needs a darwin min-OS floor); `release-platform-subset-check.yml` (daily)
+opens a tracking issue once the subset is older than 7 days — a paused
+platform's release leg does not compile, so regressions there land unnoticed
+for exactly as long as the pause stands. Do NOT reintroduce a hardcoded
+platform row in either matrix or a literal asset name in the finalizer;
+`test_release_workflow_test_step.py::ActivePlatformsDeriveTheReleaseMatrix`
+rejects both.
+
+**Job-level `if:` cannot see the `matrix` context** — that is WHY the legs
+are derived rather than gated: `if:
+contains(..., matrix.platform)` on a matrix job evaluates with an empty
+`matrix` and silently skips every leg. GitHub only exposes `github`, `needs`,
+`vars`, and `inputs` to `jobs.<id>.if`.
+
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
 GitHub returns a workflow's `run-name` as **`workflow_run.name`** in the REST API —
