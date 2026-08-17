@@ -2,7 +2,7 @@
 # `v8::v8` IMPORTED target for the in-tree build.
 #
 # V8 is the optional JS engine backend selected with PULP_JS_ENGINE=v8
-# (default is QuickJS; JSC on Apple). The provider is the pinned sealed
+# (default is QuickJS; JSC is opt-in on Apple). The provider is the pinned sealed
 # `libv8` from the danielraffel/v8-builder fork, fetched by
 # tools/scripts/fetch_v8_for_release.py into external/v8-build/<platform>/.
 # This replaces the former Homebrew-`libnode` provider search.

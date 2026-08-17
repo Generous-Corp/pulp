@@ -235,7 +235,7 @@ Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent
 <details>
 <summary><strong>How does Pulp handle minimum OS support (Windows, Linux, macOS)?</strong></summary>
 
-Depends on the platform and on whether you enable V8 (optional; default is QuickJS/JSC). We track the lowest OS the prebuilts support and occasionally sit a step above for toolchain reasons. Numbers live at the source, not here — your floor is the highest of whatever you link:
+Depends on the platform and on whether you enable an optional engine (the default is QuickJS; JSC is opt-in on Apple and V8 is opt-in where supported). We track the lowest OS the prebuilts support and occasionally sit a step above for toolchain reasons. Numbers live at the source, not here — your floor is the highest of whatever you link:
 
 | Floor | Where |
 |---|---|

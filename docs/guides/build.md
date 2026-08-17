@@ -26,7 +26,7 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_ENABLE_GPU` | ON | Enable Dawn/Skia GPU rendering |
 | `PULP_ENABLE_PROJECT_PACKAGE` | ON | Build and export the optional project-package component and dependent Timeline authoring tools. `OFF` omits them, so the installed SDK cannot satisfy a request for the `project-package` component. |
 | `PULP_ENABLE_JS` | ON | Build the JS scripting + web-compat layer (`pulp::view-script`). `OFF` yields a native-only `pulp::view` with no JS engine — smaller binaries, and the native faithful-vector design-import path still works. |
-| `PULP_JS_ENGINE` | auto | JS engine: auto, quickjs, jsc, v8 (only when `PULP_ENABLE_JS=ON`) |
+| `PULP_JS_ENGINE` | auto | JS engine: `auto`/`quickjs` compile QuickJS only; `jsc` adds JavaScriptCore on Apple and makes it the default; `v8` adds the sealed V8 backend and makes it the default (only when `PULP_ENABLE_JS=ON`) |
 | `PULP_ENABLE_AAX` | OFF | Enable optional AAX format |
 | `PULP_ENABLE_ABLETON_LINK` | OFF | Enable the source-build-only desktop Link adapter. Requires a developer-supplied, out-of-tree checkout at `PULP_ABLETON_LINK_SDK_DIR`; its adapter header and target are build-interface-only and never installed or exported. |
 

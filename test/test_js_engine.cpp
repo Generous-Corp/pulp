@@ -342,10 +342,11 @@ TEST_CASE("JsEngine availability", "[js_engine]") {
     // QuickJS is always available
     REQUIRE(is_engine_available(JsEngineType::quickjs));
 
-#if __APPLE__
+#if defined(PULP_HAS_JSC)
     REQUIRE(is_engine_available(JsEngineType::jsc));
 #else
     REQUIRE_FALSE(is_engine_available(JsEngineType::jsc));
+    REQUIRE_THROWS(create_js_engine(JsEngineType::jsc));
 #endif
 
     if (is_engine_available(JsEngineType::v8)) {
