@@ -50,6 +50,9 @@ int main() {
     const auto exp2 = pulp::signal::FastMath::exp2(0.5f);
     if (!std::isfinite(exp2))
         return 13;
+    pulp::signal::TransferCurve transfer_curve;
+    if (transfer_curve.process(0.25f) != 0.25f)
+        return 30;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
@@ -116,9 +119,9 @@ int main() {
 
     pulp::signal::TempoDelayTime tempo_delay;
     if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
-        return 30;
+        return 31;
     if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
         pulp::signal::TempoDelayError::none)
-        return 31;
-    return std::isfinite(tempo_delay.next()) ? 0 : 32;
+        return 32;
+    return std::isfinite(tempo_delay.next()) ? 0 : 33;
 }

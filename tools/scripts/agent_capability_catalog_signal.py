@@ -1471,4 +1471,31 @@ EXPORTS = [
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TiltEqT<float, 2>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
+    capability(
+        key="signal.transfer-curve", domain="signal",
+        summary=(
+            "Bounded monotonic transfer-curve shaper prepared from validated breakpoints, with "
+            "typed rejection of non-monotonic or out-of-range input."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control curve preparation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "A prepared immutable curve table plus the committed breakpoint set; preparation is "
+            "transactional so a rejected curve leaves the previous one in place."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded monotonic breakpoint list",
+        output_domain="shaped audio with typed prepare status",
+        units=["samples", "linear amplitude"],
+        latency="zero", tail="none", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/transfer_curve.hpp",
+                         qualified_name="pulp::signal::TransferCurveT<float, 32>",
+                         target="Pulp::signal", header_fingerprint="sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TransferCurveT<float, 32>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
 ]
