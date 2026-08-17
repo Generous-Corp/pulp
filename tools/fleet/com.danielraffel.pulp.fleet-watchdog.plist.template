@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Per-host fleet drift watchdog.
+
+  This is the PRIMARY watchdog. It runs on the host because drift is a property
+  of a host and only that host can observe it: whether a volume is mounted, what
+  a launchd plist declares, how much disk is left. A GitHub-hosted runner is
+  structurally blind to all of it.
+
+  Install:
+    sed -e "s|@REPO@|/Volumes/Workshop/Code/pulp|g" \
+        -e "s|@HOME@|$HOME|g" \
+        tools/fleet/com.danielraffel.pulp.fleet-watchdog.plist.template \
+      > ~/Library/LaunchAgents/com.danielraffel.pulp.fleet-watchdog.plist
+    launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.fleet-watchdog.plist 2>/dev/null
+    launchctl load  ~/Library/LaunchAgents/com.danielraffel.pulp.fleet-watchdog.plist
+
+  PATH below puts /opt/homebrew/bin first deliberately. launchd does not inherit
+  a login shell's PATH, so without it the agent finds /usr/bin/python3 (3.9, no
+  tomllib) and the watchdog refuses to run every 30 minutes. That refusal is
+  correct behaviour but useless as a watchdog.
+
+  RunAtLoad is false on purpose: a watchdog that fires during a host reboot
+  storm reports drift caused by services that have not finished starting.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.danielraffel.pulp.fleet-watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/tools/fleet/watchdog.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>FLEET_MANIFEST</key>
+    <string>@REPO@/planning/fleet/manifest.toml</string>
+    <key>FLEET_STATE_DIR</key>
+    <string>@HOME@/.local/state/pulp-fleet</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/.local/state/pulp-fleet/watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.local/state/pulp-fleet/watchdog.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+</dict>
+</plist>
