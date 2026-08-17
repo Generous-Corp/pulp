@@ -965,5 +965,222 @@ class BuildCovLockTests(unittest.TestCase):
         )
 
 
+def _worktree_with_config(tmp: pathlib.Path, name: str,
+                          min_free_gib: object) -> pathlib.Path:
+    """A throwaway worktree whose coverage_config.json sets min_free_disk_gib."""
+    root = _fake_worktree(tmp, name)
+    (root / "tools" / "scripts" / "coverage_config.json").write_text(json.dumps({
+        "diff_coverage_fail_under": 75,
+        "compare_branch": "origin/main",
+        "min_free_disk_gib": min_free_gib,
+    }))
+    return root
+
+
+def _run_script(root: pathlib.Path, env_extra: dict | None = None,
+                timeout: float = 120) -> subprocess.CompletedProcess:
+    """Run the whole script (not lib-only) with cwd inside `root`.
+
+    cwd matters: the script discovers git from cwd, so running it against a
+    throwaway tree keeps its `git fetch` off the real repository.
+    """
+    env = os.environ.copy()
+    env.pop("PULP_DIFF_COVER_LIB_ONLY", None)
+    env.pop("PULP_SKIP_DIFF_COVER", None)
+    env.pop("PULP_DIFF_COVER_MIN_FREE_GIB", None)
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        ["bash", str(root / "tools" / "scripts" / "local_diff_cover.sh")],
+        cwd=str(root), env=env, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+class DiskPreconditionTests(unittest.TestCase):
+    """A full volume must fail fast and say `disk`, not fail slow and say `gate`.
+
+    A coverage build writes tens of GB into build-cov. When the volume is
+    already full the configure dies with its output redirected to /dev/null,
+    and ~20 minutes later the pre-push hook prints `gate failure(s) above;
+    blocking push` with the word "disk" nowhere in it — so the natural next
+    move is to go debug the diff. These lock in the precondition that answers
+    in milliseconds instead.
+    """
+
+    DISK_EXIT = 3
+    # The literal a reader greps for when they suspect the disk.
+    DISK_PHRASE = "free disk space"
+    # Printed only by the coverage configure, i.e. the first expensive step.
+    BUILD_MARKER = "=== Configuring coverage build in"
+
+    # ── configuration ──────────────────────────────────────────────────────
+    def test_config_declares_a_positive_min_free_disk_gib(self) -> None:
+        with CONFIG.open() as f:
+            cfg = json.load(f)
+        self.assertIn(
+            "min_free_disk_gib", cfg,
+            "coverage_config.json must carry the free-disk floor so the local "
+            "gate and any future consumer read one value.",
+        )
+        self.assertIsInstance(cfg["min_free_disk_gib"], int)
+        self.assertGreater(cfg["min_free_disk_gib"], 0)
+
+    def test_script_reads_the_floor_from_the_config(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            "read_config_value min_free_disk_gib", text,
+            "the floor must come from coverage_config.json, not a literal in "
+            "the script — the JSON is the shared source of truth.",
+        )
+
+    def test_guard_runs_before_deps_lock_and_configure(self) -> None:
+        # Ordering is the entire value of the check: after the lock or the
+        # configure it saves nothing.
+        text = SCRIPT.read_text()
+        guard = text.index('require_free_disk "${BUILD_DIR}"')
+        for later, desc in (
+            ("for tool in clang llvm-profdata llvm-cov", "dependency preflight"),
+            ("acquire_build_cov_lock\n", "build-cov lock"),
+            (self.BUILD_MARKER, "coverage configure"),
+            ("cmake -S ", "cmake invocation"),
+        ):
+            self.assertLess(
+                guard, text.index(later),
+                f"the free-disk check must run before the {desc}",
+            )
+
+    # ── end to end: below the floor ────────────────────────────────────────
+    def test_below_floor_exits_before_any_build(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 999_999)
+            r = _run_script(root)
+        self.assertEqual(
+            r.returncode, self.DISK_EXIT,
+            f"expected exit {self.DISK_EXIT} for a too-full volume; "
+            f"got {r.returncode}\n{r.stdout}\n{r.stderr}",
+        )
+        self.assertNotIn(
+            self.BUILD_MARKER, r.stdout + r.stderr,
+            "the coverage configure started anyway — the check must precede it",
+        )
+
+    def test_message_names_disk_space_and_the_remedy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 999_999)
+            r = _run_script(root)
+        out = r.stdout + r.stderr
+        # The exact phrase someone searches for; an exit code alone would let
+        # this regress into another silent "gate failure".
+        self.assertIn(self.DISK_PHRASE, out)
+        self.assertIn("NOT ENOUGH FREE DISK SPACE", out)
+        self.assertIn("NOT a coverage or code problem", out)
+        # It must name the actual numbers, the volume, and the way out.
+        self.assertIn("required", out)
+        self.assertIn("999999 GiB", out)
+        self.assertIn("clean_build_cov.sh --yes", out)
+        self.assertIn("PULP_DIFF_COVER_MIN_FREE_GIB", out)
+
+    # ── end to end: above the floor ────────────────────────────────────────
+    def test_sufficient_space_proceeds_past_the_guard(self) -> None:
+        # The check must be a precondition, not a new failure mode: with the
+        # floor satisfied the run continues to the next stage exactly as
+        # before. "Next stage" is either the dependency preflight (on a
+        # machine without the coverage toolchain) or the configure itself —
+        # both prove the guard passed through, and neither is exit 3.
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 0)
+            r = _run_script(root)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, self.DISK_EXIT, out)
+        self.assertNotIn(self.DISK_PHRASE, out)
+        self.assertTrue(
+            self.BUILD_MARKER in out or "missing required deps" in out,
+            f"run stopped before reaching the stage after the guard:\n{out}",
+        )
+
+    # ── the override ───────────────────────────────────────────────────────
+    def test_env_override_raises_the_floor_above_the_config(self) -> None:
+        # The repo's own config says 15; only the env var can produce 4242.
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 1)
+            r = _run_script(root, {"PULP_DIFF_COVER_MIN_FREE_GIB": "4242"})
+        self.assertEqual(r.returncode, self.DISK_EXIT, r.stdout + r.stderr)
+        self.assertIn("4242 GiB", r.stdout + r.stderr)
+
+    def test_env_override_lowers_the_floor_below_the_config(self) -> None:
+        # Same tree, same disk, config floor that WOULD block — the override
+        # must be able to let it through, or it is not an override.
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 999_999)
+            blocked = _run_script(root)
+            allowed = _run_script(root, {"PULP_DIFF_COVER_MIN_FREE_GIB": "0"})
+        self.assertEqual(blocked.returncode, self.DISK_EXIT)
+        self.assertNotEqual(
+            allowed.returncode, self.DISK_EXIT,
+            "PULP_DIFF_COVER_MIN_FREE_GIB=0 did not disable the check",
+        )
+
+    def test_unparseable_override_is_rejected_with_a_clear_message(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 1)
+            r = _run_script(root, {"PULP_DIFF_COVER_MIN_FREE_GIB": "lots"})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("invalid free-disk requirement", r.stderr)
+
+    # ── the measurement itself ─────────────────────────────────────────────
+    def test_guard_answers_both_ways_about_the_same_directory(self) -> None:
+        # A check that only ever fires, or only ever passes, proves nothing.
+        # Same directory, same disk, two floors, two answers.
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            probe = str(root)
+            low = _lib_eval(root, f'require_free_disk "{probe}" 1; echo "rc=$?"')
+            high = _lib_eval(
+                root, f'rc=0; require_free_disk "{probe}" 999999 || rc=$?; echo "rc=$rc"')
+        self.assertIn("rc=0", low.stdout, low.stderr)
+        self.assertIn(f"rc={self.DISK_EXIT}", high.stdout, high.stderr)
+        self.assertIn(self.DISK_PHRASE, high.stderr)
+
+    def test_zero_disables_the_check_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            r = _lib_eval(root, f'require_free_disk "{root}" 0; echo "rc=$?"')
+        self.assertIn("rc=0", r.stdout, r.stderr)
+        self.assertNotIn(self.DISK_PHRASE, r.stderr)
+
+    def test_unmeasurable_free_space_does_not_block(self) -> None:
+        # An instrument that cannot read must never block a push. With `df`
+        # broken the run continues, with a note rather than a refusal.
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            root = _fake_worktree(tmp, "wt")
+            shim = tmp / "bin"
+            shim.mkdir()
+            (shim / "df").write_text("#!/bin/sh\nexit 1\n")
+            (shim / "df").chmod(0o755)
+            r = _lib_eval(
+                root, f'require_free_disk "{root}" 999999; echo "rc=$?"',
+                env_extra={"PATH": f"{shim}:{os.environ['PATH']}"},
+            )
+        self.assertIn("rc=0", r.stdout, r.stderr)
+        self.assertIn("could not measure free disk space", r.stderr)
+
+    def test_stats_resolve_a_build_dir_that_does_not_exist_yet(self) -> None:
+        # build-cov is absent on a first run, and `df` on a missing path
+        # reports nothing — the check would silently no-op exactly when a
+        # fresh, largest build is about to start.
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            absent = root / "build-cov"
+            self.assertFalse(absent.exists())
+            missing = _lib_eval(root, f'diff_cover_disk_stats "{absent}"')
+            present = _lib_eval(root, f'diff_cover_disk_stats "{root}"')
+        self.assertRegex(missing.stdout.strip(), r"^\d+\t.+$")
+        self.assertEqual(
+            missing.stdout.split("\t")[1], present.stdout.split("\t")[1],
+            "a not-yet-created build dir must resolve to its ancestor's volume",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

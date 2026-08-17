@@ -2263,6 +2263,14 @@ same source consumed by the GitHub Actions coverage workflow.
 Set `PULP_SKIP_DIFF_COVER=1` for docs-only or workflow-only changes where the
 diff-coverage build is intentionally out of scope.
 
+The coverage build writes tens of GB, so it refuses to start when the volume
+holding `build-cov` is nearly full: it exits **3** with a message naming the
+free space, the requirement, and `tools/scripts/clean_build_cov.sh` as the way
+to reclaim stale coverage directories — rather than failing minutes later with
+an error that never mentions disk. The floor is `min_free_disk_gib` in
+`tools/scripts/coverage_config.json`; override it for one run with
+`PULP_DIFF_COVER_MIN_FREE_GIB=<gib>`, or set `0` to disable the check.
+
 ### dsp
 
 **Status**: experimental

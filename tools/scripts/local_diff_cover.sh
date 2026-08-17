@@ -21,15 +21,20 @@
 #   PULP_DIFF_COVER_CTEST_REGEX='State|WidgetBridge' tools/scripts/local_diff_cover.sh pulp-test-state
 #   PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh   # bypass
 #   PULP_DIFF_COVER_HTML_REPORT=/path/report.html tools/scripts/local_diff_cover.sh
+#   PULP_DIFF_COVER_MIN_FREE_GIB=5 tools/scripts/local_diff_cover.sh  # 0 disables
 #
 # Exit codes:
 #   0 — diff coverage at or above threshold (or skipped)
 #   1 — diff coverage below threshold, or a hard error during the run
 #   2 — missing required dependency (clear remediation message)
+#   3 — not enough free disk space to run the coverage build (nothing built)
 #
 # Design (mirrors CI):
 #   1. Read threshold + filters from coverage_config.json.
 #   2. If PULP_SKIP_DIFF_COVER=1 → exit 0 with a clear message.
+#   2b. Refuse to start when the coverage build volume is nearly full, before
+#      any configure or compile — a full disk otherwise surfaces minutes later
+#      as a coverage gate failure that never mentions disk.
 #   3. Configure build-cov/ separately from build/ to avoid churning
 #      the user's main CMake cache (Coverage requires Clang +
 #      PULP_ENABLE_COVERAGE=ON which conflicts with the default debug
@@ -155,6 +160,79 @@ acquire_build_cov_lock() {
     echo "$$" > "${BUILD_COV_LOCK}/pid"
 }
 
+# ── Free-disk precondition ─────────────────────────────────────────────────
+# A coverage build writes tens of GB into build-cov. When the volume is
+# already full, the configure below dies with its output redirected to
+# /dev/null and the pre-push hook reports `gate failure(s) above; blocking
+# push` — after ~20 minutes, and without the word "disk" anywhere in the
+# output. That has cost real sessions ~25 minutes each: the stated reason is
+# the coverage gate, so the natural next move is to go debug the diff.
+# Measuring free space first turns that into a one-line answer.
+diff_cover_disk_stats() {
+    # Print "<available-KiB>\t<mount-point>" for the filesystem holding $1.
+    # Walks up to the nearest EXISTING ancestor, because build-cov does not
+    # exist yet on a first run. `df -Pk` is the POSIX form: a header line then
+    # exactly one unwrapped record whose 4th field is available 1024-blocks.
+    # The mount point is everything from field 6 on, so a path with a space in
+    # it survives.
+    local dir="$1"
+    while [ -n "${dir}" ] && [ ! -d "${dir}" ] && [ "${dir}" != "/" ]; do
+        dir="$(dirname "${dir}")"
+    done
+    df -Pk "${dir}" 2>/dev/null | awk '
+        NR == 2 {
+            mount = $6
+            for (i = 7; i <= NF; i++) mount = mount " " $i
+            printf "%s\t%s\n", $4, mount
+        }'
+}
+
+require_free_disk() {
+    # $1 = directory the coverage build writes into, $2 = required whole GiB.
+    # Returns 0 when there is room, when the requirement is 0 (disabled), or
+    # when free space cannot be measured — an instrument that cannot read must
+    # never block a push. Returns 3 when the volume is too full to proceed.
+    local dir="$1" min_gib="$2" stats avail_kib mount min_kib avail_gib
+    [ "${min_gib}" -le 0 ] && return 0
+    # `|| true` because the script runs under `set -e -o pipefail`: a df that
+    # exits non-zero would otherwise kill the whole run right here with a bare
+    # exit 1 and no message — the same unexplained failure this check exists to
+    # replace. An unreadable instrument degrades to "skip", never to "block".
+    stats="$(diff_cover_disk_stats "${dir}" || true)"
+    avail_kib="${stats%%$'\t'*}"
+    mount="${stats#*$'\t'}"
+    if ! [[ "${avail_kib}" =~ ^[0-9]+$ ]]; then
+        echo "[local_diff_cover] note: could not measure free disk space for ${dir}; skipping the disk precondition" >&2
+        return 0
+    fi
+    min_kib=$(( min_gib * 1024 * 1024 ))
+    [ "${avail_kib}" -ge "${min_kib}" ] && return 0
+
+    avail_gib="$(awk -v kb="${avail_kib}" 'BEGIN{printf "%.1f", kb/1024/1024}')"
+    # Loud, in the same register as the pre-push hook's build banner, because
+    # this is read in a wall of gate output by someone who is one step away
+    # from going and debugging the wrong thing.
+    echo "" >&2
+    echo "┌──────────────────────────────────────────────────────────────────────┐" >&2
+    echo "│ local_diff_cover: NOT ENOUGH FREE DISK SPACE. Nothing was built.     │" >&2
+    echo "│ This is a DISK problem, NOT a coverage or code problem.              │" >&2
+    echo "└──────────────────────────────────────────────────────────────────────┘" >&2
+    echo "[local_diff_cover] free disk space below the diff-coverage precondition:" >&2
+    echo "[local_diff_cover]   coverage build dir : ${dir}" >&2
+    echo "[local_diff_cover]   volume             : ${mount}" >&2
+    echo "[local_diff_cover]   free disk space    : ${avail_gib} GiB" >&2
+    echo "[local_diff_cover]   required           : ${min_gib} GiB" >&2
+    echo "" >&2
+    echo "[local_diff_cover] Reclaim stale coverage build dirs across worktrees:" >&2
+    echo "[local_diff_cover]     tools/scripts/clean_build_cov.sh          # dry-run: what it would free" >&2
+    echo "[local_diff_cover]     tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated)" >&2
+    echo "" >&2
+    echo "[local_diff_cover] To lower or disable this precondition for one run:" >&2
+    echo "[local_diff_cover]     PULP_DIFF_COVER_MIN_FREE_GIB=5 …   (0 disables the check)" >&2
+    echo "[local_diff_cover] The default lives in coverage_config.json (min_free_disk_gib)." >&2
+    return 3
+}
+
 # Let tests source the helpers above without running a coverage build.
 if [ "${PULP_DIFF_COVER_LIB_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
@@ -198,6 +276,17 @@ if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
     echo "[local_diff_cover] invalid diff_coverage_fail_under in ${CONFIG_JSON}: '${THRESHOLD}'" >&2
     exit 1
 fi
+
+# Disk precondition, ahead of the dependency preflight, the fetch, the lock and
+# every line of build below — the whole point is to answer in milliseconds
+# rather than after a 20-minute configure + compile.
+MIN_FREE_GIB="${PULP_DIFF_COVER_MIN_FREE_GIB:-$(read_config_value min_free_disk_gib || echo "")}"
+if ! [[ "${MIN_FREE_GIB}" =~ ^[0-9]+$ ]]; then
+    echo "[local_diff_cover] invalid free-disk requirement '${MIN_FREE_GIB}': want whole GiB, from" >&2
+    echo "[local_diff_cover] PULP_DIFF_COVER_MIN_FREE_GIB or min_free_disk_gib in ${CONFIG_JSON}" >&2
+    exit 1
+fi
+require_free_disk "${BUILD_DIR}" "${MIN_FREE_GIB}" || exit 3
 
 # Per-file exclusions from the same source-of-truth (kept in lockstep
 # with .github/workflows/coverage.yml). diff-cover's `--exclude` flag
