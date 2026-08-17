@@ -196,10 +196,15 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "step in release-cli.yml.",
         )
 
-    def test_sdk_symbol_check_uses_view_core_archive(self) -> None:
-        """Phase 9 split keeps WebView symbols in the view-core archive."""
+    def test_sdk_symbol_check_scans_core_and_webview_archives(self) -> None:
+        """The WebView symbols may live in view-core (pre-split backfills)
+        or in the pulp-view-webview archive (current layout) — the gate
+        must scan both, and must not regress to the umbrella pulp-view
+        archive."""
         self.assertIn("sdk-staging/lib/libpulp-view-core.a", self.text)
+        self.assertIn("sdk-staging/lib/libpulp-view-webview.a", self.text)
         self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        self.assertIn("sdk-staging/lib/pulp-view-webview.lib", self.text)
         self.assertNotIn(
             'data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()',
             self.text,
@@ -386,6 +391,11 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_checks_view_core_archive(self) -> None:
         self.assertIn("sdk-staging/lib/pulp-view.lib", self.text)
         self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        # The PR-time gate must scan the same two archives as the tag-time
+        # gate in release-cli.yml, or the two drift (the WebView/view-core
+        # split updated only the product matrix and broke every release at
+        # tag time while this gate stayed green).
+        self.assertIn("sdk-staging/lib/pulp-view-webview.lib", self.text)
         self.assertNotIn(
             "Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); "
             "assert b'WebViewPanel'",
@@ -399,6 +409,177 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_ships_inspector_sdk(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
+
+
+class SdkSymbolGateBehavior(unittest.TestCase):
+    """Execute the ACTUAL SDK symbol gates against fabricated sdk trees.
+
+    The symbol asserts are inline snippets that historically only ran on
+    tag push, so a refactor moving a symbol between archives could not be
+    caught until a release was already building on an already-minted tag
+    (first casualty: v0.809.0, after the WebView/view-core split). These
+    tests extract the real snippet text from the workflow files — never a
+    copy of the logic, which would drift — and prove BOTH directions:
+    layouts that must pass (current split layout, pre-split backfill with
+    no webview archive at all) and regressions that must fail (symbols in
+    neither archive, the GPU-lane assert satisfied from the wrong
+    archive). A gate that cannot fail is worse than a stale one.
+    """
+
+    WV = b"WebViewPanel"
+    FE = b"make_webview_embedded_resource_fetcher"
+    GPU = b"MacGpuWindowHost"
+
+    @staticmethod
+    def _unix_gate_snippet() -> str:
+        text = RELEASE_CLI.read_text()
+        match = re.search(
+            r"python3 - <<'PY'\n(.*?)\n\s*PY\n",
+            text[text.index("Build SDK tarball (Unix)"):],
+            re.DOTALL,
+        )
+        assert match, "could not extract the Unix SDK symbol gate heredoc"
+        return textwrap.dedent(match.group(1))
+
+    @staticmethod
+    def _windows_gate_snippet(workflow: Path, step_name: str) -> str:
+        text = workflow.read_text()
+        match = re.search(
+            r'python -c "(.*?)"\n',
+            text[text.index(step_name):],
+            re.DOTALL,
+        )
+        assert match, f"could not extract the Windows SDK symbol gate from {workflow.name}"
+        return match.group(1)
+
+    def _run_gate(
+        self,
+        snippet: str,
+        *,
+        unix: bool,
+        core: bytes,
+        webview: bytes | None,
+        platform: str = "darwin-arm64",
+    ) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "sdk-staging" / "lib"
+            lib.mkdir(parents=True)
+            core_name = "libpulp-view-core.a" if unix else "pulp-view-core.lib"
+            webview_name = (
+                "libpulp-view-webview.a" if unix else "pulp-view-webview.lib"
+            )
+            (lib / core_name).write_bytes(core)
+            if webview is not None:
+                (lib / webview_name).write_bytes(webview)
+            env = dict(os.environ, MATRIX_PLATFORM=platform)
+            if unix:
+                cmd = [sys.executable, "-"]
+                return subprocess.run(
+                    cmd, input=snippet, cwd=tmp, env=env,
+                    capture_output=True, text=True,
+                )
+            return subprocess.run(
+                [sys.executable, "-c", snippet], cwd=tmp, env=env,
+                capture_output=True, text=True,
+            )
+
+    def assert_gate(self, expect_pass: bool, proc: subprocess.CompletedProcess,
+                    label: str) -> None:
+        if expect_pass:
+            self.assertEqual(
+                proc.returncode, 0,
+                f"{label}: expected PASS, got rc={proc.returncode}: {proc.stderr}",
+            )
+        else:
+            self.assertNotEqual(
+                proc.returncode, 0, f"{label}: expected FAIL but gate passed"
+            )
+            self.assertIn("AssertionError", proc.stderr, label)
+
+    def test_unix_gate_passes_current_split_layout(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.WV + self.FE
+        )
+        self.assert_gate(True, proc, "post-split darwin")
+
+    def test_unix_gate_passes_pre_split_backfill(self) -> None:
+        # Old-tag backfills predate the webview archive entirely; the
+        # `.exists()` conditional is load-bearing — a hard existence check
+        # would break every historical backfill.
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.WV + self.FE + self.GPU,
+            webview=None, platform="darwin-x64",
+        )
+        self.assert_gate(True, proc, "pre-split backfill darwin")
+
+    def test_unix_gate_fails_when_webview_symbol_in_neither_archive(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.FE
+        )
+        self.assert_gate(False, proc, "WebViewPanel in neither archive")
+
+    def test_unix_gate_fails_when_fetcher_symbol_in_neither_archive(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.WV
+        )
+        self.assert_gate(False, proc, "fetcher in neither archive")
+
+    def test_unix_gate_fails_without_webview_archive_or_core_symbols(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(snippet, unix=True, core=self.GPU, webview=None)
+        self.assert_gate(False, proc, "no webview archive, none in core")
+
+    def test_unix_gate_gpu_assert_not_satisfiable_from_webview_archive(self) -> None:
+        # The GPU-lane assert must keep reading view-core alone: the GPU
+        # window host belongs in the native archive, and a scan over the
+        # concatenation would let it drift into the WebView archive unseen.
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=b"",
+            webview=self.WV + self.FE + self.GPU,
+        )
+        self.assert_gate(False, proc, "MacGpuWindowHost only in view-webview")
+
+    def test_unix_gate_linux_skips_gpu_assert_but_needs_webview(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=b"", webview=self.WV + self.FE,
+            platform="linux-x64",
+        )
+        self.assert_gate(True, proc, "linux post-split")
+        proc = self._run_gate(
+            snippet, unix=True, core=b"", webview=b"", platform="linux-x64"
+        )
+        self.assert_gate(False, proc, "linux missing webview symbols")
+
+    def test_windows_gates_pass_split_and_backfill_fail_regression(self) -> None:
+        # release-cli.yml (tag time) and build.yml (PR time) each carry a
+        # Windows one-liner; both must accept either archive layout and
+        # both must still fail when the symbols are genuinely absent.
+        for workflow, step in (
+            (RELEASE_CLI, "Build SDK tarball (Windows)"),
+            (BUILD_WORKFLOW, "Verify installed SDK keeps WebView symbols"),
+        ):
+            snippet = self._windows_gate_snippet(workflow, step)
+            label = f"{workflow.name} windows gate"
+            proc = self._run_gate(
+                snippet, unix=False, core=b"", webview=self.WV + self.FE
+            )
+            self.assert_gate(True, proc, f"{label}: post-split")
+            proc = self._run_gate(
+                snippet, unix=False, core=self.WV + self.FE, webview=None
+            )
+            self.assert_gate(True, proc, f"{label}: pre-split backfill")
+            proc = self._run_gate(
+                snippet, unix=False, core=b"", webview=self.FE
+            )
+            self.assert_gate(False, proc, f"{label}: WebViewPanel absent")
+            proc = self._run_gate(snippet, unix=False, core=b"", webview=None)
+            self.assert_gate(False, proc, f"{label}: no webview archive")
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):

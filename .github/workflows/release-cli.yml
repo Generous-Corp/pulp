@@ -1077,7 +1077,10 @@ jobs:
           # pulp-view-webview archive (split out of view-core so native-only
           # consumers stop linking WebKit); old-tag backfills predate the
           # split and still carry the symbols in view-core, so accept them
-          # from either archive.
+          # from either archive. Note the gate is a substring scan over
+          # concatenated archives, so it proves "the SDK ships these symbols
+          # somewhere", not "in the correct archive" — it can no longer
+          # detect a symbol landing in the wrong library.
           webview = Path("sdk-staging/lib/libpulp-view-webview.a")
           scan = data + (webview.read_bytes() if webview.exists() else b"")
           assert b"WebViewPanel" in scan, "WebViewPanel symbol missing"
@@ -1138,7 +1141,9 @@ jobs:
           }
           # WebView symbols live in pulp-view-webview.lib after the
           # view-core/WebView split; old-tag backfills predate the split, so
-          # accept the symbols from either archive.
+          # accept the symbols from either archive. Substring scan over
+          # concatenated archives: proves the SDK ships the symbols
+          # somewhere, not that they are in the correct archive.
           python -c "from pathlib import Path; core = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); wv = Path(r'sdk-staging/lib/pulp-view-webview.lib'); data = core + (wv.read_bytes() if wv.exists() else b''); assert b'WebViewPanel' in data, 'WebViewPanel symbol missing'; assert b'make_webview_embedded_resource_fetcher' in data, 'make_webview_embedded_resource_fetcher symbol missing'"
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
