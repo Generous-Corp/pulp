@@ -537,6 +537,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/frequency_response.hpp",
+        "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
+        ),
+    },
+    {
         "include": "pulp/signal/signal.hpp",
         "fingerprint": "sha256:bc879a73eb268de2e20473aa41d1429e41e579fff6ec24855572988241e3bf90",
         "fingerprint": "sha256:7af0956d5c3124fa132a54aff00c2d84c80b7a6d053c39addbe9180ec07f7272",
