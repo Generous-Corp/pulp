@@ -1256,6 +1256,7 @@ disabling overflow. Nothing about either failure is visible without asking.
 |-------|--------------------|
 | `drift` | A variable was edited without updating the contract (or vice versa). The variable is a reviewed artifact, not a blind edit. |
 | `black-hole` | The lane's labels are satisfiable by no runner. |
+| `visibility-incomplete` | The lane's labels matched no runner, *and* a runner scope refused the census — so the check never looked everywhere it needed to. Reported at the lane's normal level (an error for a required lane), never below it: a genuinely dead org-scoped lane is indistinguishable from an unreadable one. |
 | `degraded` | The only matching runners are offline — the host may just be asleep. A warning, not an error: a different failure from a label nobody owns. |
 | `undeclared` | A live routing variable with no lane in the contract. |
 | `hosted-unknown` | A `runs-on` value that is not self-hosted and not a known GitHub image — i.e. a typo, which queues forever. |
@@ -1295,6 +1296,26 @@ workflow rather than driven by a variable. An ephemeral lane whose consuming
 workflow has not run inside the lookback window yields no evidence and is
 reported as a black hole — a false positive that is deliberately biased loud, on
 the grounds that a silent relief valve is what caused this in the first place.
+
+**Looked and found nothing vs. was not allowed to look.** Those two are not the
+same claim, and the checker no longer conflates them:
+
+- **No service evidence within the lookback window → `black-hole`.** The
+  checker read every scope it needs and found nothing behind the labels. The
+  loud bias above stays exactly as it is: a lane reported dead on thin evidence
+  costs an operator a minute, a lane reported healthy on none costs a queue
+  nobody can explain.
+- **A refused observation → `visibility-incomplete`, still an error.** Reading
+  `actions/runners` at org scope needs `Administration: Read`. Without it the
+  org query 403s, every org-group runner is invisible, and "no runner carries
+  these labels" becomes a claim the check never established — the exact
+  misreading that had two sessions declare the live Mac Pro Linux lane dead on
+  2026-08-16. So the verdict is renamed to what the evidence supports, and its
+  **severity is unchanged**: the workflow branches only on the exit code, and
+  its tracking issue auto-closes on a clean sweep, so demoting this would let a
+  persistent token-scope regression report green hourly and hide a real dead
+  lane behind a permissions bug. Fix the token scope, or verify the lane's
+  provisioner by hand — do not read it as either verdict.
 
 ### Where it runs, and why
 
