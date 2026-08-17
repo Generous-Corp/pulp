@@ -24,6 +24,7 @@
 
 #include "pulp/canvas/canvas.hpp"  // Color, Canvas::BlendMode
 
+#include <cstdint>
 #include <string>
 
 namespace pulp::canvas {
@@ -108,6 +109,21 @@ SkFont make_font(const std::string& family, float size,
                  int weight = SkFontStyle::kNormal_Weight,
                  int slant = 0,
                  bool non_opaque_dst = false);
+
+// False when PULP_TEXT_CACHE=0. Governs both the SkFont cache in
+// skia_canvas.cpp and the paragraph cache in skia_canvas_text.cpp, so a single
+// switch restores the historical build-per-draw behavior for A/B measurement
+// or for bisecting a suspected stale-text bug. Read once. Defined in
+// skia_canvas.cpp.
+bool text_cache_enabled();
+
+// Combined font-state generation: the bundled-registry counter
+// (`font_registration_generation()`) plus the scope counter
+// (`merged_generation_for()`). Both are monotonic, so the sum changes whenever
+// a font is registered through EITHER path. Text caches key on it so a font
+// arriving after first paint evicts entries instead of being ignored. Defined
+// in skia_canvas.cpp.
+std::uint64_t text_cache_generation();
 
 } // namespace pulp::canvas
 

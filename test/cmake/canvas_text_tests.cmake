@@ -328,3 +328,14 @@ endif()
 # degenerate guard (a zero-width path scaled to a non-zero width is a division by
 # zero, and the "result" is a path of NaNs that renders as nothing, forever).
 pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
+
+# Text-path caching. fill_text builds an SkFont and an SkParagraph per draw;
+# a continuously repainting UI redraws immutable ruler/axis labels every frame,
+# so that construction recurs at frame rate for an unchanging shaped result.
+# These cases pin what any cache there must preserve: identical inputs render
+# identically, and colour / size / weight / letter-spacing / family / registry
+# generation all still change the pixels. Carries a hidden [.perf] workload
+# case used to measure the text path.
+pulp_add_test_suite(pulp-test-canvas-text-cache LIBRARIES pulp::canvas
+    COMPILE_DEFINITIONS
+    "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")

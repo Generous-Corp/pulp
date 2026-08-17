@@ -45,6 +45,8 @@
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
+#include <pulp/canvas/font_scope.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/text_font_context.hpp>
@@ -233,6 +235,86 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
 }
 
+namespace {
+
+// ── SkFont cache ────────────────────────────────────────────────────────────
+//
+// make_font() resolves a typeface through FontResolver on every call. For a
+// comma-separated CSS family ("Inter, sans-serif") that means splitting the
+// list, constructing a FontOptions per entry, and a family-name comparison per
+// candidate — all allocating. fill_text() calls make_font() for every text
+// draw, so a canvas that repaints continuously pays the full resolution at
+// frame rate to rebuild a font that has not changed.
+//
+// The key carries every input make_font() consults, plus the font-registry
+// generation. merged_generation_for() is documented as the eviction signal for
+// downstream caches, so a font registered after first paint (async webfont
+// load, design-import hot reload) invalidates these entries instead of pinning
+// a stale typeface for the life of the process.
+struct FontCacheKey {
+    std::string   family;
+    float         size = 0.0f;
+    int           weight = 0;
+    int           slant = 0;
+    bool          non_opaque_dst = false;
+    std::uint64_t generation = 0;
+    bool operator==(const FontCacheKey&) const = default;
+};
+
+struct FontCacheKeyHash {
+    std::size_t operator()(const FontCacheKey& k) const noexcept {
+        std::size_t h = std::hash<std::string>{}(k.family);
+        const auto mix = [&h](std::size_t v) {
+            h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        mix(std::hash<float>{}(k.size));
+        mix(static_cast<std::size_t>(k.weight));
+        mix(static_cast<std::size_t>(k.slant));
+        mix(static_cast<std::size_t>(k.non_opaque_dst));
+        mix(std::hash<std::uint64_t>{}(k.generation));
+        return h;
+    }
+};
+
+// Distinct (family, size, weight, slant) combinations in a real UI number in
+// the tens. 128 leaves room for animated font sizes without letting a
+// pathological caller grow the map without bound. On overflow the map is
+// cleared wholesale rather than evicted one entry at a time: the working set
+// is small enough that refilling it costs less than maintaining LRU order on
+// every hit, and a cleared cache is never *wrong* — only briefly cold.
+constexpr std::size_t kFontCacheMax = 128;
+
+}  // namespace
+
+// Kill switch, read once. Setting PULP_TEXT_CACHE=0 restores the
+// build-every-time behavior; it is how the caches are measured, and an escape
+// hatch if a cache is ever suspected of serving stale text in the field.
+// Shared with the paragraph cache in skia_canvas_text.cpp so one switch
+// governs the whole text path.
+bool text_cache_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("PULP_TEXT_CACHE");
+        return !(v && v[0] == '0');
+    }();
+    return enabled;
+}
+
+// Font state can be mutated through two independent paths, and a cache that
+// watches only one of them serves stale text after the other fires:
+//
+//   * `register_font()` / `register_font_url()` mutate the process-global
+//     bundled registry and bump `font_registration_generation()`, which exists
+//     specifically so the caches in this file can invalidate themselves.
+//   * `FontScope::register_font()` mutates a Global/Plugin/View scope and is
+//     observed through `merged_generation_for()`.
+//
+// Both counters are monotonic, so their sum is monotonic and changes whenever
+// either side does. Keying on the sum covers both paths with one value.
+std::uint64_t text_cache_generation() {
+    return font_registration_generation()
+         + merged_generation_for(FontScopeId::global());
+}
+
 SkFont make_font(const std::string& family, float size,
                         int weight = SkFontStyle::kNormal_Weight,
                         int slant = 0,
@@ -241,7 +323,21 @@ SkFont make_font(const std::string& family, float size,
     // If size is 0 here, fill_text records commands but produces zero-height
     // glyphs; clamp to a minimal visible default so labels render even when the
     // JS-side font sync races the paint.
+    // Normalized BEFORE the cache key is built so size 0 and size 14 share one
+    // entry rather than resolving the same font twice.
     if (!(size > 0.0f)) size = 14.0f;
+
+    // Per-thread so the hot path takes no lock: measure callbacks can run off
+    // the paint thread, and the duplicate entry set per thread is bounded.
+    thread_local std::unordered_map<FontCacheKey, SkFont, FontCacheKeyHash> cache;
+    const bool use_cache = text_cache_enabled();
+    FontCacheKey key;
+    if (use_cache) {
+        key = FontCacheKey{family, size, weight, slant, non_opaque_dst,
+                           text_cache_generation()};
+        if (auto it = cache.find(key); it != cache.end()) return it->second;
+    }
+
     font.setSize(size);
     font.setSubpixel(true);                               // Subpixel glyph positioning
     // LCD subpixel AA visibly degrades when the destination surface isn't
@@ -277,6 +373,16 @@ SkFont make_font(const std::string& family, float size,
         if (!typeface) typeface = bundled_fallback_typeface();
     }
     if (typeface) font.setTypeface(std::move(typeface));
+
+    // Only a font that actually resolved a typeface is worth keeping. A failed
+    // resolution is frequently transient — an async webfont that has not landed
+    // yet — and caching the failure would freeze the fallback in place even
+    // after the real face registers. Re-resolving on failure matches the
+    // pre-cache behavior exactly.
+    if (use_cache && font.getTypeface()) {
+        if (cache.size() >= kFontCacheMax) cache.clear();
+        cache.emplace(std::move(key), font);
+    }
 
     return font;
 }
