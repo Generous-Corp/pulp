@@ -167,6 +167,7 @@ setBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cp
 createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgPath
 setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.d
 setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.viewBox
+setSvgStretchToBounds	svg	function	core/view/src/widget_bridge/svg_api.cpp	internal
 setSvgFill	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fill
 setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillGradient
 setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillRule

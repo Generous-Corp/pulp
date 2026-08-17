@@ -1927,11 +1927,26 @@ Checks worth doing before believing a designed-control skin works:
   `painter()` and not `effective_painter()` for the install assertion, because
   the latter walks up to an ancestor and will pass on a widget that was never
   skinned itself.
-- A designed control's **Chrome-relative pixel diff is not a success metric.**
-  The design authors a bare track or a bare disc and the widget supplies the
-  value layer, so the oracle has no fill, no thumb and no arc to match. Fixing a
-  designed fader makes that region score WORSE against Chrome while being more
-  correct. Judge it by what the widget stopped overpainting, not by the number.
+- A designed FADER's **Chrome-relative pixel diff is not a success metric.**
+  The design authors a bare track and the widget supplies the fill/thumb, so the
+  oracle has nothing to match there. Judge a fader by what the widget stopped
+  overpainting, not by the number. A designed KNOB is the opposite (next point):
+  its value layer is authored-gated, so its Chrome diff IS the metric.
+
+**A designed knob's value layer is authored-gated — no authored ring/pointer,
+no pixels.** The skin used to synthesize the full arc gauge (accent value arc +
+grey track + derived tick) on every designed knob. On a captured panel whose
+knobs are plain gradient dials (`data-pulp-paint`, no `data-pulp-indicator`)
+that painted arcs the reference never shows, riding OUTSIDE the authored dial —
+the single largest bucket (~42%) of a real strict-fidelity failure. Now
+`apply_designed_body_skin` sets `DesignedControlSkin::draw_ring` only when the
+design declared a ring (`design_ring_radius > 0`) and `draw_indicator` only for
+an authored pointer (`knob_ind_r_out > 0`) or that declared ring; with neither,
+`paint_rotary` still returns true (the stock body stays suppressed) but emits
+nothing, so the authored body beneath is the whole appearance. A design that
+wants a moving part must author `data-pulp-indicator` — Pulp never substitutes
+its own knob art. (`paint_mod_ring_knob` grew matching `draw_track_and_fill` /
+`draw_indicator` flags, default true, so stock knobs are untouched.)
 
 **The control's box IS the design's body box.** It comes from the author's
 `[data-pulp-paint]` rect (`browser_capture/semantics.mjs`, `paintBox`), which in
@@ -6064,12 +6079,34 @@ own capture. Read `native_svg_lowered` / `native_svg_refused` /
 `native_svg_shapes` on the IR root beside those per-node strings: the residual
 is meant to be a list of constructs, not a total.
 
-Two refusals are easy to get wrong in the permissive direction, and both draw a
-plausible-looking WRONG picture rather than nothing: `<switch>` renders the
-FIRST child whose requirement attributes hold, so walking it as a plain group
-draws every alternative stacked; and a non-default `preserveAspectRatio`
-(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
-renderer's fixed `xMidYMid meet` will not.
+`<switch>` is easy to get wrong in the permissive direction, and it draws a
+plausible-looking WRONG picture rather than nothing: it renders the FIRST child
+whose requirement attributes hold, so walking it as a plain group draws every
+alternative stacked.
+
+**`preserveAspectRatio` is carried for `none`, refused for the rest.** `none`
+scales each axis onto the box independently with no centring — a transform the
+renderer can build from the box and the viewBox it already has — so it lowers
+and rides to `SvgPathWidget::set_stretch_to_bounds` via a
+`svg_preserve_aspect_ratio` attribute beside `svg_viewbox`. A non-centre
+alignment (`xMinYMax`) needs a per-axis offset rule, and `slice` overflows and
+crops; both still refuse.
+
+Do not read the old refusal as "stretching is a small cosmetic error worth
+avoiding". A wide, short drawing is where the value is load-bearing, and the
+refusal was not a letterboxed trace — it was NO trace, because nothing attaches
+a raster to a fallback node. One `<svg viewBox="0 0 380 108"
+preserveAspectRatio="none">` waveform in a 1000x649 panel opened a hole worth
+6% of the design, which `native panel validation refused:` then turned into an
+outright import failure rather than a few lost points. Weigh a candidate
+refusal by what the fallback actually renders (nothing), not by how far off a
+best-effort draw would have been.
+
+Match the value with whitespace collapsed, not raw: `preserveAspectRatio` is
+two space-separated tokens and an author who wrapped the attribute across lines
+wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
+third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
+alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
 **Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
 miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
@@ -6148,6 +6185,40 @@ stroke IS there. Both consumers already understand the literal string `none`
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
 
+**Read `capture_fallback_reason` before you believe what the hole IS.** A
+`native panel validation refused: N painted element fallback(s) have no native
+painter` message names a count, not a construct, and the obvious guess is wrong
+often enough to cost hours. `<canvas>` ALREADY has a native painter: the
+capture writes a `canvas-snapshot` PNG per canvas (`captureCanvasAssets` in
+`browser_capture/capture.mjs`), `browser_capture_ir.cpp` binds it by
+`backend_node_id` into `captured_element_assets`, and `lower_painted_tree`
+emits an `image` node carrying `asset_ref`. A canvas only falls back when that
+asset is MISSING for its node.
+
+So do not start from the element type you expect. Open the emitted IR and read
+the fallback node's own `capture_fallback_element` / `capture_fallback_reason`
+/ `capture_fallback_detail`, and check the area against
+`native_nodes_unpainted_area_fraction`:
+
+```
+python3 - <<'EOF'
+import json; r=json.load(open("design.json"))["root"]
+def walk(n):
+    a=n.get("attributes") or {}
+    if a.get("unpainted")=="true":
+        s=n.get("style") or {}
+        print(a.get("capture_fallback_element"), a.get("capture_fallback_reason"),
+              a.get("capture_fallback_detail"), s.get("width"), s.get("height"))
+    for c in n.get("children") or []: walk(c)
+walk(r)
+EOF
+```
+
+A `width*height` that divides into the root's area to give exactly the reported
+fraction confirms you have found the right node. A design whose "blank waveform
+canvas" turned out to be an `<svg preserveAspectRatio="none">` was diagnosed in
+one command this way, after the element-type guess had already been acted on.
+
 **One place decides a node is a captured element.** Two conditions reach the
 element-capture fallback — an element style cannot describe, and an `<svg>`
 whose shapes refused — and they are `capture_fallback()` in
@@ -6176,12 +6247,34 @@ own capture. Read `native_svg_lowered` / `native_svg_refused` /
 `native_svg_shapes` on the IR root beside those per-node strings: the residual
 is meant to be a list of constructs, not a total.
 
-Two refusals are easy to get wrong in the permissive direction, and both draw a
-plausible-looking WRONG picture rather than nothing: `<switch>` renders the
-FIRST child whose requirement attributes hold, so walking it as a plain group
-draws every alternative stacked; and a non-default `preserveAspectRatio`
-(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
-renderer's fixed `xMidYMid meet` will not.
+`<switch>` is easy to get wrong in the permissive direction, and it draws a
+plausible-looking WRONG picture rather than nothing: it renders the FIRST child
+whose requirement attributes hold, so walking it as a plain group draws every
+alternative stacked.
+
+**`preserveAspectRatio` is carried for `none`, refused for the rest.** `none`
+scales each axis onto the box independently with no centring — a transform the
+renderer can build from the box and the viewBox it already has — so it lowers
+and rides to `SvgPathWidget::set_stretch_to_bounds` via a
+`svg_preserve_aspect_ratio` attribute beside `svg_viewbox`. A non-centre
+alignment (`xMinYMax`) needs a per-axis offset rule, and `slice` overflows and
+crops; both still refuse.
+
+Do not read the old refusal as "stretching is a small cosmetic error worth
+avoiding". A wide, short drawing is where the value is load-bearing, and the
+refusal was not a letterboxed trace — it was NO trace, because nothing attaches
+a raster to a fallback node. One `<svg viewBox="0 0 380 108"
+preserveAspectRatio="none">` waveform in a 1000x649 panel opened a hole worth
+6% of the design, which `native panel validation refused:` then turned into an
+outright import failure rather than a few lost points. Weigh a candidate
+refusal by what the fallback actually renders (nothing), not by how far off a
+best-effort draw would have been.
+
+Match the value with whitespace collapsed, not raw: `preserveAspectRatio` is
+two space-separated tokens and an author who wrapped the attribute across lines
+wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
+third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
+alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
 **Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
 miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick

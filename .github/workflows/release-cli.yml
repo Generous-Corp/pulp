@@ -784,9 +784,17 @@ jobs:
           # runner cannot stamp a 15.0 floor that would lock out macOS 13/14 Intel
           # Macs. Passing 13.0 here would only trip PulpMinOs's "below the floor,
           # raising it" warning.
+          # PULP_BUILD_EXAMPLES=OFF: the release ships no example binaries —
+          # nothing in package_cli.py, the SDK staging, or the product-matrix
+          # member lists references one — yet the option defaults ON and this
+          # build has no --target, so every leg was compiling ~89 example
+          # executables and discarding them. CMakeLists.txt names
+          # `-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF` as the intended
+          # stripped-build pairing; the release had only taken half of it.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $INSPECTOR \
             $REQUIRE_GPU \
@@ -799,7 +807,35 @@ jobs:
         # On Linux this is built WITHOUT WebView so the CLI binary stays
         # portable; the SDK reconfigure step below adds WebView back so the
         # SDK tarball still ships WebViewPanel symbols.
-        run: cmake --build build --config Release
+        #
+        # PARALLELISM IS EXPLICIT HERE, NEVER DEFAULTED. `cmake --build` with no
+        # job count under the Unix Makefiles generator (the default on these
+        # runners — nothing sets -G Ninja or CMAKE_BUILD_PARALLEL_LEVEL) runs
+        # `make` with NO -j: one translation unit at a time. That serialized
+        # every release leg — ~1,700 TUs compiled single-threaded, ~50 min of
+        # the ~55 min darwin leg — and nothing flagged it, because
+        # build_parallelism_guard.py polices unbounded/whole-machine counts,
+        # not their silent opposite. Verified from the v0.806.1 leg log:
+        # Makefiles `[ NN%]` progress lines, strictly monotonic (a parallel
+        # make interleaves them out of order).
+        #
+        # Full visible core count is the DELIBERATE bound on this lane, not an
+        # oversight: every release leg runs on an ephemeral, single-tenant
+        # runner (GitHub-hosted image or a dedicated release Tart VM), so the
+        # host-melt concern behind the governed-share rule in build.yml does
+        # not apply — admission control happens at the VM/runner level (how
+        # many release VMs a host boots), not by throttling each build. The
+        # count is still explicit, so build_parallelism_guard.py's bare-flag
+        # class stays satisfied. The cores/memory echo exists so run logs
+        # record what the runner actually offered — if a leg ever OOMs here,
+        # the fix is more RAM per release VM or fewer concurrent VMs, and the
+        # log carries the numbers to decide with.
+        run: |
+          set -euo pipefail
+          jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+          mem="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/ {print $2 * 1024; exit}' /proc/meminfo 2>/dev/null || echo unknown)"
+          echo "Build parallelism: --parallel ${jobs} (visible cores=${jobs}, mem_bytes=${mem})"
+          cmake --build build --config Release --parallel "$jobs"
         shell: bash
 
       - name: Normalize CLI binary layout (Unix)
@@ -973,7 +1009,7 @@ jobs:
       # #720). For the SDK tarball, do a SEPARATE configure+build into
       # `build-sdk/` with WebView=ON so plugin authors who consume the
       # SDK still get WebViewPanel + make_webview_embedded_resource_fetcher
-      # symbols in the split view-core archive. Using a separate build directory
+      # symbols in the pulp-view-webview archive. Using a separate build directory
       # avoids re-linking the already-built CLI binary against
       # libwebkit2gtk during the reconfigure (which would defeat the
       # purpose of the split).
@@ -1002,6 +1038,7 @@ jobs:
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $INSPECTOR \
             $REQUIRE_GPU \
@@ -1009,7 +1046,12 @@ jobs:
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
           # binary (built in `build/` with WebView=OFF) portable.
-          cmake --build build-sdk --config Release
+          # Explicit full-core parallelism, same rationale + guard contract as
+          # the "Build" step above (ephemeral single-tenant runner; a bare
+          # `cmake --build` here is a silent -j1 under Unix Makefiles).
+          jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+          echo "SDK build parallelism: --parallel ${jobs}"
+          cmake --build build-sdk --config Release --parallel "$jobs"
         shell: bash
 
       - name: Report Linux SDK glibc floor (min-OS validation)
@@ -1073,9 +1115,18 @@ jobs:
           from pathlib import Path
           platform = os.environ["MATRIX_PLATFORM"]
           data = Path("sdk-staging/lib/libpulp-view-core.a").read_bytes()
-          # WebView lane (existing).
-          assert b"WebViewPanel" in data, "WebViewPanel symbol missing"
-          assert b"make_webview_embedded_resource_fetcher" in data, (
+          # WebView lane. The WebView bridge lives in its own
+          # pulp-view-webview archive (split out of view-core so native-only
+          # consumers stop linking WebKit); old-tag backfills predate the
+          # split and still carry the symbols in view-core, so accept them
+          # from either archive. Note the gate is a substring scan over
+          # concatenated archives, so it proves "the SDK ships these symbols
+          # somewhere", not "in the correct archive" — it can no longer
+          # detect a symbol landing in the wrong library.
+          webview = Path("sdk-staging/lib/libpulp-view-webview.a")
+          scan = data + (webview.read_bytes() if webview.exists() else b"")
+          assert b"WebViewPanel" in scan, "WebViewPanel symbol missing"
+          assert b"make_webview_embedded_resource_fetcher" in scan, (
               "make_webview_embedded_resource_fetcher symbol missing"
           )
           # GPU lane (new — prevents pulp #1817 from regressing).
@@ -1130,7 +1181,12 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
             throw "sdk-staging/lib/pulp-view-core.lib missing"
           }
-          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+          # WebView symbols live in pulp-view-webview.lib after the
+          # view-core/WebView split; old-tag backfills predate the split, so
+          # accept the symbols from either archive. Substring scan over
+          # concatenated archives: proves the SDK ships the symbols
+          # somewhere, not that they are in the correct archive.
+          python -c "from pathlib import Path; core = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); wv = Path(r'sdk-staging/lib/pulp-view-webview.lib'); data = core + (wv.read_bytes() if wv.exists() else b''); assert b'WebViewPanel' in data, 'WebViewPanel symbol missing'; assert b'make_webview_embedded_resource_fetcher' in data, 'make_webview_embedded_resource_fetcher symbol missing'"
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk
@@ -1908,5 +1964,19 @@ jobs:
             fi
           fi
 
-          gh release edit "${TAG}" --repo "${REPO}" --draft=false ${latest_flag}
+          # Classify the one publish failure that no retry can ever fix: GitHub
+          # permanently reserves the tag name of a DELETED published (immutable)
+          # release, so the flip 422s with "tag_name was used by an immutable
+          # release" on every attempt, forever. Without classification this
+          # surfaces as a bare HTTP 422 after a full multi-platform build, and
+          # the obvious-looking "cleanup" (deleting the draft) is exactly the
+          # act that burns MORE tag names. Name the condition and the recovery.
+          if ! publish_output=$(gh release edit "${TAG}" --repo "${REPO}" --draft=false ${latest_flag} 2>&1); then
+            printf '%s\n' "${publish_output}" >&2
+            if grep -qi "immutable release" <<<"${publish_output}"; then
+              echo "::error::${TAG} can never publish: a published (immutable) release previously used this tag name and was deleted, and GitHub reserves the name forever. Re-dispatching this workflow will always fail the same way. Recovery: ship a NEW patch tag (docs/guides/release-watchdog.md). Do NOT delete this draft or any release — deletion is what burns tag names. Every built binary also survives as this run's workflow artifacts, independent of the draft."
+            fi
+            exit 1
+          fi
+          printf '%s\n' "${publish_output}"
           echo "::notice::Published ${TAG} with $(( ${#required_assets[@]} + 1 )) assets."

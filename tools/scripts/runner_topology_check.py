@@ -20,6 +20,11 @@ WHAT IT CHECKS
     undeclared   — a live `*_RUNS_ON_JSON` variable with no lane. A new lane
                    added without a contract row.
     black-hole   — the lane's labels are satisfiable by no runner.
+    visibility-incomplete
+                 — the labels matched nothing, but a runner scope REFUSED the
+                   query, so the census never looked everywhere. Reported at
+                   the lane's normal level, not below it: a real black hole on
+                   an org-scoped lane is indistinguishable from this.
     degraded     — the only runners that match are offline (may just be asleep).
     hosted       — a GitHub-hosted scalar outside the allowlist (typo catch).
     must-unset   — a variable contracted to stay unset is set (cost guard).
@@ -130,6 +135,20 @@ class Finding:
     detail: str
 
 
+@dataclass
+class RunnerInventory:
+    """The runner census, plus an honest account of what it could not see.
+
+    `unread_scopes` is load-bearing and separate from `warnings`: a scope that
+    REFUSED the query is not a scope that answered "no runners". Adjudicating
+    the two alike is how a check ends up asserting a fleet state it never
+    observed, so the refusal travels as data rather than as prose.
+    """
+    runners: list[Runner] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    unread_scopes: list[str] = field(default_factory=list)
+
+
 # ── Contract loading ────────────────────────────────────────────────────
 
 
@@ -217,13 +236,13 @@ def fetch_runners(repo: str) -> list[Runner]:
     surfaced, never swallowed — a silent fallback to repo-only would reproduce
     the exact failure this exists to prevent.
     """
-    runners, _ = fetch_runner_inventory(repo)
-    return runners
+    return fetch_runner_inventory(repo).runners
 
 
-def fetch_runner_inventory(repo: str) -> tuple[list[Runner], list[str]]:
-    """Return `(runners, warnings)`; warnings name any scope that was skipped."""
+def fetch_runner_inventory(repo: str) -> RunnerInventory:
+    """Census both scopes, and report which ones refused to answer."""
     warnings: list[str] = []
+    unread_scopes: list[str] = []
     by_name: dict[str, Runner] = {}
 
     repo_payload = _api([f"repos/{repo}/actions/runners", "--paginate"])
@@ -240,6 +259,7 @@ def fetch_runner_inventory(repo: str) -> tuple[list[Runner], list[str]]:
             # not know the org scope was skipped will read a partial inventory
             # as a complete one.
             detail = (exc.stderr or "").strip().splitlines()
+            unread_scopes.append(f"orgs/{org}")
             warnings.append(
                 f"org runner scope orgs/{org} was NOT read "
                 f"({detail[-1][:160] if detail else 'unknown error'}); "
@@ -250,7 +270,11 @@ def fetch_runner_inventory(repo: str) -> tuple[list[Runner], list[str]]:
             for runner in parse_runners(org_payload):
                 by_name.setdefault(runner.name, runner)
 
-    return list(by_name.values()), warnings
+    return RunnerInventory(
+        runners=list(by_name.values()),
+        warnings=warnings,
+        unread_scopes=unread_scopes,
+    )
 
 
 def _count_warnings(payload: Any, scope: str) -> list[str]:
@@ -481,6 +505,7 @@ def check(
     variables: dict[str, str],
     evidence: Any,
     workflows_dir: Path | None = None,
+    unread_scopes: list[str] | None = None,
 ) -> list[Finding]:
     """`evidence` is a callable lane -> list of served label sets, invoked ONLY
     when an ephemeral lane has no live runner. A list is accepted for
@@ -489,6 +514,10 @@ def check(
 
     `workflows_dir` enables the selector-parsing check. It is optional so that
     offline fixture runs, which have no workflow tree, keep working unchanged.
+
+    `unread_scopes` names the runner scopes that refused the census (see
+    `RunnerInventory`). It downgrades no verdict — it only replaces the claim
+    "nothing serves this lane" with the claim the evidence actually supports.
     """
     if not callable(evidence):
         evidence = static_evidence(evidence)
@@ -534,7 +563,8 @@ def check(
         ))
 
     for lane in contract.lanes:
-        findings.extend(_check_lane(lane, contract, runners, variables, evidence))
+        findings.extend(_check_lane(lane, contract, runners, variables, evidence,
+                                    unread_scopes or []))
 
     return findings
 
@@ -545,6 +575,7 @@ def _check_lane(
     runners: list[Runner],
     variables: dict[str, str],
     evidence: Any,
+    unread_scopes: list[str],
 ) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -570,7 +601,8 @@ def _check_lane(
             ))
             return findings
         return _check_target(lane, contract, runners, evidence, lane.unset_fallback,
-                             origin="workflow fallback (variable unset)")
+                             origin="workflow fallback (variable unset)",
+                             unread_scopes=unread_scopes)
 
     # ── drift: the variable must match what the contract says it routes to.
     actual_raw = variables[lane.variable]
@@ -632,7 +664,7 @@ def _check_lane(
         target = lane.expect
 
     findings.extend(_check_target(lane, contract, runners, evidence, target,
-                                  origin="variable"))
+                                  origin="variable", unread_scopes=unread_scopes))
     return findings
 
 
@@ -643,6 +675,7 @@ def _check_target(
     evidence: Any,
     target: Any,
     origin: str,
+    unread_scopes: list[str] | None = None,
 ) -> list[Finding]:
     """Can anything actually serve this `runs-on` value?"""
     findings: list[Finding] = []
@@ -709,12 +742,28 @@ def _check_target(
                 "within the lookback window: the provisioner is alive and idle.",
             ))
             return findings
+        if unread_scopes:
+            findings.append(_visibility_incomplete(
+                lane, labels_str, unread_scopes,
+                f"It has also served no job in the last {contract.lookback_hours}h, "
+                "which is what an idle provisioner behind an unreadable scope "
+                "looks like too.",
+            ))
+            return findings
         findings.append(Finding(
             _level_for(lane), "black-hole", lane.variable,
             f"{labels_str} is carried by NO registered runner and has served NO "
             f"job in the last {contract.lookback_hours}h. Nothing provisions it. "
             "Jobs routed here queue forever with no error. "
             f"Purpose: {lane.purpose}",
+        ))
+        return findings
+
+    if unread_scopes:
+        findings.append(_visibility_incomplete(
+            lane, labels_str, unread_scopes,
+            "A runner registered in that scope would carry these labels and "
+            "never appear here.",
         ))
         return findings
 
@@ -725,6 +774,34 @@ def _check_target(
         f"Purpose: {lane.purpose}",
     ))
     return findings
+
+
+def _visibility_incomplete(
+    lane: Lane,
+    labels_str: str,
+    unread_scopes: list[str],
+    census_note: str,
+) -> Finding:
+    """The lane matched nothing, but the census did not read every scope.
+
+    Emitted at the lane's NORMAL level, never below it. Downgrading it would
+    make a persistent token-scope regression report green every hour and
+    auto-close its own tracking issue, hiding a genuinely dead lane behind a
+    permissions bug — the exact substitution of "unobserved" for "healthy"
+    that the union of scopes exists to prevent.
+    """
+    scopes = ", ".join(unread_scopes)
+    return Finding(
+        _level_for(lane), "visibility-incomplete", lane.variable,
+        f"{labels_str} is carried by no runner the census could see — but the "
+        f"census is INCOMPLETE: {scopes} refused the query, so runners "
+        f"registered there were never read. {census_note} "
+        "This is NOT downgraded to a warning, because a genuine black hole on "
+        "an org-scoped lane looks exactly like this. Restore the token's "
+        f"`Administration: Read` scope for {scopes}, or verify this lane's "
+        "provisioner manually, before treating the lane as either healthy or "
+        f"dead. Purpose: {lane.purpose}",
+    )
 
 
 # ── Reporting ───────────────────────────────────────────────────────────
@@ -750,6 +827,15 @@ def render(findings: list[Finding]) -> str:
         lines.append("'jobs pile up while the pool looks busy', never an error.")
         lines.append("Fix by reconciling the repo variable and this contract, or by")
         lines.append("bringing the provisioner for those labels back online.")
+        if any(f.kind == "visibility-incomplete" for f in findings):
+            # This summary is what the tracking issue shows first, so it must
+            # not send an operator to reroute a lane when the actual defect is
+            # that the census could not read a runner scope.
+            lines.append("")
+            lines.append("SOME LANES ABOVE WERE NOT FULLY OBSERVED: a runner scope refused")
+            lines.append("the census, so their labels matched nothing that could be read.")
+            lines.append("Repair the token scope before rerouting anything — until then")
+            lines.append("neither 'healthy' nor 'dead' is established for those lanes.")
     elif warns:
         lines.append("")
         lines.append(f"runner-topology: OK ({len(warns)} warning(s)).")
@@ -784,6 +870,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     offline_inputs = bool(args.runners_json and args.variables_json)
+    unread_scopes: list[str] = []
     if offline_inputs:
         runners = parse_runners(json.loads(args.runners_json.read_text()))
         variables = parse_variables(json.loads(args.variables_json.read_text()))
@@ -792,8 +879,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.jobs_json else [])
     else:
         try:
-            runners, inventory_warnings = fetch_runner_inventory(args.repo)
-            for warning in inventory_warnings:
+            inventory = fetch_runner_inventory(args.repo)
+            runners = inventory.runners
+            unread_scopes = inventory.unread_scopes
+            for warning in inventory.warnings:
                 print(f"runner-topology: WARNING: {warning}", file=sys.stderr)
             variables = fetch_variables(args.repo)
         except FileNotFoundError:
@@ -816,7 +905,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.repo, contract.lookback_hours, consumers,
                 contract.runs_per_workflow, manual_only=lane.dispatch_only)
 
-    findings = check(contract, runners, variables, evidence, workflows_dir)
+    findings = check(contract, runners, variables, evidence, workflows_dir,
+                     unread_scopes)
 
     if args.json:
         print(json.dumps([{

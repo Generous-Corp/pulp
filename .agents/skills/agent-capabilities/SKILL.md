@@ -68,6 +68,12 @@ compile fixture proves the intended signature without leaking fixture syntax
 into the installed contract. Each overload still needs its own operational
 probe with arguments that select and invoke that overload.
 
+If generation reports that a new public header is unclassified or has no
+covered public target owner, do not retry `--write` or add a blanket exception.
+Add the curated capability or reviewed disposition first, register the exact
+minimal owner in `REVIEWED_MINIMAL_TARGETS`, and then regenerate. A capability
+binding alone cannot establish which installed CMake target owns its header.
+
 For a non-static member-function binding, keep the public `qualified_name` as
 the real class-qualified method, provide an exact pointer-to-member
 `address_expression`, and use an explicit-object `member_function_call` probe.
@@ -259,6 +265,50 @@ that conflict by hand.
 Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
+
+### Publishing a capability on a NEW public header takes four coordinated edits
+
+`--write` validates one precondition at a time and stops at the first failure,
+so a new-header capability surfaces as four *unrelated-looking* errors in
+sequence rather than one checklist. Make all four edits before running it:
+
+1. **Catalog entry** — a `capability(...)` block in
+   `agent_capability_catalog_<domain>.py`.
+2. **Registry header ownership** — `"pulp/<domain>/<new>.hpp": "Pulp::<domain>",`
+   in `agent_capability_registry.py`. Without it the error is
+   `bindings[N] include has no covered public target owner`, which names the
+   *binding* rather than the missing map entry — the message points away from
+   the fix.
+3. **Umbrella fingerprint** — adding the include to `<domain>.hpp` changes that
+   umbrella's digest too. Update the declared value to the `got sha256:` the
+   error reports. The stale digest also appears in `contract-history.json`;
+   **do not edit those** — history is append-only.
+4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
+   reported as two separate errors.
+
+### `header_fingerprint` is not the SHA-256 of the header file
+
+The declared value and `sha256sum <header>` legitimately differ. Do not
+"reconcile" them by hashing the file — take the `got sha256:` the generator
+reports.
+
+### Adding a function to an existing capability header costs NO contract bump
+
+A binding's identity is `(role, kind, include, qualified_name, target,
+availability)`. **`header_fingerprint` is not a component**, and it does not
+appear in the capability row at all — it lives only in the surface document,
+versioned on its own `SURFACE_INVENTORY_VERSION` axis. So a pure header-bytes
+change is a *surface-axis* event that is invisible to every capability contract
+payload.
+
+Two agents independently reasoned "fingerprint ∈ bindings ∈ contract_payload,
+therefore this needs a version bump," each having verified `_binding_identity`
+(which legitimately excludes the fingerprint) and let that stand in for
+checking the snapshot's actual binding shape one level down. The generator
+rejected it with `contract_version changed without a contract change`. If you
+are adding a function to a header that already backs a capability, expect the
+existing key to stay at its current version and the change to be absorbed by
+the two counters.
 
 ## A STALE verdict on a tree you did not touch is a base problem, not a you problem
 

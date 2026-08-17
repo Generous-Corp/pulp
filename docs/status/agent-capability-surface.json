@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 43,
+  "inventory_version": 44,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -2575,11 +2575,12 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fir_design.hpp",
-      "fingerprint": "sha256:5bca92ea3c99cd128602d0518b1469b143a91956dbc48955f56dbd8137967759",
+      "fingerprint": "sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
       "include": "pulp/signal/fir_design.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
-        "signal.fir-design"
+        "signal.fir-design",
+        "signal.minimum-phase-fir"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

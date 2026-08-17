@@ -1196,16 +1196,21 @@ TEST_CASE("each refusal names the construct that caused it",
     // produce, which is why the honest answer is the captured element:
     //   <text>            — no shape vocabulary for glyphs
     //   <switch>          — renders ONE child, so a group walk draws too much
-    //   preserveAspectRatio="none" — stretches instead of fitting
     //   stroke-dasharray  — drawn solid it is a different picture
     //   <g opacity>       — composited as a unit, not per shape
     //   width="50%"       — resolves against a viewport the synthesis lacks
+    //
+    // The sixth icon in the fixture, `preserveAspectRatio="none"`, is NOT one
+    // of them: a stretch is a scale per axis, which the renderer can build
+    // from the same box and viewBox it already has. It stays in this fixture
+    // as the near-miss that proves the refusal list is a list of constructs
+    // rather than of attribute names — asserted below.
     const auto lowered = lower_capture("browser-capture-svg-refusals");
     REQUIRE(lowered.design_ir);
     const auto& root = lowered.design_ir->root;
 
-    CHECK(root.attributes.count("native_svg_lowered") == 0);
-    CHECK(attribute(root, "native_svg_refused") == "6");
+    CHECK(attribute(root, "native_svg_lowered") == "1");
+    CHECK(attribute(root, "native_svg_refused") == "5");
 
     std::map<std::string, std::string> refusals;  // reason → detail
     const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
@@ -1222,7 +1227,7 @@ TEST_CASE("each refusal names the construct that caused it",
     CHECK(refusals["svg-dashed-stroke"] == "circle");
     CHECK(refusals["svg-group-opacity"] == "g");
     CHECK(refusals["svg-shape-geometry"] == "rect");
-    // Three different constructs share the `element` reason, so the DETAIL is
+    // Two different constructs share the `element` reason, so the DETAIL is
     // the only thing that separates them — a reason alone would collapse
     // "add a shape kind" and "this can never be a shape" into one line.
     CHECK(refusals.count("svg-element") == 1);
@@ -1238,13 +1243,22 @@ TEST_CASE("each refusal names the construct that caused it",
     };
     details(root);
     std::sort(element_details.begin(), element_details.end());
-    CHECK(element_details == std::vector<std::string>{
-                                 "preserveAspectRatio=none", "switch", "text"});
+    CHECK(element_details ==
+          std::vector<std::string>{"switch", "text"});
 
-    // Nothing from a refused subtree may reach the tree as geometry.
-    CHECK(count_nodes(root, [](const IRNode& node) {
-              return node.attributes.count("path_data") != 0;
-          }) == 0);
+    // Nothing from a refused subtree may reach the tree as geometry. The one
+    // path that IS here is the stretched icon's `<rect>`, which no longer
+    // refuses — so this counts to exactly one rather than to zero, and a
+    // regression that let a refused subtree leak a shape still fails it.
+    const auto vector_shapes = vector_nodes(root);
+    REQUIRE(vector_shapes.size() == 1);
+    // The stretch reaches the renderer as an explicit mapping beside the
+    // viewBox. Without it the shape lowers and then paints letterboxed —
+    // drawable, wrong, and silent, which is worse than the refusal was.
+    CHECK(attribute(*vector_shapes.front(), "svg_preserve_aspect_ratio") ==
+          "none");
+    CHECK(attribute(*vector_shapes.front(), "svg_viewbox") == "0 0 12 12");
+    CHECK(attribute(*vector_shapes.front(), "source_tag") == "rect");
 }
 
 TEST_CASE("a capture with no SVG paint says so out loud",
