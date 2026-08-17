@@ -36,6 +36,7 @@ target_sources(pulp-host PRIVATE
     src/timeline_automation_delivery.cpp
     src/timeline_device_resolver.cpp
     src/timeline_graph_binding.cpp
+    src/timeline_offline_renderer.cpp
     src/timeline_graph_binding_candidate.cpp
     src/timeline_graph_binding_routes.cpp
     src/timeline_graph_stretch_policy.cpp
