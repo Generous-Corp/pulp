@@ -97,6 +97,16 @@
     },
     {
       "paths": [
+        ".github/workflows/api-contracts.yml",
+        "tools/build-api-docs.sh"
+      ],
+      "docs": [
+        "docs/guides/test-lanes.md"
+      ],
+      "why": "The API-contract lane is promotable to a required context only because of two properties that are invisible in the file itself — it reports on merge_group, and it carries no paths filter. test-lanes.md is where those are explained, along with why the HTML render stays off the lane. The advisory version of this check reported a main-breaking defect it could not block; a lane whose documented behavior is wrong is how that happens again."
+    },
+    {
+      "paths": [
         ".github/workflows/gcc-compile-gate.yml"
       ],
       "docs": [

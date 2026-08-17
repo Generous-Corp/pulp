@@ -276,6 +276,18 @@ std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
     return host.capture_back_buffer_png();
 }
 
+pulp::view::WindowHost::ContentSize content_view_bounds(
+    pulp::view::WindowHost& host) {
+    if (!is_main_thread()) return {};
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!view) return {};
+        const NSSize bounds = view.bounds.size;
+        return {static_cast<uint32_t>(bounds.width),
+                static_cast<uint32_t>(bounds.height)};
+    }
+}
+
 bool simulate_backing_scale_change(pulp::view::WindowHost& host, float scale) {
     if (!is_main_thread() || scale <= 0.0f) return false;
 
