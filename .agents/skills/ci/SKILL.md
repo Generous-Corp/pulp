@@ -3885,6 +3885,40 @@ commissioned. Expected hosts match stable label subsets, never disposable runner
 names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
 not an intentional absence.
 
+**Do not "fix" the absence of m3/m5/m1 from `expected_host` — it is deliberate,
+and declaring them makes the view wrong.** The gap looks obvious and actionable
+(the three Macs that serve the required `macos` gate are not declared, so a dead
+one raises nothing), which is why it keeps getting re-proposed. Three things to
+check before spending a cycle on it, all readable in a minute:
+
+- **The gate hosts have no host-identifying label.** Matching is by label subset,
+  and every gate runner on all three registers the same `self-hosted, macOS,
+  ARM64, pulp-build, pulp-build-vm, pulp-gate-fast`; the labels that vary
+  (`pulp-build-studio`, `pulp-build-vm-secondary`) are role labels, and m1's and
+  m5's are label-identical. There is no `pulp-host-m3` analogue to
+  `pulp-host-macpro` / `pulp-host-macmini`. So three per-host entries match one
+  pool three times and all report online while a single machine serves — a real
+  partial degradation reads as three green rows. Confirm with the live label sets
+  before assuming otherwise:
+  `ghapp api "repos/Generous-Corp/pulp/actions/runners?per_page=100"`.
+- **Pool-wide `min_online` fails the other way.** The gate pool is ephemeral JIT,
+  so a healthy idle host has zero runners registered and would alarm on every
+  quiet period — the alarm gets muted within a week and the class returns.
+- **Nothing consumes `fleet-status`.** `grep -rl fleet-status .github/workflows
+  tools/` finds nothing; it is a manual-inspection view, so a declaration pages
+  no one on its own.
+
+The per-host question is already answered by the same report's `hosts[]` array —
+keyed by class (`m1`, `m5`, `studio`), read from tartci state over SSH rather than
+from labels, carrying `routable`, `free`/`cap`, supervisor heartbeat age, and disk
+/ ccache admission problems. Read that, not `expected_hosts[]`, when asking
+whether a specific Mac is serving. The genuinely open gap is narrower and nobody
+has built it: detecting a *partially* degraded pool needs capacity measured
+against demand, because a busy pool and a pool at a third of capacity are
+indistinguishable from host presence. Rationale in
+`docs/guides/local-ci.md`, "Why the macOS gate hosts are not declared as expected
+hosts".
+
 ### Prevent: build-dir ODR guard (interrupted-build sentinel)
 
 The self-hosted macОS lane uses `clean: false` (warm `build-<key>` dir for
