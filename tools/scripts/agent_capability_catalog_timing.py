@@ -93,7 +93,7 @@ EXPORTS = [
                 qualified_name="pulp::timebase::CompiledTempoMap",
                 target="Pulp::timebase",
                 header_fingerprint=(
-                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
                 ),
             ),
             binding(
@@ -103,7 +103,7 @@ EXPORTS = [
                 qualified_name="pulp::timebase::CompiledTempoMap::compile",
                 target="Pulp::timebase",
                 header_fingerprint=(
-                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
                 ),
                 address_expression=(
                     "static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, "
@@ -119,7 +119,7 @@ EXPORTS = [
                 qualified_name="pulp::timebase::CompiledTempoMap::ticks_to_samples",
                 target="Pulp::timebase",
                 header_fingerprint=(
-                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
                 ),
                 address_expression=(
                     "static_cast<pulp::timebase::SamplePosition "
@@ -134,7 +134,7 @@ EXPORTS = [
                 qualified_name="pulp::timebase::CompiledTempoMap::resolve_sample",
                 target="Pulp::timebase",
                 header_fingerprint=(
-                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
                 ),
                 address_expression=(
                     "static_cast<pulp::timebase::SampleToTickResult "
