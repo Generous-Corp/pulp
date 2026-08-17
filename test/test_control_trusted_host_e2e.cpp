@@ -20,6 +20,7 @@
 #ifdef __APPLE__
 #include <sys/stat.h>
 #include <unistd.h>
+#include "support/control_runtime_closure_sanitizer.hpp"
 #endif
 
 using namespace std::chrono_literals;
@@ -146,6 +147,8 @@ bool wait_for_path(const fs::path& path) {
 
 TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonical control",
           "[inspect][control][e2e][t1][security]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     Directory directory;
     const auto executable = directory.root / "source" / "trusted-host";

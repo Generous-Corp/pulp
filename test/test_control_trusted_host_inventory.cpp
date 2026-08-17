@@ -22,6 +22,7 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
+#include "support/control_runtime_closure_sanitizer.hpp"
 #endif
 
 namespace {
@@ -138,6 +139,8 @@ std::string read_file(const fs::path& path) {
 
 TEST_CASE("trusted host launcher releases enrollment only after exact child preflight",
           "[inspect][control][inventory][launcher][security]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
     Fixture fixture;
     fs::copy_file(PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, fixture.executable,
@@ -204,6 +207,8 @@ TEST_CASE("trusted host launcher releases enrollment only after exact child pref
 
 TEST_CASE("trusted host launcher gives an exact preflighted child a fresh enrollment window",
           "[inspect][control][inventory][launcher][security][expiry]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
     Fixture fixture;
     fs::copy_file(PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, fixture.executable,

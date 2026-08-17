@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "support/control_runtime_closure_sanitizer.hpp"
 #endif
 
 using namespace std::chrono_literals;
@@ -392,6 +393,8 @@ TEST_CASE("control broker daemon preserves durable receipts and artifacts across
 
 TEST_CASE("installed daemon composes host enrollment routing execution and restart teardown",
           "[inspect][control][daemon][host][e2e][restart]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto source = root.path / "source";
@@ -725,6 +728,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 
 TEST_CASE("installed broker launches only its named ordinary Standalone host",
           "[inspect][control][daemon][host][process][standalone][security][author-catalog-process]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto* author_broker_environment = std::getenv("PULP_CONTROL_AUTHOR_BROKER");
@@ -973,6 +978,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 
 TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
           "[inspect][control][daemon][host][standalone][e2e][aggregate][installed-author-full-parity][author-catalog]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto broker_executable = current_executable();
@@ -1580,6 +1587,8 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
 
 TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
           "[inspect][control][daemon][host][process][restart][crash][artifact][security]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto source = root.path / "crash-source";
