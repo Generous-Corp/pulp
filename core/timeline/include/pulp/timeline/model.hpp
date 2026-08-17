@@ -393,8 +393,13 @@ class ChordScaleLane {
 /// `interpolation` describes the segment *leaving* this event, matching
 /// AutomationPoint's convention, so the last event's value simply holds.
 struct DynamicsEvent {
+    /// Canonical tick at which this intensity statement takes effect.
     timebase::TickPosition position;
+    /// Normalized intensity in [0, 1]. Must be finite; a value outside the
+    /// range is rejected rather than clamped.
     float intensity = 0.0f;
+    /// How the segment *leaving* this event reaches the next one. The final
+    /// event's value simply holds, whatever this says.
     AutomationInterpolation interpolation = AutomationInterpolation::Continuous;
 
     constexpr bool operator==(const DynamicsEvent&) const = default;
@@ -630,6 +635,8 @@ struct SequenceInput {
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
     std::optional<ChordScaleLane> chord_scale_lane;
+    /// Intensity context lane. Absent means the sequence is built with an empty
+    /// lane, which states no dynamics rather than stating silence.
     std::optional<DynamicsLane> dynamics_lane;
     std::optional<GrooveTemplate> groove;
     // Authored launch order. A scene owns its slots; every non-empty slot
