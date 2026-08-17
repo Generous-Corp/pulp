@@ -163,7 +163,16 @@ public:
             if (!accepts_original()) return;
 
             View& root = host_.input_root();
-            drag_target_.set(root.hit_test(pt));
+            // Consult the generalized overlay slot before the regular hit
+            // test, so a React / imported-design popover both receives clicks
+            // aimed at it and is dismissed by a click outside it. This host
+            // previously handled only the native ComboBox mechanism below,
+            // which left such a popover open forever.
+            const auto overlay_press = route_press_to_active_overlay(root, pt);
+            if (overlay_press.routing == OverlayPressRouting::routed)
+                drag_target_.set(overlay_press.target);
+            else
+                drag_target_.set(root.hit_test(pt));
             View* drag_target = drag_target_.live_in(root);
             if (button == MouseButton::left)
                 ComboBox::notify_global_click(drag_target);

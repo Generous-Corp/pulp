@@ -263,6 +263,39 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
         return;
     }
 
+    // Generalized overlay routing, in the same slot the standalone host runs
+    // it: after the ComboBox popup path and before the regular hit_test. A
+    // React / imported-design popover claims `View::active_overlay_`, which
+    // this host previously never consulted — so clicking outside such a
+    // dropdown inside a DAW editor never closed it, while the identical UI
+    // dismissed correctly in the standalone app.
+    {
+        const auto overlay_press = pulp::view::route_press_to_active_overlay(
+            *root, pt);
+        if (overlay_press.routing == pulp::view::OverlayPressRouting::routed) {
+            drag_target->set(overlay_press.target);
+            pulp::view::ComboBox::notify_global_click(drag_target->live_in(*root));
+            auto* target = drag_target->live_in(*root);
+            if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+                drag_target->reset();
+                return;
+            }
+            // bubble=false matches the standalone host's overlay path, which
+            // has never bubbled pointerdown to ancestors from inside an
+            // overlay. Unifying that is a separate, deliberate decision.
+            if (!pulp::view::deliver_mouse_down(
+                    *root, drag_target->live_in(*root), pt,
+                    pulp::view::mac_geometry::modifiers_from_ns_flags(
+                        event.modifierFlags),
+                    static_cast<int>(event.clickCount), /*bubble=*/false))
+                drag_target->reset();
+            return;
+        }
+        // dismissed / not_hittable / no_overlay all fall through to the
+        // regular path below, so an outside click both closes the overlay and
+        // activates whatever sits underneath.
+    }
+
     pulp::view::MouseEvent gesture_event;
     gesture_event.position = pt;
     gesture_event.window_position = pt;
