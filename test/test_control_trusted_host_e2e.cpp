@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "support/control_runtime_closure_sanitizer.hpp"
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_client_connection.hpp>
@@ -20,7 +21,6 @@
 #ifdef __APPLE__
 #include <sys/stat.h>
 #include <unistd.h>
-#include "support/control_runtime_closure_sanitizer.hpp"
 #endif
 
 using namespace std::chrono_literals;

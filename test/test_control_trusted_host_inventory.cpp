@@ -5,6 +5,7 @@
 #include "control_static_code_identity.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include "support/control_runtime_closure_sanitizer.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -22,7 +23,6 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
-#include "support/control_runtime_closure_sanitizer.hpp"
 #endif
 
 namespace {
