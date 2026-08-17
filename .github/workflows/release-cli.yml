@@ -973,7 +973,7 @@ jobs:
       # #720). For the SDK tarball, do a SEPARATE configure+build into
       # `build-sdk/` with WebView=ON so plugin authors who consume the
       # SDK still get WebViewPanel + make_webview_embedded_resource_fetcher
-      # symbols in the split view-core archive. Using a separate build directory
+      # symbols in the pulp-view-webview archive. Using a separate build directory
       # avoids re-linking the already-built CLI binary against
       # libwebkit2gtk during the reconfigure (which would defeat the
       # purpose of the split).
@@ -1073,9 +1073,18 @@ jobs:
           from pathlib import Path
           platform = os.environ["MATRIX_PLATFORM"]
           data = Path("sdk-staging/lib/libpulp-view-core.a").read_bytes()
-          # WebView lane (existing).
-          assert b"WebViewPanel" in data, "WebViewPanel symbol missing"
-          assert b"make_webview_embedded_resource_fetcher" in data, (
+          # WebView lane. The WebView bridge lives in its own
+          # pulp-view-webview archive (split out of view-core so native-only
+          # consumers stop linking WebKit); old-tag backfills predate the
+          # split and still carry the symbols in view-core, so accept them
+          # from either archive. Note the gate is a substring scan over
+          # concatenated archives, so it proves "the SDK ships these symbols
+          # somewhere", not "in the correct archive" — it can no longer
+          # detect a symbol landing in the wrong library.
+          webview = Path("sdk-staging/lib/libpulp-view-webview.a")
+          scan = data + (webview.read_bytes() if webview.exists() else b"")
+          assert b"WebViewPanel" in scan, "WebViewPanel symbol missing"
+          assert b"make_webview_embedded_resource_fetcher" in scan, (
               "make_webview_embedded_resource_fetcher symbol missing"
           )
           # GPU lane (new — prevents pulp #1817 from regressing).
@@ -1130,7 +1139,12 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
             throw "sdk-staging/lib/pulp-view-core.lib missing"
           }
-          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+          # WebView symbols live in pulp-view-webview.lib after the
+          # view-core/WebView split; old-tag backfills predate the split, so
+          # accept the symbols from either archive. Substring scan over
+          # concatenated archives: proves the SDK ships the symbols
+          # somewhere, not that they are in the correct archive.
+          python -c "from pathlib import Path; core = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); wv = Path(r'sdk-staging/lib/pulp-view-webview.lib'); data = core + (wv.read_bytes() if wv.exists() else b''); assert b'WebViewPanel' in data, 'WebViewPanel symbol missing'; assert b'make_webview_embedded_resource_fetcher' in data, 'make_webview_embedded_resource_fetcher symbol missing'"
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk
@@ -1908,5 +1922,19 @@ jobs:
             fi
           fi
 
-          gh release edit "${TAG}" --repo "${REPO}" --draft=false ${latest_flag}
+          # Classify the one publish failure that no retry can ever fix: GitHub
+          # permanently reserves the tag name of a DELETED published (immutable)
+          # release, so the flip 422s with "tag_name was used by an immutable
+          # release" on every attempt, forever. Without classification this
+          # surfaces as a bare HTTP 422 after a full multi-platform build, and
+          # the obvious-looking "cleanup" (deleting the draft) is exactly the
+          # act that burns MORE tag names. Name the condition and the recovery.
+          if ! publish_output=$(gh release edit "${TAG}" --repo "${REPO}" --draft=false ${latest_flag} 2>&1); then
+            printf '%s\n' "${publish_output}" >&2
+            if grep -qi "immutable release" <<<"${publish_output}"; then
+              echo "::error::${TAG} can never publish: a published (immutable) release previously used this tag name and was deleted, and GitHub reserves the name forever. Re-dispatching this workflow will always fail the same way. Recovery: ship a NEW patch tag (docs/guides/release-watchdog.md). Do NOT delete this draft or any release — deletion is what burns tag names. Every built binary also survives as this run's workflow artifacts, independent of the draft."
+            fi
+            exit 1
+          fi
+          printf '%s\n' "${publish_output}"
           echo "::notice::Published ${TAG} with $(( ${#required_assets[@]} + 1 )) assets."
