@@ -6627,3 +6627,31 @@ The shape that works, and the one `timeline-fuzz.yml` uses:
 cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
+
+## Splitting a CMake target silently breaks the SDK tarball's symbol assertions
+
+`release-cli.yml`'s "Build SDK tarball" step asserts that named symbols are
+present in *named archives* — e.g. `WebViewPanel` and
+`make_webview_embedded_resource_fetcher` in `libpulp-view-webview.a`, and
+`MacGpuWindowHost` in `libpulp-view-core.a`. Those assertions encode which
+target owns which symbol.
+
+So moving sources between targets is a release-breaking change even when the
+build, the tests, and the installed SDK are all correct. When the native/WebView
+split moved `src/web_view.cpp` and `src/editor_bridge_webview.cpp` into a new
+`pulp-view-webview` target, the assertion kept reading `libpulp-view-core.a` and
+began failing on every platform.
+
+Two properties make this expensive to discover:
+
+- **It only fires at release time.** No PR gate builds the SDK tarball, so the
+  break lands green and is found by the next tag, not the change that caused it.
+- **It looks like infrastructure.** The failure is identical across a local
+  release VM and a GitHub-hosted runner, which is actually the tell that it is
+  NOT host pressure or a flake: same step, two platforms, two runner classes.
+
+If you move sources between view/signal/render targets, grep
+`.github/workflows/release-cli.yml` for the archive names and repoint the
+affected asserts in BOTH the Unix and Windows blocks. Repoint only the symbols
+that moved: swapping the whole check to the new archive trades one wrong archive
+for another.
