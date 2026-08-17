@@ -159,15 +159,31 @@ catch_discover_tests(pulp-test-control-connection-admission
 
 add_executable(pulp-control-trusted-host-fixture
     control_trusted_host_fixture.cpp)
+# Guard direction check: the sanitizer guard decides whether the trusted-host
+# launch tests run, so an inverted one is silent both ways. This target carries
+# the same PULP_TEST_WITH_SANITIZER wiring, so each lane asserts its own
+# direction.
+add_executable(pulp-test-control-runtime-closure-sanitizer-guard
+    test_control_runtime_closure_sanitizer_guard.cpp)
+target_link_libraries(pulp-test-control-runtime-closure-sanitizer-guard PRIVATE
+    Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-runtime-closure-sanitizer-guard PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
+target_compile_definitions(pulp-test-control-runtime-closure-sanitizer-guard PRIVATE
+    $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
+catch_discover_tests(pulp-test-control-runtime-closure-sanitizer-guard)
+
 add_executable(pulp-test-control-trusted-host-inventory
     test_control_trusted_host_inventory.cpp)
 target_link_libraries(pulp-test-control-trusted-host-inventory PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 target_include_directories(pulp-test-control-trusted-host-inventory PRIVATE
-    ${CMAKE_SOURCE_DIR}/inspect/src)
+    ${CMAKE_SOURCE_DIR}/inspect/src
+    ${CMAKE_SOURCE_DIR}/test)
 target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
     PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>"
-    PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>")
+    PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>"
+    $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
 add_dependencies(pulp-test-control-trusted-host-inventory
     pulp-control-trusted-host-fixture
     pulp-control-host-preflight-fixture)
@@ -232,8 +248,11 @@ add_executable(pulp-test-control-trusted-host-e2e
     test_control_trusted_host_e2e.cpp)
 target_link_libraries(pulp-test-control-trusted-host-e2e PRIVATE
     pulp::inspect-client Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-trusted-host-e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
-    PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>")
+    PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+    $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
 add_dependencies(pulp-test-control-trusted-host-e2e
     pulp-control-trusted-host-e2e-fixture)
 if(APPLE)
@@ -367,12 +386,14 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
         test_control_broker_daemon.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
     target_include_directories(pulp-test-control-broker-daemon PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src)
+        ${CMAKE_SOURCE_DIR}/inspect/src
+        ${CMAKE_SOURCE_DIR}/test)
     target_link_libraries(pulp-test-control-broker-daemon PRIVATE
         pulp::inspect-client Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
         PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
         PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>"
+        $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>
         PULP_CONTROL_BROKER_CRASH_FIXTURE="$<TARGET_FILE:pulp-control-broker-crash-fixture>")
     add_dependencies(pulp-test-control-broker-daemon
         pulp-control-trusted-host-e2e-fixture pulp-control-broker

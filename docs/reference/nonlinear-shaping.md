@@ -122,9 +122,9 @@ oversampling path rather than a nominal two-argument wrapper.
 
 ## Breakpoint transfer curves
 
-Arbitrary breakpoint transfer functions are intentionally not defined in this
-header. They should share the modulation-language curve vocabulary rather than
-introduce a second point/interpolation schema. Once
-`<pulp/signal/modulation_curve.hpp>` is available on the target branch, a
-breakpoint shaper can consume that type and add its own monotonicity policy and
-antiderivative-antialiasing contract.
+`<pulp/signal/transfer_curve.hpp>` provides fixed-capacity breakpoint transfer
+functions. Each point uses the shared modulation-language curve vocabulary for
+the following segment, so envelopes and transfer functions agree on linear,
+exponential, logarithmic, smoothstep, and hold shapes. The processor validates
+and publishes complete snapshots but deliberately leaves oversampling and any
+antiderivative-antialiasing policy to its caller.
