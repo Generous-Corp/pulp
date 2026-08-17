@@ -191,7 +191,11 @@ PreparedParagraph make_paragraph(const std::string& text,
     // by text content ("*" traces every run) and reports the typeface that
     // SkParagraph actually shaped with, rather than the requested CSS family
     // or the separate Canvas2D resolver result.
-    if (const char* trace = std::getenv("PULP_PARAGRAPH_FONT_TRACE")) {
+    // Cached for the same reason as fill_text's guard below: this runs per
+    // paragraph build, and getenv() locks the environment on every call.
+    static const char* const paragraph_font_trace =
+        std::getenv("PULP_PARAGRAPH_FONT_TRACE");
+    if (const char* trace = paragraph_font_trace) {
         const std::string_view filter(trace);
         if (filter == "*" || text.find(filter) != std::string::npos) {
             const auto fonts = paragraph->getFonts();
@@ -493,7 +497,12 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // the Skia path for the labels named below. Pair with
     // PULP_LABEL_DEBUG_BOX to compare Label::paint's computed baseline
     // against the y argument fill_text actually receives.
-    if (std::getenv("PULP_FILL_TEXT_TRACE")) {
+    // Read once: this is a launch-time diagnostic switch, but fill_text runs
+    // for every text draw, and a per-draw getenv() takes the libc environ
+    // lock. Profiling a live drag showed __findenv_locked at ~3% of non-idle
+    // main-thread time purely from these trace guards.
+    static const bool fill_text_trace = std::getenv("PULP_FILL_TEXT_TRACE") != nullptr;
+    if (fill_text_trace) {
         if (text.find("CROSSOVER") != std::string::npos
          || text.find("MID / SIDE") != std::string::npos
          || text.find("MULTIBAND") != std::string::npos

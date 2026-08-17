@@ -579,6 +579,12 @@ bool serial_batch_shaping() {
 #if defined(__EMSCRIPTEN__)
     return true;
 #else
+    // Deliberately read live on every call, NOT cached in a static: the
+    // comment above and test/test_canvas_fonts.cpp toggle this var with
+    // setenv/unsetenv between assertions to exercise both the serial and
+    // parallel shaping arms. Caching it would silently pin the first value
+    // and neuter that coverage. This is not on the per-draw text path that
+    // motivated hoisting the other trace guards.
     const char* v = std::getenv("PULP_TEXT_SHAPE_SERIAL");
     return v && *v != '\0' && std::string_view(v) != "0";
 #endif
