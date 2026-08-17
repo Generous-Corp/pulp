@@ -994,3 +994,89 @@ TEST_CASE("WidgetBridge createTextEditor uses SDK TextEditor text navigation",
     REQUIRE(field->on_key_event(word_left));
     REQUIRE(field->caret_pos() == 0);
 }
+
+// ── the clock a UI animates against must actually advance ───────────────────
+//
+// Every dt-driven animation in a scripted UI computes its step from
+// `performance.now()`:
+//
+//     const dt = Math.min(0.05, (now - last) / 1e3);
+//     value = smooth(value, target, dt * k);
+//
+// If `now` never changes, `dt` is 0, `smooth()` is the identity, and the value
+// is pinned forever — while the frame pump keeps ticking, callbacks keep
+// draining, and nothing logs an error. That failure presents as a RENDERING
+// bug (a control frozen at its default) with the renderer entirely healthy,
+// and it costs a day if you start downstream of the clock.
+//
+// Observed for real: a materialized capture shadowed globalThis.performance
+// with a deterministic replay clock that ramped to the capture's presentation
+// time and then froze at that ceiling. See danielraffel/spectr 50235f6.
+//
+// This guards Pulp's half of the contract — the shim must be monotonic and it
+// must ADVANCE. A shadowing bundle is a consumer bug this cannot prevent, but
+// the diagnostic it encodes (check the clock before anything downstream of it)
+// is the transferable part.
+TEST_CASE("performance.now advances across frame ticks",
+          "[view][bridge][animation][clock]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto now_ms = [&] {
+        return engine.evaluate("performance.now()").getWithDefault<double>(-1.0);
+    };
+
+    const double t0 = now_ms();
+    REQUIRE(t0 >= 0.0);   // the shim exists and returns a number
+
+    // Two frame ticks with real time in between. A frozen or replay-pinned
+    // clock returns the same value here; a live one cannot.
+    for (int i = 0; i < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        bridge.service_frame_callbacks();
+    }
+    const double t1 = now_ms();
+
+    INFO("performance.now(): t0=" << t0 << " t1=" << t1);
+    CHECK(t1 > t0);                       // advances
+    CHECK(t1 - t0 >= 10.0);               // by roughly the elapsed wall time
+    CHECK(now_ms() >= t1);                // and never runs backwards
+}
+
+TEST_CASE("requestAnimationFrame hands its callback an advancing timestamp",
+          "[view][bridge][animation][clock]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // A self-rescheduling rAF loop, exactly the shape a UI animation uses.
+    engine.evaluate(R"JS(
+        globalThis.__ts = [];
+        (function tick(t) { globalThis.__ts.push(t); requestAnimationFrame(tick); })(0);
+    )JS");
+
+    for (int i = 0; i < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        bridge.service_frame_callbacks();
+    }
+
+    const auto samples =
+        engine.evaluate("globalThis.__ts.length").getWithDefault<int>(0);
+    REQUIRE(samples >= 3);
+
+    // The deltas are what a dt-driven loop consumes; a pinned clock makes them
+    // all zero and every animation stops without any other symptom.
+    const auto advanced =
+        engine.evaluate(
+                  "globalThis.__ts[globalThis.__ts.length - 1] > globalThis.__ts[1]")
+            .getWithDefault<bool>(false);
+    INFO("rAF timestamps: "
+         << engine.evaluate("JSON.stringify(globalThis.__ts)")
+                .getWithDefault<std::string>(""));
+    CHECK(advanced);
+}
