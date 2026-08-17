@@ -127,6 +127,21 @@
         "tools/cmake/PulpInfoPlist.au.in"
       ]
     },
+    "canvas-text": {
+      "paths": [
+        "core/canvas/src/skia_canvas_text.cpp",
+        "core/canvas/src/skia_canvas.cpp",
+        "core/canvas/src/skia_canvas_internal.hpp",
+        "core/canvas/src/text_font_context.cpp",
+        "core/canvas/src/font_resolver.cpp",
+        "core/canvas/src/font_scope.cpp",
+        "core/canvas/src/bundled_fonts.cpp",
+        "core/canvas/include/pulp/canvas/font_scope.hpp",
+        "core/canvas/include/pulp/canvas/font_resolver.hpp",
+        "core/canvas/include/pulp/canvas/bundled_fonts.hpp",
+        ".agents/skills/canvas-text/**"
+      ]
+    },
     "ci": {
       "paths": [
         ".github/workflows/**",
@@ -248,6 +263,16 @@
         "examples/faust-*/**",
         "core/dsl/include/pulp/dsl/faust*",
         "tools/cmake/PulpFaust.cmake"
+      ]
+    },
+    "forge-app-delivery": {
+      "paths": [
+        "examples/forge-modular/package.sh",
+        "examples/forge-modular/uninstall.sh",
+        "examples/forge-modular/LICENSE-INSTALLER.txt",
+        "forge-seam/populate.sh",
+        "forge-seam/sync.sh",
+        "tools/rack/fetch_sdk.py"
       ]
     },
     "forge-modular": {
@@ -407,7 +432,11 @@
         "test/test_timeline_replay_golden.cpp",
         "test/cmake/sampler_runtime_tests.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         "tools/scripts/*web_timeline_source_closure_check.py",
+        "tools/scripts/negative_capability_check.py",
+        "tools/scripts/negative_capability_allowlist.json",
         ".agents/skills/playback/**"
       ]
     },
@@ -437,11 +466,6 @@
         "examples/forge-modular/test/shell_interaction.cpp"
       ]
     },
-    "pulp-web-demo": {
-      "paths": [
-        ".agents/skills/pulp-web-demo/**"
-      ]
-    },
     "pulp-vellum-change-routing": {
       "paths": [
         ".agents/skills/pulp-vellum-change-routing/**",
@@ -449,6 +473,26 @@
         ".github/workflows/vellum-routing-contract.yml",
         "tools/scripts/generate_vellum_ownership_projection.py",
         "tools/scripts/vellum_freeze_check.py"
+      ]
+    },
+    "pulp-web-demo": {
+      "paths": [
+        ".agents/skills/pulp-web-demo/**"
+      ]
+    },
+    "render-toolchain-update": {
+      "paths": [
+        "tools/deps/manifest.json",
+        "tools/deps/min_os.json",
+        "tools/cmake/FindV8.cmake",
+        "tools/cmake/PulpV8Windows.cmake",
+        "tools/scripts/fetch_skia_for_release.py",
+        "tools/scripts/fetch_v8_for_release.py",
+        "tools/scripts/test_fetch_v8_for_release.py",
+        "examples/threejs-native-demo/provider_identity_test.cmake",
+        "external/skia-build/VERSION.md",
+        "ci/visual-harness.Dockerfile",
+        "tools/harness/visual/pins.py"
       ]
     },
     "screenshot": {
@@ -485,21 +529,6 @@
         ".github/workflows/sign-and-release.yml",
         ".github/workflows/release-cli.yml",
         "tools/scripts/build_combined_installer.sh"
-      ]
-    },
-    "render-toolchain-update": {
-      "paths": [
-        "tools/deps/manifest.json",
-        "tools/deps/min_os.json",
-        "tools/cmake/FindV8.cmake",
-        "tools/cmake/PulpV8Windows.cmake",
-        "tools/scripts/fetch_skia_for_release.py",
-        "tools/scripts/fetch_v8_for_release.py",
-        "tools/scripts/test_fetch_v8_for_release.py",
-        "examples/threejs-native-demo/provider_identity_test.cmake",
-        "external/skia-build/VERSION.md",
-        "ci/visual-harness.Dockerfile",
-        "tools/harness/visual/pins.py"
       ]
     },
     "skia-gpu-build": {
@@ -566,12 +595,28 @@
     },
     "timeline": {
       "paths": [
+        "core/interchange/**",
+        "core/dawproject/**",
+        "core/smf/**",
         "core/timeline/**",
+        "core/project_package/**",
+        "core/timeline_editor/**",
+        "examples/timeline-sdk-consumer/**",
         "test/test_timeline_*.cpp",
+        "test/test_sequencer_ui_host.cpp",
+        "test/test_interchange_*.cpp",
+        "test/test_dawproject_*.cpp",
+        "test/test_smf_*.cpp",
         "test/fixtures/timeline/**",
         "test/timeline_command_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/cmake/test_timeline_sdk_consumer.cmake",
         "test/cmake/sampler_runtime_tests.cmake",
+        "tools/timeline/**",
+        "tools/mcp/mcp_timeline_tools.cpp",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         ".agents/skills/timeline/**"
       ]
     },
@@ -663,59 +708,6 @@
         "examples/view-bridge-demo/**"
       ]
     },
-    "playback": {
-      "paths": [
-        "core/playback/**",
-        "core/format/include/pulp/format/playback_context_projection.hpp",
-        "test/test_playback_*.cpp",
-        "test/test_timeline_replay_golden.cpp",
-        "test/cmake/sampler_runtime_tests.cmake",
-        "tools/scripts/timeline_engine_dependency_floor_check.py",
-        "tools/cmake/PulpLinkFloor.cmake",
-        "tools/scripts/link_floor_selftest.py",
-        "tools/scripts/*web_timeline_source_closure_check.py",
-        "tools/scripts/negative_capability_check.py",
-        "tools/scripts/negative_capability_allowlist.json",
-        ".agents/skills/playback/**"
-      ]
-    },
-    "timebase": {
-      "paths": [
-        "core/timebase/**",
-        "core/format/src/transport_quantizer.cpp",
-        "core/format/include/pulp/format/transport_quantizer.hpp",
-        "test/test_timebase.cpp",
-        "test/test_transport_quantizer.cpp",
-        ".agents/skills/timebase/**"
-      ]
-    },
-    "timeline": {
-      "paths": [
-        "core/interchange/**",
-        "core/dawproject/**",
-        "core/smf/**",
-        "core/timeline/**",
-        "core/project_package/**",
-        "core/timeline_editor/**",
-        "examples/timeline-sdk-consumer/**",
-        "test/test_timeline_*.cpp",
-        "test/test_sequencer_ui_host.cpp",
-        "test/test_interchange_*.cpp",
-        "test/test_dawproject_*.cpp",
-        "test/test_smf_*.cpp",
-        "test/fixtures/timeline/**",
-        "test/timeline_command_test_helpers.hpp",
-        "test/cmake/timeline_tests.cmake",
-        "test/cmake/test_timeline_sdk_consumer.cmake",
-        "test/cmake/sampler_runtime_tests.cmake",
-        "tools/timeline/**",
-        "tools/mcp/mcp_timeline_tools.cpp",
-        "tools/scripts/timeline_engine_dependency_floor_check.py",
-        "tools/cmake/PulpLinkFloor.cmake",
-        "tools/scripts/link_floor_selftest.py",
-        ".agents/skills/timeline/**"
-      ]
-    },
     "vst3": {
       "paths": [
         "core/format/src/vst3_adapter.cpp",
@@ -745,22 +737,12 @@
         "tools/cmake/PulpWebUi.cmake"
       ],
       "_doc": {
-        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list — so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer — the habit that lets a genuinely missed skill update through."
+        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list \u2014 so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer \u2014 the habit that lets a genuinely missed skill update through."
       }
     },
     "webview-ui": {
       "paths": [
         "examples/webview-*/**"
-      ]
-    },
-    "forge-app-delivery": {
-      "paths": [
-        "examples/forge-modular/package.sh",
-        "examples/forge-modular/uninstall.sh",
-        "examples/forge-modular/LICENSE-INSTALLER.txt",
-        "forge-seam/populate.sh",
-        "forge-seam/sync.sh",
-        "tools/rack/fetch_sdk.py"
       ]
     }
   }

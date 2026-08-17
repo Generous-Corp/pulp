@@ -1708,6 +1708,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
 | `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
 | `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
+| `canvas-text` | Canvas2D text path: SkParagraph/SkFont behind fill_text, the two font-generation counters, family-list cost, paragraph-cache constraints |
 | `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
 | `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
 | `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
