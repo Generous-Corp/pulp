@@ -214,6 +214,41 @@ touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
 If you add a NEW example struct pattern that a compiler tolerates but the release
 compiler rejects, extend that guard rather than discovering it at release time.
 
+### Which workflows may set `PULP_BUILD_EXAMPLES=OFF` — and which must not
+
+`PULP_BUILD_EXAMPLES` defaults **ON** (`CMakeLists.txt`), and `examples/` is 89
+`add_executable` targets. A workflow that configures the ROOT project and then
+builds with no narrowing `--target` compiles all 89 — usually to throw them away.
+That is not free: every Linux, Linux ARM64 and Windows leg of
+`cross-platform-check.yml` was cancelled at its 60-minute job limit, so the
+cross-platform *backstop* delivered no cross-platform signal at all until
+examples were turned off there.
+
+Four rules before you add or remove the flag:
+
+1. **Check the `-S` argument and the step's `working-directory` first.** Only a
+   root configure is affected. `web-plugins.yml` (8 configures) and
+   `wclap-cloudflare.yml` (5) look like the biggest wins and are not wins at
+   all — every one targets an `examples/web-demos/*` tree that declares its own
+   `project()` and never includes the Pulp root, so the option is simply unused
+   there.
+2. **Check whether the build narrows with `--target`.** If it does, the flag
+   trims *configure* work only — say so rather than claiming a build-time win
+   (`release-path-pr-gate.yml`, `non-skia-build-guard.yml`).
+3. **Grep for example TARGET names before disabling.** Several workflows build
+   an example by name and will hard-fail with the tree gone:
+   `format-baseline-diff.yml` (`PulpEffect_AU|VST3|CLAP` — with none built it
+   exits 1) and `nightly-intel.yml`'s universal cross-check
+   (`PulpGain_VST3 PulpGain_AU PulpGain_CLAP`, feeding `lipo -archs` + `auval`).
+4. **Grep for consumers of the built bundles.** `build/{VST3,CLAP,AU}/*` come
+   from `pulp_add_plugin`, and every caller wired from the root lives under
+   `examples/`. `validate.yml` globs those directories — with examples OFF the
+   globs go empty and it validates *nothing*, silently and green.
+
+Deliberately examples-ON, do not "fix": `examples-validation.yml` (its entire
+purpose) and `nightly-full-build.yml` (whose configure step says so in a
+comment). Shipyard's `[validation.default]` likewise keeps them ON on purpose.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
