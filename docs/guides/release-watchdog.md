@@ -41,9 +41,34 @@ firehose.
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
 | 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it** | ≤30 min |
 | 5. Release content gate | each native release leg + release finalizer | correctly named archives containing missing, stale, wrong-version, non-executable, or invalidly signed products | pre-publish |
+| 6. Deletion tripwire | `release: [deleted]` | a human/agent deleted a release or draft — burned tag name, destroyed assets | ~1 minute |
 
 Layers 0-3 are prevention and detection. Layer 4 is the only one that changes
 release state, and it can only ever drive a release *forward*.
+
+## Layer 6 — Release-deletion tripwire
+
+**File:** `.github/workflows/release-deleted-tripwire.yml`
+
+Deleting a release is close to irreversible in two non-obvious ways: deleting a
+release that was ever **published** permanently burns its tag name (GitHub
+reserves an immutable release's `tag_name` forever, so every later publish
+attempt for that tag fails with `HTTP 422: tag_name was used by an immutable
+release` — the only recovery is a new patch tag), and deleting a **draft**
+destroys its attached assets (the binaries still survive as the building run's
+workflow artifacts for ~90 days — `gh run download <run-id>` recovers them, so
+a failed publish never destroys the build output by itself).
+
+No Pulp automation deletes releases — the reconciler is re-dispatch-only and
+its `NeverDestructive` test asserts there is no delete path — so every deletion
+is a human or agent-driven `gh` call. The tripwire files (or updates, deduped
+by exact title) a tracking issue within a minute of the deletion, naming the
+tag, the actor, and the correct recovery, while the actor is still at the
+keyboard. It only reports; it never recreates or retags. The publish finalizer
+in `release-cli.yml` classifies the matching downstream symptom: an
+immutable-tag `422` at the `--draft=false` flip is reported as permanently
+unrecoverable for that tag, with the new-patch-tag recovery named, instead of
+surfacing as a bare HTTP error after a full multi-platform build.
 
 ## Layer 5 — Published-product content gate
 
@@ -392,7 +417,11 @@ The tracker is keyed on the tip SHA so multiple stranded merges produce
 distinct issues — each needs its own catch-up bump PR. Unlike version-keyed
 release watchdogs, a SHA-keyed tracker cannot be auto-closed from its title
 alone because the affected surface is not encoded there — but it is encoded in
-the body. `watchdog-reaper.yml` (daily) parses the body for the full tip SHA and
+the body. `watchdog-reaper.yml` (daily at 06:00 UTC, plus immediately after
+every successful `Release CLI` run — the event that actually resolves most open
+trackers; the sweep chains via `workflow_run` because the publish uses
+`GITHUB_TOKEN`, whose events cannot trigger other workflows) parses the body
+for the full tip SHA and
 the uncovered surfaces, then auto-closes the tracker once a *later* release tag
 for **every** uncovered surface contains the stranded commit
 (`git tag --contains <tip>`, filtered per surface: SDK tags `vX.Y.Z`, plugin

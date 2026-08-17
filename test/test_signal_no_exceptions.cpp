@@ -1,4 +1,5 @@
 #include <pulp/signal/headphone_crossfeed.hpp>
+#include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/tempo_delay.hpp>
 
@@ -65,6 +66,13 @@ int main() {
         points, {.tap_count = 3u, .type = pulp::signal::LinearPhaseFirType::type_i_symmetric_odd});
     if (!design)
         return 16;
+    pulp::signal::ReverseBuffer reverse;
+    if (!reverse.configure({.window_samples = 4}) || !reverse.prepare(8))
+        return 17;
+    const float reversed = reverse.process_sample(1.0f);
+    if (!std::isfinite(reversed))
+        return 18;
+
     pulp::signal::TempoDelayTime tempo_delay;
     if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
         return 19;

@@ -116,6 +116,17 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/reverse_buffer.hpp",
+        "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Prepared fixed-capacity streaming window reversal with explicit boundary "
+            "shaping and a finite tail; it is a bounded buffering surface reused by "
+            "effects rather than an advertised generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/signal/tempo_delay.hpp",
         "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
         "disposition": "infrastructure",
@@ -531,7 +542,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:2d8b6d15264c91030522f59c2982fbfec6052079198488b4de9704f207f96025",
+        "fingerprint": "sha256:10df478ab7c3f883d4b871b59822a8b58262b59bd219becc2669116de392e538",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

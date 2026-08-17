@@ -10364,6 +10364,30 @@
             "enums": []
           }
         ],
+        "reverse_buffer.hpp": [
+          {
+            "class": "ReverseBufferT",
+            "qualified_name": "pulp::signal::ReverseBufferT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t maximum_window_samples)",
+              "reset()",
+              "configure(Config replacement)",
+              "config()",
+              "prepared()",
+              "maximum_window_samples()",
+              "retained_bytes()",
+              "latency_samples()",
+              "startup_latency_samples()",
+              "tail_samples()",
+              "state()",
+              "position()",
+              "set_bypassed(bool bypassed)",
+              "bypassed()"
+            ],
+            "enums": []
+          }
+        ],
         "rise_fall_generator.hpp": [
           {
             "class": "RiseFallGeneratorT",
