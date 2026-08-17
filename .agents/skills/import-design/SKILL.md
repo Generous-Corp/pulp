@@ -6618,3 +6618,42 @@ browser capture has had the chance to supply that reference. `--offline` and
 all non-browser sources still require an explicit `--reference`; if browser
 capture cannot produce its source image, the import must fail closed. Keep a
 browser-backed regression test for both halves of this rule.
+
+## Two lowering lanes read one resolver — a widget kind must reach BOTH
+
+`resolve_design_ir_native` classifies a node into a `NativeWidgetKind`, and two
+independent consumers act on that answer:
+
+- the **runtime materializer**, `make_widget` in `design_import_native_common.cpp`
+- the **baked C++ emitter**, `widget_make_expr` in `design_cpp_tree_codegen.cpp`
+
+They are separate switches. A kind handled by one and not the other produces a
+working control in the runtime importer and a **bare `View`** in an exported
+plugin — it lays out, it paints its imported styling, and it does nothing. No
+diagnostic fires, because the emitter's fallthrough returns a plain `View` for
+anything it does not name, and `-Werror` is not global so `-Wswitch` only warns.
+
+Rules when touching either lane:
+
+- **Add the kind to both switches in the same change**, and keep
+  `widget_make_expr` exhaustive over `NativeWidgetKind` so `-Wswitch` fires on
+  the next addition instead of baking silence.
+- **Per-widget setup is a second, separate switch.** Constructing the right type
+  is not enough: `emit_widget_specific` must also emit the setter calls the
+  runtime performs, or the baked control ships empty (no items, no range, no
+  value).
+- **Put anything both lanes need on `ImportedWidgetSemantics`, not in a
+  TU-local helper.** The scraping helpers in `design_import_native_common.cpp`
+  live in an anonymous namespace and are unreachable from the emitter, so
+  reaching for one there means duplicating it, which is the same drift one step
+  later. The shared struct is what the header means by "a single definition here
+  keeps the two lowerers from drifting".
+- **A test asserting only the runtime path cannot catch this.** Assert against
+  `generate_pulp_cpp(...).source` that the expected widget type and its setup
+  calls appear. Verify the assertion fails with the case removed; a test that
+  passes either way is not covering the lane.
+
+Note the **Swift** emitter (`design_swift_codegen.cpp`) is a deliberate fourth
+lowering that shares only `resolve_design_ir_native` and re-derives the rest, so
+"all native lanes share X" is false for it. Plan for two full sharers (runtime +
+C++ baker), one partial (native-JS), and one non-sharer (Swift).
