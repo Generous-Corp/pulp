@@ -2094,7 +2094,7 @@ down this list before touching build code:
    alongside anything else that wants that VM. Anything that *waits* on another
    workflow while holding it deadlocks the release outright.
 2. **Tagged releases and the release-path PR gate need distinct runner classes.**
-   `release-cli.yml` and `release-publish.yml` use
+   `release-cli.yml` and `sign-and-release.yml` use
    `PULP_RELEASE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-tagged` label. `release-path-pr-gate.yml` prefers
    `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` and the exclusive
@@ -6310,32 +6310,40 @@ The fallback is last, not first. `sign-and-release.yml` must prefer the isolated
 PR pool. A split route can finish all CLI/SDK assets while the signing leg
 remains queued with no runner, leaving the release draft unpublished.
 
-## Release health escalation (`release-health.yml`)
+## "Tag exists but no published release" → the reconciler owns this
 
-Beyond the auto-release/cadence/release-cli watchdogs, `release-health.yml`
-(every 2h) is the SYMPTOM-LEVEL catch-all: it fails RED + keeps ONE rolling
-`release-health`-labelled issue when the newest N tags (default 2) have no
-non-draft release with assets — i.e. published releases aren't keeping pace with
-tags, regardless of which leg broke. To debug a "release stuck" report: check
-this workflow's latest run + the open `release-health` issue, then the failing
-`sign-and-release.yml`/`release-cli.yml` legs for the newest tag. Discord push is
-wired but OFF unless the `RELEASE_ALERT_DISCORD_WEBHOOK` secret is set.
+`release-reconcile.yml` (every 30 min) is the single owner of "did every recent
+tag actually ship?", and the only workflow allowed to act on the answer. It
+replaced four report-only watchdogs (`release-guard`, `release-health`,
+`release-cli-watchdog`, `release-draft-stuck-check`) that between them filed 413
+issues in two weeks without fixing anything, while the real recovery was a human
+running `gh workflow run` by hand. Their grace windows (15-60 min) were also
+shorter than the real pipeline (70-165+ min), so they alarmed on healthy
+releases that were still building.
 
-## Release is built by TWO workflows → publish via the coordinator (immutable releases)
+It reconciles rather than reports: for each recent SDK tag it compares desired
+state (a published release) against actual state and drives the difference to
+zero by **re-dispatching** the release. It never cancels or deletes anything.
 
-A Pulp release is assembled from two parallel tag-triggered workflows: `Release
-CLI` (release-cli.yml → CLI binaries) and `Sign and Release` (sign-and-release.yml
-→ macOS sign/notarize + appcast.xml). GitHub now makes a PUBLISHED release
-IMMUTABLE, so the leg that published first locked the other out ("Cannot upload
-asset to an immutable release") and releases shipped incomplete. Both legs now
-create the release as a DRAFT on a tag push; `release-publish.yml` (the "Release
-publish coordinator", workflow_run on both) flips it to published EXACTLY ONCE,
-when BOTH legs succeed for the same SHA. Consequences to know: a release stays a
-draft until both legs are green (incomplete releases never publish), and
-release-health.yml treats a stuck draft as unhealthy. When debugging "tag exists
-but no published release", check both legs' runs AND the coordinator. A manual
-release-cli workflow_dispatch backfill still publishes directly (draft only on
-`push`).
+Convergence rules worth knowing before you intervene by hand:
+
+- A published release is done. `release-cli` publishes only after an
+  `--exact-required` asset check, so "published" already means complete.
+- A tag whose release run is queued or in progress is **left alone, however
+  long it has been running**. Slow is not broken.
+- A tag younger than `GRACE_MINUTES` is left alone even with no run visible yet.
+- A completed terminal failure opens the circuit and is reported rather than
+  retried: SDK tags are immutable, so retrying a real validation failure only
+  repeats runner load.
+- No run, or a run interrupted by cancellation/staleness, is re-dispatched up to
+  `MAX_ATTEMPTS`.
+- A tag that exhausts `MAX_ATTEMPTS` gets ONE issue, updated in place, labelled
+  **`release-guard`** (`tools/scripts/release_reconcile.py`).
+
+So to debug a "release stuck" report: read the newest `release-reconcile.yml`
+run and the open `release-guard` issue, not the individual legs. Most of the
+time the answer is that it is still building and the reconciler is correctly
+doing nothing.
 
 ## Build strings must take a share, not the machine
 

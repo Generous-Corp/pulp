@@ -2165,16 +2165,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return editor;
         }
         case NativeWidgetKind::combo_box: {
-            // A captured "Dropdown" frame → an interactive ComboBox. Its text
-            // child is the selected value, and that is the ONLY real option: a
-            // static design defines no alternatives, so emit just the shown value
-            // rather than fabricating "Option 2/3" placeholders. A design that
-            // carries component variants would source the full list from them.
+            // A captured "Dropdown" frame → an interactive ComboBox. The option
+            // list comes from the shared semantic model so the baked C++ lane
+            // builds the identical control from the identical list.
             auto combo = std::make_unique<ComboBox>();
-            std::string selected = first_text_descendant(node).value_or(text);
-            std::vector<std::string> items;
-            if (!selected.empty()) items.push_back(selected);
-            combo->set_items(std::move(items));
+            combo->set_items(semantics.combo_items);
             combo->set_selected_silent(0);
             return combo;
         }
@@ -2791,6 +2786,13 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     // binding descriptor's count.
     if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
         out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
+    // A dropdown's shown value is its only real option in a static design.
+    // Resolved here, in the shared model, so the runtime materializer and the
+    // baked C++ lane build the same ComboBox from the same list.
+    if (resolved.kind == NativeWidgetKind::combo_box) {
+        std::string selected = first_text_descendant(node).value_or(out.text);
+        if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+    }
     out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");
