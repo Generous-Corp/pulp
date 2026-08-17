@@ -1252,6 +1252,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 vector_node.attributes["svg_viewbox"] =
                     "0 0 " + format_number(svg_subtree.viewbox_width) + " " +
                     format_number(svg_subtree.viewbox_height);
+                // Only ever written beside a viewBox, and only for the
+                // non-default mapping. Without a viewBox the shapes are
+                // already in CSS pixels and there is no aspect to preserve, so
+                // an attribute there would describe a transform nobody applies.
+                if (svg_subtree.stretch_to_box) {
+                    vector_node.attributes["svg_preserve_aspect_ratio"] =
+                        "none";
+                }
             }
             // Both paints are ALWAYS stated, `none` included. SVG's own
             // default fill is opaque black and the renderer's default matches

@@ -51,6 +51,19 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // SVG's `preserveAspectRatio="none"`. Separate from setSvgViewBox rather
+    // than a fourth argument to it, so the two can be issued in either order
+    // and an existing caller keeps its arity.
+    register_bridge_function(api, "setSvgStretchToBounds",
+                             [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto stretch = args.get<bool>(1, false);
+        if (auto* w = dynamic_cast<SvgPathWidget*>(self.widget(id))) {
+            w->set_stretch_to_bounds(stretch);
+        }
+        return choc::value::Value();
+    });
+
     // setSvgFill / setSvgStroke / setSvgStrokeWidth are polymorphic across
     // all SVG-primitive widgets so JSX consumers see a uniform fill/stroke
     // surface. SvgRectWidget and SvgLineWidget mirror the path API with the

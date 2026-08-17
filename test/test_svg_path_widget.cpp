@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <optional>
+#include <utility>
 
 using pulp::view::SvgPathWidget;
 using pulp::view::SvgPathSegment;
@@ -438,6 +439,69 @@ TEST_CASE("SvgPathWidget viewBox is mapped onto widget bounds with xMidYMid meet
         }
     }
     REQUIRE(saw_scale);
+}
+
+TEST_CASE("SvgPathWidget stretches the viewBox onto bounds when asked",
+          "[svg_path][native-lowering]") {
+    // The two mappings held against each other on ONE deliberately
+    // non-square pairing, because the claim is a DIFFERENCE between them and
+    // asserting the stretch alone would pass just as well if the default had
+    // silently started stretching too.
+    //
+    // Bounds 40x10, viewBox 20x10: the axes want 2 and 1. `meet` must take
+    // min(2,1)=1 on both and centre the leftover 20px horizontally; `none`
+    // must take 2 and 1 and centre nothing. This is the waveform case — a
+    // trace authored wide and short, which under `meet` collapses into a
+    // band down the middle of its own box.
+    const auto transform_for = [](bool stretch) {
+        SvgPathWidget w;
+        w.set_bounds({0, 0, 40, 10});
+        w.set_viewbox(20, 10);
+        w.set_stretch_to_bounds(stretch);
+        w.set_path("M 0 0 L 20 10");
+        w.set_fill_color(pulp::canvas::Color::rgba8(255, 255, 255));
+
+        RecordingCanvas rc;
+        w.paint(rc);
+
+        struct Transform {
+            std::optional<std::pair<float, float>> scale;
+            std::optional<std::pair<float, float>> translate;
+        } found;
+        for (const auto& cmd : rc.commands()) {
+            if (cmd.type == DrawCommand::Type::scale)
+                found.scale = {cmd.f[0], cmd.f[1]};
+            else if (cmd.type == DrawCommand::Type::translate)
+                found.translate = {cmd.f[0], cmd.f[1]};
+        }
+        return found;
+    };
+
+    const auto meet = transform_for(false);
+    REQUIRE(meet.scale);
+    CHECK(meet.scale->first == 1.0f);
+    CHECK(meet.scale->second == 1.0f);
+    REQUIRE(meet.translate);
+    CHECK(meet.translate->first == 10.0f);  // (40 - 20*1) / 2
+    CHECK(meet.translate->second == 0.0f);
+
+    const auto stretched = transform_for(true);
+    REQUIRE(stretched.scale);
+    CHECK(stretched.scale->first == 2.0f);
+    CHECK(stretched.scale->second == 1.0f);
+    // Nothing is left over, so nothing is centred. A translate here would
+    // push the drawing off the box it was just made to fill.
+    CHECK_FALSE(stretched.translate);
+}
+
+TEST_CASE("SvgPathWidget stretch is off by default and round-trips",
+          "[svg_path][native-lowering]") {
+    SvgPathWidget w;
+    CHECK_FALSE(w.stretch_to_bounds());
+    w.set_stretch_to_bounds(true);
+    CHECK(w.stretch_to_bounds());
+    w.set_stretch_to_bounds(false);
+    CHECK_FALSE(w.stretch_to_bounds());
 }
 
 TEST_CASE("SvgPathWidget setFill / clearFill toggles emission",
