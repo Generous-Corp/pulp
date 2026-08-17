@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 47,
+  "inventory_version": 48,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 434,
-    "reviewed_headers": 138,
+    "public_headers": 435,
+    "reviewed_headers": 139,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 89,
+      "capability_entrypoint": 90,
       "capability_support": 38,
       "infrastructure": 9,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 255,
-        "reviewed_headers": 96,
+        "public_headers": 256,
+        "reviewed_headers": 97,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -3579,7 +3579,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:89d29a569c2803a56bd034b26a53cf48bcbc7b23c6271e6b9e6d1fb85ecc4beb",
+      "fingerprint": "sha256:867c27fe4d7ef095f9c145d5bc667c3da34b2fa2e1bdc4c12d477ed4a07a896b",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3882,6 +3882,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/transfer_curve.hpp",
+      "fingerprint": "sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632",
+      "include": "pulp/signal/transfer_curve.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.transfer-curve"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
