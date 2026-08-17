@@ -25,11 +25,6 @@ int main() {
     pulp::signal::FractionalDelayLine fractional_delay;
     if (!fractional_delay.prepare(8u, pulp::signal::FractionalDelayMethod::lagrange3))
         return 5;
-    pulp::signal::CombFilter comb;
-    if (!comb.prepare(8u) || !comb.configure({pulp::signal::CombFilterMode::feedback, 4u, 0.5}))
-        return 20;
-    if (!comb.process(1.0f))
-        return 21;
     pulp::signal::AudioMatrixMixer matrix;
     if (!matrix.prepare(16u))
         return 6;
