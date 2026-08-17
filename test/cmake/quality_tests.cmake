@@ -105,6 +105,10 @@ if(Python3_Interpreter_FOUND)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    if(UNIX)
+        add_test(NAME linux-runner-lane-contract COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_linux_runner_lane_contract.py")
+    endif()
     add_test(NAME inspector-protocol-registry-complete
         COMMAND ${Python3_EXECUTABLE}
             ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
