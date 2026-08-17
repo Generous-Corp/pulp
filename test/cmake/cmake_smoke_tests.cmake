@@ -586,11 +586,16 @@ if(UNIX)
 
     # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
     # (stub tartci): asserts bounded parallelism with no tartci, lease
-    # acquire+release when granted, and a non-failing leaseless fallback when
-    # the lease is denied.
+    # acquire+release when granted, a non-failing leaseless fallback when the
+    # lease is denied, and that a held lease keeps beating for the life of the
+    # build without leaking the refresher.
+    #
+    # The heartbeat cases sleep on purpose — one runs at the default 60s
+    # interval to prove teardown does not block on it — so the budget is
+    # wall-clock, not CPU. It is not a candidate for tightening.
     add_test(NAME governed-build-wrapper
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_governed_build.sh)
-    set_tests_properties(governed-build-wrapper PROPERTIES TIMEOUT 30)
+    set_tests_properties(governed-build-wrapper PROPERTIES TIMEOUT 120)
 endif()
 
 # install.sh contract: install CLI + matching SDK in one
