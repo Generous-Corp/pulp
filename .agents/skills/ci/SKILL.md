@@ -3900,6 +3900,36 @@ Two details differ from `build.yml` deliberately:
 marker wipes, a clean run does not) plus the arm/clear pairing across stages —
 a lane that arms without clearing wipes its build dir on every run.
 
+### Prevent: name the configure blockers before cmake does
+
+`tools/scripts/checkout_preflight.py` (advisory, run by `setup.sh`; also
+`--root <dir>` to audit another checkout) reports, in seconds, the failures a
+tree is already destined for. Run it first when a configure dies — it answers
+the two questions the CMake error does not.
+
+**Which Skia is this build actually using, and why.** `FindSkia.cmake` reads
+`$SKIA_DIR` **before** the checkout's own `external/skia-build`, and that
+variable is pinned in a shell rc on the multi-worktree hosts. So a worktree can
+hold a perfectly good cache and still build against a different, broken one. On
+2026-08-16 every worktree on M5 — including ones carrying m151 and m152 — was
+resolving to a stale m150 tree whose Dawn slice was compiled at macOS 15.0
+against a 13.4 floor. `Pulp macOS archive-floor mismatch` names the archive, never
+the override, so "set `SKIA_DIR` per worktree" and "fetch a good cache locally"
+both look reasonable and **neither can take effect**. The preflight prints the
+winning path, says when it overrides the local one, and gives a fix with `--dest`
+pointing at the cache actually in use.
+
+**Is this checkout trustworthy to read a pinned value from.** It flags an
+unfinished merge and the distance behind `origin/main`. The primary checkout on
+M5 sits **6,365 commits behind with 4 conflicted paths**, and it is the most
+natural place to look. Reading `tools/deps/manifest.json` and `tools/shipyard.toml`
+from it produced two confidently-wrong answers hours apart in one session — once
+nearly overriding a peer's correct diagnosis. **Read pinned values with
+`git show origin/main:<path>`**, not from a working tree.
+
+It also catches an uninitialised `planning` submodule, which the source-contracts
+gate otherwise reports as a contract violation rather than a provisioning gap.
+
 ### Prevent: ccache false-hit guard (#3504 follow-up)
 
 The build-dir sentinel above does **not** cover the *ccache*, and the
