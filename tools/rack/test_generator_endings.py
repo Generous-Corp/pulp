@@ -167,6 +167,15 @@ def main():
             continue
         if any(key in rule for key in NOT_FROM_A_GENERATOR):
             continue
+        # NOT_IN_A_BUILD_LOG names endings raised BEFORE a build starts, so
+        # they never appear in generator source and this scan cannot see them.
+        # Its entries are decisions to keep the rule anyway, and the orphan
+        # check has to honour them or it reports the opposite of what the same
+        # file already decided. It did: `rack sdk not found` was reported here
+        # as matching nothing, the rule was removed on that advice, and the
+        # app then read that ending as ordinary progress.
+        if any(key in rule or rule in key for key in NOT_IN_A_BUILD_LOG):
+            continue
         orphaned.append(rule)
     if orphaned:
         print(f"  WRONG  {len(orphaned)} rule(s) match wording no generator "
