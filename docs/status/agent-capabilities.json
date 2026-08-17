@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 26,
+  "manifest_revision": 28,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 41
+        "capabilities": 42
       },
       "timebase": {
         "state": "partial",
@@ -2771,6 +2771,67 @@
       "contract_digest": "sha256:a4b8818f25bc81b9b9e34f3c4dc341dc757a6abfb441254ce1d88d7cecae096b"
     },
     {
+      "key": "signal.minimum-phase-fir",
+      "domain": "signal",
+      "summary": "Offline cepstral minimum-phase FIR reconstruction from bounded one-sided magnitude bins.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "none",
+        "process": "offline reconstruction; may allocate bounded workspace",
+        "reset": "none",
+        "release": "returned vectors destroyed off audio"
+      },
+      "state_model": "Stateless reconstruction over a bounded radix-2 work spectrum, returning owned coefficients, measured magnitudes, and per-bin errors.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite nonnegative one-sided magnitude bins from DC through Nyquist for a bounded radix-2 FFT size",
+      "output_domain": "real causal minimum-phase FIR coefficients with measured magnitude and error diagnostics",
+      "units": [
+        "linear magnitude",
+        "coefficients",
+        "FFT bins",
+        "bytes"
+      ],
+      "latency": "offline whole-reconstruction transform",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "reconstructor",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::reconstruct_minimum_phase_fir",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:ad59514cbd7d101df3df95427b291bd579806895d2a8a13eba3b05ef4078bed4"
+    },
+    {
       "key": "signal.modulation-primitives",
       "domain": "signal",
       "summary": "Shared curve vocabulary, bounded breakpoint envelopes, and rise/fall generators.",
@@ -5358,14 +5419,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 74,
+    "total": 75,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 41,
+      "signal": 42,
       "timebase": 9
     }
   },
@@ -8056,6 +8117,15 @@
               "bool()"
             ],
             "enums": []
+          },
+          {
+            "class": "MinimumPhaseFirResult",
+            "qualified_name": "pulp::signal::MinimumPhaseFirResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
           }
         ],
         "fir_filter.hpp": [
@@ -10290,6 +10360,30 @@
               "set_decay(SampleType seconds)",
               "set_damping(SampleType d)",
               "set_mix(SampleType m)"
+            ],
+            "enums": []
+          }
+        ],
+        "reverse_buffer.hpp": [
+          {
+            "class": "ReverseBufferT",
+            "qualified_name": "pulp::signal::ReverseBufferT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t maximum_window_samples)",
+              "reset()",
+              "configure(Config replacement)",
+              "config()",
+              "prepared()",
+              "maximum_window_samples()",
+              "retained_bytes()",
+              "latency_samples()",
+              "startup_latency_samples()",
+              "tail_samples()",
+              "state()",
+              "position()",
+              "set_bypassed(bool bypassed)",
+              "bypassed()"
             ],
             "enums": []
           }

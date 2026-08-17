@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7612-release-build-parallelism",
+  "created_at": "2026-08-17T01:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Give the release and release-dry-run build steps an explicit --parallel job count so the default Unix Makefiles generator no longer compiles release legs serially; no packaging, artifact-contract, or design-import behavior changes.",
+  "tests": [
+    "ReleaseBuildParallelismExplicit rejects a release build invocation without a job count",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

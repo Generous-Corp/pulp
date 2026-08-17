@@ -33,6 +33,10 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/release_build_matrix.py'
+      - 'tools/scripts/test_release_build_matrix.py'
+      - 'tools/scripts/release_platform_subset_check.py'
+      - 'tools/scripts/test_release_platform_subset_check.py'
       - 'tools/scripts/sdk_provenance.py'
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
@@ -105,6 +109,10 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/release_build_matrix.py'
+      - 'tools/scripts/test_release_build_matrix.py'
+      - 'tools/scripts/release_platform_subset_check.py'
+      - 'tools/scripts/test_release_platform_subset_check.py'
       - 'tools/scripts/sdk_provenance.py'
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
@@ -288,6 +296,10 @@ jobs:
           python3 tools/scripts/test_release_workflow_test_step.py
           python3 tools/scripts/test_release_checksum_manifest.py
           python3 tools/scripts/test_release_artifact_contents.py
+          # The active_platforms shipping knob: matrix-leg derivation and the
+          # subset-staleness allowance that keeps a platform pause temporary.
+          python3 tools/scripts/test_release_build_matrix.py
+          python3 tools/scripts/test_release_platform_subset_check.py
           python3 tools/scripts/test_sdk_provenance.py
           python3 tools/scripts/test_required_gate_liveness.py
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py

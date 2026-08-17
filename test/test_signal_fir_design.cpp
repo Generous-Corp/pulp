@@ -82,6 +82,23 @@ double weighted_squared_residual(std::span<const FirDesignPoint> points,
     return residual;
 }
 
+std::vector<double> direct_dft_magnitudes(std::span<const double> impulse, std::size_t fft_size) {
+    std::vector<double> magnitudes(fft_size / 2u + 1u);
+    for (std::size_t bin = 0u; bin < magnitudes.size(); ++bin) {
+        const double omega = 2.0 * kPi * static_cast<double>(bin) / static_cast<double>(fft_size);
+        magnitudes[bin] = std::abs(direct_dft_response_at(impulse, omega));
+    }
+    return magnitudes;
+}
+
+double front_half_energy(std::span<const double> values) {
+    const std::size_t half = values.size() / 2u;
+    double energy = 0.0;
+    for (std::size_t index = 0u; index < half; ++index)
+        energy += values[index] * values[index];
+    return energy;
+}
+
 } // namespace
 
 TEST_CASE("least-squares FIR exactly recovers all four linear-phase types",
@@ -283,6 +300,93 @@ TEST_CASE("pivoted least-squares FIR is deterministic",
     REQUIRE(first.coefficients == second.coefficients);
     REQUIRE(first.measured_amplitudes == second.measured_amplitudes);
     REQUIRE(first.qr_diagonal_condition_estimate == second.qr_diagonal_condition_estimate);
+}
+
+TEST_CASE("minimum-phase reconstruction recovers an untruncated magnitude and stable zero",
+          "[signal][fir-design][minimum-phase]") {
+    constexpr std::size_t fft_size = 64u;
+    const std::vector<double> known_minimum_phase{1.0, -0.5};
+    const auto target = direct_dft_magnitudes(known_minimum_phase, fft_size);
+    const auto result = reconstruct_minimum_phase_fir(target);
+    REQUIRE(result.status == FirDesignStatus::success);
+    REQUIRE(result.fft_size == fft_size);
+    REQUIRE(result.coefficients.size() == fft_size);
+    REQUIRE(result.maximum_absolute_error < 2.0e-12);
+    REQUIRE(result.rms_error < 1.0e-12);
+    REQUIRE_THAT(result.coefficients[0], WithinAbs(1.0, 2.0e-12));
+    REQUIRE_THAT(result.coefficients[1], WithinAbs(-0.5, 2.0e-12));
+    const double recovered_zero = -result.coefficients[1] / result.coefficients[0];
+    REQUIRE_THAT(recovered_zero, WithinAbs(0.5, 2.0e-12));
+    REQUIRE(std::abs(recovered_zero) < 1.0);
+    const auto independent_returned = direct_dft_magnitudes(result.coefficients, fft_size);
+    for (std::size_t bin = 0u; bin < target.size(); ++bin) {
+        REQUIRE_THAT(independent_returned[bin], WithinAbs(target[bin], 2.0e-12));
+        REQUIRE_THAT(result.measured_magnitudes[bin],
+                     WithinAbs(independent_returned[bin], 2.0e-12));
+    }
+}
+
+TEST_CASE("minimum-phase reconstruction front-loads energy independently of magnitude fit",
+          "[signal][fir-design][minimum-phase]") {
+    constexpr std::size_t fft_size = 128u;
+    const std::vector<double> symmetric{0.02, 0.08, 0.2, 0.4, 0.6, 0.4, 0.2, 0.08, 0.02};
+    const auto target = direct_dft_magnitudes(symmetric, fft_size);
+    const auto result = reconstruct_minimum_phase_fir(target);
+    REQUIRE(result);
+    REQUIRE(result.maximum_absolute_error < 1.0e-9);
+    const double total_energy = std::inner_product(
+        result.coefficients.begin(), result.coefficients.end(), result.coefficients.begin(), 0.0);
+    REQUIRE(front_half_energy(result.coefficients) > 0.99 * total_energy);
+}
+
+TEST_CASE("minimum-phase floor and truncation are observable in measured error",
+          "[signal][fir-design][minimum-phase]") {
+    const std::vector<double> zeros(33u, 0.0);
+    const auto floored = reconstruct_minimum_phase_fir(
+        zeros, {.coefficient_count = 64u, .log_magnitude_floor = 1.0e-6});
+    REQUIRE(floored);
+    REQUIRE_THAT(floored.coefficients[0], WithinAbs(1.0e-6, 1.0e-15));
+    REQUIRE(floored.maximum_absolute_error < 1.0e-14);
+
+    const auto target = direct_dft_magnitudes(std::vector<double>{1.0, -0.8}, 64u);
+    const auto truncated = reconstruct_minimum_phase_fir(target, {.coefficient_count = 1u});
+    REQUIRE(truncated);
+    REQUIRE(truncated.coefficients.size() == 1u);
+    REQUIRE(truncated.maximum_absolute_error > 0.7);
+    REQUIRE(truncated.rms_error > 0.4);
+    REQUIRE_THAT(truncated.errors.front(), WithinAbs(0.8, 2.0e-8));
+}
+
+TEST_CASE("minimum-phase reconstruction rejects invalid geometry, values, and budgets",
+          "[signal][fir-design][minimum-phase][fault]") {
+    REQUIRE(reconstruct_minimum_phase_fir(std::vector<double>{1.0}).status ==
+            FirDesignStatus::invalid_argument);
+    REQUIRE(reconstruct_minimum_phase_fir(std::vector<double>{1.0, 1.0, 1.0, 1.0}).status ==
+            FirDesignStatus::invalid_argument); // Implied N=6 is not radix-2.
+    REQUIRE(reconstruct_minimum_phase_fir(std::vector<double>(33u, 1.0), {.coefficient_count = 65u})
+                .status == FirDesignStatus::invalid_argument);
+    auto nonfinite = std::vector<double>(33u, 1.0);
+    nonfinite[4] = std::numeric_limits<double>::infinity();
+    REQUIRE(reconstruct_minimum_phase_fir(nonfinite).status == FirDesignStatus::invalid_argument);
+    // One bin past the largest admitted radix-2 size implies N=131072.
+    REQUIRE(reconstruct_minimum_phase_fir(
+                std::vector<double>(kMaximumMinimumPhaseFirSize + 1u, 1.0))
+                .status == FirDesignStatus::unsupported_size);
+    REQUIRE(reconstruct_minimum_phase_fir(std::vector<double>(33u, 1.0),
+                                          {.coefficient_count = 64u,
+                                           .log_magnitude_floor = 1.0e-12,
+                                           .maximum_workspace_bytes = 8u})
+                .status == FirDesignStatus::workspace_limit_exceeded);
+
+    std::vector<double> extreme(33u, std::numeric_limits<double>::max());
+    for (std::size_t bin = 1u; bin < extreme.size(); bin += 2u)
+        extreme[bin] = std::numeric_limits<double>::min();
+    const auto overflow = reconstruct_minimum_phase_fir(extreme);
+    REQUIRE(overflow.status == FirDesignStatus::numerical_failure);
+    REQUIRE(overflow.fft_size == 0u);
+    REQUIRE(overflow.coefficients.empty());
+    REQUIRE(overflow.measured_magnitudes.empty());
+    REQUIRE(overflow.errors.empty());
 }
 
 TEST_CASE("designed coefficients feed both double and intentionally narrowed FIR runtimes",

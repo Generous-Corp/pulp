@@ -25,11 +25,45 @@ For the end-to-end release pipeline that turns a merged PR into a published GitH
 
 **There is no Intel/universal gate on the release path.** A `universal-arch-gate` job used to build PulpGain universal and run dual-arch `auval` on every tag. It was removed: it is redundant with `nightly-intel.yml`'s `universal-crosscheck` (same check) and `intel-portability.yml` (Intel at PR time), and — worse — it pinned itself to the GitHub-hosted `macos-15` pool for ~2h per tag, which is the SAME scarce pool the release's own required `darwin-x64` legs need. At ~14 tags/day it queued ~28 macOS-hours/day of hosted work ahead of the leg that actually gates publication, while the self-hosted Studios sat idle. Never put an advisory check in front of the release on a pool the release itself competes for. (Universal-build gotcha worth keeping: a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is SIGKILL'd at load — always re-sign after lipo.) See `docs/guides/intel-support.md`.
 
+**Which platforms a release ships is `active_platforms` in
+`release_product_matrix.json`** — one field consumed by the build/smoke matrix
+(`release_build_matrix.py`), the publish-time content verification, and the
+`--exact-required` asset list, so the built legs and the demanded assets
+cannot desync. Absent = full inventory; a subset (e.g. `["darwin-arm64"]`)
+pauses the other platforms' legs AND drops their archives from the asset
+contract in one edit. The publish step reads it from the default branch, so
+the flip governs re-dispatches and backfills too. Paused platforms are
+time-boxed by `release-platform-subset-check.yml` (7 days → tracking issue).
+The per-release asset table in docs/guides/release-pipeline.md describes the
+full inventory; a subset release legitimately carries fewer rows, and
+installers for paused platforms serve users from the last release that
+carried them. **The narrowing is permanent per release**: a published GitHub
+release is immutable, so every tag published while the field is narrow ships
+without the paused platforms' assets forever — widening the field later
+cannot repair them; only a new tag can. The 7-day check catches a subset
+that outlives its purpose, NOT a release that shipped incomplete inside the
+window — that one is already immutable by the time the issue opens.
+
 **Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.
 - The `release` job's `if:` uses `always() && needs.build-cli.result == 'success' && needs.smoke-cli.result == 'success' && needs.universal-arch-gate.result == 'success'` (NOT the implicit `success()` over all needs). `always()` forces evaluation even if a needed job failed, so nothing silently skips publish; the explicit `== 'success'` checks are what enforce the requirement. All three are now required (the universal-arch-gate was re-required once its shell-bug false failure was fixed). A genuine build/smoke/gate failure blocks publish.
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
 - `sign-and-release.yml` and `release-cli.yml` both fire on the SAME `v*` tag and race. sign-and-release notarizes, then its "Attach appcast.xml" step POLLS `gh release view <tag>` for the draft that release-cli's `release` job creates at the very end of its build chain. Since the Intel `darwin-x64` cross-compile leg landed, that chain runs 60-90 min (the leg queues for a hosted macos-15 runner, then builds), so a too-short poll times out and the release ships without the Sparkle appcast → someone has to hand-publish. The poll window is bumped to 100 min (`seq 1 300`, 20s each). The deeper fix (not yet done — needs a real-tag validation): the poll runs ON the macOS notarize VM, holding a scarce self-hosted release VM for the whole wait, which also starves the lane; emit `appcast.xml` as an artifact and move the wait+attach to a cheap ubuntu job so the macOS VM frees right after notarization.
+
+**Release builds carry an explicit `--parallel` count — do not "simplify" it away.**
+`release-cli.yml`'s CLI and SDK build steps (and `release-dry-run.yml`'s mirror)
+compute `jobs` from the runner's visible cores and pass
+`cmake --build … --parallel "$jobs"`. Without it the default Unix Makefiles
+generator runs `make` with no `-j` — a strictly serial compile that cost ~50 min
+of every ~55 min release leg for months while `build_parallelism_guard.py`
+stayed green (it polices unbounded/whole-machine counts, not the serial
+opposite). Full visible cores is deliberate on this lane: release runners are
+ephemeral and single-tenant (GitHub-hosted images or dedicated release Tart
+VMs), so the shared-host governed-share rule does not apply; capacity is
+controlled by how many release VMs a host admits, not by throttling each build.
+`test_release_workflow_test_step.py::ReleaseBuildParallelismExplicit` enforces
+the shape; the steps also echo cores/RAM so an OOM or a small-VM allocation is
+diagnosable from the run log alone.
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -1264,6 +1298,18 @@ is still a draft, which is why the release job creates a draft and publishes it 
 the same job (the draft lives for seconds and is never observable from outside).
 It also means a release that publishes with a missing asset cannot be repaired —
 it needs a new patch tag.
+
+**Deleting a once-published release permanently BURNS its tag name.** GitHub
+reserves an immutable release's `tag_name` forever, even after deletion: every
+later publish attempt for that tag fails with `HTTP 422: tag_name was used by
+an immutable release`, and no re-dispatch can ever succeed (v0.807.0 and
+v0.808.0 were burned this way on 2026-08-16). Deleting a draft destroys its
+attached assets — though the binaries survive as the building run's workflow
+artifacts for ~90 days (`gh run download <run-id>`). So: NEVER delete a
+release or draft; recovery from any failed publish is a NEW patch tag. The
+publish step classifies the burned-tag 422 explicitly, and
+`release-deleted-tripwire.yml` files a tracking issue the minute any release
+is deleted.
 
 **Slow is survivable; racy is not.** A three-hour release still publishes. Never
 add automation that cancels or deletes an in-flight release because a newer tag

@@ -34,9 +34,28 @@ hard `needs`/`if` requirement — is a tracked follow-up.
 ### Shipped Intel artifacts — cross-compiled on Apple Silicon (2026-07-11)
 
 Tier 3 *validates* a universal build; it never publishes an installable binary.
-The **installable** `darwin-x64` slice is a separate REQUIRED leg in
-`release-cli.yml` (`os: macos-15-xcompile`, `platform: darwin-x64`) that ships
-`pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` in every release.
+The **installable** `darwin-x64` slice is a separate leg in `release-cli.yml`
+(`os: macos-15-xcompile`, `platform: darwin-x64` — leg configuration lives in
+`tools/scripts/release_build_matrix.py`) that ships
+`pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz`. When active it is
+REQUIRED — same reliability class as `darwin-arm64`, and the publish-time
+exact-asset contract demands its archives.
+
+**Whether the leg runs at all is governed by `active_platforms`** in
+`tools/scripts/release_product_matrix.json`: the release matrix, the content
+verification, and the exact-asset contract all derive from that one field.
+The full-platform inventory (including this leg) is the default; the field
+lets releases temporarily ship a subset (e.g. `darwin-arm64` only) with a
+one-line edit, and platforms are re-added the same way — piecemeal or all at
+once by deleting the field. While `darwin-x64` is paused, an Intel regression
+can land unnoticed (its release leg does not compile), which is why the pause
+is time-boxed: `.github/workflows/release-platform-subset-check.yml` opens a
+tracking issue once `active_platforms` has been a strict subset for more than
+7 days. Note the boundary of that guard: a published GitHub release is
+immutable, so every release published while the field is narrow lacks the
+Intel assets permanently — restoring the field afterwards fixes future
+releases, never past ones. Users on paused platforms install from the last
+release that carried their binaries until a new tag ships them again.
 
 It is **cross-compiled on the healthy Apple-Silicon runner**, not the
 GitHub-hosted `macos-15-intel` image. That native runner CPU-pegs on a full

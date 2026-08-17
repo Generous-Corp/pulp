@@ -1641,13 +1641,32 @@ uses, or the golden warms a cache the real jobs never touch.
   subbuilds short while preserving the normal `build-windows` artifact/test
   directory.
 - `.github/workflows/watchdog-reaper.yml` (pulp #2576) sweeps ALL open release
-  watchdog trackers daily and closes any whose version is released or superseded
+  watchdog trackers and closes any whose version is released or superseded
   — the existing watchdogs only auto-close inside a recent window, so historical
   per-version trackers orphaned (334 had accumulated). It only matches the exact
   auto-generated tracker titles and only closes objectively-resolved ones.
-  SHA-keyed `release: stuck` trackers carry no version in their title; the reaper
-  skips them without failing the sweep. Close those only after verifying the
-  affected SDK/plugin surface shipped the stranded commit.
+  SHA-keyed `release: stuck` trackers carry no version in their title; the
+  reaper parses the body for the tip SHA + uncovered surfaces and closes once a
+  later release tag for EVERY uncovered surface contains the stranded commit
+  (`tools/scripts/reap_stranded_tracker.py`). It runs daily at 06:00 UTC AND
+  immediately after every successful `Release CLI` run (via `workflow_run` —
+  the publish uses `GITHUB_TOKEN`, whose events cannot trigger a `release:`
+  workflow), because the resolving release otherwise lands just after the daily
+  sweep and objectively-closed trackers sit open all day looking like live
+  incidents. A pile of open `release: stuck` trackers therefore means the
+  release pipeline is genuinely stuck NOW — check release-reconcile's single
+  incident issue first, don't triage the trackers one by one.
+- **NEVER delete a GitHub release or draft — deletion of a once-published
+  release permanently burns its tag name.** GitHub reserves an immutable
+  release's `tag_name` forever; every later publish attempt 422s with
+  `tag_name was used by an immutable release`, and no re-dispatch can ever
+  succeed (this burned v0.807.0 and v0.808.0). Deleting a draft destroys its
+  attached assets, but the binaries survive as the building run's workflow
+  artifacts (~90-day retention, `gh run download <run-id>`). Recovery from a
+  failed publish is always a NEW patch tag, never a deletion.
+  `release-deleted-tripwire.yml` files a tracking issue the minute any release
+  is deleted, and release-cli's publish step names the burned-tag condition
+  explicitly when it hits the 422.
 - Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
   `gh issue list` / `gh pr *` helpers in those paths because they can use the
   shared GraphQL quota; a watchdog must not fail while reporting that the
@@ -1774,6 +1793,41 @@ Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml` pin whenever a
 post-tag-hook feature depends on it. (Durable fix is for `hook install` to pin
 from `tools/shipyard.toml` — a Shipyard-side change.)
 
+### Release platforms are a one-line knob: `active_platforms`
+
+`release_product_matrix.json` carries two platform fields: `platforms` (the
+full historical inventory — per-platform archive verification and
+library-stem merging key off it for every era; do not shrink it) and
+`active_platforms` (the subset a release currently SHIPS; absent = all).
+Three consumers derive from `active_platforms`, which is the whole point —
+they can never disagree:
+
+1. `release-cli.yml`'s build/smoke `matrix.include` — expanded by
+   `release_build_matrix.py` in the `resolve-macos-runner` job (leg configs —
+   runner images, the darwin-x64 `macos-15-xcompile` sentinel, the linux-x64
+   glibc container — live in that script, unit tested).
+2. The publish-time `--all-platforms` content verification.
+3. The finalizer's `--exact-required` asset list.
+
+The publish step imports `active_platforms` from the DEFAULT branch's matrix
+(like the policy floors), so a one-line edit on main governs every subsequent
+run — tag pushes, re-dispatches, old-tag backfills. Flip back by deleting the
+field, or re-add platforms piecemeal. Guardrails: the subset must be
+non-empty, within the inventory, and contain a darwin platform (the appcast
+needs a darwin min-OS floor); `release-platform-subset-check.yml` (daily)
+opens a tracking issue once the subset is older than 7 days — a paused
+platform's release leg does not compile, so regressions there land unnoticed
+for exactly as long as the pause stands. Do NOT reintroduce a hardcoded
+platform row in either matrix or a literal asset name in the finalizer;
+`test_release_workflow_test_step.py::ActivePlatformsDeriveTheReleaseMatrix`
+rejects both.
+
+**Job-level `if:` cannot see the `matrix` context** — that is WHY the legs
+are derived rather than gated: `if:
+contains(..., matrix.platform)` on a matrix job evaluates with an empty
+`matrix` and silently skips every leg. GitHub only exposes `github`, `needs`,
+`vars`, and `inputs` to `jobs.<id>.if`.
+
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
 GitHub returns a workflow's `run-name` as **`workflow_run.name`** in the REST API —
@@ -1801,6 +1855,33 @@ asserts `run-name` never returns.
 run is not cosmetic. Before changing it, grep the tartci supervisor config
 (`TARTCI_RUNNER_WORKFLOW_NAME`) for anything matching on it.
 
+
+### A bare `cmake --build` in a workflow is a SERIAL build, and no guard sees it
+
+CI runners select no CMake generator, so `cmake --build` resolves to **Unix
+Makefiles**, and with no `--parallel`/`-j` that runs `make` with **no job flag
+at all — one translation unit at a time**. This is the *opposite* failure to
+the one `build_parallelism_guard.py` polices (unbounded / whole-machine
+counts), so the guard stays green while a lane quietly compiles ~1,700 TUs on
+one core. release-cli.yml shipped exactly this for months: ~50 min of a ~55 min
+release leg was a single-threaded compile (v0.806.1 logs), and nothing flagged
+it.
+
+How to tell from a log without guessing: Makefiles progress lines look like
+`[ 37%] Building CXX object …` (Ninja's look like `[123/1700]`), and a **serial**
+make emits those percentages strictly monotonically — a parallel make interleaves
+them out of order. Counting out-of-order percentage lines is a two-minute
+proof either way.
+
+Release lanes (`release-cli.yml`, `release-dry-run.yml`) now derive an explicit
+count (`--parallel "$jobs"` from the runner's visible cores — deliberate on
+ephemeral single-tenant release runners/VMs, where admission control happens at
+the VM level, not by throttling each build) and
+`test_release_workflow_test_step.py::ReleaseBuildParallelismExplicit` fails any
+`cmake --build` that re-loses its job count there. Other workflows are NOT
+covered by that test — when adding a build step to any workflow, give it an
+explicit count or route it through `tools/ci/governed-build.sh` (mandatory
+anyway for legs that can resolve to the shared self-hosted Macs).
 
 ### Keep ONE -O0 lane: it sees UB that -O3 provably hides
 

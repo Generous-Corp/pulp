@@ -382,6 +382,27 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("new_tool.py", result.stderr)
 
+    def test_main_forces_blocking_stdio(self) -> None:
+        # Some callers (shipyard's pre-push capture) hand the guard a
+        # non-blocking stderr; a burst of notes then dies with
+        # BlockingIOError (EAGAIN), which reads as a gate failure and blocks
+        # the push even when every note said "not a violation". main() must
+        # force its stdio blocking before printing anything.
+        read_fd, write_fd = os.pipe()
+        os.set_blocking(write_fd, False)
+        saved_out, saved_err = os.dup(1), os.dup(2)
+        os.dup2(write_fd, 1)
+        os.dup2(write_fd, 2)
+        try:
+            hsg.main(["--mode", "report", "--base", "HEAD", "--head", "HEAD"])
+            self.assertTrue(os.get_blocking(1))
+            self.assertTrue(os.get_blocking(2))
+        finally:
+            os.dup2(saved_out, 1)
+            os.dup2(saved_err, 2)
+            for fd in (read_fd, write_fd, saved_out, saved_err):
+                os.close(fd)
+
     def test_script_entrypoint_exits_with_main_status(self) -> None:
         proc = subprocess.CompletedProcess(["git"], 1, stdout="", stderr="fatal")
         stderr = io.StringIO()

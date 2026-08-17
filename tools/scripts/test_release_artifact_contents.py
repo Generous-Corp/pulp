@@ -1261,5 +1261,95 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             )
 
 
+class ActivePlatformsContract(unittest.TestCase):
+    """The active_platforms shipping knob and its asset-contract derivation."""
+
+    @staticmethod
+    def _load(mutate) -> "rac.ProductMatrix":
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "matrix.json"
+            document = json.loads(
+                rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
+            )
+            mutate(document)
+            path.write_text(json.dumps(document), encoding="utf-8")
+            return rac.ProductMatrix.load(path)
+
+    def test_absent_field_means_every_platform(self) -> None:
+        matrix = self._load(lambda d: d.pop("active_platforms", None))
+        self.assertEqual(matrix.active_platforms, matrix.platforms)
+
+    def test_subset_round_trips(self) -> None:
+        matrix = self._load(
+            lambda d: d.update(active_platforms=["darwin-arm64"])
+        )
+        self.assertEqual(matrix.active_platforms, ("darwin-arm64",))
+
+    def test_flip_back_to_full_restores_the_full_contract(self) -> None:
+        subset = self._load(
+            lambda d: d.update(active_platforms=["darwin-arm64"])
+        )
+        restored = self._load(lambda d: d.pop("active_platforms", None))
+        self.assertEqual(
+            rac.release_asset_names(subset),
+            ("pulp-darwin-arm64.tar.gz", "pulp-sdk-darwin-arm64.tar.gz"),
+        )
+        self.assertEqual(len(rac.release_asset_names(restored)), 12)
+        self.assertIn("pulp-windows-x64.zip", rac.release_asset_names(restored))
+        self.assertIn(
+            "pulp-sdk-linux-arm64.tar.gz", rac.release_asset_names(restored)
+        )
+
+    def test_empty_subset_is_rejected(self) -> None:
+        with self.assertRaisesRegex(rac.ContentError, "active_platforms"):
+            self._load(lambda d: d.update(active_platforms=[]))
+
+    def test_unknown_platform_is_rejected(self) -> None:
+        with self.assertRaisesRegex(rac.ContentError, "not in the platform"):
+            self._load(lambda d: d.update(active_platforms=["freebsd-x64"]))
+
+    def test_darwinless_subset_is_rejected(self) -> None:
+        with self.assertRaisesRegex(rac.ContentError, "darwin"):
+            self._load(lambda d: d.update(active_platforms=["linux-x64"]))
+
+    def test_all_platforms_verification_walks_only_the_active_subset(
+        self,
+    ) -> None:
+        # --all-platforms against an empty directory fails on the FIRST
+        # missing archive; with an arm-only subset that first (and only)
+        # platform demanded must be darwin-arm64, and no linux/windows
+        # archive may be requested.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "matrix.json"
+            document = json.loads(
+                rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
+            )
+            document["active_platforms"] = ["darwin-arm64"]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            empty = Path(td) / "assets"
+            empty.mkdir()
+            import contextlib
+            import io
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = rac.main(
+                    [
+                        str(empty),
+                        "--all-platforms",
+                        "--version",
+                        VERSION,
+                        "--source-sha",
+                        SOURCE_SHA,
+                        "--matrix",
+                        str(path),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("pulp-darwin-arm64", stderr.getvalue())
+            self.assertNotIn("linux", stderr.getvalue())
+            self.assertNotIn("windows", stderr.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
