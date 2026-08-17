@@ -51,7 +51,7 @@ int main() {
         return 13;
     pulp::signal::TransferCurve transfer_curve;
     if (transfer_curve.process(0.25f) != 0.25f)
-        return 19;
+        return 30;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
