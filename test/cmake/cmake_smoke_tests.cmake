@@ -584,6 +584,19 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_tool_registry_reminder_hook.sh)
     set_tests_properties(tool-registry-reminder-hook PROPERTIES TIMEOUT 15)
 
+    # Coverage widens every declared test TIMEOUT (a coverage tree runs the
+    # same work at -O0 with instrumentation). Two halves, deliberately split:
+    # the arithmetic is provable in cmake script mode without configuring
+    # Pulp, while "a wedged process is still killed" needs a real CTest run
+    # and is the control that keeps the widening honest.
+    add_test(NAME pulp-test-timeout-scaling
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_test_timeout.cmake)
+    set_tests_properties(pulp-test-timeout-scaling PROPERTIES TIMEOUT 60)
+    add_test(NAME pulp-test-timeout-enforced
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../test_ctest_timeout_kills_wedged.sh)
+    # Deliberately sleeps to the scaled budget; the wall time IS the assertion.
+    set_tests_properties(pulp-test-timeout-enforced PROPERTIES TIMEOUT 120)
+
     # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
     # (stub tartci): asserts bounded parallelism with no tartci, lease
     # acquire+release when granted, and a non-failing leaseless fallback when
