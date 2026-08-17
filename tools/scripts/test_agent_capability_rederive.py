@@ -9,6 +9,7 @@ Over-bumping is not the safe direction — it fails the opposite evolution rule,
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 
 import agent_capability_rederive as rederive
@@ -150,8 +151,48 @@ def exercise_rewrite_round_trip() -> int:
         path.write_text(original, encoding="utf-8")
 
 
+def exercise_refuses_mid_merge() -> int:
+    """An uncommitted merge must refuse, not derive from the merge base.
+
+    This is the case the tool is most often reached for and the one where the
+    resolver quietly answers a different question: until the merge commits, the
+    incoming tip is not an ancestor of HEAD, so resolution steps back to the
+    merge base and the derived counter is stale but plausible.
+    """
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=ROOT, capture_output=True, text=True,
+    ).stdout.strip()
+    if not git_dir:  # pragma: no cover - not a work tree
+        return 0
+    path = pathlib.Path(git_dir)
+    if not path.is_absolute():
+        path = ROOT / path
+    merge_head = path / "MERGE_HEAD"
+    if merge_head.exists():  # pragma: no cover - never clobber a real merge
+        raise AssertionError(
+            "a merge is genuinely in progress; refusing to run this test"
+        )
+    try:
+        merge_head.write_text("0" * 39 + "1\n", encoding="utf-8")
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tools/scripts/agent_capability_rederive.py"),
+             "--print"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        assert completed.returncode != 0, completed.stdout
+        assert "a merge is in progress" in completed.stderr, completed.stderr
+        # The message must say what to DO, or it is just a different stall.
+        assert "Commit the merge first" in completed.stderr, completed.stderr
+    finally:
+        merge_head.unlink(missing_ok=True)
+    assert not merge_head.exists(), "test left a stray MERGE_HEAD behind"
+    return 3
+
+
 def main() -> int:
     checks = 0
+    checks += exercise_refuses_mid_merge()
     checks += exercise_no_change()
     checks += exercise_manifest_only()
     checks += exercise_surface_only()

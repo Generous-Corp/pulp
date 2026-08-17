@@ -112,6 +112,21 @@ def rewrite_constants(root: pathlib.Path, revision: int, inventory: int) -> bool
     return True
 
 
+def _merge_head(root: pathlib.Path) -> str | None:
+    """The commit being merged, when a merge is in progress. None otherwise."""
+    git_dir = history._git_output(root, ["rev-parse", "--git-dir"])
+    if git_dir is None:
+        return None
+    path = pathlib.Path(git_dir)
+    if not path.is_absolute():
+        path = root / path
+    merge_head = path / "MERGE_HEAD"
+    if not merge_head.is_file():
+        return None
+    first = merge_head.read_text(encoding="utf-8").split()
+    return first[0] if first else None
+
+
 def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
     """Read the protected tip's two snapshots, or explain why we cannot."""
     inside = history._git_output(root, ["rev-parse", "--is-inside-work-tree"])
@@ -126,6 +141,23 @@ def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
         raise DeriveError(
             f"could not resolve the protected capability base {base_ref!r}; "
             "set PULP_AGENT_CAPABILITY_BASE_REF to the CI base ref"
+        )
+
+    # An UNCOMMITTED merge is the case this tool is most often reached for, and
+    # the one where the resolver quietly answers the wrong question. Until the
+    # merge commits, the incoming tip is not an ancestor of HEAD, so resolution
+    # steps back to the MERGE BASE — a commit that predates both sides. The
+    # counters derived from it look plausible and are stale, which is precisely
+    # the silent-wrong-number this exists to prevent. Observed while resolving a
+    # real conflict: it reported base 28/45 while main was already 30/47.
+    merge_head = _merge_head(root)
+    if merge_head is not None and merge_head != tip:
+        raise DeriveError(
+            "a merge is in progress and its incoming commit is not the "
+            f"protected base ({merge_head[:9]} vs {tip[:9]}), so the base "
+            "resolver would step back to the merge base and derive a stale "
+            "counter. Commit the merge first, then re-run — or point "
+            "PULP_AGENT_CAPABILITY_BASE_REF at the ref being merged."
         )
     return (
         history._git_json(root, tip, history.SNAPSHOT),

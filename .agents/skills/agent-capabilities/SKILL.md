@@ -285,6 +285,14 @@ Re-running it is idempotent: the counter a tree currently holds is not evidence
 of anything, so a tree already carrying a stale reservation is derived back
 down to what its material justifies.
 
+**Commit the merge before you run it.** During an uncommitted merge the incoming
+tip is not yet an ancestor of `HEAD`, so base resolution steps back to the *merge
+base* — a commit that predates both sides — and the counter derived from it is
+stale while looking entirely plausible. Observed live: it read base 28/45 while
+`main` already held 30/47. The tool now refuses in that state rather than
+answering the wrong question, so the sequence when resolving a conflict is:
+resolve → commit the merge → refresh fingerprints → re-derive → `--write`.
+
 Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
