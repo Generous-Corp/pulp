@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260816-svg-stretched-viewbox",
+  "created_at": "2026-08-16T23:18:32Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record carrying a non-default preserveAspectRatio through SVG lowering as a per-axis scale so a stretched viewBox is drawn instead of refused, which previously left an authored waveform unpainted. Watch-only: no design-import or rendering authority is transferred.",
+  "tests": [
+    "SvgPathWidget stretches the viewBox onto bounds when asked",
+    "SvgPathWidget stretch is off by default and round-trips",
+    "WidgetBridge setSvgStretchToBounds round-trips onto SvgPathWidget",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

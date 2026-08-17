@@ -149,6 +149,20 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
         )
         emitted_map = json.loads(map_line.removeprefix("map="))
         self.assertEqual(emitted_map["windows-x64"], "windows-latest")
+        # The matrix legs are data now (release_build_matrix.py, filtered by
+        # active_platforms), so the windows-latest invariant is asserted on
+        # the leg map the workflow derives its include lists from.
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        try:
+            import release_build_matrix
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(
+            release_build_matrix.BUILD_LEGS["windows-x64"]["os"],
+            "windows-latest",
+        )
+        for config in release_build_matrix.BUILD_LEGS.values():
+            self.assertNotEqual(config["os"], "windows-2022")
         for name in ("build-cli", "smoke-cli"):
             with self.subTest(job=name):
                 section = job(self.release, name)
@@ -157,7 +171,8 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
                 )
                 self.assertRegex(
                     section,
-                    r"(?m)^\s*- os: windows-latest\n\s+platform: windows-x64$",
+                    r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner"
+                    r"\.outputs\.(build|smoke)_include\)\s*\}\}",
                 )
                 self.assertIn(
                     "runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)"

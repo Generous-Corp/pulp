@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -507,6 +509,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Some callers (shipyard's pre-push capture) hand this process a
+    # non-blocking stderr; a burst of notes then dies with BlockingIOError
+    # (EAGAIN), which reads as a gate failure and blocks the push even when
+    # every note said "not a violation". Force blocking writes up front.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            os.set_blocking(stream.fileno(), True)
+        except (OSError, ValueError, io.UnsupportedOperation):
+            pass
     args = build_parser().parse_args(argv)
     root = repo_root()
     if root is None:

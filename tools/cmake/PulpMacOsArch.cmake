@@ -15,7 +15,7 @@
 #
 # An explicit -DCMAKE_OSX_ARCHITECTURES=... on the command line always wins (this
 # module is a no-op then). Note: PULP_JS_ENGINE=v8 cannot build universal (no
-# universal libv8) — use a single arch there; QuickJS/JSC (the defaults) are fine.
+# universal libv8) — use a single arch there; QuickJS (the default) and JSC are fine.
 if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
     set(PULP_MACOS_ARCH "host" CACHE STRING
         "macOS target arch: host | universal | arm64 | x86_64")

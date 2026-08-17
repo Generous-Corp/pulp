@@ -5,7 +5,7 @@ portable real FIR coefficients. It complements the parameter-driven
 windowed-sinc helpers: use windowed sinc for a conventional cutoff, and this API
 when the curve itself is the input.
 
-The designer allocates and may perform substantial numerical work. Call it
+Both designers allocate and may perform substantial numerical work. Call them
 from an offline tool, setup path, or control thread—not from an audio callback.
 The returned `std::vector<double>` can be installed directly in `FirFilter64`.
 For `FirFilter`, explicitly narrow the coefficients to `float` after checking
@@ -89,6 +89,45 @@ empty, including when finite input drives an intermediate calculation outside
 the representable range. `rank_tolerance` must be in `(0, 1]`; rank loss and
 non-finite arithmetic are reported separately.
 
-This API does not perform minimum-phase reconstruction, Remez exchange,
-minimum-order search, IIR fitting, or frequency warping. Those are separate
-algorithms with distinct validation and lifecycle contracts.
+This API does not perform Remez exchange, minimum-order search, IIR fitting,
+or frequency warping. Those are separate algorithms with distinct validation
+and lifecycle contracts.
+
+## Minimum-phase reconstruction
+
+`reconstruct_minimum_phase_fir()` accepts exactly `N/2 + 1` finite,
+nonnegative magnitude bins from DC through Nyquist. The implied `N` must be an
+even radix-2 FFT size. It reuses `FftT<double>` with its unscaled forward and
+`1/N` inverse normalization:
+
+1. floor magnitudes and form the even real log spectrum;
+2. inverse-transform to the real cepstrum;
+3. retain DC, double positive quefrencies below `N/2`, retain the Nyquist
+   quefrency, and zero negative quefrencies;
+4. transform, take the complex exponential, and inverse-transform to the causal
+   impulse response.
+
+```cpp
+std::vector<double> magnitude_bins = measured_curve; // N/2 + 1 bins
+auto minimum_phase = reconstruct_minimum_phase_fir(
+    magnitude_bins,
+    {.coefficient_count = 256,
+     .log_magnitude_floor = 1.0e-10});
+```
+
+The logarithm cannot represent an exact zero. Every bin below
+`log_magnitude_floor`, including zero, is therefore reconstructed at the floor.
+The implementation checks the FFT, complex exponential, coefficients, and
+reported measurements for non-finite results.
+
+With `coefficient_count = 0`, all `N` circular impulse samples are retained.
+Keeping fewer coefficients is a causal truncation and changes the target
+response; it is not a hidden normalization step. `measured_magnitudes`,
+`errors`, RMS error, and maximum error always describe the returned,
+post-truncation coefficients against the floored target. Increase `N`, retain
+more coefficients, or apply a deliberate product-specific window when the
+reported truncation error is too large.
+
+The reconstruction is minimum phase within the finite, floored FFT geometry.
+It does not perform Remez exchange, minimum-order search, IIR fitting, or
+frequency warping.

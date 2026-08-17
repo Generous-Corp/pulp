@@ -782,12 +782,18 @@ class AssetContractFloor(unittest.TestCase):
         self.assertFalse(old.unresolved(newest_published=None, floor=self.FLOOR))
 
     def test_release_at_or_above_the_floor_must_be_complete(self) -> None:
+        # Drop a platform archive that the CURRENT contract actually demands,
+        # so this test keeps meaning "missing required asset" whatever the
+        # active_platforms knob is set to.
+        dropped = sorted(
+            asset for asset in REQUIRED_ASSETS if asset.startswith("pulp-")
+        )[0]
         new = TagState(
             tag="v0.660.0",
             created_at=NOW - timedelta(hours=2),
             published=True,
             has_release_object=True,
-            assets=REQUIRED_ASSETS - {"pulp-darwin-x64.tar.gz"},
+            assets=REQUIRED_ASSETS - {dropped},
             run_states=("completed",),
             validation_failures=(),
             dispatch_attempts=0,

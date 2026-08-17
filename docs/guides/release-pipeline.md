@@ -72,7 +72,10 @@ PR merge to main
 ┌─────────────────────────────────────────────────────────┐
 │ 2a. release-cli.yml — builds AND publishes               │
 │                                                          │
-│ Matrix (6 platforms, parallel):                          │
+│ Matrix (parallel; legs derived by                        │
+│ release_build_matrix.py from release_product_matrix.json │
+│ `active_platforms` — a subset may be paused; full        │
+│ inventory:)                                              │
 │   - darwin-arm64    → resolved release macOS runner      │
 │   - darwin-x64      → cross-compiled on Apple Silicon    │
 │   - linux-x64       → github-hosted ubuntu-latest        │
@@ -92,13 +95,15 @@ PR merge to main
 │ capture runtime, catching missing delegates/rpaths.      │
 │                                                          │
 │ Final `release` job — the SOLE writer of the release:    │
-│   1. Download all 12 matrix artifacts.                   │
+│   1. Download every matrix artifact (2 per active        │
+│      platform: CLI + SDK archives).                      │
 │   2. Compose the body (compose_release_notes.py).        │
 │   3. Generate + attest `appcast.xml`. The Sparkle feed   │
-│      is a pure function of the tag name and the date, so │
-│      it is written HERE. Nothing about the release       │
-│      depends on macOS signing.                           │
-│   4. Create the release as a DRAFT and attach all 13     │
+│      is a pure function of the tag name, the date, and   │
+│      the built darwin legs' min-OS floors, so it is      │
+│      written HERE. Nothing about the release depends on  │
+│      macOS signing.                                      │
+│   4. Create the release as a DRAFT and attach the        │
 │      assets. (A published release is immutable, so       │
 │      assets can only land while it is still a draft.)    │
 │   5. Download the draft assets back and verify their     │
@@ -287,7 +292,16 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | `pulp-sdk-linux-x64.tar.gz` | " |
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
-| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (13 base) |
+| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above |
+
+The table shows the FULL platform inventory. Which per-platform rows a given
+release actually carries is `release_product_matrix.json`'s
+`active_platforms` (absent = all of them): the same field derives the build
+matrix (`release_build_matrix.py`), the `--all-platforms` content
+verification, and the finalizer's `--exact-required` asset list, so the three
+cannot disagree. A paused platform's rows are absent from that release —
+deliberately, temporarily, and under the 7-day watch of
+`release-platform-subset-check.yml`.
 
 The asset table is only the outer contract. Before publication,
 `release_artifact_contents.py` opens those exact downloaded draft assets and

@@ -52,6 +52,14 @@ struct KnobStyle {
     /// Where the pointer ENDS, as a fraction of min(w,h). Zero means "the ring
     /// radius", which is where it has always ended.
     float indicator_outer_scale = 0.0f;
+    /// Which layers to emit. A stock knob draws all three — its box is its own
+    /// body and the arc gauge IS its appearance. A knob whose appearance was
+    /// AUTHORED by a design draws only the layers the design put there: a
+    /// design that drew no value ring must not acquire one from us, so its
+    /// skin clears `draw_track_and_fill`; a design that drew no pointer
+    /// clears `draw_indicator` too and the painter emits nothing at all.
+    bool draw_track_and_fill = true;
+    bool draw_indicator = true;
 };
 
 /// Draw a rotary knob whose active ring sweeps from `start_angle_deg` by

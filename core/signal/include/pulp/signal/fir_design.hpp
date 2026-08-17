@@ -4,6 +4,7 @@
 /// Offline FIR design from sampled frequency-domain targets.
 
 #include <pulp/signal/checked_allocation.hpp>
+#include <pulp/signal/fft.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,9 @@ namespace pulp::signal {
 inline constexpr std::uint64_t kDefaultFirDesignWorkspaceBytes = 256u * 1024u * 1024u;
 inline constexpr std::size_t kMaximumFirDesignTapCount = 1023u;
 inline constexpr std::size_t kMaximumFirDesignPointCount = 65536u;
+/// Largest admitted radix-2 FFT size for minimum-phase reconstruction. This
+/// mirrors the point-count bound: the one-sided input is a sampled grid too.
+inline constexpr std::size_t kMaximumMinimumPhaseFirSize = 65536u;
 
 enum class FirDesignStatus {
     success,
@@ -70,6 +74,29 @@ struct FirLeastSquaresResult {
     /// Ratio of largest to smallest accepted diagonal of pivoted R. This is a
     /// deterministic warning metric, not the 2-norm condition number of A.
     double qr_diagonal_condition_estimate = 0.0;
+
+    explicit operator bool() const noexcept {
+        return status == FirDesignStatus::success;
+    }
+};
+
+struct MinimumPhaseFirOptions {
+    /// Zero means retain the complete circular impulse of fft_size samples.
+    std::size_t coefficient_count = 0;
+    /// Every magnitude below this positive floor, including zero, is replaced
+    /// before log(). This bounds the cepstrum of exact spectral nulls.
+    double log_magnitude_floor = 1.0e-12;
+    std::uint64_t maximum_workspace_bytes = kDefaultFirDesignWorkspaceBytes;
+};
+
+struct MinimumPhaseFirResult {
+    FirDesignStatus status = FirDesignStatus::invalid_argument;
+    std::size_t fft_size = 0;
+    std::vector<double> coefficients;
+    std::vector<double> measured_magnitudes;
+    std::vector<double> errors;
+    double rms_error = 0.0;
+    double maximum_absolute_error = 0.0;
 
     explicit operator bool() const noexcept {
         return status == FirDesignStatus::success;
@@ -164,6 +191,33 @@ inline void clear_payload(FirLeastSquaresResult& result) noexcept {
     result.errors.clear();
     result.weighted_rms_error = 0.0;
     result.maximum_absolute_error = 0.0;
+}
+
+inline void clear_payload(MinimumPhaseFirResult& result) noexcept {
+    result.fft_size = 0u;
+    result.coefficients.clear();
+    result.measured_magnitudes.clear();
+    result.errors.clear();
+    result.rms_error = 0.0;
+    result.maximum_absolute_error = 0.0;
+}
+
+inline bool is_power_of_two(std::size_t value) noexcept {
+    return value >= 2u && (value & (value - 1u)) == 0u;
+}
+
+inline bool admit_minimum_phase_workspace(std::size_t fft_size, std::size_t bins,
+                                          std::size_t coefficients, std::uint64_t limit) noexcept {
+    if (limit == 0u)
+        return false;
+    CheckedRetainedByteCharge charge(limit);
+    // One complex work spectrum, FftT's retained twiddles, coefficients,
+    // measured bins, and errors. No hidden full-spectrum copy is retained.
+    if (!charge.add<std::complex<double>>(fft_size) ||
+        !charge.add<std::complex<double>>(fft_size / 2u) || !charge.add<double>(coefficients) ||
+        !charge.add<double>(bins) || !charge.add<double>(bins))
+        return false;
+    return charge.total() <= limit;
 }
 
 inline bool admit_least_squares_workspace(std::size_t rows, std::size_t columns, std::size_t taps,
@@ -503,6 +557,141 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
         }
         result.weighted_rms_error = std::sqrt(weighted_squared_error / weight_sum);
         if (!std::isfinite(result.weighted_rms_error)) {
+            result.status = FirDesignStatus::numerical_failure;
+            clear_payload(result);
+            return result;
+        }
+        result.status = FirDesignStatus::success;
+        return result;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    } catch (const std::bad_alloc&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    } catch (const std::length_error&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    }
+#endif
+}
+
+/// Reconstruct a causal minimum-phase FIR from N/2+1 nonnegative magnitude bins.
+///
+/// Input bins cover DC through Nyquist for the implied even FFT size
+/// N=2*(bins-1). Exact zeros are floored before the logarithm. Retaining fewer
+/// than N coefficients truncates the circular impulse and therefore changes the
+/// requested magnitude; measured_magnitudes and errors always report that
+/// post-truncation result. This is allocation-allowed offline or control work,
+/// never an audio callback. The result is minimum phase within the finite,
+/// floored FFT geometry; it is not a linear-phase design.
+inline MinimumPhaseFirResult
+reconstruct_minimum_phase_fir(std::span<const double> one_sided_magnitudes,
+                              const MinimumPhaseFirOptions& options = {}) {
+    using namespace fir_design_detail;
+    MinimumPhaseFirResult result;
+    if (one_sided_magnitudes.size() < 2u ||
+        one_sided_magnitudes.size() - 1u > std::numeric_limits<std::size_t>::max() / 2u ||
+        !(options.log_magnitude_floor > 0.0) || !std::isfinite(options.log_magnitude_floor))
+        return result;
+    const std::size_t fft_size = 2u * (one_sided_magnitudes.size() - 1u);
+    const std::size_t coefficient_count =
+        options.coefficient_count == 0u ? fft_size : options.coefficient_count;
+    if (fft_size > kMaximumMinimumPhaseFirSize ||
+        fft_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        result.status = FirDesignStatus::unsupported_size;
+        return result;
+    }
+    if (!is_power_of_two(fft_size) || coefficient_count == 0u || coefficient_count > fft_size)
+        return result;
+    for (double magnitude : one_sided_magnitudes) {
+        if (!(magnitude >= 0.0) || !std::isfinite(magnitude))
+            return result;
+    }
+    if (!admit_minimum_phase_workspace(fft_size, one_sided_magnitudes.size(), coefficient_count,
+                                       options.maximum_workspace_bytes)) {
+        result.status = FirDesignStatus::workspace_limit_exceeded;
+        return result;
+    }
+
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+#endif
+        std::vector<std::complex<double>> spectrum(fft_size);
+        for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
+            const double log_magnitude =
+                std::log(std::max(one_sided_magnitudes[bin], options.log_magnitude_floor));
+            if (!std::isfinite(log_magnitude)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            spectrum[bin] = {log_magnitude, 0.0};
+        }
+        for (std::size_t bin = one_sided_magnitudes.size(); bin < fft_size; ++bin)
+            spectrum[bin] = spectrum[fft_size - bin];
+
+        FftT<double> fft(static_cast<int>(fft_size));
+        fft.inverse(spectrum.data());
+        for (const auto value : spectrum) {
+            if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+        }
+        for (std::size_t quefrency = 1u; quefrency < fft_size / 2u; ++quefrency)
+            spectrum[quefrency] *= 2.0;
+        for (std::size_t quefrency = fft_size / 2u + 1u; quefrency < fft_size; ++quefrency)
+            spectrum[quefrency] = {};
+        fft.forward(spectrum.data());
+        for (auto& value : spectrum) {
+            value = std::exp(value);
+            if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+        }
+        fft.inverse(spectrum.data());
+
+        result.fft_size = fft_size;
+        result.coefficients.resize(coefficient_count);
+        for (std::size_t index = 0u; index < coefficient_count; ++index) {
+            const double value = spectrum[index].real();
+            if (!std::isfinite(value)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            result.coefficients[index] = value;
+        }
+
+        std::fill(spectrum.begin(), spectrum.end(), std::complex<double>{});
+        for (std::size_t index = 0u; index < coefficient_count; ++index)
+            spectrum[index] = {result.coefficients[index], 0.0};
+        fft.forward(spectrum.data());
+        result.measured_magnitudes.resize(one_sided_magnitudes.size());
+        result.errors.resize(one_sided_magnitudes.size());
+        double squared_error = 0.0;
+        for (std::size_t bin = 0u; bin < one_sided_magnitudes.size(); ++bin) {
+            const double measured = std::abs(spectrum[bin]);
+            const double target = std::max(one_sided_magnitudes[bin], options.log_magnitude_floor);
+            const double error = measured - target;
+            if (!std::isfinite(measured) || !std::isfinite(error)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            result.measured_magnitudes[bin] = measured;
+            result.errors[bin] = error;
+            result.maximum_absolute_error =
+                std::max(result.maximum_absolute_error, std::abs(error));
+            squared_error += error * error;
+        }
+        result.rms_error =
+            std::sqrt(squared_error / static_cast<double>(one_sided_magnitudes.size()));
+        if (!std::isfinite(result.rms_error)) {
             result.status = FirDesignStatus::numerical_failure;
             clear_payload(result);
             return result;

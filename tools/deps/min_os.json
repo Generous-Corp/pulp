@@ -84,7 +84,7 @@
       "unit": "ios_version",
       "floor": "16.0",
       "binding": "toolchain",
-      "note": "Deps allow iOS 14 (Skia/Dawn stamp 14.0); Pulp declares 16.0 via IOS_DEPLOYMENT_TARGET. Toolchain-declared, not leaked. V8 excluded (JSC-only on iOS).",
+      "note": "Deps allow iOS 14 (Skia/Dawn stamp 14.0); Pulp declares 16.0 via IOS_DEPLOYMENT_TARGET. Toolchain-declared, not leaked. V8 is excluded on iOS; QuickJS is the default and JSC remains opt-in.",
       "deps": {
         "skia": {
           "measured": "14.0",

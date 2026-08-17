@@ -520,6 +520,49 @@ When assessing what features exist or what claims are accurate, **always check t
 
 Run `git ls-tree -r --name-only origin/main <path>` or `git log --oneline origin/main -- <path>` to verify claims before reporting them.
 
+### Pair every NEGATIVE finding with a control that must return non-zero
+
+**A measurement aimed at the wrong target almost never errors. It succeeds and returns empty.**
+So "0 results", "not found", "nothing running", "the queue is empty" is ambiguous by
+construction: it means *either* the thing is absent *or* you measured the wrong thing. Nothing in
+the output distinguishes those, and the wrong one is the one that reads as a clean, confident
+finding.
+
+**The rule: before reporting any absence, run a second query on the SAME instrument and the SAME
+target that MUST return non-zero. If the control also returns zero, your instrument is broken —
+report nothing.**
+
+Three real instances from a single night, each by a different agent, each caught only by the
+control:
+
+| what was run | what it returned | what was actually wrong |
+|---|---|---|
+| `rg -l "merge-stall" .github/workflows/` | 0 files → "the workflow does not exist" | the worktree was on a feature branch, not `main` |
+| `strings $(which shipyard) \| grep …` | 0 hits → "Shipyard does not consume this" | `which` resolved to a shell function; `strings` read nothing |
+| `git ls-tree origin/main …` | 0 files → "the path is empty" | cwd had drifted into the `planning` submodule |
+
+In the first case the control was *present but misread*: `runs-on` matched 56 files, which looked
+like a healthy instrument — but the same control returns 72 on `main`. **A control that returns
+non-zero only proves the tool ran. Compare its COUNT against the expected target** when the two
+could differ.
+
+Practical forms:
+
+```sh
+# absence in the repo — measure the REF, never the working tree
+git grep -c "<pattern>" origin/main -- <path>     # the finding
+git grep -c "<a-pattern-that-must-exist>" origin/main -- <path>   # the control
+
+# absence of a live resource — a level value cannot prove "never"
+# one reading of an empty queue / idle pool / zero count is a SNAPSHOT.
+# To claim "never", sample over time or find the mechanism that forbids it.
+```
+
+**A destruction or absence claim deserves MORE verification than a routine one**, not less — it
+is precisely the claim others will act on without re-checking. Before asserting something was
+lost, look for the second copy (workflow artifacts, a branch ref, a cache) rather than inferring
+its absence from not having looked.
+
 ### Structure
 
 ```

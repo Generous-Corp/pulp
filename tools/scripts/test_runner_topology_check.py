@@ -1102,17 +1102,19 @@ class TestRunnerInventoryScope(unittest.TestCase):
             {"total_count": 0, "runners": []},
             {"total_count": 1, "runners": [self.ORG_RUNNER]},
         )):
-            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
-        self.assertEqual([r.name for r in runners], ["pulp-auto-ephemeral-200"])
-        self.assertEqual(warnings, [])
+            inventory = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual([r.name for r in inventory.runners],
+                         ["pulp-auto-ephemeral-200"])
+        self.assertEqual(inventory.warnings, [])
+        self.assertEqual(inventory.unread_scopes, [])
 
     def test_a_repo_runner_is_not_duplicated_by_the_org_scope(self):
         with mock.patch.object(gate, "_api", side_effect=self._api_returning(
             {"total_count": 1, "runners": [self.ORG_RUNNER]},
             {"total_count": 1, "runners": [self.ORG_RUNNER]},
         )):
-            runners, _ = gate.fetch_runner_inventory("Generous-Corp/pulp")
-        self.assertEqual(len(runners), 1)
+            inventory = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(inventory.runners), 1)
 
     def test_org_permission_failure_warns_instead_of_silently_degrading(self):
         # Falling back to repo-only WITHOUT saying so would reproduce exactly
@@ -1121,11 +1123,14 @@ class TestRunnerInventoryScope(unittest.TestCase):
             {"total_count": 0, "runners": []},
             subprocess.CalledProcessError(1, "ghapp", stderr="HTTP 403"),
         )):
-            runners, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
-        self.assertEqual(runners, [])
-        self.assertEqual(len(warnings), 1)
-        self.assertIn("orgs/Generous-Corp", warnings[0])
-        self.assertIn("403", warnings[0])
+            inventory = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(inventory.runners, [])
+        self.assertEqual(len(inventory.warnings), 1)
+        self.assertIn("orgs/Generous-Corp", inventory.warnings[0])
+        self.assertIn("403", inventory.warnings[0])
+        # The refusal must also travel as DATA, not only as prose: adjudication
+        # downstream has to distinguish "answered none" from "would not answer".
+        self.assertEqual(inventory.unread_scopes, ["orgs/Generous-Corp"])
 
     def test_row_count_disagreeing_with_total_count_is_flagged(self):
         # An empty rendered list next to total_count=3 reads as "no runners"
@@ -1134,9 +1139,11 @@ class TestRunnerInventoryScope(unittest.TestCase):
             {"total_count": 3, "runners": []},
             {"total_count": 0, "runners": []},
         )):
-            _, warnings = gate.fetch_runner_inventory("Generous-Corp/pulp")
-        self.assertEqual(len(warnings), 1)
-        self.assertIn("total_count=3", warnings[0])
+            inventory = gate.fetch_runner_inventory("Generous-Corp/pulp")
+        self.assertEqual(len(inventory.warnings), 1)
+        self.assertIn("total_count=3", inventory.warnings[0])
+        # A truncated answer is still an answer; only a refusal is unread.
+        self.assertEqual(inventory.unread_scopes, [])
 
     def test_repo_endpoint_failure_still_propagates(self):
         # Only the ORG scope degrades gracefully. Losing the repo scope means
@@ -1146,6 +1153,112 @@ class TestRunnerInventoryScope(unittest.TestCase):
         )):
             with self.assertRaises(subprocess.CalledProcessError):
                 gate.fetch_runner_inventory("Generous-Corp/pulp")
+
+
+class TestRefusedCensusIsNotADeadLane(unittest.TestCase):
+    """A refused scope is not evidence of an empty one.
+
+    When the org runner scope refuses the query, every org-registered runner is
+    invisible, so "no runner carries these labels" is a claim the check never
+    established. It reports `visibility-incomplete` instead — at the SAME level,
+    because a genuinely dead org-scoped lane is indistinguishable from an
+    unreadable one, and a verdict demoted below ERROR would let a persistent
+    token-scope regression report green hourly and auto-close its own tracker.
+    """
+
+    UNREAD = ["orgs/Generous-Corp"]
+
+    def _unmatched_lane(self):
+        # Labels no fixture runner carries: the census as read matches nothing.
+        return lane(variable="PULP_LINUX_RUNS_ON_JSON", severity="required",
+                    expect=["self-hosted", "Linux", "X64", "pulp-auto-linux-x64"])
+
+    def _findings(self, unread):
+        target = self._unmatched_lane()
+        return gate.check(
+            contract([target]), runners(),
+            {target.variable: json.dumps(target.expect)}, [], None, unread)
+
+    def test_refused_scope_reports_visibility_incomplete_at_error(self):
+        findings = self._findings(self.UNREAD)
+        self.assertEqual(kinds(findings), ["visibility-incomplete"])
+        finding = findings[0]
+        self.assertEqual(finding.level, gate.ERROR)
+        self.assertIn("orgs/Generous-Corp", finding.detail)
+        # The inverse risk must be stated, not implied: this verdict is loud
+        # precisely because it cannot be told apart from a real black hole.
+        self.assertIn(
+            "a genuine black hole on an org-scoped lane looks exactly like this",
+            finding.detail)
+        self.assertIn("Administration: Read", finding.detail)
+        self.assertIn("verify this lane's", finding.detail)
+
+    def test_complete_census_still_reports_black_hole(self):
+        # The control. Without it, a checker that simply stopped adjudicating
+        # black holes at all would satisfy the test above.
+        findings = self._findings([])
+        self.assertEqual(kinds(findings), ["black-hole"])
+        self.assertEqual(findings[0].level, gate.ERROR)
+
+    def test_ephemeral_lane_without_evidence_also_defers_to_visibility(self):
+        target = lane(variable="PULP_LINUX_RUNS_ON_JSON", severity="required",
+                      provisioning="ephemeral",
+                      expect=["self-hosted", "Linux", "X64", "pulp-auto-linux-x64"])
+        variables = {target.variable: json.dumps(target.expect)}
+        self.assertEqual(
+            kinds(gate.check(contract([target]), runners(), variables, [],
+                             None, self.UNREAD)),
+            ["visibility-incomplete"])
+        self.assertEqual(
+            kinds(gate.check(contract([target]), runners(), variables, [],
+                             None, [])),
+            ["black-hole"])
+
+    # Wording unique to the report FOOTER. Asserting on a phrase the finding
+    # detail also carries would pass with the footer deleted — the assertion
+    # would be about the finding, not about the summary it is meant to cover.
+    FOOTER_MARKER = "WERE NOT FULLY OBSERVED"
+
+    def test_report_summary_sends_the_operator_at_the_token_scope(self):
+        # The rendered report is what the tracking issue shows first, and its
+        # standing footer prescribes rerouting a lane — the wrong repair when
+        # the real defect is a census that could not read a scope.
+        report = gate.render(self._findings(self.UNREAD))
+        self.assertIn(self.FOOTER_MARKER, report)
+        self.assertIn("Repair the token scope", report)
+        # ...and it stays out of the way when every verdict is a real one.
+        self.assertNotIn(self.FOOTER_MARKER, gate.render(self._findings([])))
+
+    def test_report_mode_still_exits_1_when_the_census_was_refused(self):
+        # Exit code is the whole signal the workflow branches on, and its
+        # tracking issue auto-closes on rc=0. Renaming the verdict must not
+        # quiet the gate.
+        target = self._unmatched_lane()
+        with tempfile.TemporaryDirectory() as tmp:
+            contract_path = Path(tmp) / "contract.json"
+            contract_path.write_text(json.dumps({
+                "lanes": [{
+                    "variable": target.variable,
+                    "purpose": "linux capacity served from an org runner group",
+                    "expect": target.expect,
+                    "provisioning": "persistent",
+                    "severity": "required",
+                }],
+                "github_hosted_labels": ["macos-15"],
+                "sentinels": ["local-only"],
+            }))
+            inventory = gate.RunnerInventory(runners=[], warnings=["refused"],
+                                             unread_scopes=self.UNREAD)
+            with mock.patch.object(gate, "fetch_runner_inventory",
+                                   return_value=inventory), \
+                 mock.patch.object(gate, "fetch_variables", return_value={
+                     target.variable: json.dumps(target.expect)}):
+                rc = gate.main([
+                    "--mode", "report",
+                    "--contract", str(contract_path),
+                    "--workflows-dir", str(Path(tmp) / "no-workflows"),
+                ])
+        self.assertEqual(rc, 1)
 
 
 class TestApiFailureHandling(unittest.TestCase):

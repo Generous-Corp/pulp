@@ -465,6 +465,43 @@ GENERATOR_ENDED_BADLY = (
     "unknown setting",
     "two manifests claim",
     "already running against this module pack",
+    "generation cancelled by user",
+    "the generated patch violated the exclusive",
+    # The curation gates. The request is understood and declined because no
+    # validated capability backs it, and nothing is sent to the model — so the
+    # wording IS the verdict, and reporting INCONCLUSIVE hides the one sentence
+    # that tells the person how to rephrase.
+    "no curated per-sample dsp capability matches this module request.",
+    "the curated shortlist has helpers but lacks the requested core",
+    "this request matches only generic module helpers and no direct",
+    "the requested structure has no port-complete installed module",
+    "the refinement base does not pass current static checks",
+    "the curated dsp capability selection was not valid json",
+    # Argument handling reaches this log because the app builds the command
+    # line, so a rejected flag is a stop the harness has to be able to name.
+    "--base requires an existing .vcv path",
+    "--response-file requires a saved response path",
+    "--retries requires a non-negative integer",
+    "--keep-on-fail is disabled: a failed attempt must not poison the",
+    # Evidence and prompt-record I/O, reserved before the model call: failing
+    # here stops the run without spending anything.
+    "cannot read refinement base",
+    "cannot read saved model response",
+    "cannot reserve generation evidence before the model call",
+    "cannot reserve the model response before the call",
+    "cannot write requested output",
+    "cannot write generated patches directory",
+    "model prompt record exhausted its",
+    "refusing to overwrite model prompt record",
+    "saved model response is empty",
+    "the codex prompt has malformed inventory boundary markers;",
+    "the codex prompt is too large to send inline and has no",
+    # An install that cannot proceed: a missing pack, a toolchain that did not
+    # land, or a generator copy shipped without its payload.
+    "the module pack at",
+    "the toolchain could not be installed, so no module can be built.",
+    "the toolchain reported success but",
+    "this copy of the generator is incomplete, so a module cannot be",
 )
 
 

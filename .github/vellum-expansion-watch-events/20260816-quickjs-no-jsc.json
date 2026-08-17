@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260816-quickjs-no-jsc",
+  "created_at": "2026-08-16T15:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the JavaScript-engine selection contract inside the accepted design-import expansion watch. The change makes JavaScriptCore opt-in on Apple rather than implied: auto and quickjs compile QuickJS only, jsc additionally compiles js_jsc_engine.mm and links JavaScriptCore.framework, and an unsupported selection fails configure. It adds a configure-time target-graph oracle that fails closed on JSC leakage and extends the native link-floor fixture with independent WebKit and JavaScriptCore positive controls. This touches core/view scripting-backend wiring only; it adds no renderer, asset, or design-import capability and transfers no implementation authority.",
+  "tests": [
+    "pulp-test-js-engine",
+    "pulp-native-link-floor-proof",
+    "cmake-js-engine-selection",
+    "native-ui-link-floor-artifacts",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

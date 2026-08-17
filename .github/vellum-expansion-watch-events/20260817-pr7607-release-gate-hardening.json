@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7607-release-gate-hardening",
+  "created_at": "2026-08-17T02:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record release-cli.yml gate hardening: the SDK symbol asserts accept the WebView symbols from either the view-core or the split pulp-view-webview archive, and the publish flip classifies the immutable-tag 422; no design-output or packaging behavior is transferred.",
+  "tests": [
+    "python3 tools/scripts/test_release_workflow_test_step.py (97 tests, SdkSymbolGateBehavior executes the real gate snippets with expected-PASS and expected-FAIL trees)",
+    "python3 tools/scripts/test_release_reconcile.py (64 tests)",
+    "yamllint + actionlint + structural yaml.safe_load on the changed workflows",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -33,6 +33,18 @@ name: Release-watchdog reaper
 on:
   schedule:
     - cron: '0 6 * * *'  # daily 06:00 UTC
+  # A successful "Release CLI" run is the event that RESOLVES most open
+  # trackers (the new tag now contains the stranded commits, and the version
+  # trackers' release now exists), so sweep immediately instead of leaving
+  # resolved trackers open for up to 24h until the next daily run. During the
+  # 2026-08 release stall, every containing tag landed 27 minutes AFTER the
+  # daily sweep, so ~30 objectively-resolved trackers sat open all day looking
+  # like live incidents. This must be `workflow_run`, not `release:
+  # [published]` — the publish is performed with GITHUB_TOKEN, whose events do
+  # not trigger other workflows.
+  workflow_run:
+    workflows: ["Release CLI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -46,7 +58,15 @@ concurrency:
 jobs:
   reap:
     name: Close stale release-watchdog trackers
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    # Automatic triggers (schedule, workflow_run) run only on the primary repo;
+    # a manual dispatch runs anywhere. A workflow_run sweep additionally
+    # requires the release run to have SUCCEEDED — a failed release resolves
+    # nothing, so sweeping after it would only burn API quota.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.repository == vars.PULP_PRIMARY_REPO
+          && (github.event_name != 'workflow_run'
+              || github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
