@@ -57,6 +57,7 @@
 #include <pulp/signal/particle_percussion_voice.hpp>
 #include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/path_latency_aligner.hpp>
+#include <pulp/signal/parallel_dynamics.hpp>
 #include <pulp/signal/path_switcher.hpp>
 #include <pulp/signal/square_osc_bank.hpp>
 #include <pulp/signal/processor_chain.hpp>
