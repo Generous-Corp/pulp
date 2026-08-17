@@ -1558,3 +1558,126 @@ test("a rotated pointer is described in its own space, from either source",
       await rm(root, { recursive: true, force: true });
     }
   });
+
+// The automatic width correction grows the viewport by both clipped margins
+// once. A layout that changes width at a breakpoint moves the edge that growth
+// was chasing, so the single bounded step lands mid-breakpoint and stays
+// negative, while the authored desktop width resolves the same page exactly.
+// The uncorrected run is the control: without it a passing pinned run proves
+// only that the page captures, not that pinning decided anything.
+test("an explicit --width resolves a layout the bounded correction cannot",
+  { timeout: 60000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-pinned-width-"));
+    const input = path.join(root, "shell.html");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+  html,body{margin:0;background:#111}
+  body{display:flex;justify-content:center}
+  #canvas{flex:0 0 1600px;height:200px;background:#246}
+  @media (min-width:1500px){ #canvas{flex-basis:2600px} }
+</style><div id="canvas"></div>
+`);
+
+      const uncorrected = path.join(root, "uncorrected");
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", uncorrected,
+        "--initial-width", "1280",
+        "--initial-height", "300",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 }), (error) =>
+        error.stderr.includes("capture-negative-overflow"));
+
+      const pinned = path.join(root, "pinned");
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", pinned,
+        "--width", "2600",
+        "--initial-height", "300",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const envelope = JSON.parse(
+        await readFile(path.join(pinned, "capture.json"), "utf8"));
+      assert.equal(envelope.provenance.viewport.width_pinned, true);
+      assert.equal(envelope.provenance.viewport.initial.width, 2600);
+      assert.equal(envelope.provenance.viewport.resolved.width, 2600);
+      assert.equal(envelope.reference.logical_width, 2600);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// Content anchored left of the document origin is unreachable at every
+// viewport width, so a refusal that names a width as its remedy sends the
+// caller round a loop that cannot terminate. The refusal must describe what
+// was measured and both layouts that produce it.
+test("an unreachable left overflow names its cause, not a phantom flag",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-anchored-overflow-"));
+    const input = path.join(root, "anchored.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+  html,body{margin:0;background:#111}
+  #panel{width:600px;height:200px;background:#246}
+  #glow{position:absolute;left:-40px;top:20px;width:120px;height:120px;
+    background:#8a4}
+</style><div id="panel"></div><div id="glow"></div>
+`);
+
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--width", "900",
+        "--initial-height", "300",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 }), (error) => {
+        assert.ok(error.stderr.includes("capture-negative-overflow"));
+        assert.ok(error.stderr.includes("x=-40px"));
+        assert.ok(error.stderr.includes(
+          "anchors content left of the document origin"));
+        assert.ok(error.stderr.includes("position: fixed"));
+        assert.equal(error.stderr.includes("pass an explicit --width"), false);
+        assert.ok(error.stderr.includes("does not resolve at 900px"));
+        return true;
+      });
+      const diagnostic = JSON.parse(
+        await readFile(path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(diagnostic.code, "capture-negative-overflow");
+      await assert.rejects(access(path.join(output, "capture.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });

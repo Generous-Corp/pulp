@@ -122,6 +122,33 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+// The width correction grows the viewport so content the viewport centres is
+// re-centred inside it. Two layouts survive it, and only one of them has a
+// width that would help: content anchored left of the origin never moves at
+// any width, while a layout whose own width tracks the viewport moves the very
+// edge the correction was chasing and can still resolve at an authored width.
+// Naming a width as the sole remedy sent callers of the first kind round a
+// loop that could not terminate, so report the measurement and both causes
+// rather than asserting the one that happens to carry a fix.
+function negativeLeftOverflowError(left, pinnedWidth) {
+  const attempt = pinnedWidth === undefined
+    ? "one bounded viewport correction"
+    : `a pinned ${pinnedWidth}px viewport width`;
+  const remedy = pinnedWidth === undefined
+    ? "Pass --width with the authored width if the layout resolves at one " +
+      "specific viewport width."
+    : `The layout does not resolve at ${pinnedWidth}px; another --width may ` +
+      "still resolve it, but no width recovers anchored content.";
+  const error = new Error(
+    `content still begins at x=${left}px after ${attempt}. Either something ` +
+    "anchors content left of the document origin (an absolutely positioned " +
+    "element at a negative left, position: fixed, or a negative margin on " +
+    "<html>), which no viewport width moves, or the layout's own width " +
+    `tracks the viewport, so widening chases itself. ${remedy}`);
+  error.code = "capture-negative-overflow";
+  return error;
+}
+
 function exitAfterCleanupDeadline(expiry, outputDir, browser) {
   const diagnostic = {
     schema: "pulp-browser-capture-error-v1",
@@ -966,7 +993,14 @@ async function runCapture(options) {
   const inputPath = required(options.values, "--input");
   const rootPath = required(options.values, "--root");
   const outputDir = path.resolve(required(options.values, "--output"));
-  const initialWidth = positiveInteger(
+  // `--width` pins the viewport a caller already knows the layout resolves at.
+  // `--initial-width` only seeds the automatic correction, which is free to
+  // grow past it. Accepting both would silently honour one and drop the other.
+  const pinnedWidth = positiveInteger(options.values, "--width");
+  if (pinnedWidth !== undefined && options.values.has("--initial-width")) {
+    throw new Error("--width and --initial-width are mutually exclusive");
+  }
+  const initialWidth = pinnedWidth ?? positiveInteger(
     options.values, "--initial-width", 1280);
   const initialHeight = positiveInteger(
     options.values, "--initial-height", 800);
@@ -1142,6 +1176,12 @@ async function runCapture(options) {
     let resolvedViewportHeight = initialHeight;
     let widthSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
     if (finalExtent.left < 0) {
+      if (pinnedWidth !== undefined) {
+        // A pinned width is the caller's answer, and the layout was authored
+        // at it before this measurement. Growing past it would replace that
+        // answer with a guess, so report what the pin left uncorrected.
+        throw negativeLeftOverflowError(finalExtent.left, pinnedWidth);
+      }
       // Fixed-width canvases are commonly centered in a viewport smaller than
       // their authored surface. Their negative left edge cannot be recovered
       // by captureBeyondViewport. Grow width once by both clipped margins,
@@ -1170,11 +1210,7 @@ async function runCapture(options) {
       });
       finalExtent = await measureDocumentExtent(cdp);
       if (finalExtent.left < 0) {
-        const error = new Error(
-          `content still begins at x=${finalExtent.left}px after one bounded ` +
-          "viewport correction; pass an explicit --width");
-        error.code = "capture-negative-overflow";
-        throw error;
+        throw negativeLeftOverflowError(finalExtent.left, undefined);
       }
     }
     let heightSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
@@ -1651,6 +1687,10 @@ async function runCapture(options) {
         },
         viewport: {
           initial: { width: initialWidth, height: initialHeight },
+          // Equal initial and resolved widths mean either that no correction
+          // was needed or that none was allowed. A replay has to tell those
+          // apart, so record which of the two produced this width.
+          width_pinned: pinnedWidth !== undefined,
           resolved: {
             width: resolvedViewportWidth,
             height: resolvedViewportHeight,
