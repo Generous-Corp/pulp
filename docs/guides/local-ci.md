@@ -699,6 +699,59 @@ or `PULP_TARTCI_WATCHDOG=0` to disable the wrapper. Operators can tune
 `PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS`, `PULP_TARTCI_WATCHDOG_CPU_PER_JOB`,
 and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
 
+### The macOS release VM lane and cross-lane priority
+
+Release builds (`release-cli.yml`) route to a dedicated ephemeral label,
+`pulp-build-vm-release`, via `PULP_RELEASE_MACOS_RUNS_ON_JSON`. Like the gate
+VM lane, it is JIT: a runner registers only while serving a job and deregisters
+after, so an idle release lane shows **zero** runners in the GitHub inventory.
+That is its healthy state, not an outage — judge the lane on service history
+(`runner_topology.json`'s `service_evidence`), never on a point-in-time runner
+census. Unsetting the variable is the break-glass rollback: the resolver chain
+falls through to `PULP_LOCAL_MACOS_RUNS_ON_JSON`, sharing the gate pool
+(safe for a tag-only, clean-checkout workflow, but not the preferred state).
+
+A release slot admits a job only when **three independent gates** all pass;
+labels are necessary but not sufficient:
+
+1. **Workflow allowlist** — `TARTCI_RUNNER_WORKFLOW_TIERS` in the slot's
+   LaunchAgent names the workflows it may serve (e.g. `Release CLI`,
+   `Sign and Release`). A matching label with an unlisted workflow never boots.
+2. **VM-count cap** — macOS allows 2 concurrent VMs per host (kernel quota),
+   shared by every macOS lane on that host regardless of label.
+3. **Core-lease budget** — the tartci per-host lease store admits or refuses
+   by core count; tagged-release boots acquire at gate priority, so release
+   and gate work contend first-come-first-served for the same budget.
+
+Cross-lane priority is the tartci provider's opt-in **yield hook**: a slot
+whose LaunchAgent sets `TARTCI_YIELD_TO_WORKFLOW_NAME` (single-valued — a
+pipe-separated list is passed as one literal name and silently matches
+nothing) plus `TARTCI_YIELD_TO_LABELS` refuses to boot while the named
+workflow has queued or in-progress demand matching those labels. Enabling the
+hook on a *subset* of gate slots lets release work claim a VM slot promptly
+while the never-yielding remainder of the gate pool keeps serving PRs — the
+subset size is the gate-capacity floor, expressed purely in per-host config.
+
+One sharp edge to monitor for: the yield probe **fails closed** — any `gh`
+error while scanning the priority workflow's queue reads as "demand exists,
+keep yielding." A total outage is self-limiting (the main queue scan goes
+blind first and the supervisor self-restarts), but an asymmetric failure
+(main scan healthy, priority scan erroring) can hold a yielding slot down
+indefinitely. Before treating a long-yielding slot as real demand, corroborate
+with `tartci leases status` (is a release lease actually held anywhere?) and
+the per-runner event log, which distinguishes `yielded_to_priority` (detail
+carries the workflow and queue counts) from `yielded_host_health`, alongside
+per-slot heartbeats at `~/.tartci/state/macos/<runner>.state.json`. Note the
+heartbeat write fails silently on a full disk, so heartbeat staleness is a
+freshness alarm of its own but the `phase` field cannot be a monitor's sole
+source.
+
+Declared fleet state — which hosts carry which tartci slots — lives in the
+fleet manifest in the private planning repository, not in this guide. A slot
+present on a host but absent from the manifest is configuration drift, even
+when it works: it will not survive fleet reconciliation, and repairs to such
+a slot start by declaring it.
+
 ### Shipping a PR: `shipyard pr`
 
 `shipyard pr` is the single "ship this" orchestrator. Agents and humans should
