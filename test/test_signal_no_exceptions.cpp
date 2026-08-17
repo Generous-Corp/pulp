@@ -114,14 +114,18 @@ int main() {
     const std::array<pulp::signal::FormantFilterBank::FormantSpec, 1> recipe{{
         {800.0, 80.0, 0.0},
     }};
-    if (formants.configure(recipe) != pulp::signal::FormantConfigureStatus::configured)
+    if (!(formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured))
         return 29;
+
+    pulp::signal::ParallelDynamicsMixer parallel_dynamics;
+    if (!parallel_dynamics.prepare(8u, 16u))
+        return 31;
 
     pulp::signal::TempoDelayTime tempo_delay;
     if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
-        return 31;
+        return 32;
     if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
         pulp::signal::TempoDelayError::none)
-        return 32;
-    return std::isfinite(tempo_delay.next()) ? 0 : 33;
+        return 33;
+    return std::isfinite(tempo_delay.next()) ? 0 : 34;
 }

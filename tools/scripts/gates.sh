@@ -87,6 +87,7 @@ CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
@@ -459,6 +460,18 @@ if [ -f "$FORK_GUARD" ]; then
     if ! "$PYTHON" "$FORK_GUARD"; then
         fail=1
     fi
+fi
+
+# ── 11b. live-build check (advisory) ───────────────────────────────────────
+# Shipyard's `local` mac backend builds IN the checkout. Editing the tree under a
+# running CMake does not fail cleanly — the build slows, dies on the lane
+# timeout, and reports the target rather than the cause (2026-08-16: two merges
+# into a live checkout, 11% in two hours, `Validation timed out`).
+#
+# Advisory on purpose: a build in your own checkout is a fact to know, not a
+# policy violation, and this must never be the reason a push fails.
+if [ -f "$LIVE_BUILD_CHECK" ]; then
+    "$PYTHON" "$LIVE_BUILD_CHECK" --quiet-when-idle >&2 || true
 fi
 
 # ── 12. conflict-marker guard ──────────────────────────────────────────────
