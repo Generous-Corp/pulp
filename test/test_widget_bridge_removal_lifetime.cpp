@@ -376,3 +376,41 @@ TEST_CASE("an overlay dismiss handler may release the overlay from inside itself
     View::dismiss_active_overlay();
     REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
 }
+
+TEST_CASE("an overlay dismiss handler may re-claim the overlay from inside itself",
+          "[view][bridge][lifetime][overlay]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Re-claiming from inside the handler ASSIGNS a new std::function to
+    // `on_overlay_dismissed`, which destroys the closure whose body is
+    // currently executing and frees its out-of-line heap block. This is the
+    // reentrancy shape a React popover produces when `onDismissed` re-opens.
+    bridge.load_script(R"JS(
+        var dismissed = 0;
+        createLabel('pop', 'Pop', '');
+        on('pop', 'dismiss', function () {
+            dismissed += 1;
+            claimOverlay('pop');
+        });
+        claimOverlay('pop');
+    )JS");
+
+    auto* pop = bridge.widget("pop");
+    REQUIRE(pop != nullptr);
+    REQUIRE(View::active_overlay_ == pop);
+
+    View::dismiss_active_overlay();
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
+    // The handler re-claimed, so the slot points at the replacement closure.
+    REQUIRE(View::active_overlay_ == pop);
+
+    // The second dismiss must reach the REPLACEMENT, not the block the first
+    // dismiss freed out from under itself.
+    View::dismiss_active_overlay();
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 2);
+    REQUIRE(View::active_overlay_ == pop);
+}
