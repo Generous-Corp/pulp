@@ -144,9 +144,30 @@ chosen = booted or (devices[0] if devices else None)
 if chosen:
     print(chosen["udid"])
 ')
+# A missing Simulator runtime is a SKIP, not a failure.
+#
+# This script runs in-band with the macOS Build step, and the CI golden image
+# deliberately strips simulator runtimes (tools/ci/tart-provision.sh: "Trim
+# simulator runtimes (large; CI plugin builds don't need them)"). Exiting
+# nonzero here therefore turns the REQUIRED macos gate red on every PR, on a
+# runner that was never provisioned to run this phase. The compile gate above --
+# which is the part that proves iOS actually builds -- has already passed by
+# this point, so the useful signal is preserved.
+#
+# Set PULP_IOS_REQUIRE_SIMULATOR=1 on a host that does have runtimes (a dev Mac,
+# or a future provisioned lane) to make the absence fatal instead.
 if [[ -z "$simulator_udid" ]]; then
-    echo "ERROR: no available iPhone Simulator" >&2
-    exit 1
+    if [[ "${PULP_IOS_REQUIRE_SIMULATOR:-0}" == "1" ]]; then
+        echo "ERROR: no available iPhone Simulator and PULP_IOS_REQUIRE_SIMULATOR=1" >&2
+        exit 1
+    fi
+    echo "SKIP: no available iPhone Simulator; iOS compile gate passed, Simulator phase skipped"
+    echo "      (set PULP_IOS_REQUIRE_SIMULATOR=1 to make this fatal)"
+    choc_root=$(sed -n 's/^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=//p' \
+        "$build_root/iphonesimulator/CMakeCache.txt" | head -n 1)
+    bash "$root/test/cmake/test_ios_source_syntax.sh" \
+        "$root" "$build_root/iphonesimulator" "$choc_root"
+    exit 0
 fi
 
 booted_here=0
@@ -157,7 +178,8 @@ data = json.load(sys.stdin)
 print(next((d.get("state", "") for ds in data["devices"].values()
             for d in ds if d.get("udid") == udid), ""))
 ' "$simulator_udid") != "Booted" ]]; then
-    xcrun simctl boot "$simulator_udid"
+    run_logged "simctl boot" 180 "$build_root/simctl-boot.log" \
+        xcrun simctl boot "$simulator_udid"
     booted_here=1
 fi
 cleanup_simulator() {
@@ -166,19 +188,26 @@ cleanup_simulator() {
     fi
 }
 trap cleanup_simulator EXIT
-xcrun simctl bootstatus "$simulator_udid" -b
+run_logged "simctl bootstatus" 300 "$build_root/simctl-bootstatus.log" \
+    xcrun simctl bootstatus "$simulator_udid" -b
 
 harness_app=$(find "$build_root/iphonesimulator" -type d \
     -name PulpCoreMidiHarness.app -print -quit)
 bundle_id=dev.pulp.tests.coremidi
 xcrun simctl uninstall "$simulator_udid" "$bundle_id" >/dev/null 2>&1 || true
-xcrun simctl install "$simulator_udid" "$harness_app"
+run_logged "simctl install" 180 "$build_root/simctl-install.log" \
+    xcrun simctl install "$simulator_udid" "$harness_app"
 container=$(xcrun simctl get_app_container "$simulator_udid" "$bundle_id" data)
 result_file="$container/Documents/coremidi-result.txt"
 rm -f "$result_file"
-xcrun simctl launch --terminate-running-process "$simulator_udid" "$bundle_id"
+run_logged "simctl launch" 180 "$build_root/simctl-launch.log" \
+    xcrun simctl launch --terminate-running-process "$simulator_udid" "$bundle_id"
 
-for _ in {1..150}; do
+# 90s, not 15s. The harness runs ~12 wait_until calls (~4s worst case each)
+# plus a multi-second 4-thread send stress against a live destination disposal;
+# a 15s budget produced intermittent "produced no result" that reads as a real
+# failure.
+for _ in {1..900}; do
     [[ -f "$result_file" ]] && break
     sleep 0.1
 done
