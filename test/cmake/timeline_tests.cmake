@@ -273,6 +273,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
         test_timeline_track_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-writer-capabilities LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal
     SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp

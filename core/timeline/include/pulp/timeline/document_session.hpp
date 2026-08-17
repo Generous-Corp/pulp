@@ -1,10 +1,15 @@
 #pragma once
 
+#include <pulp/timeline/command.hpp>
 #include <pulp/timeline/journal.hpp>
 #include <pulp/timeline/undo.hpp>
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 
 namespace pulp::timeline {
 
@@ -28,6 +33,248 @@ struct SessionLimits {
     std::size_t max_writers = 32;
     std::size_t max_cached_results = 256;
 };
+
+/// The part of the document one command governs.
+///
+/// Classes partition `Command` exactly: every alternative maps to one class, so
+/// an allowlist over classes is total rather than best-effort.
+enum class CommandClass : std::uint8_t {
+    /// Clip placement, timing, and playback properties on a track.
+    Clip,
+    /// Note content within a clip.
+    Note,
+    /// Automation lanes on a track.
+    Automation,
+    /// Track existence, order, naming, mix, arm, and freeze.
+    Track,
+    /// Take lanes, takes, and comping.
+    Take,
+    /// Launch scenes and their slots.
+    Scene,
+    /// Sequence existence and cloning.
+    Sequence,
+    /// Device placement, ordering, retargeting, and state.
+    Device,
+    /// Markers, regions, chord/scale lane, and groove.
+    Annotation,
+    /// Project tempo and meter maps.
+    Timing,
+    /// Project-owned media assets.
+    Asset,
+};
+
+/// Number of distinct command classes.
+inline constexpr std::size_t kCommandClassCount = 11;
+
+/// What a command does to the entity its class names.
+///
+/// `Remove` is the destructive intent: it is the axis a capability mask denies
+/// by default for an untrusted writer.
+enum class CommandIntent : std::uint8_t {
+    /// Brings a new entity into the document.
+    Create,
+    /// Changes an existing entity in place.
+    Modify,
+    /// Takes an existing entity out of the document.
+    Remove,
+};
+
+/// Number of distinct command intents.
+inline constexpr std::size_t kCommandIntentCount = 3;
+
+/// The authority one command requires, as a class and intent pair.
+struct CommandAuthority {
+    /// The part of the document the command governs.
+    CommandClass command_class = CommandClass::Clip;
+    /// What the command does to that part.
+    CommandIntent intent = CommandIntent::Modify;
+
+    constexpr bool operator==(const CommandAuthority&) const noexcept = default;
+};
+
+namespace detail {
+template <class> inline constexpr bool unclassified_command_v = false;
+} // namespace detail
+
+/// Returns the primary authority command type `T` requires.
+///
+/// Total over the `Command` variant by construction: an unclassified
+/// alternative fails to compile rather than defaulting to a permissive answer,
+/// so a command added to the variant cannot silently arrive unguarded. Stated
+/// per type rather than per value so a conformance check can walk every
+/// alternative without constructing one. Admission additionally accounts for
+/// identity-bearing children carried by aggregate commands and for the note-ID
+/// set difference in `ReplaceNoteContent`.
+template <class T> constexpr CommandAuthority command_authority_of() noexcept {
+    using Class = CommandClass;
+    using Intent = CommandIntent;
+    if constexpr (std::is_same_v<T, InsertClip>)
+        return {Class::Clip, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveClip>)
+        return {Class::Clip, Intent::Remove};
+    else if constexpr (std::is_same_v<T, MoveClip>)
+        return {Class::Clip, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>)
+        return {Class::Clip, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetClipSequenceRef>)
+        return {Class::Clip, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertNotes>)
+        return {Class::Note, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveNotes>)
+        return {Class::Note, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetNoteVelocity>)
+        return {Class::Note, Intent::Modify};
+    else if constexpr (std::is_same_v<T, ReplaceNoteContent>)
+        return {Class::Note, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetNoteEvents>)
+        return {Class::Note, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertAutomationLane>)
+        return {Class::Automation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveAutomationLane>)
+        return {Class::Automation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertTrack>)
+        return {Class::Track, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveTrack>)
+        return {Class::Track, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetTrackName>)
+        return {Class::Track, Intent::Modify};
+    else if constexpr (std::is_same_v<T, MoveTrack>)
+        return {Class::Track, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetTrackMixer>)
+        return {Class::Track, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetRecordArm>)
+        return {Class::Track, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetTrackFreeze>)
+        return {Class::Track, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertTakeLane>)
+        return {Class::Take, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveTakeLane>)
+        return {Class::Take, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertTake>)
+        return {Class::Take, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveTake>)
+        return {Class::Take, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetActiveTakeLane>)
+        return {Class::Take, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetTakeComp>)
+        return {Class::Take, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertScene>)
+        return {Class::Scene, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveScene>)
+        return {Class::Scene, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertSlot>)
+        return {Class::Scene, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveSlot>)
+        return {Class::Scene, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertSequence>)
+        return {Class::Sequence, Intent::Create};
+    else if constexpr (std::is_same_v<T, CloneSequence>)
+        return {Class::Sequence, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveSequence>)
+        return {Class::Sequence, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertDevice>)
+        return {Class::Device, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveDevice>)
+        return {Class::Device, Intent::Remove};
+    else if constexpr (std::is_same_v<T, MoveDevice>)
+        return {Class::Device, Intent::Modify};
+    else if constexpr (std::is_same_v<T, RetargetDevice>)
+        return {Class::Device, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetDeviceState>)
+        return {Class::Device, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertMarker>)
+        return {Class::Annotation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveMarker>)
+        return {Class::Annotation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, InsertRegion>)
+        return {Class::Annotation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveRegion>)
+        return {Class::Annotation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetChordScaleLane>)
+        return {Class::Annotation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetGroove>)
+        return {Class::Annotation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetTempoMap>)
+        return {Class::Timing, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetMeterMap>)
+        return {Class::Timing, Intent::Modify};
+    else if constexpr (std::is_same_v<T, CreateAsset>)
+        return {Class::Asset, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveAsset>)
+        return {Class::Asset, Intent::Remove};
+    else
+        static_assert(detail::unclassified_command_v<T>,
+                      "every Command alternative needs a CommandAuthority");
+}
+
+/// Returns the primary authority `command` requires.
+CommandAuthority command_authority(const Command& command) noexcept;
+
+/// Returns the single mask bit representing `authority`.
+constexpr std::uint64_t capability_bit(CommandAuthority authority) noexcept {
+    return std::uint64_t{1} << (static_cast<std::size_t>(authority.command_class) *
+                                    kCommandIntentCount +
+                                static_cast<std::size_t>(authority.intent));
+}
+
+/// Every class/intent pair set.
+inline constexpr std::uint64_t kAllCommandAuthorities =
+    (std::uint64_t{1} << (kCommandClassCount * kCommandIntentCount)) - 1;
+static_assert(kCommandClassCount * kCommandIntentCount < 64,
+              "writer capability pairs must fit in the mask");
+
+/// Fixed authority of one writer over command classes and retained size.
+///
+/// A default-constructed mask denies every destructive intent and imposes no
+/// quota. The no-argument registration overload explicitly uses
+/// `unrestricted_capabilities()` so existing trusted callers retain their prior
+/// authority. Quotas use the complete envelope-aware
+/// `retained_size(const Transaction&)` estimate.
+struct WriterCapabilityMask {
+    /// One bit per class/intent pair, indexed by `capability_bit`.
+    std::uint64_t allowed = [] {
+        auto value = kAllCommandAuthorities;
+        for (std::size_t index = 0; index < kCommandClassCount; ++index)
+            value &= ~capability_bit(
+                {static_cast<CommandClass>(index), CommandIntent::Remove});
+        return value;
+    }();
+    /// Largest retained size a single transaction from this writer may carry.
+    std::size_t max_transaction_retained_bytes = std::numeric_limits<std::size_t>::max();
+    /// Largest cumulative retained size this writer may commit to the session.
+    std::size_t max_session_retained_bytes = std::numeric_limits<std::size_t>::max();
+};
+
+/// Reports whether `mask` permits `authority`.
+constexpr bool allows(const WriterCapabilityMask& mask, CommandAuthority authority) noexcept {
+    return (mask.allowed & capability_bit(authority)) != 0;
+}
+
+/// Returns `mask` with one class/intent pair denied.
+constexpr WriterCapabilityMask deny(WriterCapabilityMask mask, CommandClass command_class,
+                                    CommandIntent intent) noexcept {
+    mask.allowed &= ~capability_bit({command_class, intent});
+    return mask;
+}
+
+/// Returns `mask` with one class/intent pair permitted.
+constexpr WriterCapabilityMask allow(WriterCapabilityMask mask, CommandClass command_class,
+                                     CommandIntent intent) noexcept {
+    mask.allowed |= capability_bit({command_class, intent});
+    return mask;
+}
+
+/// Returns the legacy authority carried by writers registered without a mask.
+constexpr WriterCapabilityMask unrestricted_capabilities() noexcept {
+    WriterCapabilityMask mask;
+    mask.allowed = kAllCommandAuthorities;
+    return mask;
+}
+
+/// Returns a mask permitting every class but denying every destructive intent.
+constexpr WriterCapabilityMask non_destructive_capabilities() noexcept {
+    return WriterCapabilityMask{};
+}
 
 /// Move-only authority for submitting transactions to one DocumentSession.
 ///
@@ -154,7 +401,28 @@ class DocumentSession {
     DocumentSession& operator=(const DocumentSession&) = delete;
 
     /// Registers a distinct writer until max_writers or ID space is exhausted.
+    ///
+    /// The writer carries full authority and no quota.
     runtime::Result<WriterToken, TransactionError> register_writer();
+    /// Registers a distinct writer whose authority is fixed at `mask`.
+    ///
+    /// The mask is copied into session state and is never reachable from the
+    /// returned token, so it cannot be widened, narrowed, or replaced for the
+    /// life of the writer. Submissions are admitted against it inside the
+    /// session's own admission path, so there is no wrapper to bypass.
+    ///
+    /// Undo and redo are admitted against the same classes, because the inverse
+    /// of a creation is a removal: without that check a writer denied a class
+    /// could still reach its effect by undoing another writer's work. Quotas
+    /// are not charged there, since replaying history adds no new content.
+    runtime::Result<WriterToken, TransactionError> register_writer(WriterCapabilityMask mask);
+    /// Returns the authority fixed at registration for `provenance`.
+    ///
+    /// Returns nullopt when the provenance does not name a writer of this
+    /// session. This is an observation for tests and diagnostics; it hands back
+    /// a copy and never a handle that could mutate the stored mask.
+    std::optional<WriterCapabilityMask>
+    writer_capabilities(WriterToken::Provenance provenance) const noexcept;
     /// Returns one atomic snapshot/revision observation without taking the writer lock.
     DocumentView current() const noexcept;
     /// Returns the currently published immutable snapshot.

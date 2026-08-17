@@ -2847,3 +2847,56 @@ Two gotchas worth knowing before you debug an output that looks *almost* right:
   which is correct for a real-time reader but would silently turn an absurd
   region into a plausible bounce here, so the renderer rejects a saturated
   derivation instead of using it.
+## A writer capability mask has to gate undo, not just submit
+
+`WriterCapabilityMask` (`document_session.hpp`) fixes a writer's authority at
+registration as a bitmask over (`CommandClass`, `CommandIntent`) pairs, and
+`DocumentSession` admits against it inside `submit` — deliberately inside the
+session rather than in a wrapper a caller could route around.
+The mask itself is non-destructive by default. The legacy no-argument
+`register_writer()` remains explicitly unrestricted for source-compatible
+trusted callers; new agent-facing call sites must pass a mask.
+
+Authority follows effects, including effects nested in one command. Complete
+note replacement requires create/remove authority for its note-ID set
+difference. Clip, track, and sequence insertion/removal (including cloning and
+history inverses) also requires the authorities of every identity-bearing child
+in the carried or current subtree; checking only the aggregate's primary class
+would launder a denied child operation.
+Every aggregate removal after another command in the same atomic batch fails
+closed across its possible child classes, because admission otherwise inspects
+the pre-batch snapshot while reduction sees the earlier command's result. A
+granular writer can split the batch when it needs a precise current-subtree
+decision; an unrestricted trusted writer is unaffected.
+
+The non-obvious half is that gating `submit` alone leaves the mask bypassable.
+Undo applies the recorded **inverse** of a transaction, and the inverse of a
+creation is a removal: a writer denied `(Asset, Remove)` that could still call
+`undo()` on another writer's `CreateAsset` would reach exactly the effect the
+mask forbids. `undo` and `redo` therefore run the same class check on the
+history transaction they are about to commit, before touching the redo/undo
+stacks so a refusal mutates nothing.
+
+Quotas are the opposite case and are charged **only** on `submit`. A quota
+bounds what a writer adds to the document; replaying history adds no new
+content, and charging it there would let a writer that hit its ceiling become
+unable to undo its own work.
+
+Two smaller traps in the same area:
+
+- `Transaction` has no member `retained_size()`. The shipped accounting is the
+  free `retained_size(const Transaction&)` function in `command.hpp`; use that
+  complete envelope-aware estimate for writer budgets. Undo history separately
+  uses `retained_size(std::span<const Command>)` because it retains command
+  payloads without transaction identities or admission metadata.
+- Idempotent retries must consult the accepted-result cache before cumulative
+  quota admission. The original commit already spent its quota; rejecting or
+  charging the exact retry breaks the session's idempotency contract.
+- Cached ID collisions and retries older than the result cache also retain their
+  established structured errors before quota admission. They cannot mutate the
+  document, and reporting quota exhaustion would incorrectly tell a caller that
+  shrinking the transaction could make the same ID viable.
+- `ConflictCode` ordinals are a wire surface: `tools/mcp` emits them verbatim as
+  `numeric_code`, and a test pins the ordinal of every existing value. Append
+  new causes **after** `Unspecified` — appending anywhere else renumbers a
+  shipped code even though the enum still compiles.

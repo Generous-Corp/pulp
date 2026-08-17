@@ -2,6 +2,8 @@
 
 #include "document_session_internal.hpp"
 
+#include "owned_identity_traversal.hpp"
+
 #include "journal_internal.hpp"
 #include "session_nonce_test_access.hpp"
 #include "transaction_internal.hpp"
@@ -11,8 +13,12 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace pulp::timeline {
 namespace {
@@ -23,6 +29,8 @@ struct WriterState {
     WriterId id;
     std::uint64_t transaction_watermark = 0;
     std::uint64_t command_watermark = 0;
+    WriterCapabilityMask capabilities{};
+    std::size_t session_retained_bytes = 0;
 };
 
 struct CachedCommit {
@@ -77,6 +85,190 @@ std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
                : lhs + rhs;
 }
 
+// Admission runs before any reduction, so a refusal here cannot have applied a
+// prefix of the batch.
+std::optional<TransactionError> refuse_by_class(const WriterState& writer,
+                                                const Transaction& transaction,
+                                                const Project& project,
+                                                DocumentRevision current);
+
+std::optional<CommandClass> identity_command_class(ItemKind kind) noexcept {
+    switch (kind) {
+    case ItemKind::Sequence:
+        return CommandClass::Sequence;
+    case ItemKind::Track:
+        return CommandClass::Track;
+    case ItemKind::Clip:
+        return CommandClass::Clip;
+    case ItemKind::Note:
+    case ItemKind::MidiLane:
+    case ItemKind::MidiLanePoint:
+        return CommandClass::Note;
+    case ItemKind::DevicePlacement:
+        return CommandClass::Device;
+    case ItemKind::AutomationLane:
+    case ItemKind::AutomationPoint:
+    case ItemKind::Modulator:
+    case ItemKind::MacroControl:
+    case ItemKind::ModulationRoute:
+        return CommandClass::Automation;
+    case ItemKind::TakeLane:
+    case ItemKind::Take:
+        return CommandClass::Take;
+    case ItemKind::Marker:
+    case ItemKind::Region:
+        return CommandClass::Annotation;
+    case ItemKind::Scene:
+    case ItemKind::Slot:
+        return CommandClass::Scene;
+    case ItemKind::Project:
+    case ItemKind::Asset:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+template <typename Visit>
+void add_owned_authorities(std::uint64_t& required, CommandIntent intent, Visit&& visit) {
+    visit([&](const detail::ModelOwnedIdentity& identity) {
+        if (const auto command_class = identity_command_class(identity.kind))
+            required |= capability_bit({*command_class, intent});
+    });
+}
+
+void add_clip_authorities(std::uint64_t& required, const Clip& clip, CommandIntent intent) {
+    add_owned_authorities(required, intent, [&](auto&& visitor) {
+        detail::visit_clip_owned_identities(clip, {}, std::forward<decltype(visitor)>(visitor));
+    });
+}
+
+void add_track_authorities(std::uint64_t& required, const Track& track, CommandIntent intent) {
+    add_owned_authorities(required, intent, [&](auto&& visitor) {
+        detail::visit_track_owned_identities(track, std::forward<decltype(visitor)>(visitor));
+    });
+}
+
+void add_sequence_authorities(std::uint64_t& required, const Sequence& sequence,
+                              CommandIntent intent) {
+    add_owned_authorities(required, intent, [&](auto&& visitor) {
+        detail::visit_sequence_owned_identities(sequence,
+                                                std::forward<decltype(visitor)>(visitor));
+    });
+}
+
+void add_possible_track_child_authorities(std::uint64_t& required, CommandIntent intent) {
+    for (const auto command_class : {CommandClass::Clip, CommandClass::Note,
+                                     CommandClass::Automation, CommandClass::Take,
+                                     CommandClass::Device})
+        required |= capability_bit({command_class, intent});
+}
+
+void add_possible_sequence_child_authorities(std::uint64_t& required, CommandIntent intent) {
+    add_possible_track_child_authorities(required, intent);
+    for (const auto command_class :
+         {CommandClass::Track, CommandClass::Annotation, CommandClass::Scene})
+        required |= capability_bit({command_class, intent});
+}
+
+std::vector<std::uint64_t> note_ids(const std::vector<NoteEvent>& notes) {
+    std::vector<std::uint64_t> result;
+    result.reserve(notes.size());
+    for (const auto& note : notes)
+        result.push_back(note.id.value);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::uint64_t required_authorities(const Command& command, const Project& project,
+                                   bool has_prior_commands) {
+    auto required = capability_bit(command_authority(command));
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, InsertClip>) {
+                add_clip_authorities(required, value.clip, CommandIntent::Create);
+            } else if constexpr (std::is_same_v<T, RemoveClip>) {
+                bool found = false;
+                if (const auto* sequence = project.find_sequence(value.sequence_id))
+                    if (const auto* track = sequence->find_track(value.track_id))
+                        if (const auto* clip = track->find_clip(value.clip_id)) {
+                            add_clip_authorities(required, *clip, CommandIntent::Remove);
+                            found = true;
+                        }
+                // A prior command in the same atomic batch may create the
+                // target. Without a current subtree to inspect, fail closed on
+                // the only distinct child class a clip can own.
+                if (!found || has_prior_commands)
+                    required |= capability_bit({CommandClass::Note, CommandIntent::Remove});
+            } else if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                const auto expected = note_ids(value.expected);
+                const auto replacement = note_ids(value.replacement);
+                if (!std::includes(expected.begin(), expected.end(), replacement.begin(),
+                                   replacement.end()))
+                    required |= capability_bit({CommandClass::Note, CommandIntent::Create});
+                if (!std::includes(replacement.begin(), replacement.end(), expected.begin(),
+                                   expected.end()))
+                    required |= capability_bit({CommandClass::Note, CommandIntent::Remove});
+            } else if constexpr (std::is_same_v<T, InsertTrack>) {
+                add_track_authorities(required, value.track, CommandIntent::Create);
+            } else if constexpr (std::is_same_v<T, RemoveTrack>) {
+                bool found = false;
+                if (const auto* sequence = project.find_sequence(value.sequence_id))
+                    if (const auto* track = sequence->find_track(value.track_id)) {
+                        add_track_authorities(required, *track, CommandIntent::Remove);
+                        found = true;
+                    }
+                if (!found || has_prior_commands)
+                    add_possible_track_child_authorities(required, CommandIntent::Remove);
+            } else if constexpr (std::is_same_v<T, InsertSequence>) {
+                add_sequence_authorities(required, value.sequence, CommandIntent::Create);
+            } else if constexpr (std::is_same_v<T, CloneSequence>) {
+                if (const auto* sequence = project.find_sequence(value.source_sequence_id)) {
+                    add_sequence_authorities(required, *sequence, CommandIntent::Create);
+                } else {
+                    add_possible_sequence_child_authorities(required, CommandIntent::Create);
+                }
+            } else if constexpr (std::is_same_v<T, RemoveSequence>) {
+                if (const auto* sequence = project.find_sequence(value.sequence_id)) {
+                    add_sequence_authorities(required, *sequence, CommandIntent::Remove);
+                } else {
+                    add_possible_sequence_child_authorities(required, CommandIntent::Remove);
+                }
+                if (has_prior_commands)
+                    add_possible_sequence_child_authorities(required, CommandIntent::Remove);
+            }
+        },
+        command);
+    return required;
+}
+
+std::optional<TransactionError> refuse_by_class(const WriterState& writer,
+                                                const Transaction& transaction,
+                                                const Project& project,
+                                                DocumentRevision current) {
+    bool has_prior_commands = false;
+    for (const auto& envelope : transaction.commands) {
+        if ((required_authorities(envelope.command, project, has_prior_commands) &
+             ~writer.capabilities.allowed) != 0)
+            return error(ConflictCode::CapabilityDenied, transaction, current, envelope.id);
+        has_prior_commands = true;
+    }
+    return std::nullopt;
+}
+
+// A quota bounds what a writer adds to the document, so it is charged when that
+// writer submits and not when history replays content already accounted for.
+std::optional<TransactionError> refuse_by_quota(const WriterState& writer,
+                                                const Transaction& transaction,
+                                                DocumentRevision current) {
+    const auto size = retained_size(transaction);
+    if (size > writer.capabilities.max_transaction_retained_bytes ||
+        saturated_add(writer.session_retained_bytes, size) >
+            writer.capabilities.max_session_retained_bytes)
+        return error(ConflictCode::WriterQuotaExhausted, transaction, current);
+    return std::nullopt;
+}
+
 } // namespace
 
 struct DocumentSession::Impl {
@@ -114,6 +306,14 @@ struct DocumentSession::Impl {
         return found == writers.end() ? nullptr : &*found;
     }
 
+    const CachedCommit* find_cached(TransactionId id) const noexcept {
+        const auto found = std::find_if(cache.begin(), cache.end(),
+                                        [&](const CachedCommit& value) {
+                                            return value.transaction.id == id;
+                                        });
+        return found == cache.end() ? nullptr : &*found;
+    }
+
     runtime::Result<CommitResult, TransactionError>
     commit_locked(Transaction transaction, bool record_undo, bool clear_redo, CommitKind kind) {
         const auto current = std::atomic_load_explicit(&published, std::memory_order_relaxed);
@@ -123,10 +323,8 @@ struct DocumentSession::Impl {
             return failure<CommitResult>(
                 error(ConflictCode::InvalidIdentifier, transaction, current_revision));
 
-        const auto cached = std::find_if(cache.begin(), cache.end(), [&](const CachedCommit& item) {
-            return item.transaction.id == transaction.id;
-        });
-        if (cached != cache.end()) {
+        const auto* cached = find_cached(transaction.id);
+        if (cached != nullptr) {
             if (equivalent(cached->transaction, transaction))
                 return runtime::Result<CommitResult, TransactionError>(runtime::Ok(cached->result));
             return failure<CommitResult>(
@@ -428,7 +626,20 @@ std::uint64_t detail::SessionNonceTestAccess::exchange_next(std::uint64_t value)
 DocumentSession::~DocumentSession() = default;
 DocumentSession::DocumentSession(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 
+CommandAuthority command_authority(const Command& command) noexcept {
+    return std::visit(
+        [](const auto& value) {
+            return command_authority_of<std::decay_t<decltype(value)>>();
+        },
+        command);
+}
+
 runtime::Result<WriterToken, TransactionError> DocumentSession::register_writer() {
+    return register_writer(unrestricted_capabilities());
+}
+
+runtime::Result<WriterToken, TransactionError>
+DocumentSession::register_writer(WriterCapabilityMask mask) {
     std::lock_guard lock(impl_->mutex);
     if (impl_->writers.size() >= impl_->limits.max_writers || impl_->next_writer == 0 ||
         impl_->next_writer == std::numeric_limits<std::uint64_t>::max()) {
@@ -437,11 +648,20 @@ runtime::Result<WriterToken, TransactionError> DocumentSession::register_writer(
         return failure<WriterToken>(value);
     }
     const WriterId id{impl_->next_writer++};
-    impl_->writers.push_back({id, 0, 0});
+    impl_->writers.push_back({id, 0, 0, mask, 0});
     WriterToken token;
     token.id_ = id;
     token.owner_nonce_ = impl_->session_nonce;
     return runtime::Result<WriterToken, TransactionError>(runtime::Ok(std::move(token)));
+}
+
+std::optional<WriterCapabilityMask>
+DocumentSession::writer_capabilities(WriterToken::Provenance provenance) const noexcept {
+    std::lock_guard lock(impl_->mutex);
+    if (!provenance.valid() || provenance.owner_nonce_ != impl_->session_nonce)
+        return std::nullopt;
+    const auto* writer = impl_->find_writer(provenance.writer_);
+    return writer ? std::optional<WriterCapabilityMask>(writer->capabilities) : std::nullopt;
 }
 
 DocumentView DocumentSession::current() const noexcept {
@@ -477,7 +697,28 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::submit(WriterTo
         return failure<CommitResult>(
             error(ConflictCode::InvalidIdentifier, transaction, revision()));
     }
-    return impl_->commit_locked(std::move(transaction), true, true, CommitKind::Ordinary);
+    auto* state = impl_->find_writer(writer.id_);
+    std::size_t charge = 0;
+    const auto* cached = impl_->find_cached(transaction.id);
+    if (state != nullptr) {
+        // Established identifier outcomes precede capability/quota admission:
+        // none can mutate the document, and callers rely on their structured
+        // collision/expired-retry errors to decide whether retry is meaningful.
+        if (!transaction.id.valid() || cached != nullptr ||
+            transaction.id.sequence <= state->transaction_watermark)
+            return impl_->commit_locked(std::move(transaction), true, true,
+                                        CommitKind::Ordinary);
+        const auto view = current();
+        if (auto refusal = refuse_by_class(*state, transaction, *view.snapshot, view.revision))
+            return failure<CommitResult>(*refusal);
+        if (auto refusal = refuse_by_quota(*state, transaction, view.revision))
+            return failure<CommitResult>(*refusal);
+        charge = retained_size(transaction);
+    }
+    auto result = impl_->commit_locked(std::move(transaction), true, true, CommitKind::Ordinary);
+    if (result && state != nullptr)
+        state->session_retained_bytes = saturated_add(state->session_retained_bytes, charge);
+    return result;
 }
 
 runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToken& writer) {
@@ -501,6 +742,11 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToke
     }
     auto record = impl_->undo.back();
     auto transaction = impl_->make_history_transaction(writer, record.inverse);
+    if (auto* state = impl_->find_writer(writer.id_)) {
+        const auto view = current();
+        if (auto refusal = refuse_by_class(*state, transaction, *view.snapshot, view.revision))
+            return failure<CommitResult>(*refusal);
+    }
     impl_->redo.emplace_back();
     auto result =
         impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
@@ -536,6 +782,11 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
     }
     auto record = impl_->redo.back();
     auto transaction = impl_->make_history_transaction(writer, record.forward);
+    if (auto* state = impl_->find_writer(writer.id_)) {
+        const auto view = current();
+        if (auto refusal = refuse_by_class(*state, transaction, *view.snapshot, view.revision))
+            return failure<CommitResult>(*refusal);
+    }
     impl_->undo.emplace_back();
     auto result =
         impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
