@@ -404,6 +404,7 @@ jobs:
             --strict-mcp-config \
             --mcp-config '{"mcpServers":{}}' \
             --settings '{"disableAllHooks":true}' \
+            --setting-sources user \
             --no-session-persistence \
             --permission-mode plan \
             --model "$CLAUDE_FALLBACK_MODEL" \
@@ -590,6 +591,7 @@ jobs:
         shell: bash
         env:
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-repair-home
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
         run: |
           set -euo pipefail
           command -v claude >/dev/null
@@ -603,6 +605,13 @@ jobs:
           export ANTHROPIC_BASE_URL="$base_url"
           export ANTHROPIC_AUTH_TOKEN
           ANTHROPIC_AUTH_TOKEN=$(jq -r '.environment.ANTHROPIC_AUTH_TOKEN' "$RUNNER_TEMP/fallback-repair-lease.json")
+          # The primary lane edits this same worktree under workspace-write and
+          # can fail AFTER editing (a mid-task error, or tripping its own enum
+          # check). Reset to the fenced head first so a failed Codex attempt's
+          # partial edits are never bundled into this patch and attributed to
+          # Claude by the commit trailers.
+          git -C worktree reset --hard --quiet "$EXPECTED_HEAD"
+          git -C worktree clean -qfd
           # The model may edit the untrusted worktree but never stages, commits,
           # or pushes. Blast radius is re-validated deterministically downstream
           # by shipyard_recovery_repair.py and again by the publisher.
@@ -612,6 +621,7 @@ jobs:
             --strict-mcp-config \
             --mcp-config '{"mcpServers":{}}' \
             --settings '{"disableAllHooks":true}' \
+            --setting-sources user \
             --no-session-persistence \
             --permission-mode acceptEdits \
             --model "$CLAUDE_FALLBACK_REPAIR_MODEL" \
@@ -664,18 +674,29 @@ jobs:
         id: repair_bundle
         if: steps.repair_result.outputs.outcome == 'fixed'
         shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
         run: |
           set -euo pipefail
           # The model is forbidden to stage or commit, but normalize the index
           # defensively so the bundle includes every tracked edit it left behind.
-          git -C worktree reset --mixed --quiet HEAD
+          # Diff against the fenced commit, never the index. `add --intent-to-add`
+          # fully stages a DELETION, so a worktree-vs-index diff silently drops
+          # deleted and renamed files from both the patch and the declared path
+          # list — and the publisher's parity check still passes, because both
+          # lists are identically wrong. That ships a "fix" that does not delete
+          # what the model deleted. Resetting to the assignment's exact head
+          # rather than HEAD also survives a model that committed.
+          git -C worktree reset --mixed --quiet "$EXPECTED_HEAD"
           git -C worktree add --intent-to-add --all
-          git -C worktree diff --check
+          # Whitespace is a hygiene signal, not grounds to discard a good repair;
+          # the publisher re-checks the patch independently before applying it.
+          git -C worktree diff HEAD --check || echo "warning: patch has whitespace errors" >&2
           {
-            git -C worktree diff --name-only
+            git -C worktree diff HEAD --name-only
             git -C worktree ls-files --others --exclude-standard
-          } | sort -u > "$RUNNER_TEMP/changed-paths.txt"
-          git -C worktree diff --binary --full-index > "$RUNNER_TEMP/recovery-repair.patch"
+          } | LC_ALL=C sort -u > "$RUNNER_TEMP/changed-paths.txt"
+          git -C worktree diff HEAD --binary --full-index > "$RUNNER_TEMP/recovery-repair.patch"
           python3 control/tools/scripts/shipyard_recovery_repair.py \
             --assignment "$RUNNER_TEMP/recovery-input/assignment.json" \
             --triage "$RUNNER_TEMP/recovery-result.json" \
@@ -802,8 +823,16 @@ jobs:
           head_ref=$(jq -r '.head.ref' post-repair-pull.json)
           [ -n "$head_ref" ] && [ "$head_ref" != null ]
           git -C worktree apply --index --binary "$GITHUB_WORKSPACE/recovery-output/recovery-repair.patch"
-          git -C worktree diff --cached --check
-          git -C worktree diff --cached --name-only | sort -u > applied-paths.txt
+          # Warn, do not fail: trailing whitespace is not grounds to discard a
+          # repair that fixes a real blocker, and the security fences (control-
+          # plane prefixes, path escape, size caps, exact head/epoch/fingerprint,
+          # and the parity check below) are all enforced independently.
+          git -C worktree diff --cached --check || echo "warning: applied patch has whitespace errors" >&2
+          # LC_ALL=C on BOTH sides. The worker and this publisher run on
+          # different hosts, and glibc/BSD collation orders `-`, `_`, and case
+          # differently from C — so an unpinned sort makes the parity diff below
+          # reject a perfectly correct patch purely on locale.
+          git -C worktree diff --cached --name-only | LC_ALL=C sort -u > applied-paths.txt
           python3 control/tools/scripts/shipyard_recovery_repair.py \
             --assignment recovery-output/recovery-input/assignment.json \
             --triage recovery-output/recovery-result.json \
@@ -821,15 +850,23 @@ jobs:
             claude) repair_agent=claude; repair_model=claude-sonnet-4-5; repair_effort=default ;;
             *) echo "unknown repair provider: $REPAIR_PROVIDER" >&2; exit 1 ;;
           esac
-          git -C worktree commit \
-            -m "fix: recover PR #${PR_NUMBER} blocker" \
-            -m "Shipyard-Recovery-For: ${EXPECTED_HEAD}" \
-            -m "Shipyard-Recovery-Epoch: ${ASSIGNMENT_EPOCH}" \
-            -m "Shipyard-Recovery-Fingerprint: ${BLOCKER_FINGERPRINT}" \
-            -m "Agent: ${repair_agent}" \
-            -m "Model: ${repair_model}" \
-            -m "Model-Reasoning: ${repair_effort}" \
-            -m "Router: subrouter"
+          # Built as one string rather than one -m per trailer: separate -m
+          # flags become separate PARAGRAPHS, and `git interpret-trailers
+          # --parse` reads only the last one — so an auditor asking which agent
+          # produced a recovery commit would see `Router: subrouter` and
+          # nothing else. printf keeps the block contiguous without dedenting
+          # the YAML block scalar to column zero.
+          recovery_message=$(printf '%s\n' \
+            "fix: recover PR #${PR_NUMBER} blocker" \
+            "" \
+            "Shipyard-Recovery-For: ${EXPECTED_HEAD}" \
+            "Shipyard-Recovery-Epoch: ${ASSIGNMENT_EPOCH}" \
+            "Shipyard-Recovery-Fingerprint: ${BLOCKER_FINGERPRINT}" \
+            "Agent: ${repair_agent}" \
+            "Model: ${repair_model}" \
+            "Model-Reasoning: ${repair_effort}" \
+            "Router: subrouter")
+          git -C worktree commit -m "$recovery_message"
           new_head=$(git -C worktree rev-parse HEAD)
           [ "$(git -C worktree rev-parse HEAD^)" = "$EXPECTED_HEAD" ]
           gh auth setup-git
@@ -853,7 +890,14 @@ jobs:
           if [ "${{ steps.repair_push.outcome }}" = success ]; then
             state=success
             classification=repair_pushed
-          elif [ "${{ needs.luna-triage.result }}" != success ] || [ "${{ steps.download.outcome }}" != success ] || [ "${{ steps.repair_push.outcome }}" = failure ]; then
+          elif [ "${{ needs.luna-triage.result }}" != success ] || [ "${{ steps.download.outcome }}" != success ] || [ "${{ steps.repair_push.outcome }}" = failure ] || { [ "${{ needs.luna-triage.outputs.repair_outcome }}" = fixed ] && [ "${{ steps.repair_push.outcome }}" != success ]; }; then
+            # A repair the model marked `fixed` whose push did not RUN leaves
+            # `repair_push.outcome` as `skipped`, not `failure`. Without the
+            # second clause that falls through to a success classification and
+            # tells the steward the dispatch completed cleanly while the
+            # authorised repair silently evaporated. `skipped` stays legitimate
+            # when no repair was attempted, which is why this is gated on
+            # `fixed` rather than a blanket `!= success`.
             classification=repair_failed
           elif [ "${{ needs.luna-triage.outputs.repair_outcome }}" = needs_human ] || [ "${{ needs.luna-triage.outputs.repair_outcome }}" = no_change ]; then
             state=success
