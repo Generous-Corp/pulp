@@ -82,6 +82,23 @@ double weighted_squared_residual(std::span<const FirDesignPoint> points,
     return residual;
 }
 
+std::vector<double> direct_dft_magnitudes(std::span<const double> impulse, std::size_t fft_size) {
+    std::vector<double> magnitudes(fft_size / 2u + 1u);
+    for (std::size_t bin = 0u; bin < magnitudes.size(); ++bin) {
+        const double omega = 2.0 * kPi * static_cast<double>(bin) / static_cast<double>(fft_size);
+        magnitudes[bin] = std::abs(direct_dft_response_at(impulse, omega));
+    }
+    return magnitudes;
+}
+
+double front_half_energy(std::span<const double> values) {
+    const std::size_t half = values.size() / 2u;
+    double energy = 0.0;
+    for (std::size_t index = 0u; index < half; ++index)
+        energy += values[index] * values[index];
+    return energy;
+}
+
 } // namespace
 
 TEST_CASE("least-squares FIR exactly recovers all four linear-phase types",
