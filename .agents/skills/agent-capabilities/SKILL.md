@@ -374,3 +374,14 @@ Classify honestly: a reusable bounded surface that is not an advertised generato
 `infrastructure` with empty `capability_keys` and a durable rationale. Do not manufacture a
 capability row to clear the gate; a capability row is a consumer contract with typed bindings
 and operational probes.
+
+**A header in the frozen legacy baseline does NOT require unfreezing anything.**
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` snapshots the public headers that
+predate classification, guarded by `FROZEN_LEGACY_DIGEST` and `FROZEN_LEGACY_COUNT` in
+`tools/scripts/agent_capability_surface.py`. Changing one fails with `public header fingerprint
+changed`, which reads like it demands editing those pinned constants — it does not, and editing
+them to make one PR pass would be removing a deliberate guard. Declaring the header in
+`agent_capability_registry.py`, as a capability or as an `infrastructure` disposition, satisfies
+the fingerprint check on its own; the baseline file, its entry count, and its digest all stay
+untouched. Confirm afterwards that the baseline entry count is unchanged and the manifest
+self-tests still pass.
