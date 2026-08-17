@@ -113,12 +113,46 @@ private:
 
 /// What to print when a wait runs out, so a CI failure carries the evidence
 /// needed to separate "the host never registered" from "the runner was slow".
-/// A bare `0 == 1` says neither, and that ambiguity cost a full triage cycle.
-std::string wait_timeout_report(std::string_view what, std::string_view observed) {
-    return std::string{"waited "} + std::to_string(broker_wait_budget().count())
-           + "ms for " + std::string{what} + "; last observed: " + std::string{observed}
-           + ". Raise PULP_TEST_BROKER_WAIT_MS if this host is simply slow; a value "
-             "far below the budget means the launch genuinely failed.";
+///
+/// A bare `REQUIRE(connection)` expanding to `0` says neither. Merge-group run
+/// 31899922031 reported exactly that, and reconstructing what it had actually
+/// waited for cost a full triage cycle. The two numbers that answer it are the
+/// budget the wait was given and the time it really spent: a wait that burned
+/// its whole budget was starved, while one that returned early failed for some
+/// other reason and raising the budget will not help.
+///
+/// `deadline` is the loop's own deadline, so elapsed time is derived rather
+/// than threaded separately through every call site.
+std::string wait_timeout_report(std::string_view what,
+                                std::string_view endpoint,
+                                std::chrono::steady_clock::time_point deadline,
+                                std::string_view observed) {
+    const auto budget = broker_wait_budget();
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    auto spent = budget - remaining;
+    if (spent < std::chrono::milliseconds::zero())
+        spent = std::chrono::milliseconds::zero();
+    if (spent > budget)
+        spent = budget;
+
+    std::string report = "waited for " + std::string{what};
+    if (!endpoint.empty())
+        report += " at " + std::string{endpoint};
+    report += "; budget " + std::to_string(budget.count()) + "ms, spent "
+              + std::to_string(spent.count()) + "ms";
+    if (!observed.empty())
+        report += "; last observed: " + std::string{observed};
+    if (remaining <= std::chrono::milliseconds::zero()) {
+        report += ". The budget was exhausted, so this host may simply be slow "
+                  "-- re-run with a larger PULP_TEST_BROKER_WAIT_MS to tell a "
+                  "starved launch from a failed one.";
+    } else {
+        report += ". The budget was NOT exhausted, so raising "
+                  "PULP_TEST_BROKER_WAIT_MS will not help; the launch itself "
+                  "failed.";
+    }
+    return report;
 }
 
 constexpr std::string_view kHostManifest = R"({
@@ -736,7 +770,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (const auto deadline = poll_deadline(); !connection && polling(deadline);) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -745,6 +780,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a client connection", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     CHECK_FALSE(std::filesystem::exists(stale_observer));
     CHECK(connection->manage("host-prepare", "{}").status_id == "session-required");
@@ -775,7 +812,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
     pulp::platform::ChildProcess restarted_process;
     REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
     std::unique_ptr<ControlClientConnection> restarted;
-    for (const auto deadline = poll_deadline(); !restarted && polling(deadline);) {
+    const auto restart_deadline = poll_deadline();
+    for (; !restarted && polling(restart_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -784,6 +822,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a connection after its crash-restart", endpoint.string(), restart_deadline,
+                             restarted ? "connected" : "never connected"));
     REQUIRE(restarted);
     REQUIRE(restarted->manage("enroll").status_id == "accepted");
     const auto empty_inventory = restarted->manage("instances");
@@ -841,7 +881,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (const auto deadline = poll_deadline(); !connection && polling(deadline);) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -850,6 +891,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a client connection", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     REQUIRE(connection->manage("enroll").status_id == "accepted");
 
@@ -897,7 +940,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         connection->manage("host-launch", choc::json::toString(launch, false), 15s);
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
-    for (const auto deadline = poll_deadline(); polling(deadline);) {
+    const auto registration_deadline = poll_deadline();
+    for (; polling(registration_deadline);) {
         const auto result = connection->manage("instances");
         REQUIRE(result.status_id == "completed");
         instances = choc::json::parse(result.data_json)["instances"];
@@ -915,7 +959,7 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     }
     // This is the assertion merge-group run 31899922031 failed as a bare
     // `0 == 1`, which named neither the budget it had nor what it last saw.
-    INFO(wait_timeout_report("the author host to register",
+    INFO(wait_timeout_report("the author host to register", endpoint.string(), registration_deadline,
                              choc::json::toString(instances, false)));
     REQUIRE(instances.size() == 1);
     const auto instance = instances[0];
@@ -964,7 +1008,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         CHECK(disconnected_for_reload);
         connection->disconnect();
         connection.reset();
-        for (const auto deadline = poll_deadline(); !connection && polling(deadline);) {
+        const auto enroll_connect_deadline = poll_deadline();
+        for (; !connection && polling(enroll_connect_deadline);) {
             auto candidate = std::make_unique<ControlClientConnection>(
                 ControlClientConnectionConfig{.endpoint_path = endpoint,
                                               .expected_broker_executable = installed_broker});
@@ -974,6 +1019,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
             else
                 std::this_thread::sleep_for(1ms);
         }
+        INFO(wait_timeout_report("the enrolled broker to accept a client connection", endpoint.string(), enroll_connect_deadline,
+                                 connection ? "connected" : "never connected"));
         REQUIRE(connection);
         CHECK(connection
                   ->manage("host-prepare-installed", choc::json::toString(named, false))
@@ -994,7 +1041,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         CHECK(disconnected_for_restore);
         connection->disconnect();
         connection.reset();
-        for (const auto deadline = poll_deadline(); !connection && polling(deadline);) {
+        const auto reenroll_connect_deadline = poll_deadline();
+        for (; !connection && polling(reenroll_connect_deadline);) {
             auto candidate = std::make_unique<ControlClientConnection>(
                 ControlClientConnectionConfig{.endpoint_path = endpoint,
                                               .expected_broker_executable = installed_broker});
@@ -1004,6 +1052,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
             else
                 std::this_thread::sleep_for(1ms);
         }
+        INFO(wait_timeout_report("the enrolled broker to accept a client connection", endpoint.string(), reenroll_connect_deadline,
+                                 connection ? "connected" : "never connected"));
         REQUIRE(connection);
         const auto restored_prepared = connection->manage(
             "host-prepare-installed", choc::json::toString(named, false), 15s);
@@ -1706,7 +1756,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (const auto deadline = poll_deadline(); !connection && polling(deadline);) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = broker_executable});
@@ -1715,6 +1766,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the broker to accept a client connection before the SIGKILL case", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     const auto enrolled = connection->manage("enroll");
     INFO(enrolled.explanation);
@@ -1829,7 +1882,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
     pulp::platform::ChildProcess restarted_process;
     REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
     std::unique_ptr<ControlClientConnection> restarted;
-    for (const auto deadline = poll_deadline(); !restarted && polling(deadline);) {
+    const auto restart_deadline = poll_deadline();
+    for (; !restarted && polling(restart_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = broker_executable});
@@ -1838,6 +1892,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the broker to accept a connection after SIGKILL", endpoint.string(), restart_deadline,
+                             restarted ? "connected" : "never connected"));
     REQUIRE(restarted);
     const auto restarted_enrollment = restarted->manage("enroll");
     REQUIRE(restarted_enrollment.status_id == "accepted");
