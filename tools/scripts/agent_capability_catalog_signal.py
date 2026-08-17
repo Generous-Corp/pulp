@@ -220,10 +220,10 @@ EXPORTS = [
         bindings=[
             binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
+                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
             binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
+                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
