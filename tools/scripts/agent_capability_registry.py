@@ -79,6 +79,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/spectral_band_mask.hpp": "Pulp::signal",
     "pulp/signal/spectral_mask_processor.hpp": "Pulp::signal",
     "pulp/signal/spectral_gate_blur.hpp": "Pulp::signal",
+    "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/spectral_morph.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/supersaw.hpp": "Pulp::signal",
@@ -549,7 +550,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:867c27fe4d7ef095f9c145d5bc667c3da34b2fa2e1bdc4c12d477ed4a07a896b",
+        "fingerprint": "sha256:92344d759584d3070385ecc6a93e1cba05acfa23d7054744b6ab22c917fa2f8a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
