@@ -145,6 +145,11 @@ def test_unpopulated_cache_is_distinguished_from_a_bad_one() -> int:
 
 
 def test_missing_skia_dir_is_reported_not_crashed() -> int:
+    # The Skia checks are macOS-only by design (check_skia returns early
+    # elsewhere), so on Linux there is no "does not exist" to assert. The other
+    # Skia controls carry this guard; this one was missed and CI caught it.
+    if sys.platform != "darwin":
+        return 0
     result = run("/nonexistent/skia-build-path")
     check(result.returncode == 1, "a missing SKIA_DIR must exit 1, not crash")
     check("does not exist" in result.stderr, result.stderr)
