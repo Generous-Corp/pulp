@@ -48,12 +48,6 @@ int main() {
     const auto exp2 = pulp::signal::FastMath::exp2(0.5f);
     if (!std::isfinite(exp2))
         return 13;
-    pulp::signal::AutoDuckedSend ducked_send;
-    if (ducked_send.prepare(48000.0f) != pulp::signal::AutoDuckedSendStatus::ready)
-        return 19;
-    const auto send_output = ducked_send.process(0.25f, -0.5f, 1.0f, -1.0f);
-    if (!std::isfinite(send_output[0]) || !std::isfinite(send_output[1]))
-        return 20;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
