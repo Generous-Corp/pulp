@@ -27,9 +27,15 @@
 #include <optional>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::state;
+
+// State snapshots are taken by copying ParamValue objects wholesale, so the
+// type must stay trivially copyable for that copy to be sound.
+static_assert(std::is_trivially_copyable_v<ParamValue>,
+              "ParamValue must stay trivially copyable for wholesale state snapshots");
 using Catch::Matchers::WithinAbs;
 
 namespace {
