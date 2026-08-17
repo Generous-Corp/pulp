@@ -82,6 +82,15 @@ struct SvgSubtree {
     /// already in CSS pixels" — the renderer's own 1:1 fallback.
     double viewbox_width = 0.0;
     double viewbox_height = 0.0;
+    /// `preserveAspectRatio="none"`: map the viewBox onto the element's box on
+    /// each axis independently, with no uniform scale and no centering.
+    ///
+    /// False is the SVG default (`xMidYMid meet`). The distinction is not
+    /// cosmetic for a wide, short drawing: a waveform authored in a 380x108
+    /// viewBox and stretched across its box is the shape the author drew, and
+    /// fitting it uniformly instead letterboxes it into a band with the trace
+    /// squeezed away from the box it is supposed to span.
+    bool stretch_to_box = false;
     /// Document order, which for a well-formed SVG subtree is paint order.
     std::vector<SvgShape> shapes;
 

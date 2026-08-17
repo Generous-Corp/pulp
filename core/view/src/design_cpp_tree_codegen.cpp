@@ -393,6 +393,15 @@ void emit_widget_specific(std::ostringstream& out,
                                   float_expr(ctx, *node.style.width) + ", " +
                                   float_expr(ctx, *node.style.height) + ");");
                 }
+                // Emitted only for `none`; `xMidYMid meet` is the widget
+                // default and re-stating it would put a line in every exported
+                // panel that says nothing.
+                if (auto aspect = attr(node, "svg_preserve_aspect_ratio");
+                    aspect && *aspect == "none") {
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) +
+                                  "->set_stretch_to_bounds(true);");
+                }
             }
             // Path-only (SvgRect/SvgLine have no fill rule): the winding rule
             // decides which regions of a multi-subpath path are holes, and the
