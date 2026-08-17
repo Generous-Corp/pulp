@@ -6525,3 +6525,59 @@ browser capture has had the chance to supply that reference. `--offline` and
 all non-browser sources still require an explicit `--reference`; if browser
 capture cannot produce its source image, the import must fail closed. Keep a
 browser-backed regression test for both halves of this rule.
+
+## The materialized runtime FREEZES the clock — every dt-driven animation dies
+
+`tools/import-design/jsx-runtime/materialized_runtime_entry.mjs` emits a captured
+replay clock into **every** generated runtime. It ramps to the capture's
+presentation time in 50 ms steps, then **holds that value forever**, and it
+**shadows `globalThis.performance`**. The rAF timestamp hook is handed the real
+native time as `_nativeNow` and discards it.
+
+So in any imported app:
+
+```js
+const dt = Math.min(0.05, (now - last) / 1e3);   // === 0, forever
+smooth(renderValues, targetValues, dt * k);      // returns renderValues unchanged
+```
+
+**Every dt-integrated visual is frozen for the life of the process.** The app
+paints correctly exactly once — the first paint needs no `dt` — then never again.
+
+The freeze is deliberate (byte-stable screenshot proofs), which is why the fix
+is not simply "always advance": it must keep the replay ramp deterministic and
+hand back real, monotonic time once the ramp completes. `_nativeNow` is already
+a parameter and already discarded; the bridge already exposes
+`__performanceNow__` (`core/view/src/widget_bridge/runtime_api.cpp`).
+
+**Why this costs a day if you do not know it.** It presents as a rendering bug
+while rendering is entirely healthy, and it defeats the obvious checks:
+
+- input, coordinates, hit-testing and the native protocol all work — state
+  updates and publishes correctly; only the *rendered* projection is frozen
+- event-driven UI (buttons, toggles) works, because it repaints without `dt`,
+  so the failure looks selective and points at pointer handling
+- the frame pump is healthy — `flushes == ticks` — so "rAF starvation" refutes
+- data-driven surfaces pushed from C++ *do* animate, so "nothing repaints" is
+  demonstrably false
+- logs are clean; every failure mode in this chain is silent
+
+In one instance this killed ~10 hypotheses across three agents — paint protocol,
+revision idempotence, coordinate scale, rAF starvation, presentation gap,
+modifier routing, and an audio-input theory — all downstream of a clock that
+could not advance.
+
+**Check this FIRST when an imported app renders once and then appears static:**
+does `performance.now()` advance across two frame ticks? Everything downstream of
+that question is wasted effort until it is answered.
+
+**Two testing rules this establishes.**
+
+Assert **rendered** state, never published state. A UI whose editor could not
+draw held 119 green tests, because every test asserted the published side of the
+boundary. Where a runtime exposes both (e.g. a test hook returning both render
+and target arrays), assert that render *converges on* target.
+
+And keep a one-line class guard: **`performance.now()` must advance across two
+frame ticks.** It is worth more than any specific fix, because it catches every
+future frozen or shadowed clock rather than this one instance.
