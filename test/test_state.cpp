@@ -31,11 +31,16 @@
 
 using namespace pulp::state;
 
-// The audio thread reads a parameter with a single relaxed load, so ParamValue
-// must stay within one 64-bit word for that load to remain lock-free on every
-// supported target. Guard the assumption at compile time.
-static_assert(sizeof(ParamValue) <= sizeof(std::uint64_t),
-              "ParamValue must stay within one 64-bit word for the lock-free audio path");
+// The audio thread reads a value with ONE relaxed load of a single atomic
+// member, so the lock-free guarantee belongs to that member and is already
+// asserted beside it (parameter.hpp: is_always_lock_free on
+// std::atomic<VersionedValue>) — not to this enclosing class, which holds four
+// separate 64-bit atomics (value, generation, mod offset, mod generation).
+// What is worth guarding here is that the class does not silently GROW another
+// atomic word, since each one added is another load some reader has to make.
+static_assert(sizeof(ParamValue) == 4 * sizeof(std::uint64_t),
+              "ParamValue changed atomic-word count; re-check that every audio-thread "
+              "read still needs only one relaxed load per value");
 using Catch::Matchers::WithinAbs;
 
 namespace {
