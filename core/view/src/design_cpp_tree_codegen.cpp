@@ -727,7 +727,7 @@ void emit_node(std::ostringstream& out,
     // Faithful frames carry their own visuals (the SVG) and interaction (the
     // overlays), so the native style/widget/child emit is skipped entirely.
     if (!faithful) {
-        emit_visual_style(out, depth, ctx, var, node.style);
+        emit_visual_style(out, depth, ctx, var, node, node.style);
         emit_widget_specific(out, depth, ctx, var, node, resolved, ctx.manifest);
     }
 

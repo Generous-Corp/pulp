@@ -144,6 +144,67 @@ TEST_CASE("generate_pulp_cpp bakes a dropdown as a ComboBox, not a bare View",
     REQUIRE(result.source.find("Stereo") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_cpp emits clip radii beside the clip rect",
+          "[view][import][cpp-codegen]") {
+    // The radii are half of the clip, not decoration on it. The runtime
+    // materializer emits both; emitting only the rect made a baked export clip
+    // square where the same design clips rounded at runtime.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Card";
+    IRStyle::ClipRect clip;
+    clip.x = 0.0f; clip.y = 0.0f; clip.width = 120.0f; clip.height = 80.0f;
+    clip.radius_tl = 6.0f; clip.radius_tr = 7.0f;
+    clip.radius_br = 8.0f; clip.radius_bl = 9.0f;
+    ir.root.style.clip_rect = clip;
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("set_ancestor_clip_rect(") != std::string::npos);
+    REQUIRE(result.source.find("set_ancestor_clip_radii(") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
+          "[view][import][cpp-codegen][fidelity]") {
+    // This lane lowers a subset of IRStyle, and a drop is invisible in the
+    // output: the export lays out identically and renders flatter. The sink is
+    // what makes the remaining gaps findable rather than silent.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.box_shadow = parse_css_box_shadow("0 2px 4px rgba(0,0,0,0.5)");
+    ir.root.style.mix_blend_mode = "multiply";
+    ir.root.style.filter = "blur(4px)";
+    ir.root.style.transform = "rotate(30deg)";
+
+    std::vector<FidelityIssue> report;
+    CppExportOptions opts;
+    opts.fidelity_report = &report;
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    auto reported = [&](std::string_view property) {
+        return std::any_of(report.begin(), report.end(), [&](const FidelityIssue& i) {
+            return i.kind == "cpp-unlowered-style" &&
+                   i.detail.find(property) != std::string::npos;
+        });
+    };
+    REQUIRE(reported("box-shadow"));
+    REQUIRE(reported("mix-blend-mode"));
+    REQUIRE(reported("filter"));
+    REQUIRE(reported("transform"));
+
+    // A node with none of them reports nothing, so the sink is not just always-on.
+    DesignIR plain;
+    plain.root.type = "frame";
+    plain.root.name = "Plain";
+    plain.root.style.opacity = 0.5f;
+    std::vector<FidelityIssue> empty_report;
+    CppExportOptions plain_opts;
+    plain_opts.fidelity_report = &empty_report;
+    generate_pulp_cpp(plain, plain.asset_manifest, plain_opts);
+    REQUIRE(std::none_of(empty_report.begin(), empty_report.end(),
+                         [](const FidelityIssue& i) { return i.kind == "cpp-unlowered-style"; }));
+}
+
 TEST_CASE("generate_pulp_cpp resolves figma-plugin asset_ref image sources",
           "[view][import][cpp-codegen][figma-plugin][asset-ref]") {
     DesignIR ir;

@@ -84,6 +84,17 @@ struct CppExportOptions {
     bool extract_named_components = true;
     bool emit_binding_context_helpers = true;
     int indent_spaces = 4;
+
+    /// Optional fidelity-report sink, matching `CodeGenOptions` and
+    /// `SwiftExportOptions`. When non-null, the baked-C++ lane appends a
+    /// FidelityIssue for every style property it cannot lower.
+    ///
+    /// This lane lowers a subset of IRStyle. Without a sink it had no way to
+    /// say so, and a dropped property is invisible: the exported plugin lays
+    /// out correctly and simply renders flatter than the design. Reporting is
+    /// what makes the remaining gaps findable instead of silent.
+    /// Non-owning; the caller owns the vector.
+    std::vector<FidelityIssue>* fidelity_report = nullptr;
 };
 
 struct CppExportResult {
