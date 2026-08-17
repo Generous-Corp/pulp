@@ -148,6 +148,14 @@ class ProductMatrix:
     # stop building it, add it back piecemeal later. Absent in the matrix
     # document means "everything" — the pre-knob contract — so historical
     # matrices keep their meaning.
+    #
+    # THE NARROWING IS PERMANENT PER RELEASE. A published GitHub release is
+    # immutable: every tag published while this field is narrow ships without
+    # the paused platforms' assets FOREVER — re-running, re-dispatching, or
+    # widening the field afterwards cannot add them; only a new tag can. The
+    # subset staleness check catches a subset that outlives its allowance,
+    # not a release that shipped inside the window. Narrow this field only
+    # when incomplete releases in the window are an accepted, decided cost.
     active_platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]

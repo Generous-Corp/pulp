@@ -37,7 +37,12 @@ time-boxed by `release-platform-subset-check.yml` (7 days → tracking issue).
 The per-release asset table in docs/guides/release-pipeline.md describes the
 full inventory; a subset release legitimately carries fewer rows, and
 installers for paused platforms serve users from the last release that
-carried them.
+carried them. **The narrowing is permanent per release**: a published GitHub
+release is immutable, so every tag published while the field is narrow ships
+without the paused platforms' assets forever — widening the field later
+cannot repair them; only a new tag can. The 7-day check catches a subset
+that outlives its purpose, NOT a release that shipped incomplete inside the
+window — that one is already immutable by the time the issue opens.
 
 **Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.

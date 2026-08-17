@@ -51,7 +51,11 @@ once by deleting the field. While `darwin-x64` is paused, an Intel regression
 can land unnoticed (its release leg does not compile), which is why the pause
 is time-boxed: `.github/workflows/release-platform-subset-check.yml` opens a
 tracking issue once `active_platforms` has been a strict subset for more than
-7 days.
+7 days. Note the boundary of that guard: a published GitHub release is
+immutable, so every release published while the field is narrow lacks the
+Intel assets permanently — restoring the field afterwards fixes future
+releases, never past ones. Users on paused platforms install from the last
+release that carried their binaries until a new tag ships them again.
 
 It is **cross-compiled on the healthy Apple-Silicon runner**, not the
 GitHub-hosted `macos-15-intel` image. That native runner CPU-pegs on a full
