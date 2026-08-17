@@ -1810,8 +1810,21 @@ public:
             };
             [window_ setDelegate:delegate_];
 
-            // Initialize GPU render stack
-            init_gpu(options.width, options.height);
+            // Initialize GPU render stack from the content view's REAL bounds.
+            // options.width/height are only a request: create_configured_window
+            // applies the window style and setContentMinSize:, and AppKit
+            // additionally constrains the frame to the screen's visibleFrame, so
+            // setContentView: above may already have sized metal_view_ smaller.
+            // Seeding width_/height_ from the request instead leaves them — and
+            // therefore get_content_size() — lying until the first
+            // windowDidResize, which paints the first frame at the wrong size
+            // with truncated content and feeds the same wrong numbers to the
+            // editor bridge's initial resize.
+            const NSSize content = metal_view_.bounds.size;
+            init_gpu(content.width > 0.0 ? static_cast<float>(content.width)
+                                         : options.width,
+                     content.height > 0.0 ? static_cast<float>(content.height)
+                                          : options.height);
         }
     }
 
@@ -1853,7 +1866,28 @@ public:
         root_.set_frame_clock(nullptr);
     }
 
+    // Promote the process to a regular foreground app exactly once. Ordering a
+    // window on screen while the process is still policy-less gives it no Dock
+    // icon and no menu bar; the later promotion then makes a Dock icon appear
+    // and repaints the window, which reads as a SECOND app launching over a
+    // wrong-looking first one. Whoever gets here first — show() or
+    // run_event_loop_until() — adopts the role, and the other is a no-op.
+    void adopt_foreground_role() {
+        if (foreground_role_adopted_) return;
+        foreground_role_adopted_ = true;
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        mac_menu::install_application_menu(
+            menu_commands_, [] { request_cocoa_app_stop(); });
+    }
+
     void show() override {
+        // A standalone shows its window before entering the event loop, so the
+        // application object may not exist yet. Establish the foreground role
+        // first so this is the only time the window becomes visible.
+        if (!options_initially_hidden_) {
+            [NSApplication sharedApplication];
+            adopt_foreground_role();
+        }
         // Render one frame BEFORE ordering the window on screen so it appears
         // already showing content — no black flash in the gap between
         // makeKeyAndOrderFront and the first display-link tick. The GPU/Skia
@@ -2120,9 +2154,7 @@ public:
             if (options_initially_hidden_) {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
-                [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                mac_menu::install_application_menu(
-                    menu_commands_, [] { request_cocoa_app_stop(); });
+                adopt_foreground_role();
             }
 
             // A hidden CAMetalLayer may receive no display-link ticks in an
@@ -2267,6 +2299,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    bool foreground_role_adopted_ = false;
     std::vector<WindowOptions::MenuCommand> menu_commands_;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;

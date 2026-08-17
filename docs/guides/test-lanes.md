@@ -11,6 +11,7 @@ single source of truth for that model.
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** `validation` and `slow` labels; `--repeat until-pass:2` |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
+| **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including `validation` + `slow`; results eyeballed, build failures file an issue |
 | **cross-platform-check** | per PR (Linux/Windows) | advisory | no | core tests, excludes `validation` + `slow` |
 
@@ -76,6 +77,53 @@ on non-`examples/**` PRs), so it is **required-safe** — it can be added to bra
 protection without the "Expected — waiting for status" dead-lock GitHub imposes
 on a `paths:`-filtered required check. Promote it to required after one green
 real-runner run on an `examples/**` PR. Until then it is visible-but-advisory.
+
+## The API-contract lane
+
+A public symbol under a catalogued module root (`core/timeline/include`,
+`core/music/include`, `core/timeline_editor/include`, `core/timeline_view/include`)
+must carry a doc comment. `tools/build-api-docs.sh --contract-only` runs Doxygen's
+strict pass and `tools/scripts/timeline_api_docs_check.py` over the result, and
+nothing else — about three seconds after checkout.
+
+It has its own workflow rather than a step inside the docs preview build, and the
+split is the point. The same check used to run only inside `docs-material.yml`,
+which is not a required context. On 2026-08-16 it detected an undocumented public
+typedef, reported FAILURE **before** the PR merged, and the PR merged anyway; main's
+docs build then failed for eight hours and four unrelated PRs carried a red `build`
+none of them caused. A check that can name a main-breaking defect but not prevent it
+converts one bad merge into N misleading reds, which teaches everyone to ignore red.
+
+Two properties of the workflow exist solely so it can be promoted to a required
+context, and both fail silently if removed — `tools/scripts/test_api_contracts_workflow.py`
+pins them:
+
+- **It reports on `merge_group`.** A required context that does not fire for a
+  queued group leaves the queue waiting on a result that never arrives.
+- **It has no `paths` filter.** GitHub treats a required context that never
+  reports as permanently pending, so a path-filtered required check blocks every
+  PR outside its filter forever. The check is cheap enough to run unconditionally,
+  so it does. (`merge_group` does not support `paths` at all.)
+
+The published HTML render stays out of this lane deliberately: it is roughly an
+order of magnitude more work and produces a preview artifact, not a verdict. It
+continues to run in `docs-material.yml`, which re-checks the contract on its way to
+the render. Putting the render back on this lane would repeat the mistake that put
+example validators on the required gate.
+
+**Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
+`required_status_checks`, this lane reports the same defect the old one did and is
+equally unable to stop it. Promotion is a branch-protection change:
+
+```bash
+ghapp api -X PATCH repos/Generous-Corp/pulp/branches/main/protection/required_status_checks \
+    -f 'contexts[]=Enforce version & skill sync' \
+    -f 'contexts[]=Build + prove + (owner-gated) deploy' \
+    -f 'contexts[]=Vellum trusted freeze' \
+    -f 'contexts[]=Vellum freeze' \
+    -f 'contexts[]=macos' \
+    -f 'contexts[]=api-contracts'
+```
 
 ## Adding a test — where will it land?
 

@@ -70,6 +70,10 @@ jobs:
       - name: Build Material site
         run: mkdocs build --site-dir build/site-material
 
+      # Re-runs the API-contract pass on the way to the HTML render. That pass
+      # is separately gated by `api-contracts.yml`, which is the check that can
+      # block a merge; this lane's copy exists because the render needs the
+      # contract to hold before it produces a site, not as the gate itself.
       - name: Build API reference (Doxygen)
         run: |
           chmod +x tools/build-api-docs.sh
