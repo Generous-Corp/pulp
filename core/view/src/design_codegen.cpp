@@ -3,8 +3,11 @@
 // Two code-generation backends plus the shared public entry point:
 //
 //   * web-compat JS generator   — emits @pulp/react-compatible JS from
-//     the design IR (the default import target).
-//   * native Pulp API generator — emits direct Pulp widget API calls.
+//     the design IR. Opt-in, via `--web-compat`.
+//   * native Pulp API generator — emits direct Pulp widget API calls. This is
+//     the DEFAULT (CodeGenMode::bridge_native_js), and the two lower different
+//     subsets of IRLayout, so which one produced a bundle is load-bearing when
+//     reading a layout difference between two renders of one design.
 //   * generate_pulp_js()        — public dispatch over CodeGenOptions.
 //
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
@@ -935,38 +938,26 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
         ss << ind << "setFlex('" << target_id << "', 'align_self', 'stretch');\n";
         stretch_done = true;
     };
-    if (L.h_constraint) {
-        const std::string& h = *L.h_constraint;
-        if (h == "center") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
-            ss << ind << "setFlex('" << target_id << "', 'margin_right', 'auto');\n";
-        } else if (h == "right") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
-        } else if (h == "scale") {
-            grow();
-        } else if (h == "stretch") {
-            stretch();
-            // Pin both horizontal edges = fill width. min-width:100% keeps
-            // this effective even when the node ALSO has an explicit width
-            // (Yoga clamps the final width up to min-width), so STRETCH is no
-            // longer a no-op against a defined cross-size.
-            ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
-        }
-    }
-    if (L.v_constraint) {
-        const std::string& v = *L.v_constraint;
-        if (v == "center") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
-            ss << ind << "setFlex('" << target_id << "', 'margin_bottom', 'auto');\n";
-        } else if (v == "bottom") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
-        } else if (v == "scale") {
-            grow();
-        } else if (v == "stretch") {
-            stretch();
-            ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
-        }
-    }
+    // Resize constraints resolve through the mapping shared with the native
+    // materializer and the baked C++ emitter, so a constrained node cannot
+    // land pinned in one render of the design and flush-left in another.
+    const auto constraints = resolve_layout_constraints(L.h_constraint, L.v_constraint);
+    auto auto_margin = [&](const char* side) {
+        ss << ind << "setFlex('" << target_id << "', '" << side << "', 'auto');\n";
+    };
+    if (constraints.margin_left_auto) auto_margin("margin_left");
+    if (constraints.margin_right_auto) auto_margin("margin_right");
+    if (constraints.margin_top_auto) auto_margin("margin_top");
+    if (constraints.margin_bottom_auto) auto_margin("margin_bottom");
+    if (constraints.grow) grow();
+    if (constraints.stretch) stretch();
+    // Pinning both edges is fill-the-axis. min-width/min-height 100% keeps that
+    // effective even when the node ALSO has an explicit size (Yoga clamps a
+    // final size up to min-*), so STRETCH is not a no-op against a defined one.
+    if (constraints.fill_width)
+        ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
+    if (constraints.fill_height)
+        ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
 }
 
 // Grid item placement: a child of a grid container can carry grid-column /
