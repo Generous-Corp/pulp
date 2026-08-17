@@ -903,7 +903,8 @@ a working convolution and would hide the bug. Assert
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
-| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
+| Transfer Curve | `transfer_curve.hpp` | Fixed-capacity arbitrary piecewise transfer curve using shared modulation shapes and transactional RT publication |
+| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion with five built-in curve formulas |
 
 #### Dynamics
 

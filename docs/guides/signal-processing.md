@@ -927,6 +927,30 @@ Default: `tanh_clip`, drive = 1.0.
 
 ---
 
+### TransferCurve
+
+`TransferCurve` maps an explicit input domain through up to 32 ordered control
+points. Configuration is validated and published as one lock-free snapshot, so
+the audio thread never observes a partly edited curve. Inputs outside the
+domain clamp to the endpoint outputs, and non-finite samples recover to zero.
+
+```cpp
+std::array<signal::TransferCurvePoint, 3> points{{
+    {-1.0f, -1.0f}, {0.0f, 0.1f}, {1.0f, 1.0f}
+}};
+signal::TransferCurve curve;
+curve.publish_curve(points, -1.0f, 1.0f, -1.0f, 1.0f);
+curve.process(buffer, num_samples);
+```
+
+Each point's optional `curve_to_next` uses the shared modulation-curve shapes;
+two-field point initializers default to linear interpolation. The processor has
+zero latency and no tail. It intentionally does not choose an anti-aliasing
+policy: consumers applying nonlinear curves to audio own any required
+oversampling and can compose the curve with `OversamplerT`.
+
+---
+
 ### Oversampler
 
 Runs a processing callback at 2x, 4x, 8x, or 16x sample rate with anti-aliasing filters on input and output.

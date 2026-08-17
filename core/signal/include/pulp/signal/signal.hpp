@@ -31,6 +31,7 @@
 #include <pulp/signal/explicit_q_resonator_bank.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/waveset_transformer.hpp>
+#include <pulp/signal/transfer_curve.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/panner.hpp>

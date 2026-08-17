@@ -262,6 +262,37 @@ numbers you reserved and leaves your branch conflicting on exactly those two
 constant lines. Re-read them from main and regenerate rather than resolving
 that conflict by hand.
 
+**Do that with the tool, not by hand:**
+
+```bash
+python3 tools/scripts/agent_capability_rederive.py --print   # read-only: what would change
+python3 tools/scripts/agent_capability_rederive.py           # rewrite both, then --write
+```
+
+It resolves the same protected tip `--check` uses, compares this tree's
+generated material against the base's with the counter excluded, and moves each
+counter only when its own material actually moved. That asymmetry is the part
+worth not hand-rolling: **over-bumping is not the safe direction.** Advancing a
+counter whose material is identical fails the opposite rule,
+`... changed without a manifest change`, so "bump both to be safe" trades one
+red gate for another.
+
+It refuses rather than guesses when the surface has unresolved problems — a
+changed header with a stale fingerprint has no stable material to derive from,
+and its fingerprints must be refreshed first. Counters are decided LAST.
+
+Re-running it is idempotent: the counter a tree currently holds is not evidence
+of anything, so a tree already carrying a stale reservation is derived back
+down to what its material justifies.
+
+**Commit the merge before you run it.** During an uncommitted merge the incoming
+tip is not yet an ancestor of `HEAD`, so base resolution steps back to the *merge
+base* — a commit that predates both sides — and the counter derived from it is
+stale while looking entirely plausible. Observed live: it read base 28/45 while
+`main` already held 30/47. The tool now refuses in that state rather than
+answering the wrong question, so the sequence when resolving a conflict is:
+resolve → commit the merge → refresh fingerprints → re-derive → `--write`.
+
 Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
