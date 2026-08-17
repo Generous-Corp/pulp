@@ -351,3 +351,26 @@ PULP_AGENT_CAPABILITY_BASE_REF=<sha> python3 tools/scripts/agent_capability_mani
 
 That path is deliberately literal: an explicit ref is used as given, without the
 ancestry fallback.
+
+## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
+
+The pre-push gates cover skill-sync, version-bump, compat, deps and friends. They do **not**
+run `agent_capability_manifest.py --check`. So a change that adds a header under a covered
+root, or edits an existing one, sails through `gates.sh: all gates pass` and then fails CI on
+`agent-capability-manifest-check` / `-selftest`.
+
+Adding one new DSP header produces two failures, not one:
+
+    unclassified public header: pulp/signal/<new>.hpp
+    public header fingerprint changed: pulp/signal/signal.hpp   <- the umbrella include
+
+The umbrella one is the easiest to miss: adding `#include <pulp/signal/foo.hpp>` to
+`signal.hpp` changes *that* header's bytes too.
+
+**Run `python3 tools/scripts/agent_capability_manifest.py --check` yourself before pushing any
+change under `core/*/include/`.** Gates passing is not evidence here.
+
+Classify honestly: a reusable bounded surface that is not an advertised generator claim takes
+`infrastructure` with empty `capability_keys` and a durable rationale. Do not manufacture a
+capability row to clear the gate; a capability row is a consumer contract with typed bindings
+and operational probes.
