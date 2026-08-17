@@ -49,10 +49,13 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/early_reflections.cpp
     header_compile/additive_spectral_envelope.cpp
     header_compile/auto_ducked_send.cpp
+    header_compile/comb_filter.cpp
     header_compile/cartesian_walk.cpp
     header_compile/dynamics_contract.cpp
     header_compile/dynamic_eq.cpp
     header_compile/fast_math.cpp
+    header_compile/formant_filter_bank.cpp
+    header_compile/graphic_eq.cpp
     header_compile/gate_logic.cpp
     header_compile/leslie_rotary.cpp
     header_compile/probability_gate.cpp
@@ -70,15 +73,22 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/spectral_mask_processor.cpp
     header_compile/spectral_delay_matrix.cpp
     header_compile/zero_latency_convolver_support.cpp)
+target_sources(pulp-dsp-series-header-self-containment PRIVATE
+    header_compile/filter_morph.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-fractional-delay
                              test_signal_fractional_delay.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-filter-morph
+                             test_signal_filter_morph.cpp)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-explicit-q-resonator-bank
                              test_explicit_q_resonator_bank.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-spectral-delay-matrix
                              test_spectral_delay_matrix.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-comb-filter
+                             test_signal_comb_filter.cpp)
+
 # ── The modules ───────────────────────────────────────────────────────────
 pulp_dsp_series_signal_suite(pulp-test-signal-tape-machine   test_signal_tape_machine_eq_nonlinearity_archetypes.cpp
     test_signal_tape_machine_latency_rt_faults.cpp)
@@ -88,6 +98,8 @@ pulp_dsp_series_signal_suite(pulp-test-signal-vca-compressor test_signal_vca_com
 pulp_dsp_series_signal_suite(pulp-test-signal-transient-designer
                              test_signal_transient_designer.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-dynamic-eq test_signal_dynamic_eq.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-formant-filter-bank
+                             test_signal_formant_filter_bank.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-fet-compressor test_signal_fet_compressor_curve_ballistics_colour.cpp
     test_signal_fet_compressor_controls_rt.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-diode-bridge-compressor

@@ -1,4 +1,5 @@
 #include <pulp/signal/early_reflections.hpp>
+#include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
@@ -87,5 +88,27 @@ int main() {
     if (ducked_send.prepare(48000.0f) != pulp::signal::AutoDuckedSendStatus::ready)
         return 21;
     const auto send_output = ducked_send.process(0.25f, -0.5f, 1.0f, -1.0f);
-    return std::isfinite(send_output[0]) && std::isfinite(send_output[1]) ? 0 : 22;
+    if (!(std::isfinite(send_output[0]) && std::isfinite(send_output[1])))
+        return 22;
+    pulp::signal::CombFilter comb;
+    if (!comb.prepare(8u) || !comb.configure({pulp::signal::CombFilterMode::feedback, 4u, 0.5}))
+        return 23;
+    if (!comb.process(1.0f))
+        return 24;
+    pulp::signal::GraphicEqT<float, 4> graphic_eq;
+    if (graphic_eq.prepare(48000.0f, 4u) != pulp::signal::GraphicEqPrepareStatus::prepared)
+        return 25;
+    const pulp::signal::GraphicEqBandT<float> graphic_band{1000.0f, 3.0f, 1.0f};
+    if (graphic_eq.configure(std::span{&graphic_band, 1u}) !=
+        pulp::signal::GraphicEqConfigureStatus::configured)
+        return 26;
+    if (!std::isfinite(graphic_eq.process(0.25f)))
+        return 27;
+    pulp::signal::FormantFilterBank formants;
+    if (!formants.prepare(48000.0))
+        return 28;
+    const std::array<pulp::signal::FormantFilterBank::FormantSpec, 1> recipe{{
+        {800.0, 80.0, 0.0},
+    }};
+    return formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured ? 0 : 29;
 }

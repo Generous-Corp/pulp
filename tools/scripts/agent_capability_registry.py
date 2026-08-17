@@ -46,6 +46,11 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/expander.hpp": "Pulp::signal",
     "pulp/signal/auto_ducked_send.hpp": "Pulp::signal",
     "pulp/signal/early_reflections.hpp": "Pulp::signal",
+    "pulp/signal/comb_filter.hpp": "Pulp::signal",
+    "pulp/signal/filter_morph.hpp": "Pulp::signal",
+    "pulp/signal/formant_filter_bank.hpp": "Pulp::signal",
+    "pulp/signal/graphic_eq.hpp": "Pulp::signal",
+    "pulp/signal/tilt_eq.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
@@ -532,8 +537,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/frequency_response.hpp",
+        "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
+        ),
+    },
+    {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:bc879a73eb268de2e20473aa41d1429e41e579fff6ec24855572988241e3bf90",
+        "fingerprint": "sha256:89d29a569c2803a56bd034b26a53cf48bcbc7b23c6271e6b9e6d1fb85ecc4beb",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
