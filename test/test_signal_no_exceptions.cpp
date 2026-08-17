@@ -1,4 +1,5 @@
 #include <pulp/signal/headphone_crossfeed.hpp>
+#include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
 
 #include <array>
@@ -62,5 +63,11 @@ int main() {
         pulp::signal::FirDesignPoint{3.141592653589793, 0.0, 1.0}};
     const auto design = pulp::signal::design_fir_least_squares(
         points, {.tap_count = 3u, .type = pulp::signal::LinearPhaseFirType::type_i_symmetric_odd});
-    return design ? 0 : 16;
+    if (!design)
+        return 16;
+    pulp::signal::ReverseBuffer reverse;
+    if (!reverse.configure({.window_samples = 4}) || !reverse.prepare(8))
+        return 17;
+    const float reversed = reverse.process_sample(1.0f);
+    return std::isfinite(reversed) ? 0 : 18;
 }

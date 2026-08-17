@@ -278,3 +278,10 @@ pulp_add_test_suite(pulp-test-signal-fir-design
     SOURCES test_signal_fir_design.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+# Prepared streaming reverse windows: independent hand-sequence oracle,
+# boundary fading, latency/tail/state, partitioning, and RT proof.
+pulp_add_test_suite(pulp-test-signal-reverse-buffer
+    SOURCES test_signal_reverse_buffer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
