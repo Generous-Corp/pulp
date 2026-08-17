@@ -730,6 +730,19 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
   /idle MCP) before building. `gates.sh` prints this banner advisorily on every
   pre-push.
+- **A live validation build in your checkout is now visible — `gates.sh` says so.**
+  Shipyard's `local` mac backend builds IN the checkout, so a validation run and
+  an agent editing the tree share one directory. Editing under a running CMake
+  does not fail cleanly: the build crawls and dies on the lane's `timeout_secs`,
+  reporting `Validation timed out` — the target, not the cause. `governed-build.sh`
+  writes `.pulp-build-active` at the source-tree root for the life of a build and
+  `gates.sh` surfaces it advisorily on every pre-push. **Heed it before a merge,
+  rebase, or branch switch** — a build dir can be wiped, a half-merged tree under
+  a running CMake cannot be un-mutated. It is advisory and never fails a push, and
+  because a push follows the damaging edit it *detects* rather than prevents; the
+  value is knowing which edit invalidated which run instead of debugging a
+  two-hour timeout. Distinct from `build-dir-sentinel.sh`, which guards the
+  inverse invariant (do not reuse a dirty build dir).
 - **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
   not the network.** When the diff touches a coverage surface (`core/`,
   `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local
