@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260816-svg-stretch-to-bounds",
+  "kind": "change",
+  "created_at": "2026-08-16T23:18:32Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "SvgPathWidget mapped a viewBox onto its bounds with a single uniform scale, so SVG lowering had to refuse any non-default preserveAspectRatio rather than draw it wrong. An authored element carrying preserveAspectRatio=\"none\" therefore rendered as nothing. This adds an opt-in per-axis stretch to the widget and carries the authored value through lowering, so the element paints as designed. The flag defaults off, so every existing uniform-scale caller is unchanged. This is Pulp-only design-import fidelity work with no named immutable Vellum framework commit to backport.",
+  "tests": [
+    "SvgPathWidget stretch is off by default and round-trips",
+    "SvgPathWidget stretches the viewBox onto bounds when asked",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "WidgetBridge setSvgStretchToBounds round-trips onto SvgPathWidget"
+  ],
+  "disposition": "pulp-only"
+}

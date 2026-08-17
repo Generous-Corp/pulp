@@ -272,8 +272,16 @@ pulp_add_test_suite(pulp-test-particle-percussion
 
 # Offline FIR design from sampled targets. The suite covers all four real
 # linear-phase symmetry forms, independent dense response/weighted-residual
-# oracles, and planted weight/normalization mutations. It is not realtime DSP.
+# oracles, planted weight/normalization mutations, and the cepstral
+# minimum-phase reconstruction. It is not realtime DSP.
 pulp_add_test_suite(pulp-test-signal-fir-design
     SOURCES test_signal_fir_design.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# Prepared streaming reverse windows: independent hand-sequence oracle,
+# boundary fading, latency/tail/state, partitioning, and RT proof.
+pulp_add_test_suite(pulp-test-signal-reverse-buffer
+    SOURCES test_signal_reverse_buffer.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)

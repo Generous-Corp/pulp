@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 43,
+  "inventory_version": 45,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,14 +37,14 @@
     }
   ],
   "counts": {
-    "public_headers": 426,
-    "reviewed_headers": 129,
+    "public_headers": 427,
+    "reviewed_headers": 130,
     "legacy_unreviewed_headers": 297,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 82,
       "capability_support": 38,
-      "infrastructure": 7,
+      "infrastructure": 8,
       "legacy_unreviewed": 297,
       "unsupported_capability": 2
     },
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 247,
-        "reviewed_headers": 87,
+        "public_headers": 248,
+        "reviewed_headers": 88,
         "legacy_unreviewed_headers": 160,
         "unsupported_headers": 2
       },
@@ -2575,11 +2575,12 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fir_design.hpp",
-      "fingerprint": "sha256:5bca92ea3c99cd128602d0518b1469b143a91956dbc48955f56dbd8137967759",
+      "fingerprint": "sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
       "include": "pulp/signal/fir_design.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
-        "signal.fir-design"
+        "signal.fir-design",
+        "signal.minimum-phase-fir"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },
@@ -3422,6 +3423,15 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/reverse_buffer.hpp",
+      "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
+      "include": "pulp/signal/reverse_buffer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Prepared fixed-capacity streaming window reversal with explicit boundary shaping and a finite tail; it is a bounded buffering surface reused by effects rather than an advertised generator DSP claim."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/rise_fall_generator.hpp",
       "fingerprint": "sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3",
       "include": "pulp/signal/rise_fall_generator.hpp",
@@ -3503,7 +3513,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
+      "fingerprint": "sha256:7af0956d5c3124fa132a54aff00c2d84c80b7a6d053c39addbe9180ec07f7272",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

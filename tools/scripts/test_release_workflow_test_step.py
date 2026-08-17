@@ -42,6 +42,7 @@ Run:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -196,10 +197,15 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "step in release-cli.yml.",
         )
 
-    def test_sdk_symbol_check_uses_view_core_archive(self) -> None:
-        """Phase 9 split keeps WebView symbols in the view-core archive."""
+    def test_sdk_symbol_check_scans_core_and_webview_archives(self) -> None:
+        """The WebView symbols may live in view-core (pre-split backfills)
+        or in the pulp-view-webview archive (current layout) — the gate
+        must scan both, and must not regress to the umbrella pulp-view
+        archive."""
         self.assertIn("sdk-staging/lib/libpulp-view-core.a", self.text)
+        self.assertIn("sdk-staging/lib/libpulp-view-webview.a", self.text)
         self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        self.assertIn("sdk-staging/lib/pulp-view-webview.lib", self.text)
         self.assertNotIn(
             'data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()',
             self.text,
@@ -386,6 +392,11 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_checks_view_core_archive(self) -> None:
         self.assertIn("sdk-staging/lib/pulp-view.lib", self.text)
         self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        # The PR-time gate must scan the same two archives as the tag-time
+        # gate in release-cli.yml, or the two drift (the WebView/view-core
+        # split updated only the product matrix and broke every release at
+        # tag time while this gate stayed green).
+        self.assertIn("sdk-staging/lib/pulp-view-webview.lib", self.text)
         self.assertNotIn(
             "Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); "
             "assert b'WebViewPanel'",
@@ -399,6 +410,177 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_ships_inspector_sdk(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
+
+
+class SdkSymbolGateBehavior(unittest.TestCase):
+    """Execute the ACTUAL SDK symbol gates against fabricated sdk trees.
+
+    The symbol asserts are inline snippets that historically only ran on
+    tag push, so a refactor moving a symbol between archives could not be
+    caught until a release was already building on an already-minted tag
+    (first casualty: v0.809.0, after the WebView/view-core split). These
+    tests extract the real snippet text from the workflow files — never a
+    copy of the logic, which would drift — and prove BOTH directions:
+    layouts that must pass (current split layout, pre-split backfill with
+    no webview archive at all) and regressions that must fail (symbols in
+    neither archive, the GPU-lane assert satisfied from the wrong
+    archive). A gate that cannot fail is worse than a stale one.
+    """
+
+    WV = b"WebViewPanel"
+    FE = b"make_webview_embedded_resource_fetcher"
+    GPU = b"MacGpuWindowHost"
+
+    @staticmethod
+    def _unix_gate_snippet() -> str:
+        text = RELEASE_CLI.read_text()
+        match = re.search(
+            r"python3 - <<'PY'\n(.*?)\n\s*PY\n",
+            text[text.index("Build SDK tarball (Unix)"):],
+            re.DOTALL,
+        )
+        assert match, "could not extract the Unix SDK symbol gate heredoc"
+        return textwrap.dedent(match.group(1))
+
+    @staticmethod
+    def _windows_gate_snippet(workflow: Path, step_name: str) -> str:
+        text = workflow.read_text()
+        match = re.search(
+            r'python -c "(.*?)"\n',
+            text[text.index(step_name):],
+            re.DOTALL,
+        )
+        assert match, f"could not extract the Windows SDK symbol gate from {workflow.name}"
+        return match.group(1)
+
+    def _run_gate(
+        self,
+        snippet: str,
+        *,
+        unix: bool,
+        core: bytes,
+        webview: bytes | None,
+        platform: str = "darwin-arm64",
+    ) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "sdk-staging" / "lib"
+            lib.mkdir(parents=True)
+            core_name = "libpulp-view-core.a" if unix else "pulp-view-core.lib"
+            webview_name = (
+                "libpulp-view-webview.a" if unix else "pulp-view-webview.lib"
+            )
+            (lib / core_name).write_bytes(core)
+            if webview is not None:
+                (lib / webview_name).write_bytes(webview)
+            env = dict(os.environ, MATRIX_PLATFORM=platform)
+            if unix:
+                cmd = [sys.executable, "-"]
+                return subprocess.run(
+                    cmd, input=snippet, cwd=tmp, env=env,
+                    capture_output=True, text=True,
+                )
+            return subprocess.run(
+                [sys.executable, "-c", snippet], cwd=tmp, env=env,
+                capture_output=True, text=True,
+            )
+
+    def assert_gate(self, expect_pass: bool, proc: subprocess.CompletedProcess,
+                    label: str) -> None:
+        if expect_pass:
+            self.assertEqual(
+                proc.returncode, 0,
+                f"{label}: expected PASS, got rc={proc.returncode}: {proc.stderr}",
+            )
+        else:
+            self.assertNotEqual(
+                proc.returncode, 0, f"{label}: expected FAIL but gate passed"
+            )
+            self.assertIn("AssertionError", proc.stderr, label)
+
+    def test_unix_gate_passes_current_split_layout(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.WV + self.FE
+        )
+        self.assert_gate(True, proc, "post-split darwin")
+
+    def test_unix_gate_passes_pre_split_backfill(self) -> None:
+        # Old-tag backfills predate the webview archive entirely; the
+        # `.exists()` conditional is load-bearing — a hard existence check
+        # would break every historical backfill.
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.WV + self.FE + self.GPU,
+            webview=None, platform="darwin-x64",
+        )
+        self.assert_gate(True, proc, "pre-split backfill darwin")
+
+    def test_unix_gate_fails_when_webview_symbol_in_neither_archive(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.FE
+        )
+        self.assert_gate(False, proc, "WebViewPanel in neither archive")
+
+    def test_unix_gate_fails_when_fetcher_symbol_in_neither_archive(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=self.GPU, webview=self.WV
+        )
+        self.assert_gate(False, proc, "fetcher in neither archive")
+
+    def test_unix_gate_fails_without_webview_archive_or_core_symbols(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(snippet, unix=True, core=self.GPU, webview=None)
+        self.assert_gate(False, proc, "no webview archive, none in core")
+
+    def test_unix_gate_gpu_assert_not_satisfiable_from_webview_archive(self) -> None:
+        # The GPU-lane assert must keep reading view-core alone: the GPU
+        # window host belongs in the native archive, and a scan over the
+        # concatenation would let it drift into the WebView archive unseen.
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=b"",
+            webview=self.WV + self.FE + self.GPU,
+        )
+        self.assert_gate(False, proc, "MacGpuWindowHost only in view-webview")
+
+    def test_unix_gate_linux_skips_gpu_assert_but_needs_webview(self) -> None:
+        snippet = self._unix_gate_snippet()
+        proc = self._run_gate(
+            snippet, unix=True, core=b"", webview=self.WV + self.FE,
+            platform="linux-x64",
+        )
+        self.assert_gate(True, proc, "linux post-split")
+        proc = self._run_gate(
+            snippet, unix=True, core=b"", webview=b"", platform="linux-x64"
+        )
+        self.assert_gate(False, proc, "linux missing webview symbols")
+
+    def test_windows_gates_pass_split_and_backfill_fail_regression(self) -> None:
+        # release-cli.yml (tag time) and build.yml (PR time) each carry a
+        # Windows one-liner; both must accept either archive layout and
+        # both must still fail when the symbols are genuinely absent.
+        for workflow, step in (
+            (RELEASE_CLI, "Build SDK tarball (Windows)"),
+            (BUILD_WORKFLOW, "Verify installed SDK keeps WebView symbols"),
+        ):
+            snippet = self._windows_gate_snippet(workflow, step)
+            label = f"{workflow.name} windows gate"
+            proc = self._run_gate(
+                snippet, unix=False, core=b"", webview=self.WV + self.FE
+            )
+            self.assert_gate(True, proc, f"{label}: post-split")
+            proc = self._run_gate(
+                snippet, unix=False, core=self.WV + self.FE, webview=None
+            )
+            self.assert_gate(True, proc, f"{label}: pre-split backfill")
+            proc = self._run_gate(
+                snippet, unix=False, core=b"", webview=self.FE
+            )
+            self.assert_gate(False, proc, f"{label}: WebViewPanel absent")
+            proc = self._run_gate(snippet, unix=False, core=b"", webview=None)
+            self.assert_gate(False, proc, f"{label}: no webview archive")
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
@@ -1104,8 +1286,29 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertNotIn('--matrix "$matrix"', run_block)
 
     def test_every_user_facing_asset_is_required_before_publish(self) -> None:
-        for asset in self.REQUIRED_RELEASE_ASSETS:
-            self.assertIn(asset, self.text)
+        """The exact-required list is DERIVED, and the derivation is complete.
+
+        The finalizer no longer hardcodes per-platform asset names — it derives
+        them from the publication matrix's active_platforms via
+        release_asset_names(), the same field that selected the build legs. So
+        the assertion moves one level up: the workflow must invoke that
+        derivation, and the derivation itself (over the FULL inventory) must
+        yield every user-facing asset the old hardcoded list demanded.
+        """
+        self.assertIn("required_assets=(appcast.xml)", self.text)
+        self.assertIn("release_asset_names(ProductMatrix.load", self.text)
+
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        try:
+            import release_artifact_contents as rac
+        finally:
+            sys.path.pop(0)
+        full = dataclasses.replace(
+            rac.DEFAULT_MATRIX,
+            active_platforms=rac.DEFAULT_MATRIX.platforms,
+        )
+        derived = {"appcast.xml", *rac.release_asset_names(full)}
+        self.assertEqual(derived, set(self.REQUIRED_RELEASE_ASSETS))
 
     def test_republishing_an_already_published_tag_is_a_no_op(self) -> None:
         """Re-dispatch must be idempotent — release-reconcile.yml depends on it.
@@ -1309,13 +1512,22 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         self.assertLess(release_pool, legacy_intel)
 
     def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        # The include lists are derived (release_build_matrix.py, filtered by
+        # active_platforms), so the invariant lives in the leg map: whenever
+        # darwin-x64 is active it must build on the macos-15-xcompile
+        # sentinel, never the flaky native macos-15-intel image.
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        try:
+            import release_build_matrix
+        finally:
+            sys.path.pop(0)
+        darwin_x64 = release_build_matrix.BUILD_LEGS["darwin-x64"]
+        self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+        self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
         for job in ("build-cli", "smoke-cli"):
-            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
-            darwin_x64 = next(
-                row for row in rows if row["platform"] == "darwin-x64"
-            )
-            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
-            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+            include = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            self.assertIsInstance(include, str)
+            self.assertIn("fromJSON", include)
 
 
 class TrustedReleaseControlPlaneRouting(unittest.TestCase):
@@ -1767,6 +1979,69 @@ class ReleaseCliLatestPointer(unittest.TestCase):
         self.assertIn("issues: read", job_block)
 
 
+class ActivePlatformsDeriveTheReleaseMatrix(unittest.TestCase):
+    """release-cli.yml must derive legs AND asset contract from active_platforms.
+
+    The build/smoke matrices, the publish-time content verification, and the
+    exact-required asset list all read release_product_matrix.json's
+    active_platforms. A hardcoded platform list in any of those places can
+    disagree with the others — and the expensive failure mode is exactly
+    that: a 1-2h matrix that publishes nothing because the finalizer demanded
+    an asset no leg was asked to build (or vice versa).
+    """
+
+    def setUp(self) -> None:
+        self.assertTrue(RELEASE_CLI.exists(), f"missing: {RELEASE_CLI}")
+        self.text = RELEASE_CLI.read_text()
+
+    def test_matrix_legs_come_from_the_unit_tested_resolver(self) -> None:
+        self.assertIn(
+            "python3 tools/scripts/release_build_matrix.py --github-output",
+            self.text,
+        )
+        self.assertRegex(
+            self.text,
+            r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner\.outputs\.build_include\)\s*\}\}",
+        )
+        self.assertRegex(
+            self.text,
+            r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner\.outputs\.smoke_include\)\s*\}\}",
+        )
+
+    def test_no_hardcoded_platform_include_entries_remain(self) -> None:
+        # A stray static include row would run regardless of the knob and
+        # desync the matrix from the asset contract.
+        self.assertNotRegex(self.text, r"platform:\s*linux-x64")
+        self.assertNotRegex(self.text, r"platform:\s*windows-arm64")
+        self.assertNotRegex(self.text, r"platform:\s*darwin-arm64")
+
+    def test_publish_imports_active_platforms_from_the_default_branch(
+        self,
+    ) -> None:
+        self.assertIn('selected["active_platforms"]', self.text)
+        self.assertIn(
+            'authoritative.get(\n              "active_platforms", authoritative["platforms"]\n          )',
+            self.text,
+        )
+
+    def test_required_assets_derive_from_the_publication_matrix(self) -> None:
+        self.assertIn("required_assets=(appcast.xml)", self.text)
+        self.assertIn("release_asset_names(ProductMatrix.load", self.text)
+        # The old hardcoded contract must be gone: a literal per-platform
+        # asset name in the finalizer would resurrect the desync.
+        self.assertNotIn("pulp-sdk-windows-x64.tar.gz", self.text)
+        self.assertNotIn("pulp-linux-arm64.tar.gz", self.text)
+
+    def test_appcast_floor_comes_from_whichever_darwin_legs_built(self) -> None:
+        self.assertIn(
+            "FLOOR_FILES=(artifacts/pulp-darwin-*/pulp-darwin-*.min-os)",
+            self.text,
+        )
+        self.assertIn(
+            "no darwin min-os floor artifacts found", self.text
+        )
+
+
 class SignAndReleaseMacosRoutingTest(unittest.TestCase):
     """Signing must share release-cli's dedicated macOS runner priority."""
 
@@ -1790,6 +2065,61 @@ class SignAndReleaseMacosRoutingTest(unittest.TestCase):
         self.assertIn("name: Clean up signing keychain", self.text)
         self.assertIn("if: always() && env.SIGNING_KEYCHAIN != ''", self.text)
         self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
+
+
+class ReleaseBuildParallelismExplicit(unittest.TestCase):
+    """Every release-path `cmake --build` must carry an explicit job count.
+
+    On the release runners nothing selects a generator, so CMake defaults to
+    Unix Makefiles — and `cmake --build` with no `--parallel`/`-j` under that
+    generator runs `make` with NO job flag: strictly serial. That shape
+    compiled ~1,700 release TUs single-threaded (~50 min of a ~55 min leg,
+    v0.806.1 logs) while build_parallelism_guard.py stayed green, because the
+    guard polices unbounded and whole-machine counts — not their silent
+    serial opposite. This test closes that gap for the release lanes: an
+    explicit count (a variable is fine) or a governed wrapper is required on
+    every build invocation in release-cli.yml and its dry-run rehearsal.
+    """
+
+    WORKFLOWS = {
+        "release-cli.yml": RELEASE_CLI,
+        "release-dry-run.yml": RELEASE_DRY_RUN,
+    }
+
+    @staticmethod
+    def _build_invocations(text: str) -> list[str]:
+        """Return each `cmake --build` invocation with continuations joined."""
+        joined = text.replace("\\\n", " ")
+        return [
+            line.strip()
+            for line in joined.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+
+    def test_release_builds_are_never_serial(self) -> None:
+        bounded = re.compile(r"(--parallel|-j)\s*\"?\S")
+        for name, path in self.WORKFLOWS.items():
+            self.assertTrue(path.exists(), f"missing workflow file: {path}")
+            invocations = self._build_invocations(path.read_text())
+            self.assertTrue(
+                invocations,
+                f"{name}: expected at least one `cmake --build` invocation — "
+                "if the build moved elsewhere, point this test at it rather "
+                "than deleting the assertion",
+            )
+            for line in invocations:
+                if "governed-build.sh" in line:
+                    continue  # the wrapper exports CMAKE_BUILD_PARALLEL_LEVEL
+                self.assertRegex(
+                    line,
+                    bounded,
+                    f"{name}: `{line}` has no --parallel/-j job count. Under "
+                    "the default Unix Makefiles generator this is a SERIAL "
+                    "build (make with no -j) — the exact shape that pinned "
+                    "every release leg to one core. Give it an explicit "
+                    "count (e.g. --parallel \"$jobs\") or route it through "
+                    "tools/ci/governed-build.sh.",
+                )
 
 
 if __name__ == "__main__":

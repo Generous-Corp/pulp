@@ -54,6 +54,27 @@ std::string trim(std::string_view value) {
     return std::string(value.substr(first, last - first + 1));
 }
 
+/// Trimmed, with every internal run of whitespace collapsed to one space.
+///
+/// `preserveAspectRatio` is two space-separated tokens in the source, and an
+/// author who wrapped the attribute across lines wrote a newline between them.
+/// Comparing the raw string against `"none meet"` reads that as a third,
+/// unknown value and refuses a drawing this lowering can draw.
+std::string collapse_whitespace(std::string_view value) {
+    std::string out;
+    bool pending_space = false;
+    for (const unsigned char c : value) {
+        if (std::isspace(c) != 0) {
+            pending_space = !out.empty();
+            continue;
+        }
+        if (pending_space) out.push_back(' ');
+        pending_space = false;
+        out.push_back(static_cast<char>(c));
+    }
+    return out;
+}
+
 /// A CSS/SVG length as a user-unit number. Only unitless values and `px` are
 /// accepted: every other unit (`%`, `em`, `mm`) resolves against a context the
 /// shape synthesis does not have, and guessing would draw the shape at the
@@ -302,15 +323,32 @@ SvgSubtree lower_svg_subtree(const CapturedStyleIndex& index,
         return out;
     }
 
-    // The renderer maps the viewBox into the node's box with `xMidYMid meet`,
-    // which is SVG's own default. Any other `preserveAspectRatio` — `none`
-    // stretches, `slice` overflows and crops — puts the geometry somewhere
-    // else, and the refusal names the value so the gap is readable.
+    // How the viewBox maps into the node's box. Two of the values are
+    // representable as a transform the renderer can build from the box and the
+    // viewBox alone, and both are carried rather than refused:
+    //
+    //   xMidYMid meet  — SVG's default: uniform scale, centred. Implicit when
+    //                    the attribute is absent.
+    //   none           — the two axes scale independently, no centring. Per
+    //                    SVG, `meetOrSlice` is ignored once the alignment is
+    //                    `none`, so all three spellings are the same mapping.
+    //
+    // Everything else still refuses. A non-centre alignment needs an offset
+    // rule per axis, and `slice` overflows the box and crops — neither is the
+    // single scale-and-translate this lowering hands the renderer, and drawing
+    // one as if it were the other puts the geometry somewhere the author did
+    // not put it. The refusal names the value so the gap stays readable.
     if (const std::string aspect =
-            trim(index.attribute(svg_node_index, "preserveAspectRatio"));
+            collapse_whitespace(index.attribute(svg_node_index,
+                                                "preserveAspectRatio"));
         !aspect.empty() && aspect != "xMidYMid" && aspect != "xMidYMid meet") {
-        refuse(out, SvgRefusal::element, "preserveAspectRatio=" + aspect);
-        return out;
+        if (aspect == "none" || aspect == "none meet" ||
+            aspect == "none slice") {
+            out.stretch_to_box = true;
+        } else {
+            refuse(out, SvgRefusal::element, "preserveAspectRatio=" + aspect);
+            return out;
+        }
     }
 
     // The root's own transform moves the whole icon; a shape's moves one piece.

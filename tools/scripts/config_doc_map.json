@@ -49,7 +49,9 @@
       "paths": [
         ".github/workflows/auto-release.yml",
         ".github/workflows/auto-release-watchdog.yml",
-        ".github/workflows/release-cadence-check.yml"
+        ".github/workflows/release-cadence-check.yml",
+        ".github/workflows/watchdog-reaper.yml",
+        ".github/workflows/release-deleted-tripwire.yml"
       ],
       "docs": [
         "docs/guides/release-watchdog.md"

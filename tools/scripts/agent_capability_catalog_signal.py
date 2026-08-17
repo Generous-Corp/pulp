@@ -607,7 +607,7 @@ EXPORTS = [
             role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::design_fir_least_squares",
             target="Pulp::signal",
-            header_fingerprint="sha256:5bca92ea3c99cd128602d0518b1469b143a91956dbc48955f56dbd8137967759",
+            header_fingerprint="sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
             address_expression=(
                 "static_cast<pulp::signal::FirLeastSquaresResult (*)"
                 "(std::span<const pulp::signal::FirDesignPoint>, "
@@ -619,6 +619,55 @@ EXPORTS = [
             "role": "designer", "binding": "pulp::signal::design_fir_least_squares",
             "operation": "function_call",
             "arguments": "std::span<const pulp::signal::FirDesignPoint>{}, pulp::signal::FirLeastSquaresOptions{}",
+        }],
+    ),
+    capability(
+        key="signal.minimum-phase-fir", domain="signal",
+        summary=(
+            "Offline cepstral minimum-phase FIR reconstruction from bounded one-sided "
+            "magnitude bins."
+        ),
+        rt_class="offline",
+        lifecycle={"construction": "none", "prepare": "none",
+                   "process": "offline reconstruction; may allocate bounded workspace",
+                   "reset": "none", "release": "returned vectors destroyed off audio"},
+        state_model=(
+            "Stateless reconstruction over a bounded radix-2 work spectrum, returning owned "
+            "coefficients, measured magnitudes, and per-bin errors."
+        ),
+        seed_model="none",
+        # Real-to-complex FFT round trips and a complex exponential accumulate
+        # rounding, so equality holds only within a tolerance, unlike the
+        # pivoted-QR linear-phase designer's bit-exact promise.
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite nonnegative one-sided magnitude bins from DC through Nyquist for a bounded "
+            "radix-2 FFT size"
+        ),
+        output_domain=(
+            "real causal minimum-phase FIR coefficients with measured magnitude and error "
+            "diagnostics"
+        ),
+        units=["linear magnitude", "coefficients", "FFT bins", "bytes"],
+        latency="offline whole-reconstruction transform", tail="none",
+        scheduling="offline request",
+        bindings=[binding(
+            role="reconstructor", kind="cpp_function", include="pulp/signal/fir_design.hpp",
+            qualified_name="pulp::signal::reconstruct_minimum_phase_fir",
+            target="Pulp::signal",
+            header_fingerprint="sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
+            address_expression=(
+                "static_cast<pulp::signal::MinimumPhaseFirResult (*)"
+                "(std::span<const double>, "
+                "const pulp::signal::MinimumPhaseFirOptions&)>("
+                "&pulp::signal::reconstruct_minimum_phase_fir)"
+            ),
+        )],
+        _link_probes=[{
+            "role": "reconstructor", "binding": "pulp::signal::reconstruct_minimum_phase_fir",
+            "operation": "function_call",
+            "arguments": "std::span<const double>{}, pulp::signal::MinimumPhaseFirOptions{}",
         }],
     ),
     capability(
