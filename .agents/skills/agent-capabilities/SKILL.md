@@ -68,6 +68,12 @@ compile fixture proves the intended signature without leaking fixture syntax
 into the installed contract. Each overload still needs its own operational
 probe with arguments that select and invoke that overload.
 
+If generation reports that a new public header is unclassified or has no
+covered public target owner, do not retry `--write` or add a blanket exception.
+Add the curated capability or reviewed disposition first, register the exact
+minimal owner in `REVIEWED_MINIMAL_TARGETS`, and then regenerate. A capability
+binding alone cannot establish which installed CMake target owns its header.
+
 For a non-static member-function binding, keep the public `qualified_name` as
 the real class-qualified method, provide an exact pointer-to-member
 `address_expression`, and use an explicit-object `member_function_call` probe.
