@@ -3692,3 +3692,198 @@ TEST_CASE("a decorative layer that opts out of hit-testing stops eating presses"
          << (dynamic_cast<Knob*>(hit) != nullptr ? "the knob" : "NOT the knob"));
     CHECK(dynamic_cast<Knob*>(hit) != nullptr);
 }
+
+// Figma resize constraints reach the live View tree, not just the script lane.
+//
+// `IRLayout::h_constraint` / `v_constraint` are a codegen-wide contract, so a
+// right-pinned or centered node has to land in the same place whether it
+// renders through a script bundle or through the native tree. A surface that
+// skips the mapping anchors the node flush-left and reports nothing.
+// The assertions below are on FlexStyle rather than on the IR on purpose — the
+// IR carrying the token while the materializer ignores it is the failure this
+// covers, and an IR-only assertion passes against it.
+TEST_CASE("native materializer lowers figma resize constraints onto flex",
+          "[view][import][native-materializer][parity]") {
+    auto frame_with = [](const char* h, const char* v) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.stable_anchor_id = "root";
+        IRNode child;
+        child.type = "frame";
+        child.stable_anchor_id = "pinned";
+        child.style.width = 40.0f;
+        child.style.height = 20.0f;
+        if (h) child.layout.h_constraint = h;
+        if (v) child.layout.v_constraint = v;
+        ir.root.children.push_back(std::move(child));
+        return ir;
+    };
+
+    SECTION("center pins both margins to auto on the constrained axis") {
+        auto root = build_native_view_tree(frame_with("center", nullptr), {}, {});
+        REQUIRE(root != nullptr);
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().dim_margin_left.unit == DimensionUnit::auto_);
+        CHECK(child->flex().dim_margin_right.unit == DimensionUnit::auto_);
+        // The untouched axis stays put — a horizontal constraint must not
+        // silently centre the node vertically as well.
+        CHECK(child->flex().dim_margin_top.unit != DimensionUnit::auto_);
+        CHECK(child->flex().dim_margin_bottom.unit != DimensionUnit::auto_);
+    }
+
+    SECTION("right pins only the leading margin") {
+        auto root = build_native_view_tree(frame_with("right", nullptr), {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().dim_margin_left.unit == DimensionUnit::auto_);
+        CHECK(child->flex().dim_margin_right.unit != DimensionUnit::auto_);
+    }
+
+    SECTION("bottom pins only the top margin") {
+        auto root = build_native_view_tree(frame_with(nullptr, "bottom"), {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().dim_margin_top.unit == DimensionUnit::auto_);
+        CHECK(child->flex().dim_margin_bottom.unit != DimensionUnit::auto_);
+    }
+
+    SECTION("stretch fills the axis even against an explicit size") {
+        // min-width:100% is what keeps stretch effective on a node that also
+        // has a width — Yoga clamps the final size up to min-width. Without it
+        // the constraint is a silent no-op precisely on sized nodes, which is
+        // most of them in an imported design.
+        auto root = build_native_view_tree(frame_with("stretch", nullptr), {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().align_self == FlexAlign::stretch);
+        CHECK(child->flex().dim_min_width.unit == DimensionUnit::percent);
+        CHECK(child->flex().dim_min_width.value == Catch::Approx(100.0f));
+    }
+
+    SECTION("scale raises flex-grow without overruling a larger authored one") {
+        auto ir = frame_with("scale", nullptr);
+        ir.root.children[0].layout.flex_grow = 3.0f;
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().flex_grow == Catch::Approx(3.0f));
+    }
+
+    SECTION("an explicit align-self wins over a stretch constraint") {
+        auto ir = frame_with("stretch", nullptr);
+        ir.root.children[0].layout.align_self = "center";
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().align_self == FlexAlign::center);
+    }
+
+    SECTION("left and top are the flex default and change nothing") {
+        auto root = build_native_view_tree(frame_with("left", "top"), {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().dim_margin_left.unit != DimensionUnit::auto_);
+        CHECK(child->flex().dim_margin_top.unit != DimensionUnit::auto_);
+        CHECK(child->flex().align_self != FlexAlign::stretch);
+    }
+}
+
+// Track flow direction reaches the live grid. Without it a `grid-auto-flow:
+// column` design fills row-first and every implicitly-placed child lands
+// transposed — a whole-panel scramble that still renders, so nothing looks
+// broken enough to investigate.
+TEST_CASE("native materializer lowers grid auto-flow",
+          "[view][import][native-materializer][parity]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "1fr 1fr";
+    ir.root.layout.grid_auto_flow = "column";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    CHECK(root->grid().auto_flow == GridStyle::AutoFlow::column);
+
+    // A grid that does not declare a flow keeps the CSS default rather than
+    // inheriting whatever the previous node set.
+    DesignIR plain = ir;
+    plain.root.layout.grid_auto_flow.reset();
+    auto plain_root = build_native_view_tree(plain, {}, {});
+    REQUIRE(plain_root != nullptr);
+    CHECK(plain_root->grid().auto_flow == GridStyle::AutoFlow::row);
+}
+
+// The constraint and grid-flow lines the exporter emits have to be valid C++.
+//
+// The assertions in test_design_cpp_codegen_golden.cpp match the emitted SOURCE
+// TEXT, which cannot tell a correct field name from a plausible one: an emitter
+// writing `flex.dim_margin_start`, or calling a `parse_auto_flow` that actually
+// took an enum, satisfies every string check and fails only in a user's build of
+// the exported plugin. Running the generated source through the real compiler is
+// what separates those.
+//
+// This lives here rather than beside the other baked-C++ cases because
+// `pulp-test-design-import-cpp-codegen` is gated on `planning/artifacts/...`
+// existing, and CI checks out no submodules — so a compile proof placed there
+// would never run in CI. This target is unconditional.
+TEST_CASE("baked constraint and grid-flow output compiles",
+          "[view][import][cpp-codegen][parity]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Constraint Root";
+    ir.root.stable_anchor_id = "constraint-root";
+    ir.root.style.width = 320.0f;
+    ir.root.style.height = 140.0f;
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "1fr 1fr";
+    ir.root.layout.grid_auto_flow = "column dense";
+
+    // One child per constraint outcome, so every branch of the shared mapping
+    // reaches the compiler rather than only the first one that happens to fire.
+    struct ConstraintCase { const char* id; const char* h; const char* v; };
+    for (const ConstraintCase& c : {ConstraintCase{"pinned-center", "center", "center"},
+                                    ConstraintCase{"pinned-right", "right", nullptr},
+                                    ConstraintCase{"pinned-bottom", nullptr, "bottom"},
+                                    ConstraintCase{"pinned-scale", "scale", nullptr},
+                                    ConstraintCase{"pinned-stretch", "stretch", "stretch"}}) {
+        IRNode child;
+        child.type = "frame";
+        child.name = c.id;
+        child.stable_anchor_id = c.id;
+        child.style.width = 40.0f;
+        child.style.height = 20.0f;
+        if (c.h != nullptr) child.layout.h_constraint = c.h;
+        if (c.v != nullptr) child.layout.v_constraint = c.v;
+        ir.root.children.push_back(std::move(child));
+    }
+
+    CppExportOptions opts;
+    opts.header_filename = "constraint_layout.hpp";
+    opts.namespace_name = "pulp::test::constraint_layout";
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    // Guard the guard: if the emitter stopped producing these the compile below
+    // would still succeed on an empty function, and prove nothing.
+    REQUIRE(generated.source.find("pulp::view::DimensionUnit::auto_") != std::string::npos);
+    REQUIRE(generated.source.find("GridStyle::parse_auto_flow(\"column dense\")") !=
+            std::string::npos);
+    REQUIRE(generated.source.find("pulp::view::DimensionUnit::percent") != std::string::npos);
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-constraint-layout-cpp-codegen");
+    const auto header = tmp.path / "constraint_layout.hpp";
+    const auto source = tmp.path / "constraint_layout.cpp";
+    const auto object = tmp.path / "constraint_layout.o";
+    write_text(header, generated.header);
+    write_text(source, generated.source);
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+#endif
+}

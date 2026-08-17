@@ -112,6 +112,7 @@ TEST_CASE("generate_pulp_cpp emits the public layout and visual-style surface",
     ir.root.layout.align_content = "space-evenly";
     ir.root.layout.grid_template_columns = "1fr 2fr";
     ir.root.layout.grid_template_rows = "auto 40px";
+    ir.root.layout.grid_auto_flow = "column";
     ir.root.attributes["pulpGridTemplateColumns"] = "2fr 1fr";
     ir.root.attributes["pulpGridTemplateRows"] = "20px auto";
 
@@ -181,6 +182,7 @@ TEST_CASE("generate_pulp_cpp emits the public layout and visual-style surface",
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
     CHECK(result.source.find("GridStyle::parse_template(\"2fr 1fr\")") != std::string::npos);
     CHECK(result.source.find("grid_column_end = 3") != std::string::npos);
+    CHECK(result.source.find("GridStyle::parse_auto_flow(\"column\")") != std::string::npos);
     CHECK(result.source.find("set_corner_radius_br(8.0f)") != std::string::npos);
     CHECK(result.source.find("set_position(pulp::view::View::Position::absolute)") != std::string::npos);
     CHECK(result.source.find("set_text_transform(pulp::view::Label::TextTransform::uppercase)") !=
@@ -445,4 +447,83 @@ TEST_CASE("baked C++ codegen emits a resolved clip rectangle",
     // And it did NOT arrive as an overflow clip, which would clip the node's
     // children instead of the node.
     REQUIRE(result.source.find("set_overflow") == std::string::npos);
+}
+
+// The baked exporter emits the same constraint outcome the live materializer
+// applies (test_design_import_native_materializer.cpp covers that side). Both
+// consult the one mapping in design_ir_helpers.hpp, so this asserts the emitted
+// SOURCE carries it — a shared helper the emitter never calls would leave an
+// exported plugin laying out differently from the design it was baked from.
+TEST_CASE("baked C++ emits figma resize constraints and grid auto-flow",
+          "[view][import][cpp-codegen][parity]") {
+    auto source_for = [](const char* h, const char* v) {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.name = "Root";
+        IRNode child;
+        child.type = "frame";
+        child.name = "Pinned";
+        child.style.width = 40.0f;
+        child.style.height = 20.0f;
+        if (h) child.layout.h_constraint = h;
+        if (v) child.layout.v_constraint = v;
+        ir.root.children.push_back(std::move(child));
+        return generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+    };
+
+    SECTION("center emits auto margins on both sides of the constrained axis") {
+        const auto src = source_for("center", nullptr);
+        CHECK(src.find("flex.dim_margin_left = {0.0f, pulp::view::DimensionUnit::auto_};") !=
+              std::string::npos);
+        CHECK(src.find("flex.dim_margin_right = {0.0f, pulp::view::DimensionUnit::auto_};") !=
+              std::string::npos);
+        // The float side must be cleared too: FlexStyle reads the per-side
+        // float first and only falls through to the Dimension at -1, so
+        // leaving it at 0 would pin the margin to zero and ignore the auto.
+        CHECK(src.find("flex.margin_left = -1.0f;") != std::string::npos);
+        CHECK(src.find("flex.dim_margin_top = {0.0f, pulp::view::DimensionUnit::auto_};") ==
+              std::string::npos);
+    }
+
+    SECTION("right emits only the leading auto margin") {
+        const auto src = source_for("right", nullptr);
+        CHECK(src.find("flex.dim_margin_left = {0.0f, pulp::view::DimensionUnit::auto_};") !=
+              std::string::npos);
+        CHECK(src.find("flex.dim_margin_right = {0.0f, pulp::view::DimensionUnit::auto_};") ==
+              std::string::npos);
+    }
+
+    SECTION("stretch emits align-self plus the percentage minimum") {
+        const auto src = source_for("stretch", nullptr);
+        CHECK(src.find("flex.align_self = pulp::view::FlexAlign::stretch;") != std::string::npos);
+        CHECK(src.find("flex.dim_min_width = {100.0f, pulp::view::DimensionUnit::percent};") !=
+              std::string::npos);
+    }
+
+    SECTION("scale raises flex-grow rather than assigning it") {
+        const auto src = source_for("scale", nullptr);
+        CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") != std::string::npos);
+    }
+
+    SECTION("left and top emit nothing") {
+        const auto src = source_for("left", "top");
+        CHECK(src.find("pulp::view::DimensionUnit::auto_};") == std::string::npos);
+        CHECK(src.find("flex.align_self = pulp::view::FlexAlign::stretch;") == std::string::npos);
+    }
+
+    SECTION("grid auto-flow is emitted only when the design declares it") {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.name = "Grid";
+        ir.root.layout.display = "grid";
+        ir.root.layout.grid_template_columns = "1fr 1fr";
+        const auto without = generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+        CHECK(without.find("parse_auto_flow") == std::string::npos);
+
+        ir.root.layout.grid_auto_flow = "column";
+        const auto with = generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+        CHECK(with.find("GridStyle::parse_auto_flow(\"column\")") != std::string::npos);
+    }
 }

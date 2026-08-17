@@ -321,4 +321,82 @@ inline std::optional<std::array<unsigned, 4>> parse_hex_color_rgba(std::string_v
     return std::nullopt;
 }
 
+// ── Resize constraints ───────────────────────────────────────────────────
+
+// What a Figma-style resize constraint pair lowers to in flex terms.
+//
+// `IRLayout::h_constraint` / `v_constraint` are declared in design_ir.hpp as a
+// codegen-wide contract — "mapped onto flex/position at codegen (margin:auto /
+// flex-grow / align-self), never a new layout primitive". The mapping itself
+// lives here, once, because a target that re-derives it is free to disagree:
+// a right-pinned button that reaches one lane's mapping and not another's is
+// pinned in one render of the design and flush-left in the next, and nothing
+// reports the difference.
+//
+// Pure decision only. Each lane applies the result in its own idiom — the
+// materializer writes FlexStyle fields, the C++ emitter writes the equivalent
+// source lines, the script emitter writes setFlex calls — because only the
+// application differs per target, not the meaning.
+//
+// Takes the two tokens rather than the whole IRLayout on purpose. The
+// cross-surface parity test (test/test_design_import_parity.cpp) proves a
+// field is lowered by finding a `.field` member access in each surface's own
+// source, so a lane that reached the mapping through `resolve(node.layout)`
+// would share the logic and go dark to the ledger that tracks it. Naming both
+// fields at every call site keeps one definition AND a per-lane signal.
+struct ResolvedLayoutConstraints {
+    bool margin_left_auto = false;
+    bool margin_right_auto = false;
+    bool margin_top_auto = false;
+    bool margin_bottom_auto = false;
+    bool grow = false;         // flex-grow: 1
+    bool stretch = false;      // align-self: stretch
+    bool fill_width = false;   // min-width: 100%
+    bool fill_height = false;  // min-height: 100%
+};
+
+// `left` / `top` need no expression: they are the flex default, anchored start.
+// An unrecognized token is left alone for the same reason — the token set is
+// normalized at ingest (design_ir_json.cpp), so an unknown value means a
+// producer Pulp does not model, and guessing at it would move the node.
+//
+// `stretch` pins both edges, which is fill-the-cross-axis. It carries min-width
+// (or min-height) 100% alongside align-self so it stays effective against a
+// node that ALSO has an explicit size: Yoga clamps a final size up to
+// min-width, so without it a stretch constraint on a sized node is a no-op.
+inline ResolvedLayoutConstraints resolve_layout_constraints(
+    const std::optional<std::string>& h_constraint,
+    const std::optional<std::string>& v_constraint) {
+    ResolvedLayoutConstraints r;
+    if (h_constraint) {
+        const std::string h = lower_copy(*h_constraint);
+        if (h == "center") {
+            r.margin_left_auto = true;
+            r.margin_right_auto = true;
+        } else if (h == "right") {
+            r.margin_left_auto = true;
+        } else if (h == "scale") {
+            r.grow = true;
+        } else if (h == "stretch") {
+            r.stretch = true;
+            r.fill_width = true;
+        }
+    }
+    if (v_constraint) {
+        const std::string v = lower_copy(*v_constraint);
+        if (v == "center") {
+            r.margin_top_auto = true;
+            r.margin_bottom_auto = true;
+        } else if (v == "bottom") {
+            r.margin_top_auto = true;
+        } else if (v == "scale") {
+            r.grow = true;
+        } else if (v == "stretch") {
+            r.stretch = true;
+            r.fill_height = true;
+        }
+    }
+    return r;
+}
+
 }  // namespace pulp::view

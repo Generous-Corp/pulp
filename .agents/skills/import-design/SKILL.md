@@ -5818,13 +5818,22 @@ parse decision is shared; the representation is not. Per-target string escaping,
 and number formatting stay in their emitters for the same reason — a helper only belongs in
 the shared header when its contract is identical for every lane.
 
-Two things to watch:
-- **The JS lane is NOT a consumer.** `design_codegen.cpp` (`generate_pulp_js` — web-compat
-  and bridge-native JS) still reads `node.attributes` directly, so a helper fix does not
-  reach it. Same separate-lanes hazard as background gradients above.
+Three things to watch:
+- **The JS lane is only a partial consumer.** `design_codegen.cpp` (`generate_pulp_js` —
+  web-compat and bridge-native JS) reads `node.attributes` directly for the accessor
+  helpers, so an `attr` / `first_asset_id` fix does not reach it. It *does* consume
+  `resolve_layout_constraints`. Check which before assuming a helper fix propagates.
 - **`parse_hex_color` still exists as a per-lane name.** In native_common it is now a thin
   wrapper over the shared `parse_hex_color_rgba`. Grepping the old name finds the wrapper,
   not the rules — those live in `design_ir_helpers.hpp`.
+- **A shared helper can hide a field from the parity ledger.**
+  `test/test_design_import_parity.cpp` proves a surface lowers an IR field by finding a
+  literal `.field` member access *in that surface's own source*. So moving a mapping behind
+  `resolve(node.layout)` shares the logic and makes every lane read as **not** lowering the
+  fields it consumes — the ledger goes quiet exactly where it should speak. Shared helpers
+  that stand in for specific IR fields therefore take **the fields**, not the containing
+  struct: `resolve_layout_constraints(node.layout.h_constraint, node.layout.v_constraint)`.
+  One definition, and each call site still names what it lowers.
 
 Tests: `[design-ir-helpers]` in `pulp-test-design-import-native-common` pins the contracts a
 lane would otherwise re-guess — asset-key priority then a sorted fallback scan, both bool

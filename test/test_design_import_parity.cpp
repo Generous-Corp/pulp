@@ -210,15 +210,16 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"height_mode",
          {{"swift"}, "js+cpp+native lower hug/fill sizing; SwiftUI deferred"}},
         {"h_constraint",
-         {{"cpp", "swift", "native"},
-          "js-only; figma resize constraints map onto flex auto-margins in the "
-          "web lane, not modeled in cpp/swift/native-common yet"}},
+         {{"swift"},
+          "js+cpp+native resolve figma resize constraints onto flex "
+          "auto-margins / grow / align-self through the shared mapping in "
+          "design_ir_helpers.hpp; SwiftUI deferred"}},
         {"v_constraint",
-         {{"cpp", "swift", "native"}, "same as h_constraint"}},
+         {{"swift"}, "same as h_constraint"}},
         {"grid_auto_flow",
-         {{"cpp", "swift", "native"},
-          "js-only; the other surfaces lower explicit grid templates/placement "
-          "but not auto-flow yet"}},
+         {{"swift"},
+          "js+cpp+native lower track flow direction; SwiftUI LazyVGrid owns "
+          "its own flow and already reports the approximation"}},
 
         // ── IRNode extras (see checked_node_fields) ────────────────────────
     };
