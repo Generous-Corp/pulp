@@ -397,17 +397,12 @@ inline bool is_bypass_param(const ParamInfo& info) {
            info.range.min == 0.0f && info.range.max == 1.0f;
 }
 
-/// Thread-safe atomic parameter value for lock-free audio/UI communication.
+/// Parameter value storage for state snapshots.
 ///
-/// The audio thread reads and the UI thread writes via relaxed atomics.
-/// No locks, no allocation. Each parameter is independent, so relaxed
-/// ordering is correct — there is no dependency between reading param A
-/// and param B. For coherent multi-field reads (e.g., transport state),
-/// use SeqLock<T> instead.
-///
-/// @note Relaxed atomics are safe on both x86 (TSO gives acquire/release
-/// for free) and ARM (each load/store is individually atomic; reordering
-/// between independent parameters is harmless).
+/// Stores parameter values and generation counters for versioned updates.
+/// Thread-safety must be ensured by external synchronization (e.g., at the
+/// StateStore level). This class is trivially copyable to support wholesale
+/// state snapshot copying.
 class ParamValue {
 public:
     using VersionedValue = std::uint64_t;
@@ -417,38 +412,21 @@ public:
     /// @param initial  Starting value for this parameter.
     explicit ParamValue(float initial) : value_(pack(initial, 0)) {}
 
-    ParamValue(ParamValue&& other) noexcept
-        : value_(other.value_.load()),
-          committed_generation_(other.committed_generation_.load()) {}
-    ParamValue& operator=(ParamValue&& other) noexcept {
-        value_.store(other.value_.load());
-        committed_generation_.store(other.committed_generation_.load());
-        return *this;
-    }
-    ParamValue(const ParamValue& other)
-        : value_(other.value_.load()),
-          committed_generation_(other.committed_generation_.load()) {}
-    ParamValue& operator=(const ParamValue& other) {
-        value_.store(other.value_.load());
-        committed_generation_.store(other.committed_generation_.load());
-        return *this;
-    }
+    /// Read the current base value.
+    float get() const { return unpack_value(value_); }
 
-    /// Read the current base value (lock-free, relaxed ordering).
-    float get() const { return unpack_value(value_.load(std::memory_order_relaxed)); }
-
-    /// Write a new base value (lock-free, relaxed ordering).
+    /// Write a new base value.
     void set(float v) {
-        const auto current = value_.load(std::memory_order_relaxed);
-        value_.store(pack(v, unpack_generation(current)), std::memory_order_relaxed);
+        const auto current = value_;
+        value_ = pack(v, unpack_generation(current));
     }
 
     VersionedValue versioned_value() const {
-        return value_.load(std::memory_order_relaxed);
+        return value_;
     }
 
     std::uint64_t committed_generation() const {
-        return committed_generation_.load(std::memory_order_relaxed);
+        return committed_generation_;
     }
 
     static VersionedValue make_versioned_value(float value, std::uint64_t generation) {
@@ -460,88 +438,56 @@ public:
     }
 
     bool set_versioned_if_newer(float value, std::uint64_t generation,
-                                std::uint32_t max_attempts) {
-        // The full generation remains StateStore-owned. The packed low bits
-        // are only an atomic ABA stamp for the bounded compare/apply window;
-        // they never replace or limit the public 64-bit authority.
-        auto committed = committed_generation_.load(std::memory_order_relaxed);
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed >= generation)
-                return false;
-            if (committed_generation_.compare_exchange_strong(
-                    committed, generation, std::memory_order_relaxed,
-                    std::memory_order_relaxed))
-                break;
-        }
-        if (committed_generation() != generation)
+                                std::uint32_t /*max_attempts*/) {
+        // Without atomics, this is a simple generation check and update.
+        // Thread-safety must be ensured by external synchronization.
+        if (committed_generation_ >= generation)
             return false;
-        auto current = value_.load(std::memory_order_relaxed);
-        const auto desired = pack(value, static_cast<std::uint32_t>(generation));
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed_generation() != generation)
-                return false;
-            if (value_.compare_exchange_strong(current, desired,
-                                               std::memory_order_relaxed,
-                                               std::memory_order_relaxed))
-                return true;
-        }
-        return false;
+        committed_generation_ = generation;
+        value_ = pack(value, static_cast<std::uint32_t>(generation));
+        return true;
     }
 
     bool compare_exchange_versioned(VersionedValue& expected,
                                     std::uint64_t expected_generation,
                                     float desired, std::uint64_t generation) {
-        if (!committed_generation_.compare_exchange_strong(
-                expected_generation, generation, std::memory_order_relaxed,
-                std::memory_order_relaxed))
+        // Without atomics, this is a simple comparison and update.
+        // Thread-safety must be ensured by external synchronization.
+        if (committed_generation_ != expected_generation)
             return false;
-        return value_.compare_exchange_strong(
-            expected, pack(desired, static_cast<std::uint32_t>(generation)),
-            std::memory_order_relaxed, std::memory_order_relaxed);
+        if (value_ != expected)
+            return false;
+        committed_generation_ = generation;
+        value_ = pack(desired, static_cast<std::uint32_t>(generation));
+        return true;
     }
 
     /// Read the modulated value: base + mod_offset.
     /// Used by the audio thread to get the final value after CLAP per-voice modulation.
     float get_modulated() const {
-        return unpack_value(value_.load(std::memory_order_relaxed))
-             + unpack_value(mod_offset_.load(std::memory_order_relaxed));
+        return unpack_value(value_)
+             + unpack_value(mod_offset_);
     }
 
     float get_mod_offset() const {
-        return unpack_value(mod_offset_.load(std::memory_order_relaxed));
+        return unpack_value(mod_offset_);
     }
 
     /// Set the absolute modulation offset (replaces any existing offset).
     void set_mod_offset(float offset) {
-        const auto current = mod_offset_.load(std::memory_order_relaxed);
-        mod_offset_.store(pack(offset, unpack_generation(current)),
-                          std::memory_order_relaxed);
+        const auto current = mod_offset_;
+        mod_offset_ = pack(offset, unpack_generation(current));
     }
 
     bool set_mod_versioned_if_newer(float offset, std::uint64_t generation,
-                                    std::uint32_t max_attempts) {
-        auto committed = committed_mod_generation_.load(std::memory_order_relaxed);
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed >= generation)
-                return false;
-            if (committed_mod_generation_.compare_exchange_strong(
-                    committed, generation, std::memory_order_relaxed,
-                    std::memory_order_relaxed))
-                break;
-        }
-        if (committed_mod_generation_.load(std::memory_order_relaxed) != generation)
+                                    std::uint32_t /*max_attempts*/) {
+        // Without atomics, this is a simple generation check and update.
+        // Thread-safety must be ensured by external synchronization.
+        if (committed_mod_generation_ >= generation)
             return false;
-        auto current = mod_offset_.load(std::memory_order_relaxed);
-        const auto desired = pack(offset, static_cast<std::uint32_t>(generation));
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed_mod_generation_.load(std::memory_order_relaxed) != generation)
-                return false;
-            if (mod_offset_.compare_exchange_strong(current, desired,
-                                                    std::memory_order_relaxed,
-                                                    std::memory_order_relaxed))
-                return true;
-        }
-        return false;
+        committed_mod_generation_ = generation;
+        mod_offset_ = pack(offset, static_cast<std::uint32_t>(generation));
+        return true;
     }
 
     /// Add a delta to the current modulation offset (for stacking modulators).
@@ -578,21 +524,13 @@ private:
         return static_cast<std::uint32_t>(value >> 32);
     }
 
-    std::atomic<VersionedValue> value_{pack(0.0f, 0)};
+    VersionedValue value_{pack(0.0f, 0)};
     // A ticket copied from StateStore's one generation authority. This is not
     // independently advanced; it prevents an older reserved writer from
     // publishing after a newer writer has claimed this parameter.
-    std::atomic<std::uint64_t> committed_generation_{0};
-    std::atomic<VersionedValue> mod_offset_{pack(0.0f, 0)};
-    std::atomic<std::uint64_t> committed_mod_generation_{0};
-
-    // The packed base value/generation stamp and modulation offset are read and
-    // written on the audio thread through relaxed atomics. Fail the build if a
-    // target would implement either with a hidden mutex. See
-    // docs/guides/dsp-threading.md "The three rules".
-    static_assert(std::atomic<VersionedValue>::is_always_lock_free,
-                  "Pulp requires lock-free atomic<uint64_t> for versioned real-time "
-                  "parameter access");
+    std::uint64_t committed_generation_{0};
+    VersionedValue mod_offset_{pack(0.0f, 0)};
+    std::uint64_t committed_mod_generation_{0};
 };
 
 /// Callback signature for parameter change notifications.
