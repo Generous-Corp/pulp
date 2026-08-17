@@ -1798,31 +1798,6 @@ class ReleaseCliLatestPointer(unittest.TestCase):
         self.assertIn("issues: read", job_block)
 
 
-class SignAndReleaseMacosRoutingTest(unittest.TestCase):
-    """Signing must share release-cli's dedicated macOS runner priority."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
-
-    def test_dedicated_release_runner_precedes_hosted_fallback(self) -> None:
-        release_pos = self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
-        namespace_pos = self.text.index("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON")
-        fallback_pos = self.text.index('runs_on_json=["macos-15"]')
-        self.assertNotIn("PULP_LOCAL_MACOS_RUNS_ON_JSON", self.text)
-        self.assertLess(release_pos, namespace_pos)
-        self.assertLess(namespace_pos, fallback_pos)
-
-    def test_signing_keychain_is_unique_and_always_cleaned_up(self) -> None:
-        self.assertIn("pulp-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", self.text)
-        self.assertIn("PREVIOUS_DEFAULT_KEYCHAIN", self.text)
-        self.assertIn("s/^[[:space:]]*//", self.text)
-        self.assertIn("s/[[:space:]]*$//", self.text)
-        self.assertIn("name: Clean up signing keychain", self.text)
-        self.assertIn("if: always() && env.SIGNING_KEYCHAIN != ''", self.text)
-        self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
-
-
 class ActivePlatformsDeriveTheReleaseMatrix(unittest.TestCase):
     """release-cli.yml must derive legs AND asset contract from active_platforms.
 
@@ -1884,6 +1859,31 @@ class ActivePlatformsDeriveTheReleaseMatrix(unittest.TestCase):
         self.assertIn(
             "no darwin min-os floor artifacts found", self.text
         )
+
+
+class SignAndReleaseMacosRoutingTest(unittest.TestCase):
+    """Signing must share release-cli's dedicated macOS runner priority."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+
+    def test_dedicated_release_runner_precedes_hosted_fallback(self) -> None:
+        release_pos = self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        namespace_pos = self.text.index("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON")
+        fallback_pos = self.text.index('runs_on_json=["macos-15"]')
+        self.assertNotIn("PULP_LOCAL_MACOS_RUNS_ON_JSON", self.text)
+        self.assertLess(release_pos, namespace_pos)
+        self.assertLess(namespace_pos, fallback_pos)
+
+    def test_signing_keychain_is_unique_and_always_cleaned_up(self) -> None:
+        self.assertIn("pulp-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", self.text)
+        self.assertIn("PREVIOUS_DEFAULT_KEYCHAIN", self.text)
+        self.assertIn("s/^[[:space:]]*//", self.text)
+        self.assertIn("s/[[:space:]]*$//", self.text)
+        self.assertIn("name: Clean up signing keychain", self.text)
+        self.assertIn("if: always() && env.SIGNING_KEYCHAIN != ''", self.text)
+        self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
 
 
 if __name__ == "__main__":

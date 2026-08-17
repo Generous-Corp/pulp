@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-release-active-platforms",
+  "created_at": "2026-08-17T03:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Derive release-cli's build/smoke matrix legs and exact-asset contract from release_product_matrix.json's new active_platforms field (darwin-arm64-only shipping subset, 7-day staleness watch); packaged artifact contents and design-import payloads are unchanged.",
+  "tests": [
+    "release_build_matrix legs and asset contract flip both ways (arm-only and full)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
