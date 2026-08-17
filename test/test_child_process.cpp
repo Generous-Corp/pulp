@@ -109,15 +109,20 @@ TEST_CASE("line callback exceptions cancel the child during wait",
 TEST_CASE("line callback failure preserves the other output stream during cancellation",
           "[child_process][lifecycle]") {
     std::atomic<bool> callback_entered{false};
-    std::atomic<bool> stderr_callback_entered{false};
+    std::atomic<bool> stderr_callback_after_failure{false};
     ProcessOptions options;
     options.timeout_ms = 5000;
     options.on_stdout_line = [&](std::string_view) {
         callback_entered.store(true, std::memory_order_release);
         throw std::runtime_error("callback failure");
     };
+    // The child writes its stderr line before its stdout line, so a stderr
+    // delivery that lands before the stdout callback throws is legitimate
+    // streaming, not a defect. The invariant is that a failing callback
+    // retires *both* streams: nothing may be delivered after that point.
     options.on_stderr_line = [&](std::string_view) {
-        stderr_callback_entered.store(true, std::memory_order_release);
+        if (callback_entered.load(std::memory_order_acquire))
+            stderr_callback_after_failure.store(true, std::memory_order_release);
     };
 
     ChildProcess child;
@@ -139,14 +144,14 @@ TEST_CASE("line callback failure preserves the other output stream during cancel
     CHECK(result.was_cancelled);
     CHECK(result.stdout_output.find("callback-line") != std::string::npos);
     CHECK(result.stderr_output.find("stderr-line") != std::string::npos);
-    CHECK_FALSE(stderr_callback_entered.load(std::memory_order_acquire));
+    CHECK_FALSE(stderr_callback_after_failure.load(std::memory_order_acquire));
 }
 
 #ifndef _WIN32
 TEST_CASE("line callback exceptions cancel a child during input-channel setup",
           "[child_process][lifecycle][standard-input]") {
     std::atomic<bool> callback_entered{false};
-    std::atomic<bool> stderr_callback_entered{false};
+    std::atomic<bool> stderr_callback_after_failure{false};
     std::atomic<bool> session_observed_child_exit{false};
     ProcessOptions options;
     options.standard_input_timeout_ms = 2000;
@@ -155,8 +160,11 @@ TEST_CASE("line callback exceptions cancel a child during input-channel setup",
         callback_entered.store(true, std::memory_order_release);
         throw std::runtime_error("callback failure");
     };
+    // Same ordering as the plain-cancellation case: the child emits stderr
+    // first, so only a delivery after the stdout callback throws is a defect.
     options.on_stderr_line = [&](std::string_view) {
-        stderr_callback_entered.store(true, std::memory_order_release);
+        if (callback_entered.load(std::memory_order_acquire))
+            stderr_callback_after_failure.store(true, std::memory_order_release);
     };
 
     ChildProcess child;
@@ -185,7 +193,7 @@ TEST_CASE("line callback exceptions cancel a child during input-channel setup",
     const auto result = child.wait();
     CHECK(result.was_cancelled);
     CHECK(result.stderr_output.find("stderr-line") != std::string::npos);
-    CHECK_FALSE(stderr_callback_entered.load(std::memory_order_acquire));
+    CHECK_FALSE(stderr_callback_after_failure.load(std::memory_order_acquire));
 }
 #endif
 
