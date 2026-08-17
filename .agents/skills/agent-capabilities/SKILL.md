@@ -297,6 +297,34 @@ Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
 
+**`--write` is not idempotent, so never use it to *verify* a transaction.** A
+second `--write` on an unchanged tree still appends a second history entry, and
+it reports the same cheerful `wrote ...` line either way — so the check reads as
+confirmation while it is the thing creating the defect. The reviewer then sees
+`capability history is not append-only relative to the protected base` for a
+transaction that was correct until it was checked. Verify with `--check`, which
+writes nothing and answers the same question (`fresh; N keys and M public
+headers checked`). If a verification `--write` already ran, do not try to prune
+the entry by hand: reset the four generated artifacts to the protected base and
+regenerate once.
+
+Prove the append is single rather than assuming it. `git diff --numstat` showing
+zero deletions is necessary but not sufficient — two appends are also
+deletion-free. Compare entry counts:
+
+```bash
+python3 -c "
+import json,subprocess
+c=json.load(open('tools/agent-capabilities/contract-history.json'))['entries']
+b=json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
+                            capture_output=True,text=True,check=True).stdout)['entries']
+print('delta', len(c)-len(b), 'prefix-identical', c[:len(b)]==b)"
+```
+
+`--check`'s diagnostics go to **stderr**, not stdout. A script that scrapes the
+expected/got fingerprint pairs from captured stdout alone silently sees nothing
+and reports success.
+
 ### Publishing a capability on a NEW public header takes four coordinated edits
 
 `--write` validates one precondition at a time and stops at the first failure,
