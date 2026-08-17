@@ -1953,6 +1953,22 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
             skin.ring_radius_scale + (skin.ring_width * 0.5f) / box;
     }
 
+    // The value layer is drawn only where the DESIGN put one. The derivations
+    // above answer "where", but "whether" belongs to the author: a knob that is
+    // a plain gradient dial in the capture must be a plain gradient dial in the
+    // native render. Synthesizing a ring the author never drew — accent fill,
+    // grey track, riding outside the authored dial — is our art on their
+    // control, and it is exactly what the strict-fidelity diff lit up on every
+    // knob of a captured panel. A declared ring radius authorizes the ring (and
+    // the tick that reads against it); an authored pointer authorizes only the
+    // pointer.
+    const bool declared_ring =
+        attr_float(node, "design_ring_radius").value_or(0.0f) > 0.0f;
+    const bool authored_pointer =
+        attr_float(node, "knob_ind_r_out").value_or(0.0f) > 0.0f;
+    skin.draw_ring = declared_ring;
+    skin.draw_indicator = declared_ring || authored_pointer;
+
     // A design that DREW its own pointer says exactly where it belongs, and
     // that wins over the derivation above — the derivation is what runs when
     // the design is silent, not a preference.

@@ -52,6 +52,24 @@ struct DesignedControlSkin {
     /// so a caller with no box to measure is unaffected.
     float indicator_inner_scale = 0.0f;
     float indicator_outer_scale = 0.0f;
+
+    /// Which rotary value layers the DESIGN authorized.
+    ///
+    /// The skin exists because the design owns the body; these say the design
+    /// owns the value layer too. A design that drew no ring gets no ring —
+    /// synthesizing one puts arcs in the render that the design's own capture
+    /// does not show, in colours the author never placed there. `draw_ring` is
+    /// set only when the design declared where a value ring belongs
+    /// (design_ring_radius); `draw_indicator` when it authored a pointer
+    /// (knob_ind_*) or declared that ring. Both clear: paint_rotary still
+    /// returns true — suppressing the stock body is the skin's whole point —
+    /// but contributes no pixels, so the authored body beneath is the entire
+    /// appearance, exactly as captured.
+    ///
+    /// Defaults stay true so a standalone caller keeps the full arc gauge.
+    /// Rotary-only: paint_linear ignores them.
+    bool draw_ring = true;
+    bool draw_indicator = true;
 };
 
 /// Install the value-only painter on `control`. After this the widget draws no
