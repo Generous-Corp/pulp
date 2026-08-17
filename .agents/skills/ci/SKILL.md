@@ -110,6 +110,98 @@ If you add a target that links option-gated sources, gate the `add_subdirectory`
 on the same option. A target whose implementation is compiled out still
 participates in `all`.
 
+## Sanitizing a DOWNSTREAM app, not just Pulp
+
+Two traps, both hit while chasing a heap corruption in a Pulp-based
+standalone (`Spectr Native Preview`, 2026-08-17). Together they cost most of a
+build cycle; neither is discoverable from the error message.
+
+### `PULP_SANITIZER` does not reach a consumer project
+
+`-DPULP_SANITIZER=address` is a **Pulp-internal** option consumed by
+`tools/cmake/Sanitizers.cmake`. It instruments Pulp's own targets and is
+exported nowhere, so a downstream project that merely sets it on its own
+configure compiles and links **without** `-fsanitize=address` — and then fails
+at link with ~46 undefined `___asan_*` symbols (`___asan_init`,
+`___asan_memcpy`, `___asan_register_image_globals`, …) referenced from the
+instrumented Pulp static libs. The symbols are missing because nothing pulled
+in the ASan runtime, not because the SDK is broken.
+
+Build the SDK with the option, then pass the flags to the consumer directly:
+
+```bash
+# 1. ASan Pulp SDK (GPU on; examples off to cut build time)
+cmake -S . -B build-asan-sdk -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DPULP_SANITIZER=address -DPULP_ENABLE_GPU=ON \
+  -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF \
+  -DCMAKE_INSTALL_PREFIX=/tmp/pulp-sdk-asan
+cmake --build build-asan-sdk --target install -j"$(sysctl -n hw.ncpu)"
+
+# 2. Consumer — the flags must be spelled out here
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DPulp_DIR=/tmp/pulp-sdk-asan/lib/cmake/Pulp \
+  -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address"
+```
+
+Verify before trusting a run: `otool -L <binary> | grep asan` must show
+`libclang_rt.asan_osx_dynamic.dylib`.
+
+### `container-overflow` is a FALSE POSITIVE against prebuilt Skia
+
+An ASan GPU build reports, on the very first frame:
+
+```
+ERROR: AddressSanitizer: container-overflow, READ of size 12
+  vector<wgpu::BindGroupEntry>::__swap_out_circular_buffer
+  skgpu::graphite::DawnCommandBuffer::bindTextureAndSamplers
+  pulp::render::SkiaSurfaceImpl::end_frame()
+```
+
+It is not a bug. `container-overflow` relies on libc++ container annotations,
+which are only correct when **every** party touching the container is
+instrumented. Pulp's Skia is a prebuilt binary and is not:
+
+```bash
+nm external/skia-build/build/mac-gpu/lib/Release/libskia.a | grep -c __asan_   # 0
+```
+
+Check that count before believing any container-overflow report. The remedy is
+`detect_container_overflow=0`, which disables **only** the annotation check:
+
+```
+ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0:halt_on_error=1:malloc_context_size=30:log_path=/tmp/asan
+```
+
+`heap-buffer-overflow`, `heap-use-after-free`, `stack-buffer-overflow`, and
+double-free stay fully active — none of them depend on container annotations.
+
+**Coverage limit to state whenever you report a clean ASan run:** detection
+requires the *access* to be instrumented, so a stray write originating inside
+prebuilt Skia or Dawn is invisible. A clean run clears Pulp's code, not the
+process.
+
+### Guard malloc cannot run a Pulp GPU app
+
+`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib` loads fine (Pulp app bundles
+are adhoc/linker-signed, so no hardened-runtime entitlement is needed) and
+survives CoreAudio, Dawn/Metal, and Skia init — then never finishes the JS
+realm load, which evaluates ~30 QuickJS preludes and is allocation-dominated.
+Observed: no `editor window open` after 240 s. `man libgmalloc` confirms there
+is no size-scoping knob, so you cannot guard one size class and leave the rest
+fast. Use ASan for GPU apps; libgmalloc is only viable for headless tools.
+
+### Driving an instrumented GPU app: do not use AppleScript for the window rect
+
+`System Events … get {position, size} of window 1` goes through the
+**accessibility API, which the target app answers on its own main thread**. A
+Pulp GPU app under instrumentation is main-thread-saturated, so the query
+returns nothing and looks exactly like "the app never opened a window" — it did.
+Use `CGWindowListCopyWindowInfo`, which the WindowServer answers, and take
+readiness from the app's own `editor window open` log line rather than from AX.
+
 ## Test lanes — what gates the required `macos` check
 
 ### An advisory check that names a main-breaking defect is worse than none
