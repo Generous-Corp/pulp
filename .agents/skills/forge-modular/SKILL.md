@@ -896,6 +896,36 @@ The authoritative check runs `classify()` itself.
 `reason.sh` is the shared "why did it stop" shim, for the same reason `cap.sh`
 is shared: this rule already existed twice and both copies were wrong.
 
+### A guard nothing runs goes stale silently, and this one did
+
+That test was written, was correct, and exited 1 — and **nothing ever ran it**.
+It carried no ctest registration, so it drifted by **24 unmatched endings**
+while reporting them accurately to an empty room. The app hung on the plainest
+possible case: the curation gates end a run before anything reaches the model,
+so a mistyped prompt produced a spinner that never resolved, with the reason
+sitting in the log.
+
+The list and the checker are therefore one change, never two. Fixing the
+endings without registering the check just resets the clock to the next drift.
+It now runs as ctest `rack-generator-endings` (labels `rack;contract`, ~0.04 s,
+pure Python — no Rack SDK, so it must never be gated on `PULP_HAS_RACK`).
+
+Two things worth knowing before trusting a green run of it:
+
+- **Prove it can go red.** Delete one ending from `build_monitor.cpp` and
+  confirm the ctest fails, then restore. `tools/scripts/confirm_failure.sh`
+  automates that loop and handles the same-second-mtime trap that makes a
+  hand-rolled version report a false verdict in either direction.
+- **Classify a curation gate as a `refusal`, not an `error`.** Nothing broke:
+  the request was understood and declined, and the wording is the whole answer
+  because no model call was made. `outcome_of` ranks refused and failed alike
+  as terminal, so either ends the spinner — but only one of them tells the
+  truth on screen.
+
+Registration is the general point, not a detail of this test: 42 of the 48
+`tools/rack/test_*.py` harnesses have no ctest entry. Some gate on Rack or the
+network deliberately; a pure-source checker never should.
+
 ### Headless runs use the app's saved model, or do not run
 
 `tools/rack/with_app_model_selection.py -- <command>` snapshots Forge Modular's
