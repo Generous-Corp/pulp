@@ -42,6 +42,7 @@ Run:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -1285,8 +1286,29 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertNotIn('--matrix "$matrix"', run_block)
 
     def test_every_user_facing_asset_is_required_before_publish(self) -> None:
-        for asset in self.REQUIRED_RELEASE_ASSETS:
-            self.assertIn(asset, self.text)
+        """The exact-required list is DERIVED, and the derivation is complete.
+
+        The finalizer no longer hardcodes per-platform asset names — it derives
+        them from the publication matrix's active_platforms via
+        release_asset_names(), the same field that selected the build legs. So
+        the assertion moves one level up: the workflow must invoke that
+        derivation, and the derivation itself (over the FULL inventory) must
+        yield every user-facing asset the old hardcoded list demanded.
+        """
+        self.assertIn("required_assets=(appcast.xml)", self.text)
+        self.assertIn("release_asset_names(ProductMatrix.load", self.text)
+
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        try:
+            import release_artifact_contents as rac
+        finally:
+            sys.path.pop(0)
+        full = dataclasses.replace(
+            rac.DEFAULT_MATRIX,
+            active_platforms=rac.DEFAULT_MATRIX.platforms,
+        )
+        derived = {"appcast.xml", *rac.release_asset_names(full)}
+        self.assertEqual(derived, set(self.REQUIRED_RELEASE_ASSETS))
 
     def test_republishing_an_already_published_tag_is_a_no_op(self) -> None:
         """Re-dispatch must be idempotent — release-reconcile.yml depends on it.
@@ -1490,13 +1512,22 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         self.assertLess(release_pool, legacy_intel)
 
     def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        # The include lists are derived (release_build_matrix.py, filtered by
+        # active_platforms), so the invariant lives in the leg map: whenever
+        # darwin-x64 is active it must build on the macos-15-xcompile
+        # sentinel, never the flaky native macos-15-intel image.
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        try:
+            import release_build_matrix
+        finally:
+            sys.path.pop(0)
+        darwin_x64 = release_build_matrix.BUILD_LEGS["darwin-x64"]
+        self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+        self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
         for job in ("build-cli", "smoke-cli"):
-            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
-            darwin_x64 = next(
-                row for row in rows if row["platform"] == "darwin-x64"
-            )
-            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
-            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+            include = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            self.assertIsInstance(include, str)
+            self.assertIn("fromJSON", include)
 
 
 class TrustedReleaseControlPlaneRouting(unittest.TestCase):
@@ -1946,6 +1977,69 @@ class ReleaseCliLatestPointer(unittest.TestCase):
         job_block = self._find_release_job_block()
         self.assertIn("contents: write", job_block)
         self.assertIn("issues: read", job_block)
+
+
+class ActivePlatformsDeriveTheReleaseMatrix(unittest.TestCase):
+    """release-cli.yml must derive legs AND asset contract from active_platforms.
+
+    The build/smoke matrices, the publish-time content verification, and the
+    exact-required asset list all read release_product_matrix.json's
+    active_platforms. A hardcoded platform list in any of those places can
+    disagree with the others — and the expensive failure mode is exactly
+    that: a 1-2h matrix that publishes nothing because the finalizer demanded
+    an asset no leg was asked to build (or vice versa).
+    """
+
+    def setUp(self) -> None:
+        self.assertTrue(RELEASE_CLI.exists(), f"missing: {RELEASE_CLI}")
+        self.text = RELEASE_CLI.read_text()
+
+    def test_matrix_legs_come_from_the_unit_tested_resolver(self) -> None:
+        self.assertIn(
+            "python3 tools/scripts/release_build_matrix.py --github-output",
+            self.text,
+        )
+        self.assertRegex(
+            self.text,
+            r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner\.outputs\.build_include\)\s*\}\}",
+        )
+        self.assertRegex(
+            self.text,
+            r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner\.outputs\.smoke_include\)\s*\}\}",
+        )
+
+    def test_no_hardcoded_platform_include_entries_remain(self) -> None:
+        # A stray static include row would run regardless of the knob and
+        # desync the matrix from the asset contract.
+        self.assertNotRegex(self.text, r"platform:\s*linux-x64")
+        self.assertNotRegex(self.text, r"platform:\s*windows-arm64")
+        self.assertNotRegex(self.text, r"platform:\s*darwin-arm64")
+
+    def test_publish_imports_active_platforms_from_the_default_branch(
+        self,
+    ) -> None:
+        self.assertIn('selected["active_platforms"]', self.text)
+        self.assertIn(
+            'authoritative.get(\n              "active_platforms", authoritative["platforms"]\n          )',
+            self.text,
+        )
+
+    def test_required_assets_derive_from_the_publication_matrix(self) -> None:
+        self.assertIn("required_assets=(appcast.xml)", self.text)
+        self.assertIn("release_asset_names(ProductMatrix.load", self.text)
+        # The old hardcoded contract must be gone: a literal per-platform
+        # asset name in the finalizer would resurrect the desync.
+        self.assertNotIn("pulp-sdk-windows-x64.tar.gz", self.text)
+        self.assertNotIn("pulp-linux-arm64.tar.gz", self.text)
+
+    def test_appcast_floor_comes_from_whichever_darwin_legs_built(self) -> None:
+        self.assertIn(
+            "FLOOR_FILES=(artifacts/pulp-darwin-*/pulp-darwin-*.min-os)",
+            self.text,
+        )
+        self.assertIn(
+            "no darwin min-os floor artifacts found", self.text
+        )
 
 
 class SignAndReleaseMacosRoutingTest(unittest.TestCase):
