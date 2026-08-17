@@ -676,7 +676,10 @@ struct TextShaper::Impl {
             // path, so the margin stays opt-in via
             // `PULP_FONT_LEGACY_SAFETY_MARGIN=1` for bisection or A/B
             // regression triage.
-            const bool legacy_margin =
+            // Read once — see skia_canvas_text.cpp's fill_text guard. Metric
+            // computation is per shaped run, so a per-call getenv() shows up
+            // in profiles as environment-lock contention.
+            static const bool legacy_margin =
                 std::getenv("PULP_FONT_LEGACY_SAFETY_MARGIN") != nullptr;
             const float safety = legacy_margin ? font_size * 0.5f : 0.0f;
             box.line_height = box.ascent + box.descent + box.leading + safety;
@@ -684,7 +687,8 @@ struct TextShaper::Impl {
         }
 #endif
 
-        if (std::getenv("PULP_METRICS_TRACE")) {
+        static const bool metrics_trace = std::getenv("PULP_METRICS_TRACE") != nullptr;
+        if (metrics_trace) {
             std::fprintf(stderr, "[metrics] family='%s' size=%.1f ascent=%.2f descent=%.2f leading=%.2f line_height=%.2f real=%d\n",
                          font_family.c_str(), font_size, box.ascent, box.descent,
                          box.leading, box.line_height, box.real ? 1 : 0);
