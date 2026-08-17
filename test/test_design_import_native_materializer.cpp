@@ -3386,14 +3386,18 @@ TEST_CASE("a lowered control does not repaint the box-shadow its underlay drew",
     CHECK(root->child_at(1)->box_shadows().empty());
 }
 
-TEST_CASE("a designed knob's value ring rides outside the body, not across it",
+TEST_CASE("a designed knob without an authored value layer paints none",
           "[view][import][native-materializer][designed-control]") {
-    // The control box is the design's body box, so the old fixed 0.46 put the
-    // ring at 92% of the body radius — over the brushed cap the design drew.
-    // Measured on kelvin: an authored dial of radius 80 with our arc at 73.6.
+    // The authored contract: the design owns the control's entire appearance.
+    // This knob is a plain gradient dial — no ring, no pointer — and the
+    // browser capture shows exactly that. The skin used to synthesize an
+    // accent value arc, a grey track and a derived tick anyway, riding
+    // OUTSIDE the authored dial, so every captured knob came back wearing arcs
+    // its own reference image does not contain — the largest single bucket of
+    // a strict-fidelity diff on a real generated panel.
     //
-    // Assert the PAINTED radius, not the skin field: the field is private to
-    // the painter, and the radius is the thing a reviewer sees.
+    // Assert the PAINT STREAM, not a skin field: no arcs, no lines. The body
+    // is the underlay's to draw; the widget contributes nothing.
     DesignIR ir;
     ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
 
@@ -3412,19 +3416,22 @@ TEST_CASE("a designed knob's value ring rides outside the body, not across it",
     pulp::canvas::RecordingCanvas canvas;
     knob->paint(canvas);
 
-    const pulp::canvas::DrawCommand* arc = nullptr;
-    for (const auto& cmd : canvas.commands())
-        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
-    REQUIRE(arc != nullptr);
+    for (const auto& cmd : canvas.commands()) {
+        CHECK(cmd.type != pulp::canvas::DrawCommand::Type::stroke_arc);
+        CHECK(cmd.type != pulp::canvas::DrawCommand::Type::stroke_line);
+    }
 
-    // Centre stays the box centre; only the radius moves.
-    REQUIRE(arc->f[0] == Catch::Approx(80.0f));
-    REQUIRE(arc->f[1] == Catch::Approx(80.0f));
-    // Half the box (80) + half the 4px ring (2) + a hairline (1) = 83.
-    REQUIRE(arc->f[2] == Catch::Approx(83.0f));
-    // The property that matters, stated independently of the arithmetic: the
-    // ring clears the body instead of crossing it.
-    REQUIRE(arc->f[2] > 80.0f);
+    // Control for the harness: silence above must be the painter's doing, not
+    // a recording failure. The same recorder capturing a stock arc-gauge paint
+    // proves the instrument can see arcs when they are drawn.
+    pulp::canvas::RecordingCanvas control_canvas;
+    painters::paint_mod_ring_knob(control_canvas,
+                                  Rect{0.0f, 0.0f, 160.0f, 160.0f}, 0.5f);
+    bool control_saw_arc = false;
+    for (const auto& cmd : control_canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc)
+            control_saw_arc = true;
+    REQUIRE(control_saw_arc);
 }
 
 TEST_CASE("a design can declare where its value ring belongs",
@@ -3467,6 +3474,11 @@ TEST_CASE("a designed knob's pointer starts at the body edge, not the centre",
     // cap AND the gap. Whatever a reviewer calls it, a black line across a
     // brushed dial is the design's body being painted over by the widget.
     //
+    // The value layer is authored-gated now, so this design DECLARES its ring —
+    // at 83/160, the same radius the old body-edge derivation produced — and
+    // the derived tick is the one that reads against it. The geometry under
+    // test is unchanged: the tick spans the ring's own layer, not the cap.
+    //
     // Asserted on the PAINTED endpoints, because the endpoints are what a
     // reviewer sees and the skin fields are private to the painter.
     DesignIR ir;
@@ -3476,6 +3488,7 @@ TEST_CASE("a designed knob's pointer starts at the body edge, not the centre",
     knob_node.audio_widget = AudioWidgetType::knob;
     knob_node.attributes["designed_body"] = "underlay";
     knob_node.attributes["design_accent"] = "#C4622A";
+    knob_node.attributes["design_ring_radius"] = "0.51875";
     ir.root.children.push_back(std::move(knob_node));
 
     auto root = build_native_view_tree(ir, {}, {});
@@ -3562,9 +3575,15 @@ TEST_CASE("a design's declared pointer overrides the derived tick",
     knob->paint(canvas);
 
     const pulp::canvas::DrawCommand* line = nullptr;
-    for (const auto& cmd : canvas.commands())
+    bool saw_arc = false;
+    for (const auto& cmd : canvas.commands()) {
         if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) saw_arc = true;
+    }
     REQUIRE(line != nullptr);
+    // An authored pointer authorizes only the pointer: the design drew no value
+    // ring, so none may appear around it.
+    CHECK_FALSE(saw_arc);
 
     const float cx = 80.0f, cy = 80.0f;
     const auto radius_of = [&](float x, float y) {

@@ -1284,6 +1284,18 @@ the same job (the draft lives for seconds and is never observable from outside).
 It also means a release that publishes with a missing asset cannot be repaired —
 it needs a new patch tag.
 
+**Deleting a once-published release permanently BURNS its tag name.** GitHub
+reserves an immutable release's `tag_name` forever, even after deletion: every
+later publish attempt for that tag fails with `HTTP 422: tag_name was used by
+an immutable release`, and no re-dispatch can ever succeed (v0.807.0 and
+v0.808.0 were burned this way on 2026-08-16). Deleting a draft destroys its
+attached assets — though the binaries survive as the building run's workflow
+artifacts for ~90 days (`gh run download <run-id>`). So: NEVER delete a
+release or draft; recovery from any failed publish is a NEW patch tag. The
+publish step classifies the burned-tag 422 explicitly, and
+`release-deleted-tripwire.yml` files a tracking issue the minute any release
+is deleted.
+
 **Slow is survivable; racy is not.** A three-hour release still publishes. Never
 add automation that cancels or deletes an in-flight release because a newer tag
 appeared: releases legitimately complete OUT OF ORDER now (the pipeline outlasts

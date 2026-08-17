@@ -1606,13 +1606,32 @@ uses, or the golden warms a cache the real jobs never touch.
   subbuilds short while preserving the normal `build-windows` artifact/test
   directory.
 - `.github/workflows/watchdog-reaper.yml` (pulp #2576) sweeps ALL open release
-  watchdog trackers daily and closes any whose version is released or superseded
+  watchdog trackers and closes any whose version is released or superseded
   — the existing watchdogs only auto-close inside a recent window, so historical
   per-version trackers orphaned (334 had accumulated). It only matches the exact
   auto-generated tracker titles and only closes objectively-resolved ones.
-  SHA-keyed `release: stuck` trackers carry no version in their title; the reaper
-  skips them without failing the sweep. Close those only after verifying the
-  affected SDK/plugin surface shipped the stranded commit.
+  SHA-keyed `release: stuck` trackers carry no version in their title; the
+  reaper parses the body for the tip SHA + uncovered surfaces and closes once a
+  later release tag for EVERY uncovered surface contains the stranded commit
+  (`tools/scripts/reap_stranded_tracker.py`). It runs daily at 06:00 UTC AND
+  immediately after every successful `Release CLI` run (via `workflow_run` —
+  the publish uses `GITHUB_TOKEN`, whose events cannot trigger a `release:`
+  workflow), because the resolving release otherwise lands just after the daily
+  sweep and objectively-closed trackers sit open all day looking like live
+  incidents. A pile of open `release: stuck` trackers therefore means the
+  release pipeline is genuinely stuck NOW — check release-reconcile's single
+  incident issue first, don't triage the trackers one by one.
+- **NEVER delete a GitHub release or draft — deletion of a once-published
+  release permanently burns its tag name.** GitHub reserves an immutable
+  release's `tag_name` forever; every later publish attempt 422s with
+  `tag_name was used by an immutable release`, and no re-dispatch can ever
+  succeed (this burned v0.807.0 and v0.808.0). Deleting a draft destroys its
+  attached assets, but the binaries survive as the building run's workflow
+  artifacts (~90-day retention, `gh run download <run-id>`). Recovery from a
+  failed publish is always a NEW patch tag, never a deletion.
+  `release-deleted-tripwire.yml` files a tracking issue the minute any release
+  is deleted, and release-cli's publish step names the burned-tag condition
+  explicitly when it hits the 422.
 - Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
   `gh issue list` / `gh pr *` helpers in those paths because they can use the
   shared GraphQL quota; a watchdog must not fail while reporting that the

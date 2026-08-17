@@ -868,7 +868,7 @@ a working convolution and would hide the bug. Assert
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
-| [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting |
+| [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
 | Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |

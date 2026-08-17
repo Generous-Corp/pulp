@@ -80,6 +80,31 @@ TEST_CASE("WidgetBridge createSvgPath produces an SvgPathWidget the bridge can a
     REQUIRE(w->fill_color().b8() == 0);
 }
 
+TEST_CASE("WidgetBridge setSvgStretchToBounds round-trips onto SvgPathWidget",
+          "[view][bridge][native-lowering]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgPath('scope', '')");
+    bridge.load_script("setSvgPath('scope', 'M0 54 L380 54')");
+    bridge.load_script("setSvgViewBox('scope', 380, 108)");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("scope"));
+    REQUIRE(w != nullptr);
+    // Absent means SVG's default mapping, not "unset and therefore anything".
+    // A panel emitted before this global existed must keep fitting its icons.
+    REQUIRE_FALSE(w->stretch_to_bounds());
+
+    bridge.load_script("setSvgStretchToBounds('scope', true)");
+    REQUIRE(w->stretch_to_bounds());
+    // Still reversible from script: the emitted panel sets it once, but a live
+    // consumer re-rendering the same node must be able to take it back off.
+    bridge.load_script("setSvgStretchToBounds('scope', false)");
+    REQUIRE_FALSE(w->stretch_to_bounds());
+}
+
 TEST_CASE("WidgetBridge setSvgStrokeGradient round-trips onto SvgPathWidget",
           "[view][bridge][stroke-gradient]") {
     ScriptEngine engine;
