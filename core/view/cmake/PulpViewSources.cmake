@@ -28,6 +28,7 @@ target_sources(pulp-view-core PRIVATE
     src/view.cpp
     src/view_paint.cpp
     src/repaint_damage.cpp
+    src/pointer_coalescer.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
     src/continuous_frames.cpp
