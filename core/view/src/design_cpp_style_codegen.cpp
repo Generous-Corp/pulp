@@ -2,6 +2,8 @@
 
 #include "design_ir_helpers.hpp"
 
+#include <pulp/view/css_effect_parse.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -325,6 +327,15 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_left(" + float_expr(ctx, *style.left) + ");");
     if (style.z_index)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_z_index(" + std::to_string(*style.z_index) + ");");
+    // Rotation goes through the same parser the runtime materializer uses, so a
+    // design that rotates looks the same baked as it does at runtime. Only the
+    // rotation component lowers; any other transform stays unlowered and is
+    // reported below, matching what the runtime keeps as an unhandled value.
+    if (style.transform) {
+        if (const auto degrees = css_transform_rotation(*style.transform))
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_rotation(" + float_expr(ctx, *degrees) + ");");
+    }
 
     report_unlowered_visual_style(ctx, node, style);
 }
@@ -366,8 +377,12 @@ void report_unlowered_visual_style(const EmitContext& ctx,
         note("backdrop-filter", "the backdrop renders opaque");
     if (style.clip_path && !style.clip_path->empty())
         note("clip-path", "the node paints its full rectangle");
-    if (style.transform && !style.transform->empty())
-        note("transform", "the node renders unrotated and unscaled");
+    // Rotation lowers above. A transform that carries anything else (scale,
+    // skew, translate, matrix) still does not, so report only that remainder
+    // rather than claiming the whole property was dropped.
+    if (style.transform && !style.transform->empty() &&
+        !css_transform_rotation(*style.transform))
+        note("transform", "the node renders untransformed");
     if (style.border_style && !style.border_style->empty())
         note("border-style", "the border renders solid");
     if (style.text_overflow && !style.text_overflow->empty())

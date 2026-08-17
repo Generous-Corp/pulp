@@ -174,7 +174,7 @@ TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
     ir.root.style.box_shadow = parse_css_box_shadow("0 2px 4px rgba(0,0,0,0.5)");
     ir.root.style.mix_blend_mode = "multiply";
     ir.root.style.filter = "blur(4px)";
-    ir.root.style.transform = "rotate(30deg)";
+    ir.root.style.transform = "skewX(10deg)";  // no rotation component to lower
 
     std::vector<FidelityIssue> report;
     CppExportOptions opts;
@@ -191,6 +191,29 @@ TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
     REQUIRE(reported("mix-blend-mode"));
     REQUIRE(reported("filter"));
     REQUIRE(reported("transform"));
+}
+
+TEST_CASE("generate_pulp_cpp lowers a rotation instead of reporting it",
+          "[view][import][cpp-codegen]") {
+    // The native-bridge JS lane reads rotation through the same parser the
+    // runtime materializer uses so the two cannot disagree. The baked lane is a
+    // third native tree and was left out of that invariant: a rotated knob
+    // needle baked as an axis-aligned stub.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Needle";
+    ir.root.style.transform = "rotate(30deg)";
+
+    std::vector<FidelityIssue> report;
+    CppExportOptions opts;
+    opts.fidelity_report = &report;
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(result.source.find("->set_rotation(") != std::string::npos);
+    // Lowered, so it must NOT also be reported as dropped.
+    REQUIRE(std::none_of(report.begin(), report.end(), [](const FidelityIssue& i) {
+        return i.detail.find("transform") != std::string::npos;
+    }));
 
     // A node with none of them reports nothing, so the sink is not just always-on.
     DesignIR plain;
