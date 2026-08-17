@@ -1,5 +1,6 @@
 #include <pulp/signal/headphone_crossfeed.hpp>
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/tempo_delay.hpp>
 
 #include <array>
 #include <cmath>
@@ -62,5 +63,13 @@ int main() {
         pulp::signal::FirDesignPoint{3.141592653589793, 0.0, 1.0}};
     const auto design = pulp::signal::design_fir_least_squares(
         points, {.tap_count = 3u, .type = pulp::signal::LinearPhaseFirType::type_i_symmetric_odd});
-    return design ? 0 : 16;
+    if (!design)
+        return 16;
+    pulp::signal::TempoDelayTime tempo_delay;
+    if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
+        return 19;
+    if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
+        pulp::signal::TempoDelayError::none)
+        return 20;
+    return std::isfinite(tempo_delay.next()) ? 0 : 21;
 }

@@ -116,6 +116,17 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/tempo_delay.hpp",
+        "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo "
+            "range; it is a bounded conversion surface reused by delay kernels rather "
+            "than an advertised generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/audio/planar_audio_ring_buffer.hpp",
         "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
         "disposition": "infrastructure",
@@ -520,7 +531,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
+        "fingerprint": "sha256:2d8b6d15264c91030522f59c2982fbfec6052079198488b4de9704f207f96025",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

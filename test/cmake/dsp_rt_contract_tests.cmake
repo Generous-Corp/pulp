@@ -278,3 +278,8 @@ pulp_add_test_suite(pulp-test-signal-fir-design
     SOURCES test_signal_fir_design.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-tempo-delay
+    SOURCES test_tempo_delay.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)

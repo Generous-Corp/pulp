@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 44,
+  "inventory_version": 46,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,14 +37,14 @@
     }
   ],
   "counts": {
-    "public_headers": 426,
-    "reviewed_headers": 129,
+    "public_headers": 427,
+    "reviewed_headers": 130,
     "legacy_unreviewed_headers": 297,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 82,
       "capability_support": 38,
-      "infrastructure": 7,
+      "infrastructure": 8,
       "legacy_unreviewed": 297,
       "unsupported_capability": 2
     },
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 247,
-        "reviewed_headers": 87,
+        "public_headers": 248,
+        "reviewed_headers": 88,
         "legacy_unreviewed_headers": 160,
         "unsupported_headers": 2
       },
@@ -3504,7 +3504,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
+      "fingerprint": "sha256:2d8b6d15264c91030522f59c2982fbfec6052079198488b4de9704f207f96025",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3787,6 +3787,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/tempo_delay.hpp",
+      "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+      "include": "pulp/signal/tempo_delay.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion surface reused by delay kernels rather than an advertised generator DSP claim."
     },
     {
       "domain": "signal",
@@ -4096,7 +4105,7 @@
     {
       "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/compiled_tempo_map.hpp",
-      "fingerprint": "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8",
+      "fingerprint": "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c",
       "include": "pulp/timebase/compiled_tempo_map.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
