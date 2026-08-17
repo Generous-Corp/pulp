@@ -416,3 +416,30 @@ them to make one PR pass would be removing a deliberate guard. Declaring the hea
 the fingerprint check on its own; the baseline file, its entry count, and its digest all stay
 untouched. Confirm afterwards that the baseline entry count is unchanged and the manifest
 self-tests still pass.
+
+**Ask the prior question first: does your capability actually need that header to change?**
+Both this section and the recorded precedents jump straight to *how* to classify a frozen
+header, which quietly assumes the edit to it is load-bearing. Often it is not. A cell that adds
+a new processor and, while it is in there, refactors three existing processors onto a shared
+kernel will trip this gate on headers its capability never touches — and the whole gate
+disappears if the refactor is dropped.
+
+So triage the edit before classifying the header:
+
+- **Incidental to the capability** (a dedup, a comment, a rename, an ordering tidy) — revert it
+  and shrink the cell. Nothing about the new capability depends on it, the frozen baseline stays
+  out of the change entirely, and the diff shrinks to what a reviewer can actually check.
+- **Required by the capability** — declare the header. The recorded example is
+  `frequency_response.hpp` templated over `SampleType` so the `_64` variants could compute a
+  response without narrowing: reverting it would have shipped those variants with no response
+  inspection, so there was no smaller correct slice.
+
+The asymmetry is what makes this worth doing in that order. Reverting an incidental edit costs
+one `git checkout origin/main -- <header>`. Declaring a header is permanent: it converts an
+unreviewed legacy header into a reviewed contract the repo then owns, decided as a side effect
+of a cleanup rather than on its own merits. If the dedup is worth having, it is worth its own
+change, where the classification is the subject of review instead of collateral.
+
+When you do revert, prune whatever the reverted call sites were the only users of. A shared
+helper introduced for three call sites that no longer exist is dead public surface, and it
+enlarges the very fingerprint you are trying to keep small.
