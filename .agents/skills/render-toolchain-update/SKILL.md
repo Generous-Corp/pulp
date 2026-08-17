@@ -122,3 +122,14 @@ Skia/Dawn, V8, or both may be consumed independently.
 - Keep release-fetch progress output ASCII-safe. Windows release runners can use a
   cp1252 console, where decorative Unicode arrows raise `UnicodeEncodeError` before
   an asset download starts; exercise the full Windows fetch path with cp1252 stdout.
+- JS-engine wording in `tools/deps/manifest.json`, `tools/deps/min_os.json`, and
+  `tools/cmake/FindV8.cmake` describes a *selection contract*, not just prose.
+  The contract is: `auto`/`quickjs` compile QuickJS only; `jsc` additionally
+  compiles `core/view/src/js_jsc_engine.mm` and links
+  `JavaScriptCore.framework` on Apple; `v8` selects the sealed prebuilt. JSC is
+  **opt-in**, never implied by "Apple". Older text said "default is QuickJS, JSC
+  on Apple", which reads as JSC being automatic on Apple platforms and is wrong.
+  Likewise iOS is no longer "JSC-only": V8 is excluded there because JIT is
+  forbidden, but QuickJS is the default and JSC stays opt-in. When a pin or
+  min-OS note is edited, keep these three files saying the same thing — they are
+  the only place the engine contract is written down outside the CMake modules.

@@ -7,7 +7,7 @@ into `external/v8-build/<manifest-key>/` so that `FindV8.cmake` locates
 the headers + library when `PULP_JS_ENGINE=v8` is selected.
 
 This is the V8 analog of `fetch_skia_for_release.py`: V8 is an optional
-JS engine backend (default is QuickJS; JSC on Apple). When selected, the
+JS engine backend (default is QuickJS; JSC is opt-in on Apple). When selected, the
 provider is the pinned sealed `libv8` from the danielraffel/v8-builder
 fork — NOT a developer's Homebrew `libnode`. Each platform zip contains
 `include/` plus a platform-appropriate library:
@@ -16,7 +16,7 @@ fork — NOT a developer's Homebrew `libnode`. Each platform zip contains
     linux-*    lib/libv8.so
     win-*      lib/v8.dll + lib/v8.dll.lib (MSVC import lib)
     android-*  jniLibs/arm64-v8a/libv8.so
-    ios-sim    headers only (no library — iOS is JSC-only; V8 needs JIT)
+    ios-sim    headers only (no library — iOS supports QuickJS/JSC; V8 needs JIT)
 
 Usage:
     python3 tools/scripts/fetch_v8_for_release.py <matrix-platform>
@@ -76,7 +76,7 @@ def expected_library_path(manifest_key: str) -> Path | None:
     if manifest_key.startswith("android-"):
         return base / "jniLibs" / "arm64-v8a" / "libv8.so"
     if manifest_key.startswith("ios-"):
-        return None  # headers only — iOS is JSC-only (V8 needs JIT)
+        return None  # headers only — iOS supports QuickJS/JSC (V8 needs JIT)
     raise SystemExit(f"unknown manifest key: {manifest_key!r}")
 
 

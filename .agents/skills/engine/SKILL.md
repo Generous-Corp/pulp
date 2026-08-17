@@ -223,7 +223,8 @@ fork — the same pin/fetch/Find pattern as Skia:
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
    `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64`,
-   `android-arm64`, `ios-simulator-arm64` (headers-only — iOS is JSC).
+   `android-arm64`, `ios-simulator-arm64` (headers-only — iOS supports
+   QuickJS/JSC but not V8).
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
@@ -246,7 +247,8 @@ a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR` — V8
-  needs JIT, forbidden in iOS apps / AUv3 extensions. iOS uses JSC.
+  needs JIT, forbidden in iOS apps / AUv3 extensions. Use QuickJS (the
+  default) or select JSC explicitly.
 
 **Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
 only the `v8::`/`cppgc::` API and keeps its bundled ICU/zlib/Abseil

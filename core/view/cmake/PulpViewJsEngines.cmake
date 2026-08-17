@@ -8,6 +8,18 @@
 #             tools/scripts/fetch_v8_for_release.py). Not supported on iOS.
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
+set(_pulp_js_engine_choices auto quickjs jsc v8)
+if(NOT PULP_JS_ENGINE IN_LIST _pulp_js_engine_choices)
+    message(FATAL_ERROR
+        "PULP_JS_ENGINE must be one of auto, quickjs, jsc, or v8; got "
+        "'${PULP_JS_ENGINE}'.")
+endif()
+if(PULP_JS_ENGINE STREQUAL "jsc" AND NOT APPLE)
+    message(FATAL_ERROR
+        "PULP_JS_ENGINE=jsc is only supported on Apple platforms. Use auto or "
+        "quickjs for the portable QuickJS backend.")
+endif()
+unset(_pulp_js_engine_choices)
 # Advanced local-experiment overrides only — normal v8 builds need none (FindV8
 # resolves external/v8-build or a baked $V8_DIR). When v8 is selected, the
 # provider is the pinned sealed libv8, nothing else.
@@ -58,7 +70,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     if(IOS OR PULP_IOS)
         message(FATAL_ERROR
             "PULP_JS_ENGINE=v8 is not supported on iOS: V8 requires JIT, which iOS "
-            "apps and AUv3 extensions forbid. iOS uses JSC (the default on Apple).")
+            "apps and AUv3 extensions forbid. Use QuickJS (the default) or JSC.")
     endif()
     include(${PULP_ROOT_DIR}/tools/cmake/FindV8.cmake)
     if(NOT PULP_V8_FOUND)
@@ -137,10 +149,22 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     pulp_v8_windows_apply_abi(pulp-view-script)
 endif()
 
-# JSC backend (Apple platforms only).
-if(APPLE)
+# JSC is opt-in even on Apple. `auto` and `quickjs` are intentionally
+# QuickJS-only builds: compiling every platform backend made the documented
+# selection knob lie and forced JavaScriptCore.framework into otherwise
+# QuickJS-only plugin binaries.
+set(PULP_HAS_JSC_ACTUAL OFF)
+if(APPLE AND PULP_JS_ENGINE STREQUAL "jsc")
     list(APPEND PULP_JS_ENGINE_SOURCES src/js_jsc_engine.mm)
+    target_compile_definitions(pulp-view-script PUBLIC PULP_HAS_JSC=1)
+    set(PULP_HAS_JSC_ACTUAL ON)
 endif()
+# Sibling directories (notably the binary link-floor fixture under test/) need
+# the resolved availability after core/view returns to the parent scope. Cache
+# it internally and force-refresh it so reconfiguring jsc -> quickjs cannot
+# retain a stale ON value.
+set(PULP_HAS_JSC_ACTUAL "${PULP_HAS_JSC_ACTUAL}" CACHE INTERNAL
+    "Whether this build compiles and links the JavaScriptCore backend" FORCE)
 
 # Set compile definitions for engine availability / defaults.
 if(PULP_HAS_V8_ACTUAL)
@@ -157,10 +181,38 @@ endif()
 
 # Only set non-QuickJS default when explicitly requested (not auto).
 if(PULP_JS_ENGINE STREQUAL "jsc")
-    if(APPLE)
+    if(PULP_HAS_JSC_ACTUAL)
         target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_JSC=1)
     endif()
 elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_V8=1)
 endif()
 # auto → QuickJS default (backward compatible with all existing code)
+
+# Configure-time source/link oracle, called from core/view/CMakeLists.txt AFTER the
+# JSC source and framework linkage are attached to pulp-view-script. Calling it
+# earlier reads empty target properties and silently passes.
+function(pulp_view_assert_js_engine_link_contract)
+    # Configure-time source/link oracle. Static archives can dead-strip an unused
+    # backend, so final-binary symbol scans alone cannot prove that a QuickJS SDK did
+    # not compile or export JSC linkage. Keep the target graph itself fail-closed.
+    get_target_property(_pulp_view_script_sources pulp-view-script SOURCES)
+    get_target_property(_pulp_view_script_links pulp-view-script LINK_LIBRARIES)
+    if(PULP_HAS_JSC_ACTUAL)
+        if(NOT "${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+           NOT "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+            message(FATAL_ERROR
+                "PULP_JS_ENGINE=jsc must compile js_jsc_engine.mm and link "
+                "JavaScriptCore.framework.")
+        endif()
+    else()
+        if("${_pulp_view_script_sources}" MATCHES "js_jsc_engine\\.mm" OR
+           "${_pulp_view_script_links}" MATCHES "JavaScriptCore")
+            message(FATAL_ERROR
+                "PULP_JS_ENGINE=${PULP_JS_ENGINE} leaked the JSC source or framework: "
+                "sources=${_pulp_view_script_sources}; links=${_pulp_view_script_links}")
+        endif()
+    endif()
+    unset(_pulp_view_script_sources)
+    unset(_pulp_view_script_links)
+endfunction()

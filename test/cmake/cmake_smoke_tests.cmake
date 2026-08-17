@@ -77,6 +77,16 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# Engine selection negative contracts run under `cmake -P`: they exercise the
+# real module's fail-fast validation without requiring an invalid full build or
+# access to a second host OS.
+add_test(NAME cmake-js-engine-selection
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_js_engine_selection.cmake)
+set_tests_properties(cmake-js-engine-selection PROPERTIES
+    LABELS "cmake;view;js-engine"
+    TIMEOUT 30)
+
 # The iOS-only public helper bypasses pulp_add_plugin(), but its AUv3 target
 # still carries the ordinary production control-shipping declaration.
 add_test(NAME cmake-ios-auv3-control-shipping

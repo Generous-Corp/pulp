@@ -43,7 +43,7 @@ std::unique_ptr<JsEngine> create_recorded_js_engine(JsEngineType type, Factory&&
 std::unique_ptr<JsEngine> create_quickjs_engine();
 std::unique_ptr<JsEngine> create_v8_engine();
 
-#if __APPLE__
+#if defined(PULP_HAS_JSC)
 std::unique_ptr<JsEngine> create_jsc_engine();
 #endif
 
@@ -53,7 +53,7 @@ bool is_engine_available(JsEngineType type) {
             return true;  // Always available
 
         case JsEngineType::jsc:
-#if __APPLE__
+#if defined(PULP_HAS_JSC)
             return true;
 #else
             return false;
@@ -75,10 +75,12 @@ std::unique_ptr<JsEngine> create_js_engine(JsEngineType type) {
             return create_recorded_js_engine(JsEngineType::quickjs, create_quickjs_engine);
 
         case JsEngineType::jsc:
-#if __APPLE__
+#if defined(PULP_HAS_JSC)
             return create_recorded_js_engine(JsEngineType::jsc, create_jsc_engine);
 #else
-            throw std::runtime_error("JavaScriptCore is only available on Apple platforms");
+            throw std::runtime_error(
+                "JavaScriptCore is not available in this build; configure an Apple build "
+                "with PULP_JS_ENGINE=jsc");
 #endif
 
         case JsEngineType::v8:
@@ -98,7 +100,7 @@ std::unique_ptr<JsEngine> create_default_js_engine() {
     // to ScriptEngine(JsEngineType::jsc) or create_js_engine(JsEngineType::v8).
 #if defined(PULP_DEFAULT_ENGINE_V8) && defined(PULP_HAS_V8)
     return create_recorded_js_engine(JsEngineType::v8, create_v8_engine);
-#elif defined(PULP_DEFAULT_ENGINE_JSC) && __APPLE__
+#elif defined(PULP_DEFAULT_ENGINE_JSC) && defined(PULP_HAS_JSC)
     return create_recorded_js_engine(JsEngineType::jsc, create_jsc_engine);
 #else
     return create_recorded_js_engine(JsEngineType::quickjs, create_quickjs_engine);

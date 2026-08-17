@@ -238,10 +238,10 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     )
 endif()
 
-# JavaScriptCore framework for JSC backend (Apple only)
-if(APPLE)
+if(PULP_HAS_JSC_ACTUAL)  # auto/quickjs must never leak JSC into link interfaces
     target_link_libraries(pulp-view-script PRIVATE "-framework JavaScriptCore")
 endif()
+pulp_view_assert_js_engine_link_contract()
 
 if(WIN32)
     # Process spawning routes through pulp::platform::ChildProcess.

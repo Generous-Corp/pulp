@@ -27,6 +27,12 @@ endif()
 add_executable(pulp-native-link-floor-webkit-control webkit_control.cpp)
 target_link_libraries(pulp-native-link-floor-webkit-control PRIVATE pulp::view)
 
+# Independent JSC positive control makes the artifact scanner's negative JSC
+# assertion mutation-sensitive in the normal auto/QuickJS configuration.
+add_executable(pulp-native-link-floor-jsc-control jsc_control.mm)
+target_link_libraries(pulp-native-link-floor-jsc-control PRIVATE
+    "-framework JavaScriptCore")
+
 # Target-graph contract: mutating NATIVE_UI back to the legacy view umbrella,
 # or moving WebKit onto a native dependency, fails at configure time before
 # dead stripping can conceal the regression in the final binary.
@@ -58,19 +64,24 @@ add_custom_target(pulp-native-link-floor-proof
     COMMAND "${CMAKE_COMMAND}"
         -DNATIVE_STANDALONE=$<TARGET_FILE:PulpNativeLinkFloor_Standalone>
         -DNATIVE_CLAP=$<TARGET_FILE:PulpNativeLinkFloor_CLAP>
-        -DPOSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
+        -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
+        -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
+        -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
         -P "${_native_link_floor_scan}"
     DEPENDS
         PulpNativeLinkFloor_Standalone
         PulpNativeLinkFloor_CLAP
         pulp-native-link-floor-webkit-control
+        pulp-native-link-floor-jsc-control
     VERBATIM)
 
 add_test(NAME native-ui-link-floor-artifacts
     COMMAND "${CMAKE_COMMAND}"
         -DNATIVE_STANDALONE=$<TARGET_FILE:PulpNativeLinkFloor_Standalone>
         -DNATIVE_CLAP=$<TARGET_FILE:PulpNativeLinkFloor_CLAP>
-        -DPOSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
+        -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
+        -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
+        -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
         -P "${_native_link_floor_scan}")
 set_tests_properties(native-ui-link-floor-artifacts PROPERTIES
     LABELS "view;link-contract;artifact" TIMEOUT 30)
