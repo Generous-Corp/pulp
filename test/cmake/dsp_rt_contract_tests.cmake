@@ -38,6 +38,11 @@ pulp_add_test_suite(pulp-test-expander
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+pulp_add_test_suite(pulp-test-auto-ducked-send
+    SOURCES test_auto_ducked_send.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-source-filter-analysis
     SOURCES test_source_filter_analysis.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
@@ -195,6 +200,13 @@ pulp_add_test_suite(pulp-test-signal-nonlinear-shaping
 
 pulp_add_test_suite(pulp-test-signal-cross-feedback-multitap-delay
     SOURCES test_signal_cross_feedback_multitap_delay.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# Fixed-capacity caller-authored early-reflection taps: independent sparse
+# impulse oracle, true-stereo routing, headroom, partitioning, and RT proof.
+pulp_add_test_suite(pulp-test-signal-early-reflections
+    SOURCES test_signal_early_reflections.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
 

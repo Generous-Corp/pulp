@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 28,
+  "manifest_revision": 29,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 42
+        "capabilities": 44
       },
       "timebase": {
         "state": "partial",
@@ -1825,6 +1825,66 @@
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
     },
     {
+      "key": "signal.auto-ducked-send",
+      "domain": "signal",
+      "summary": "Envelope-following send that ducks a wet path against a dry key signal with bounded attack, release, threshold, and range.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control envelope setup",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Single envelope follower plus the committed duck configuration.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "wet and dry audio plus bounded threshold, range, attack, and release",
+      "output_domain": "ducked stereo send",
+      "units": [
+        "samples",
+        "decibels",
+        "milliseconds"
+      ],
+      "latency": "zero",
+      "tail": "envelope release",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/auto_ducked_send.hpp",
+          "qualified_name": "pulp::signal::AutoDuckedSendT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:dabad14b890bce07b4a8fe22e622e3bf9d9e67da3634c98a0ec96cd396d9cee7"
+    },
+    {
       "key": "signal.beat-repeat-kernel",
       "domain": "signal",
       "summary": "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, reverse/alternate playback, and direct trigger/stop/seek controls; pitch excluded.",
@@ -2265,6 +2325,66 @@
         }
       },
       "contract_digest": "sha256:b198f11304f11bb40dfb310e73e301a7f669996c388a50672c48bebbafd413e9"
+    },
+    {
+      "key": "signal.early-reflections",
+      "domain": "signal",
+      "summary": "Bounded feed-forward early-reflection tap bank producing a stereo reflection pattern from validated per-tap delay, gain, and pan.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control delay-line allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity delay history plus the committed tap list; feed-forward only, so no recursive state accumulates.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded tap list of delay, gain, and pan",
+      "output_domain": "stereo early-reflection pattern",
+      "units": [
+        "samples",
+        "milliseconds",
+        "linear gain"
+      ],
+      "latency": "per-tap delay",
+      "tail": "longest configured tap",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/early_reflections.hpp",
+          "qualified_name": "pulp::signal::EarlyReflectionsT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:6b2f892a78fa126c4a1fd93b06cbd3313581fb9282136f207a4d41d6d1b3e6c6"
     },
     {
       "key": "signal.expander",
@@ -5419,14 +5539,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 75,
+    "total": 77,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 42,
+      "signal": 44,
       "timebase": 9
     }
   },
@@ -5636,6 +5756,30 @@
               "output_count()",
               "max_block_size()",
               "nonfinite_gain_count()"
+            ],
+            "enums": []
+          }
+        ],
+        "auto_ducked_send.hpp": [
+          {
+            "class": "AutoDuckedSendT",
+            "qualified_name": "pulp::signal::AutoDuckedSendT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(SampleType sample_rate)",
+              "process(SampleType send_left, SampleType send_right, SampleType detector_left, SampleType detector_right)",
+              "reset()",
+              "configure(const Config& next)",
+              "gain_computer_db(SampleType detector_level_db, const Config& config)",
+              "process_block(const SampleType* send_left, const SampleType* send_right, const SampleType* detector_left, const SampleType* detector_right, SampleType* output_left, SampleType* output_right, int num_samples)",
+              "process_block(SampleType* send_left, SampleType* send_right, const SampleType* detector_left, const SampleType* detector_right, int num_samples)",
+              "set_bypassed(bool bypassed)",
+              "bypassed()",
+              "config()",
+              "prepared()",
+              "sample_rate()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -7411,6 +7555,30 @@
             "template": "typename SampleType = float",
             "methods": [
               "coefficient_for_time_ms(SampleType ms, SampleType sample_rate)"
+            ],
+            "enums": []
+          }
+        ],
+        "early_reflections.hpp": [
+          {
+            "class": "EarlyReflectionsT",
+            "qualified_name": "pulp::signal::EarlyReflectionsT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(double sample_rate, double maximum_delay_ms = 250.0)",
+              "reset()",
+              "configure(std::span<const Tap> taps, MatrixHeadroomPolicy policy = MatrixHeadroomPolicy::NormalizePeak)",
+              "prepared()",
+              "sample_rate()",
+              "maximum_delay_ms()",
+              "tap_count()",
+              "tap(std::size_t index)",
+              "headroom_policy()",
+              "retained_bytes()",
+              "latency_samples()",
+              "tail_samples()",
+              "process_sample(SampleType input_left, SampleType input_right, SampleType& output_left, SampleType& output_right)",
+              "process_block(const SampleType* input_left, const SampleType* input_right, SampleType* output_left, SampleType* output_right, std::size_t sample_count)"
             ],
             "enums": []
           }

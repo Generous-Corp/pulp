@@ -1,3 +1,4 @@
+#include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
@@ -5,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <span>
 
 int main() {
     pulp::signal::MirroredHistoryBuffer<float> mirrored_history;
@@ -69,5 +71,21 @@ int main() {
     if (!reverse.configure({.window_samples = 4}) || !reverse.prepare(8))
         return 17;
     const float reversed = reverse.process_sample(1.0f);
-    return std::isfinite(reversed) ? 0 : 18;
+    if (!(std::isfinite(reversed)))
+        return 18;
+    pulp::signal::EarlyReflections early_reflections;
+    const pulp::signal::EarlyReflections::Tap reflection{.delay_ms = 10.0};
+    if (!early_reflections.configure(std::span{&reflection, 1u}) ||
+        !early_reflections.prepare(48000.0, 100.0))
+        return 19;
+    float reflected_left = 0.0f;
+    float reflected_right = 0.0f;
+    early_reflections.process_sample(1.0f, -1.0f, reflected_left, reflected_right);
+    if (!std::isfinite(reflected_left) || !std::isfinite(reflected_right))
+        return 20;
+    pulp::signal::AutoDuckedSend ducked_send;
+    if (ducked_send.prepare(48000.0f) != pulp::signal::AutoDuckedSendStatus::ready)
+        return 21;
+    const auto send_output = ducked_send.process(0.25f, -0.5f, 1.0f, -1.0f);
+    return std::isfinite(send_output[0]) && std::isfinite(send_output[1]) ? 0 : 22;
 }

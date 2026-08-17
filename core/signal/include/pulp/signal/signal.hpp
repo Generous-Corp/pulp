@@ -9,6 +9,7 @@
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
+#include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/waveguide_junction.hpp>
 #include <pulp/signal/waveguide_line.hpp>
@@ -19,6 +20,7 @@
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/auto_ducked_send.hpp>
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
