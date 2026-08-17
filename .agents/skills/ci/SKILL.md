@@ -1767,6 +1767,33 @@ run is not cosmetic. Before changing it, grep the tartci supervisor config
 (`TARTCI_RUNNER_WORKFLOW_NAME`) for anything matching on it.
 
 
+### A bare `cmake --build` in a workflow is a SERIAL build, and no guard sees it
+
+CI runners select no CMake generator, so `cmake --build` resolves to **Unix
+Makefiles**, and with no `--parallel`/`-j` that runs `make` with **no job flag
+at all — one translation unit at a time**. This is the *opposite* failure to
+the one `build_parallelism_guard.py` polices (unbounded / whole-machine
+counts), so the guard stays green while a lane quietly compiles ~1,700 TUs on
+one core. release-cli.yml shipped exactly this for months: ~50 min of a ~55 min
+release leg was a single-threaded compile (v0.806.1 logs), and nothing flagged
+it.
+
+How to tell from a log without guessing: Makefiles progress lines look like
+`[ 37%] Building CXX object …` (Ninja's look like `[123/1700]`), and a **serial**
+make emits those percentages strictly monotonically — a parallel make interleaves
+them out of order. Counting out-of-order percentage lines is a two-minute
+proof either way.
+
+Release lanes (`release-cli.yml`, `release-dry-run.yml`) now derive an explicit
+count (`--parallel "$jobs"` from the runner's visible cores — deliberate on
+ephemeral single-tenant release runners/VMs, where admission control happens at
+the VM level, not by throttling each build) and
+`test_release_workflow_test_step.py::ReleaseBuildParallelismExplicit` fails any
+`cmake --build` that re-loses its job count there. Other workflows are NOT
+covered by that test — when adding a build step to any workflow, give it an
+explicit count or route it through `tools/ci/governed-build.sh` (mandatory
+anyway for legs that can resolve to the shared self-hosted Macs).
+
 ### Keep ONE -O0 lane: it sees UB that -O3 provably hides
 
 `.shipyard/config.toml`'s macOS validation lane builds **Debug (-O0)**. This

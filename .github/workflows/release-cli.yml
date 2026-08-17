@@ -799,7 +799,35 @@ jobs:
         # On Linux this is built WITHOUT WebView so the CLI binary stays
         # portable; the SDK reconfigure step below adds WebView back so the
         # SDK tarball still ships WebViewPanel symbols.
-        run: cmake --build build --config Release
+        #
+        # PARALLELISM IS EXPLICIT HERE, NEVER DEFAULTED. `cmake --build` with no
+        # job count under the Unix Makefiles generator (the default on these
+        # runners — nothing sets -G Ninja or CMAKE_BUILD_PARALLEL_LEVEL) runs
+        # `make` with NO -j: one translation unit at a time. That serialized
+        # every release leg — ~1,700 TUs compiled single-threaded, ~50 min of
+        # the ~55 min darwin leg — and nothing flagged it, because
+        # build_parallelism_guard.py polices unbounded/whole-machine counts,
+        # not their silent opposite. Verified from the v0.806.1 leg log:
+        # Makefiles `[ NN%]` progress lines, strictly monotonic (a parallel
+        # make interleaves them out of order).
+        #
+        # Full visible core count is the DELIBERATE bound on this lane, not an
+        # oversight: every release leg runs on an ephemeral, single-tenant
+        # runner (GitHub-hosted image or a dedicated release Tart VM), so the
+        # host-melt concern behind the governed-share rule in build.yml does
+        # not apply — admission control happens at the VM/runner level (how
+        # many release VMs a host boots), not by throttling each build. The
+        # count is still explicit, so build_parallelism_guard.py's bare-flag
+        # class stays satisfied. The cores/memory echo exists so run logs
+        # record what the runner actually offered — if a leg ever OOMs here,
+        # the fix is more RAM per release VM or fewer concurrent VMs, and the
+        # log carries the numbers to decide with.
+        run: |
+          set -euo pipefail
+          jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+          mem="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/ {print $2 * 1024; exit}' /proc/meminfo 2>/dev/null || echo unknown)"
+          echo "Build parallelism: --parallel ${jobs} (visible cores=${jobs}, mem_bytes=${mem})"
+          cmake --build build --config Release --parallel "$jobs"
         shell: bash
 
       - name: Normalize CLI binary layout (Unix)
@@ -1009,7 +1037,12 @@ jobs:
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
           # binary (built in `build/` with WebView=OFF) portable.
-          cmake --build build-sdk --config Release
+          # Explicit full-core parallelism, same rationale + guard contract as
+          # the "Build" step above (ephemeral single-tenant runner; a bare
+          # `cmake --build` here is a silent -j1 under Unix Makefiles).
+          jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+          echo "SDK build parallelism: --parallel ${jobs}"
+          cmake --build build-sdk --config Release --parallel "$jobs"
         shell: bash
 
       - name: Report Linux SDK glibc floor (min-OS validation)
