@@ -378,6 +378,7 @@ jobs:
             /tmp/wclap-cloudflare.png
             /tmp/wclap-shared-player.png
           if-no-files-found: ignore
+          retention-days: 14
 
       # ── Owner-gated deploy ─────────────────────────────────────────────────
       # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
