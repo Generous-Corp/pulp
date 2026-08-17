@@ -15,7 +15,17 @@ file(MAKE_DIRECTORY "${_probe_dir}")
 
 function(_expect_engine_failure name prelude expected_error)
     set(_probe "${_probe_dir}/${name}.cmake")
+    # The probe must stand in the same policy context a real configure gives the
+    # module, or it does not exercise the real validation. The module selects
+    # with `if(... IN_LIST ...)`, which only behaves as an operator once CMP0057
+    # is NEW — a project gets that from the top-level cmake_minimum_required,
+    # but a `cmake -P` script inherits nothing and falls back to whatever the
+    # running CMake defaults to. Without this line the IN_LIST test silently
+    # evaluates the OLD way, the module never reaches its FATAL_ERROR, and the
+    # probe fails for an unrelated reason while the assertion below reports it
+    # as a wrong *message*.
     file(WRITE "${_probe}"
+        "cmake_policy(SET CMP0057 NEW)\n"
         "${prelude}\n"
         "include(\"${_engine_module}\")\n")
     execute_process(
@@ -29,6 +39,17 @@ function(_expect_engine_failure name prelude expected_error)
         message(FATAL_ERROR "${name} unexpectedly accepted an invalid engine selection")
     endif()
     set(_output "${_stdout}\n${_stderr}")
+    # Distinguish "the probe said nothing" from "the probe said the wrong
+    # thing". A probe that dies before reaching the module — unwritable dir,
+    # missing module, policy fallback — produces no diagnostic of its own, and
+    # reporting that as a wrong message sends the next reader looking for a
+    # text mismatch that does not exist.
+    string(STRIP "${_output}" _stripped_output)
+    if(_stripped_output STREQUAL "")
+        message(FATAL_ERROR
+            "${name} failed with status ${_status} but produced no diagnostic at all. "
+            "The probe did not reach the module's validation; this is not a message mismatch.")
+    endif()
     if(NOT _output MATCHES "${expected_error}")
         message(FATAL_ERROR
             "${name} produced the wrong diagnostic. Expected '${expected_error}':\n${_output}")
