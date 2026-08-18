@@ -217,3 +217,21 @@ allocation-free, step-major then track-major, and block-partition invariant.
 Microtiming must remain within the per-step bounds that prevent adjacent steps
 from reversing. Groove/swing, coordinate RNG generation, generative pattern
 algorithms, transport advancement, and note lifetime remain separate owners.
+
+## The compiled tempo range is public — validate against it, do not re-declare it
+
+`compiled_tempo_map.hpp` exports `kMinimumCompiledTempoBpm` and
+`kMaximumCompiledTempoBpm`. They were originally file-private constants in
+`compiled_tempo_map.cpp`, and were promoted to the header precisely so a second
+consumer could not drift from them.
+
+Any downstream kernel that accepts a BPM (tempo-synced delay, groove, transport
+projection) must validate against these symbols rather than writing its own
+`1.0` and `1000.0`. Two copies of a range look identical the day they are
+written and diverge silently the first time one side is widened, which produces
+a value one component accepts and another rejects with no visible error.
+
+Promoting them is behaviour-neutral and must stay that way: the timebase suite
+reports 43,136,088 assertions across 27 cases, and that figure should not move
+when the constants are relocated. If it does, the promotion changed a
+comparison rather than just its spelling.

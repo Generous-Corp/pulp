@@ -32,8 +32,16 @@ CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
 ORG="${REPO%%/*}"
-LABELS="self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro"
-PAT_FILE=/root/.config/pulp/secrets/gh-runner-pat
+# Lane identity comes from the wrapper that exec'd us, defaulting to the trusted
+# lane's values so an unset environment registers exactly what it always did.
+# Before this was read, the pr-safe wrapper's exports were silently discarded and
+# its pool registered as trusted — the wrappers only LOOKED like they configured
+# a lane. The trusted lane was correct by coincidence, because its exports happen
+# to equal these defaults; now it is correct by contract.
+LABELS="${PULP_RUNNER_LABELS:-self-hosted,Linux,X64,pulp-build-linux-x64,pulp-host-macpro}"
+RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-ci-ephemeral}"
+RUNNER_GROUP_POLICY="${PULP_LINUX_RUNNER_GROUP_POLICY:-trusted}"
+PAT_FILE="${PULP_LINUX_PAT_FILE:-/root/.config/pulp/secrets/gh-runner-pat}"
 ORG_PAT_FILE="${PULP_LINUX_ORG_PAT_FILE:-/root/.config/pulp/secrets/gh-org-runner-pat}"
 GOVERNOR=/usr/local/sbin/macpro-governor.sh
 RUNNER_GROUP_ID="${PULP_LINUX_RUNNER_GROUP_ID:-}"
@@ -43,7 +51,15 @@ FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
 AUTOMATIC_NETWORK_ISOLATION=0
 KEEP=0
-[ "${1:-}" = "--keep" ] && KEEP=1
+PRINT_LANE=0
+case "${1:-}" in
+    --keep) KEEP=1 ;;
+    # Resolve the lane identity, print it, and exit before touching the host.
+    # A wrapper's exports were silently discarded for long enough to matter, so
+    # the registration this WOULD perform has to be inspectable without
+    # performing it. Also the seam the lane-contract test drives.
+    --print-lane) PRINT_LANE=1 ;;
+esac
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
@@ -61,6 +77,13 @@ command -v "$GH_CLI" >/dev/null 2>&1 \
 REGISTRATION_API="repos/${REPO}"
 RUNNER_URL="https://github.com/${REPO}"
 RUNNER_GROUP_ARG=""
+# The trusted label belongs to the org-group branch below and to nothing else,
+# which is why it is stripped here rather than merely not-added: a wrapper
+# DECLARES it in its label string, so honouring that string verbatim at
+# repository level would hand a dispatch-only worker a label that restricted-pool
+# selectors match — the exact staged-rollout collision the paragraph above
+# describes. Ownership, not omission.
+LABELS="$(printf '%s' "$LABELS" | sed -e "s/,pulp-auto-linux-x64//g" -e "s/^pulp-auto-linux-x64,//")"
 if [ -n "$RUNNER_GROUP_ID" ]; then
     [[ "$RUNNER_GROUP_ID" =~ ^[0-9]+$ ]] \
         || die "PULP_LINUX_RUNNER_GROUP_ID must be numeric"
@@ -88,8 +111,43 @@ if [ -n "$RUNNER_GROUP_ID" ]; then
     REGISTRATION_API="orgs/${ORG}"
     RUNNER_URL="https://github.com/${ORG}"
     RUNNER_GROUP_ARG="--runnergroup ${GROUP_NAME}"
-    LABELS="${LABELS},pulp-auto-linux-x64"
+    # FAIL CLOSED on a lane/group mismatch. The group is chosen by host config
+    # (PULP_LINUX_RUNNER_GROUP_ID), while the lane is chosen by the wrapper, so
+    # nothing else forces them to agree. A pr-safe lane that lands in the trusted
+    # group would run unreviewed contributor code on the pool reserved for merged
+    # code, and would look completely normal doing it — the runner advertises a
+    # legitimate name and label set. Refusing to register is recoverable; a
+    # silently-trusted pr-safe runner is not.
+    case "$RUNNER_GROUP_POLICY" in
+        pr-safe)
+            case "$GROUP_NAME" in
+                *pr-safe*) : ;;
+                *) die "lane policy is pr-safe but runner group ${RUNNER_GROUP_ID} is '${GROUP_NAME}'; refusing to register unreviewed code on a non-pr-safe pool" ;;
+            esac
+            ;;
+        trusted)
+            # The trusted lane's extra label prevents a selector for the
+            # restricted pool from matching an older repository-level worker
+            # during a staged rollout. Only the trusted lane may carry it.
+            case ",${LABELS}," in
+                *,pulp-auto-linux-x64,*) : ;;
+                *) LABELS="${LABELS},pulp-auto-linux-x64" ;;
+            esac
+            ;;
+        *)
+            die "unknown runner group policy '${RUNNER_GROUP_POLICY}'"
+            ;;
+    esac
     AUTOMATIC_NETWORK_ISOLATION=1
+fi
+
+if [ "$PRINT_LANE" = 1 ]; then
+    printf 'policy=%s\n' "$RUNNER_GROUP_POLICY"
+    printf 'labels=%s\n' "$LABELS"
+    printf 'name_prefix=%s\n' "$RUNNER_NAME_PREFIX"
+    printf 'group=%s\n' "${GROUP_NAME:-<repository-level>}"
+    printf 'registration_api=%s\n' "$REGISTRATION_API"
+    exit 0
 fi
 
 # ── admission ────────────────────────────────────────────────────────────────
@@ -127,7 +185,7 @@ printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
 # forbids static registration names because an interrupted runner can leave a
 # zombie registration that collides with its replacement.
 RUNNER_SLOT_ID="macpro-linux-${VMID}"
-RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
+RUNNER_NAME="${RUNNER_NAME_PREFIX}-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
 
 reclaim_stale_slot_runners() {
     [ -n "${PAT:-}" ] || return 0
@@ -137,7 +195,7 @@ reclaim_stale_slot_runners() {
         --jq '.runners[] | [.id,.name,.busy,.status] | @tsv')" \
         || die "cannot inspect all runner registrations for ${RUNNER_SLOT_ID}"
     slot_matches="$(printf '%s\n' "$runners_tsv" | awk -F '\t' \
-        -v prefix="pulp-ci-ephemeral-${VMID}-" 'index($2, prefix) == 1')"
+        -v prefix="${RUNNER_NAME_PREFIX}-${VMID}-" 'index($2, prefix) == 1')"
     [ -n "$slot_matches" ] || return 0
     match_count="$(printf '%s\n' "$slot_matches" | wc -l | tr -d ' ')"
     [ "$match_count" = 1 ] \
@@ -275,7 +333,7 @@ trap cleanup EXIT
 # Linked clone: near-instant and thin, because the golden's 120G disk is shared
 # copy-on-write. A full clone would copy 120G per job and defeat the purpose.
 log "linked-cloning golden $GOLDEN -> $VMID"
-if ! qm clone "$GOLDEN" "$VMID" --name "pulp-ci-ephemeral-$VMID" >/dev/null 2>&1; then
+if ! qm clone "$GOLDEN" "$VMID" --name "${RUNNER_NAME_PREFIX}-$VMID" >/dev/null 2>&1; then
     flock -u 9
     die "clone failed"
 fi

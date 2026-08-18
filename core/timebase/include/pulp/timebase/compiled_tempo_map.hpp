@@ -11,6 +11,9 @@
 
 namespace pulp::timebase {
 
+
+inline constexpr double kMinimumCompiledTempoBpm = 1.0;
+inline constexpr double kMaximumCompiledTempoBpm = 1'000.0;
 inline constexpr std::uint32_t kMaximumCompiledSampleRate = 768'000;
 
 enum class TempoCurve {

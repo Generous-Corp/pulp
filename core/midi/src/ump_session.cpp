@@ -105,13 +105,13 @@ struct UmpSession::Impl {
     void* os_state = nullptr;
 };
 
-// OS backend hook table. Each platform implementation installs the vtable from
-// a static initialiser; if no backend file is linked, the no-op defaults stay
-// in place and the session reports `os_backend_active() == false`.
+// OS backend hook table. An available platform implementation installs the
+// vtable through an explicit constructor-time anchor; without one, the no-op
+// defaults stay in place and the session reports `os_backend_active() == false`.
 
 namespace ump_os {
 
-// Mutable singleton, patched by the platform registrar.
+// Mutable singleton, patched by the explicit platform registration anchor.
 inline OsBackendVTable& vtable() {
     static OsBackendVTable v;
     return v;
@@ -119,7 +119,7 @@ inline OsBackendVTable& vtable() {
 
 } // namespace ump_os
 
-// Called from the platform .mm/.cpp static initialiser to install hooks.
+// Called by a platform's explicit registration anchor to install hooks.
 void register_ump_os_backend(const ump_os::OsBackendVTable& v) {
     ump_os::vtable() = v;
 }
@@ -130,6 +130,12 @@ UmpSession::UmpSession() : UmpSession(UmpSessionConfig{}) {}
 
 UmpSession::UmpSession(UmpSessionConfig cfg) : impl_(std::make_unique<Impl>()) {
     impl_->cfg = std::move(cfg);
+#if defined(__APPLE__)
+    // This call is deliberately non-inline: it leaves an unresolved symbol in
+    // ump_session.cpp.o, forcing static linkers to retain the CoreMIDI backend
+    // object and its registration code.
+    register_coremidi_ump_backend();
+#endif
     if (impl_->cfg.enable_os_backend && ump_os::vtable().init) {
         impl_->os_active = ump_os::vtable().init(impl_->cfg, &impl_->os_state);
     }
