@@ -714,6 +714,9 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             if (!raw.empty()) {
                 if (doctor_check_matches_only_filter(only_filter, "RELEASE_BOT_TOKEN secret")) {
                     DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
+                    // Publishing capability, not a build prerequisite:
+                    // `pulp doctor` still fails on it, `pulp create` does not.
+                    c.release_only = true;
                     // Any occurrence of "name":"RELEASE_BOT_TOKEN" across all
                     // pages means it's configured. --paginate concatenates
                     // page bodies so the substring check catches it whether
