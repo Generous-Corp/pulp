@@ -1089,6 +1089,25 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
+  storage is billed per ACCOUNT and shared across every repository in it.** That
+  makes it the rare CI cost that becomes a *different repo's* outage: when the
+  account's storage quota is exhausted, uploads start failing in repositories
+  that never uploaded anything large, and the workflow whose artifacts filled it
+  is not the one that goes red. Diagnosing from the failing repo alone leads
+  nowhere, because nothing there is wrong.
+  - **Read a storage-quota symptom as account-wide, not repo-local.** Check
+    every repo in the account for large uncapped uploads, not just the one that
+    failed.
+  - **Cap by what the artifact is for, not uniformly.** A per-platform release
+    binary that also ships as a GitHub Release asset is a job-to-job hand-off
+    and wants days, not months. A failure-only fuzz reproducer wants the long
+    retention, because a crash input that expires before anyone downloads it is a
+    lost bug — and it costs almost nothing, since green runs upload nothing.
+  - **Set the long retention explicitly when you mean it.** An inherited 90 and
+    a deliberate 90 look identical in the YAML, so the next audit cannot tell a
+    considered decision from a forgotten default and will "fix" it.
+
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
   github.ref == 'refs/heads/main'` is dead code unless the workflow has a
   `push:` trigger.** GitHub's cloud cache scopes a PR-written entry to that
