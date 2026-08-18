@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 50,
+  "inventory_version": 52,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,14 +37,14 @@
     }
   ],
   "counts": {
-    "public_headers": 437,
-    "reviewed_headers": 141,
+    "public_headers": 439,
+    "reviewed_headers": 143,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 91,
+      "capability_entrypoint": 92,
       "capability_support": 38,
-      "infrastructure": 10,
+      "infrastructure": 11,
       "legacy_unreviewed": 296,
       "unsupported_capability": 2
     },
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 258,
-        "reviewed_headers": 99,
+        "public_headers": 260,
+        "reviewed_headers": 101,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -2121,6 +2121,26 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/detail/schroeder_allpass.hpp",
+      "fingerprint": "sha256:64f8f2857c873c37bc94102544459d528459dd2c422eb0bf812a3d1d4b411760",
+      "include": "pulp/signal/detail/schroeder_allpass.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/diffusion_network.hpp",
+      "fingerprint": "sha256:3e905149b0ac4cec0df9f15989da012cbe02ace8e163ee34393c1fa4b3ffa4f5",
+      "include": "pulp/signal/diffusion_network.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.diffusion-network"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/diode_bridge_compressor.hpp",
       "fingerprint": "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3",
       "include": "pulp/signal/diode_bridge_compressor.hpp",
@@ -3590,7 +3610,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
+      "fingerprint": "sha256:cfeebb24ed9b066e2571762f3e4c9d981f7a51649a3fda404153e7d874663307",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

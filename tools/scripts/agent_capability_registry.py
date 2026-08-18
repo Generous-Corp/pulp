@@ -561,8 +561,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/detail/schroeder_allpass.hpp",
+        "fingerprint": "sha256:64f8f2857c873c37bc94102544459d528459dd2c422eb0bf812a3d1d4b411760",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
+        ),
+    },
+    {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
+        "fingerprint": "sha256:cfeebb24ed9b066e2571762f3e4c9d981f7a51649a3fda404153e7d874663307",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
