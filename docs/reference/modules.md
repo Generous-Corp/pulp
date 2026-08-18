@@ -678,7 +678,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Buffer | `midi_buffer.hpp` | Timestamped event buffer for `process()` callbacks |
-| Device I/O | platform/ | CoreMIDI (macOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
+| Device I/O | platform/ | CoreMIDI (macOS/iOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |
@@ -746,6 +746,11 @@ construction/configuration/`prepare()` step. Setup methods that allocate
 storage must run off the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
+
+`TiltEqT` provides fixed-state, pivot-normalized tonal slope in signed
+dB/octave with exact neutral bypass, transactional retuning, and no audio-thread
+allocation. Its full lifecycle and response-inspection surface is listed in the
+[advanced DSP API](advanced-dsp-api.md#tilteqtsampletype-channels).
 
 For synthesized percussion, including the complete voice API, recipes,
 provenance, and Forge bake-layer controls, see
@@ -864,11 +869,14 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
+| Formant Filter Bank | `formant_filter_bank.hpp` | Fixed-capacity parallel resonant-peak filter with validated ordered recipes, A/E/I/O/U morphing, click-safe whole-bank retunes, normalized headroom, and zero latency |
+| Filter Morph | `filter_morph.hpp` | Stable parallel morph between validated second-order filter endpoints |
 | Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
+| Graphic EQ | `graphic_eq.hpp` | Fixed-capacity configurable peaking-band cascade with transactional retune and exact endpoint response |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
-| [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting |
+| [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
 | Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
@@ -883,16 +891,20 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
+| [Reverse Buffer](reverse-buffer.md) | `reverse_buffer.hpp` | Prepared fixed-capacity streaming window reversal with transactional configuration, explicit raw or raised-cosine boundaries, hard-bypass state, startup latency, and finite tail |
+| [Early Reflections](early-reflections.md) | `early_reflections.hpp` | Fixed-capacity true-stereo caller-authored taps with fractional timing, equal-power pan/width routing, transactional publication, and explicit peak-normalized or raw headroom |
 | Beat Repeat Kernel | `beat_repeat_kernel.hpp` | Zero-latency tempo-map-quantized capture of exact recent dry history with bounded repeat, gate, forward/reverse/alternate playback, direct `trigger`/`stop`/`seek` gesture controls, and click-safe transitions. Pitch is not included: it remains gated on an interpolated immutable-span reader that does not duplicate the capture buffer. |
 | Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions; these are composable building blocks, not a complete instrument loop. |
 | Reed exciter | `waveguide_reed_exciter.hpp` | Bounded, allocation-free single-reed valve primitive for waveguide compositions; finite positive bore impedance is not model-capped, and the signed reverse-flow law means zero mouth pressure is not a passive closed termination. It does not own oversampling or the recursive loop. |
+| Comb Filter | `comb_filter.hpp` | Fixed-capacity feedforward, stable feedback, and Schroeder allpass combs with transactional configuration, exact integer delays, response inspection, and typed fault recovery |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
-| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
+| Transfer Curve | `transfer_curve.hpp` | Fixed-capacity arbitrary piecewise transfer curve using shared modulation shapes and transactional RT publication |
+| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion with five built-in curve formulas |
 
 #### Dynamics
 
@@ -904,6 +916,7 @@ a working convolution and would hide the bug. Assert
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | True-peak limiter | `true_peak_limiter.hpp` | Stereo look-ahead limiter with 8x intersample detection, a fixed 64-sample gain-scheduling horizon plus optional user lookahead, explicit channel linking, latency, tail, and gain-reduction telemetry; larger channel capacities require an explicit template specialization |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
+| Parallel Dynamics Mixer | `parallel_dynamics.hpp` | Transactional true-stereo dry/processed-wet blend with explicit latency and tail propagation |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
 

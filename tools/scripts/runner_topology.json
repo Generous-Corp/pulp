@@ -108,7 +108,7 @@
     },
     {
       "variable": "PULP_RELEASE_MACOS_RUNS_ON_JSON",
-      "purpose": "release-cli arm64 macOS build lane. Deliberately UNSET: release-cli.yml resolves PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so leaving it unset routes releases to the self-hosted Studio/M5 pool that already backs the required `macos` gate. That IS the local-first state and is why the hosted pool starving release-cli for hours (2026-05-18, 2026-06-09) no longer blocks publishing; release-cli is tag-only and checkout runs clean:true, so it neither starves the gate nor inherits a warm dir. Setting this variable overrides that chain and is only correct for a proven dedicated release lane.",
+      "purpose": "release-cli arm64 macOS build lane. SET to the dedicated `pulp-build-vm-release` ephemeral Tart pool — a proven dedicated release lane, served by JIT slots that register only while a job runs (judge it on service evidence, never the runner census; see service_evidence). Resolution in release-cli.yml is PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so UNSETTING this variable is the break-glass rollback: releases then share the self-hosted Studio/M5 pool that backs the required `macos` gate — safe because release-cli is tag-only and its checkout runs clean:true, so it neither starves the gate nor inherits a warm dir (why the hosted-pool starvation incidents of 2026-05-18 and 2026-06-09 no longer block publishing). unset_fallback records that rollback labelset.",
       "expect": [
         "self-hosted",
         "macOS",

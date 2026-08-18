@@ -55,9 +55,14 @@ jobs:
 
       - name: Configure (mirrors release-cli.yml)
         run: |
+          # Examples OFF to match release-cli.yml. The Build CLI step below
+          # deliberately builds with no --target, so with examples ON this
+          # job compiled the whole examples tree to package three binaries
+          # (pulp, pulp-cpp, pulp-mcp) that none of it contributes to.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \
             -DPULP_BUILD_WEBVIEW=ON
@@ -69,7 +74,15 @@ jobs:
         # binary named `pulp`), so `--target pulp` fails with "No rule to make
         # target 'pulp'" — a latent bug in this dry-run since the Phase-8
         # rename. Building all also produces pulp-cpp + pulp-mcp for packaging.
-        run: cmake --build build --config Release
+        # Explicit full-core parallelism, mirroring release-cli.yml's Build
+        # step — without it the Unix Makefiles generator runs `make` with no
+        # -j (serial), and this rehearsal lane's timing stops resembling the
+        # real release it exists to rehearse.
+        run: |
+          set -euo pipefail
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+          echo "Build parallelism: --parallel ${jobs}"
+          cmake --build build --config Release --parallel "$jobs"
         shell: bash
 
       - name: Package CLI (dry-run — no upload)

@@ -44,6 +44,15 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/dynamics_contract.hpp": "Pulp::signal",
     "pulp/signal/explicit_q_resonator_bank.hpp": "Pulp::signal",
     "pulp/signal/expander.hpp": "Pulp::signal",
+    "pulp/signal/auto_ducked_send.hpp": "Pulp::signal",
+    "pulp/signal/early_reflections.hpp": "Pulp::signal",
+    "pulp/signal/comb_filter.hpp": "Pulp::signal",
+    "pulp/signal/filter_morph.hpp": "Pulp::signal",
+    "pulp/signal/formant_filter_bank.hpp": "Pulp::signal",
+    "pulp/signal/graphic_eq.hpp": "Pulp::signal",
+    "pulp/signal/tilt_eq.hpp": "Pulp::signal",
+    "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
+    "pulp/signal/transfer_curve.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
@@ -115,6 +124,28 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/reverse_buffer.hpp",
+        "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Prepared fixed-capacity streaming window reversal with explicit boundary "
+            "shaping and a finite tail; it is a bounded buffering surface reused by "
+            "effects rather than an advertised generator DSP claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/tempo_delay.hpp",
+        "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo "
+            "range; it is a bounded conversion surface reused by delay kernels rather "
+            "than an advertised generator DSP claim."
+        ),
+    },
     {
         "include": "pulp/audio/planar_audio_ring_buffer.hpp",
         "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
@@ -519,8 +550,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/frequency_response.hpp",
+        "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
+        ),
+    },
+    {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:1c9fe098556fe4284de6960ebcc8d06d740429ffa27a4ebe4a1a909d92f2de81",
+        "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

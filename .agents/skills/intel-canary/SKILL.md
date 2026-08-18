@@ -77,6 +77,16 @@ release-cli" (this cross-compiled leg) now hold. `macos-15-intel` survives only
 as the Tier-2 nightly's native-silicon signal. See `docs/guides/intel-support.md`
 → "Shipped Intel artifacts".
 
+**Whether the darwin-x64 leg runs at all is now governed by
+`active_platforms`** in `tools/scripts/release_product_matrix.json` (leg
+config in `release_build_matrix.py`). When the field lists a subset without
+`darwin-x64`, the Intel release leg is paused: no artifact ships AND no
+Intel release compile happens, so an Intel regression lands unnoticed for
+the duration. The pause is deliberately time-boxed —
+`release-platform-subset-check.yml` opens a tracking issue after 7 days of
+subset. When judging "why did no Intel artifact ship for vX.Y.Z", check that
+field for the era before suspecting the cross-compile leg.
+
 ## The five lint classes (and why they are scoped the way they are)
 
 1. Raw NEON intrinsics / `arm_neon.h` outside an `__aarch64__`/`__ARM_NEON`

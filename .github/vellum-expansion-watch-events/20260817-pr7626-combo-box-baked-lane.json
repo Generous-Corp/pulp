@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7626-combo-box-baked-lane",
+  "created_at": "2026-08-17T07:06:59Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record teaching the baked C++ lowering lane about combo_box, which its widget switch omitted while the runtime materializer handled it, so an imported dropdown baked as a bare View that rendered and did nothing. The option list moves onto the shared ImportedWidgetSemantics so both lowerers read one field, and the emitter switch becomes exhaustive over NativeWidgetKind. Watch-only: no design-import or rendering authority is transferred, and no existing kind changes behavior.",
+  "tests": [
+    "generate_pulp_cpp bakes a dropdown as a ComboBox, not a bare View",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

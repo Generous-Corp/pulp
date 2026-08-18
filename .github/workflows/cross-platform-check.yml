@@ -74,7 +74,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+          # Examples OFF, matching the build.yml legs this job mirrors. The
+          # examples tree is 89 extra executables; building it pushed every
+          # leg past `timeout-minutes: 60`, so this workflow reported a
+          # cancelled build instead of the cross-platform signal it exists to
+          # provide. Example compile coverage stays with nightly-full-build
+          # (macOS, examples ON) and examples-validation.
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Build
         shell: bash
@@ -133,7 +139,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+          # Examples OFF, matching the build.yml legs this job mirrors. The
+          # examples tree is 89 extra executables; building it pushed every
+          # leg past `timeout-minutes: 60`, so this workflow reported a
+          # cancelled build instead of the cross-platform signal it exists to
+          # provide. Example compile coverage stays with nightly-full-build
+          # (macOS, examples ON) and examples-validation.
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Build
         shell: bash
@@ -192,7 +204,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+          # Examples OFF, matching the build.yml legs this job mirrors. The
+          # examples tree is 89 extra executables; building it pushed every
+          # leg past `timeout-minutes: 60`, so this workflow reported a
+          # cancelled build instead of the cross-platform signal it exists to
+          # provide. Example compile coverage stays with nightly-full-build
+          # (macOS, examples ON) and examples-validation.
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Build
         shell: bash

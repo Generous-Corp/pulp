@@ -49,6 +49,16 @@ public:
     /// 1:1, which matches HTML default for path data with no viewBox.
     void set_viewbox(float width, float height);
 
+    /// Stretch the viewbox onto the widget's bounds instead of fitting it —
+    /// SVG's `preserveAspectRatio="none"`. The two axes then scale
+    /// independently and nothing is centred, so the drawing spans the whole
+    /// box rather than being letterboxed inside it.
+    ///
+    /// No effect when the viewbox is unset: the 1:1 fallback already maps the
+    /// bounds onto themselves.
+    void set_stretch_to_bounds(bool stretch);
+    bool stretch_to_bounds() const { return stretch_to_bounds_; }
+
     /// Solid-fill paint. Pass an alpha-zero color or call clear_fill()
     /// to disable filling. Default: opaque black, fill enabled.
     void set_fill_color(canvas::Color c);
@@ -146,6 +156,7 @@ private:
     canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;  // pulp #3656
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"
     float viewbox_h_ = 0.0f;
+    bool stretch_to_bounds_ = false;  // preserveAspectRatio="none"
     bool has_fill_ = true;
     bool has_stroke_ = false;
 };

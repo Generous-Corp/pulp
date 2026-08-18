@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7632-sanitizer-runtime-closure-guard",
+  "created_at": "2026-08-17T08:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Register two test targets in test/cmake/view_widget_bridge_tests.cmake and guard seven trusted-host launch cases on PULP_TEST_WITH_SANITIZER. A sanitizer build links libclang_rt.*_osx_dynamic.dylib into every launched child, which the trusted-host runtime-closure policy correctly rejects as an unpinned foreign image, so those cases can only report a false red on the sanitizer lane. The production policy in inspect/src/control_trusted_host_inventory.cpp is deliberately unchanged — relaxing it would delete the property under test — and the guarded cases still run and still gate on every non-sanitizer lane. No visual-proof, screenshot, capture, or harness behavior is altered; the touched file is a test-registration manifest.",
+  "tests": [
+    "the runtime-closure sanitizer guard matches this build (asserts the skip fires under PULP_TEST_WITH_SANITIZER and does NOT fire otherwise; confirmed by inverting the guard and observing failure in both directions)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

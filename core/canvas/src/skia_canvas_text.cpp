@@ -16,10 +16,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <list>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+
+#include <pulp/canvas/font_scope.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkCanvas.h"
@@ -94,11 +98,133 @@ SkFontStyle::Slant skia_slant(int slant) {
     return SkFontStyle::kUpright_Slant;
 }
 
+// `paragraph` is shared rather than uniquely owned so make_paragraph() can
+// hand out a cached instance. Sharing is safe here: no caller mutates the
+// paragraph's structure — two call sites paint it, the rest read `advance` or
+// query getRectsForRange — and the cache is per-thread, so the text-blob cache
+// that paint() populates lazily is never touched from two threads at once. A
+// shared_ptr also means an entry evicted while a caller still holds it stays
+// alive until that caller is done.
 struct PreparedParagraph {
-    std::unique_ptr<skia::textlayout::Paragraph> paragraph;
+    std::shared_ptr<skia::textlayout::Paragraph> paragraph;
     float advance = 0;
     float alphabetic_baseline = 0;
 };
+
+namespace {
+
+// ── Paragraph cache ─────────────────────────────────────────────────────────
+//
+// Building a paragraph is the dominant cost of a text draw: it parses the CSS
+// family list, constructs a TextStyle, allocates a ParagraphBuilder, and runs
+// HarfBuzz shaping plus layout. A continuously repainting canvas redraws the
+// same immutable ruler and axis labels every frame, so all of that recurs at
+// frame rate to produce a byte-identical result.
+//
+// The key carries every input that can change the shaped or painted output.
+// The fill paint is part of it because make_paragraph bakes the paint into the
+// TextStyle — a cache keyed only on the string would render one label in
+// another's colour. Rather than trust a hash of an arbitrary SkPaint, only
+// PLAIN paints participate: a paint carrying a shader, colour/image/mask
+// filter, path effect, or a non-default blend mode is left to build a fresh
+// paragraph exactly as before. That keeps gradient text, CSS `filter`, and
+// Canvas2D shadows correct by construction instead of by hash fidelity.
+struct ParagraphCacheKey {
+    std::string text;
+    std::string family;
+    float size = 0.0f;
+    int weight = 0;
+    int slant = 0;
+    float letter_spacing = 0.0f;
+    bool ltr = true;
+    float color[4] = {0, 0, 0, 0};
+    std::vector<Canvas::FontFeature> features;
+    std::uint64_t generation = 0;
+    bool operator==(const ParagraphCacheKey&) const = default;
+};
+
+struct ParagraphCacheKeyHash {
+    std::size_t operator()(const ParagraphCacheKey& k) const noexcept {
+        std::size_t h = std::hash<std::string>{}(k.text);
+        const auto mix = [&h](std::size_t v) {
+            h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        mix(std::hash<std::string>{}(k.family));
+        mix(std::hash<float>{}(k.size));
+        mix(static_cast<std::size_t>(k.weight));
+        mix(static_cast<std::size_t>(k.slant));
+        mix(std::hash<float>{}(k.letter_spacing));
+        mix(static_cast<std::size_t>(k.ltr));
+        for (float c : k.color) mix(std::hash<float>{}(c));
+        for (const auto& f : k.features) {
+            mix(static_cast<std::size_t>(f.tag));
+            mix(static_cast<std::size_t>(f.value));
+        }
+        mix(std::hash<std::uint64_t>{}(k.generation));
+        return h;
+    }
+};
+
+// A paragraph is a much heavier object than an SkFont, so this bound is about
+// memory, not lookup cost. A UI's distinct (string, style) set is typically a
+// few dozen entries; 256 leaves room for a numeric readout cycling through
+// values alongside the static labels.
+//
+// Eviction is least-recently-used, NOT clear-on-overflow. The distinction
+// matters for exactly the workload this cache targets: an analyzer frame draws
+// a dozen immutable labels plus one readout whose text changes every frame.
+// The changing string inserts a new entry per frame, so a clear-on-overflow
+// policy would periodically discard the twelve entries that were actually
+// earning their keep and re-shape them from scratch — the churn this cache
+// exists to remove. LRU evicts the single-use readout entries instead and
+// leaves the labels resident.
+constexpr std::size_t kParagraphCacheMax = 256;
+
+// Small LRU over the paragraph key. `order` holds keys most-recent-first;
+// each map entry keeps an iterator into it so a hit is a splice rather than a
+// search.
+class ParagraphCache {
+public:
+    const PreparedParagraph* find(const ParagraphCacheKey& key) {
+        auto it = map_.find(key);
+        if (it == map_.end()) return nullptr;
+        order_.splice(order_.begin(), order_, it->second.pos);  // mark recent
+        return &it->second.value;
+    }
+
+    void put(ParagraphCacheKey key, PreparedParagraph value) {
+        if (map_.find(key) != map_.end()) return;  // keep the resident entry
+        while (map_.size() >= kParagraphCacheMax && !order_.empty()) {
+            map_.erase(order_.back());
+            order_.pop_back();
+        }
+        order_.push_front(key);
+        map_.emplace(std::move(key), Entry{std::move(value), order_.begin()});
+    }
+
+private:
+    struct Entry {
+        PreparedParagraph value;
+        std::list<ParagraphCacheKey>::iterator pos;
+    };
+    std::list<ParagraphCacheKey> order_;
+    std::unordered_map<ParagraphCacheKey, Entry, ParagraphCacheKeyHash> map_;
+};
+
+// Only a paint whose entire contribution is its colour can be represented in
+// the key. Anything else builds fresh.
+bool paint_is_cacheable(const std::optional<SkPaint>& paint) {
+    if (!paint.has_value()) return true;
+    const SkPaint& p = *paint;
+    if (p.getShader() || p.getColorFilter() || p.getImageFilter()
+        || p.getMaskFilter() || p.getPathEffect()) {
+        return false;
+    }
+    const auto blend = p.asBlendMode();
+    return blend.has_value() && *blend == SkBlendMode::kSrcOver;
+}
+
+}  // namespace
 
 PreparedParagraph make_paragraph(const std::string& text,
                                   const std::string& family,
@@ -111,6 +237,32 @@ PreparedParagraph make_paragraph(const std::string& text,
                                   const std::vector<Canvas::FontFeature>& features = {}) {
     PreparedParagraph result;
     if (text.empty()) return result;
+
+    // Per-thread: measurement can run off the paint thread, and keeping the
+    // cache thread-local means a cached paragraph is never painted from two
+    // threads at once (paint() lazily populates a text-blob cache).
+    thread_local ParagraphCache cache;
+    const bool use_cache =
+        pulp::canvas::text_cache_enabled() && paint_is_cacheable(foreground_paint);
+    ParagraphCacheKey key;
+    if (use_cache) {
+        key.text = text;
+        key.family = family;
+        key.size = size;
+        key.weight = weight;
+        key.slant = slant;
+        key.letter_spacing = letter_spacing;
+        key.ltr = ltr;
+        if (foreground_paint.has_value()) {
+            const SkColor4f c = foreground_paint->getColor4f();
+            key.color[0] = c.fR; key.color[1] = c.fG;
+            key.color[2] = c.fB; key.color[3] = c.fA;
+        }
+        key.features = features;
+        key.generation = pulp::canvas::text_cache_generation();
+        if (const PreparedParagraph* hit = cache.find(key)) return *hit;
+    }
+
     auto ctx = pulp::canvas::TextFontContext::shared();
     auto fc = ctx->font_collection();
     if (!fc) return result;
@@ -226,6 +378,8 @@ PreparedParagraph make_paragraph(const std::string& text,
                               paragraph->getMaxIntrinsicWidth());
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
     result.paragraph = std::move(paragraph);
+
+    if (use_cache) cache.put(std::move(key), result);
     return result;
 }
 

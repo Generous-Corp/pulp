@@ -1905,6 +1905,10 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
             ss << ind << "setSvgViewBox('" << id << "', "
                << vals[2] << ", " << vals[3] << ");\n";
     }
+    // Emitted only for `none`; `xMidYMid meet` is the widget default.
+    if (auto aspect = node.attributes.find("svg_preserve_aspect_ratio");
+        aspect != node.attributes.end() && aspect->second == "none")
+        ss << ind << "setSvgStretchToBounds('" << id << "', true);\n";
     if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
         ss << ind << "setSvgFill('" << id << "', '"
            << js_single_quote_escape(f->second) << "');\n";

@@ -42,7 +42,16 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // progress it never terminates, and the app spins on a build that
         // exited immediately.
         contains(lower, "already running against this module pack") ||
-        contains(lower, "generation cancelled by user")) {
+        contains(lower, "generation cancelled by user") ||
+        // The curation gates: the request is understood and declined because
+        // no validated capability backs it. Nothing is sent to the model, so
+        // the run ends here and the wording IS the answer -- as unmatched
+        // progress it left the app spinning on a build that stopped seconds in.
+        contains(lower, "no curated per-sample dsp capability matches this module request.") ||
+        contains(lower, "the curated shortlist has helpers but lacks the requested core") ||
+        contains(lower, "this request matches only generic module helpers and no direct") ||
+        contains(lower, "the requested structure has no port-complete installed module") ||
+        contains(lower, "the refinement base does not pass current static checks")) {
         return BuildLine::Kind::refusal;
     }
 
@@ -78,6 +87,14 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         contains(lower, "gave up after") ||
         contains(lower, "model call failed") ||
         contains(lower, "generation stop failed") ||
+        // The account, not the machine. A model with no quota left ends the
+        // run exactly as a login failure does, and it is what a person hits
+        // after a busy day rather than a misconfiguration. Unmatched it read
+        // as progress: the generator was already dead while the app still
+        // showed "Thinking... 1m 55s elapsed".
+        contains(lower, "is out of quota") ||
+        contains(lower, "usage limit") ||
+        contains(lower, "quota exceeded") ||
         contains(lower, "model cli is not logged in") ||
         contains(lower, "could not fetch the library catalog") ||
         contains(lower, "could not fetch the module index") ||
@@ -89,11 +106,41 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // person can fix in a minute once they are told.
         contains(lower, "is missing something") ||
         contains(lower, "is not installed, so nothing can be generated") ||
-        contains(lower, "the rack sdk is not installed") ||
+        // Kept deliberately even though no generator prints it during a BUILD:
+        // it is raised at import/setup, before a run starts, and matching it
+        // costs nothing. Removing it as "orphaned" made the app read that
+        // ending as ordinary progress.
         contains(lower, "rack sdk not found") ||
+        contains(lower, "the rack sdk is not installed") ||
         contains(lower, "could not download the rack sdk") ||
         contains(lower, "unknown setting") ||
-        contains(lower, "two manifests claim")) {
+        contains(lower, "two manifests claim") ||
+        // Argument handling that reaches a watched log, because the app builds
+        // the command line: a rejected flag ends the run with nothing to open.
+        contains(lower, "--base requires an existing .vcv path") ||
+        contains(lower, "--response-file requires a saved response path") ||
+        contains(lower, "--retries requires a non-negative integer") ||
+        contains(lower, "--keep-on-fail is disabled: a failed attempt must not poison the") ||
+        // Evidence and prompt-record I/O. These reserve a file BEFORE the model
+        // call, so failing here means the run stopped without spending anything.
+        contains(lower, "cannot read refinement base") ||
+        contains(lower, "cannot read saved model response") ||
+        contains(lower, "cannot reserve generation evidence before the model call") ||
+        contains(lower, "cannot reserve the model response before the call") ||
+        contains(lower, "cannot write requested output") ||
+        contains(lower, "cannot write generated patches directory") ||
+        contains(lower, "model prompt record exhausted its") ||
+        contains(lower, "refusing to overwrite model prompt record") ||
+        contains(lower, "saved model response is empty") ||
+        contains(lower, "the codex prompt has malformed inventory boundary markers;") ||
+        contains(lower, "the codex prompt is too large to send inline and has no") ||
+        contains(lower, "the curated dsp capability selection was not valid json") ||
+        // An install that cannot proceed: a missing pack, a toolchain that did
+        // not land, or a generator copy shipped without its payload.
+        contains(lower, "the module pack at") ||
+        contains(lower, "the toolchain could not be installed, so no module can be built.") ||
+        contains(lower, "the toolchain reported success but") ||
+        contains(lower, "this copy of the generator is incomplete, so a module cannot be")) {
         return BuildLine::Kind::error;
     }
 

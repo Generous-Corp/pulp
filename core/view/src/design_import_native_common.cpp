@@ -1953,6 +1953,22 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
             skin.ring_radius_scale + (skin.ring_width * 0.5f) / box;
     }
 
+    // The value layer is drawn only where the DESIGN put one. The derivations
+    // above answer "where", but "whether" belongs to the author: a knob that is
+    // a plain gradient dial in the capture must be a plain gradient dial in the
+    // native render. Synthesizing a ring the author never drew — accent fill,
+    // grey track, riding outside the authored dial — is our art on their
+    // control, and it is exactly what the strict-fidelity diff lit up on every
+    // knob of a captured panel. A declared ring radius authorizes the ring (and
+    // the tick that reads against it); an authored pointer authorizes only the
+    // pointer.
+    const bool declared_ring =
+        attr_float(node, "design_ring_radius").value_or(0.0f) > 0.0f;
+    const bool authored_pointer =
+        attr_float(node, "knob_ind_r_out").value_or(0.0f) > 0.0f;
+    skin.draw_ring = declared_ring;
+    skin.draw_indicator = declared_ring || authored_pointer;
+
     // A design that DREW its own pointer says exactly where it belongs, and
     // that wins over the derivation above — the derivation is what runs when
     // the design is silent, not a preference.
@@ -2149,16 +2165,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return editor;
         }
         case NativeWidgetKind::combo_box: {
-            // A captured "Dropdown" frame → an interactive ComboBox. Its text
-            // child is the selected value, and that is the ONLY real option: a
-            // static design defines no alternatives, so emit just the shown value
-            // rather than fabricating "Option 2/3" placeholders. A design that
-            // carries component variants would source the full list from them.
+            // A captured "Dropdown" frame → an interactive ComboBox. The option
+            // list comes from the shared semantic model so the baked C++ lane
+            // builds the identical control from the identical list.
             auto combo = std::make_unique<ComboBox>();
-            std::string selected = first_text_descendant(node).value_or(text);
-            std::vector<std::string> items;
-            if (!selected.empty()) items.push_back(selected);
-            combo->set_items(std::move(items));
+            combo->set_items(semantics.combo_items);
             combo->set_selected_silent(0);
             return combo;
         }
@@ -2371,6 +2382,10 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             }
             if (svg->viewbox_width() <= 0.0f && node.style.width && node.style.height) {
                 svg->set_viewbox(*node.style.width, *node.style.height);
+            }
+            if (auto aspect = attr(node, "svg_preserve_aspect_ratio");
+                aspect && *aspect == "none") {
+                svg->set_stretch_to_bounds(true);
             }
             apply_svg_paint(*svg, node);
             return svg;
@@ -2771,6 +2786,13 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     // binding descriptor's count.
     if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
         out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
+    // A dropdown's shown value is its only real option in a static design.
+    // Resolved here, in the shared model, so the runtime materializer and the
+    // baked C++ lane build the same ComboBox from the same list.
+    if (resolved.kind == NativeWidgetKind::combo_box) {
+        std::string selected = first_text_descendant(node).value_or(out.text);
+        if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+    }
     out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");

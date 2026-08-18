@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260816-authored-knob-value-layer",
+  "created_at": "2026-08-16T23:18:41Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record gating a designed knob's value layer on authored art so the imported design owns its own visual language, replacing an unconditional mod-ring gauge painted over every authored knob. Watch-only: no design-import or rendering authority is transferred.",
+  "tests": [
+    "a designed knob without an authored value layer paints none",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

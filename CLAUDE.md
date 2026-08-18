@@ -448,25 +448,6 @@ the authoritative block is the CLI `validate` gate plus CI required checks, not
 a hook. Non-obvious "wrong-looking" rows are scar tissue; find the incident
 before proposing removal.
 
-### Language: American English, everywhere
-
-Pulp is written in **American English** — identifiers, comments, docs, and commit
-messages alike. This is a consistency rule, nothing more: a codebase with one
-spelling per word is greppable and guessable, while a mix of `color`/`colour` or
-`normalize`/`normalise` forces every reader to remember which spelling the author
-reached for. It is not aimed at any contributor or dialect; it is house style.
-
-- **Contributions in another dialect are rewritten**, not rejected. Run
-  `python3 tools/scripts/us_english_check.py --fix` to apply the house spelling,
-  then review the diff.
-- The gate (`us_english_check.py`) runs in the pre-push `gates.sh` and in CI
-  (`version-skill-check.yml`), and hard-fails on a non-US spelling in Pulp's own
-  source. Its dictionary is deliberately conservative — only words with a single
-  unambiguous American form (so `canceled`/`cancelled` and `gray`/`grey`, both
-  current in US usage, are NOT flagged).
-- A genuine external contract (a foreign API symbol, a value quoted verbatim from
-  a third-party licence) is exempted via `EXEMPT_SUBSTRINGS` in that script — use
-  it sparingly, and only when the spelling is not ours to change.
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
 Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
@@ -519,6 +500,49 @@ When assessing what features exist or what claims are accurate, **always check t
 - Phase completion judgments (check what's merged to main, not what a planning doc says)
 
 Run `git ls-tree -r --name-only origin/main <path>` or `git log --oneline origin/main -- <path>` to verify claims before reporting them.
+
+### Pair every NEGATIVE finding with a control that must return non-zero
+
+**A measurement aimed at the wrong target almost never errors. It succeeds and returns empty.**
+So "0 results", "not found", "nothing running", "the queue is empty" is ambiguous by
+construction: it means *either* the thing is absent *or* you measured the wrong thing. Nothing in
+the output distinguishes those, and the wrong one is the one that reads as a clean, confident
+finding.
+
+**The rule: before reporting any absence, run a second query on the SAME instrument and the SAME
+target that MUST return non-zero. If the control also returns zero, your instrument is broken —
+report nothing.**
+
+Three real instances from a single night, each by a different agent, each caught only by the
+control:
+
+| what was run | what it returned | what was actually wrong |
+|---|---|---|
+| `rg -l "merge-stall" .github/workflows/` | 0 files → "the workflow does not exist" | the worktree was on a feature branch, not `main` |
+| `strings $(which shipyard) \| grep …` | 0 hits → "Shipyard does not consume this" | `which` resolved to a shell function; `strings` read nothing |
+| `git ls-tree origin/main …` | 0 files → "the path is empty" | cwd had drifted into the `planning` submodule |
+
+In the first case the control was *present but misread*: `runs-on` matched 56 files, which looked
+like a healthy instrument — but the same control returns 72 on `main`. **A control that returns
+non-zero only proves the tool ran. Compare its COUNT against the expected target** when the two
+could differ.
+
+Practical forms:
+
+```sh
+# absence in the repo — measure the REF, never the working tree
+git grep -c "<pattern>" origin/main -- <path>     # the finding
+git grep -c "<a-pattern-that-must-exist>" origin/main -- <path>   # the control
+
+# absence of a live resource — a level value cannot prove "never"
+# one reading of an empty queue / idle pool / zero count is a SNAPSHOT.
+# To claim "never", sample over time or find the mechanism that forbids it.
+```
+
+**A destruction or absence claim deserves MORE verification than a routine one**, not less — it
+is precisely the claim others will act on without re-checking. Before asserting something was
+lost, look for the second copy (workflow artifacts, a branch ref, a cache) rather than inferring
+its absence from not having looked.
 
 ### Structure
 
@@ -1684,6 +1708,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
 | `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
 | `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
+| `canvas-text` | Canvas2D text path: SkParagraph/SkFont behind fill_text, the two font-generation counters, family-list cost, paragraph-cache constraints |
 | `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
 | `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
 | `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |

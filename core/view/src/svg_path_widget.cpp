@@ -646,6 +646,12 @@ void SvgPathWidget::set_viewbox(float w, float h) {
     request_repaint();
 }
 
+void SvgPathWidget::set_stretch_to_bounds(bool stretch) {
+    if (stretch_to_bounds_ == stretch) return;
+    stretch_to_bounds_ = stretch;
+    request_repaint();
+}
+
 void SvgPathWidget::set_fill_color(canvas::Color c) {
     fill_color_ = c;
     has_fill_ = true;
@@ -715,14 +721,23 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
 
     canvas.save();
-    // xMidYMid meet — preserve aspect, center, scale to fit.
     const float sx = b.width / vw;
     const float sy = b.height / vh;
-    const float scale = std::min(sx, sy);
-    const float ox = (b.width  - vw * scale) * 0.5f;
-    const float oy = (b.height - vh * scale) * 0.5f;
-    canvas.translate(ox, oy);
-    canvas.scale(scale, scale);
+    if (stretch_to_bounds_) {
+        // preserveAspectRatio="none" — each axis maps the viewbox onto the
+        // bounds on its own, and nothing is centred because nothing is left
+        // over. A stroke authored in user units is scaled anisotropically by
+        // the same transform, which is what SVG specifies: the pen deforms
+        // with the drawing rather than staying round.
+        canvas.scale(sx, sy);
+    } else {
+        // xMidYMid meet — preserve aspect, center, scale to fit.
+        const float scale = std::min(sx, sy);
+        const float ox = (b.width  - vw * scale) * 0.5f;
+        const float oy = (b.height - vh * scale) * 0.5f;
+        canvas.translate(ox, oy);
+        canvas.scale(scale, scale);
+    }
 
     canvas.begin_path();
     for (const auto& seg : segments_) {

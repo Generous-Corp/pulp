@@ -8,8 +8,6 @@
 namespace pulp::timebase {
 namespace {
 
-constexpr double kMinimumBpm = 1.0;
-constexpr double kMaximumBpm = 1'000.0;
 constexpr long double kInt64MaximumRoundingBoundary = 9'223'372'036'854'775'807.5L;
 
 std::int64_t rounded_and_clamped(long double value) noexcept {
@@ -40,7 +38,7 @@ std::uint64_t integer_distance(std::int64_t lhs, std::int64_t rhs) noexcept {
 }
 
 bool valid_bpm(double bpm) noexcept {
-    return std::isfinite(bpm) && bpm >= kMinimumBpm && bpm <= kMaximumBpm;
+    return std::isfinite(bpm) && bpm >= kMinimumCompiledTempoBpm && bpm <= kMaximumCompiledTempoBpm;
 }
 
 } // namespace

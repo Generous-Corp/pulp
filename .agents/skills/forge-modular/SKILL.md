@@ -896,6 +896,91 @@ The authoritative check runs `classify()` itself.
 `reason.sh` is the shared "why did it stop" shim, for the same reason `cap.sh`
 is shared: this rule already existed twice and both copies were wrong.
 
+### An inert input usually means a DEFAULT, not a miswired jack
+
+`input N changes no output when connected versus muted` is the gate telling the
+truth about a module whose DSP is correct. The commonest cause is a modulated
+param whose **default** sits in a flat region of its law, where the CV is added
+to a knob position that cannot move.
+
+`AnalogVcfT`'s **minimoog** voicing is the one that bites:
+
+```cpp
+kMinimoogResonanceKnots  { 0.0,  0.25, 0.50, 0.60, 0.75, 0.90, 1.0 }
+kMinimoogResonanceValues { 0.079, 0.079, 0.079, 0.52, 0.90, 0.97, 1.0 }
+```
+
+Knob 0.0–0.50 all map to 0.079, so a resonance CV on a knob defaulted at 0.30
+produces **bit-identical** output — measured at every tone from 110 Hz to 8 kHz,
+not merely "too small to detect". It is a measured calibration curve: a real
+Minimoog's resonance control does nothing over its lower half. **Minimoog only**
+— Juno, Jupiter and Prophet are monotonic from zero and need no floor.
+
+Measured against the gate's `1e-6` threshold with the gate's own +0.05 CV:
+
+| knob default | rms_diff | |
+|---|---|---|
+| 0.30 | 0.000000000 | fails |
+| 0.50 | 0.126 | passes |
+| 0.55 | 0.100 | passes |
+| 0.60 | 0.078 | passes |
+
+**The param sweep cannot catch this.** Section 1 of the gate moves each knob
+across its FULL range, where such a law does move, so the knob reads as live.
+Only the default position is dead.
+
+So the gate re-probes with params pushed to 0.75 of range and says which it is:
+a wired jack whose default is at fault, or a genuinely dead one. `--retries`
+defaults to 1 so the model can act on that; before the message was actionable a
+retry only reproduced the same failure at the price of a model call.
+
+**Proving a fix here needs the real gate, not a filter probe.** Driving
+`AnalogVcfT` directly proves the FILTER responds; it says nothing about whether
+the gate accepts a module built that way. Use the replay harness, which runs
+validation, compile, behaviour and packaging with **zero model calls**:
+
+```
+python3 tools/rack/generate.py --response-file <saved-response> "<prompt>"
+```
+
+Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-response.txt`.
+Change one line in a copy, replay both, and the control/test differ by exactly
+that line.
+
+**Generation writes into the pack**, so never run it inside a checkout you are
+using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and
+the next Forge configure fails.
+
+### A guard nothing runs goes stale silently, and this one did
+
+That test was written, was correct, and exited 1 — and **nothing ever ran it**.
+It carried no ctest registration, so it drifted by **24 unmatched endings**
+while reporting them accurately to an empty room. The app hung on the plainest
+possible case: the curation gates end a run before anything reaches the model,
+so a mistyped prompt produced a spinner that never resolved, with the reason
+sitting in the log.
+
+The list and the checker are therefore one change, never two. Fixing the
+endings without registering the check just resets the clock to the next drift.
+It now runs as ctest `rack-generator-endings` (labels `rack;contract`, ~0.04 s,
+pure Python — no Rack SDK, so it must never be gated on `PULP_HAS_RACK`).
+
+Two things worth knowing before trusting a green run of it:
+
+- **Prove it can go red.** Delete one ending from `build_monitor.cpp` and
+  confirm the ctest fails, then restore. `tools/scripts/confirm_failure.sh`
+  automates that loop and handles the same-second-mtime trap that makes a
+  hand-rolled version report a false verdict in either direction.
+- **Classify a curation gate as a `refusal`, not an `error`.** Nothing broke:
+  the request was understood and declined, and the wording is the whole answer
+  because no model call was made. `outcome_of` ranks refused and failed alike
+  as terminal, so either ends the spinner — but only one of them tells the
+  truth on screen.
+
+Registration is the general point, not a detail of this test: 42 of the 48
+`tools/rack/test_*.py` harnesses have no ctest entry. Some gate on Rack or the
+network deliberately; a pure-source checker never should.
+
 ### Headless runs use the app's saved model, or do not run
 
 `tools/rack/with_app_model_selection.py -- <command>` snapshots Forge Modular's

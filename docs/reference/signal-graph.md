@@ -400,6 +400,47 @@ silently interpreted as current data.
 - **Load** (`PluginSlot::load`) runs on a worker thread; the returned
   slot is handed to the graph only after it's fully loaded.
 
+## Offline rendering: two hosts, and why
+
+There are two offline paths and picking the wrong one renders silence rather
+than failing, so the distinction is worth stating plainly.
+
+`OfflineSignalGraphHost` drives the **no-transport** `SignalGraph::process()`
+overload. Its contract is that block partitioning is the *only* difference
+between an online and an offline render, which is what makes "same graph, any
+block size, same output" a meaningful check. Nothing it renders receives host
+transport.
+
+`render_timeline_offline()` (`pulp/host/timeline_offline_renderer.hpp`) exists
+because Timeline graph nodes need the opposite: note scheduling, automation
+evaluation and PDC all read the exact transport state for the block being
+rendered. Its loop is `MasterTransport::begin_block()` →
+`TimelineGraphPlaybackBinding::process()`. **Driving a timeline slice through
+`OfflineSignalGraphHost` does not error — it produces silence**, because the
+nodes never see a transport.
+
+Three properties of the timeline renderer are contractual rather than
+incidental:
+
+- **Bounds are ticks, derived through the program's own compiled tempo map.**
+  A tempo change inside the region is therefore honoured exactly instead of
+  being approximated from a nominal rate. Tick→sample derivation that saturates
+  is rejected rather than clamped, because a saturated bound would silently turn
+  an absurd request into a plausible file.
+- **A region that does not start on a block boundary pre-rolls from tick origin
+  with output discarded.** Seeking straight to the region start would hand
+  stateful nodes an empty delay line and a cold PDC pipeline, so the region
+  would merely resemble the corresponding slice of a full bounce instead of
+  equalling it.
+- **It is fail-closed and one-shot.** Invalid ranges, exceeded limits, a
+  sample-rate disagreement, or a mid-render binding/transport failure return a
+  status and no audio. There is no partial success, because a truncated bounce
+  presents as a short file — the failure this contract exists to make
+  impossible.
+
+Stems, freeze, normalisation, adaptive tails and CLI rendering are out of scope;
+the renderer is scoped to deterministic Pulp nodes with anticipation disabled.
+
 ## Timeline playback adapter
 
 `TimelineGraphPlaybackBinding` lowers each phase-1 timeline track to a stable,

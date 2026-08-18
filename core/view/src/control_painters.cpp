@@ -42,16 +42,20 @@ void paint_mod_ring_knob(canvas::Canvas& canvas, const Rect& rect, float value,
     const float track_end = angle_at(1.0f);
     const float value_end = angle_at(value);
 
-    canvas.set_line_width(style.ring_width);
+    if (style.draw_track_and_fill) {
+        canvas.set_line_width(style.ring_width);
 
-    // Track: the whole range.
-    canvas.set_stroke_color(style.track);
-    canvas.stroke_arc(center.x, center.y, radius, track_start, track_end);
+        // Track: the whole range.
+        canvas.set_stroke_color(style.track);
+        canvas.stroke_arc(center.x, center.y, radius, track_start, track_end);
 
-    // Fill: the track redrawn from its start up to the value. Emitted after the
-    // track so the value-dependent sweep is the last arc on the stream.
-    canvas.set_stroke_color(style.ring);
-    canvas.stroke_arc(center.x, center.y, radius, track_start, value_end);
+        // Fill: the track redrawn from its start up to the value. Emitted after
+        // the track so the value-dependent sweep is the last arc on the stream.
+        canvas.set_stroke_color(style.ring);
+        canvas.stroke_arc(center.x, center.y, radius, track_start, value_end);
+    }
+
+    if (!style.draw_indicator) return;
 
     // Indicator: a mark pointing at the value.
     //

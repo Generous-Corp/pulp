@@ -292,6 +292,72 @@ class GovernedBuildTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertGreaterEqual(self._granted(r), 1)
 
+    # --- the live-build marker -----------------------------------------------
+    #
+    # Shipyard's local mac backend builds IN the checkout, so a validation run
+    # and an agent editing the tree share a directory with nothing between them.
+    # The marker exists so anything looking at the tree can see a build is live.
+    # Its pid is what makes it usable: the file necessarily outlives a SIGKILL,
+    # so presence alone proves nothing.
+
+    def _run_in_repo(self, script: str, repo: Path) -> subprocess.CompletedProcess:
+        env = {**os.environ, "PULP_TARTCI_LEASES": "0"}
+        return subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c", script],
+            capture_output=True, text=True, check=False, env=env, cwd=repo,
+        )
+
+    @staticmethod
+    def _git_repo(tmp: Path) -> Path:
+        subprocess.run(["git", "init", "-q", str(tmp)], check=True,
+                       capture_output=True)
+        return tmp
+
+    def test_marker_exists_while_the_build_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._git_repo(Path(tmp))
+            r = self._run_in_repo("cat .pulp-build-active", repo)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("pid=", r.stdout)
+            self.assertIn("started_epoch=", r.stdout)
+            self.assertIn("jobs=", r.stdout)
+
+    def test_marker_records_the_running_pid(self) -> None:
+        """A reader probes this pid; a marker without it cannot be acted on."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._git_repo(Path(tmp))
+            r = self._run_in_repo(
+                'grep "^pid=" .pulp-build-active | cut -d= -f2', repo)
+            pid = int(r.stdout.strip())
+            self.assertGreater(pid, 0)
+
+    def test_marker_is_removed_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._git_repo(Path(tmp))
+            self._run_in_repo("true", repo)
+            self.assertFalse((repo / ".pulp-build-active").exists())
+
+    def test_marker_is_removed_when_the_build_fails(self) -> None:
+        """A failed build is over; leaving the marker would cry wolf."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._git_repo(Path(tmp))
+            r = self._run_in_repo("exit 3", repo)
+            self.assertEqual(r.returncode, 3)
+            self.assertFalse((repo / ".pulp-build-active").exists())
+
+    def test_no_git_worktree_still_builds(self) -> None:
+        """Outside a checkout there is no tree to protect — build anyway."""
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self._run_in_repo("echo ran", Path(tmp))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("ran", r.stdout)
+
+    def test_marker_never_fails_the_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._git_repo(Path(tmp))
+            r = self._run_in_repo("true", repo)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     # --- script hygiene ------------------------------------------------------
 
     def test_script_exists_and_executable(self) -> None:
