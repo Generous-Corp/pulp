@@ -778,8 +778,22 @@ def _main(argv, resources: contextlib.ExitStack):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("prompt", help="what the module should do")
     ap.add_argument("--launch", action="store_true", help="open Rack with the new module")
-    ap.add_argument("--retries", type=int, default=0,
-                    help="compile-failure retries (default: 0; each retry is a model call)")
+    # One retry, not zero. A failure here is not a coin flip the model might win
+    # on a second roll -- it hands back `ctx` describing what went wrong, and a
+    # retry is the only thing that can USE that. At zero the loop exits before
+    # the feedback it just wrote is ever read.
+    #
+    # Zero was right while the messages were unactionable: "input N changes no
+    # output" told the model nothing to change, so a retry reproduced the same
+    # failure at the price of a model call. Now that an inert input reports
+    # whether the jack is wired and the DEFAULT is at fault, the retry has
+    # something to act on.
+    #
+    # Still costs a model call, and only on failure -- a run that passes first
+    # time is unaffected. Pass --retries 0 for batch work where a failed
+    # generation should stop rather than spend again.
+    ap.add_argument("--retries", type=int, default=1,
+                    help="retries after a failure (default: 1; each retry is a model call)")
     ap.add_argument("--keep-on-fail", action="store_true",
                     help="leave the failed sources in place for inspection")
     ap.add_argument("--response-file",

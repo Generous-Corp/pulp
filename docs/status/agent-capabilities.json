@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 32,
+  "manifest_revision": 33,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12003,6 +12003,39 @@
               "reset()",
               "encode(double x)",
               "decode(double x)"
+            ],
+            "enums": []
+          }
+        ],
+        "tempo_delay.hpp": [
+          {
+            "class": "TempoDelayResult",
+            "qualified_name": "pulp::signal::TempoDelayResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "TempoDelayTime",
+            "qualified_name": "pulp::signal::TempoDelayTime",
+            "template": null,
+            "methods": [
+              "prepare(double sample_rate, double maximum_delay_samples, std::uint32_t transition_samples = kDefaultTransitionSamples)",
+              "reset()",
+              "set_delay_samples(double samples)",
+              "set_tempo(timebase::BeatDivision division, double beats_per_minute)",
+              "next()",
+              "render(double* output, std::size_t sample_count)",
+              "prepared()",
+              "initialized()",
+              "transition_active()",
+              "remaining_transition_samples()",
+              "sample_rate()",
+              "maximum_delay_samples()",
+              "current_delay_samples()",
+              "target_delay_samples()"
             ],
             "enums": []
           }

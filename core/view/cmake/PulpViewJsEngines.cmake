@@ -6,6 +6,15 @@
 #   v8      → V8 via the pinned sealed libv8 (FindV8.cmake →
 #             external/v8-build/<platform>/, populated by
 #             tools/scripts/fetch_v8_for_release.py). Not supported on iOS.
+# The negative-contract probes in test/cmake/test_js_engine_selection.cmake load
+# this module through `cmake -P`, where no project has established policies and
+# CMP0057 therefore defaults to OLD on CMake 3.x. `IN_LIST` is then parsed as a
+# plain argument rather than an operator, so the validation below aborts with
+# "Unknown arguments specified" instead of its own diagnostic. Set the policy
+# explicitly so the module validates the same way however it is loaded.
+cmake_policy(PUSH)
+cmake_policy(SET CMP0057 NEW)
+
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
 set(_pulp_js_engine_choices auto quickjs jsc v8)
@@ -216,3 +225,5 @@ function(pulp_view_assert_js_engine_link_contract)
     unset(_pulp_view_script_sources)
     unset(_pulp_view_script_links)
 endfunction()
+
+cmake_policy(POP)

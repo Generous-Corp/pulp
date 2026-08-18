@@ -266,6 +266,58 @@ int main() {
         }
     }
 
+    // Why an inert input is inert, when the gate can tell.
+    //
+    // "input N changes no output" is true and unactionable: it names the
+    // symptom and leaves the reason to be guessed. The commonest reason is not
+    // a miswired jack at all — it is a MODULATED PARAM WHOSE DEFAULT SITS IN A
+    // FLAT REGION OF ITS LAW, where the CV is added to a knob position that
+    // cannot move. `AnalogVcfT`'s minimoog resonance is flat at 0.079 across
+    // knob 0.0-0.50, so a resonance CV on a knob defaulted at 0.30 is
+    // arithmetically incapable of changing the output, and every retry
+    // reproduces it exactly.
+    //
+    // The param sweep in section 1 cannot see this: it moves each knob across
+    // its FULL range, where such a law does move, so the knob reads as live.
+    // Only the default position is dead.
+    //
+    // So: re-probe with every param pushed off its default. If the input
+    // becomes observable there, the jack is wired and the DEFAULT is the
+    // defect — which is a thing a generator can actually fix, unlike "no
+    // output". Reported as a hint rather than a separate verdict, because the
+    // run still failed and the remedy is a guess about which param.
+    auto inert_input_hint = [&](int input) -> std::string {
+        rack::engine::Module* moved_ref = forge_make_module();
+        rack::engine::Module* moved_mute = forge_make_module();
+        auto bias = [](rack::engine::Module& m) {
+            reset_params(m);
+            for (int q = 0; q < m.getNumParams(); ++q) {
+                if (auto* pq = m.getParamQuantity(q)) {
+                    // 0.75 of range: past minimoog's 0.60 knee, and off the
+                    // default without pinning to an extreme that would make
+                    // an unrelated nonlinearity look like the cause.
+                    const float lo = pq->getMinValue(), hi = pq->getMaxValue();
+                    m.params[q].setValue(lo + 0.75f * (hi - lo));
+                }
+            }
+        };
+        bias(*moved_ref);
+        bias(*moved_mute);
+        auto mb = run(*moved_ref, 2.5f, true);
+        auto mm = run(*moved_mute, 2.5f, true, input);
+        double moved_delta = 0;
+        for (size_t o = 0; o < mm.size() && o < mb.size(); ++o)
+            moved_delta = std::max(moved_delta, rms_diff(mm[o], mb[o]));
+        delete moved_ref;
+        delete moved_mute;
+        if (moved_delta < 1e-6) return "";
+        return " — but it DOES affect the output with the params moved off "
+               "their defaults, so the jack is wired and a param it modulates "
+               "has a default in a flat region of its law (e.g. AnalogVcfT "
+               "minimoog resonance is flat below knob 0.50). Raise that "
+               "param's default into the responsive region";
+    };
+
     // ── 2. Inert inputs ──────────────────────────────────────────────────────
     // Compare the normal role-aware stimulus with one input muted while every
     // other input remains active. This exercises interaction-dependent ports
@@ -287,7 +339,8 @@ int main() {
                 delta = std::max(delta, rms_diff(muted[o], base[o]));
             if (delta < 1e-6)
                 fail("input " + std::to_string(p) +
-                     " changes no output when connected versus muted");
+                     " changes no output when connected versus muted" +
+                     inert_input_hint(p));
             else
                 pass("input " + std::to_string(p) + " affects the output");
             delete probe;
