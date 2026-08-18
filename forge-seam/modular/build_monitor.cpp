@@ -87,6 +87,14 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         contains(lower, "gave up after") ||
         contains(lower, "model call failed") ||
         contains(lower, "generation stop failed") ||
+        // The account, not the machine. A model with no quota left ends the
+        // run exactly as a login failure does, and it is what a person hits
+        // after a busy day rather than a misconfiguration. Unmatched it read
+        // as progress: the generator was already dead while the app still
+        // showed "Thinking... 1m 55s elapsed".
+        contains(lower, "is out of quota") ||
+        contains(lower, "usage limit") ||
+        contains(lower, "quota exceeded") ||
         contains(lower, "model cli is not logged in") ||
         contains(lower, "could not fetch the library catalog") ||
         contains(lower, "could not fetch the module index") ||
