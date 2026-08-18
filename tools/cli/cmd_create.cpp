@@ -474,7 +474,12 @@ int cmd_create(const std::vector<std::string>& args) {
         // must not gate `pulp create`. The pulp-mcp row is
         // optional because the binary is only needed for the Claude
         // Code plugin's MCP server, not for creating a Pulp project.
-        if (c.optional) {
+        // Release-only checks (e.g. RELEASE_BOT_TOKEN) describe how tags get
+        // published. Scaffolding a project does not publish anything, and a
+        // repo secret is not something a contributor can set, so gating here
+        // made `pulp create` unusable on any machine without release
+        // credentials. `pulp doctor` still fails on them.
+        if (c.optional || c.release_only) {
             log("  \xe2\x9a\xa0 " + c.name
                 + (c.detail.empty() ? std::string{}
                                     : (" — " + c.detail))
