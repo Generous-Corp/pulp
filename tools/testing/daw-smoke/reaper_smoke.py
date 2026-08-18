@@ -109,6 +109,23 @@ def log(msg: str) -> None:
     print(f"[daw-smoke] {msg}", flush=True)
 
 
+def copy_bundle_preserving_signature(src: Path, dst: Path) -> None:
+    """Copy a macOS plugin bundle without breaking its code signature.
+
+    A signed bundle can carry per-file ad-hoc signatures on non-executable
+    sidecars that live in Contents/MacOS (codesign treats every file there as
+    nested code) — those signatures are stored as `com.apple.cs.*` extended
+    attributes, not in the file bytes. `shutil.copytree` does not preserve
+    those xattrs, so a byte-identical copy still fails
+    `codesign --verify --deep --strict` with "code object is not signed at
+    all" on the sidecar, even though the original bundle verifies clean.
+    `ditto` is Apple's own tool for exactly this case: it preserves extended
+    attributes, resource forks, and ACLs, so the copy verifies the same as
+    the original.
+    """
+    subprocess.run(["ditto", str(src), str(dst)], check=True)
+
+
 def find_reaper() -> Path | None:
     """Locate a REAPER binary without installing anything. Returns None if absent."""
     candidates = [
@@ -294,7 +311,7 @@ class ReaperSession:
         (self.portable / "reaper.ini").write_text(text)
 
         if self.args.format in ("vst3", "clap"):
-            shutil.copytree(plugin, self.scan_dir / plugin.name)
+            copy_bundle_preserving_signature(plugin, self.scan_dir / plugin.name)
         else:  # au — no custom-path scan; install to the real folder, uninstall on exit.
             # An AU is found through the system's AudioComponent registry, and
             # that registry is not visible to a process outside a GUI login
@@ -327,7 +344,7 @@ class ReaperSession:
                     log(f"refusing to clobber existing {comp} — FAIL")
                     return EXIT_FAIL
             else:
-                shutil.copytree(plugin, comp)
+                copy_bundle_preserving_signature(plugin, comp)
                 self.au_installed = comp
             subprocess.run(["killall", "-9", "AudioComponentRegistrar"], capture_output=True)
         return None
