@@ -736,6 +736,21 @@ private:
     // that internal header, the owning .cpp, and register_api()'s data table
     // in widget_bridge.cpp, never this header. The friend grants those statics
     // access to WidgetBridge's private state.
+    // ── Layout-pass elision ─────────────────────────────────────────────
+    //
+    // The geometry queries (getLayoutRect / getLayoutBoxMetrics /
+    // getLayoutAncestorRects) each used to force `root_.layout_children()`
+    // UNCONDITIONALLY. That is correct but quadratic in practice: a shipping
+    // scripted UI calls getBoundingClientRect and getLayoutBoxMetrics dozens of
+    // times per frame, and `valueFromEvent` calls one PER POINTER EVENT — so a
+    // drag paid a full tree layout per sample, on the UI thread, ahead of paint.
+    //
+    // `ensure_layout()` keeps the guarantee those call sites actually need —
+    // "the geometry you are about to read is current" — while paying for it
+    // only when something has changed since the last pass.
+    void ensure_layout();
+    std::uint64_t last_layout_generation_ = 0;  // 0 => always lay out once
+
     friend struct BridgeRegistrars;
     void register_api();
 

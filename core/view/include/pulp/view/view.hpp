@@ -626,8 +626,46 @@ public:
         return {};
     }
 
+    // ── Layout generation ───────────────────────────────────────────────
+    //
+    // A process-wide monotonic counter bumped by ANY mutation that can change
+    // computed geometry. It exists so a reader (the JS bridge's geometry
+    // queries) can answer "has anything moved since I last laid out?" without
+    // running a tree walk to find out.
+    //
+    // Why not the per-View `layout_dirty_` flag: invalidation does NOT
+    // propagate upward. `invalidate_layout()` marks the view it is called on,
+    // so a flex change on a deep child leaves `root.layout_dirty()` FALSE while
+    // the tree is genuinely stale. A guard reading the root's flag would skip a
+    // needed pass and hand back stale (often 0x0) bounds — the exact failure
+    // `getLayoutRect`'s comment exists to prevent.
+    //
+    // The bump lives inside the invalidators themselves rather than at the
+    // bridge's entry points, so any mutation path is automatically correct —
+    // including host resizes, C++-side widget code, and invalidators written
+    // after this. OVER-invalidating costs one redundant layout; UNDER-
+    // invalidating is a correctness bug, so the counter is deliberately eager.
+    //
+    // Starts at 1 so a reader initialised to 0 always lays out once.
+    static std::uint64_t layout_generation() noexcept {
+        return layout_generation_.load(std::memory_order_relaxed);
+    }
+    static void bump_layout_generation() noexcept {
+        layout_generation_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// Number of `layout_children()` calls since process start. A test seam:
+    /// the property under test is "how many tree walks did that read loop
+    /// cost", which timing cannot answer reliably and this can.
+    static std::uint64_t layout_pass_count() noexcept {
+        return layout_pass_count_.load(std::memory_order_relaxed);
+    }
+
     /// Mark layout as needing recalculation (auto-invalidation)
-    void invalidate_layout() { layout_dirty_ = true; }
+    void invalidate_layout() {
+        layout_dirty_ = true;
+        bump_layout_generation();
+    }
     bool layout_dirty() const { return layout_dirty_; }
     void clear_layout_dirty() { layout_dirty_ = false; }
 
@@ -2385,6 +2423,8 @@ private:
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;
+    static std::atomic<std::uint64_t> layout_generation_;
+    static std::atomic<std::uint64_t> layout_pass_count_;
     bool has_focus_ = false;
     bool hovered_ = false;
     bool hit_testable_ = true;

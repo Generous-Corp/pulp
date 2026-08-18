@@ -541,9 +541,19 @@ View* View::focus_prev(View& root, View* current) {
     return focusable.back();
 }
 
+std::atomic<std::uint64_t> View::layout_generation_{1};
+std::atomic<std::uint64_t> View::layout_pass_count_{0};
+
 void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
+    // Geometry changed without necessarily going through invalidate_layout() —
+    // a host resize, a widget positioning itself, or the layout pass placing a
+    // child. Every one of those changes what a geometry query would return, so
+    // the generation moves. This is also why a reader must record the
+    // generation AFTER its layout pass: the pass itself sets child bounds and
+    // therefore bumps this counter.
+    bump_layout_generation();
     // Resize/move re-records: the recording was captured at the old size (and a
     // parent's recording placed this view at its old box). Stale this view and
     // its cached ancestors before on_resized() drives the repaint.
@@ -1847,6 +1857,10 @@ void View::layout_children() {
     // subtree in one shot, so this reads as one span per frame; grid / custom
     // subtrees that recurse show as nested layout spans.
     PULP_TRACE_SCOPE_NAMED("layout", "layout_children");
+
+    // Counted before the early-outs: the quantity under test is how many times
+    // a caller ASKED for a layout, which is the cost being eliminated.
+    layout_pass_count_.fetch_add(1, std::memory_order_relaxed);
 
     if (children_.empty()) return;
 
