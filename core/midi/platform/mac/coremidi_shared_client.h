@@ -1,6 +1,6 @@
 #pragma once
 
-// Internal to the macOS CoreMIDI backend. Exposed as a header so the
+// Internal to the macOS/iOS CoreMIDI backend. Exposed as a header so the
 // one-client-per-process invariant can be asserted from a test rather than
 // only reasoned about.
 
