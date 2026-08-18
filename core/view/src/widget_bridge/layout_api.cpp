@@ -642,12 +642,28 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
     });
 }
 
+void WidgetBridge::ensure_layout() {
+    const auto generation = View::layout_generation();
+    if (generation == last_layout_generation_) return;
+    root_.layout_children();
+    // Record the generation AFTER the pass, not the value sampled before it.
+    // `layout_children()` assigns child bounds, and `set_bounds` bumps the
+    // generation, so the counter reliably moves DURING a layout. Storing the
+    // pre-pass value would leave generation != last on every subsequent read
+    // and elide nothing — the optimisation would silently do nothing while
+    // still looking correct.
+    last_layout_generation_ = View::layout_generation();
+}
+
 void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
     register_bridge_function(api, "layout", [&self](choc::javascript::ArgumentList) {
         self.root_.clear_layout_dirty();
         self.root_.layout_children();
+        // Explicit "lay out now" still always forces — but record the
+        // generation so the geometry reads that typically follow it are elided.
+        self.last_layout_generation_ = View::layout_generation();
         self.request_repaint();
         return choc::value::Value();
     });
@@ -669,7 +685,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // changed, so the cost is bounded to one tree walk per call.
     register_bridge_function(api, "getLayoutRect", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_rect_value(v);
     });
@@ -681,7 +697,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // owner-relative captured evidence onto generated native paint children.
     register_bridge_function(api, "getLayoutBoxMetrics", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_box_metrics_value(v);
     });
@@ -692,7 +708,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // parent chain included so validation can localize coordinate drift.
     register_bridge_function(api, "getLayoutAncestorRects", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_ancestor_chain_value(v);
     });
