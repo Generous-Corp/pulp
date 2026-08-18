@@ -111,6 +111,15 @@ continues to run in `docs-material.yml`, which re-checks the contract on its way
 the render. Putting the render back on this lane would repeat the mistake that put
 example validators on the required gate.
 
+Its one external dependency is Doxygen from the runner image's apt mirror, and
+that install retries. A mirror hiccup is the most common hosted-Linux flake class,
+and a lane meant to gate merges cannot fail on one. The version is deliberately
+**not** pinned: `build-api-docs.sh` documents that CI's Ubuntu package and a
+developer's Homebrew build disagree on some diagnostics, so pinning this lane
+alone would make one runner image's version the contract while `docs-material.yml`
+and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
+pin all three together rather than just this one.
+
 **Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
 `required_status_checks`, this lane reports the same defect the old one did and is
 equally unable to stop it. Promotion is a branch-protection change:

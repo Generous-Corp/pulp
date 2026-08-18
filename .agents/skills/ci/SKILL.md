@@ -144,6 +144,46 @@ Material-site render is a preview artifact and has no business on the merge
 critical path. That is the mistake this repo already made with example
 validators.
 
+### A documented guard may not run — check registration, not existence
+
+`.shipyard/config.toml` stated the macro-gated-header ODR class was "Guarded by
+`tools/scripts/test_odr_macro_gated_headers.py`". The script existed, worked, and
+**ran nowhere**: not a ctest, not a workflow, not `tools/check-docs.sh`. The claim
+was true of the file and false of its execution, and nothing in the repo could tell
+the difference — a prose reference in a config comment reads exactly like
+enforcement.
+
+That left the class enforced only by the Shipyard mac lane's Debug build, which is
+`backend = local` — so the signal existed on a host large enough to finish the
+build and was simply absent on one that was not. The gate you got depended on which
+machine typed `shipyard pr`, which is the same divergent-semantics class
+`.agents/contract.toml` #6 was bought with, reached through host capacity instead
+of tool version.
+
+It is now `add_test(NAME odr-macro-gated-headers …)` in
+`test/cmake/quality_tests.cmake`, so it rides the required `macos` gate and the
+enforcement no longer depends on the shipping host.
+
+**The generalizable check:** when a comment, doc, or config says a class is
+"guarded by X", confirm X is *invoked* somewhere —
+
+```bash
+git grep -l "X" -- test tools .github   # references
+git grep -n "X" -- test/cmake .github/workflows tools/check-docs.sh   # invocations
+```
+
+If every hit is prose, the guard is decorative. `tools/scripts/tools_registry_check.py`
+enforces this property for the tools registry; nothing enforces it for guards named
+in passing.
+
+### Running `gates.sh` before committing can be a false green
+
+`config_doc_check.py`, `skill_sync_check.py`, and `version_bump_check.py` all diff a
+**commit range** (`origin/main...HEAD`). Staged-but-uncommitted work is invisible to
+them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
+0 on a change that will fail the moment it is committed. Commit first, then run
+gates — a green run over an empty range is not evidence about your change.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
