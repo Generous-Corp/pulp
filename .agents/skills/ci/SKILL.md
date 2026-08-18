@@ -1087,6 +1087,50 @@ du -sh "$FETCHCONTENT_BASE_DIR" 2>/dev/null || echo "nothing cached"
 Same idea applies to the self-hosted golden images: bake with the flags CI actually
 uses, or the golden warms a cache the real jobs never touch.
 
+## Autonomous repair: the fences count, they do not judge
+
+Every fence on the recovery lane bounds **how much** a repair changed — exact
+head, epoch, fingerprint, force-with-lease, changed-file count, patch bytes,
+control-plane path prefixes. On 2026-08-17 every one of them held while the
+lane, asked to satisfy `static_assert(std::is_trivially_copyable_v<ParamValue>)`,
+removed all five `std::atomic` members from `ParamValue` and rewrote its docs to
+make thread-safety the caller's problem. `ParamValue` is the audio-thread to
+UI-thread primitive; the repair introduced data races on the audio thread of a
+real-time framework, and **it would have gone green**, because the assertion
+passes once the atomics are gone.
+
+`tools/scripts/shipyard_recovery_judgement.py` is the check that reads meaning.
+Two independent tests, either of which escalates to `needs_human`:
+
+- **Surface** — an ALLOWLIST (`test/` only today), not a denylist. A denylist
+  fails open on the surface nobody named, and the dangerous surfaces are not
+  only `core/`: a repair could make a failing gate pass by editing
+  `.github/workflows/build.yml`, or disable a check in `tools/cmake`.
+- **Invariant removal** — surface alone is insufficient. A test-only diff that
+  merely deletes `REQUIRE` lines satisfies any surface rule and is the same
+  failure: a model can make a check pass by making the claim true **or by
+  deleting the claim**, and it chose to delete.
+
+Two things to know before "fixing" it:
+
+1. **It escalates the CORRECT repair too.** The right fix on 2026-08-17 was to
+   delete the false assertion, and the invariant test refuses that as well.
+   That is intended. The lane's job is to never land a catastrophic change
+   unattended, not to land every correct one unattended.
+2. **It is enforced in the publisher, not the worker.** The worker still
+   uploads its artifact so an escalated repair stays inspectable; the publisher
+   is the step that applies and pushes, so that is where refusing matters. On
+   escalation it exits `3` (distinct from `1`, which means the check itself
+   broke) and records the reason on the exact head as
+   `shipyard/recovery-judgement`.
+
+Like `shipyard_recovery_result_check.py`, it lives under
+`tools/scripts/shipyard_recovery_`, which is in `FORBIDDEN_PREFIXES` in
+`shipyard_recovery_repair.py` — so a fenced repair model cannot weaken the check
+that constrains it. `test_shipyard_recovery_judgement.py` asserts that
+containment rather than assuming it, and its central case is the verbatim diff
+from `a08ec2d4abd8`.
+
 ## GitHub workflow gotchas
 
 - **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
