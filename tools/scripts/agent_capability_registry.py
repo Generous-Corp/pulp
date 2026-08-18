@@ -53,6 +53,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/tilt_eq.hpp": "Pulp::signal",
     "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
     "pulp/signal/transfer_curve.hpp": "Pulp::signal",
+    "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
@@ -80,7 +81,6 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/spectral_band_mask.hpp": "Pulp::signal",
     "pulp/signal/spectral_mask_processor.hpp": "Pulp::signal",
     "pulp/signal/spectral_gate_blur.hpp": "Pulp::signal",
-    "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/spectral_morph.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/supersaw.hpp": "Pulp::signal",
@@ -562,7 +562,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
+        "fingerprint": "sha256:be6077a922d9773b094db0cbfcdec10d43c84ba8f204ca909cff9f883861139c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
