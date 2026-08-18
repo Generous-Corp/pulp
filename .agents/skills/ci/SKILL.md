@@ -3307,6 +3307,79 @@ fenced head and compare. Under the pre-fix commands that rehearsal reports
 `validator: PASS` and `parity check: PASS` while leaving the deleted file in
 place — which is precisely why no amount of green CI would have caught it.
 
+### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
+
+Two independent traps, found across three days and roughly six mis-routed
+required legs on 2026-08-18. Together they are the whole story.
+
+**1. `gh run rerun --failed` freezes the routing decision.** `build.yml` computes
+routing in a `resolve-provider` job and bakes the answer into the downstream job
+*name* (`macOS (ARM64) [local]` vs `[github-hosted]`). `--failed` re-runs only
+**failed** jobs — and `resolve-provider` **succeeded**, so it is carried forward
+and every retry re-uses the *original* dispatch's decision, however stale.
+
+Verified: on one run's attempt 3, `resolve-provider` showed `2026-08-17` while
+the macOS job showed `2026-08-18`. Same PR, same head, same host state; the only
+variable was the re-run mode, and it produced opposite labels.
+
+> **To change routing, use a full `ghapp run rerun <id>` — never `--failed`.**
+> It re-executes `resolve-provider` against current conditions. It does not move
+> the head, so head-exact Shipyard receipts survive. It costs re-running green
+> advisory lanes, which is nothing next to a leg that never executes.
+
+A run that is still `queued` refuses a re-run (`This workflow is already
+running`) — cancel it first; cancelling does not move the head either.
+
+**2. Every intuitive capacity check reads the wrong thing.**
+`_count_busy_local_mac_runners()` counts **other `in_progress` "Build and Test"
+runs whose macOS job is RIGHT NOW `in_progress` with the local self-hosted label**.
+Overflow fires at `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (3). Queued runs,
+not-yet-registered jobs, and completed jobs are deliberately excluded — that
+exclusion is scar tissue from an older pessimistic fallback that starved the
+local runners during deep queues.
+
+| what people reach for | why it is wrong |
+| --- | --- |
+| `tart list` VM count | measures the machine, not in-flight GitHub jobs |
+| load average | **never a routing input**; affects duration only |
+| org runner-group `busy` | wrong scope, and ephemeral runners are invisible while idle |
+
+**All three measure the host. The selector measures in-flight jobs** — and
+host-level signals cannot see merge-queue work at all, which is usually what is
+holding the slots.
+
+The probe that actually predicts routing:
+
+```sh
+for r in $(ghapp api "repos/OWNER/REPO/actions/runs?status=in_progress&per_page=100" \
+      --jq '[.workflow_runs[]|select(.name=="Build and Test")|.id]|.[]'); do
+  ghapp api "repos/OWNER/REPO/actions/runs/$r/jobs" \
+    --jq '[.jobs[]|select((.name|test("macOS \\(ARM64\\)")) and .status=="in_progress")|.labels|join(",")]|first // empty'
+done | grep -c self-hosted
+```
+
+Dispatch only when it reads **< 3**.
+
+**Two consequences that bite in practice:**
+
+- **Merge-queue runs consume the same budget.** They are "Build and Test" runs
+  with local macOS legs, so a working queue holds slots and starves PR
+  dispatches — often leaving only ~1 of 3 available.
+- **Serial dispatch self-defeats.** Dispatching PR B right after PR A's leg
+  *starts* guarantees B sees a higher count than A did. Wait for A's leg to
+  **finish**, not to start. Two PRs three minutes apart routed oppositely for
+  exactly this reason: A's leg started 11 seconds before B's resolver ran.
+
+**Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
+is indistinguishable from a real test failure at PR level — so read the leg, not
+just the alias. And when a remedy stops working, re-verify the remedy still does
+what it did when you first observed it, rather than adding conditions around it:
+"re-running re-routes" was observed twice, generalised, then applied through
+`--failed` where it silently does not hold.
+
+**The authority for "why did CI route this way" is the workflow file, not the
+API.** The API shows outcomes; the workflow states the rule.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
