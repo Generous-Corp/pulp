@@ -896,6 +896,61 @@ The authoritative check runs `classify()` itself.
 `reason.sh` is the shared "why did it stop" shim, for the same reason `cap.sh`
 is shared: this rule already existed twice and both copies were wrong.
 
+### An inert input usually means a DEFAULT, not a miswired jack
+
+`input N changes no output when connected versus muted` is the gate telling the
+truth about a module whose DSP is correct. The commonest cause is a modulated
+param whose **default** sits in a flat region of its law, where the CV is added
+to a knob position that cannot move.
+
+`AnalogVcfT`'s **minimoog** voicing is the one that bites:
+
+```cpp
+kMinimoogResonanceKnots  { 0.0,  0.25, 0.50, 0.60, 0.75, 0.90, 1.0 }
+kMinimoogResonanceValues { 0.079, 0.079, 0.079, 0.52, 0.90, 0.97, 1.0 }
+```
+
+Knob 0.0–0.50 all map to 0.079, so a resonance CV on a knob defaulted at 0.30
+produces **bit-identical** output — measured at every tone from 110 Hz to 8 kHz,
+not merely "too small to detect". It is a measured calibration curve: a real
+Minimoog's resonance control does nothing over its lower half. **Minimoog only**
+— Juno, Jupiter and Prophet are monotonic from zero and need no floor.
+
+Measured against the gate's `1e-6` threshold with the gate's own +0.05 CV:
+
+| knob default | rms_diff | |
+|---|---|---|
+| 0.30 | 0.000000000 | fails |
+| 0.50 | 0.126 | passes |
+| 0.55 | 0.100 | passes |
+| 0.60 | 0.078 | passes |
+
+**The param sweep cannot catch this.** Section 1 of the gate moves each knob
+across its FULL range, where such a law does move, so the knob reads as live.
+Only the default position is dead.
+
+So the gate re-probes with params pushed to 0.75 of range and says which it is:
+a wired jack whose default is at fault, or a genuinely dead one. `--retries`
+defaults to 1 so the model can act on that; before the message was actionable a
+retry only reproduced the same failure at the price of a model call.
+
+**Proving a fix here needs the real gate, not a filter probe.** Driving
+`AnalogVcfT` directly proves the FILTER responds; it says nothing about whether
+the gate accepts a module built that way. Use the replay harness, which runs
+validation, compile, behaviour and packaging with **zero model calls**:
+
+```
+python3 tools/rack/generate.py --response-file <saved-response> "<prompt>"
+```
+
+Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-response.txt`.
+Change one line in a copy, replay both, and the control/test differ by exactly
+that line.
+
+**Generation writes into the pack**, so never run it inside a checkout you are
+using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and
+the next Forge configure fails.
+
 ### A guard nothing runs goes stale silently, and this one did
 
 That test was written, was correct, and exited 1 — and **nothing ever ran it**.

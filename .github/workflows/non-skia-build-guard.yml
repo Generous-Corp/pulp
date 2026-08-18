@@ -50,10 +50,14 @@ jobs:
       # GPU off ⇒ no Skia ⇒ the Core Graphics path that broke twice.
       - name: Configure (no Skia, no GPU)
         run: |
+          # Examples OFF alongside PULP_BUILD_APP=OFF: this guard compiles two
+          # core targets by name, so the examples tree is configure-only weight
+          # here. Trims configure, not compile time.
           cmake -S . -B build-noskia -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_APP=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 

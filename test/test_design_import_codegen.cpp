@@ -112,6 +112,38 @@ TEST_CASE("parse_v0_tsx preserves inline-style host controls for baked C++",
     REQUIRE(result.source.find("std::make_unique<pulp::view::SvgPathWidget>") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_cpp bakes a dropdown as a ComboBox, not a bare View",
+          "[view][import][cpp-codegen]") {
+    // The runtime materializer and the baked C++ lane resolve the same
+    // NativeWidgetKind, so a <select> must reach a real ComboBox in both. The
+    // baker's widget switch falls through to a plain View for any kind it does
+    // not name, which renders but does nothing, so the failure is silent
+    // without this assertion.
+    auto ir = parse_v0_tsx(R"tsx(
+        export default function Panel() {
+            return (
+                <div style={{ width: 200, height: 60 }}>
+                    <select aria-label="Mode" style={{ width: 120, height: 24 }}>
+                        <option>Stereo</option>
+                    </select>
+                </div>
+            );
+        }
+    )tsx");
+
+    const auto* select = find_descendant(ir.root, [](const IRNode& node) {
+        return node.type == "select";
+    });
+    REQUIRE(select != nullptr);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("std::make_unique<pulp::view::ComboBox>") != std::string::npos);
+    // The option list is carried on the shared semantic model, so the baked
+    // control is populated rather than an empty dropdown.
+    REQUIRE(result.source.find("->set_items(") != std::string::npos);
+    REQUIRE(result.source.find("Stereo") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_cpp resolves figma-plugin asset_ref image sources",
           "[view][import][cpp-codegen][figma-plugin][asset-ref]") {
     DesignIR ir;

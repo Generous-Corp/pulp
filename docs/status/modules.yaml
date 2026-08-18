@@ -56,7 +56,7 @@ modules:
       - runtime
     docs: reference/modules.md#dawproject
   - name: host
-    summary: Plugin hosting and the SignalGraph binding that compiles an authored graph into an immutable routed runtime snapshot with latency compensation and anticipation lanes
+    summary: Plugin hosting, the SignalGraph binding that compiles an authored graph into an immutable routed runtime snapshot with latency compensation and anticipation lanes, and a transport-aware one-shot offline renderer for bouncing a timeline region
     status: experimental
     dependencies:
       - playback

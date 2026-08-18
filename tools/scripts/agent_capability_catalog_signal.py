@@ -220,10 +220,10 @@ EXPORTS = [
         bindings=[
             binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
+                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
             binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
+                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
@@ -1288,5 +1288,243 @@ EXPORTS = [
             "role": "entrypoint", "binding": "pulp::signal::SpectralDelayMatrixT<float>",
             "operation": "member_call", "member": "reset", "arguments": "",
         }],
+    ),
+    capability(
+        key="signal.early-reflections", domain="signal",
+        summary=(
+            "Bounded feed-forward early-reflection tap bank producing a stereo reflection pattern "
+            "from validated per-tap delay, gain, and pan."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control delay-line allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity delay history plus the committed tap list; feed-forward only, so no "
+            "recursive state accumulates."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded tap list of delay, gain, and pan",
+        output_domain="stereo early-reflection pattern",
+        units=["samples", "milliseconds", "linear gain"],
+        latency="per-tap delay", tail="longest configured tap",
+        scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/early_reflections.hpp",
+                         qualified_name="pulp::signal::EarlyReflectionsT<float>",
+                         target="Pulp::signal", header_fingerprint="sha256:4e2c96110a97d359d96e1c3fbcd8f369024d8351579298729471f9ff4ebcd4d4")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::EarlyReflectionsT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.auto-ducked-send", domain="signal",
+        summary=(
+            "Envelope-following send that ducks a wet path against a dry key signal with bounded "
+            "attack, release, threshold, and range."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control envelope setup",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Single envelope follower plus the committed duck configuration.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="wet and dry audio plus bounded threshold, range, attack, and release",
+        output_domain="ducked stereo send",
+        units=["samples", "decibels", "milliseconds"],
+        latency="zero", tail="envelope release", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/auto_ducked_send.hpp",
+                         qualified_name="pulp::signal::AutoDuckedSendT<float>",
+                         target="Pulp::signal", header_fingerprint="sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::AutoDuckedSendT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.comb-filter", domain="signal",
+        summary=(
+            "Prepared feedforward, feedback, and Schroeder allpass comb filters with exact integer "
+            "delays, transactional configuration, and typed fault recovery."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control delay-line allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity fractional delay history plus the committed mode/delay/gain "
+            "configuration; recursive modes snap their stored state to zero."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded mode, integer delay, and stable feedback gain",
+        output_domain="comb-filtered audio with typed status",
+        units=["samples", "linear gain"],
+        latency="zero", tail="recursive decay in feedback and allpass modes",
+        scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/comb_filter.hpp",
+                         qualified_name="pulp::signal::CombFilterT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:6f5963276c7fc2f68985dba678754f7afc4216b2486f3f4c356b3344eeceda4c")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::CombFilterT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.filter-morph", domain="signal",
+        summary=(
+            "Continuous morph across lowpass, bandpass, highpass, and notch responses with a stable "
+            "coefficient path and no discontinuity at type boundaries."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control coefficient design",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Biquad state plus the current morph position, cutoff, and resonance.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded morph position, cutoff, and resonance",
+        output_domain="filtered audio",
+        units=["samples", "hertz", "normalized morph position", "Q"],
+        latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/filter_morph.hpp",
+                         qualified_name="pulp::signal::FilterMorphT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:9065017c36f2451be9b3143efbb63650c2d70e412f197ae6fa2f3ad6871809b3")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FilterMorphT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.formant-filter-bank", domain="signal",
+        summary=(
+            "Bounded parallel formant resonator bank with vowel presets and transactional "
+            "reconfiguration for vocal-character shaping."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control resonator allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Up to MaxFormants parallel resonator states plus the committed formant recipe; "
+            "configuration is rejected atomically rather than partially applied."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus bounded formant center, bandwidth, and gain specifications",
+        output_domain="formant-shaped audio with typed configure status",
+        units=["samples", "hertz", "decibels"],
+        latency="zero", tail="recursive resonator decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/formant_filter_bank.hpp",
+                         qualified_name="pulp::signal::FormantFilterBankT<float>",
+                         target="Pulp::signal",
+                         header_fingerprint="sha256:3fe22c92f7793b10a219c1270d0b43d143cc025b7d9769566a98c29dd4fe62f5")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FormantFilterBankT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.graphic-eq", domain="signal",
+        summary=(
+            "Bounded multi-band graphic equalizer container with transactional band commits and an "
+            "optional sample-counted crossfade between configurations."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control band allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Up to MaxBands biquad sections plus an optional transition bank; a rejected "
+            "configuration leaves the committed bank untouched."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus bounded per-band frequency, gain, and Q controls",
+        output_domain="equalized audio with typed prepare and configure status",
+        units=["samples", "hertz", "decibels", "Q"],
+        latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/graphic_eq.hpp",
+                         qualified_name="pulp::signal::GraphicEqT<float, 31>", target="Pulp::signal",
+                         header_fingerprint="sha256:63dafa17e4e4650647680a41b29ab3db78435aecf2136adc0195c827102d4d25")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::GraphicEqT<float, 31>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.tilt-eq", domain="signal",
+        summary=(
+            "Multi-channel tilt equalizer trading low- against high-shelf gain around a pivot "
+            "frequency from a single control."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control coefficient design",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Per-channel shelf cascade state plus the committed pivot and tilt; set_config "
+            "reinstalls coefficients and clears history rather than crossfading."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded pivot frequency and signed tilt amount",
+        output_domain="tilt-equalized audio",
+        units=["samples", "hertz", "decibels"],
+        latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/tilt_eq.hpp",
+                         qualified_name="pulp::signal::TiltEqT<float, 2>", target="Pulp::signal",
+                         header_fingerprint="sha256:ed676f18106a4465246265aeaebe138bc28c75ef197db2083b95e934418efb3d")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TiltEqT<float, 2>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.transfer-curve", domain="signal",
+        summary=(
+            "Bounded monotonic transfer-curve shaper prepared from validated breakpoints, with "
+            "typed rejection of non-monotonic or out-of-range input."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control curve preparation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "A prepared immutable curve table plus the committed breakpoint set; preparation is "
+            "transactional so a rejected curve leaves the previous one in place."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus a bounded monotonic breakpoint list",
+        output_domain="shaped audio with typed prepare status",
+        units=["samples", "linear amplitude"],
+        latency="zero", tail="none", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/transfer_curve.hpp",
+                         qualified_name="pulp::signal::TransferCurveT<float, 32>",
+                         target="Pulp::signal", header_fingerprint="sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TransferCurveT<float, 32>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.parallel-dynamics", domain="signal",
+        summary=(
+            "Bounded parallel dynamics mixer blending a dry path against processed bands with "
+            "latency-aligned summing and transactional configuration."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control buffer allocation",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity per-band mix buffers plus the committed blend configuration; a "
+            "rejected configuration leaves the previous blend in place."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus bounded per-band blend and alignment controls",
+        output_domain="summed parallel-processed audio",
+        units=["samples", "linear gain"],
+        latency="aligned across parallel paths", tail="none",
+        scheduling="block-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/parallel_dynamics.hpp",
+                         qualified_name="pulp::signal::ParallelDynamicsMixerT<float>",
+                         target="Pulp::signal", header_fingerprint="sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e")],
+        _link_probes=[{"role": "entrypoint",
+                       "binding": "pulp::signal::ParallelDynamicsMixerT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
 ]

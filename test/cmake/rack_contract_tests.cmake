@@ -24,4 +24,16 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rack-generator-endings PROPERTIES
         LABELS "rack;contract"
         TIMEOUT 60)
+
+    # What the gate SAYS when an input reads as inert, which decides whether a
+    # generation can act on the failure or only observe it. Compiles two
+    # fixtures against the real Rack SDK and runs the real gate, so it skips
+    # cleanly where that SDK is absent rather than reporting a false pass.
+    # Longer timeout than its siblings: it builds the gate twice.
+    add_test(NAME rack-inert-input-cause
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_inert_input_cause.py)
+    set_tests_properties(rack-inert-input-cause PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 300)
 endif()

@@ -8,8 +8,9 @@
 /// coefficients; BiquadT runs those coefficients over samples. Neither can
 /// answer "what curve does this filter draw?" — that is what lives here.
 ///
-/// Every entry point takes the canonical BiquadCoefficients from biquad.hpp,
-/// so the same section that is processing audio right now (via
+/// Every entry point takes the canonical BiquadCoefficientsT from biquad.hpp,
+/// preserving its float or double coefficient precision, so the same section
+/// that is processing audio right now (via
 /// BiquadT::coefficients()) is the one being plotted. A UI never has to
 /// re-derive, and therefore never has to approximate, a filter's shape.
 ///
@@ -40,7 +41,8 @@ inline float magnitude_to_db(double magnitude) {
 
 /// Linear magnitude |H(e^jω)| of one section at normalized angular frequency
 /// ω = 2π·f/fs (radians/sample, meaningful over [0, π]).
-inline double section_magnitude(const BiquadCoefficients& c, double omega) {
+template <typename SampleType>
+inline double section_magnitude(const BiquadCoefficientsT<SampleType>& c, double omega) {
     const std::complex<double> z_inv = std::polar(1.0, -omega);
     const std::complex<double> z_inv2 = z_inv * z_inv;
     const std::complex<double> num =
@@ -52,12 +54,27 @@ inline double section_magnitude(const BiquadCoefficients& c, double omega) {
     return std::abs(num) / d;
 }
 
+// Preserve the original concrete float entry point so aggregate calls such as
+// section_magnitude({1, 0, 0, 0, 0}, omega) remain source-compatible.
+inline double section_magnitude(const BiquadCoefficients& c, double omega) {
+    return section_magnitude<float>(c, omega);
+}
+
 /// Linear magnitude |H| of a cascade at angular frequency ω. Sections are in
 /// series, so magnitudes multiply (equivalently, their dB values sum).
-inline double cascade_magnitude(std::span<const BiquadCoefficients> sos, double omega) {
+template <typename SampleType, std::size_t Extent>
+inline double cascade_magnitude(std::span<const BiquadCoefficientsT<SampleType>, Extent> sos,
+                                double omega) {
     double mag = 1.0;
     for (const auto& c : sos) mag *= section_magnitude(c, omega);
     return mag;
+}
+
+// Preserve the original float-span entry point so containers such as
+// std::vector<BiquadCoefficients> retain their implicit span conversion. The
+// templated overload above adds precision without narrowing that source API.
+inline double cascade_magnitude(std::span<const BiquadCoefficients> sos, double omega) {
+    return cascade_magnitude<float, std::dynamic_extent>(sos, omega);
 }
 
 /// Angular frequency (radians/sample) of `freq_hz` at `sample_rate`, clamped
@@ -70,15 +87,27 @@ inline double angular_frequency(double freq_hz, double sample_rate) {
 }
 
 /// Magnitude of one section at a frequency in Hz, in dB.
-inline float section_magnitude_db(const BiquadCoefficients& c, double freq_hz, double sample_rate) {
+template <typename SampleType>
+inline float section_magnitude_db(const BiquadCoefficientsT<SampleType>& c, double freq_hz,
+                                  double sample_rate) {
     return magnitude_to_db(section_magnitude(c, angular_frequency(freq_hz, sample_rate)));
 }
 
-/// Magnitude of a cascade at a frequency in Hz, in dB.
-inline float cascade_magnitude_db(std::span<const BiquadCoefficients> sos,
-                                  double freq_hz,
+inline float section_magnitude_db(const BiquadCoefficients& c, double freq_hz,
                                   double sample_rate) {
+    return section_magnitude_db<float>(c, freq_hz, sample_rate);
+}
+
+/// Magnitude of a cascade at a frequency in Hz, in dB.
+template <typename SampleType, std::size_t Extent>
+inline float cascade_magnitude_db(std::span<const BiquadCoefficientsT<SampleType>, Extent> sos,
+                                  double freq_hz, double sample_rate) {
     return magnitude_to_db(cascade_magnitude(sos, angular_frequency(freq_hz, sample_rate)));
+}
+
+inline float cascade_magnitude_db(std::span<const BiquadCoefficients> sos, double freq_hz,
+                                  double sample_rate) {
+    return cascade_magnitude_db<float, std::dynamic_extent>(sos, freq_hz, sample_rate);
 }
 
 /// Ask a live filter what it looks like: the magnitude, in dB, that this
@@ -86,12 +115,7 @@ inline float cascade_magnitude_db(std::span<const BiquadCoefficients> sos,
 template <typename SampleType>
 inline float magnitude_db(const BiquadT<SampleType>& filter, double freq_hz, double sample_rate) {
     const auto c = filter.coefficients();
-    const BiquadCoefficients f{static_cast<float>(c.b0),
-                               static_cast<float>(c.b1),
-                               static_cast<float>(c.b2),
-                               static_cast<float>(c.a1),
-                               static_cast<float>(c.a2)};
-    return section_magnitude_db(f, freq_hz, sample_rate);
+    return section_magnitude_db(c, freq_hz, sample_rate);
 }
 
 /// Center frequency of bin `index` in a real-FFT magnitude array.
@@ -125,16 +149,20 @@ inline double log_frequency_at(std::size_t index, std::size_t count, double min_
 /// This is the stage a curve widget wants: hand it one point per pixel column
 /// and the result is the polyline, already in the plot's own x-spacing.
 /// Allocation-free — `out` is caller-owned.
-inline void response_curve_db(std::span<const BiquadCoefficients> sos,
-                              double min_hz,
-                              double max_hz,
-                              double sample_rate,
+template <typename SampleType, std::size_t Extent>
+inline void response_curve_db(std::span<const BiquadCoefficientsT<SampleType>, Extent> sos,
+                              double min_hz, double max_hz, double sample_rate,
                               std::span<float> out) {
     const std::size_t n = out.size();
     for (std::size_t i = 0; i < n; ++i) {
         const double hz = log_frequency_at(i, n, min_hz, max_hz);
         out[i] = cascade_magnitude_db(sos, hz, sample_rate);
     }
+}
+
+inline void response_curve_db(std::span<const BiquadCoefficients> sos, double min_hz,
+                              double max_hz, double sample_rate, std::span<float> out) {
+    response_curve_db<float, std::dynamic_extent>(sos, min_hz, max_hz, sample_rate, out);
 }
 
 } // namespace pulp::signal
