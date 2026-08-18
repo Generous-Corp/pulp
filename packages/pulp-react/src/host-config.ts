@@ -69,6 +69,38 @@ const domRegistry = (): DomRegistry => {
     if (windowProxy) windowProxy.__pulpReactDomRegistryValues__ = values;
     return registry;
 };
+// ── Commit-time metadata gating ────────────────────────────────────
+// Re-applying captured import metadata is expensive out of all proportion to
+// how often it is needed. The importer's apply pass reads layout metrics per
+// binding, and every one of those reads runs a full `root.layout_children()`
+// in the bridge, so a document with N layout bindings costs roughly 2N
+// whole-tree layout passes each time it is applied. Running that after every
+// React commit means a state change that moves no native node at all -- a
+// canvas-only drag, for instance -- pays the same price as a structural one.
+//
+// React already knows the answer. A commit that mutated no host node left the
+// native tree, and therefore the captured geometry, exactly as it was.
+let materializedTreeDirty = true;
+let materializedRootSignature = '';
+// The importer installs its hook during module init, before React mounts, so in
+// practice it is always present by the first commit. Tracking its identity
+// removes the dependence on that ordering: a hook that arrives late -- or is
+// swapped -- would otherwise wait for the next host mutation to be applied at
+// all, and before this gate existed it simply ran on the following commit.
+let materializedHookApplied: unknown;
+
+// The marks live on the host-config METHOD boundaries, never inside the
+// attach / attachToRoot / detach helpers those methods usually delegate to.
+// `insertBefore`'s same-parent branch reorders `childIds` and returns WITHOUT
+// reaching `attach`, so a helper-level mark silently misses sibling
+// reordering -- which is exactly how React swaps a list row for an inline
+// editor, and skipping the re-apply there leaves the replacement without its
+// captured geometry. A missed mark is invisible: the API, the return values
+// and the rendered tree all still look correct.
+function markMaterializedTreeDirty(): void {
+    materializedTreeDirty = true;
+}
+
 let _hc_count = 0;
 function call(name: string, ...args: unknown[]): unknown {
     // A materialized browser document may legitimately define globals such as
@@ -583,6 +615,7 @@ export const PulpHostConfig: HostConfig<
 
     // ── First-mount attachment ──────────────────────────────────────
     appendInitialChild(parentInstance, child) {
+        markMaterializedTreeDirty();
         attach(parentInstance, child);
     },
 
@@ -594,13 +627,16 @@ export const PulpHostConfig: HostConfig<
 
     // ── Mutation: append / insert / remove ──────────────────────────
     appendChild(parentInstance, child) {
+        markMaterializedTreeDirty();
         attach(parentInstance, child);
     },
     appendChildToContainer(container, child) {
+        markMaterializedTreeDirty();
         attachToRoot(container, child);
     },
 
     insertBefore(parentInstance, child, beforeChild) {
+        markMaterializedTreeDirty();
         const beforeIdx = parentInstance.childIds.indexOf(beforeChild.id);
         const sameParent = child.parentId === parentInstance.id && child.onBridge;
         if (sameParent) {
@@ -622,6 +658,7 @@ export const PulpHostConfig: HostConfig<
         attach(parentInstance, child, beforeIdx >= 0 ? beforeIdx : undefined);
     },
     insertInContainerBefore(container, child, beforeChild) {
+        markMaterializedTreeDirty();
         // Root container ordering is append-only on this path today:
         // attachToRoot materializes under the bridge root and does not
         // consult beforeChild. Non-root insertions preserve order via
@@ -630,9 +667,11 @@ export const PulpHostConfig: HostConfig<
     },
 
     removeChild(parentInstance, child) {
+        markMaterializedTreeDirty();
         detach(parentInstance, child);
     },
     removeChildFromContainer(_container, child) {
+        markMaterializedTreeDirty();
         // Detach from root and let the bridge clean up the subtree.
         if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
         unregisterDomSubtree(child);
@@ -640,6 +679,7 @@ export const PulpHostConfig: HostConfig<
     },
 
     clearContainer(_container) {
+        markMaterializedTreeDirty();
         // No-op for v0 — React always issues per-child removals.
         // Could be optimized later by tracking a list of root children.
     },
@@ -655,6 +695,7 @@ export const PulpHostConfig: HostConfig<
     },
 
     commitUpdate(instance, _updatePayload, type, oldProps, newProps, _internalHandle) {
+        markMaterializedTreeDirty();
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
         applyChangedProps(instance, oldN, newN);
@@ -685,6 +726,7 @@ export const PulpHostConfig: HostConfig<
     },
 
     commitTextUpdate(_textInstance, _oldText, _newText) {
+        markMaterializedTreeDirty();
         // Unreachable — see createTextInstance.
     },
 
@@ -694,6 +736,7 @@ export const PulpHostConfig: HostConfig<
     // <span><em>hi</em></span>. Clear stale text before the new child
     // element mounts.
     resetTextContent(instance) {
+        markMaterializedTreeDirty();
         if (typeof g.setText === 'function') {
             call('setText', instance.textTargetId ?? instance.id, '');
         }
@@ -707,9 +750,30 @@ export const PulpHostConfig: HostConfig<
         // later). Apply it only after React has committed the complete native
         // host tree, so structural paths see siblings in their final order.
         // The hook is optional: ordinary @pulp/react applications remain
-        // independent of the import pipeline.
+        // independent of the import pipeline, and it is gated on the commit
+        // having actually changed something -- see "Commit-time metadata
+        // gating" above for why that gate is worth the bookkeeping.
+        //
+        // A host resize never arrives as a React commit, yet it changes the
+        // metrics every captured inset is derived from. `getRootSize` reads the
+        // root View's bounds and is the one layout bridge call that does NOT
+        // force a layout pass, so consulting it here costs nothing.
+        let rootSignature = materializedRootSignature;
+        const rootSize = g.getRootSize;
+        if (typeof rootSize === 'function') {
+            const size = rootSize() as { width?: number; height?: number } | undefined;
+            if (size) rootSignature = `${size.width}x${size.height}`;
+        }
         const metadataHook = g.__pulpApplyMaterializedImportMetadata__;
-        if (typeof metadataHook === 'function') metadataHook();
+        const shouldReapply = materializedTreeDirty
+            || rootSignature !== materializedRootSignature
+            || metadataHook !== materializedHookApplied;
+        materializedRootSignature = rootSignature;
+        materializedTreeDirty = false;
+        if (shouldReapply) {
+            materializedHookApplied = metadataHook;
+            if (typeof metadataHook === 'function') metadataHook();
+        }
         // Semantic captured-state matching is commit-driven: menus, dialogs,
         // and selected controls only change after a React commit. Let the
         // importer refresh here instead of walking every selector on every
