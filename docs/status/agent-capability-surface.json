@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 45,
+  "inventory_version": 50,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,15 +37,15 @@
     }
   ],
   "counts": {
-    "public_headers": 427,
-    "reviewed_headers": 130,
-    "legacy_unreviewed_headers": 297,
+    "public_headers": 437,
+    "reviewed_headers": 141,
+    "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 82,
+      "capability_entrypoint": 91,
       "capability_support": 38,
-      "infrastructure": 8,
-      "legacy_unreviewed": 297,
+      "infrastructure": 10,
+      "legacy_unreviewed": 296,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -74,9 +74,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 248,
-        "reviewed_headers": 88,
-        "legacy_unreviewed_headers": 160,
+        "public_headers": 258,
+        "reviewed_headers": 99,
+        "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1739,6 +1739,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/auto_ducked_send.hpp",
+      "fingerprint": "sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb",
+      "include": "pulp/signal/auto_ducked_send.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.auto-ducked-send"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/ballistics_filter.hpp",
       "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
       "include": "pulp/signal/ballistics_filter.hpp",
@@ -1944,6 +1955,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/comb_filter.hpp",
+      "fingerprint": "sha256:6f5963276c7fc2f68985dba678754f7afc4216b2486f3f4c356b3344eeceda4c",
+      "include": "pulp/signal/comb_filter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.comb-filter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2356,6 +2378,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/early_reflections.hpp",
+      "fingerprint": "sha256:4e2c96110a97d359d96e1c3fbcd8f369024d8351579298729471f9ff4ebcd4d4",
+      "include": "pulp/signal/early_reflections.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.early-reflections"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/envelope.hpp",
       "fingerprint": "sha256:dc624d9acca91f044c5eac8ed3ad6d3e35ef86b8cdb4a34b2424679550169eaf",
       "include": "pulp/signal/envelope.hpp",
@@ -2565,6 +2598,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/filter_morph.hpp",
+      "fingerprint": "sha256:9065017c36f2451be9b3143efbb63650c2d70e412f197ae6fa2f3ad6871809b3",
+      "include": "pulp/signal/filter_morph.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.filter-morph"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/finite_stretch_builder.hpp",
       "fingerprint": "sha256:9c78fb3f1c47b76dce491e9aeffb197b3fdc808a3976ccca39fee1039cbfcfa3",
       "include": "pulp/signal/finite_stretch_builder.hpp",
@@ -2615,8 +2659,19 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/formant_filter_bank.hpp",
+      "fingerprint": "sha256:3fe22c92f7793b10a219c1270d0b43d143cc025b7d9769566a98c29dd4fe62f5",
+      "include": "pulp/signal/formant_filter_bank.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.formant-filter-bank"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/fractional_delay.hpp",
-      "fingerprint": "sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125",
+      "fingerprint": "sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7",
       "include": "pulp/signal/fractional_delay.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2647,11 +2702,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/frequency_response.hpp",
-      "fingerprint": "sha256:605f532380faf983b8f35306540bd5a1cef6f870ab67058e65e69ffb505bd982",
+      "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
       "include": "pulp/signal/frequency_response.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
     },
     {
       "domain": "signal",
@@ -2706,6 +2761,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/graphic_eq.hpp",
+      "fingerprint": "sha256:63dafa17e4e4650647680a41b29ab3db78435aecf2136adc0195c827102d4d25",
+      "include": "pulp/signal/graphic_eq.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.graphic-eq"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3236,6 +3302,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/parallel_dynamics.hpp",
+      "fingerprint": "sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e",
+      "include": "pulp/signal/parallel_dynamics.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.parallel-dynamics"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/particle_collision_exciter.hpp",
       "fingerprint": "sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
       "include": "pulp/signal/particle_collision_exciter.hpp",
@@ -3513,7 +3590,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:7af0956d5c3124fa132a54aff00c2d84c80b7a6d053c39addbe9180ec07f7272",
+      "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3799,12 +3876,43 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/tempo_delay.hpp",
+      "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+      "include": "pulp/signal/tempo_delay.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion surface reused by delay kernels rather than an advertised generator DSP claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/tilt_eq.hpp",
+      "fingerprint": "sha256:ed676f18106a4465246265aeaebe138bc28c75ef197db2083b95e934418efb3d",
+      "include": "pulp/signal/tilt_eq.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.tilt-eq"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/tpt_filter.hpp",
       "fingerprint": "sha256:280fe931e00700159f4fb526b5f35e08228c4091c09068b111a89d21fc46a974",
       "include": "pulp/signal/tpt_filter.hpp",
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/transfer_curve.hpp",
+      "fingerprint": "sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632",
+      "include": "pulp/signal/transfer_curve.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.transfer-curve"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -4105,7 +4213,7 @@
     {
       "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/compiled_tempo_map.hpp",
-      "fingerprint": "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8",
+      "fingerprint": "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c",
       "include": "pulp/timebase/compiled_tempo_map.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

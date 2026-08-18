@@ -11,8 +11,8 @@ ships today, per backend.
 
 | OS / API           | Source                                          | Sysex (in) | Sysex (out) | Hotplug | Callback thread        | Typical jitter |
 |--------------------|-------------------------------------------------|------------|-------------|---------|------------------------|----------------|
-| macOS — CoreMIDI   | `core/midi/platform/mac/coremidi_device.mm`     | yes (UMP sysex7 reassembled) | yes | yes (CoreMIDI notify) | CoreMIDI thread (high QoS) | sub-ms typical |
-| iOS — CoreMIDI     | shared with macOS path                          | yes (UMP sysex7 reassembled) | yes | yes | CoreMIDI thread        | sub-ms typical |
+| macOS — CoreMIDI   | `core/midi/platform/mac/coremidi_device.mm`     | yes (MIDI-1 adapter reassembles UMP SysEx7) | yes | yes (CoreMIDI notify) | CoreMIDI thread (high QoS) | sub-ms typical |
+| iOS — CoreMIDI     | shared with macOS path                          | yes (MIDI-1 adapter reassembles UMP SysEx7) | yes | yes | CoreMIDI thread        | sub-ms typical |
 | Linux — ALSA raw MIDI | `core/midi/platform/linux/alsa_midi_device.cpp` | yes (raw-byte stream + `SysexAccumulator`) | yes | partial (runtime libudev monitor; manual re-enumeration fallback) | dedicated `std::thread` per port | ~1 ms (`poll()` driven) |
 | Windows — mmeapi   | `core/midi/platform/win/winmidi_device.cpp`     | yes (MIM_LONGDATA buffer queue) | yes | no (mmeapi has no notify; re-enumerate) | OS callback thread (`midiInOpen` CALLBACK_FUNCTION) | ~1 ms (mmeapi tick) |
 | Windows — WinRT    | `core/midi/platform/win/winrt_midi_device.cpp`  | yes | yes | yes (Windows.Devices.Midi watcher) | WinRT ThreadPool | sub-ms typical |
@@ -30,19 +30,51 @@ enumerate returns sane port descriptors, `create_input()` /
 
 ### macOS / iOS — CoreMIDI
 
-- **Sysex**: receive path uses the shared `UmpSysex7Reassembler` so
-  multi-packet sysex spanning callback boundaries reassembles correctly. The
+Both Apple platforms compile the same production `coremidi_device.mm` and
+`ump_session_coremidi.mm` translation units. The iOS Release gate builds them
+for `iphonesimulator` and `iphoneos`; its installable Simulator harness creates
+uniquely named virtual CoreMIDI source/destination endpoints through Pulp's
+process-wide shared client, enumerates them through `create_midi_system()`,
+checks id/name/direction, requires an active production `UmpSession`, and proves
+real CoreMIDI event-list I/O in both directions before disposal and disappearance.
+This is an OS-backed discovery/I/O proof, not an in-process
+`VirtualUmpEndpoint` substitute.
+
+The event-list/UMP path is availability-guarded at iOS 14 and macOS 11. Older
+Apple runtimes retain the virtual-only `UmpSession` fallback rather than calling
+a weak-linked CoreMIDI 2.0 API.
+
+In the gate's current iOS Simulator environment, creating virtual endpoints
+without the harness bundle's `UIBackgroundModes=audio` declaration returned
+`kMIDINotPermitted`; adding that declaration made the same creation oracle pass.
+The harness therefore carries it in generated bundle metadata. This is evidence
+for the test fixture, not a general recommendation that production MIDI apps
+claim background audio; applications must choose background modes according to
+their actual behavior and Apple's current policy.
+
+- **Sysex**: the legacy MIDI-1 receive adapter uses the shared
+  `UmpSysex7Reassembler`, so multi-packet sysex spanning callback boundaries
+  reassembles correctly. The UMP-native session deliberately delivers the raw
+  UMP messages to its callback instead of reassembling them. The
   "second word's top nibble is 0x3" UMP edge case is covered by the dedicated
   reassembler test suite.
 - **Hotplug**: CoreMIDI fires a notification callback on the MIDI
   client; Pulp re-enumerates ports on each notification. Not currently
   exposed as a public event — clients poll `enumerate_inputs()`.
-- **Threading**: `MIDIClientCreate` runs the callback on CoreMIDI's
-  own real-time thread. Pulp's callback runs there directly — keep it
-  short, allocation-free, and pass data to your audio / UI thread via
-  lock-free FIFOs.
+- **Threading**: the `MIDIInputPortCreateWithProtocol` receive block runs on a
+  CoreMIDI-managed thread. Pulp invokes the user callback there, but callback replacement is a
+  control-thread operation: the backend synchronizes and snapshots the
+  `std::function`, so this handoff is thread-safe but is not advertised as
+  lock-free or allocation-free. Do not treat it as an audio render callback;
+  keep the callback short and pass data onward through a bounded FIFO.
 - **UMP**: same backend supports UMP via `ump_session_coremidi.mm`
-  (CoreMIDI 2.0 path on macOS 11+ / iOS 14+).
+  (CoreMIDI 2.0 path on macOS 11+ / iOS 14+). Static consumers retain it
+  through the explicit anchor called by `UmpSession`; discovery pairs source
+  and destination directions only for an unambiguous one-source/one-destination
+  CoreMIDI entity. Multi-endpoint entities retain every direction separately;
+  endpoint unique IDs are never treated as a pairing key. Cached opens recheck
+  the live topology, so hot-unplug makes `is_open()` and `send()` fail and a
+  repeated open resolves current endpoints instead of returning a stale handle.
 
 ### Linux — ALSA raw MIDI
 

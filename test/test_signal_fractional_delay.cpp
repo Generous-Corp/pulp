@@ -391,7 +391,7 @@ TEST_CASE("shared history has transactional bounded preparation and typed faults
 
     REQUIRE(history.push(0.5) == FractionalDelayStatus::ok);
     const auto retained = history.retained_samples();
-    CHECK_FALSE(history.prepare(2));
+    CHECK_FALSE(history.prepare(1));
     CHECK_FALSE(history.prepare(std::numeric_limits<std::size_t>::max()));
     CHECK(history.prepared());
     CHECK(history.maximum_delay_samples() == 16);
@@ -415,6 +415,9 @@ TEST_CASE("shared history has transactional bounded preparation and typed faults
     REQUIRE(history.push(0.25) == FractionalDelayStatus::ok);
     CHECK(std::isfinite(history.read_lagrange3_at(2.0).sample));
     history.reset();
+    CHECK(history.read_lagrange3_at(2.0).sample == 0.0);
+    REQUIRE(history.push(1.0) == FractionalDelayStatus::ok);
+    history.discard_history();
     CHECK(history.read_lagrange3_at(2.0).sample == 0.0);
 
     std::array<double, 256> input{};

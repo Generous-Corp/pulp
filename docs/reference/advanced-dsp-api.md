@@ -35,6 +35,28 @@ processing call.
 
 ## Filters and crossovers
 
+### `TiltEqT<SampleType, Channels>`
+
+`TiltEqT` is a fixed-state reusable tonal-slope filter. Its signed
+`tilt_db_per_octave` range is `[-6, +6]`: positive values raise high
+frequencies relative to low frequencies, while negative values lower them. The
+slope is realized across `[31.25 Hz, min(16 kHz, 0.4 * sample_rate)]` by nine
+stable SOS shelves. `pivot_hz` must lie inside that band and is normalized to
+unity gain, so moving the pivot changes the response's gain reference without
+changing its slope. Zero tilt is an exact finite-input bypass.
+
+`set_config()` validates and designs the complete request before changing live
+coefficients; rejection preserves configuration and recursive history. An
+accepted non-no-op retune clears every channel's history. Non-finite audio
+clears only the affected channel, returns zero, and increments `fault_count()`.
+The filter has zero algorithmic latency. Active recursive shelves have an
+asymptotic tail (`tail_samples() == -1`); neutral bypass has no tail.
+
+- Lifecycle: `prepare(sample_rate)`, `reset()`, `reset(channel)`.
+- Configuration: `set_config(Config{pivot_hz, tilt_db_per_octave})`, `config()`.
+- Processing: `process(input, channel)`, in-place and separate-buffer `process_block()` overloads.
+- Inspection: `sample_rate()`, `design_high_hz()`, `normalization_gain()`, `coefficients()`, `magnitude()`, `magnitude_db()`, `fault_count()`, `latency_samples()`, `tail_samples()`.
+
 ### `LinkwitzRileyCrossoverT<SampleType, MaxBands>`
 
 This fixed-capacity LR4 crossover creates between two and `MaxBands` ordered
@@ -132,6 +154,70 @@ phase-preservingly saturated.
 - Lifecycle/configuration: `supports_configuration()`, `prepare()`, `reset()`, `set_config()`/`config()`.
 - Processing: `process(a, b, out, channels, bins, magnitude_amount, phase_amount)`, `process_partition(a, b, out, channels, first_bin, bin_count, magnitude_amount, phase_amount)`.
 - Inspection: `prepared()`, `channels()`, `num_bins()`.
+### `GraphicEqT<SampleType, MaxBands>`
+
+`GraphicEqT` is the variable-band graphic-EQ container. It is distinct from
+the fixed-role `SixBandEqT` compatibility surface and from constant-Q analysis:
+the caller supplies zero or more strictly increasing peaking-band centers and
+the container runs them as one fixed-capacity SOS cascade. Instantiate one
+object per independently processed channel.
+
+`prepare(sample_rate, band_capacity)` accepts sample rates from 8 kHz through
+384 kHz and a non-zero capacity no larger than `MaxBands`. `configure()` accepts
+frequencies from 20 Hz through `min(20 kHz, 0.49 * sample_rate)`, gains from
+-24 through +24 dB, and Q from 0.1 through 12. Every value must be finite.
+An empty layout is bypass. Invalid, unordered, or over-capacity requests leave
+the complete live cascade, recursive history, and transition state unchanged.
+The object is not a concurrent publication primitive: call `configure()` while
+stopped or from the processing thread at a block boundary.
+
+A zero-sample configuration selects the validated endpoint immediately. A
+non-zero transition linearly crossfades two complete stable cascades without
+interpolating recursive coefficients. Requests made while that transition is
+active fail with `transition_in_progress`; this keeps rendering independent of
+caller block partitioning. `reset()` clears both recursive histories and selects
+the requested endpoint if a transition was active. `process_block()` is in-place;
+a null pointer is accepted only for an empty block.
+
+Zero-gain bands are exact identity sections, so an all-neutral layout is a
+bit-exact flat bypass. `magnitude()` and `magnitude_db()` expose the stationary
+requested endpoint and reject non-finite or out-of-Nyquist queries with NaN.
+A bad audio sample clears both bounded histories, emits zero, increments
+`fault_count()`, and the next finite sample resumes from cleared state.
+
+The cascade has zero host latency. A bypass or all-zero-gain layout has zero
+tail; any non-neutral recursive band reports Pulp's infinite-tail sentinel `-1`.
+Preparation, whole-layout replacement, processing, reset, and response
+inspection allocate no memory, although coefficient design and response queries
+belong off the audio callback because they use transcendental functions.
+
+- Lifecycle: `prepare()`, `reset()`.
+- Configuration: `configure()`, `GraphicEqPrepareStatus`, `GraphicEqConfigureStatus`.
+- Processing: `process()`, `process_block()`.
+- Inspection: `band()`, `coefficients()`, `band_count()`, `capacity()`, `sample_rate()`, `supported_frequency_ceiling_hz()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `tail_samples()`, `magnitude()`, `magnitude_db()`.
+### `CombFilterT<SampleType>`
+
+This prepared integer-delay family exposes three explicit topologies through
+`CombFilterMode`: feedforward (`y = x + g x[n-D]`), feedback
+(`y = x + g y[n-D]`), and the Schroeder allpass form. Feedforward gain is
+bounded to `[-1, 1]`; recursive gain is bounded to `[-0.999, 0.999]`. Delay is
+an exact integer in `[2, maximum_delay_samples]`. Fractional modulation is
+deliberately outside this fixed comb contract; use `FractionalDelayLineT` when
+that interpolation behavior is required.
+
+`prepare(maximum_delay_samples)` is the only allocating operation and is
+transactional. `configure(config)` validates the complete candidate, commits it
+without allocation, and clears old history so a topology or delay retune is
+deterministic. Exact in-place and arbitrary block partitioning are supported.
+Nonfinite input or arithmetic overflow emits zero, increments `fault_count()`,
+and discards history in constant time. All modes report zero fixed host latency.
+`tail_samples()` reports the exact finite feedforward/pure-delay tail and
+`nullopt` for a nonzero recursive tail. `comb_filter_response()` exposes the
+stationary complex response for plotting and independent verification.
+
+- Lifecycle: `prepare(maximum_delay_samples)`, `configure(config)`, `reset()`.
+- Processing: `process(sample)`, `process(input, output, frames)`.
+- Inspection: `prepared()`, `configured()`, `maximum_delay_samples()`, `config()`, `fault_count()`, `clear_fault_count()`, `processing_latency_samples()`, `tail_samples()`, `comb_filter_response()`.
 
 ## Routing and gain laws
 
