@@ -2806,6 +2806,26 @@ private:
                     // tick whether or not anything is painted, and a submit
                     // arms needs_repaint_ on the idle->pending transition, so
                     // that tick is guaranteed to be dispatched.
+                    // DETECTION. Reaching this callback means a frame driver
+                    // is running, so the view must be holding motion. If it is
+                    // not, coalescing has silently degraded to per-event
+                    // dispatch — which is precisely how this broke once: the
+                    // fail-safe restored the OLD behaviour, so there was no
+                    // crash, no failing test and no log, and the only symptom
+                    // was that a measured 4x reproduced on some runs and not
+                    // others. The invariant is cheap to state and was
+                    // expensive to rediscover, so state it out loud. Once per
+                    // process; this is the frame callback.
+                    if (!self->metal_view_.coalescePointerInput) {
+                        static std::once_flag warned_no_coalescing;
+                        std::call_once(warned_no_coalescing, [] {
+                            std::cerr << "[gpu-host] pointer coalescing is OFF "
+                                         "while a frame driver is running — drag "
+                                         "motion will dispatch per event. A frame "
+                                         "driver was started without "
+                                         "begin_frame_driver_().\n";
+                        });
+                    }
                     [self->metal_view_ flushCoalescedPointerInput];
 
                     // Pump idle FIRST so JS rAF callbacks fire (and any
@@ -2851,6 +2871,10 @@ private:
 
     void start_hidden_frame_timer() {
         if (hidden_frame_timer_) return;
+        // This timer re-enters display_link_callback, so it releases held
+        // motion exactly as the display link does — which makes it a frame
+        // driver and means it must opt in too. Omitting this was the defect.
+        begin_frame_driver_();
         frame_pump_.suspend();
         hidden_frame_timer_ = [NSTimer timerWithTimeInterval:1.0 / 60.0
             repeats:YES block:^(NSTimer*) {
@@ -2860,15 +2884,38 @@ private:
                                      forMode:NSRunLoopCommonModes];
     }
 
-    void start_display_link() {
-        // Opt the view into holding drag motion. This is the commitment the
-        // property documents: from here on the display-link block calls
-        // -flushCoalescedPointerInput every tick, so held motion always has a
-        // release. Enabled alongside the link rather than at construction so
-        // the two can never be out of step — the hidden-window NSTimer
-        // fallback re-enters the same callback, so a hidden window keeps
-        // flushing too.
+    // ── Frame-driver lifecycle ──────────────────────────────────────────────
+    //
+    // TWO things drive frames — the CVDisplayLink and, for a hidden window,
+    // an NSTimer — and BOTH funnel into display_link_callback, which is what
+    // releases held pointer motion. The opt-in therefore belongs to "a frame
+    // driver is running", not to either driver specifically.
+    //
+    // It was originally set inside start_display_link() alone. That looked
+    // right and shipped a silent defect: start_hidden_frame_timer() drives
+    // frames without it, so on that path motion was never held and coalescing
+    // simply did not happen. Nothing failed — the fail-safe dispatches
+    // immediately — so there was no crash, no log, no red test, just the old
+    // frame rate. It was found only by measuring the same binary twice and
+    // getting two different answers.
+    //
+    // Routing both drivers through one helper is what stops a third driver
+    // from reintroducing it.
+    void begin_frame_driver_() {
         metal_view_.coalescePointerInput = YES;
+    }
+
+    void end_frame_driver_() {
+        // Clear the opt-in BEFORE flushing so a sample arriving during
+        // teardown dispatches immediately rather than joining a batch that
+        // nobody is left to release.
+        if (!metal_view_) return;
+        metal_view_.coalescePointerInput = NO;
+        [metal_view_ flushCoalescedPointerInput];
+    }
+
+    void start_display_link() {
+        begin_frame_driver_();
 
         display_link_.open(display_link_callback, this);
 
@@ -2890,15 +2937,8 @@ private:
     }
 
     void stop_display_link() {
-        // Symmetric with start_display_link: once the link stops there is no
-        // longer anything to release held motion, so stop holding it and
-        // deliver whatever is outstanding. Order matters — clear the opt-in
-        // first so a sample arriving during teardown dispatches immediately
-        // rather than joining a batch nobody will flush.
-        if (metal_view_) {
-            metal_view_.coalescePointerInput = NO;
-            [metal_view_ flushCoalescedPointerInput];
-        }
+        // Once no driver is left there is nothing to release held motion.
+        end_frame_driver_();
         if (hidden_frame_timer_) {
             [hidden_frame_timer_ invalidate];
             hidden_frame_timer_ = nil;
