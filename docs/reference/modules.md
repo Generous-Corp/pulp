@@ -678,7 +678,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Buffer | `midi_buffer.hpp` | Timestamped event buffer for `process()` callbacks |
-| Device I/O | platform/ | CoreMIDI (macOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
+| Device I/O | platform/ | CoreMIDI (macOS/iOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |

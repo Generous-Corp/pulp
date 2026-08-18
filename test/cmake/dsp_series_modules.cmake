@@ -75,6 +75,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/transient_designer.cpp
     header_compile/spectral_mask_processor.cpp
     header_compile/spectral_delay_matrix.cpp
+    header_compile/tempo_delay.cpp
     header_compile/zero_latency_convolver_support.cpp)
 target_sources(pulp-dsp-series-header-self-containment PRIVATE
     header_compile/filter_morph.cpp)

@@ -42,9 +42,9 @@
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 92,
+      "capability_entrypoint": 91,
       "capability_support": 38,
-      "infrastructure": 9,
+      "infrastructure": 10,
       "legacy_unreviewed": 296,
       "unsupported_capability": 2
     },
@@ -3590,7 +3590,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:88c3008841612b8cb3071cdea268291103a5bcc56fb64499fae56d0a9f0e1fde",
+      "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3700,17 +3700,6 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.spectral-band-mask"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "signal",
-      "source": "core/signal/include/pulp/signal/spectral_cross_synthesis.hpp",
-      "fingerprint": "sha256:00860da91696473d18f8c276ac53a82788568640cb173b958eaa1dac9bbfee63",
-      "include": "pulp/signal/spectral_cross_synthesis.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "signal.spectral-cross-synthesis"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },
@@ -3884,6 +3873,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/tempo_delay.hpp",
+      "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+      "include": "pulp/signal/tempo_delay.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion surface reused by delay kernels rather than an advertised generator DSP claim."
     },
     {
       "domain": "signal",
@@ -4215,7 +4213,7 @@
     {
       "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/compiled_tempo_map.hpp",
-      "fingerprint": "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8",
+      "fingerprint": "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c",
       "include": "pulp/timebase/compiled_tempo_map.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

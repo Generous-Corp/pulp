@@ -3,6 +3,7 @@
 #include <pulp/signal/headphone_crossfeed.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/tempo_delay.hpp>
 
 #include <array>
 #include <cmath>
@@ -120,10 +121,18 @@ int main() {
     if (!parallel_dynamics.prepare(8u, 16u))
         return 31;
 
-    pulp::signal::SpectralCrossSynthesis cross_synthesis;
+    pulp::signal::TempoDelayTime tempo_delay;
+    if (tempo_delay.prepare(48000.0, 96000.0) != pulp::signal::TempoDelayError::none)
+        return 32;
+    if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
+        pulp::signal::TempoDelayError::none)
+        return 33;
+    if (!(std::isfinite(tempo_delay.next())))
+        return 34;    pulp::signal::SpectralCrossSynthesis cross_synthesis;
     pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
     cross_config.fft_size = 256;
     if (!cross_synthesis.prepare(cross_config))
-        return 32;
+        return 35;
+
     return 0;
 }

@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 52
+        "capabilities": 51
       },
       "timebase": {
         "state": "partial",
@@ -4290,69 +4290,6 @@
       "contract_digest": "sha256:78f2687898c22099885e4815358233d7bf8c4c467709b7ca74bdd4500dd42841"
     },
     {
-      "key": "signal.spectral-cross-synthesis",
-      "domain": "signal",
-      "summary": "Prepared source-filter cross-synthesis that transfers a modulator cepstral envelope onto carrier phase and residual in the log-magnitude domain.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "control; allocates the analyzer, envelope history, and frame scratch",
-        "process": "audio frame owner",
-        "reset": "audio frame owner",
-        "release": "none"
-      },
-      "state_model": "Prepared channel/bin geometry and cepstral analyzer scratch plus per-channel smoothed carrier and modulator log-envelope history with validity flags; spectral frames are caller-owned. Rejected prepare and set_config calls are transactional and leave the committed configuration and history in place, and reset clears only the temporal envelope history.",
-      "seed_model": "none",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "not_applicable",
-        "platform_scope": "same_build",
-        "transport_history": "irrelevant"
-      },
-      "input_domain": "two coherent one-sided complex channel groups, carrier and modulator, plus a bounded envelope transfer amount, dry/wet mix, smoothing time in frames, symmetric transfer bound, and analysis magnitude floor",
-      "output_domain": "caller-owned complex spectra carrying the carrier phase and residual under the transferred modulator envelope, optionally RMS-matched to the carrier",
-      "units": [
-        "bins",
-        "channels",
-        "linear magnitude",
-        "decibels",
-        "frames",
-        "normalized amount"
-      ],
-      "latency": "zero additional frame-domain latency",
-      "tail": "none",
-      "scheduling": "one supplied coherent carrier and modulator frame pair per prepared channel group",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/signal/spectral_cross_synthesis.hpp",
-          "qualified_name": "pulp::signal::SpectralCrossSynthesisT<float>",
-          "target": "Pulp::signal",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:fe19d2fcb37e6de72060f390132ba214370d622927f936494763ad9f9395ff30"
-    },
-    {
       "key": "signal.spectral-delay-matrix",
       "domain": "signal",
       "summary": "Prepared per-bin spectral delay and attenuation with bounded history and race-free frame-boundary table publication.",
@@ -6021,14 +5958,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 85,
+    "total": 84,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 52,
+      "signal": 51,
       "timebase": 9
     }
   },
@@ -11664,39 +11601,6 @@
             "enums": []
           }
         ],
-        "spectral_cross_synthesis.hpp": [
-          {
-            "class": "SpectralCrossSynthesisT",
-            "qualified_name": "pulp::signal::SpectralCrossSynthesisT",
-            "template": "typename SampleType = float",
-            "methods": [
-              "prepare(PrepareConfig config)",
-              "reset()",
-              "process(const std::complex<SampleType>* const* carrier, const std::complex<SampleType>* const* modulator, std::complex<SampleType>* const* output, int channels, int num_bins)",
-              "supports_configuration(const PrepareConfig& config)",
-              "set_config(const Config& config)",
-              "config()",
-              "prepared()",
-              "channels()",
-              "fft_size()",
-              "num_bins()",
-              "lifter_order()",
-              "retained_bytes()",
-              "added_latency_samples()",
-              "added_tail_samples()"
-            ],
-            "enums": []
-          },
-          {
-            "class": "ScaledSquares",
-            "qualified_name": "pulp::signal::ScaledSquares",
-            "template": null,
-            "methods": [
-              "add(SampleType value)"
-            ],
-            "enums": []
-          }
-        ],
         "spectral_delay_matrix.hpp": [
           {
             "class": "SpectralDelayMatrixT",
@@ -12099,6 +12003,39 @@
               "reset()",
               "encode(double x)",
               "decode(double x)"
+            ],
+            "enums": []
+          }
+        ],
+        "tempo_delay.hpp": [
+          {
+            "class": "TempoDelayResult",
+            "qualified_name": "pulp::signal::TempoDelayResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "TempoDelayTime",
+            "qualified_name": "pulp::signal::TempoDelayTime",
+            "template": null,
+            "methods": [
+              "prepare(double sample_rate, double maximum_delay_samples, std::uint32_t transition_samples = kDefaultTransitionSamples)",
+              "reset()",
+              "set_delay_samples(double samples)",
+              "set_tempo(timebase::BeatDivision division, double beats_per_minute)",
+              "next()",
+              "render(double* output, std::size_t sample_count)",
+              "prepared()",
+              "initialized()",
+              "transition_active()",
+              "remaining_transition_samples()",
+              "sample_rate()",
+              "maximum_delay_samples()",
+              "current_delay_samples()",
+              "target_delay_samples()"
             ],
             "enums": []
           }
