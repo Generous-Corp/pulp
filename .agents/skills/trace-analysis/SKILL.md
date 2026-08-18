@@ -19,6 +19,77 @@ narrated root cause and a chain of evidence — never raw SQL. **You are reading
 this because a tracing question fired (L1 `explain`) or an expert is driving an
 iterative investigation (L2).**
 
+---
+
+## Trace FIRST. Do not substitute a cruder instrument.
+
+**Any question of the form "why is this slow / choppy / stalling / laggy" starts
+with a trace.** Not `sample`, not counting log lines, not timing a phase with
+wall-clock stamps. Those answer different questions and will quietly send you
+somewhere wrong.
+
+| instrument | answers | cannot answer |
+|---|---|---|
+| `sample` | where CPU time went, by symbol, aggregated | how often a thing ran, what called it, whether it was inside the frame |
+| log/frame counting | that frames were slow | which stage of the frame owns the time |
+| wall-clock stamps | that a phase is long | what the phase is composed of |
+| **a trace** | **structure: counts, nesting, causality, per-stage cost** | — |
+
+The distinction is not academic. In one investigation, `sample` and frame-counting
+supported a confident, coherent, **wrong** conclusion for hours ("the full-surface
+repaint is the cost"). A single trace query overturned it in seconds:
+
+```
+stage    slices   total_ms
+layout    11876     6711.2     <- 36 layout passes PER FRAME
+render      332     4338.3
+gpu         664     3771.7
+```
+
+Then one more query located it exactly — `layout_children` at depth 0 (outside
+any `frame` slice) accounted for **11,544 slices / 6,589 ms**, against 332 / 121 ms
+inside frames. Layout was running per *repaint request* rather than per presented
+frame. No symbol-level profile can show that, because the expensive thing is the
+COUNT and the CALLER, not the function.
+
+**The tell that you are using the wrong instrument:** you find yourself saying
+"it must be X" about a timing question. A trace does not require a hypothesis.
+
+### Absence of a span is not absence of cost
+
+If a frame's children sum to ~2 ms while the frame took 45 ms, the missing time
+is real and it is somewhere with no span. That exact gap hid a swapchain acquire
+blocking on a Fifo present mode (pulp #6559, #6563) — invisible until
+`gpu_acquire` was added. **When a parent's children do not account for the
+parent, add a span before theorising.** Check that the path you are tracing is
+instrumented at all: `plugin_frame_renderer.cpp` carries `gpu_acquire`; other
+frame paths may not, and a trace with no such slices means "not measured", never
+"not slow".
+
+### Capture recipe
+
+Tracing is env-driven — a plug-in has no `main()`, so there is nothing to call:
+
+```sh
+PULP_TRACE_PATH=/tmp/x.pftrace PULP_TRACE_SECONDS=20 <app-or-host>
+# drive the interaction inside that window; the file self-flushes on the timer
+```
+
+Query it **SQL first, trace second** — the reverse order fails with a misleading
+"only one SQL string is allowed":
+
+```sh
+pulp trace query "SELECT ... FROM slice WHERE dur >= 0" --trace /tmp/x.pftrace
+pulp trace doctor      # confirms trace_processor is present
+```
+
+Requires an SDK built `-DPULP_TRACING=ON`; it is OFF by default and adds nothing
+when off. Attachment is wired for VST3, CLAP, AU v2, AU v3, AAX and Standalone
+(pulp #6744) — before that it was VST3-only, so an older build captures nothing
+in other formats and looks like a tracing failure rather than a missing wire-up.
+
+---
+
 This skill is provider-agnostic by construction: it is a plain `SKILL.md` read
 identically by **Claude Code and Codex** from `.agents/skills/`. The whole
 "why is this slow?" experience works under any agent because it is a shipped
