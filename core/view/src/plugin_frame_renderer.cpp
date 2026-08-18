@@ -3,6 +3,8 @@
 
 #include <pulp/view/plugin_frame_renderer.hpp>
 
+#include <atomic>
+
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -24,6 +26,30 @@
 #include <cmath>
 
 namespace pulp::view {
+
+namespace {
+// Packed so the whole colour is read and written atomically; a torn read here
+// would paint one frame's worth of a colour that was never set.
+std::atomic<std::uint32_t> g_editor_host_clear_color{
+    (static_cast<std::uint32_t>(kEditorHostClearR) << 16)
+    | (static_cast<std::uint32_t>(kEditorHostClearG) << 8)
+    | static_cast<std::uint32_t>(kEditorHostClearB)};
+} // namespace
+
+void set_editor_host_clear_color(EditorHostClearColor colour) noexcept {
+    g_editor_host_clear_color.store(
+        (static_cast<std::uint32_t>(colour.r) << 16)
+            | (static_cast<std::uint32_t>(colour.g) << 8)
+            | static_cast<std::uint32_t>(colour.b),
+        std::memory_order_relaxed);
+}
+
+EditorHostClearColor editor_host_clear_color() noexcept {
+    const auto packed = g_editor_host_clear_color.load(std::memory_order_relaxed);
+    return {static_cast<std::uint8_t>((packed >> 16) & 0xFF),
+            static_cast<std::uint8_t>((packed >> 8) & 0xFF),
+            static_cast<std::uint8_t>(packed & 0xFF)};
+}
 
 namespace {
 

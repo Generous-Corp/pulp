@@ -12,6 +12,7 @@
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/properties_file.hpp>
+#include <pulp/view/plugin_frame_renderer.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/command_registry.hpp>
 
@@ -916,6 +917,24 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_error("Standalone: ViewBridge::release_view returned null");
         stop();
         return false;
+    }
+
+    // Growing a window exposes area no frame has covered yet, and macOS pins
+    // the last drawable top-left during a live resize, so that strip shows the
+    // host layer's clear colour until the next frame lands. The default is only
+    // right for an editor that happens to share it; an app with its own surface
+    // colour flashes the wrong dark along the right and bottom edges as it
+    // grows. The root already carries the app's declared background, so publish
+    // it and the strip becomes invisible instead. Shrinking exposes nothing,
+    // which is why the artefact is grow-only.
+    if (root->has_background_color()) {
+        const auto bg = root->background_color();
+        // Color channels are floats in [0,1]; the clear colour is 8-bit.
+        const auto to8 = [](float c) {
+            return static_cast<std::uint8_t>(
+                std::lround(std::clamp(c, 0.0f, 1.0f) * 255.0f));
+        };
+        view::set_editor_host_clear_color({to8(bg.r), to8(bg.g), to8(bg.b)});
     }
 
     const auto& size_hints = bridge->size_hints();

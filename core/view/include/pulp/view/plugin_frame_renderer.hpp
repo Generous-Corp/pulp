@@ -52,6 +52,30 @@ inline constexpr std::uint8_t kEditorHostClearR = 30;
 inline constexpr std::uint8_t kEditorHostClearG = 30;
 inline constexpr std::uint8_t kEditorHostClearB = 46;
 
+/// The colour a host layer shows where no frame has been painted yet.
+///
+/// Defaults to the constants above. An app whose own surface is a different
+/// colour should override this at startup, because the default is only ever
+/// correct for an editor that happens to share it.
+///
+/// This matters at exactly one moment, and it is visible: growing a window
+/// exposes area the previous frame never covered. macOS pins the last drawable
+/// to the top-left during a live resize (deliberately -- the alternative is
+/// Core Animation STRETCHING the old frame, which reads as the canvas zooming
+/// as you drag), so the new strip along the right and bottom edges shows this
+/// colour until the next frame lands. Shrinking exposes nothing, which is why
+/// the artefact is grow-only. Match the app's surface and the strip becomes
+/// invisible rather than a flash of the wrong dark.
+struct EditorHostClearColor {
+    std::uint8_t r = kEditorHostClearR;
+    std::uint8_t g = kEditorHostClearG;
+    std::uint8_t b = kEditorHostClearB;
+};
+
+/// Thread-safe: hosts read this while painting.
+void set_editor_host_clear_color(EditorHostClearColor colour) noexcept;
+[[nodiscard]] EditorHostClearColor editor_host_clear_color() noexcept;
+
 /// The size/scale/viewport a frame is painted against, in one value.
 ///
 /// `width`/`height` are LOGICAL (the view tree's units). `scale` maps them to
