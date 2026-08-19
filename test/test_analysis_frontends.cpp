@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -170,20 +171,46 @@ TEST_CASE("Spectrum smoothing preserves legacy coefficients and peak-frame timin
     config.peak_decay_db_per_frame = 2.0;
     REQUIRE(trace.configure(config));
 
+    // Expectations are DERIVED from the configured coefficients, not pasted. The
+    // smoothing law is one-pole toward the target, selecting attack when rising
+    // and release when falling, so a reference that mirrors it turns this into a
+    // check of the coefficients actually in force. Written as literals, the
+    // assertions still passed when a coefficient changed meaning.
+    const auto smooth = [&](double previous, double target) {
+        const double coefficient = target > previous ? config.attack : config.release;
+        return previous + coefficient * (target - previous);
+    };
+    // Peak-hold decays one step per frame and is re-armed whenever the magnitude
+    // rises above it. Asserting the decayed value alone silently assumed the
+    // rebound always overtakes it — true for these coefficients, false for
+    // others, which is exactly the coupling a derived expectation removes.
+    const auto decayed_peak = [&](double previous_peak, double magnitude) {
+        return std::max(previous_peak - config.peak_decay_db_per_frame, magnitude);
+    };
+    constexpr double kTolerance = 1.0e-12;
+
     std::array<double, 5> bins{};
     REQUIRE(trace.process_frame(bins));
+    const double settled = trace.current().magnitude_db[0];
+
     bins[1] = -20.0;
     REQUIRE(trace.process_frame(bins));
-    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(-3.0, 1.0e-12));
+    const double falling_once = smooth(settled, -20.0);
+    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(falling_once, kTolerance));
     REQUIRE(trace.current().peak_db[0] == 0.0);
+
     REQUIRE(trace.process_frame(bins));
-    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(-5.55, 1.0e-12));
-    REQUIRE(trace.current().peak_db[0] == -2.0);
+    const double falling_twice = smooth(falling_once, -20.0);
+    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(falling_twice, kTolerance));
+    const double peak_after_decay = decayed_peak(0.0, falling_twice);
+    REQUIRE_THAT(trace.current().peak_db[0], WithinAbs(peak_after_decay, kTolerance));
 
     bins[1] = 0.0;
     REQUIRE(trace.process_frame(bins));
-    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(-2.775, 1.0e-12));
-    REQUIRE_THAT(trace.current().peak_db[0], WithinAbs(-2.775, 1.0e-12));
+    const double rising = smooth(falling_twice, 0.0);
+    REQUIRE_THAT(trace.current().magnitude_db[0], WithinAbs(rising, kTolerance));
+    REQUIRE_THAT(trace.current().peak_db[0],
+                 WithinAbs(decayed_peak(peak_after_decay, rising), kTolerance));
 }
 
 TEST_CASE("Spectrum faults are finite transactional and reset deterministic",

@@ -136,6 +136,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/tempo_delay.hpp",
+        "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo "
+            "range; it is a bounded conversion surface reused by delay kernels rather "
+            "than an advertised generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/audio/planar_audio_ring_buffer.hpp",
         "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
         "disposition": "infrastructure",
@@ -550,7 +561,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:e9b25b2ad86ecf31ffdf7138ee93a21647702dc9c2a931c7f69ba660ce8700ab",
+        "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

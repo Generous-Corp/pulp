@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7629-js-engine-cmp0057",
+  "created_at": "2026-08-17T07:48:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Set CMP0057 explicitly in core/view/cmake/PulpViewJsEngines.cmake so its PULP_JS_ENGINE validation emits its own diagnostic when the module is loaded through `cmake -P`, where no project has established policies and IN_LIST would otherwise parse as a plain argument on CMake 3.x. Backend selection semantics, the set of accepted engines, and every rendering or asset path are unchanged; in a normal project configure the policy is already established and an invalid engine produces the identical FATAL_ERROR with or without this change.",
+  "tests": [
+    "cmake-js-engine-selection negative-contract probes emit their intended diagnostics under cmake -P",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

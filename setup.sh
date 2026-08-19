@@ -1059,6 +1059,21 @@ if $DRY_RUN; then
     exit 0
 fi
 
+# ── Preflight ───────────────────────────────────────────────────────────────
+
+# Name the failures this checkout is already destined for, BEFORE cmake reports
+# them accurately and late. The archive-floor error names the archive, not the
+# stale cache behind it — and never the fact that $SKIA_DIR may be silently
+# redirecting this build to a different checkout's cache entirely. Advisory: the
+# problems it finds are real, but a preflight that can block setup is a
+# preflight that gets bypassed.
+step "Checking for known configure blockers"
+if python3 "$REPO_ROOT/tools/scripts/checkout_preflight.py"; then
+    :
+else
+    warn "preflight found problems that will fail configure (see above)"
+fi
+
 # ── Configure ───────────────────────────────────────────────────────────────
 
 step "Configuring CMake"
