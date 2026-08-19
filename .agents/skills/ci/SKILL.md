@@ -3413,6 +3413,41 @@ self-inflicted. "The hosted queue kills our jobs" is the wrong story and sends
 the next person hunting a phantom. The true one is "hosted runs our jobs and
 fails one specific compile, and `--failed` re-runs kept us routed there."
 
+### Verify through the real harness, not a lookalike — five instances in one week
+
+Every hard bug in this section shares one shape: **a check that passes against
+something resembling the real artifact, and fails against the artifact.** It is
+worth stating on its own because it is the cheapest to prevent and the most
+expensive to diagnose.
+
+| what was verified | what actually runs | result |
+| --- | --- | --- |
+| a hand-written inline JSON schema | the committed schema file (has `$schema`) | CLI rejected it; a live recovery job died |
+| `rerun` observed twice re-routing | `rerun --failed`, which skips the resolver | ~6 legs mis-routed over 3 days |
+| `tart list` VM count, host load | `resolve-provider`'s in-flight-legs counter | dispatch strategy built on the wrong variable |
+| the busy counter read **at dispatch** | the resolver reads it **~2 min later** | a dispatch starved by its own predecessor |
+| `bash test/foo.sh` run directly | `ctest -R foo` with CMake's registered path | script never executed: `0.00 sec`, `No such file or directory` |
+
+The last one is the sharpest, because the test existed *specifically* to prove a
+mechanism was genuinely enforced rather than merely configured — and it was
+merely configured. A wrong `${CMAKE_CURRENT_SOURCE_DIR}/../` (the file is
+`include()`d, so the variable is the *including* scope, not the file's own
+directory) made ctest invoke a path that did not exist. It reports as `Failed`,
+not `Timeout`, and takes `0.00 sec`.
+
+**The rules that fall out:**
+
+- **Run a new test through its real runner before claiming it passes.** `ctest -R
+  <name>`, not the script directly. A registration bug is invisible to the
+  script and fatal in CI.
+- **`0.00 sec` plus `Failed` means it never ran.** Read that as a registration or
+  path fault, never as a behavioural failure — and never as contention.
+- **A green result in a simplified mode proves only what that mode exercises.**
+  Script-mode arithmetic passing says nothing about whether CMake applied the
+  property to a registered test. Say which half is proven.
+- **When a remedy stops working, re-verify the remedy** rather than adding
+  conditions around it.
+
 **Two conditions, not one — they answer different questions.** This distinction
 took a week to separate and is the single most useful thing here:
 
