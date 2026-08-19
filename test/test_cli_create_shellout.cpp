@@ -236,6 +236,72 @@ TEST_CASE("pulp create --in-tree rejects output paths outside examples",
             != std::string::npos);
 }
 
+TEST_CASE("pulp create is not gated by release-publishing credentials",
+          "[cli][create][shellout][doctor-scope]") {
+    // `pulp create` used to run the full doctor gate, which includes the
+    // RELEASE_BOT_TOKEN secret check. On any machine without that credential —
+    // every contributor's, since a repo secret is not theirs to set, and every
+    // fleet host that is not the release host — scaffolding a project failed
+    // with `Environment issues found. Run \`pulp doctor --fix\` first.` and a
+    // walkthrough for minting a PAT.
+    //
+    // That also quietly broke the sibling test in this file, whose purpose is a
+    // SECURITY property (a local kit is consumed without executing packaged
+    // code). It reddened for a reason that had nothing to do with sandboxing,
+    // and a security assertion that fails environmentally gets dismissed as
+    // noise. So this asserts the scoping directly rather than leaving it
+    // implied by that test's exit code.
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-doctor-scope");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    // Stub `gh` so the secret check deterministically reports MISSING. Without
+    // this the test is vacuous on any machine that HAS the credential
+    // configured — it would pass whether or not the scoping fix is present,
+    // which is precisely the machine a maintainer runs it on. The stub answers
+    // `repo view` (the guard that decides whether the check runs at all) and
+    // returns a well-formed secrets payload with the token absent, which is the
+    // shape the real check saw when this regression was found.
+#ifndef _WIN32
+    const auto stub_dir = tmp.path / "ghstub";
+    fs::create_directories(stub_dir);
+    {
+        std::ofstream gh(stub_dir / "gh");
+        gh << "#!/bin/sh\n"
+              "case \"$*\" in\n"
+              "  *\"repo view\"*) echo \"Generous-Corp/pulp\" ;;\n"
+              "  *actions/secrets*) echo '{\"total_count\":0,\"secrets\":[]}' ;;\n"
+              "  *) exit 1 ;;\n"
+              "esac\n";
+    }
+    fs::permissions(stub_dir / "gh",
+                    fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec,
+                    fs::perm_options::replace);
+    const std::string patched_path =
+        native_path_string(stub_dir) + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+    ScopedEnvVar path_with_stub("PATH", patched_path.c_str());
+#endif
+
+    const auto out_dir = tmp.path / "GeneratedWithoutReleaseSecret";
+    const auto kit_dir = source_root() / "fixtures" / "packages" / "simple-plugin-template";
+
+    auto r = run_create({"create", "Scope Gain",
+                         "--template", native_path_string(kit_dir),
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        source_root());
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    // The specific regression: a release credential must never decide whether
+    // a project can be scaffolded.
+    REQUIRE(r.stderr_output.find("Environment issues found") == std::string::npos);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
+}
+
 TEST_CASE("pulp create accepts local template kit paths without executing package code",
           "[cli][create][shellout][kit]") {
     if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }

@@ -8,6 +8,12 @@
 # Build artifacts
 /build/
 /build-*/
+
+# Live-build marker written by tools/ci/governed-build.sh for the life of a
+# governed build, and read by tools/scripts/live_build_check.py. Untracked on
+# purpose: it describes what is happening in THIS checkout right now, so it is
+# per-worktree state, never repository content.
+/.pulp-build-active
 # `cmake --install` output. A staged SDK prefix is a build artifact, and at
 # ~300MB of untracked noise it hides the files a `git status` is meant to show.
 /install/

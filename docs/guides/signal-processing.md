@@ -118,6 +118,52 @@ storage. Call them outside the audio callback. After `prepare()`, `push_dry()`,
 `mix_wet()`, `set_mix()`, `set_curve()`, and `reset()` are real-time safe for
 channel/block sizes within the prepared capacity.
 
+### ParallelDynamicsMixer
+
+`ParallelDynamicsMixer` wraps caller-owned dynamics processing with the pieces
+that parallel compression otherwise repeats: true-stereo path alignment, a
+declared mix law, output makeup gain, and latency/tail reporting. It does not
+own or construct a compressor.
+
+```cpp
+signal::ParallelDynamicsMixer mixer;
+mixer.prepare(/* max path latency */ 256, /* max block */ 512);
+mixer.configure_latency_and_publish({ // initial setup, while audio is stopped
+    .wet_mix = 0.35f,
+    .mix_law = signal::CrossfadeGainLaw::EqualGain,
+    .output_gain_db = 1.5f,
+    .dry_latency_samples = 0,
+    .wet_latency_samples = compressor.latency_samples(),
+    .dry_tail_samples = 0,
+    .wet_tail_samples = compressor.tail_samples(),
+});
+
+const float* dry[2] = {dry_left, dry_right};
+const float* wet[2] = {compressed_left, compressed_right};
+float* output[2] = {output_left, output_right};
+mixer.process(dry, wet, output, num_samples);
+```
+
+The linear `EqualGain` law is the default because dry and dynamics-processed
+wet signals are normally correlated; identical aligned paths retain unity
+gain at every mix. `EqualPower` is available when the wet path is decorrelated
+or deliberately phase-altered. Both laws have exact dry-only and wet-only
+endpoints. Output may exactly alias the corresponding dry or wet channel;
+partial and cross-channel overlap are rejected.
+
+Gain-, law-, and tail-only configuration publishes atomically at block
+boundaries through `publish_config()`. It rejects latency changes. Use
+`configure_latency_and_publish()` while audio is stopped to change declared
+path latency and clear alignment history. `latency_samples()` reports the
+greater declared path latency; `tail_samples()` includes compensation delay
+and reports the active path tail or their maximum while blended.
+
+**Caveat:** `prepare()`, `publish_config()`, and
+`configure_latency_and_publish()` are control-thread operations; latency
+configuration additionally requires stopped audio. `process()` and `reset()`
+allocate no memory after preparation. Consumers own any oversampling around
+the wet dynamics processor.
+
 ---
 
 ### Panner
@@ -1162,3 +1208,47 @@ SPSC publication primitives for those ownership boundaries. After `prepare()`,
 ### Filter and polynomial design helpers
 
 Scalar `FilterDesign` biquad helpers return fixed-size coefficient structs and do not allocate, but they are intended for prepare/control-rate retuning because applying coefficients can reset processor state. Butterworth, Chebyshev, elliptic, and polynomial helpers that return `std::vector` allocate result storage and belong on prepare/control/offline threads.
+
+### Tempo-synced delay time
+
+`tempo_delay_samples()` converts the canonical persisted `BeatDivision`
+vocabulary—including dotted and triplet values—to an unrounded fractional
+sample count. It uses the same 1–1000 BPM and maximum 768 kHz domains as the
+compiled tempo map, but it does not create, copy, or query a tempo map. A beat
+always means a quarter note; meter affects which division a product presents,
+not its duration.
+
+`TempoDelayTime` adds a fixed-state read-time transition for an existing delay
+engine:
+
+```cpp
+signal::TempoDelayTime sync;
+sync.prepare(sample_rate, delay.max_delay());
+sync.set_tempo(timebase::BeatDivision::EighthDotted, 120.0);
+
+// The caller retains ownership of audio history and feedback routing.
+delay.push(input);
+const float wet = delay.read(static_cast<float>(sync.next()));
+```
+
+The first setting after `prepare()` is immediate. Subsequent settings move
+linearly over exactly 64 samples by default; retargeting starts at the current
+published value. `reset()` collapses an active move to its target. Invalid BPM,
+sample rate, division, capacity, and nonfinite values reject transactionally
+without changing the current move. `render()` produces the same sample sequence
+for every host block partition and allocates no memory.
+
+The transition is deterministic delay-time modulation, not an audio crossfade:
+large read-time moves can produce an intentional pitch sweep. A delay engine
+that requires a click-free jump should use these targets to drive its own
+dual-read-head crossfade; read heads and audio-history ownership stay outside
+this helper.
+
+This is control state only: it has zero audio latency and zero audio tail.
+`conservative_delay_samples()` lets an audio-history owner retain the longest
+read time traversed by the current transition in its own tail calculation. Use
+`CompiledTempoMap` separately when document tempo ramps must be resolved at
+timeline positions; this helper intentionally does not duplicate that
+authority.
+
+---

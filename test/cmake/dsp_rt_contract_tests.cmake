@@ -198,6 +198,11 @@ pulp_add_test_suite(pulp-test-signal-nonlinear-shaping
     LIBRARIES pulp::signal
     TIMEOUT 900)
 
+pulp_add_test_suite(pulp-test-signal-parallel-dynamics
+    SOURCES test_signal_parallel_dynamics.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-signal-transfer-curve
     SOURCES test_signal_transfer_curve.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
@@ -300,5 +305,10 @@ pulp_add_test_suite(pulp-test-signal-fir-design
 # boundary fading, latency/tail/state, partitioning, and RT proof.
 pulp_add_test_suite(pulp-test-signal-reverse-buffer
     SOURCES test_signal_reverse_buffer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-tempo-delay
+    SOURCES test_tempo_delay.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)

@@ -26,6 +26,9 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
     set_tests_properties(agent-capability-manifest-selftest PROPERTIES PROCESSORS 8)
+    add_test(NAME agent-capability-rederive-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
     add_test(NAME agent-capability-sdk-handoff-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_capability_handoff.py")
@@ -105,6 +108,10 @@ if(Python3_Interpreter_FOUND)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    if(UNIX)
+        add_test(NAME linux-runner-lane-contract COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_linux_runner_lane_contract.py")
+    endif()
     add_test(NAME inspector-protocol-registry-complete
         COMMAND ${Python3_EXECUTABLE}
             ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
@@ -218,6 +225,35 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
+
+    # ODR macro-gated-header guard. A macro-gated inline/template function in a
+    # header, plus a TU that redefines that macro, is an ODR violation a Release
+    # lane provably CANNOT see: at -O3 each TU inlines its own copy so the A/B
+    # test appears to work, and Release is green by construction.
+    #
+    # `.shipyard/config.toml` states this class is "Guarded by
+    # tools/scripts/test_odr_macro_gated_headers.py". Until this registration
+    # that script ran NOWHERE — not a ctest, not a workflow, not check-docs.sh —
+    # so the claim was true of the file's existence and false of its execution.
+    # The only live enforcement was the Shipyard mac lane's Debug build, which is
+    # `backend = local` and so yields the signal only on hosts big enough to
+    # finish it; on a small one the class simply goes unchecked. A static check on
+    # the required gate makes the enforcement host-independent, which is what the
+    # config always implied. Stdlib-only and runs on Python 3.9, so it carries no
+    # false-green risk on the required macOS hosts.
+    add_test(NAME odr-macro-gated-headers COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_odr_macro_gated_headers.py")
+    set_tests_properties(odr-macro-gated-headers PROPERTIES TIMEOUT 120)
+
+    # Live-build check: reports a governed build running in THIS checkout, which
+    # Shipyard's local mac backend does by design. Its one job is to tell a live
+    # marker from the one a killed build necessarily leaves behind, so the test
+    # asserts both directions — a presence-keyed check would pass a one-way test
+    # while warning on every dead build until nobody reads it. Pure Python, no
+    # lease store, no build.
+    add_test(NAME live-build-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_live_build_check.py")
+    set_tests_properties(live-build-check-selftest PROPERTIES TIMEOUT 120)
 
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs

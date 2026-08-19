@@ -51,6 +51,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/formant_filter_bank.hpp": "Pulp::signal",
     "pulp/signal/graphic_eq.hpp": "Pulp::signal",
     "pulp/signal/tilt_eq.hpp": "Pulp::signal",
+    "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
     "pulp/signal/transfer_curve.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
@@ -132,6 +133,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Prepared fixed-capacity streaming window reversal with explicit boundary "
             "shaping and a finite tail; it is a bounded buffering surface reused by "
             "effects rather than an advertised generator DSP claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/tempo_delay.hpp",
+        "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo "
+            "range; it is a bounded conversion surface reused by delay kernels rather "
+            "than an advertised generator DSP claim."
         ),
     },
     {
@@ -549,7 +561,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:867c27fe4d7ef095f9c145d5bc667c3da34b2fa2e1bdc4c12d477ed4a07a896b",
+        "fingerprint": "sha256:02c2499719132f3a5af60232aa204b1f79ae8c82a4e3264189d4383692e29419",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

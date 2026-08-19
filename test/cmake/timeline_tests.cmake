@@ -336,6 +336,14 @@ pulp_add_test_suite(pulp-test-timeline-replay-golden
 target_compile_definitions(pulp-test-timeline-replay-golden PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
+# Transport-aware offline render (P1-7). Separate suite rather than a case in
+# the binding suite: it drives its own MasterTransport across a whole region and
+# compares full bounces, so it is slow relative to the per-block binding cases
+# and benefits from failing on its own.
+pulp_add_test_suite(pulp-test-timeline-offline-renderer
+    SOURCES test_timeline_offline_renderer.cpp
+    LIBRARIES pulp::host pulp::sequence)
+
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
         test_timeline_graph_automation_delivery.cpp

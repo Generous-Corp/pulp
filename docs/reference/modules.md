@@ -678,7 +678,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Buffer | `midi_buffer.hpp` | Timestamped event buffer for `process()` callbacks |
-| Device I/O | platform/ | CoreMIDI (macOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
+| Device I/O | platform/ | CoreMIDI (macOS/iOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |
@@ -916,6 +916,7 @@ a working convolution and would hide the bug. Assert
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | True-peak limiter | `true_peak_limiter.hpp` | Stereo look-ahead limiter with 8x intersample detection, a fixed 64-sample gain-scheduling horizon plus optional user lookahead, explicit channel linking, latency, tail, and gain-reduction telemetry; larger channel capacities require an explicit template specialization |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
+| Parallel Dynamics Mixer | `parallel_dynamics.hpp` | Transactional true-stereo dry/processed-wet blend with explicit latency and tail propagation |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
 

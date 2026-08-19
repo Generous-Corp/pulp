@@ -144,6 +144,46 @@ Material-site render is a preview artifact and has no business on the merge
 critical path. That is the mistake this repo already made with example
 validators.
 
+### A documented guard may not run — check registration, not existence
+
+`.shipyard/config.toml` stated the macro-gated-header ODR class was "Guarded by
+`tools/scripts/test_odr_macro_gated_headers.py`". The script existed, worked, and
+**ran nowhere**: not a ctest, not a workflow, not `tools/check-docs.sh`. The claim
+was true of the file and false of its execution, and nothing in the repo could tell
+the difference — a prose reference in a config comment reads exactly like
+enforcement.
+
+That left the class enforced only by the Shipyard mac lane's Debug build, which is
+`backend = local` — so the signal existed on a host large enough to finish the
+build and was simply absent on one that was not. The gate you got depended on which
+machine typed `shipyard pr`, which is the same divergent-semantics class
+`.agents/contract.toml` #6 was bought with, reached through host capacity instead
+of tool version.
+
+It is now `add_test(NAME odr-macro-gated-headers …)` in
+`test/cmake/quality_tests.cmake`, so it rides the required `macos` gate and the
+enforcement no longer depends on the shipping host.
+
+**The generalizable check:** when a comment, doc, or config says a class is
+"guarded by X", confirm X is *invoked* somewhere —
+
+```bash
+git grep -l "X" -- test tools .github   # references
+git grep -n "X" -- test/cmake .github/workflows tools/check-docs.sh   # invocations
+```
+
+If every hit is prose, the guard is decorative. `tools/scripts/tools_registry_check.py`
+enforces this property for the tools registry; nothing enforces it for guards named
+in passing.
+
+### Running `gates.sh` before committing can be a false green
+
+`config_doc_check.py`, `skill_sync_check.py`, and `version_bump_check.py` all diff a
+**commit range** (`origin/main...HEAD`). Staged-but-uncommitted work is invisible to
+them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
+0 on a change that will fail the moment it is committed. Commit first, then run
+gates — a green run over an empty range is not evidence about your change.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
@@ -730,6 +770,19 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
   /idle MCP) before building. `gates.sh` prints this banner advisorily on every
   pre-push.
+- **A live validation build in your checkout is now visible — `gates.sh` says so.**
+  Shipyard's `local` mac backend builds IN the checkout, so a validation run and
+  an agent editing the tree share one directory. Editing under a running CMake
+  does not fail cleanly: the build crawls and dies on the lane's `timeout_secs`,
+  reporting `Validation timed out` — the target, not the cause. `governed-build.sh`
+  writes `.pulp-build-active` at the source-tree root for the life of a build and
+  `gates.sh` surfaces it advisorily on every pre-push. **Heed it before a merge,
+  rebase, or branch switch** — a build dir can be wiped, a half-merged tree under
+  a running CMake cannot be un-mutated. It is advisory and never fails a push, and
+  because a push follows the damaging edit it *detects* rather than prevents; the
+  value is knowing which edit invalidated which run instead of debugging a
+  two-hour timeout. Distinct from `build-dir-sentinel.sh`, which guards the
+  inverse invariant (do not reuse a dirty build dir).
 - **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
   not the network.** When the diff touches a coverage surface (`core/`,
   `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local
@@ -1074,7 +1127,70 @@ du -sh "$FETCHCONTENT_BASE_DIR" 2>/dev/null || echo "nothing cached"
 Same idea applies to the self-hosted golden images: bake with the flags CI actually
 uses, or the golden warms a cache the real jobs never touch.
 
+## Autonomous repair: the fences count, they do not judge
+
+Every fence on the recovery lane bounds **how much** a repair changed — exact
+head, epoch, fingerprint, force-with-lease, changed-file count, patch bytes,
+control-plane path prefixes. On 2026-08-17 every one of them held while the
+lane, asked to satisfy `static_assert(std::is_trivially_copyable_v<ParamValue>)`,
+removed all five `std::atomic` members from `ParamValue` and rewrote its docs to
+make thread-safety the caller's problem. `ParamValue` is the audio-thread to
+UI-thread primitive; the repair introduced data races on the audio thread of a
+real-time framework, and **it would have gone green**, because the assertion
+passes once the atomics are gone.
+
+`tools/scripts/shipyard_recovery_judgement.py` is the check that reads meaning.
+Two independent tests, either of which escalates to `needs_human`:
+
+- **Surface** — an ALLOWLIST (`test/` only today), not a denylist. A denylist
+  fails open on the surface nobody named, and the dangerous surfaces are not
+  only `core/`: a repair could make a failing gate pass by editing
+  `.github/workflows/build.yml`, or disable a check in `tools/cmake`.
+- **Invariant removal** — surface alone is insufficient. A test-only diff that
+  merely deletes `REQUIRE` lines satisfies any surface rule and is the same
+  failure: a model can make a check pass by making the claim true **or by
+  deleting the claim**, and it chose to delete.
+
+Two things to know before "fixing" it:
+
+1. **It escalates the CORRECT repair too.** The right fix on 2026-08-17 was to
+   delete the false assertion, and the invariant test refuses that as well.
+   That is intended. The lane's job is to never land a catastrophic change
+   unattended, not to land every correct one unattended.
+2. **It is enforced in the publisher, not the worker.** The worker still
+   uploads its artifact so an escalated repair stays inspectable; the publisher
+   is the step that applies and pushes, so that is where refusing matters. On
+   escalation it exits `3` (distinct from `1`, which means the check itself
+   broke) and records the reason on the exact head as
+   `shipyard/recovery-judgement`.
+
+Like `shipyard_recovery_result_check.py`, it lives under
+`tools/scripts/shipyard_recovery_`, which is in `FORBIDDEN_PREFIXES` in
+`shipyard_recovery_repair.py` — so a fenced repair model cannot weaken the check
+that constrains it. `test_shipyard_recovery_judgement.py` asserts that
+containment rather than assuming it, and its central case is the verbatim diff
+from `a08ec2d4abd8`.
+
 ## GitHub workflow gotchas
+
+- **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
+  storage is billed per ACCOUNT and shared across every repository in it.** That
+  makes it the rare CI cost that becomes a *different repo's* outage: when the
+  account's storage quota is exhausted, uploads start failing in repositories
+  that never uploaded anything large, and the workflow whose artifacts filled it
+  is not the one that goes red. Diagnosing from the failing repo alone leads
+  nowhere, because nothing there is wrong.
+  - **Read a storage-quota symptom as account-wide, not repo-local.** Check
+    every repo in the account for large uncapped uploads, not just the one that
+    failed.
+  - **Cap by what the artifact is for, not uniformly.** A per-platform release
+    binary that also ships as a GitHub Release asset is a job-to-job hand-off
+    and wants days, not months. A failure-only fuzz reproducer wants the long
+    retention, because a crash input that expires before anyone downloads it is a
+    lost bug — and it costs almost nothing, since green runs upload nothing.
+  - **Set the long retention explicitly when you mean it.** An inherited 90 and
+    a deliberate 90 look identical in the YAML, so the next audit cannot tell a
+    considered decision from a forgotten default and will "fix" it.
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
   github.ref == 'refs/heads/main'` is dead code unless the workflow has a
@@ -3168,6 +3284,69 @@ classification, and the publisher's commit trailers record the lane that
 actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
 trail never misattributes a repair.
 
+**The repair-publication path is the part no canary has exercised.** Every live
+canary so far ended at triage (`no_action`), so the bundle/validate/commit/push
+steps have never run against a real model patch. Seven defects were found by
+reading it adversarially rather than by a red run, and each is a class that
+would have shipped a *wrong* repair while every check reported success:
+
+- **Diff against the fenced commit, never the index.** `git add
+  --intent-to-add --all` fully stages a DELETION, so a worktree-vs-index
+  `git diff` silently drops deleted and renamed files from *both* the patch and
+  the declared path list — and the publisher's parity check still passes,
+  because both lists are identically wrong. The lane force-pushes a "fix" that
+  does not delete what the model deleted. Use `git reset --mixed
+  "$EXPECTED_HEAD"` then `git diff HEAD`; resetting to the assignment's exact
+  head rather than `HEAD` also survives a model that committed.
+- **Reset the worktree before the fallback repair.** Both repair lanes edit the
+  same checkout, and the primary lane runs under `continue-on-error` — it can
+  fail *after* editing (a mid-task error, or tripping its own enum check).
+  Without `git reset --hard "$EXPECTED_HEAD" && git clean -qfd`, a failed
+  Codex attempt's partial edits are bundled into the fallback's patch and
+  attributed to Claude by the commit trailers.
+- **`--settings` does not stop project settings from loading.** cwd is inside
+  the untrusted PR head, so a PR-supplied `.claude/settings.json` is read unless
+  the lane pins `--setting-sources user`. Valid values are `user,project,local`;
+  the CLI rejects anything else, so the flag fails loudly if it ever changes.
+- **Keep the trailers one paragraph.** One `-m` per trailer makes each its own
+  paragraph and `git interpret-trailers --parse` reads only the last, so the
+  audit trail collapses to `Router: subrouter`. Build the message with `printf`
+  into a variable — a literal multi-line `-m` inside a `run: |` block dedents to
+  column zero and breaks the YAML block scalar.
+- **Pin `LC_ALL=C` on BOTH sorted path lists.** The worker and the publisher
+  run on different hosts and the parity check is a plain `diff -u` of the two.
+  C and `en_US.UTF-8` genuinely order `-`, `_`, and case differently for
+  ordinary source paths (`LC_ALL=C` gives `A-b a-b a_b ab`; `en_US.UTF-8` gives
+  `a_b a-b A-b ab`), so an unpinned sort rejects a correct patch on locale
+  alone. Pinning one side is worse than pinning neither.
+- **Whitespace is a warning on BOTH sides, or on neither.** Trailing whitespace
+  is not grounds to discard a repair that fixes a real blocker. Demoting only
+  the worker's `--check` moves the rejection to the publisher — *after* the
+  lease and model are already spent — instead of removing it. The security
+  fences (control-plane prefixes, path escape, size caps, exact
+  head/epoch/fingerprint revalidation, parity) are what protect this path;
+  whitespace is not one of them.
+- **`skipped` is not `failure` in the publisher's classification.** A repair the
+  model marked `fixed` whose push step never *ran* leaves
+  `steps.repair_push.outcome` as `skipped`; a bare `= failure` test falls
+  through to a success classification and tells the steward the dispatch
+  completed cleanly while the authorised repair evaporated. Gate the extra
+  clause on `repair_outcome = fixed`, not a blanket `!= success` — `skipped` is
+  legitimate when no repair was attempted.
+
+`tools/scripts/test_shipyard_recovery_worker_workflow.py` pins all seven. They
+are text assertions against a workflow that CI cannot execute end to end, so
+verify them by mutation: revert a fix, confirm exactly one test fails.
+
+Because the assertions are textual, they prove the workflow *says* the right
+thing, not that the path *works*. Rehearse the semantics separately in a
+scratch git repo: build a synthetic model patch that modifies, deletes,
+renames, and adds; run the real bundle commands and the real
+`shipyard_recovery_repair.py`; then apply the patch in a second checkout at the
+fenced head and compare. Under the pre-fix commands that rehearsal reports
+`validator: PASS` and `parity check: PASS` while leaving the deleted file in
+place — which is precisely why no amount of green CI would have caught it.
+
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
 (higher rate budget), so PR-create / check-watching / merge aren't bound
@@ -3885,6 +4064,40 @@ commissioned. Expected hosts match stable label subsets, never disposable runner
 names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
 not an intentional absence.
 
+**Do not "fix" the absence of m3/m5/m1 from `expected_host` — it is deliberate,
+and declaring them makes the view wrong.** The gap looks obvious and actionable
+(the three Macs that serve the required `macos` gate are not declared, so a dead
+one raises nothing), which is why it keeps getting re-proposed. Three things to
+check before spending a cycle on it, all readable in a minute:
+
+- **The gate hosts have no host-identifying label.** Matching is by label subset,
+  and every gate runner on all three registers the same `self-hosted, macOS,
+  ARM64, pulp-build, pulp-build-vm, pulp-gate-fast`; the labels that vary
+  (`pulp-build-studio`, `pulp-build-vm-secondary`) are role labels, and m1's and
+  m5's are label-identical. There is no `pulp-host-m3` analogue to
+  `pulp-host-macpro` / `pulp-host-macmini`. So three per-host entries match one
+  pool three times and all report online while a single machine serves — a real
+  partial degradation reads as three green rows. Confirm with the live label sets
+  before assuming otherwise:
+  `ghapp api "repos/Generous-Corp/pulp/actions/runners?per_page=100"`.
+- **Pool-wide `min_online` fails the other way.** The gate pool is ephemeral JIT,
+  so a healthy idle host has zero runners registered and would alarm on every
+  quiet period — the alarm gets muted within a week and the class returns.
+- **Nothing consumes `fleet-status`.** `grep -rl fleet-status .github/workflows
+  tools/` finds nothing; it is a manual-inspection view, so a declaration pages
+  no one on its own.
+
+The per-host question is already answered by the same report's `hosts[]` array —
+keyed by class (`m1`, `m5`, `studio`), read from tartci state over SSH rather than
+from labels, carrying `routable`, `free`/`cap`, supervisor heartbeat age, and disk
+/ ccache admission problems. Read that, not `expected_hosts[]`, when asking
+whether a specific Mac is serving. The genuinely open gap is narrower and nobody
+has built it: detecting a *partially* degraded pool needs capacity measured
+against demand, because a busy pool and a pool at a third of capacity are
+indistinguishable from host presence. Rationale in
+`docs/guides/local-ci.md`, "Why the macOS gate hosts are not declared as expected
+hosts".
+
 ### Prevent: build-dir ODR guard (interrupted-build sentinel)
 
 The self-hosted macОS lane uses `clean: false` (warm `build-<key>` dir for
@@ -3934,6 +4147,36 @@ Two details differ from `build.yml` deliberately:
 `tools/scripts/test_build_dir_sentinel.py` asserts both directions (a stale
 marker wipes, a clean run does not) plus the arm/clear pairing across stages —
 a lane that arms without clearing wipes its build dir on every run.
+
+### Prevent: name the configure blockers before cmake does
+
+`tools/scripts/checkout_preflight.py` (advisory, run by `setup.sh`; also
+`--root <dir>` to audit another checkout) reports, in seconds, the failures a
+tree is already destined for. Run it first when a configure dies — it answers
+the two questions the CMake error does not.
+
+**Which Skia is this build actually using, and why.** `FindSkia.cmake` reads
+`$SKIA_DIR` **before** the checkout's own `external/skia-build`, and that
+variable is pinned in a shell rc on the multi-worktree hosts. So a worktree can
+hold a perfectly good cache and still build against a different, broken one. On
+2026-08-16 every worktree on M5 — including ones carrying m151 and m152 — was
+resolving to a stale m150 tree whose Dawn slice was compiled at macOS 15.0
+against a 13.4 floor. `Pulp macOS archive-floor mismatch` names the archive, never
+the override, so "set `SKIA_DIR` per worktree" and "fetch a good cache locally"
+both look reasonable and **neither can take effect**. The preflight prints the
+winning path, says when it overrides the local one, and gives a fix with `--dest`
+pointing at the cache actually in use.
+
+**Is this checkout trustworthy to read a pinned value from.** It flags an
+unfinished merge and the distance behind `origin/main`. The primary checkout on
+M5 sits **6,365 commits behind with 4 conflicted paths**, and it is the most
+natural place to look. Reading `tools/deps/manifest.json` and `tools/shipyard.toml`
+from it produced two confidently-wrong answers hours apart in one session — once
+nearly overriding a peer's correct diagnosis. **Read pinned values with
+`git show origin/main:<path>`**, not from a working tree.
+
+It also catches an uninitialised `planning` submodule, which the source-contracts
+gate otherwise reports as a contract violation rather than a provisioning gap.
 
 ### Prevent: ccache false-hit guard (#3504 follow-up)
 

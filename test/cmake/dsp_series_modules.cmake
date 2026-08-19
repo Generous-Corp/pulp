@@ -67,12 +67,14 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/yin_tracker.cpp
     header_compile/tape_machine_components.cpp
     header_compile/nonlin_ambience_design.cpp
+    header_compile/parallel_dynamics.cpp
     header_compile/transfer_curve.cpp
     header_compile/explicit_q_resonator_bank.cpp
     header_compile/beat_repeat_kernel.cpp
     header_compile/transient_designer.cpp
     header_compile/spectral_mask_processor.cpp
     header_compile/spectral_delay_matrix.cpp
+    header_compile/tempo_delay.cpp
     header_compile/zero_latency_convolver_support.cpp)
 target_sources(pulp-dsp-series-header-self-containment PRIVATE
     header_compile/filter_morph.cpp)
