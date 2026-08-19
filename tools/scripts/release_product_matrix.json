@@ -13,9 +13,6 @@
     "windows-arm64",
     "windows-x64"
   ],
-  "active_platforms": [
-    "darwin-arm64"
-  ],
   "cli_binary_stems": [
     "pulp",
     "pulp-cpp",
