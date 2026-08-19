@@ -463,3 +463,58 @@ TEST_CASE("dispatch_document_event survives bridge destruction mid-fan-out",
         "mousedown", "{clientX:-1,clientY:-1,target:null}");
     REQUIRE(keeper_hits() == 2);
 }
+
+// ── The host actually CALLS the fan-out ─────────────────────────────────────
+//
+// Everything above proves `dispatch_document_event` WORKS. None of it proves
+// anything ever calls it, because every case invokes it directly. That gap is
+// not hypothetical: the macOS window host's Esc wiring landed in c0dcc3298 and
+// was deleted by 51af86203 — a commit whose subject ends "[rebased]", i.e. a
+// botched rebase rather than a decision. This suite stayed green throughout,
+// including a case named after Spectr's PickerDropdown, while in the shipping
+// product Escape closed nothing. It surfaced only when a user reported that
+// dropdowns would not close.
+//
+// A JS-visible mechanism with no caller is indistinguishable from a working one
+// from inside its own unit tests. So assert the call site itself. Grepping
+// source is crude and it is deliberate: the failure mode is precisely "the
+// function survives, the call does not", and that is the one thing a test of
+// the function can never see.
+#ifdef PULP_REPO_ROOT
+#include <fstream>
+#include <sstream>
+
+TEST_CASE("the macOS window host still fires the Esc outside-click fan-out",
+          "[view][bridge][document-event][wiring]") {
+    const std::string path =
+        std::string(PULP_REPO_ROOT) + "/core/view/platform/mac/window_host_mac.mm";
+    std::ifstream in(path);
+    REQUIRE(in.good());  // a moved file must fail loudly, not silently pass
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string src = ss.str();
+
+    // Positive control for the reader itself: if this marker is missing then
+    // the file is not what we think it is, and the assertions below are
+    // worthless rather than reassuring.
+    REQUIRE(src.find("KeyCode::escape") != std::string::npos);
+
+    const auto occurrences = [&](const std::string& needle) {
+        std::size_t n = 0, at = 0;
+        while ((at = src.find(needle, at)) != std::string::npos) { ++n; at += 1; }
+        return n;
+    };
+
+    // Count CALL SITES, not mentions. The first draft of this guard counted
+    // "dispatch_document_event" anywhere in the file, which the surrounding
+    // explanatory comment satisfied on its own — so deleting the calls and
+    // keeping the comment would still have passed. A guard a comment can
+    // satisfy is the same species of useless as the tests this one exists to
+    // backstop, so it anchors on the qualified call expression instead.
+    INFO("window_host_mac.mm must CALL the fan-out twice on Esc, so the "
+         "mousedown and pointerdown click-outside idioms each close");
+    CHECK(occurrences("WidgetBridge::dispatch_document_event(") >= 2);
+    CHECK(src.find("\"pointerdown\", \"{clientX:-1") != std::string::npos);
+    CHECK(src.find("\"mousedown\",   \"{clientX:-1") != std::string::npos);
+}
+#endif  // PULP_REPO_ROOT

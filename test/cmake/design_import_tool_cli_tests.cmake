@@ -168,6 +168,10 @@ add_executable(pulp-test-widget-bridge-dispatch-document-event
     test_widget_bridge_dispatch_document_event.cpp)
 target_link_libraries(pulp-test-widget-bridge-dispatch-document-event
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
+# The suite also asserts the platform hosts still CALL the fan-out. Testing the
+# function alone left it green for months while no caller existed.
+target_compile_definitions(pulp-test-widget-bridge-dispatch-document-event PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-widget-bridge-dispatch-document-event)
 
 # `pulp import-design --from claude` classnames.json

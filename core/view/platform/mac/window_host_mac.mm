@@ -6,6 +6,7 @@
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/pointer_coalescer.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -1015,6 +1016,30 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                                                        /*is_down=*/true);
 
         if (key == pulp::view::KeyCode::escape && self.rootView) {
+            // Fire a synthetic document-level outside-click into every
+            // WidgetBridge so React popovers that close via the
+            // `document.addEventListener('mousedown'|'pointerdown', onDoc)`
+            // click-outside idiom (Spectr's PickerDropdown, ContextMenu, etc.)
+            // close on Esc without per-app wiring. Coords (-1, -1) and
+            // `target:null` are outside any real bounding box, so
+            // `ref.current.contains(e.target)` correctly resolves to "outside".
+            // Runs BEFORE the modal / ComboBox / active_overlay paths below —
+            // additive, not consuming.
+            //
+            // REGRESSION HISTORY: this wiring landed in c0dcc3298 and was
+            // deleted by 51af86203, a commit whose subject ends "[rebased]" —
+            // a botched rebase, not a decision. It went unnoticed for months
+            // because the coverage
+            // (test_widget_bridge_dispatch_document_event.cpp) calls
+            // dispatch_document_event DIRECTLY, so the fan-out stayed green
+            // while nothing in the product ever invoked it. A JS-visible
+            // mechanism with no caller is indistinguishable from a working one
+            // until a user reports the symptom; the guard test below this
+            // file's change asserts the CALL exists, not just the function.
+            pulp::view::WidgetBridge::dispatch_document_event(
+                "pointerdown", "{clientX:-1,clientY:-1,target:null}");
+            pulp::view::WidgetBridge::dispatch_document_event(
+                "mousedown",   "{clientX:-1,clientY:-1,target:null}");
             if (auto* modal = find_topmost_modal(self.rootView)) {
                 pulp::view::KeyEvent ke;
                 ke.key = key;
