@@ -342,6 +342,35 @@ public:
         (void) callback;
     }
 
+    // ── Per-frame pointer coalescing (see host_pointer_input.hpp) ───────
+    //
+    // An embedded editor receives pointer motion at the mouse's rate and
+    // presents at the display's rate or slower. Hosts that own a frame driver
+    // hold motion and release exactly one sample per presented frame; hosts
+    // that do not drive frames dispatch every sample immediately (the
+    // pre-coalescing behavior, and still correct — just unimproved).
+    //
+    // These three exist because the failure mode is SILENT: a host whose frame
+    // driver runs but never declared itself to its view keeps flushing nothing
+    // while every sample takes the immediate path, and the only symptom is that
+    // drags cost what they always did. There is no error, so the state has to
+    // be observable.
+
+    /// True while this host has declared a per-frame flush driver, i.e. motion
+    /// is actually being coalesced. False on hosts that do not drive frames.
+    virtual bool pointer_coalescing_active() const { return false; }
+
+    /// True once a frame tick observed motion that had bypassed the coalescer
+    /// — this host drives frames but its opt-in never reached the input path.
+    /// Always false on a host that legitimately does not coalesce.
+    virtual bool pointer_coalescing_silently_disengaged() const { return false; }
+
+    /// Release motion held for the next presented frame, now. The frame driver
+    /// calls this once per tick; exposed so a test can advance one frame
+    /// without a live display link. Returns false on hosts that do not
+    /// coalesce.
+    virtual bool flush_pointer_input_for_frame() { return false; }
+
     // Capture the host's current back buffer as a PNG (mirrors
     // `WindowHost::capture_back_buffer_png`, issue #2001). GPU hosts read
     // back the rendered Skia frame via `SkiaSurface::read_current_rgba`;

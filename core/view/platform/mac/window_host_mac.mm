@@ -4,7 +4,7 @@
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <pulp/view/pointer_coalescer.hpp>
+#include <pulp/view/host_pointer_input.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -28,6 +28,7 @@
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <iostream>
 #include <memory>   // shared_ptr liveness token for deferred clicks
 #include <mutex>
@@ -196,10 +197,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // block aborts.
     std::shared_ptr<std::atomic<bool>> _deferredClickAlive;
     BOOL _pendingFirstMouse;
-    // Holds drag motion between presented frames. See
+    // Holds drag motion between presented frames, and owns the "is anything
+    // going to flush this?" decision. See
     // -submitDragSample:modifiers:clickCount: for the ordering rules that
     // keep this from stranding or reordering input.
-    pulp::view::PointerCoalescer _pointerCoalescer;
+    pulp::view::HostPointerInput _pointerInput;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -231,7 +233,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // behind makes the safety of a still-queued tick depend on the short-circuit
     // ORDER of one `&&` in that block.
     self.framePump = nullptr;
-    _pointerCoalescer.reset();  // target may already be gone
+    _pointerInput.reset();  // target may already be gone
     self.rootView = nullptr;
     _dragTargetCapture.reset();
     _relativeMouseMode = NO;
@@ -605,35 +607,39 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     sample.click_count = clickCount;
     sample.phase = pulp::view::MousePhase::drag;
 
-    // Fail safe: with no flush driver installed, deliver now. Holding motion
-    // that nothing will ever release would not be a slow drag, it would be no
-    // drag at all.
-    if (!self.coalescePointerInput) {
-        [self deliverDragAtPoint:pt modifiers:modifiers clickCount:clickCount];
-        return;
-    }
-
-    const bool wasIdle = !_pointerCoalescer.has_pending();
-    // submit() returns anything that must not wait — for pure motion that is
-    // empty, but the coalescer also flushes here when a sample cannot merge
-    // into the held one (different button or pointer id).
-    for (const auto& due : _pointerCoalescer.submit(sample)) {
-        [self deliverDragAtPoint:due.position
-                       modifiers:due.modifiers
-                      clickCount:due.click_count];
-    }
-    if (wasIdle) [self setNeedsDisplay:YES];
+    // With no flush driver declared, HostPointerInput dispatches immediately —
+    // the pre-coalescing behavior. Holding motion that nothing will ever
+    // release would not be a slow drag, it would be no drag at all.
+    if (_pointerInput.submit(sample, [self pointerDelivery]))
+        [self setNeedsDisplay:YES];  // idle -> holding, once per frame
 }
 
-// Release held motion. Called once per presented frame by the host's
-// display-link block, and by any path that is about to hand this gesture
-// somewhere else (see mouseDragged:).
-- (void)flushCoalescedPointerInput {
-    for (const auto& s : _pointerCoalescer.flush_frame()) {
+// The delivery closure HostPointerInput invokes for every sample that must
+// reach the tree — whether released by the per-frame flush or dispatched
+// straight through. One definition so both routes are literally the same code.
+- (pulp::view::HostPointerInput::Deliver)pointerDelivery {
+    return [self](const pulp::view::PointerSample& s) {
         [self deliverDragAtPoint:s.position
                        modifiers:s.modifiers
                       clickCount:s.click_count];
-    }
+    };
+}
+
+- (void)setPointerFlushDriverActive:(BOOL)active {
+    if (active) _pointerInput.begin_flush_driver();
+    else _pointerInput.end_flush_driver([self pointerDelivery]);
+}
+
+// Release held motion. Called once per presented frame by the host's
+// display-link block.
+- (void)flushPointerInputForFrame {
+    _pointerInput.flush_for_frame([self pointerDelivery]);
+}
+
+// Release held motion from a path that is about to hand this gesture somewhere
+// else, or end it (see mouseDragged: / mouseUp:).
+- (void)flushPointerInputNow {
+    _pointerInput.flush_now([self pointerDelivery]);
 }
 
 - (void)mouseDragged:(NSEvent*)event {
@@ -667,7 +673,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                     // movement before an overlay grab; deferring it would let
                     // the overlay's tick land ahead of motion that preceded
                     // it. Flushing first preserves order and loses nothing.
-                    [self flushCoalescedPointerInput];
+                    [self flushPointerInputNow];
                     [self setNeedsDisplay:YES];
                     return;
                 }
@@ -688,7 +694,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 // target no longer resolves), and not flushing at all would
                 // strand it until some later frame delivered it to a target
                 // whose gesture had already ended.
-                [self flushCoalescedPointerInput];
+                [self flushPointerInputNow];
                 // Claim landed after the press was delivered — close that
                 // bracket (contract in pointer_dispatch.hpp) and drop it.
                 pulp::view::ViewCapture handoffCapture = _dragTargetCapture;
@@ -705,7 +711,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 return;
             }
             // Hold this sample for the next presented frame instead of
-            // delivering it now. -flushCoalescedPointerInput does the actual
+            // delivering it now. -flushPointerInputForFrame does the actual
             // delivery; the target is re-resolved there, exactly as it is
             // here, so a view unmounted between submit and flush is handled
             // by the same liveness check rather than a new one.
@@ -737,7 +743,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // editor authority hard-rejects a paint that arrives without its
             // paint_start, so a swallowed or reordered terminal here fails
             // loudly rather than silently.
-            [self flushCoalescedPointerInput];
+            [self flushPointerInputNow];
             // Inspector intercept — route the release to the overlay so its
             // move/resize gesture commits (and records its undo entry).
             // Mirrors mouseDown/mouseDragged. Consume when handled.
@@ -2429,6 +2435,8 @@ private:
     pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
     NSTimer* hidden_frame_timer_ = nil;
     std::atomic<bool> needs_repaint_{true};
+    // Reentrancy guard for the synchronous paint issued from handle_resize:
+    // that paint can run layout and user callbacks, which may resize again.
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
     std::shared_ptr<std::atomic<bool>> render_dispatch_alive_ =
@@ -2554,7 +2562,27 @@ private:
         needs_repaint_ = true;
         tracker_.set_viewport(width, height);
         tracker_.invalidate_all();
+
+        // Paint the new size NOW rather than waiting for the next display-link
+        // tick -- but ONLY for a REFLOWING editor. The two cases differ in
+        // whether an uncovered strip can exist at all, so they need opposite
+        // treatment.
+        //
+        // REFLOWING (no pinned viewport): the layer runs kCAGravityTopLeft so a
+        // resize never STRETCHES the last drawable -- the canvas keeps its exact
+        // scale while the drag is in flight, because the next frame is a
+        // DIFFERENT layout and stretching would distort it. The cost of that
+        // guarantee is that any region the window just gained shows the layer
+        // background until a frame covers it, which is why growing a window
+        // flashes bars along the new edges while shrinking looks clean
+        // (shrinking only ever crops content that is already painted).
+        // Deferring the covering frame to the next vsync makes that gap last a
+        // whole frame interval, plainly visible whenever the frame rate is low.
+        // Painting inline closes it: the resize and the frame that fills it land
+        // in the same turn of the event loop.
+        //
     }
+
 
     // A backing-scale (DPI) change at the SAME logical size — display move,
     // hotplug, or the initial attachment of a view created before its window —
@@ -2831,7 +2859,7 @@ private:
                     // tick whether or not anything is painted, and a submit
                     // arms needs_repaint_ on the idle->pending transition, so
                     // that tick is guaranteed to be dispatched.
-                    [self->metal_view_ flushCoalescedPointerInput];
+                    [self->metal_view_ flushPointerInputForFrame];
 
                     // Pump idle FIRST so JS rAF callbacks fire (and any
                     // request_repaint they trigger arms needs_repaint_)
@@ -2876,6 +2904,7 @@ private:
 
     void start_hidden_frame_timer() {
         if (hidden_frame_timer_) return;
+        begin_pointer_flush_driver();
         frame_pump_.suspend();
         hidden_frame_timer_ = [NSTimer timerWithTimeInterval:1.0 / 60.0
             repeats:YES block:^(NSTimer*) {
@@ -2885,15 +2914,23 @@ private:
                                      forMode:NSRunLoopCommonModes];
     }
 
+    // Declare the per-frame flush driver to the view.
+    //
+    // Called from EVERY path that starts driving frames, which is the whole
+    // point of it being a method: this host has TWO such paths (the display
+    // link and the hidden-window NSTimer that re-enters the same callback),
+    // and the opt-in originally lived inside start_display_link() alone. The
+    // timer path therefore flushed every tick while the view was still
+    // dispatching every sample immediately — coalescing silently never
+    // engaged on any hidden-window run, and the same binary behaved
+    // differently depending on how it was started. HostPointerInput reports
+    // that condition now if a third driver path is ever added and forgets.
+    void begin_pointer_flush_driver() {
+        [metal_view_ setPointerFlushDriverActive:YES];
+    }
+
     void start_display_link() {
-        // Opt the view into holding drag motion. This is the commitment the
-        // property documents: from here on the display-link block calls
-        // -flushCoalescedPointerInput every tick, so held motion always has a
-        // release. Enabled alongside the link rather than at construction so
-        // the two can never be out of step — the hidden-window NSTimer
-        // fallback re-enters the same callback, so a hidden window keeps
-        // flushing too.
-        metal_view_.coalescePointerInput = YES;
+        begin_pointer_flush_driver();
 
         display_link_.open(display_link_callback, this);
 
@@ -2915,15 +2952,13 @@ private:
     }
 
     void stop_display_link() {
-        // Symmetric with start_display_link: once the link stops there is no
-        // longer anything to release held motion, so stop holding it and
-        // deliver whatever is outstanding. Order matters — clear the opt-in
-        // first so a sample arriving during teardown dispatches immediately
-        // rather than joining a batch nobody will flush.
-        if (metal_view_) {
-            metal_view_.coalescePointerInput = NO;
-            [metal_view_ flushCoalescedPointerInput];
-        }
+        // Symmetric with begin_pointer_flush_driver(): once frames stop there
+        // is nothing left to release held motion, so stop holding it and
+        // deliver whatever is outstanding. Withdrawing does both, in that
+        // order, so a sample arriving during teardown dispatches immediately
+        // rather than joining a batch nobody will flush. This covers BOTH
+        // driver paths — the timer is invalidated just below.
+        [metal_view_ setPointerFlushDriverActive:NO];
         if (hidden_frame_timer_) {
             [hidden_frame_timer_ invalidate];
             hidden_frame_timer_ = nil;

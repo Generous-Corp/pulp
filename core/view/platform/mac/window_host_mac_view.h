@@ -35,23 +35,35 @@
 // whose closure references freed bridge/engine state.
 - (void)prepareForTeardown;
 - (void)setRelativeMouseMode:(BOOL)enabled;
-/// Opt IN to per-frame drag coalescing. Default NO, and that default is
-/// deliberate: a host that does not drive `flushCoalescedPointerInput` every
-/// frame would strand held motion forever, so holding is enabled only by a
-/// host that has committed to flushing. The GPU host sets this when it starts
-/// its display link; the CPU host (no display link) leaves it NO and keeps
-/// dispatching each sample immediately, exactly as before.
-@property (nonatomic, assign) BOOL coalescePointerInput;
-
-/// Deliver drag motion held since the last presented frame.
+/// Declare (YES) or withdraw (NO) a per-frame flush driver.
 ///
-/// `mouseDragged:` holds motion rather than dispatching it, so the host MUST
-/// call this once per presented frame — otherwise held input is never
-/// delivered. Call it before the frame's render decision, not after: a frame
-/// that decides not to paint must still release input, or latency grows
-/// without bound while the UI is visually idle. Safe to call when nothing is
-/// held.
-- (void)flushCoalescedPointerInput;
+/// This is not a preference, it is a commitment: while it is YES the view
+/// HOLDS drag motion and only `-flushPointerInputForFrame` releases it, so a
+/// host that stops ticking without withdrawing strands the drag entirely.
+/// Withdrawing flushes whatever is held, so the pair is safe to call around a
+/// link that starts and stops with window attachment.
+///
+/// Call it from EVERY path that establishes a frame driver, not from one
+/// chosen start function — a host with a display link and a timer fallback has
+/// two such paths, and wiring only one is how this silently regressed the
+/// first time (see host_pointer_input.hpp). Default NO, which is
+/// dispatch-every-sample: the CPU window host has no frame driver and stays
+/// there permanently.
+- (void)setPointerFlushDriverActive:(BOOL)active;
+
+/// Release drag motion held since the last presented frame. Call once per
+/// frame tick, from the frame driver only.
+///
+/// Call it BEFORE the frame's render decision, not after: a frame that decides
+/// not to paint must still release input, or latency grows without bound while
+/// the UI is visually idle. Safe when nothing is held. This entry point also
+/// reports a frame driver that never declared itself, so ordinary event paths
+/// must use `-flushPointerInputNow` instead.
+- (void)flushPointerInputForFrame;
+
+/// Release held motion from an event path that must not defer — a terminal
+/// event, or a handoff about to make the current capture unreachable.
+- (void)flushPointerInputNow;
 @end
 
 #endif

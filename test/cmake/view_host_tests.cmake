@@ -62,6 +62,18 @@ endif()
 # window/document listener lists a web UI actually registers on.
 pulp_add_test_suite(pulp-test-widget-bridge-global-key-events
     LIBRARIES pulp::view pulp::state)
+# Per-frame pointer coalescing driven through the macOS PLUGIN view host's real
+# channels (NSEvent -> -mouseDragged: -> flush), plus the detector that reports
+# a frame driver which never declared itself. The coalescer's own unit suite
+# passed the whole time the plug-in path was uncoalesced, so component coverage
+# is not a substitute for this.
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-plugin-view-pointer-coalescing-macos
+        test_plugin_view_host_pointer_coalescing_macos.mm)
+    target_link_libraries(pulp-test-plugin-view-pointer-coalescing-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-plugin-view-pointer-coalescing-macos)
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
