@@ -15,7 +15,15 @@ file(MAKE_DIRECTORY "${_probe_dir}")
 
 function(_expect_engine_failure name prelude expected_error)
     set(_probe "${_probe_dir}/${name}.cmake")
+    # The module is written for the policy context its includer establishes, and
+    # the real configure supplies that from the top-level cmake_minimum_required.
+    # A bare `cmake -P` script has no such context, so CMP0057 is unset and
+    # `if(... IN_LIST ...)` is not the IN_LIST operator: the validation the probe
+    # exists to exercise never runs, and the probe then fails on the missing
+    # diagnostic rather than on the behavior. Give it the project's own baseline
+    # so the probe measures the module instead of the ambient policy defaults.
     file(WRITE "${_probe}"
+        "cmake_minimum_required(VERSION 3.24)\n"
         "${prelude}\n"
         "include(\"${_engine_module}\")\n")
     execute_process(

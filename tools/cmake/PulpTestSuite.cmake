@@ -23,6 +23,8 @@
 
 include_guard(GLOBAL)
 
+include(${CMAKE_CURRENT_LIST_DIR}/PulpTestTimeout.cmake)
+
 # pulp_add_test_suite(NAME
 #     [SOURCES src1 src2 ...]            # default: derived "<NAME>.cpp" stripped of leading "pulp-test-"
 #     [LIBRARIES lib1 lib2 ...]          # additional Pulp / system libraries (Catch2WithMain is always linked)
@@ -74,7 +76,12 @@ function(pulp_add_test_suite NAME)
         if(P_TIMEOUT OR P_PROPERTIES)
             list(APPEND _discover_args PROPERTIES)
             if(P_TIMEOUT)
-                list(APPEND _discover_args TIMEOUT "${P_TIMEOUT}")
+                # Budgets are authored for an optimized build; a coverage tree
+                # runs the same work at -O0 with instrumentation. Scaling here
+                # keeps every suite's declared TIMEOUT honest in both without
+                # each manifest having to know the build config.
+                pulp_scaled_test_timeout(_pulp_timeout "${P_TIMEOUT}")
+                list(APPEND _discover_args TIMEOUT "${_pulp_timeout}")
             endif()
             if(P_PROPERTIES)
                 list(APPEND _discover_args ${P_PROPERTIES})

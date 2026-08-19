@@ -245,6 +245,25 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         forbidden = Path("tools/scripts/shipyard_recovery_repair.py").read_text()
         self.assertIn('"tools/scripts/shipyard_recovery_"', forbidden)
 
+    def test_the_publisher_will_not_push_a_repair_the_judgement_check_refuses(self) -> None:
+        # Every other fence bounds how much a repair changed. On 2026-08-17 all
+        # of them held while the lane deleted the atomics from ParamValue, so
+        # the publisher -- the step that actually applies and pushes -- must
+        # also weigh WHAT changed, and must record why when it refuses.
+        self.assertIn(
+            "control/tools/scripts/shipyard_recovery_judgement.py", self.text
+        )
+        self.assertIn("judgement_rc=$?", self.text)
+        self.assertIn('if [ "$judgement_rc" = 3 ]; then', self.text)
+        self.assertIn("shipyard/recovery-judgement", self.text)
+        self.assertIn("needs_human", self.text)
+        self.assertTrue(
+            Path("tools/scripts/shipyard_recovery_judgement.py").exists()
+        )
+        # It must live inside the fence, or the model it constrains can edit it.
+        forbidden = Path("tools/scripts/shipyard_recovery_repair.py").read_text()
+        self.assertIn('"tools/scripts/shipyard_recovery_"', forbidden)
+
     def test_resolved_lane_drives_outputs_and_commit_trailers(self) -> None:
         outputs = self.doc["jobs"]["luna-triage"]["outputs"]
         self.assertEqual(

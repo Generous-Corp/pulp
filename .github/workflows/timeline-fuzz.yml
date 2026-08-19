@@ -196,3 +196,8 @@ jobs:
             timeout-*
             oom-*
           if-no-files-found: ignore
+          # Deliberately the long retention, not an oversight: these upload only
+          # on failure and hold the crash/timeout/OOM input that reproduces the
+          # bug. A reproducer that expires before anyone downloads it is a lost
+          # bug, and the volume is negligible because green runs upload nothing.
+          retention-days: 90

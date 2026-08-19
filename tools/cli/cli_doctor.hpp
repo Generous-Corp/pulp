@@ -23,6 +23,14 @@ struct DoctorCheck {
     // the Google Android CLI accelerator, which is a speedup,
     // not a requirement.
     bool optional = false;
+    // Release-only checks describe a capability needed to PUBLISH, not to
+    // develop. `pulp doctor` still gates on them — a missing RELEASE_BOT_TOKEN
+    // once cost a 22-hour release drought, so that signal must stay loud — but
+    // commands that merely build or scaffold must not inherit it. Without this
+    // distinction `pulp create` refused to scaffold a project on any machine
+    // lacking a release credential, including every contributor's, since a repo
+    // secret is not something they can set.
+    bool release_only = false;
 };
 
 // `only_filter`: case-insensitive substring. When non-empty,

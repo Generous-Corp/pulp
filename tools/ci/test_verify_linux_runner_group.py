@@ -124,3 +124,72 @@ class VerifyLinuxRunnerGroupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransientApiRetryTests(unittest.TestCase):
+    """A degraded API must not read as a policy verdict, and must still fail closed."""
+
+    def setUp(self) -> None:
+        # Held on self, not returned, so the count survives an expected raise.
+        # A helper that returns its counter cannot report anything about the
+        # calls that happened before an exception -- the assertion would read
+        # back its own default and pass no matter what the code did.
+        self.calls = 0
+        self.slept: list[float] = []
+
+    def _api(self, results, **kwargs):
+        outer = self
+
+        class Result:
+            def __init__(self, code, err):
+                self.returncode = code
+                self.stderr = err
+                self.stdout = '{"ok": true}'
+
+        def fake_run(argv, capture_output, text):
+            index = min(outer.calls, len(results) - 1)
+            outer.calls += 1
+            return Result(*results[index])
+
+        original = MODULE.subprocess.run
+        MODULE.subprocess.run = fake_run
+        try:
+            return MODULE.api_json(
+                "gh", "/orgs/x/actions/runner-groups",
+                sleep=self.slept.append, backoff_seconds=0.0, **kwargs
+            )
+        finally:
+            MODULE.subprocess.run = original
+
+    def test_a_503_is_retried_and_then_succeeds(self) -> None:
+        payload = self._api([
+            (1, "gh: No server is currently available to service your request."),
+            (0, ""),
+        ])
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(self.calls, 2)
+
+    def test_a_persistent_outage_still_fails_closed(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._api([(1, "gh: HTTP 503: No server is currently available")], attempts=3)
+        self.assertEqual(self.calls, 3)
+
+    def test_a_policy_refusal_is_never_retried(self) -> None:
+        """The property that must not regress: a real refusal costs exactly one call."""
+        for message in (
+            "gh: Not Found (HTTP 404)",
+            "gh: Resource not accessible by integration (HTTP 403)",
+            "gh: Bad credentials (HTTP 401)",
+            "runner group policy error: workflow is not allowed",
+        ):
+            with self.subTest(message=message):
+                self.calls = 0
+                with self.assertRaises(RuntimeError):
+                    self._api([(1, message)], attempts=4)
+                self.assertEqual(self.calls, 1, "a refusal must not be retried")
+
+    def test_transient_classification_does_not_swallow_real_errors(self) -> None:
+        self.assertTrue(MODULE.is_transient_api_error("gh: HTTP 503: unavailable"))
+        self.assertTrue(MODULE.is_transient_api_error("No server is currently available"))
+        self.assertFalse(MODULE.is_transient_api_error("gh: Not Found (HTTP 404)"))
+        self.assertFalse(MODULE.is_transient_api_error("workflow is not allowed"))
