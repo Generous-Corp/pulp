@@ -3413,6 +3413,19 @@ self-inflicted. "The hosted queue kills our jobs" is the wrong story and sends
 the next person hunting a phantom. The true one is "hosted runs our jobs and
 fails one specific compile, and `--failed` re-runs kept us routed there."
 
+**Two conditions, not one — they answer different questions.** This distinction
+took a week to separate and is the single most useful thing here:
+
+| condition | answers | why |
+| --- | --- | --- |
+| `BUSY <= 1` | **routing** — local or hosted | `resolve-provider` counts in-flight local legs; load is not an input |
+| host `load` low | **passing** — whether a timing-sensitive test survives | timeouts fire under contention *after* routing is decided |
+
+**Load does not affect where a job runs; it affects whether a job already in the
+right place can pass.** Both prior conclusions stand — routing really is
+load-independent — and that turns out to be only half the picture. Check both
+before dispatching anything whose subject matter is itself timing-sensitive.
+
 **Several test families are contention-sensitive, not just one.** Under a loaded
 host, observed failures include `test_control_broker_daemon.cpp` waits (fixed by
 deadline-bounding), the coverage FDN oracle, and `rack-acid-preflight` /
