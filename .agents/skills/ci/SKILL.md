@@ -3504,6 +3504,28 @@ check whether the failure is a **timeout** and whether the host was loaded — a
 timeout under contention on a test the diff does not touch is a lane/host
 symptom, not a regression.
 
+**A timeout ceiling equal to its enclosing budget is worse than no ceiling.** A
+test clamped at the lane's own `job_timeout` can never fire first — the job is
+killed at the same instant, and the run reports `cancelled` with **no failing
+test named**. That inverts the purpose of the budget: finite per-test budgets
+exist so a hung test *identifies itself* rather than taking the lane down
+anonymously, and a ceiling at the job cap converts precisely those cases into
+unattributed cancellations, which are the most expensive kind to diagnose.
+
+Bound a per-test ceiling **strictly inside** the enclosing budget — here 3600s
+against a 7200s `job_timeout` — and assert the inequality in a test so nobody
+can raise it back silently. The general form: whenever a limit nests inside
+another limit, the inner one must be able to fire first, or its diagnostics are
+unreachable by construction.
+
+**Prefer exact-value assertions over shape assertions in config code.** A
+two-line `set(... CACHE STRING ...)` docstring reads as ordinary formatting and
+silently folded a cache variable into a list
+(`3600;CACHE;STRING;Hard upper bound…`). A test checking "is it a number" would
+have passed; one comparing the exact expected string caught it immediately.
+Config-language defects are usually invisible as defects, which is exactly when
+a stricter-than-necessary assertion earns its keep.
+
 **Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
 is indistinguishable from a real test failure at PR level — so read the leg, not
 just the alias. And when a remedy stops working, re-verify the remedy still does
