@@ -138,14 +138,40 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
         key_json += c;
     }
 
-    engine_.evaluate("__dispatch__('__global__', 'keydown', {"
-        "key:'" + key_json + "',"
-        "keyCode:" + std::to_string(key_code) + ","
-        "ctrlKey:" + ((modifiers & kModCtrl) ? "true" : "false") + ","
-        "shiftKey:" + ((modifiers & kModShift) ? "true" : "false") + ","
-        "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + ","
-        "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + ","
-        "mods:" + std::to_string(modifiers) + "})");
+    const std::string event_literal =
+        std::string("{") +
+        "key:'" + key_json + "'," +
+        "keyCode:" + std::to_string(key_code) + "," +
+        "ctrlKey:" + ((modifiers & kModCtrl) ? "true" : "false") + "," +
+        "shiftKey:" + ((modifiers & kModShift) ? "true" : "false") + "," +
+        "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + "," +
+        "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + "," +
+        "mods:" + std::to_string(modifiers) + "}";
+
+    // Deliver to BOTH global listener lists a web UI can register on.
+    //
+    // `__dispatch__('__global__', ...)` reaches `window.addEventListener`
+    // only — it fans out to `window._listeners` and nothing else. Nothing
+    // reached `document.addEventListener`, so half of the standard idiom was
+    // silently dead: a UI whose shortcut handlers hang off `document` (which
+    // is where the click-outside/dismiss idiom already lives, so popovers and
+    // modals overwhelmingly use it) never saw a single key. Measured on
+    // Spectr's shipping runtime: four listeners on `window`, four on
+    // `document`, and only the first four could ever fire.
+    //
+    // The two dispatches share ONE event object, so a handler that stamps
+    // `defaultPrevented` is observed by both lists, matching the DOM's single
+    // event travelling one propagation path.
+    //
+    // Order is window-then-document, which is the pre-existing order for the
+    // window half and is deliberately left alone. Real DOM would run document
+    // capture BEFORE window bubble; Pulp has no true target node here, so
+    // there is no faithful phase order to reproduce, and reordering would
+    // change behaviour for apps that already rely on the window route.
+    engine_.evaluate(
+        "(function(){var e=" + event_literal + ";"
+        "__dispatch__('__global__','keydown',e);"
+        "__dispatch__('document','keydown',e);})()");
 }
 
 } // namespace pulp::view

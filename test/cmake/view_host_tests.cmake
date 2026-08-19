@@ -58,6 +58,10 @@ if(APPLE AND NOT PULP_IOS)
         PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-plugin-view-hover-macos)
 endif()
+# Keyboard events reaching JS listeners: native __global__ keydown -> the
+# window/document listener lists a web UI actually registers on.
+pulp_add_test_suite(pulp-test-widget-bridge-global-key-events
+    LIBRARIES pulp::view pulp::state)
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
