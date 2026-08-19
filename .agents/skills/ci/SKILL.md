@@ -3435,6 +3435,24 @@ merely configured. A wrong `${CMAKE_CURRENT_SOURCE_DIR}/../` (the file is
 directory) made ctest invoke a path that did not exist. It reports as `Failed`,
 not `Timeout`, and takes `0.00 sec`.
 
+**Why the pattern is seductive: the stand-in always passes.** That is what makes
+"I verified it" feel true. A direct `bash test/foo.sh` run, a hand-written
+schema, an observed `rerun` — each behaves exactly as hoped, which is precisely
+why it never prompts a second look. The lookalike does not fail and then get
+ignored; it succeeds and closes the question.
+
+**So prefer a guard that makes the real artifact refuse, over a check that
+confirms the stand-in.** The strongest fix found this week was not a better
+test — it was a **configure-time `EXISTS` assertion** on the path a test is
+registered with. A wrong path was previously invisible until run time, where it
+surfaces as `***Failed 0.00 sec`, which reads like the test ran and disagreed.
+The guard converts a silent run-time lie into a loud configure-time `FATAL_ERROR`.
+
+Generalised: when something is *registered* now and *executed* later — a test
+path, a runner label, a routing decision, a cached gate result — assert its
+validity at registration time. Otherwise the gap between the two is where a
+lookalike gets to vouch for the real thing.
+
 **The rules that fall out:**
 
 - **Run a new test through its real runner before claiming it passes.** `ctest -R
