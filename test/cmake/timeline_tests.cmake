@@ -523,6 +523,20 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-mcp-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_mcp_emit.py)
+
+    # Corpus-coverage gate: every persisted pulp.timeline.sequence schema
+    # version must carry at least one indexed document fixture. A schema bump
+    # without one leaves a version the corpus can never exercise -- the v5 gap
+    # stood unenforced for weeks. The selftest proves the gate goes red on a
+    # synthetic corpus missing a version, on a version dir carrying only
+    # non-document kinds, and on an unindexed fixture, and that operational
+    # errors stay exit 2 rather than reading as coverage verdicts.
+    add_test(NAME timeline-fixture-coverage
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_fixture_coverage_check.py)
+    add_test(NAME timeline-fixture-coverage-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/test_timeline_fixture_coverage_check.py)
 endif()
 
 include(${CMAKE_SOURCE_DIR}/core/timeline/PulpTimelineSources.cmake)

@@ -176,6 +176,28 @@ If every hit is prose, the guard is decorative. `tools/scripts/tools_registry_ch
 enforces this property for the tools registry; nothing enforces it for guards named
 in passing.
 
+### The schema-fixture coverage gate runs on three surfaces, and only one has teeth on every PR
+
+`tools/scripts/timeline_fixture_coverage_check.py` fails when a
+`pulp.timeline.sequence` schema version lacks an indexed document fixture under
+`test/fixtures/timeline/v<N>/` — the check a schema bump without fixtures used
+to slip past. It executes in three places with different force:
+
+- **ctest `timeline-fixture-coverage`** (registered in
+  `test/cmake/timeline_tests.cmake`, no `LABELS`) — unlabeled, so it rides the
+  required `macos` gate on every PR. This is the surface that blocks.
+- **ctest `timeline-fixture-coverage-selftest`** — drives the script over
+  synthetic corpora and proves it goes red on a missing version, on a version
+  dir carrying only non-document kinds, and on an unindexed fixture, and that
+  operational errors stay exit 2. Without it the gate could silently never
+  fire, the same class as the ODR guard above.
+- **job `fixture-coverage` in `timeline-hardening.yml`** — a no-build second
+  opinion on the lane the corpus already cares about. That lane is advisory and
+  `paths`-filtered (timeline
+  cores, the fixture tree, the gate scripts, its own workflow file), so a PR
+  outside the filter never runs it; the required-gate ctest is what every PR
+  answers to.
+
 ### Running `gates.sh` before committing can be a false green
 
 `config_doc_check.py`, `skill_sync_check.py`, and `version_bump_check.py` all diff a
