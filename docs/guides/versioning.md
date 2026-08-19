@@ -406,6 +406,28 @@ a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
 ### Coverage lane failure semantics
 
+**Test wall-clock budgets are scaled, not removed, on a coverage tree.** A
+coverage build compiles at `-O0` with an instrumentation counter update on
+every region, and the lane runs on a shared host, so a `TIMEOUT` authored for
+an optimized build becomes a false failure. `ctest --timeout` cannot rescue it:
+that is only a default, and a per-test `TIMEOUT` property always wins.
+
+`tools/cmake/PulpTestTimeout.cmake` multiplies every `pulp_add_test_suite`
+budget by `PULP_TEST_TIMEOUT_COVERAGE_SCALE` (**4**) when `PULP_COVERAGE_ENABLED`
+is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**3600s**). That ceiling must stay
+strictly below the CI lane's own `job_timeout` (7200s): a test clamped at the
+job budget can never time out first, so the job is killed instead and the run
+reports `cancelled` with no failing test named — which defeats the purpose of
+keeping budgets finite. Pin
+`PULP_TEST_TIMEOUT_SCALE` to override; a value below 1 fails configuration
+because it would shorten every budget in the tree.
+
+The budget stays finite on purpose. An unbounded test cannot distinguish "slow
+under instrumentation" from "wedged", which is the only question a timeout
+answers — so `test/test_ctest_timeout_kills_wedged.sh` runs a real CTest over a
+planted never-ending process and asserts it is still killed at the scaled
+budget.
+
 C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
 authoritative diff-coverage gate is the separate `Diff coverage required` check.
 The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
