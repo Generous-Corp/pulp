@@ -43,7 +43,24 @@ expect("coverage build scales 900s to 3600s" "3600" "${_out}")
 # this a large TIMEOUT times a large scale is effectively unbounded, and a
 # wedged test would hold a CI lane for the whole job instead of failing.
 pulp_scaled_test_timeout(_out 3000)
-expect("scaled budget is clamped to the ceiling" "7200" "${_out}")
+expect("scaled budget is clamped to the ceiling" "3600" "${_out}")
+
+# The largest budget actually declared in the tree is 900s. It must still get
+# its full 4x scale without clamping, or the ceiling is silently shortening the
+# very budgets this file exists to widen.
+pulp_scaled_test_timeout(_out 900)
+expect("the largest declared budget is not clamped" "3600" "${_out}")
+
+# The ceiling must stay STRICTLY below the CI lane's job budget. Equal is the
+# bug this replaced: a test clamped at the job cap cannot time out first, so
+# the JOB is killed instead and the run reports `cancelled` with no test named.
+set(_lane_job_timeout 7200)
+if(NOT PULP_TEST_TIMEOUT_CEILING LESS _lane_job_timeout)
+    message(STATUS "  FAIL ceiling ${PULP_TEST_TIMEOUT_CEILING} is not below the lane job budget ${_lane_job_timeout}")
+    math(EXPR _failures "${_failures} + 1")
+else()
+    message(STATUS "  ok   ceiling stays below the lane job budget, so a hung test names itself")
+endif()
 
 # --- clamping never shortens an authored budget -------------------------------
 # A suite that deliberately declares more than the ceiling keeps its own value;

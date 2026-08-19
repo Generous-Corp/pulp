@@ -38,8 +38,21 @@ set(PULP_TEST_TIMEOUT_COVERAGE_SCALE 4 CACHE STRING
 # A ceiling is what keeps a scaled budget honest. Without it a large TIMEOUT
 # times a large scale becomes effectively unbounded, and a wedged test would
 # hold a CI lane for the length of the job instead of failing.
-set(PULP_TEST_TIMEOUT_CEILING 7200 CACHE STRING
-    "Hard upper bound, in seconds, on any scaled test TIMEOUT.")
+#
+# It must stay STRICTLY BELOW the lane's own job budget, and the first version
+# of this file got that wrong: the ceiling was 7200s, exactly the JIT runner's
+# `job_timeout=7200s`. A test clamped at the job budget can never time out
+# first -- the job is killed at the same instant, and the run reports
+# `cancelled` with no failing test named. That is the opposite of the point.
+# The whole reason to keep budgets finite is so a hung test IDENTIFIES itself
+# instead of taking the job down anonymously, and a ceiling equal to the job
+# cap converts every such case into an unattributed cancellation.
+#
+# 3600s is half the current job budget: high enough that the largest declared
+# budget in the tree (900s) still gets its full 4x coverage scale without
+# clamping, and low enough that a test which blows through it fails as a test.
+set(PULP_TEST_TIMEOUT_CEILING 3600 CACHE STRING
+    "Hard upper bound in seconds on any scaled test TIMEOUT; must stay below the CI lane job budget")
 
 # Resolve the multiplier for this build tree into `out_var`.
 #

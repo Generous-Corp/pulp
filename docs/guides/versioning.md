@@ -399,7 +399,11 @@ that is only a default, and a per-test `TIMEOUT` property always wins.
 
 `tools/cmake/PulpTestTimeout.cmake` multiplies every `pulp_add_test_suite`
 budget by `PULP_TEST_TIMEOUT_COVERAGE_SCALE` (**4**) when `PULP_COVERAGE_ENABLED`
-is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**7200s**). Pin
+is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**3600s**). That ceiling must stay
+strictly below the CI lane's own `job_timeout` (7200s): a test clamped at the
+job budget can never time out first, so the job is killed instead and the run
+reports `cancelled` with no failing test named — which defeats the purpose of
+keeping budgets finite. Pin
 `PULP_TEST_TIMEOUT_SCALE` to override; a value below 1 fails configuration
 because it would shorten every budget in the tree.
 
