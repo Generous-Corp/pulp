@@ -1191,6 +1191,30 @@ from `a08ec2d4abd8`.
   - **Set the long retention explicitly when you mean it.** An inherited 90 and
     a deliberate 90 look identical in the YAML, so the next audit cannot tell a
     considered decision from a forgotten default and will "fix" it.
+### Action major pins drift silently — the gate is a test, not a warning
+
+GitHub retires the Node runtime under an action's *old* major and then forces
+that major onto the newer runtime, emitting a deprecation annotation. That
+annotation only exists on a live run, so a stale pin is invisible to every
+local gate and is normally found by a human reading warnings. Pulp therefore
+pins the major in one place and asserts it:
+
+- `tools/scripts/test_workflow_lint.py::ActionMajorPinTests` scans every
+  `.github/workflows/*.yml` and fails when any `actions/<name>@vN` falls below
+  `MINIMUM_MAJOR`, or when one action is pinned to two different majors across
+  workflows. The split-pin check is the one that catches real drift: a new
+  workflow copies the current pin while the old ones keep the obsolete major.
+- `actions/setup-python` is pinned at **v6**; v5 was forced onto Node 24 and
+  began emitting a Node 20 deprecation annotation.
+- Raise `MINIMUM_MAJOR` when bumping an action — do **not** add a second
+  version assertion to an individual workflow's test. The per-workflow tests
+  deliberately match `@v\d+` so a routine bump touches one invariant.
+
+`actions/checkout`, `actions/cache`, `actions/setup-node`, and
+`actions/upload-artifact` are still split across majors and are NOT yet under
+this invariant; add them one action per PR so a runtime regression stays
+bisectable.
+
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
   github.ref == 'refs/heads/main'` is dead code unless the workflow has a

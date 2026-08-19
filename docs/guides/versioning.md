@@ -182,6 +182,21 @@ invariants over Pulp's own source, both hard-failing:
 
 It also runs in the pre-push `gates.sh`, so a violation is caught before the push.
 
+### Action-major pins in the gate workflows
+
+The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts
+on a `actions/setup-python` step, so a retired action runtime degrades the
+enforcement layer itself. GitHub forces an obsolete major onto a newer Node
+runtime and reports it only as a deprecation annotation on a live run, which no
+local gate can see.
+
+The pin therefore lives in one asserted invariant rather than in each workflow:
+`tools/scripts/test_workflow_lint.py::ActionMajorPinTests` fails when any
+`actions/<name>@vN` in `.github/workflows` falls below `MINIMUM_MAJOR`, or when
+one action is pinned to two different majors across workflows. `setup-python`
+is pinned at **v6**. When bumping an action, raise `MINIMUM_MAJOR` — do not add
+a version assertion to an individual workflow's test.
+
 There is deliberately no bypass in CI other than the commit trailers. The audit trail lives in git, not in GitHub labels or PR-body text.
 
 ## CI cadence — macOS is the product (2026-07-17)
@@ -390,6 +405,28 @@ It runs advisory (`--mode=hint`) in the agent PostToolUse hook, enforcing
 a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
 ### Coverage lane failure semantics
+
+**Test wall-clock budgets are scaled, not removed, on a coverage tree.** A
+coverage build compiles at `-O0` with an instrumentation counter update on
+every region, and the lane runs on a shared host, so a `TIMEOUT` authored for
+an optimized build becomes a false failure. `ctest --timeout` cannot rescue it:
+that is only a default, and a per-test `TIMEOUT` property always wins.
+
+`tools/cmake/PulpTestTimeout.cmake` multiplies every `pulp_add_test_suite`
+budget by `PULP_TEST_TIMEOUT_COVERAGE_SCALE` (**4**) when `PULP_COVERAGE_ENABLED`
+is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**3600s**). That ceiling must stay
+strictly below the CI lane's own `job_timeout` (7200s): a test clamped at the
+job budget can never time out first, so the job is killed instead and the run
+reports `cancelled` with no failing test named — which defeats the purpose of
+keeping budgets finite. Pin
+`PULP_TEST_TIMEOUT_SCALE` to override; a value below 1 fails configuration
+because it would shorten every budget in the tree.
+
+The budget stays finite on purpose. An unbounded test cannot distinguish "slow
+under instrumentation" from "wedged", which is the only question a timeout
+answers — so `test/test_ctest_timeout_kills_wedged.sh` runs a real CTest over a
+planted never-ending process and asserts it is still killed at the scaled
+budget.
 
 C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
 authoritative diff-coverage gate is the separate `Diff coverage required` check.
