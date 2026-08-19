@@ -3370,6 +3370,57 @@ Dispatch only when it reads **< 3**.
   **finish**, not to start. Two PRs three minutes apart routed oppositely for
   exactly this reason: A's leg started 11 seconds before B's resolver ran.
 
+**The probe is read at the wrong moment by default.** The counter above is
+correct; the *timing* is not. `resolve-provider` does not run at dispatch — it
+runs roughly **two minutes later** and reads the counter then. Anything claiming
+a slot in that gap changes the answer, including a dispatch you made moments
+earlier:
+
+```
+[7679] BUSY=1  -- dispatched      23:38:03Z
+[7679] resolver_started=          23:40:07Z   ->  [github-hosted]
+```
+
+One slot busy at dispatch; three by the time the resolver counted, because our
+own previous dispatch had just gone `in_progress` and a merge-queue run started.
+**The dispatch was starved by its own predecessor.** A threshold with no
+headroom fails *intermittently* — it works whenever the gap happens to be quiet
+— and intermittent failure gets misfiled as flakiness.
+
+1. **Dispatch at `BUSY <= 1`, not `< 3`.** Headroom for one arrival during the lag.
+2. **After dispatching, wait until that leg reports `in_progress` before probing
+   again.** Until it does, the slot it will consume is invisible. This is what
+   makes sequential dispatch safe; the threshold alone does not.
+
+**The hosted lane fails *before* a test, not at one.** Legs routed
+`[github-hosted]` run to completion (90-105 min) and fail on exactly one item out
+of ~20,000: `cmake-control-sdk-consumer` — a **compile** failure, not a timeout
+or assertion. That is what makes it deterministic rather than flaky, and it has
+two consequences:
+
+- **A PR routed hosted cannot pass the required gate at any duration.** Waiting,
+  re-running, or catching a quiet window changes nothing. Local routing is not an
+  optimisation; it is the only path to green.
+- **The failure is independent of the diff.** When unrelated changes fail
+  identically on one lane and pass on another, the lane is the variable. The
+  cleanest evidence is a single PR whose **same commit failed hosted and passed
+  local in 72 minutes** — one head, two lanes, opposite verdicts, diff removed as
+  a variable entirely.
+
+**Corollary for triage: hosted never cancelled anything.** It ran every leg and
+returned a real verdict; the cancellations in that investigation were all
+self-inflicted. "The hosted queue kills our jobs" is the wrong story and sends
+the next person hunting a phantom. The true one is "hosted runs our jobs and
+fails one specific compile, and `--failed` re-runs kept us routed there."
+
+**Several test families are contention-sensitive, not just one.** Under a loaded
+host, observed failures include `test_control_broker_daemon.cpp` waits (fixed by
+deadline-bounding), the coverage FDN oracle, and `rack-acid-preflight` /
+`rack-acid-runtime-gate` (both `Timeout`, `rack safety`). Before blaming a diff,
+check whether the failure is a **timeout** and whether the host was loaded — a
+timeout under contention on a test the diff does not touch is a lane/host
+symptom, not a regression.
+
 **Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
 is indistinguishable from a real test failure at PR level — so read the leg, not
 just the alias. And when a remedy stops working, re-verify the remedy still does
