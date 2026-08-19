@@ -592,8 +592,19 @@ if(UNIX)
     add_test(NAME pulp-test-timeout-scaling
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_test_timeout.cmake)
     set_tests_properties(pulp-test-timeout-scaling PROPERTIES TIMEOUT 60)
+    # Fail at CONFIGURE if the script is not where the registration says.
+    # A wrong path here does not fail configure on its own -- it produces
+    # `***Failed 0.00 sec  No such file or directory` at run time, which reads
+    # like the test executed and disagreed rather than never having run. Note
+    # that this file is include()d from test/CMakeLists.txt, so
+    # CMAKE_CURRENT_SOURCE_DIR is `test/`, NOT `test/cmake/`.
+    set(_wedged_script "${CMAKE_CURRENT_SOURCE_DIR}/test_ctest_timeout_kills_wedged.sh")
+    if(NOT EXISTS "${_wedged_script}")
+        message(FATAL_ERROR
+            "pulp-test-timeout-enforced points at a missing script: ${_wedged_script}")
+    endif()
     add_test(NAME pulp-test-timeout-enforced
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../test_ctest_timeout_kills_wedged.sh)
+        COMMAND bash "${_wedged_script}")
     # Deliberately sleeps to the scaled budget; the wall time IS the assertion.
     set_tests_properties(pulp-test-timeout-enforced PROPERTIES TIMEOUT 120)
 
