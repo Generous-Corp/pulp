@@ -47,8 +47,31 @@ jobs:
           # the trusted `origin/main` ref, so the history must be fetchable.
           fetch-depth: 0
 
+      # Retry the install. An apt mirror hiccup is the most common flake class on
+      # a hosted Linux runner, and this check is meant to gate merges — so the
+      # one network call on its critical path must not fail the lane on a
+      # transient. `apt-get update` first because the image's package lists go
+      # stale and a bare install then 404s on a moved pool path.
+      #
+      # NOT pinned to a Doxygen version on purpose: `build-api-docs.sh` already
+      # prints the local version and documents that CI's Ubuntu package and a
+      # dev machine's Homebrew build disagree on some diagnostics, so a pin here
+      # would encode one runner image's version as the contract while the
+      # docs-material and docs-deploy lanes stayed unpinned and drifted from it.
+      # If image drift ever does flip this check, pin all three lanes together.
       - name: Install Doxygen
-        run: sudo apt-get install -y doxygen
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends doxygen; then
+              doxygen --version
+              exit 0
+            fi
+            echo "doxygen install attempt ${attempt} failed; retrying" >&2
+            sleep $(( attempt * 5 ))
+          done
+          echo "doxygen install failed after 3 attempts" >&2
+          exit 1
 
       - name: Check public API contracts
         run: |

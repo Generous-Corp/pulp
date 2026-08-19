@@ -804,6 +804,32 @@ jobs:
             --prompt-output /dev/null \
             --changed-paths recovery-output/changed-paths.txt \
             --patch recovery-output/recovery-repair.patch
+          # Judgement check. Every fence above bounds HOW MUCH a repair changed;
+          # none reads WHAT it changed. On 2026-08-17 all of them held while the
+          # lane removed every std::atomic from ParamValue -- the audio/UI
+          # primitive -- to satisfy a trivially-copyable assertion, and it would
+          # have gone green. Enforced here, in the trusted publisher, because
+          # this is the step that applies and pushes; the worker deliberately
+          # still uploads its artifact so an escalated repair remains inspectable.
+          set +e
+          python3 control/tools/scripts/shipyard_recovery_judgement.py \
+            --changed-paths recovery-output/changed-paths.txt \
+            --patch recovery-output/recovery-repair.patch \
+            --output judgement.json
+          judgement_rc=$?
+          set -e
+          if [ "$judgement_rc" = 3 ]; then
+            judgement_reason=$(jq -r '.status_description' judgement.json)
+            # Record WHY on the exact head, so the escalation is explained where
+            # a reader looks rather than only in a job log that ages out.
+            gh api "repos/${GITHUB_REPOSITORY}/statuses/${EXPECTED_HEAD}" \
+              -f state=failure \
+              -f context='shipyard/recovery-judgement' \
+              -f description="$judgement_reason" >/dev/null || true
+            echo "::error::recovery repair escalated to needs_human: $judgement_reason"
+            exit 3
+          fi
+          [ "$judgement_rc" = 0 ]
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > post-repair-pull.json
           gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_HEAD}/statuses?per_page=100" \

@@ -15,17 +15,15 @@ file(MAKE_DIRECTORY "${_probe_dir}")
 
 function(_expect_engine_failure name prelude expected_error)
     set(_probe "${_probe_dir}/${name}.cmake")
-    # The probe must stand in the same policy context a real configure gives the
-    # module, or it does not exercise the real validation. The module selects
-    # with `if(... IN_LIST ...)`, which only behaves as an operator once CMP0057
-    # is NEW — a project gets that from the top-level cmake_minimum_required,
-    # but a `cmake -P` script inherits nothing and falls back to whatever the
-    # running CMake defaults to. Without this line the IN_LIST test silently
-    # evaluates the OLD way, the module never reaches its FATAL_ERROR, and the
-    # probe fails for an unrelated reason while the assertion below reports it
-    # as a wrong *message*.
+    # The module is written for the policy context its includer establishes, and
+    # the real configure supplies that from the top-level cmake_minimum_required.
+    # A bare `cmake -P` script has no such context, so CMP0057 is unset and
+    # `if(... IN_LIST ...)` is not the IN_LIST operator: the validation the probe
+    # exists to exercise never runs, and the probe then fails on the missing
+    # diagnostic rather than on the behavior. Give it the project's own baseline
+    # so the probe measures the module instead of the ambient policy defaults.
     file(WRITE "${_probe}"
-        "cmake_policy(SET CMP0057 NEW)\n"
+        "cmake_minimum_required(VERSION 3.24)\n"
         "${prelude}\n"
         "include(\"${_engine_module}\")\n")
     execute_process(
@@ -41,9 +39,10 @@ function(_expect_engine_failure name prelude expected_error)
     set(_output "${_stdout}\n${_stderr}")
     # Distinguish "the probe said nothing" from "the probe said the wrong
     # thing". A probe that dies before reaching the module — unwritable dir,
-    # missing module, policy fallback — produces no diagnostic of its own, and
-    # reporting that as a wrong message sends the next reader looking for a
-    # text mismatch that does not exist.
+    # missing module, an ambient policy default — produces no diagnostic of its
+    # own, and reporting that as a wrong message sends the next reader looking
+    # for a text mismatch that does not exist. That is precisely how the policy
+    # bug above stayed unread across three PRs.
     string(STRIP "${_output}" _stripped_output)
     if(_stripped_output STREQUAL "")
         message(FATAL_ERROR

@@ -55,6 +55,8 @@ on:
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/ci/build-dir-sentinel.sh'
       - 'tools/scripts/test_build_dir_sentinel.py'
+      - 'tools/scripts/checkout_preflight.py'
+      - 'tools/scripts/test_checkout_preflight.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -88,6 +90,9 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
+      - 'tools/scripts/shipyard_recovery_judgement.py'
+      - 'tools/scripts/test_shipyard_recovery_judgement.py'
+      - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -131,6 +136,8 @@ on:
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/ci/build-dir-sentinel.sh'
       - 'tools/scripts/test_build_dir_sentinel.py'
+      - 'tools/scripts/checkout_preflight.py'
+      - 'tools/scripts/test_checkout_preflight.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -164,6 +171,9 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
+      - 'tools/scripts/shipyard_recovery_judgement.py'
+      - 'tools/scripts/test_shipyard_recovery_judgement.py'
+      - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -267,6 +277,7 @@ jobs:
           python3 tools/scripts/test_shipyard_recovery_repair.py
           python3 tools/scripts/test_shipyard_recovery_result_check.py
           python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
+          python3 tools/scripts/test_shipyard_recovery_judgement.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:
@@ -309,6 +320,10 @@ jobs:
           # and `clear` are a matched pair split across two stages; a lane
           # that arms without clearing wipes its build dir every run.
           python3 tools/scripts/test_build_dir_sentinel.py
+          # Preflight that names configure blockers (stale/overridden Skia
+          # cache, uninitialised planning submodule) before cmake reports
+          # them late and by symptom.
+          python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_required_macos_alias.py
