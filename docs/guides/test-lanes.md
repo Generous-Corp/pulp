@@ -111,6 +111,15 @@ continues to run in `docs-material.yml`, which re-checks the contract on its way
 the render. Putting the render back on this lane would repeat the mistake that put
 example validators on the required gate.
 
+Its one external dependency is Doxygen from the runner image's apt mirror, and
+that install retries. A mirror hiccup is the most common hosted-Linux flake class,
+and a lane meant to gate merges cannot fail on one. The version is deliberately
+**not** pinned: `build-api-docs.sh` documents that CI's Ubuntu package and a
+developer's Homebrew build disagree on some diagnostics, so pinning this lane
+alone would make one runner image's version the contract while `docs-material.yml`
+and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
+pin all three together rather than just this one.
+
 **Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
 `required_status_checks`, this lane reports the same defect the old one did and is
 equally unable to stop it. Promotion is a branch-protection change:
@@ -124,6 +133,43 @@ ghapp api -X PATCH repos/Generous-Corp/pulp/branches/main/protection/required_st
     -f 'contexts[]=macos' \
     -f 'contexts[]=api-contracts'
 ```
+
+## When a test's premise cannot hold in a lane
+
+Labels route tests that are *slow* or *flaky* in a lane. A third case is neither:
+a test whose **premise is false** there, so it can only ever report a red that
+means nothing.
+
+The worked example is the trusted-host launch tests.
+`loaded_runtime_closure_matches_policy()` rejects any image mapped into a launched
+child that is neither an Apple platform image nor a pinned inventory file — that
+rejection *is* the security property under test. A sanitizer build injects exactly
+such an image into every process it produces: `clang++ -fsanitize=undefined` links
+`@rpath/libclang_rt.ubsan_osx_dynamic.dylib`, which dyld resolves under the Xcode
+toolchain, and Apple's clang has no static sanitizer runtime on macOS to avoid it.
+So those tests cannot pass under a sanitizer, and the correct response is neither
+to retry them nor to relax the production check — relaxing it would delete the
+property the test exists to prove.
+
+Express this **in the test source**, not with a label:
+
+- Guard the affected `TEST_CASE`s on `PULP_TEST_WITH_SANITIZER`, which a target
+  picks up via `$<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>`.
+- Skip with a stated reason (`SUCCEED("skipped under a sanitizer build: …")`), so
+  the lane records *why* rather than passing silently.
+- Keep the explanation in one place — `test/support/control_runtime_closure_sanitizer.hpp`
+  holds it for this case, including the measured dylib path.
+
+Source-level guarding is deliberate. A label excludes a whole target: for these
+files it would have dropped 15 passing tests to silence 7 impossible ones. And
+coverage is preserved where it counts — the guarded cases still run, and still
+gate, on every non-sanitizer lane including the required `macos` gate.
+
+**Point the guard the right way, and prove it.** An inverted guard is silent in
+both directions: the sanitizer lane goes red exactly as before, while every other
+lane quietly stops exercising the code. `pulp-test-control-runtime-closure-sanitizer-guard`
+asserts whichever direction is true for the build it is compiled into, so each
+lane checks its own.
 
 ## Adding a test — where will it land?
 

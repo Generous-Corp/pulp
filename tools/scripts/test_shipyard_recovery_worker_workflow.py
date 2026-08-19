@@ -245,6 +245,25 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         forbidden = Path("tools/scripts/shipyard_recovery_repair.py").read_text()
         self.assertIn('"tools/scripts/shipyard_recovery_"', forbidden)
 
+    def test_the_publisher_will_not_push_a_repair_the_judgement_check_refuses(self) -> None:
+        # Every other fence bounds how much a repair changed. On 2026-08-17 all
+        # of them held while the lane deleted the atomics from ParamValue, so
+        # the publisher -- the step that actually applies and pushes -- must
+        # also weigh WHAT changed, and must record why when it refuses.
+        self.assertIn(
+            "control/tools/scripts/shipyard_recovery_judgement.py", self.text
+        )
+        self.assertIn("judgement_rc=$?", self.text)
+        self.assertIn('if [ "$judgement_rc" = 3 ]; then', self.text)
+        self.assertIn("shipyard/recovery-judgement", self.text)
+        self.assertIn("needs_human", self.text)
+        self.assertTrue(
+            Path("tools/scripts/shipyard_recovery_judgement.py").exists()
+        )
+        # It must live inside the fence, or the model it constrains can edit it.
+        forbidden = Path("tools/scripts/shipyard_recovery_repair.py").read_text()
+        self.assertIn('"tools/scripts/shipyard_recovery_"', forbidden)
+
     def test_resolved_lane_drives_outputs_and_commit_trailers(self) -> None:
         outputs = self.doc["jobs"]["luna-triage"]["outputs"]
         self.assertEqual(
@@ -255,8 +274,10 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
             outputs["repair_outcome"], "${{ steps.repair_result.outputs.outcome }}"
         )
         # The audit trail must name the lane that actually produced the patch.
-        self.assertIn('-m "Agent: ${repair_agent}"', self.text)
-        self.assertIn('-m "Model: ${repair_model}"', self.text)
+        # The trailers are one contiguous paragraph built with printf, not one
+        # -m per trailer; see the parseable-block test below.
+        self.assertIn('"Agent: ${repair_agent}"', self.text)
+        self.assertIn('"Model: ${repair_model}"', self.text)
         self.assertIn("unknown repair provider", self.text)
         self.assertNotIn('-m "Agent: codex"', self.text)
 
@@ -265,6 +286,68 @@ class RecoveryWorkerWorkflowTests(unittest.TestCase):
         # a green job with no classification.
         self.assertIn("both triage lanes failed", self.text)
         self.assertIn("both repair lanes failed", self.text)
+
+    def test_patch_is_diffed_against_the_commit_not_the_index(self) -> None:
+        """`git add --intent-to-add` fully stages a DELETION, so a
+        worktree-vs-index diff drops deleted and renamed files from both the
+        patch and the declared path list — and the publisher's parity check
+        still passes, because both lists are identically wrong. That would ship
+        a repair that fails to delete what the model deleted."""
+        self.assertIn("git -C worktree diff HEAD --name-only", self.text)
+        self.assertIn("git -C worktree diff HEAD --binary --full-index", self.text)
+        self.assertNotIn("git -C worktree diff --name-only", self.text)
+        self.assertNotIn("git -C worktree diff --binary --full-index", self.text)
+        # Reset to the fenced head, not HEAD, so a model that committed cannot
+        # reset the index to its own commit and yield an empty patch.
+        self.assertIn('git -C worktree reset --mixed --quiet "$EXPECTED_HEAD"', self.text)
+
+    def test_parity_lists_are_sorted_under_a_pinned_locale(self) -> None:
+        """The worker and the publisher run on different hosts and the parity
+        check is a plain `diff -u` of two sorted lists. glibc/BSD collation
+        orders `-`, `_`, and case differently from C, so an unpinned sort
+        rejects a correct patch purely on locale."""
+        self.assertEqual(self.text.count("LC_ALL=C sort -u"), 2)
+        self.assertNotIn("--name-only | sort -u", self.text)
+
+    def test_whitespace_is_a_warning_on_both_sides(self) -> None:
+        """Demoting only the worker's check moves the rejection later, after
+        the lease and model are already spent, instead of removing it."""
+        self.assertIn(
+            'git -C worktree diff HEAD --check || echo "warning:', self.text
+        )
+        self.assertIn(
+            'git -C worktree diff --cached --check || echo "warning:', self.text
+        )
+
+    def test_fallback_repair_starts_from_a_clean_fenced_worktree(self) -> None:
+        """The primary lane edits the same worktree and can fail AFTER editing.
+        Without a reset, its partial edits are bundled into the fallback's patch
+        and attributed to Claude by the commit trailers."""
+        self.assertIn('git -C worktree reset --hard --quiet "$EXPECTED_HEAD"', self.text)
+        self.assertIn("git -C worktree clean -qfd", self.text)
+
+    def test_untrusted_project_settings_are_not_loaded(self) -> None:
+        """cwd is inside the untrusted PR head. A PR-supplied settings file
+        granting Bash would hand the model a shell with the lease token
+        exported, and this lane has no OS sandbox."""
+        self.assertEqual(self.text.count("--setting-sources user"), 2)
+
+    def test_recovery_trailers_are_one_parseable_block(self) -> None:
+        """Separate -m flags become separate paragraphs, so
+        `git interpret-trailers --parse` sees only the last one."""
+        self.assertIn('git -C worktree commit -m "$recovery_message"', self.text)
+        self.assertNotIn('-m "Shipyard-Recovery-Epoch:', self.text)
+        self.assertNotIn('-m "Agent: ${repair_agent}"', self.text)
+
+    def test_a_fixed_repair_that_never_pushed_is_not_reported_success(self) -> None:
+        """`repair_push` skipping leaves outcome `skipped`, not `failure`; a
+        bare `= failure` test would report a clean dispatch while the authorised
+        repair evaporated."""
+        self.assertIn(
+            '{ [ "${{ needs.luna-triage.outputs.repair_outcome }}" = fixed ] && '
+            '[ "${{ steps.repair_push.outcome }}" != success ]; }',
+            self.text,
+        )
 
     def test_push_credential_is_minted_only_after_models_exit(self) -> None:
         model_end = self.text.index("Release Sol-medium Subrouter lease")

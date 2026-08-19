@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 28,
+  "manifest_revision": 33,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 42
+        "capabilities": 51
       },
       "timebase": {
         "state": "partial",
@@ -1825,6 +1825,66 @@
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
     },
     {
+      "key": "signal.auto-ducked-send",
+      "domain": "signal",
+      "summary": "Envelope-following send that ducks a wet path against a dry key signal with bounded attack, release, threshold, and range.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control envelope setup",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Single envelope follower plus the committed duck configuration.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "wet and dry audio plus bounded threshold, range, attack, and release",
+      "output_domain": "ducked stereo send",
+      "units": [
+        "samples",
+        "decibels",
+        "milliseconds"
+      ],
+      "latency": "zero",
+      "tail": "envelope release",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/auto_ducked_send.hpp",
+          "qualified_name": "pulp::signal::AutoDuckedSendT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:dabad14b890bce07b4a8fe22e622e3bf9d9e67da3634c98a0ec96cd396d9cee7"
+    },
+    {
       "key": "signal.beat-repeat-kernel",
       "domain": "signal",
       "summary": "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, reverse/alternate playback, and direct trigger/stop/seek controls; pitch excluded.",
@@ -1943,6 +2003,65 @@
         }
       },
       "contract_digest": "sha256:77d813b2f803243154a3e30607e0578377130ab87aeef45ae68f12b05b1f5427"
+    },
+    {
+      "key": "signal.comb-filter",
+      "domain": "signal",
+      "summary": "Prepared feedforward, feedback, and Schroeder allpass comb filters with exact integer delays, transactional configuration, and typed fault recovery.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control delay-line allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity fractional delay history plus the committed mode/delay/gain configuration; recursive modes snap their stored state to zero.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded mode, integer delay, and stable feedback gain",
+      "output_domain": "comb-filtered audio with typed status",
+      "units": [
+        "samples",
+        "linear gain"
+      ],
+      "latency": "zero",
+      "tail": "recursive decay in feedback and allpass modes",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/comb_filter.hpp",
+          "qualified_name": "pulp::signal::CombFilterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:08136a7d244957d09fa1ce15132db230faac72978f525d631c8b62f2beecedb6"
     },
     {
       "key": "signal.cross-feedback-multitap-delay",
@@ -2267,6 +2386,66 @@
       "contract_digest": "sha256:b198f11304f11bb40dfb310e73e301a7f669996c388a50672c48bebbafd413e9"
     },
     {
+      "key": "signal.early-reflections",
+      "domain": "signal",
+      "summary": "Bounded feed-forward early-reflection tap bank producing a stereo reflection pattern from validated per-tap delay, gain, and pan.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control delay-line allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity delay history plus the committed tap list; feed-forward only, so no recursive state accumulates.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded tap list of delay, gain, and pan",
+      "output_domain": "stereo early-reflection pattern",
+      "units": [
+        "samples",
+        "milliseconds",
+        "linear gain"
+      ],
+      "latency": "per-tap delay",
+      "tail": "longest configured tap",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/early_reflections.hpp",
+          "qualified_name": "pulp::signal::EarlyReflectionsT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:6b2f892a78fa126c4a1fd93b06cbd3313581fb9282136f207a4d41d6d1b3e6c6"
+    },
+    {
       "key": "signal.expander",
       "domain": "signal",
       "summary": "Prepared bounded stereo upward or downward expansion with shared dynamics telemetry.",
@@ -2392,6 +2571,67 @@
       "contract_digest": "sha256:d08e93be0e8366bcb238fec115b4fc62cabd641615ca6d1c6f96f4fc8d8a2050"
     },
     {
+      "key": "signal.filter-morph",
+      "domain": "signal",
+      "summary": "Continuous morph across lowpass, bandpass, highpass, and notch responses with a stable coefficient path and no discontinuity at type boundaries.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control coefficient design",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Biquad state plus the current morph position, cutoff, and resonance.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded morph position, cutoff, and resonance",
+      "output_domain": "filtered audio",
+      "units": [
+        "samples",
+        "hertz",
+        "normalized morph position",
+        "Q"
+      ],
+      "latency": "zero",
+      "tail": "recursive IIR decay",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/filter_morph.hpp",
+          "qualified_name": "pulp::signal::FilterMorphT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:63174875bdcdf46d627e6bb2ea37ff5dee7cb1bd95cd8961af4f16f273be6489"
+    },
+    {
       "key": "signal.fir-design",
       "domain": "signal",
       "summary": "Offline weighted least-squares design of bounded real Type I-IV linear-phase FIRs from sampled frequency targets.",
@@ -2515,6 +2755,66 @@
       "contract_digest": "sha256:4f829af1b5f24efacdc14764764aa64d9dea9ab6c8654cd815600c525684c8f2"
     },
     {
+      "key": "signal.formant-filter-bank",
+      "domain": "signal",
+      "summary": "Bounded parallel formant resonator bank with vowel presets and transactional reconfiguration for vocal-character shaping.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control resonator allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Up to MaxFormants parallel resonator states plus the committed formant recipe; configuration is rejected atomically rather than partially applied.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus bounded formant center, bandwidth, and gain specifications",
+      "output_domain": "formant-shaped audio with typed configure status",
+      "units": [
+        "samples",
+        "hertz",
+        "decibels"
+      ],
+      "latency": "zero",
+      "tail": "recursive resonator decay",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/formant_filter_bank.hpp",
+          "qualified_name": "pulp::signal::FormantFilterBankT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:d57ad8e6438b31c05804b7b904928cf0d8a930bc0ca1eef295871fa542ae02d2"
+    },
+    {
       "key": "signal.fractional-delay",
       "domain": "signal",
       "summary": "Prepared causal fractional-delay history and line with Lagrange or Thiran interpolation.",
@@ -2586,6 +2886,67 @@
         }
       },
       "contract_digest": "sha256:2a00db5a77cf8b3c5f9580a7a9b4652516fa0309c1a1db4b79f9ac78ef377713"
+    },
+    {
+      "key": "signal.graphic-eq",
+      "domain": "signal",
+      "summary": "Bounded multi-band graphic equalizer container with transactional band commits and an optional sample-counted crossfade between configurations.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control band allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Up to MaxBands biquad sections plus an optional transition bank; a rejected configuration leaves the committed bank untouched.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus bounded per-band frequency, gain, and Q controls",
+      "output_domain": "equalized audio with typed prepare and configure status",
+      "units": [
+        "samples",
+        "hertz",
+        "decibels",
+        "Q"
+      ],
+      "latency": "zero",
+      "tail": "recursive IIR decay",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/graphic_eq.hpp",
+          "qualified_name": "pulp::signal::GraphicEqT<float, 31>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:ad7a97c12f7503c3c028794ff76f26a7d9021c78b5102506f4fd07f497356117"
     },
     {
       "key": "signal.headphone-crossfeed",
@@ -3146,6 +3507,65 @@
         }
       },
       "contract_digest": "sha256:f96ab0ee43fcf5bbfdea31592ddf9bb85873cba45d0b1fddfa3a749eee7c7a2a"
+    },
+    {
+      "key": "signal.parallel-dynamics",
+      "domain": "signal",
+      "summary": "Bounded parallel dynamics mixer blending a dry path against processed bands with latency-aligned summing and transactional configuration.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control buffer allocation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity per-band mix buffers plus the committed blend configuration; a rejected configuration leaves the previous blend in place.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus bounded per-band blend and alignment controls",
+      "output_domain": "summed parallel-processed audio",
+      "units": [
+        "samples",
+        "linear gain"
+      ],
+      "latency": "aligned across parallel paths",
+      "tail": "none",
+      "scheduling": "block-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/parallel_dynamics.hpp",
+          "qualified_name": "pulp::signal::ParallelDynamicsMixerT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f0d2930ecba77685d3bdf4743ea111eab1dd3b970366ca60a5d11f9a86a82921"
     },
     {
       "key": "signal.particle-percussion",
@@ -4435,6 +4855,125 @@
       "contract_digest": "sha256:26c1dee5d8d61731db112932e558664d08d15d5a58c69373a762dbdd53af6246"
     },
     {
+      "key": "signal.tilt-eq",
+      "domain": "signal",
+      "summary": "Multi-channel tilt equalizer trading low- against high-shelf gain around a pivot frequency from a single control.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control coefficient design",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Per-channel shelf cascade state plus the committed pivot and tilt; set_config reinstalls coefficients and clears history rather than crossfading.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded pivot frequency and signed tilt amount",
+      "output_domain": "tilt-equalized audio",
+      "units": [
+        "samples",
+        "hertz",
+        "decibels"
+      ],
+      "latency": "zero",
+      "tail": "recursive IIR decay",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/tilt_eq.hpp",
+          "qualified_name": "pulp::signal::TiltEqT<float, 2>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:483ac0f11b4aa8e69b02f074859103ad5cd7c6cc3a20b37f1cbeacbe1a777de5"
+    },
+    {
+      "key": "signal.transfer-curve",
+      "domain": "signal",
+      "summary": "Bounded monotonic transfer-curve shaper prepared from validated breakpoints, with typed rejection of non-monotonic or out-of-range input.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control curve preparation",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "A prepared immutable curve table plus the committed breakpoint set; preparation is transactional so a rejected curve leaves the previous one in place.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio plus a bounded monotonic breakpoint list",
+      "output_domain": "shaped audio with typed prepare status",
+      "units": [
+        "samples",
+        "linear amplitude"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/transfer_curve.hpp",
+          "qualified_name": "pulp::signal::TransferCurveT<float, 32>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:ae540141fbc596e3a5dc72e58c6568b425fd97e0b3f902d2da21eb16787cf4af"
+    },
+    {
       "key": "signal.transient-designer",
       "domain": "signal",
       "summary": "Zero-latency attack and sustain shaping from independent peak envelopes.",
@@ -5419,14 +5958,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 75,
+    "total": 84,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 42,
+      "signal": 51,
       "timebase": 9
     }
   },
@@ -5636,6 +6175,30 @@
               "output_count()",
               "max_block_size()",
               "nonfinite_gain_count()"
+            ],
+            "enums": []
+          }
+        ],
+        "auto_ducked_send.hpp": [
+          {
+            "class": "AutoDuckedSendT",
+            "qualified_name": "pulp::signal::AutoDuckedSendT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(SampleType sample_rate)",
+              "process(SampleType send_left, SampleType send_right, SampleType detector_left, SampleType detector_right)",
+              "reset()",
+              "configure(const Config& next)",
+              "gain_computer_db(SampleType detector_level_db, const Config& config)",
+              "process_block(const SampleType* send_left, const SampleType* send_right, const SampleType* detector_left, const SampleType* detector_right, SampleType* output_left, SampleType* output_right, int num_samples)",
+              "process_block(SampleType* send_left, SampleType* send_right, const SampleType* detector_left, const SampleType* detector_right, int num_samples)",
+              "set_bypassed(bool bypassed)",
+              "bypassed()",
+              "config()",
+              "prepared()",
+              "sample_rate()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -6380,6 +6943,47 @@
                 ]
               ]
             ]
+          }
+        ],
+        "comb_filter.hpp": [
+          {
+            "class": "CombFilterSampleResult",
+            "qualified_name": "pulp::signal::CombFilterSampleResult",
+            "template": "typename SampleType",
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "CombFilterBlockResult",
+            "qualified_name": "pulp::signal::CombFilterBlockResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "CombFilterT",
+            "qualified_name": "pulp::signal::CombFilterT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t maximum_delay_samples)",
+              "reset()",
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, std::size_t frames)",
+              "configure(const CombFilterConfig& candidate)",
+              "prepared()",
+              "configured()",
+              "maximum_delay_samples()",
+              "config()",
+              "fault_count()",
+              "clear_fault_count()",
+              "processing_latency_samples()",
+              "tail_samples()"
+            ],
+            "enums": []
           }
         ],
         "compressor.hpp": [
@@ -7415,6 +8019,30 @@
             "enums": []
           }
         ],
+        "early_reflections.hpp": [
+          {
+            "class": "EarlyReflectionsT",
+            "qualified_name": "pulp::signal::EarlyReflectionsT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(double sample_rate, double maximum_delay_ms = 250.0)",
+              "reset()",
+              "configure(std::span<const Tap> taps, MatrixHeadroomPolicy policy = MatrixHeadroomPolicy::NormalizePeak)",
+              "prepared()",
+              "sample_rate()",
+              "maximum_delay_ms()",
+              "tap_count()",
+              "tap(std::size_t index)",
+              "headroom_policy()",
+              "retained_bytes()",
+              "latency_samples()",
+              "tail_samples()",
+              "process_sample(SampleType input_left, SampleType input_right, SampleType& output_left, SampleType& output_right)",
+              "process_block(const SampleType* input_left, const SampleType* input_right, SampleType* output_left, SampleType* output_right, std::size_t sample_count)"
+            ],
+            "enums": []
+          }
+        ],
         "envelope.hpp": [
           {
             "class": "EnvelopeStageClock",
@@ -8079,6 +8707,30 @@
             "enums": []
           }
         ],
+        "filter_morph.hpp": [
+          {
+            "class": "FilterMorphT",
+            "qualified_name": "pulp::signal::FilterMorphT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "reset()",
+              "configure(SampleType sample_rate, Endpoint first, Endpoint second)",
+              "set_morph(SampleType amount)",
+              "process_block(const SampleType* input, SampleType* output, std::size_t frames)",
+              "process_block(SampleType* samples, std::size_t frames)",
+              "first_endpoint()",
+              "second_endpoint()",
+              "morph()",
+              "sample_rate()",
+              "configured()",
+              "first_coefficients()",
+              "second_coefficients()",
+              "magnitude(double frequency_hz)"
+            ],
+            "enums": []
+          }
+        ],
         "finite_stretch_builder.hpp": [
           {
             "class": "FiniteStretchBuilderT",
@@ -8246,6 +8898,30 @@
             ]
           }
         ],
+        "formant_filter_bank.hpp": [
+          {
+            "class": "FormantFilterBankT",
+            "qualified_name": "pulp::signal::FormantFilterBankT",
+            "template": "typename SampleType = float, std::size_t MaxFormants = 5",
+            "methods": [
+              "prepare(double sample_rate, std::size_t capacity = MaxFormants)",
+              "process(SampleType input)",
+              "reset()",
+              "prepared()",
+              "capacity()",
+              "sample_rate()",
+              "set_transition_samples(std::size_t samples)",
+              "transition_samples()",
+              "transition_active()",
+              "configure(std::span<const FormantSpec> formants, double headroom_db = 3.0)",
+              "configure(const Recipe& recipe)",
+              "configure_vowel_morph(FormantVowel from, FormantVowel to, double amount, double headroom_db = 3.0)",
+              "requested_recipe()",
+              "process_block(const SampleType* input, SampleType* output, std::size_t frames)"
+            ],
+            "enums": []
+          }
+        ],
         "fractional_delay.hpp": [
           {
             "class": "FractionalDelaySampleResult",
@@ -8263,6 +8939,7 @@
             "methods": [
               "prepare(std::size_t maximum_delay_samples)",
               "reset()",
+              "discard_history()",
               "prepared()",
               "maximum_delay_samples()",
               "retained_samples()",
@@ -8529,6 +9206,30 @@
               "position()",
               "set_position_spray_ms(double ms)",
               "position_spray_ms()"
+            ],
+            "enums": []
+          }
+        ],
+        "graphic_eq.hpp": [
+          {
+            "class": "GraphicEqT",
+            "qualified_name": "pulp::signal::GraphicEqT",
+            "template": "typename SampleType = float, std::size_t MaxBands = 31",
+            "methods": [
+              "prepare(SampleType sample_rate, std::size_t band_capacity = MaxBands)",
+              "process(SampleType input)",
+              "reset()",
+              "configure(std::span<const Band> bands, std::size_t transition_samples = 0)",
+              "process_block(SampleType* samples, std::size_t frames)",
+              "prepared()",
+              "transitioning()",
+              "healthy()",
+              "fault_count()",
+              "capacity()",
+              "band_count()",
+              "sample_rate()",
+              "supported_frequency_ceiling_hz()",
+              "band(std::size_t index)"
             ],
             "enums": []
           }
@@ -9962,6 +10663,25 @@
             "enums": []
           }
         ],
+        "parallel_dynamics.hpp": [
+          {
+            "class": "ParallelDynamicsMixerT",
+            "qualified_name": "pulp::signal::ParallelDynamicsMixerT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(std::size_t max_latency_samples, std::size_t max_block_size)",
+              "process(const SampleType* const* dry, const SampleType* const* wet, SampleType* const* output, std::size_t frames)",
+              "reset()",
+              "publish_config(const Config& config)",
+              "configure_latency_and_publish(const Config& config)",
+              "latency_samples()",
+              "tail_samples()",
+              "max_block_size()",
+              "prepared()"
+            ],
+            "enums": []
+          }
+        ],
         "particle_collision_exciter.hpp": [
           {
             "class": "ParticleCollisionExciterT",
@@ -11287,6 +12007,63 @@
             "enums": []
           }
         ],
+        "tempo_delay.hpp": [
+          {
+            "class": "TempoDelayResult",
+            "qualified_name": "pulp::signal::TempoDelayResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "TempoDelayTime",
+            "qualified_name": "pulp::signal::TempoDelayTime",
+            "template": null,
+            "methods": [
+              "prepare(double sample_rate, double maximum_delay_samples, std::uint32_t transition_samples = kDefaultTransitionSamples)",
+              "reset()",
+              "set_delay_samples(double samples)",
+              "set_tempo(timebase::BeatDivision division, double beats_per_minute)",
+              "next()",
+              "render(double* output, std::size_t sample_count)",
+              "prepared()",
+              "initialized()",
+              "transition_active()",
+              "remaining_transition_samples()",
+              "sample_rate()",
+              "maximum_delay_samples()",
+              "current_delay_samples()",
+              "target_delay_samples()"
+            ],
+            "enums": []
+          }
+        ],
+        "tilt_eq.hpp": [
+          {
+            "class": "TiltEqT",
+            "qualified_name": "pulp::signal::TiltEqT",
+            "template": "typename SampleType = float, std::size_t Channels = 2",
+            "methods": [
+              "prepare(double sample_rate)",
+              "process(SampleType input, std::size_t channel = 0)",
+              "reset()",
+              "reset(std::size_t channel)",
+              "set_config(Config requested)",
+              "config()",
+              "sample_rate()",
+              "design_high_hz()",
+              "normalization_gain()",
+              "fault_count()",
+              "coefficients(std::size_t index)",
+              "process_block(SampleType* samples, std::size_t frames, std::size_t channel = 0)",
+              "process_block(const SampleType* input, SampleType* output, std::size_t frames, std::size_t channel = 0)",
+              "magnitude(double frequency_hz)"
+            ],
+            "enums": []
+          }
+        ],
         "tpt_filter.hpp": [
           {
             "class": "TptFilterT",
@@ -11302,6 +12079,23 @@
               "process_lowpass(SampleType input)",
               "process_highpass(SampleType input)",
               "process_allpass(SampleType input)"
+            ],
+            "enums": []
+          }
+        ],
+        "transfer_curve.hpp": [
+          {
+            "class": "TransferCurveT",
+            "qualified_name": "pulp::signal::TransferCurveT",
+            "template": "typename SampleType = float, std::size_t MaxPoints = 32",
+            "methods": [
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
+              "process(SampleType* samples, int num_samples)",
+              "reset()",
+              "publish_curve(std::span<const Point> points, SampleType input_min, SampleType input_max, SampleType output_min, SampleType output_max)",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }

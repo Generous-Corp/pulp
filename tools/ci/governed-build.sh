@@ -155,14 +155,129 @@ find_tartci() {
 
 LEASE_ID=""
 TARTCI_BIN=""
+HEARTBEAT_PID=""
 
-release_lease() {
+# --- live-build marker -------------------------------------------------------
+#
+# Shipyard's `local` mac backend builds IN THE CHECKOUT, and nothing tells you a
+# validation run is using the tree you are about to edit. On 2026-08-16 an agent
+# merged twice into a worktree while a validation build was live inside it; the
+# run reached 11% in two hours and died on the lane's 7200s cap, reporting
+# `Validation timed out` — which names the target and not the cause. Every piece
+# of information needed was available and nothing prompted anyone to look.
+#
+# This marker is NOT the interrupted-build sentinel (`build-dir-sentinel.sh`) and
+# cannot be folded into it. That one lives in the BUILD dir and answers "was this
+# left mid-build", deliberately surviving SIGKILL — so it reads identically during
+# a live build and after a killed one. That ambiguity is its design. This one
+# answers the opposite question, "is a build running RIGHT NOW", and resolves the
+# ambiguity by recording the pid: a reader probes it with kill(pid, 0), exactly as
+# the lease-holder logging above does, so a marker left behind by a killed build
+# is distinguishable from a live one rather than being indistinguishable by
+# construction.
+#
+# It lives at the SOURCE-tree root, not the build dir, because the hazard is
+# mutating the sources — a build dir can be wiped, a half-merged tree under a
+# running CMake cannot be un-mutated.
+BUILD_MARKER=""
+
+write_build_marker() {
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [ -n "$root" ] || return 0
+  BUILD_MARKER="$root/.pulp-build-active"
+  # Best-effort: an unwritable tree must never fail the build.
+  {
+    echo "pid=$$"
+    echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+    echo "started_epoch=$(date +%s 2>/dev/null || echo 0)"
+    echo "jobs=${jobs:-unknown}"
+    echo "lease=${LEASE_ID:-none}"
+    echo "run_id=${GITHUB_RUN_ID:-}"
+    echo "command=$*"
+  } >"$BUILD_MARKER" 2>/dev/null || BUILD_MARKER=""
+}
+
+remove_build_marker() {
+  [ -n "$BUILD_MARKER" ] && rm -f "$BUILD_MARKER" 2>/dev/null
+  BUILD_MARKER=""
+  return 0
+}
+
+
+# --- Lease heartbeat ----------------------------------------------------------
+# tartci stamps a heartbeat when a lease is acquired and marks the lease stale
+# once that stamp ages past the store's threshold (TARTCI_LEASE_STALE_SECS,
+# default 300s). A compile set runs far longer than that, so acquisition's
+# single stamp is not enough: `tartci status` reported
+# `stale_heartbeat_live_owner` for a build whose owner PID and whole `cmake
+# --build` descendant tree were alive and healthy (M5, 2026-08-15). Stale
+# telemetry on a live owner is worse than none — it invites a controller or an
+# operator to preempt a working build, or to size the host as if those cores
+# were free.
+#
+# The refresh interval is deliberately a fraction of the threshold so two
+# missed beats still do not read as stale.
+HEARTBEAT_INTERVAL="${PULP_GOVERNED_BUILD_HEARTBEAT_SECS:-60}"
+
+start_heartbeat() {
+  # Only a lease this process actually holds may be refreshed. A leaseless
+  # fallback has nothing to keep alive, and refreshing someone else's id would
+  # hide a genuinely dead owner.
+  [ -n "$LEASE_ID" ] && [ -n "$TARTCI_BIN" ] || return 0
+  [ "$HEARTBEAT_INTERVAL" -ge 1 ] 2>/dev/null || return 0
+  local parent=$$
+  (
+    # `sleep` runs in the BACKGROUND and is waited on, rather than being the
+    # foreground child. bash defers a trapped signal until the current
+    # foreground command returns, so a plain `while sleep N` refresher ignores
+    # its own SIGTERM until the interval elapses — which made teardown of every
+    # governed build block for up to one full interval. `wait` is
+    # signal-interruptible, so this exits promptly.
+    trap 'exit 0' TERM INT
+    while :; do
+      sleep "$HEARTBEAT_INTERVAL" &
+      wait $! 2>/dev/null || exit 0
+      # Watch the parent explicitly. SIGKILL skips the EXIT trap, so without
+      # this the refresher would outlive the build and keep a lease looking
+      # live forever — the exact inverse of the bug being fixed, and a harder
+      # one to see because the telemetry would look correct.
+      kill -0 "$parent" 2>/dev/null || exit 0
+      "$TARTCI_BIN" leases heartbeat --id "$LEASE_ID" --json >/dev/null 2>&1 || true
+    done
+  ) >/dev/null 2>&1 &
+  # The redirection above is load-bearing, not tidiness. A background child
+  # inherits the caller's stdout, and a caller that runs this wrapper inside a
+  # command substitution blocks until EVERY holder of that pipe closes it — so
+  # an un-redirected refresher makes `out="$(governed-build.sh ...)"` hang for
+  # a full heartbeat interval after the build already finished.
+  HEARTBEAT_PID=$!
+  log "heartbeat every ${HEARTBEAT_INTERVAL}s for lease id=$LEASE_ID"
+}
+
+stop_heartbeat() {
+  if [ -n "$HEARTBEAT_PID" ]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+    HEARTBEAT_PID=""
+  fi
+}
+
+# One cleanup for both, and the ORDER is load-bearing.
+#
+# stop_heartbeat runs first so the refresher cannot re-stamp a lease id that
+# has already been handed back. remove_build_marker runs before the release
+# for the same reason in the other direction: the marker advertises a live
+# build in this checkout, and it must not outlive the build it describes.
+cleanup() {
+  stop_heartbeat
+  remove_build_marker
   if [ -n "$LEASE_ID" ] && [ -n "$TARTCI_BIN" ]; then
     "$TARTCI_BIN" leases release --id "$LEASE_ID" --json >/dev/null 2>&1 || true
     LEASE_ID=""
   fi
 }
-trap release_lease EXIT INT TERM
+trap cleanup EXIT INT TERM
 
 # Acquire a build-priority lease of $1 cores. Omit --mem-mb so tartci derives
 # the build's memory from cores*per-job (the right estimate for a compile set).
@@ -188,6 +303,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
   LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
   if acquire_lease "$jobs"; then
     log "lease acquired id=$LEASE_ID cores=$jobs (host profile)"
+    start_heartbeat
   else
     # Denied: the host cannot spare the profile-sized lease right now. Back off
     # to what tartci says is actually free and ask again for that — a denial is
@@ -198,6 +314,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
       if [ "$avail" -lt "$jobs" ]; then jobs="$avail"; fi
       if acquire_lease "$jobs"; then
         log "lease denied at profile size — acquired id=$LEASE_ID cores=$jobs (available capacity)"
+        start_heartbeat
       else
         # Lost a race for the remaining cores.
         LEASE_ID=""
@@ -284,6 +401,8 @@ load_average() {
 
 start_load="$(load_average)"
 start_epoch="$(date +%s 2>/dev/null || echo 0)"
+
+write_build_marker "$@"
 
 rc=0
 if [ "$qos" = "background" ] && command -v taskpolicy >/dev/null 2>&1 \

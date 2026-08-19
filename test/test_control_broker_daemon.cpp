@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "support/control_runtime_closure_sanitizer.hpp"
 
 #include "control_broker_daemon.hpp"
 #include "support/thread_progress.hpp"
@@ -17,6 +18,8 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -43,6 +46,114 @@ using namespace pulp::events;
 using namespace pulp::inspect;
 
 namespace {
+
+/// Wall-clock budget for waiting on a supervised broker or host to appear.
+///
+/// Every wait in this file used to be bounded by ATTEMPT COUNT —
+/// `attempt < 10'000` around a 1ms sleep. That is not a ten-second budget:
+/// each iteration also performs real work (an IPC round trip, a `connect()`,
+/// a process-table scan), so the true budget is whatever 10'000 of those cost
+/// on the host of the day. Roughly ten seconds when the machine is idle;
+/// undefined when it is not. Merge-group run 31899922031 observed
+/// `instances.size() == 0` on a commit that touched no broker source and
+/// passed this same suite on its own head — a launch that was merely slow
+/// under parallel CI load, read as a launch that never happened.
+///
+/// A deadline says what it means: it survives a contended runner and still
+/// fails a host that genuinely never registers. Raise it in one place, or
+/// override per run with PULP_TEST_BROKER_WAIT_MS — which is also how the
+/// planted-failure case keeps itself fast.
+std::chrono::milliseconds broker_wait_budget() {
+    // Read every call rather than caching: the planted-failure case below sets
+    // the override at run time, and a cached budget would silently ignore it —
+    // leaving the control that proves this wait can still fail unable to run.
+    if (const char* override_ms = std::getenv("PULP_TEST_BROKER_WAIT_MS")) {
+        const auto parsed = std::atoll(override_ms);
+        if (parsed > 0)
+            return std::chrono::milliseconds{parsed};
+    }
+    return std::chrono::milliseconds{60'000};
+}
+
+/// Deadline for a poll loop started now.
+std::chrono::steady_clock::time_point poll_deadline() {
+    return std::chrono::steady_clock::now() + broker_wait_budget();
+}
+
+/// Whether a poll loop may still attempt again.
+bool polling(std::chrono::steady_clock::time_point deadline) {
+    return std::chrono::steady_clock::now() < deadline;
+}
+
+/// Sets an environment variable for the duration of a scope, restoring the
+/// previous value. Used only by the planted-failure case.
+class ScopedEnvironment {
+public:
+    ScopedEnvironment(const char* name, const char* value) : name_(name) {
+        if (const char* existing = std::getenv(name)) {
+            previous_ = existing;
+            had_previous_ = true;
+        }
+        ::setenv(name, value, 1);
+    }
+    ~ScopedEnvironment() {
+        if (had_previous_)
+            ::setenv(name_, previous_.c_str(), 1);
+        else
+            ::unsetenv(name_);
+    }
+    ScopedEnvironment(const ScopedEnvironment&) = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+
+private:
+    const char* name_;
+    std::string previous_;
+    bool had_previous_ = false;
+};
+
+/// What to print when a wait runs out, so a CI failure carries the evidence
+/// needed to separate "the host never registered" from "the runner was slow".
+///
+/// A bare `REQUIRE(connection)` expanding to `0` says neither. Merge-group run
+/// 31899922031 reported exactly that, and reconstructing what it had actually
+/// waited for cost a full triage cycle. The two numbers that answer it are the
+/// budget the wait was given and the time it really spent: a wait that burned
+/// its whole budget was starved, while one that returned early failed for some
+/// other reason and raising the budget will not help.
+///
+/// `deadline` is the loop's own deadline, so elapsed time is derived rather
+/// than threaded separately through every call site.
+std::string wait_timeout_report(std::string_view what,
+                                std::string_view endpoint,
+                                std::chrono::steady_clock::time_point deadline,
+                                std::string_view observed) {
+    const auto budget = broker_wait_budget();
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    auto spent = budget - remaining;
+    if (spent < std::chrono::milliseconds::zero())
+        spent = std::chrono::milliseconds::zero();
+    if (spent > budget)
+        spent = budget;
+
+    std::string report = "waited for " + std::string{what};
+    if (!endpoint.empty())
+        report += " at " + std::string{endpoint};
+    report += "; budget " + std::to_string(budget.count()) + "ms, spent "
+              + std::to_string(spent.count()) + "ms";
+    if (!observed.empty())
+        report += "; last observed: " + std::string{observed};
+    if (remaining <= std::chrono::milliseconds::zero()) {
+        report += ". The budget was exhausted, so this host may simply be slow "
+                  "-- re-run with a larger PULP_TEST_BROKER_WAIT_MS to tell a "
+                  "starved launch from a failed one.";
+    } else {
+        report += ". The budget was NOT exhausted, so raising "
+                  "PULP_TEST_BROKER_WAIT_MS will not help; the launch itself "
+                  "failed.";
+    }
+    return report;
+}
 
 constexpr std::string_view kHostManifest = R"({
   "schema": "dev.pulp.control/artifact-manifest@1",
@@ -202,7 +313,7 @@ std::filesystem::path current_executable() {
 }
 
 std::string wait_for_registration(const std::filesystem::path& path) {
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         std::ifstream input(path);
         std::string registration;
         if (input >> registration)
@@ -213,7 +324,7 @@ std::string wait_for_registration(const std::filesystem::path& path) {
 }
 
 int wait_for_host_pid(const std::filesystem::path& path) {
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         std::ifstream input(path);
         std::string registration;
         int process_id = -1;
@@ -225,7 +336,7 @@ int wait_for_host_pid(const std::filesystem::path& path) {
 }
 
 int wait_for_only_child_process(int parent_process_id) {
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         std::array<pid_t, 8> children{};
         const auto count = ::proc_listchildpids(parent_process_id, children.data(),
                                                 static_cast<int>(sizeof(children)));
@@ -237,7 +348,7 @@ int wait_for_only_child_process(int parent_process_id) {
 }
 
 std::filesystem::path wait_for_host_working_directory(const std::filesystem::path& path) {
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         std::ifstream input(path);
         std::string registration;
         std::string process_id;
@@ -252,7 +363,7 @@ std::filesystem::path wait_for_host_working_directory(const std::filesystem::pat
 }
 
 bool wait_for_path(const std::filesystem::path& path) {
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         if (std::filesystem::exists(path))
             return true;
         std::this_thread::sleep_for(1ms);
@@ -392,6 +503,8 @@ TEST_CASE("control broker daemon preserves durable receipts and artifacts across
 
 TEST_CASE("installed daemon composes host enrollment routing execution and restart teardown",
           "[inspect][control][daemon][host][e2e][restart]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto source = root.path / "source";
@@ -657,7 +770,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -666,6 +780,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a client connection", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     CHECK_FALSE(std::filesystem::exists(stale_observer));
     CHECK(connection->manage("host-prepare", "{}").status_id == "session-required");
@@ -696,7 +812,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
     pulp::platform::ChildProcess restarted_process;
     REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
     std::unique_ptr<ControlClientConnection> restarted;
-    for (unsigned attempt = 0; attempt < 10'000 && !restarted; ++attempt) {
+    const auto restart_deadline = poll_deadline();
+    for (; !restarted && polling(restart_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -705,6 +822,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a connection after its crash-restart", endpoint.string(), restart_deadline,
+                             restarted ? "connected" : "never connected"));
     REQUIRE(restarted);
     REQUIRE(restarted->manage("enroll").status_id == "accepted");
     const auto empty_inventory = restarted->manage("instances");
@@ -725,6 +844,8 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 
 TEST_CASE("installed broker launches only its named ordinary Standalone host",
           "[inspect][control][daemon][host][process][standalone][security][author-catalog-process]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto* author_broker_environment = std::getenv("PULP_CONTROL_AUTHOR_BROKER");
@@ -760,7 +881,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = installed_broker});
@@ -769,6 +891,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the installed broker to accept a client connection", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     REQUIRE(connection->manage("enroll").status_id == "accepted");
 
@@ -816,7 +940,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         connection->manage("host-launch", choc::json::toString(launch, false), 15s);
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    const auto registration_deadline = poll_deadline();
+    for (; polling(registration_deadline);) {
         const auto result = connection->manage("instances");
         REQUIRE(result.status_id == "completed");
         instances = choc::json::parse(result.data_json)["instances"];
@@ -832,6 +957,10 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         REQUIRE(listed.exit_code == 0);
         instances = choc::json::parse(listed.stdout_output)["instances"];
     }
+    // This is the assertion merge-group run 31899922031 failed as a bare
+    // `0 == 1`, which named neither the budget it had nor what it last saw.
+    INFO(wait_timeout_report("the author host to register", endpoint.string(), registration_deadline,
+                             choc::json::toString(instances, false)));
     REQUIRE(instances.size() == 1);
     const auto instance = instances[0];
     CHECK(instance["plugin_id"].getString() == expected_plugin);
@@ -879,7 +1008,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         CHECK(disconnected_for_reload);
         connection->disconnect();
         connection.reset();
-        for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+        const auto enroll_connect_deadline = poll_deadline();
+        for (; !connection && polling(enroll_connect_deadline);) {
             auto candidate = std::make_unique<ControlClientConnection>(
                 ControlClientConnectionConfig{.endpoint_path = endpoint,
                                               .expected_broker_executable = installed_broker});
@@ -889,6 +1019,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
             else
                 std::this_thread::sleep_for(1ms);
         }
+        INFO(wait_timeout_report("the enrolled broker to accept a client connection", endpoint.string(), enroll_connect_deadline,
+                                 connection ? "connected" : "never connected"));
         REQUIRE(connection);
         CHECK(connection
                   ->manage("host-prepare-installed", choc::json::toString(named, false))
@@ -909,7 +1041,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
         CHECK(disconnected_for_restore);
         connection->disconnect();
         connection.reset();
-        for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+        const auto reenroll_connect_deadline = poll_deadline();
+        for (; !connection && polling(reenroll_connect_deadline);) {
             auto candidate = std::make_unique<ControlClientConnection>(
                 ControlClientConnectionConfig{.endpoint_path = endpoint,
                                               .expected_broker_executable = installed_broker});
@@ -919,6 +1052,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
             else
                 std::this_thread::sleep_for(1ms);
         }
+        INFO(wait_timeout_report("the enrolled broker to accept a client connection", endpoint.string(), reenroll_connect_deadline,
+                                 connection ? "connected" : "never connected"));
         REQUIRE(connection);
         const auto restored_prepared = connection->manage(
             "host-prepare-installed", choc::json::toString(named, false), 15s);
@@ -933,7 +1068,7 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
                     ->manage("host-launch", choc::json::toString(restored_launch, false), 15s)
                     .status_id == "launched");
         choc::value::Value restored_instances;
-        for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        for (const auto deadline = poll_deadline(); polling(deadline);) {
             const auto result = connection->manage("instances");
             REQUIRE(result.status_id == "completed");
             restored_instances = choc::json::parse(result.data_json)["instances"];
@@ -955,8 +1090,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     connection->disconnect();
     if (!author_host_environment) {
         REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
-        for (unsigned attempt = 0;
-             attempt < 10'000 && ::kill(installed_host_process_id, 0) == 0; ++attempt)
+        for (const auto deadline = poll_deadline();
+             ::kill(installed_host_process_id, 0) == 0 && polling(deadline);)
             std::this_thread::sleep_for(1ms);
         CHECK(::kill(installed_host_process_id, 0) != 0);
     } else {
@@ -973,6 +1108,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 
 TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
           "[inspect][control][daemon][host][standalone][e2e][aggregate][installed-author-full-parity][author-catalog]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto broker_executable = current_executable();
@@ -1049,7 +1186,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
     std::string instance_id;
     std::string registration_id;
     std::string publication_id;
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
         const auto inventory = connection.manage("instances");
         REQUIRE(inventory.status_id == "completed");
         const auto inventory_data = choc::json::parse(inventory.data_json);
@@ -1580,6 +1717,8 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
 
 TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
           "[inspect][control][daemon][host][process][restart][crash][artifact][security]") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
 #ifdef __APPLE__
     DaemonRoot root;
     const auto source = root.path / "crash-source";
@@ -1617,7 +1756,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
 
     const auto endpoint = default_control_endpoint_path(root.runtime);
     std::unique_ptr<ControlClientConnection> connection;
-    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+    const auto connect_deadline = poll_deadline();
+    for (; !connection && polling(connect_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = broker_executable});
@@ -1626,6 +1766,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the broker to accept a client connection before the SIGKILL case", endpoint.string(), connect_deadline,
+                             connection ? "connected" : "never connected"));
     REQUIRE(connection);
     const auto enrolled = connection->manage("enroll");
     INFO(enrolled.explanation);
@@ -1740,7 +1882,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
     pulp::platform::ChildProcess restarted_process;
     REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
     std::unique_ptr<ControlClientConnection> restarted;
-    for (unsigned attempt = 0; attempt < 10'000 && !restarted; ++attempt) {
+    const auto restart_deadline = poll_deadline();
+    for (; !restarted && polling(restart_deadline);) {
         auto candidate = std::make_unique<ControlClientConnection>(
             ControlClientConnectionConfig{.endpoint_path = endpoint,
                                           .expected_broker_executable = broker_executable});
@@ -1749,6 +1892,8 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
         else
             std::this_thread::sleep_for(1ms);
     }
+    INFO(wait_timeout_report("the broker to accept a connection after SIGKILL", endpoint.string(), restart_deadline,
+                             restarted ? "connected" : "never connected"));
     REQUIRE(restarted);
     const auto restarted_enrollment = restarted->manage("enroll");
     REQUIRE(restarted_enrollment.status_id == "accepted");
@@ -1864,4 +2009,69 @@ TEST_CASE("control broker daemon rejects insecure symlinked or overlapping state
 #else
     SUCCEED("the authenticated control broker daemon is currently macOS-only");
 #endif
+}
+
+TEST_CASE("a broker wait that never succeeds still gives up inside its budget",
+          "[control][broker][wait]") {
+    // The planted failure this file needs. Widening a wait is only safe if the
+    // wait can still END: a deadline that a non-registering host could outlast
+    // forever would turn a real launch failure into a hung CI lane, which is a
+    // worse outcome than the flake being fixed.
+    //
+    // The predicate here can never become true, so the only way this case
+    // finishes is the deadline firing.
+    const ScopedEnvironment planted{"PULP_TEST_BROKER_WAIT_MS", "200"};
+    REQUIRE(broker_wait_budget() == std::chrono::milliseconds{200});
+
+    unsigned attempts = 0;
+    const auto started = std::chrono::steady_clock::now();
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
+        ++attempts;
+        std::this_thread::sleep_for(1ms);
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+
+    CHECK(attempts > 0);                                        // it really polled
+    CHECK(elapsed >= std::chrono::milliseconds{200});           // it spent its budget
+    CHECK(elapsed < std::chrono::seconds{10});                  // and then gave up
+}
+
+TEST_CASE("a broker wait returns as soon as its condition holds",
+          "[control][broker][wait]") {
+    // The other half: the deadline must not be a floor. A wait that always
+    // burned its whole budget would add its budget to every passing run, so
+    // raising the budget would cost real CI minutes.
+    const ScopedEnvironment planted{"PULP_TEST_BROKER_WAIT_MS", "30000"};
+    unsigned attempts = 0;
+    const auto started = std::chrono::steady_clock::now();
+    for (const auto deadline = poll_deadline(); polling(deadline);) {
+        if (++attempts >= 3)
+            break;
+        std::this_thread::sleep_for(1ms);
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+
+    CHECK(attempts == 3);
+    CHECK(elapsed < std::chrono::seconds{5});
+}
+
+TEST_CASE("the broker wait budget falls back when the override is unusable",
+          "[control][broker][wait]") {
+    // A malformed or non-positive override must not silently produce a
+    // zero-length budget, which would make every wait fail on its first check
+    // and read exactly like a broken broker.
+    {
+        const ScopedEnvironment planted{"PULP_TEST_BROKER_WAIT_MS", "0"};
+        CHECK(broker_wait_budget() == std::chrono::milliseconds{60'000});
+    }
+    {
+        const ScopedEnvironment planted{"PULP_TEST_BROKER_WAIT_MS", "not-a-number"};
+        CHECK(broker_wait_budget() == std::chrono::milliseconds{60'000});
+    }
+    {
+        const ScopedEnvironment planted{"PULP_TEST_BROKER_WAIT_MS", "-5"};
+        CHECK(broker_wait_budget() == std::chrono::milliseconds{60'000});
+    }
 }
