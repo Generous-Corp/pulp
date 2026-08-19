@@ -3453,6 +3453,23 @@ path, a runner label, a routing decision, a cached gate result — assert its
 validity at registration time. Otherwise the gap between the two is where a
 lookalike gets to vouch for the real thing.
 
+**And the gap is invisible in the artifact you are looking at.** `add_test(...)`
+looks complete on the line where it is written. `rerun --failed` looks like a
+re-run. Nothing on the surface of either says "something else consumes this
+later, and nobody re-checks it then" — so the question *is this still true at
+consumption time?* never occurs to you unless you already know the answer.
+
+That is why a guard beats discipline here. Being careful does not help, because
+carefulness is applied to the thing in front of you and the defect is in a
+relationship you cannot see. A configure-time assertion asks the question on
+your behalf, at the one moment when the answer is cheap.
+
+A useful tell: **any two-phase mechanism where phase one succeeds and phase two
+consumes its output is a candidate.** `resolve-provider` → the build job.
+`add_test` → `ctest`. A receipt → a publish step. If phase two never re-validates
+what phase one handed it, a stale or wrong value survives every retry, and the
+retry is precisely when someone will be relying on it.
+
 **The rules that fall out:**
 
 - **Run a new test through its real runner before claiming it passes.** `ctest -R
