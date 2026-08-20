@@ -308,6 +308,8 @@ def probe_github_var_unset(key):
 
 RUNNER_POLICY_ENV = ("RUSTUP_HOME", "CARGO_HOME")
 SYSTEM_PATH_PREFIX = "/usr/bin:/bin:/usr/sbin:/sbin"
+PINNED_RUSTUP_VERSION = "1.29.0"
+PINNED_RUSTUP_SHA256 = "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"
 
 
 def _runner_dirs(key):
@@ -350,6 +352,25 @@ def _runner_path_value(runner_dir):
         "/usr/local/bin",
         str(Path.home() / ".local/bin"),
     ])
+
+
+def _runner_private_env(runner_dir):
+    rustup_home, cargo_home = _runner_private_paths(runner_dir)
+    env = os.environ.copy()
+    env.update({
+        "RUSTUP_HOME": str(rustup_home),
+        "CARGO_HOME": str(cargo_home),
+        "PATH": _runner_path_value(runner_dir),
+    })
+    return env
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _read_env_file(path):
@@ -448,12 +469,16 @@ def _runner_policy_findings(key):
         for name, path in (("RUSTUP_HOME", rustup_home), ("CARGO_HOME", cargo_home)):
             if not _is_runner_private(path, runner_dir):
                 findings.append(f"{label}: {name} is absent, symlinked, or outside runner-local storage")
-        cargo = cargo_home / "bin" / "cargo"
-        rustup = cargo_home / "bin" / "rustup"
-        for name, binary in (("cargo", cargo), ("rustup", rustup)):
+        private_env = _runner_private_env(runner_dir)
+        tools = (
+            ("cargo", cargo_home / "bin" / "cargo", ["--version"]),
+            ("rustup toolchain", cargo_home / "bin" / "rustup", ["show", "active-toolchain"]),
+        )
+        for name, binary, args in tools:
             try:
                 proc = subprocess.run(
-                    [str(binary), "--version"], capture_output=True, text=True, timeout=15
+                    [str(binary), *args], capture_output=True, text=True,
+                    timeout=15, env=private_env,
                 )
             except Exception:
                 proc = None
@@ -588,7 +613,7 @@ def _install_runner_package(runner_dir, version, expected_sha256):
             "/usr/bin/curl", "--proto", "=https", "--tlsv1.2", "-fsSL",
             url, "-o", archive,
         ], timeout=300)
-        actual_sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+        actual_sha256 = _sha256_file(archive)
         if actual_sha256 != expected_sha256:
             raise RuntimeError(
                 f"runner archive sha256 {actual_sha256} != {expected_sha256}"
@@ -611,28 +636,44 @@ def _ensure_runner_rust(runner_dir):
     rustup_home, cargo_home = _runner_private_paths(runner_dir)
     rustup_home.mkdir(parents=True, exist_ok=True)
     cargo_home.mkdir(parents=True, exist_ok=True)
-    cargo = cargo_home / "bin" / "cargo"
-    try:
-        if subprocess.run(
-            [str(cargo), "--version"], capture_output=True, text=True, timeout=15
-        ).returncode == 0:
-            return
-    except Exception:
-        pass
-    installer = runner_dir / "_toolcache" / "rustup-init.sh"
+    env = _runner_private_env(runner_dir)
+
+    def ready():
+        probes = (
+            (cargo_home / "bin" / "cargo", ["--version"]),
+            (cargo_home / "bin" / "rustup", ["show", "active-toolchain"]),
+        )
+        try:
+            return all(
+                subprocess.run(
+                    [str(binary), *args], capture_output=True, text=True,
+                    timeout=15, env=env,
+                ).returncode == 0
+                for binary, args in probes
+            )
+        except Exception:
+            return False
+
+    if ready():
+        return
+    installer = runner_dir / "_toolcache" / "rustup-init"
+    rustup_url = (
+        "https://static.rust-lang.org/rustup/archive/"
+        f"{PINNED_RUSTUP_VERSION}/aarch64-apple-darwin/rustup-init"
+    )
     _run_checked([
         "/usr/bin/curl", "--proto", "=https", "--tlsv1.2", "-fsSL",
-        "https://sh.rustup.rs", "-o", installer,
+        rustup_url, "-o", installer,
     ], timeout=300)
-    env = os.environ.copy()
-    env.update({
-        "RUSTUP_HOME": str(rustup_home),
-        "CARGO_HOME": str(cargo_home),
-        "PATH": _runner_path_value(runner_dir),
-    })
+    actual_sha256 = _sha256_file(installer)
+    if actual_sha256 != PINNED_RUSTUP_SHA256:
+        raise RuntimeError(
+            f"rustup-init sha256 {actual_sha256} != {PINNED_RUSTUP_SHA256}"
+        )
+    installer.chmod(0o700)
     try:
         _run_checked([
-            "/bin/sh", installer, "-y", "--no-modify-path", "--profile", "minimal",
+            installer, "-y", "--no-modify-path", "--profile", "minimal",
             "--default-toolchain", "stable-aarch64-apple-darwin",
         ], env=env, timeout=900)
     finally:
@@ -640,6 +681,8 @@ def _ensure_runner_rust(runner_dir):
             installer.unlink()
         except OSError:
             pass
+    if not ready():
+        raise RuntimeError("private cargo/rustup toolchain is not runnable after install")
 
 
 def apply_actions_runner_policy(key, pr):

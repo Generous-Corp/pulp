@@ -131,6 +131,14 @@ class RunnerPolicyFixture(unittest.TestCase):
         self.assertEqual(result.state, F.OK, result.detail)
         self.assertIn("0 configured runner", result.detail)
 
+    def test_sha256_file_streams_the_expected_digest(self) -> None:
+        sample = self.home / "sample"
+        sample.write_bytes(b"known bytes")
+        self.assertEqual(
+            F._sha256_file(sample),
+            "25cb6d61356e5cada4238d160f3a77522e550e27a69758da40cd281c7ef2c8dc",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
