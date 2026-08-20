@@ -45,6 +45,9 @@ namespace pulp::view {
 /// One pointer sample as the host received it, before any coalescing.
 struct PointerSample {
     Point position{};
+    /// Raw positions represented by this sample after coalescing, oldest
+    /// first. Empty on an uncoalesced host sample.
+    std::vector<Point> path;
     std::uint16_t modifiers = 0;
     int click_count = 0;
     MousePhase phase = MousePhase::automatic;

@@ -148,7 +148,11 @@ TEST_CASE("The merged path is preserved for consumers that need it",
     REQUIRE(c.pending_path().front().x == 1.0f);
     REQUIRE(c.pending_path().back().y == 9.0f);
 
-    c.flush_frame();
+    const auto flushed = c.flush_frame();
+    REQUIRE(flushed.size() == 1);
+    REQUIRE(flushed[0].path.size() == 3);
+    REQUIRE(flushed[0].path.front().x == 1.0f);
+    REQUIRE(flushed[0].path.back().y == 9.0f);
     REQUIRE(c.pending_path().empty());
 }
 

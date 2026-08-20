@@ -1,5 +1,7 @@
 #include "pulp/view/pointer_coalescer.hpp"
 
+#include <utility>
+
 namespace pulp::view {
 
 std::vector<PointerSample> PointerCoalescer::take_pending_() {
@@ -10,7 +12,8 @@ std::vector<PointerSample> PointerCoalescer::take_pending_() {
     }
     // The surviving sample keeps the newest position and carries the merged
     // path so a consumer that cannot reconstruct skipped motion still can.
-    out.push_back(pending_);
+    pending_.path = std::move(path_);
+    out.push_back(std::move(pending_));
     last_merged_ = merged_in_pending_;
     total_merged_ += merged_in_pending_;
     has_pending_ = false;
@@ -30,6 +33,7 @@ std::vector<PointerSample> PointerCoalescer::submit(const PointerSample& sample)
                 || pending_.phase != sample.phase)) {
             auto flushed = take_pending_();
             pending_ = sample;
+            pending_.path.clear();
             path_.clear();
             path_.push_back(sample.position);
             has_pending_ = true;
@@ -39,6 +43,7 @@ std::vector<PointerSample> PointerCoalescer::submit(const PointerSample& sample)
 
         if (has_pending_) ++merged_in_pending_;
         pending_ = sample;              // newest position wins
+        pending_.path.clear();
         path_.push_back(sample.position);
         has_pending_ = true;
         return {};
