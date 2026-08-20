@@ -105,7 +105,7 @@ export function createCombo({ param, value, onChange, width = 150, height = 28 }
     panel = document.createElement("div");
     panel.className = "pw-combo-panel";
     panel.setAttribute("role", "listbox");
-    const longest = labels.reduce((m, s) => Math.max(m, s.length), 0);
+    const longest = labels.reduce((m, s) => Math.max(m, String(s).length), 0);
     const panelW = Math.max(rect.width, longest * 7 + 34);
     const left = Math.min(rect.left, window.innerWidth - 14 - panelW);
     panel.style.cssText =
@@ -121,9 +121,15 @@ export function createCombo({ param, value, onChange, width = 150, height = 28 }
       row.style.cssText =
         `height:24px;display:flex;align-items:center;padding:0 6px;color:var(--text-primary);` +
         `white-space:nowrap;cursor:pointer;`;
-      row.innerHTML =
-        `<span class="chk" style="width:16px;color:var(--accent-primary)">${i === idx ? "✓" : ""}</span>` +
-        `<span>${name}</span>`;
+      const check = document.createElement("span");
+      check.className = "chk";
+      check.style.width = "16px";
+      check.style.color = "var(--accent-primary)";
+      check.textContent = i === idx ? "✓" : "";
+      const label = document.createElement("span");
+      label.textContent = String(name);
+      row.appendChild(check);
+      row.appendChild(label);
       row.addEventListener("pointerenter", () => {
         for (const r of panel.children) r.style.background = "";
         row.style.background = "var(--accent-primary)";

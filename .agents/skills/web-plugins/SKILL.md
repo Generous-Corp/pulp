@@ -381,6 +381,24 @@ will tell you when you have not.
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
 
+### Web-player metadata is text, and links are web-only
+
+`@danielraffel/web-player` is a library boundary: demo titles, subtitles,
+parameter choice labels, source links, gallery links, and host labels can come
+from downstream package manifests. Build those fields with `createElement`,
+`textContent`, and `setAttribute`; `innerHTML` is reserved for package-owned
+static markup. Property assignment alone is not enough for links because a
+`javascript:` or `data:` URL remains executable when clicked, so resolve the URL
+and accept only `http:` / `https:` (relative links resolve through the page's
+base URL). Invalid optional links are omitted; an invalid gallery link falls
+back to the package gallery default.
+
+The dependency-free DOM shim in `packages/pulp-web-player/test/dom-shim.mjs`
+also receives library strings. Keep its HTML/selector scanners linear and cover
+long repeated whitespace/bracket inputs in `test/dom-security.test.mjs`; a test
+helper must not turn an adversarial label into a regular-expression denial of
+service.
+
 ## Landmine: CLAP has no parameter `unit` — only `value_to_text`
 
 The WAM ABI reports a parameter's display unit directly (`wam_adapter.cpp`
