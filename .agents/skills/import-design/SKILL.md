@@ -3878,6 +3878,12 @@ python3 tools/import-validation/check-source-contracts.py --format markdown
 python3 -m pytest tools/import-validation/test_source_contracts.py -v
 ```
 
+`--strict` makes structural registry drift enforcing in pre-push, Shipyard,
+and CI. An overdue `recheck_interval_days` cadence remains an informational
+finding even in strict mode: refreshing `last_verified` requires a separate
+upstream or human verification pass and must not date-trigger a repository-wide
+merge outage. Do not stamp a new date merely to make a gate green.
+
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.
 Prefer broad stable tags such as `[view][import][designmd]` when the registry row

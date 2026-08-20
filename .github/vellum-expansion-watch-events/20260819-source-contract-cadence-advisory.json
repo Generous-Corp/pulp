@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260819-source-contract-cadence-advisory",
+  "created_at": "2026-08-20T04:04:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record making scheduled source-contract recheck cadence advisory under strict validation so an elapsed date cannot block every merge-group. Structural source-contract drift remains enforcing, overdue cadence remains visible, and no design-import or rendering authority changes.",
+  "tests": [
+    "source-contract checker self-tests (29 cases)",
+    "strict unverified-source negative control",
+    "strict overdue-cadence positive control",
+    "strict UTC expired-registry positive control",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
