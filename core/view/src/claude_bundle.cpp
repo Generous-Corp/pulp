@@ -588,6 +588,9 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
     auto role = node.attributes.count("data-pulp-role")
         ? node.attributes["data-pulp-role"] : std::string{};
     node.audio_widget = audio_widget_from_id(role);
+    if (node.audio_widget == AudioWidgetType::none && !role.empty()) {
+        node.audio_widget = detect_audio_widget(role);
+    }
     if (node.audio_widget == AudioWidgetType::none) {
         const auto detect_source = class_str == node.name ? node.name : node.name + " " + class_str;
         node.audio_widget = detect_audio_widget(detect_source);

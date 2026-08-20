@@ -209,6 +209,8 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
         pad.appendChild(make('xy-pad-value active', null, 'X 0.4 / Y 0.7'));
         pad.appendChild(make('pulp-knob'));
         pad.appendChild(make('value', { 'data-pulp-role': 'knob' }));
+        pad.appendChild(make('value slider-role', { 'data-pulp-role': 'slider' }));
+        pad.appendChild(make('value dial-role', { 'data-pulp-role': 'dial' }));
         pad.appendChild(make('ValueKnob'));
         editor.appendChild(pad);
         for (var i = 0; i < 4; ++i) editor.appendChild(make('filler-' + i));
@@ -229,6 +231,8 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
     const IRNode* xy_value = nullptr;
     const IRNode* unbound = nullptr;
     const IRNode* explicit_role = nullptr;
+    const IRNode* slider_role = nullptr;
+    const IRNode* dial_role = nullptr;
     const IRNode* value_knob = nullptr;
     std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
         const auto it = node.attributes.find("class");
@@ -240,6 +244,8 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
         else if (cls == "knob-value active") value = &node;
         else if (cls == "xy-pad-value active") xy_value = &node;
         else if (cls == "value") explicit_role = &node;
+        else if (cls == "value slider-role") slider_role = &node;
+        else if (cls == "value dial-role") dial_role = &node;
         else if (cls == "ValueKnob") value_knob = &node;
         for (const auto& child : node.children) walk(child);
     };
@@ -257,6 +263,10 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
     REQUIRE(unbound->audio_widget == AudioWidgetType::knob);
     REQUIRE(explicit_role != nullptr);
     REQUIRE(explicit_role->audio_widget == AudioWidgetType::knob);
+    REQUIRE(slider_role != nullptr);
+    REQUIRE(slider_role->audio_widget == AudioWidgetType::fader);
+    REQUIRE(dial_role != nullptr);
+    REQUIRE(dial_role->audio_widget == AudioWidgetType::knob);
     REQUIRE(value_knob != nullptr);
     REQUIRE(value_knob->audio_widget == AudioWidgetType::knob);
 }
