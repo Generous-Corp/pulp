@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 35,
+  "manifest_revision": 36,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 53
+        "capabilities": 54
       },
       "timebase": {
         "state": "partial",
@@ -6159,14 +6159,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 86,
+    "total": 87,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 53,
+      "signal": 54,
       "timebase": 9
     }
   },
