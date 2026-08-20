@@ -191,6 +191,13 @@ public:
     // Per-instance entry; usually invoked by `dispatch_global_key` below.
     void forward_key_event(int key_code, uint16_t modifiers, bool is_down);
 
+    /// Deliver a key only to the live bridge attached to `root`.
+    /// Returns whether a shortcut or JS listener consumed the event. Plugin
+    /// hosts use this instead of process-wide dispatch so one editor can never
+    /// deliver navigation into another editor in the same host process.
+    static bool dispatch_key_for_root(View& root, int key_code,
+                                      uint16_t modifiers, bool is_down);
+
     // Static fan-out: forward a key event to every live WidgetBridge.
     //
     // Platform hosts call this from their key-event paths so that any
@@ -294,6 +301,8 @@ public:
     void install_runtime_import_handlers();
 
 private:
+    bool forward_key_event_handled(int key_code, uint16_t modifiers,
+                                   bool is_down, View* focus_root = nullptr);
     // Internal helper used by __pulpRuntimeImport__. Forward-declared in
     // the design_import unit so the implementation lives next to the
     // related offline boot code. Installs navigator/HTML*Element/etc.

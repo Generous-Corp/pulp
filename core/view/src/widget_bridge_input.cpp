@@ -17,6 +17,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
 #include <string>
 
@@ -93,8 +94,9 @@ const ScriptGlobalKeyDispatcherRegistrar script_global_key_dispatcher_registrar;
 
 } // namespace
 
-void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
-    if (!is_down) return;
+bool WidgetBridge::forward_key_event_handled(int key_code, uint16_t modifiers,
+                                             bool is_down, View* focus_root) {
+    if (!is_down) return false;
 
     // Check registered shortcuts first. Bare-key shortcuts (no Ctrl/Alt/
     // Meta/Cmd — Shift alone counts as bare since it just selects the
@@ -113,9 +115,10 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
     constexpr uint16_t kGlobalModifierMask =
         kModCtrl | kModAlt | kModMeta | kModCmd;
     const bool has_global_modifier = (modifiers & kGlobalModifierMask) != 0;
-    const bool text_input_focused  =
-        (View::focused_input_ != nullptr &&
-         View::focused_input_->accepts_text_input());
+    View* focused = focus_root ? focused_input_under_root(*focus_root)
+                               : View::focused_input_;
+    const bool text_input_focused =
+        focused != nullptr && focused->accepts_text_input();
 
     for (auto& s : shortcuts_) {
         if (shortcut_key_matches(s.key, key_code) && s.modifiers == modifiers) {
@@ -124,7 +127,7 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
                 break;
             }
             engine_.evaluate(s.callback + "()");
-            return;
+            return true;
         }
     }
 
@@ -141,14 +144,21 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
         key_json += c;
     }
 
-    engine_.evaluate("__dispatch__('__global__', 'keydown', {"
+    auto handled = engine_.evaluate("(function(){var e={"
         "key:'" + key_json + "',"
         "keyCode:" + std::to_string(key_code) + ","
         "ctrlKey:" + ((modifiers & kModCtrl) ? "true" : "false") + ","
         "shiftKey:" + ((modifiers & kModShift) ? "true" : "false") + ","
         "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + ","
         "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + ","
-        "mods:" + std::to_string(modifiers) + "})");
+        "mods:" + std::to_string(modifiers) + "};"
+        "__dispatch__('__global__','keydown',e);return !!e.defaultPrevented;})()");
+    return handled.getWithDefault<bool>(false);
+}
+
+void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers,
+                                     bool is_down) {
+    (void)forward_key_event_handled(key_code, modifiers, is_down);
 }
 
 } // namespace pulp::view

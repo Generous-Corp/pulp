@@ -6,6 +6,7 @@
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -714,6 +715,26 @@ std::unique_ptr<View> View::remove_child(View* child) {
 
     View* structure_root = this;
     while (structure_root->parent_) structure_root = structure_root->parent_;
+
+    // An open navigation control temporarily owns the root focus slot. Retire
+    // that state while the subtree is still attached: after parent_ is severed,
+    // existing_interaction() resolves to the detached fallback and neither the
+    // control destructor nor the host can safely clear the old root pointer.
+    auto belongs_to_removed_subtree = [child](View* candidate) {
+        for (View* view = candidate; view; view = view->parent_)
+            if (view == child) return true;
+        return false;
+    };
+    if (ComboBox* popup = ComboBox::active_popup_in(*structure_root);
+        popup && belongs_to_removed_subtree(popup)) {
+        ComboBox::close_active_popup(*structure_root);
+    }
+    if (RootInteractionState* state = structure_root->interaction_state_.get();
+        state && belongs_to_removed_subtree(state->focused_input)) {
+        View* focused = state->focused_input;
+        state->focused_input = nullptr;
+        if (focused_input_ == focused) focused_input_ = nullptr;
+    }
 
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.

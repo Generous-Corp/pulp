@@ -31,6 +31,7 @@
 // host or behind an `InputRouterHost` method — not in this file.
 
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/view.hpp>
@@ -377,7 +378,26 @@ public:
         event.modifiers = modifiers;
         event.is_down = is_down;
         event.is_repeat = is_repeat;
-        const bool consumed = focused->on_key_event(event);
+        bool consumed = false;
+        if (focused->accepts_text_input()) {
+            consumed = focused->on_key_event(event);
+        } else if (focused->accepts_navigation_input()) {
+            constexpr std::uint16_t kHostChordModifiers =
+                kModCtrl | kModAlt | kModMeta | kModCmd;
+            const bool allowed = (modifiers & kHostChordModifiers) == 0 &&
+                (key == KeyCode::left || key == KeyCode::right ||
+                key == KeyCode::up || key == KeyCode::down ||
+                key == KeyCode::home || key == KeyCode::end_ ||
+                key == KeyCode::enter || key == KeyCode::escape);
+            if (!allowed) return false;
+            consumed = focused->on_key_event(event);
+            if (!consumed) {
+                consumed = WidgetBridge::dispatch_key_for_root(
+                    host_.input_root(), static_cast<int>(key), modifiers, is_down);
+            }
+        } else {
+            return false;
+        }
         if (consumed) host_.input_request_repaint();
         return consumed;
     }

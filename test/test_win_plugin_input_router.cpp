@@ -17,6 +17,7 @@
 #include <pulp/view/gesture.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 
 #include <string>
 #include <vector>
@@ -727,6 +728,33 @@ TEST_CASE("keys with nothing focused are not consumed",
     PluginInputRouter router(host);
 
     REQUIRE_FALSE(router.on_key(KeyCode::left, 0, true, false));
+}
+
+TEST_CASE("an open combo consumes only the bounded navigation key set",
+          "[win-input-router][combo][navigation-focus]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<ComboBox>();
+    auto* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    combo->set_items({"A", "B", "C"});
+    root.add_child(std::move(owned));
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(focused_input_under_root(root) == combo);
+
+    REQUIRE_FALSE(router.on_key(KeyCode::space, 0, true, false));
+    REQUIRE_FALSE(router.on_key(KeyCode::down, kModCtrl, true, false));
+    REQUIRE(combo->hovered_index() == 0);
+    REQUIRE(router.on_key(KeyCode::end_, 0, true, false));
+    REQUIRE(combo->hovered_index() == 2);
+    REQUIRE(router.on_key(KeyCode::enter, 0, true, false));
+    REQUIRE(combo->selected() == 2);
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(focused_input_under_root(root) == nullptr);
 }
 
 // ── Teardown ────────────────────────────────────────────────────────────────

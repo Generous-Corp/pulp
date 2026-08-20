@@ -562,6 +562,14 @@ public:
     /// take focus.
     virtual bool accepts_text_input() const { return false; }
 
+    /// Does this widget temporarily need host-delivered navigation keys?
+    ///
+    /// Plugin roots must not become general keyboard sinks: doing so steals
+    /// transport and musical-typing keys from the DAW. Interactive controls
+    /// may opt in while a bounded navigation interaction is active (for
+    /// example, ComboBox returns true only while its menu is open).
+    virtual bool accepts_navigation_input() const { return false; }
+
     /// CSS :disabled equivalent — blocks input, reduces opacity
     bool enabled() const { return enabled_; }
     void set_enabled(bool e) { enabled_ = e; }

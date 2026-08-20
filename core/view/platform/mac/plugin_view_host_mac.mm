@@ -15,6 +15,7 @@
 #include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/accessibility.hpp>
@@ -569,18 +570,30 @@ pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(pulp::view::View
     return view;
 }
 
-// Whether to grab the DAW keyboard: ONLY while a focused widget under this root
-// actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
-// widget — a ComboBox dropdown, a focusable container/root — must NOT make the
-// plugin steal the keyboard, or the host loses transport keys (Space/R) AND its
-// Musical Typing (e.g. clicking the Direction/Loop dropdown left the editor first
-// responder, swallowing every later key so QWERTY notes stopped reaching Logic).
-// This matches acceptsFirstResponder's own contract ("ONLY while a pulp text field
-// is focused") — the focusable check alone was too broad. (pulp: AU hosted-view
-// key routing.)
+// Text input and the separately bounded navigation-input capability are the
+// only reasons an embedded editor may borrow the DAW keyboard. Mere
+// focusability is never sufficient: it would steal transport and Musical
+// Typing after an ordinary control click.
 static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
     auto* fv = pulp_focus_under_root(root);
     return fv != nullptr && fv->accepts_text_input();
+}
+
+static bool pulp_key_input_focused_under_root(pulp::view::View* root) {
+    auto* fv = pulp_focus_under_root(root);
+    return fv != nullptr &&
+           (fv->accepts_text_input() || fv->accepts_navigation_input());
+}
+
+static bool pulp_is_navigation_key(pulp::view::KeyCode key,
+                                   std::uint16_t modifiers) {
+    using K = pulp::view::KeyCode;
+    constexpr std::uint16_t kHostChordModifiers = pulp::view::kModCtrl |
+        pulp::view::kModAlt | pulp::view::kModMeta | pulp::view::kModCmd;
+    if ((modifiers & kHostChordModifiers) != 0) return false;
+    return key == K::left || key == K::right || key == K::up ||
+        key == K::down || key == K::home || key == K::end_ ||
+        key == K::enter || key == K::escape;
 }
 
 bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
@@ -609,6 +622,25 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     if (!fv) return false;
     const auto handled_focus = pulp_focus_identity(fv);
 
+    pulp::view::KeyEvent ke;
+    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+    ke.is_down = true;
+    ke.is_repeat = event.isARepeat;
+
+    // A navigation-capable control borrows the DAW keyboard only for this
+    // narrow allowlist. Everything else returns to the host unchanged.
+    // Text input takes the richer IME/editing path below and always has
+    // priority when it owns this root's focus slot.
+    if (!fv->accepts_text_input() && fv->accepts_navigation_input()) {
+        if (!pulp_is_navigation_key(ke.key, ke.modifiers)) return false;
+        const bool consumed = fv->on_key_event(ke) ||
+            pulp::view::WidgetBridge::dispatch_key_for_root(
+                *root, static_cast<int>(ke.key), ke.modifiers, true);
+        if (consumed) root->request_repaint();
+        return consumed;
+    }
+
     if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
         if (te->has_marked_text()) {
             [host interpretKeyEvents:@[ event ]];
@@ -617,11 +649,6 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
         }
     }
 
-    pulp::view::KeyEvent ke;
-    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
-    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
-    ke.is_down = true;
-    ke.is_repeat = event.isARepeat;
     // Navigation / editing commands first (arrows, backspace, enter, escape, …).
     // The return value tells us whether the editor already handled this key as a
     // command — if so it must NOT also be inserted as text.
@@ -727,7 +754,7 @@ static void pulp_plugin_sync_key_focus(NSView* host,
                                        NSResponder*& prior) {
     NSWindow* win = host.window;
     if (!win) return;
-    const bool wants = pulp_text_input_focused_under_root(root);
+    const bool wants = pulp_key_input_focused_under_root(root);
     if (wants && win.firstResponder != host) {
         prior = win.firstResponder;
         [win makeFirstResponder:host];
@@ -745,7 +772,7 @@ static void pulp_plugin_sync_key_focus(NSView* host,
 // recursing. Returns true when a widget was actually ended (repaint needed).
 // Scoped to `root`: a resignFirstResponder on THIS editor must never end a
 // type-in owned by another open plugin editor (focused_input_ is global).
-static bool pulp_plugin_end_text_input(NSView* host, pulp::view::View* root) {
+static bool pulp_plugin_end_key_input(NSView* host, pulp::view::View* root) {
     auto* fv = pulp_focus_under_root(root);
     if (!fv) return false;
     fv = pulp_plugin_cancel_marked_text_and_revalidate(root, host, fv);
@@ -777,7 +804,8 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
     ke.is_down = true;
     ke.is_repeat = event.isARepeat;
-    if (auto* fv = pulp_focus_under_root(root)) {
+    if (auto* fv = pulp_focus_under_root(root);
+        fv && fv->accepts_text_input()) {
         if (fv->on_key_event(ke)) {
             root->request_repaint();
             return true;
@@ -902,12 +930,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // but left no path to hand transport keys back after the user left a field;
 // the forward supersedes that approach.)
 - (BOOL)acceptsFirstResponder {
-    // Take the keyboard ONLY while a pulp text field is focused. Otherwise the DAW
-    // owns it, so host transport keys (Space/R) and the host's Musical Typing keep
-    // working while the plugin editor is open — a plugin must not hijack the DAW
-    // keyboard. (The standalone uses a different window host that drives its own
-    // QWERTY musical typing; this path is DAW-only.)
-    return pulp_text_input_focused_under_root(self.rootView);
+    // Borrow the keyboard only for text entry or an explicitly active bounded
+    // navigation interaction. Mere focusability never takes it from the DAW.
+    return pulp_key_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
@@ -920,7 +945,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // Musical Typing again".
 - (BOOL)resignFirstResponder {
     _priorResponder = nil;  // the host chose a new responder; nothing to restore
-    if (pulp_plugin_end_text_input(self, self.rootView)) [self setNeedsDisplay:YES];
+    if (pulp_plugin_end_key_input(self, self.rootView)) [self setNeedsDisplay:YES];
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
@@ -1655,10 +1680,8 @@ private:
 // focused field and forward everything else back to the host (transport +
 // Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
-    // DAW-only path: take the keyboard ONLY while a pulp text field is focused, so
-    // the host keeps transport keys (Space/R) + Musical Typing. See
-    // PulpPluginView::acceptsFirstResponder.
-    return pulp_text_input_focused_under_root(self.rootView);
+    // Same bounded text-or-navigation contract as the CPU plugin view.
+    return pulp_key_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
@@ -1667,7 +1690,7 @@ private:
 // See PulpPluginView::resignFirstResponder.
 - (BOOL)resignFirstResponder {
     _priorResponder = nil;
-    if (pulp_plugin_end_text_input(self, self.rootView) && self.rootView)
+    if (pulp_plugin_end_key_input(self, self.rootView) && self.rootView)
         self.rootView->request_repaint();
     return [super resignFirstResponder];
 }

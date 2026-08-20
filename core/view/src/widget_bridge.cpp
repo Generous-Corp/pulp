@@ -655,6 +655,18 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
     }
 }
 
+bool WidgetBridge::dispatch_key_for_root(View& root, int key_code,
+                                         uint16_t modifiers, bool is_down) {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    bool handled = false;
+    for (auto* bridge : all_bridges_set()) {
+        if (&bridge->root_ == &root)
+            handled = bridge->forward_key_event_handled(
+                          key_code, modifiers, is_down, &root) || handled;
+    }
+    return handled;
+}
+
 void WidgetBridge::dispatch_document_event(const std::string& event_type,
                                            const std::string& event_json_literal) {
     // FOOTGUN: both arguments are concatenated into a JS expression

@@ -5,6 +5,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/state/store.hpp>
@@ -312,6 +313,20 @@ TEST_CASE("ComboBox: keyboard navigation moves the row highlight while open",
     down.is_down = true;
     combo.on_key_event(down);
     REQUIRE(combo.hovered_index() == 1);
+
+    KeyEvent end;
+    end.key = KeyCode::end_;
+    end.is_down = true;
+    REQUIRE(combo.on_key_event(end));
+    REQUIRE(combo.hovered_index() == 2);
+
+    KeyEvent home;
+    home.key = KeyCode::home;
+    home.is_down = true;
+    REQUIRE(combo.on_key_event(home));
+    REQUIRE(combo.hovered_index() == 0);
+
+    combo.on_key_event(down);
     REQUIRE(combo.selected_text() == "A");  // not committed yet
 
     combo.on_key_event(down);
@@ -330,6 +345,51 @@ TEST_CASE("ComboBox: keyboard navigation moves the row highlight while open",
     combo.on_key_event(ret);
     REQUIRE(combo.selected_text() == "B");
     REQUIRE_FALSE(combo.is_open());
+}
+
+TEST_CASE("ComboBox: navigation focus exists only for an open menu", "[combo][key-focus]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto owned = std::make_unique<ComboBox>();
+    auto* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    combo->set_items({"A", "B"});
+    root.add_child(std::move(owned));
+
+    REQUIRE_FALSE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == combo);
+
+    KeyEvent escape{.key = KeyCode::escape, .is_down = true};
+    REQUIRE(combo->on_key_event(escape));
+    REQUIRE_FALSE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
+}
+
+TEST_CASE("ComboBox: detaching an open menu clears root navigation state",
+          "[combo][key-focus][lifecycle]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto owned = std::make_unique<ComboBox>();
+    auto* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    combo->set_items({"A", "B"});
+    root.add_child(std::move(owned));
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(ComboBox::active_popup_in(root) == combo);
+    REQUIRE(focused_input_under_root(root) == combo);
+
+    auto detached = root.remove_child(combo);
+    REQUIRE(detached != nullptr);
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(ComboBox::active_popup_in(root) == nullptr);
+    REQUIRE(focused_input_under_root(root) == nullptr);
 }
 
 // ── Regression: dropdown overlay click routing ───────────────────────────

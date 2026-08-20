@@ -92,6 +92,8 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     void on_hover_move(Point local_pos) override;  // track hovered dropdown row
     bool on_key_event(const KeyEvent& event) override;
+    bool accepts_navigation_input() const override { return open_; }
+    void on_focus_changed(bool focused) override;
     View* hit_test(Point local_point) override;  // extend hit area over the open dropdown
     bool wants_mouse_input() const override { return true; }
 
@@ -166,6 +168,7 @@ private:
     void overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h,
                          float& out_viewport_w) const;
     void move_hover(int delta);  // keyboard: move the highlighted row, skipping separators
+    void move_hover_to_edge(bool last);
 
     std::vector<std::string> items_;
     int selected_ = 0;

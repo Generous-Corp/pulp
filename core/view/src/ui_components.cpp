@@ -318,6 +318,7 @@ void ComboBox::open_dropdown() {
         prev->close_dropdown();
     set_overflow(Overflow::visible);
     open_ = true;
+    claim_input_focus();
     hover_index_ = selected_;  // highlight the current selection on open so
                                // keyboard navigation has a visible starting row
     interaction().active_popup = this;  // root-owned slot
@@ -338,6 +339,7 @@ void ComboBox::open_dropdown() {
 void ComboBox::close_dropdown() {
     if (!open_) return;
     open_ = false;
+    release_input_focus();
     set_overflow(Overflow::hidden);
     // Clear both the root-owned slot (non-allocating) and the shim mirror.
     if (RootInteractionState* s = existing_interaction(); s && s->active_popup == this)
@@ -485,6 +487,25 @@ void ComboBox::move_hover(int delta) {
     request_repaint();
 }
 
+void ComboBox::move_hover_to_edge(bool last) {
+    const int n = static_cast<int>(items_.size());
+    if (n == 0) return;
+    int idx = last ? n - 1 : 0;
+    const int delta = last ? -1 : 1;
+    while (idx >= 0 && idx < n &&
+           is_separator_item(items_[static_cast<size_t>(idx)]))
+        idx += delta;
+    if (idx < 0 || idx >= n) return;
+    hover_index_ = idx;
+
+    float top = 0.0f, height = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, height, first, visible);
+    if (visible > 0 && visible < n)
+        dropdown_scroll_ = last ? std::max(0, n - visible) : 0;
+    request_repaint();
+}
+
 void ComboBox::on_hover_move(Point local_pos) {
     // The platform host dispatches hover samples through on_hover_move (NOT
     // on_mouse_event with is_down=false), so the open dropdown's row highlight
@@ -588,6 +609,8 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
     switch (event.key) {
         case KeyCode::up:   move_hover(-1); return true;
         case KeyCode::down: move_hover(+1); return true;
+        case KeyCode::home: move_hover_to_edge(false); return true;
+        case KeyCode::end_: move_hover_to_edge(true); return true;
         case KeyCode::escape:
             close_dropdown();  // cancel — selection unchanged
             request_repaint();
@@ -603,6 +626,10 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
         default:
             return false;
     }
+}
+
+void ComboBox::on_focus_changed(bool focused) {
+    if (!focused) close_dropdown();
 }
 
 void ComboBox::on_text_input(const TextInputEvent& event) {

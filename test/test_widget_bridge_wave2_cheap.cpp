@@ -671,6 +671,78 @@ TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __glo
     REQUIRE(engine.evaluate("win_keys.join(',')").toString() == "Escape,a");
 }
 
+TEST_CASE("Event contract: root-scoped key dispatch cannot cross plugin editors",
+          "[view][bridge][events][root-scope]") {
+    ScriptEngine engine_a;
+    ScriptEngine engine_b;
+    View root_a;
+    View root_b;
+    StateStore store_a;
+    StateStore store_b;
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+
+    bridge_a.load_script(R"(
+        var root_hits = 0;
+        window.addEventListener('keydown', function(e) {
+            root_hits++;
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+    )");
+    bridge_b.load_script(R"(
+        var root_hits = 0;
+        window.addEventListener('keydown', function() { root_hits++; });
+    )");
+
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine_a.evaluate("root_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine_b.evaluate("root_hits").getWithDefault<int>(0) == 0);
+
+    // Negative controls: an unclaimed key and key-up are not consumed, and
+    // neither may leak into the other root.
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::a), 0, true));
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, false));
+    REQUIRE(engine_a.evaluate("root_hits").getWithDefault<int>(0) == 2);
+    REQUIRE(engine_b.evaluate("root_hits").getWithDefault<int>(0) == 0);
+}
+
+TEST_CASE("Materialized ComboBox exposes bounded navigation focus and native keys",
+          "[view][bridge][combo][navigation-focus]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 300, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createCombo('mode', '');
+        setItems('mode', ['A', 'B', 'C']);
+    )");
+
+    auto* combo = dynamic_cast<ComboBox*>(bridge.widget("mode"));
+    REQUIRE(combo != nullptr);
+    combo->set_bounds({0, 0, 120, 24});
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == combo);
+
+    KeyEvent end{.key = KeyCode::end_, .is_down = true};
+    REQUIRE(combo->on_key_event(end));
+    REQUIRE(combo->hovered_index() == 2);
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::a), 0, true));
+
+    KeyEvent commit{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(commit));
+    REQUIRE(combo->selected() == 2);
+    REQUIRE_FALSE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
+}
+
 TEST_CASE("Classic-script window aliases share one browser global property bag",
           "[view][bridge][web-compat][window]") {
     ScriptEngine engine;
