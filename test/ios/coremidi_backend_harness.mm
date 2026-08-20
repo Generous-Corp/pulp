@@ -466,11 +466,15 @@ int run_harness() {
         MIDIEndpointDispose(destination);
         destination = 0;
         if (!wait_until([&] {
-                return !input->is_open() && !output->is_open();
+                // Removal invalidation is endpoint-scoped: retiring the
+                // destination must close its sender without killing the
+                // unrelated source. The old source identity is retired by the
+                // explicit open_endpoint() probe below.
+                return input->is_open() && !output->is_open();
             })) {
             keep_sending.store(false, std::memory_order_release);
             for (auto& sender : senders) sender.join();
-            return fail(@"cached UMP endpoint survived topology change",
+            return fail(@"UMP removal invalidation was not endpoint-scoped",
                         retired_source, 0);
         }
         open_status = pulp::midi::UmpOpenStatus::Ok;
