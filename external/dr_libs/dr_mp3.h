@@ -3285,7 +3285,7 @@ static drmp3_bool32 drmp3_init_internal(drmp3* pMP3, drmp3_read_proc onRead, drm
     }
 
     if (detectedMP3FrameCount != 0xFFFFFFFF) {
-        pMP3->totalPCMFrameCount = detectedMP3FrameCount * firstFramePCMFrameCount;
+        pMP3->totalPCMFrameCount = (drmp3_uint64)detectedMP3FrameCount * firstFramePCMFrameCount;
     }
 
     pMP3->channels   = pMP3->mp3FrameChannels;

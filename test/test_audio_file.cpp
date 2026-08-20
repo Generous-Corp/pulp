@@ -40,6 +40,32 @@ static std::filesystem::path unique_temp_audio_path(std::string_view suffix) {
     return std::filesystem::temp_directory_path() / name;
 }
 
+static std::vector<uint8_t> make_mp3_with_xing_frame_count(uint32_t frame_count) {
+    // Two MPEG-1 Layer III, 128 kbps, 44.1 kHz stereo frames. dr_mp3 requires
+    // a following frame header to validate the first one; the Xing metadata
+    // begins after the first frame's 4-byte header and 32-byte side info.
+    constexpr size_t kFrameSize = 417;
+    std::vector<uint8_t> bytes(kFrameSize * 2, 0);
+    for (size_t offset : {size_t{0}, kFrameSize}) {
+        bytes[offset + 0] = 0xFF;
+        bytes[offset + 1] = 0xFB;
+        bytes[offset + 2] = 0x90;
+        bytes[offset + 3] = 0x64;
+    }
+
+    constexpr size_t kXingOffset = 4 + 32;
+    bytes[kXingOffset + 0] = 'X';
+    bytes[kXingOffset + 1] = 'i';
+    bytes[kXingOffset + 2] = 'n';
+    bytes[kXingOffset + 3] = 'g';
+    bytes[kXingOffset + 7] = 1;  // Big-endian Xing flags: FRAMES is present.
+    bytes[kXingOffset + 8] = static_cast<uint8_t>(frame_count >> 24);
+    bytes[kXingOffset + 9] = static_cast<uint8_t>(frame_count >> 16);
+    bytes[kXingOffset + 10] = static_cast<uint8_t>(frame_count >> 8);
+    bytes[kXingOffset + 11] = static_cast<uint8_t>(frame_count);
+    return bytes;
+}
+
 static std::vector<uint8_t> read_binary_file(const std::filesystem::path& path) {
     std::ifstream f(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
@@ -1757,6 +1783,32 @@ TEST_CASE("FormatRegistry reads a valid MP3 fixture through the built-in reader"
     REQUIRE(data->num_frames() > 0);
     REQUIRE(data->num_frames() == info->num_frames);
     REQUIRE(data->channels.front().size() == data->num_frames());
+
+    std::filesystem::remove(mp3_path);
+}
+
+TEST_CASE("MP3 Xing frame counts are widened before multiplication",
+          "[audio][file][registry][security]") {
+    // 3,728,272 * 1,152 = 4,294,969,344. In 32-bit arithmetic this wraps to
+    // 2,048 before assignment to dr_mp3's 64-bit totalPCMFrameCount.
+    constexpr uint32_t kXingFrames = 3'728'272;
+    constexpr uint64_t kExpectedPcmFrames = 4'294'969'344ULL;
+    auto mp3_path = unique_temp_audio_path("_xing_frame_count.mp3");
+    const auto bytes = make_mp3_with_xing_frame_count(kXingFrames);
+    {
+        std::ofstream file(mp3_path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+        REQUIRE(file.good());
+    }
+
+    auto* reader = FormatRegistry::instance().find_reader(".mp3");
+    REQUIRE(reader != nullptr);
+    auto info = reader->read_info(mp3_path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->sample_rate == 44'100);
+    REQUIRE(info->num_channels == 2);
+    REQUIRE(info->num_frames == kExpectedPcmFrames);
 
     std::filesystem::remove(mp3_path);
 }
