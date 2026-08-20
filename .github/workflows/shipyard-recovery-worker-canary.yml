@@ -35,7 +35,7 @@ jobs:
       - macOS
       - ARM64
       - pulp-build-vm
-      - shipyard-recovery-canary-m5-20260814
+      - shipyard-recovery-pool
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
