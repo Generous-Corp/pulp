@@ -24,6 +24,7 @@ import glob
 import hashlib
 import json
 import os
+import posixpath
 import plistlib
 import shutil
 import subprocess
@@ -622,6 +623,17 @@ def _merge_runner_env(runner_dir):
     _atomic_write(path, "\n".join(out) + "\n")
 
 
+def _archive_link_escapes(member):
+    """Return whether a tar link resolves outside its extraction root."""
+    base = posixpath.dirname(member.name) if member.issym() else ""
+    target = posixpath.normpath(posixpath.join(base, member.linkname))
+    return (
+        posixpath.isabs(member.linkname)
+        or target == ".."
+        or target.startswith("../")
+    )
+
+
 def _install_runner_package(runner_dir, version, expected_sha256):
     name = f"actions-runner-osx-arm64-{version}.tar.gz"
     url = f"https://github.com/actions/runner/releases/download/v{version}/{name}"
@@ -642,8 +654,12 @@ def _install_runner_package(runner_dir, version, expected_sha256):
                 if member_path.is_absolute() or ".." in member_path.parts:
                     raise RuntimeError(f"runner archive contains unsafe path {member.name!r}")
                 if member.issym() or member.islnk():
-                    link_path = Path(member.linkname)
-                    if link_path.is_absolute() or ".." in link_path.parts:
+                    # A symlink target is relative to the link's containing
+                    # directory; a tar hardlink target is archive-root-relative.
+                    # The runner archive legitimately uses targets such as
+                    # ../lib/node_modules/... that normalize inside the root.
+                    # Reject only targets whose normalized archive path escapes.
+                    if _archive_link_escapes(member):
                         raise RuntimeError(
                             f"runner archive contains unsafe link {member.linkname!r}"
                         )

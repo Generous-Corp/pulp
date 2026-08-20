@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -154,6 +155,18 @@ class RunnerPolicyFixture(unittest.TestCase):
             F._sha256_file(sample),
             "25cb6d61356e5cada4238d160f3a77522e550e27a69758da40cd281c7ef2c8dc",
         )
+
+    def test_runner_archive_allows_relative_link_that_stays_inside_root(self) -> None:
+        member = tarfile.TarInfo("bin/node20/bin/corepack")
+        member.type = tarfile.SYMTYPE
+        member.linkname = "../lib/node_modules/corepack/dist/corepack.js"
+        self.assertFalse(F._archive_link_escapes(member))
+
+    def test_runner_archive_relative_link_escape_is_detectable(self) -> None:
+        member = tarfile.TarInfo("bin/tool")
+        member.type = tarfile.SYMTYPE
+        member.linkname = "../../outside"
+        self.assertTrue(F._archive_link_escapes(member))
 
 
 if __name__ == "__main__":
