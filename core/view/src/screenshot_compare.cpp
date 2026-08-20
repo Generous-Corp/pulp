@@ -357,10 +357,18 @@ std::vector<uint8_t> crop_png(
     uint32_t crop_h = std::min(height, img.height - y);
     if (crop_w == 0 || crop_h == 0) return {};
 
-    std::vector<uint8_t> cropped(crop_w * crop_h * 4);
+    const auto crop_pixels =
+        static_cast<uint64_t>(crop_w) * static_cast<uint64_t>(crop_h);
+    if (crop_pixels > (std::numeric_limits<size_t>::max() / 4u)) return {};
+
+    std::vector<uint8_t> cropped(static_cast<size_t>(crop_pixels) * 4u);
     for (uint32_t row = 0; row < crop_h; ++row) {
-        const auto* src = img.pixels.data() + ((y + row) * img.width + x) * 4;
-        auto* dst = cropped.data() + (row * crop_w) * 4;
+        const auto* src = img.pixels.data() +
+                          ((static_cast<size_t>(y) + static_cast<size_t>(row)) *
+                               static_cast<size_t>(img.width) +
+                           static_cast<size_t>(x)) * 4u;
+        auto* dst = cropped.data() +
+                    static_cast<size_t>(row) * static_cast<size_t>(crop_w) * 4u;
         std::memcpy(dst, src, static_cast<size_t>(crop_w) * 4);
     }
 
