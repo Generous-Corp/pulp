@@ -152,7 +152,8 @@ bool WidgetBridge::forward_key_event_handled(int key_code, uint16_t modifiers,
         "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + ","
         "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + ","
         "mods:" + std::to_string(modifiers) + "};"
-        "__dispatch__('__global__','keydown',e);return !!e.defaultPrevented;})()");
+        "__dispatch__('__global__','keydown',e);"
+        "__dispatch__('document','keydown',e);return !!e.defaultPrevented;})()");
     return handled.getWithDefault<bool>(false);
 }
 

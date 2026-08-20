@@ -784,6 +784,118 @@ TEST_CASE("Materialized document navigation claim clears on bridge teardown",
     REQUIRE(focused_input_under_root(root) == nullptr);
 }
 
+TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal",
+          "[view][bridge][events][popup-default]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup_selected = 'A';
+        var popup = null;
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'popup-under-test');
+        trigger.textContent = popup_selected;
+        var outside = document.createElement('button');
+        outside.textContent = 'outside';
+        function closePopup() {
+            if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
+            popup = null;
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+        trigger.addEventListener('click', function() {
+            if (popup) { closePopup(); return; }
+            popup = document.createElement('div');
+            popup.setAttribute('id', 'popup-under-test');
+            popup.setAttribute('role', 'listbox');
+            ['A', 'B', 'C'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.textContent = label;
+                option.style.background = label === 'A' ? 'rgb(1,2,3)' : '';
+                option.addEventListener('click', function() {
+                    popup_selected = label;
+                    trigger.textContent = label;
+                    closePopup();
+                });
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+            trigger.setAttribute('aria-expanded', 'true');
+        });
+        document.body.appendChild(trigger);
+        document.body.appendChild(outside);
+        trigger.focus();
+    )");
+
+    REQUIRE(root.accepts_navigation_input());
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 0);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::end_), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 2);
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.options[0].style.background")
+                .toString() == "rgb(1,2,3)");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::home), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 0);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::enter), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::up), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 2);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::escape), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    engine.evaluate("__dispatch__(outside._id, 'pointerdown', {clientX:1,clientY:1})");
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::up), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::space), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "C");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "C");
+    REQUIRE(engine.evaluate("document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.setAttribute('data-pulp-popup-default','off'); trigger.focus()");
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate(R"(
+        trigger.setAttribute('data-pulp-popup-default', 'on');
+        document.addEventListener('keydown', function overridePopup(e) {
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+        trigger.focus();
+    )");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+}
+
 TEST_CASE("Materialized ComboBox exposes bounded navigation focus and native keys",
           "[view][bridge][combo][navigation-focus]") {
     ScriptEngine engine;

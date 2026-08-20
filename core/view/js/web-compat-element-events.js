@@ -78,6 +78,26 @@ Element.prototype.removeEventListener = function(type, fn, opts) {
 Element.prototype.dispatchEvent = function(event) {
     event.target = this;
     _dispatchEvent(this, event);
+    return !event.defaultPrevented;
+};
+
+Element.prototype.click = function() {
+    this.dispatchEvent(_makeEvent("click", this, { bubbles: true, cancelable: true }));
+};
+
+Element.prototype.focus = function() {
+    if (typeof document !== "undefined") document.activeElement = this;
+    if (this.getAttribute && this.getAttribute("aria-haspopup")
+        && this.getAttribute("data-pulp-popup-default") !== "off"
+        && typeof claimDocumentNavigationFocus === "function")
+        claimDocumentNavigationFocus();
+    this.dispatchEvent(_makeEvent("focus", this, { bubbles: false }));
+};
+
+Element.prototype.blur = function() {
+    if (typeof document !== "undefined" && document.activeElement === this)
+        document.activeElement = null;
+    this.dispatchEvent(_makeEvent("blur", this, { bubbles: false }));
 };
 
 Element.prototype._registerNativeEvent = function(type) {

@@ -958,6 +958,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // min_width/min_height propagate to platform window hosts that honor them.
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
+    detail::add_standalone_settings_menu_command(opts, chrome);
     opts.initially_hidden = effective_config.headless;
     if (musical_typing_) musical_typing_->add_menu_command(opts);
 
