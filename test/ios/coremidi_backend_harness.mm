@@ -21,6 +21,14 @@ namespace {
 
 constexpr const char* kResultFile = "coremidi-result.txt";
 
+struct OwnedMidiEndpoint {
+    MIDIEndpointRef value = 0;
+
+    ~OwnedMidiEndpoint() {
+        if (value) MIDIEndpointDispose(value);
+    }
+};
+
 std::string utf8(NSString* value) {
     return value ? std::string{value.UTF8String} : std::string{};
 }
@@ -169,8 +177,11 @@ int run_harness() {
     NSString* source_ns = [@"Pulp iOS Source " stringByAppendingString:nonce];
     NSString* destination_ns =
         [@"Pulp iOS Destination " stringByAppendingString:nonce];
+    NSString* unaffected_source_ns =
+        [@"Pulp iOS Unaffected Source " stringByAppendingString:nonce];
     const std::string source_name = utf8(source_ns);
     const std::string destination_name = utf8(destination_ns);
+    const std::string unaffected_source_name = utf8(unaffected_source_ns);
 
     MIDIEndpointRef source = 0;
     MIDIEndpointRef destination = 0;
@@ -195,6 +206,16 @@ int run_harness() {
         return fail([NSString stringWithFormat:@"destination create status=%d",
                                                 static_cast<int>(status)],
                     source, destination);
+    }
+    OwnedMidiEndpoint unaffected_source;
+    status = MIDISourceCreateWithProtocol(
+        client, (__bridge CFStringRef)unaffected_source_ns,
+        kMIDIProtocol_2_0, &unaffected_source.value);
+    if (status != noErr || !unaffected_source.value) {
+        return fail(
+            [NSString stringWithFormat:@"unaffected source create status=%d",
+                                       static_cast<int>(status)],
+            source, destination);
     }
 
     SInt32 source_uid = 0;
@@ -255,15 +276,24 @@ int run_harness() {
 
         std::string ump_source_id;
         std::string ump_destination_id;
+        std::string unaffected_ump_source_id;
         const bool ump_discovered = wait_until([&] {
             const auto endpoints = session.enumerate_endpoints();
             const auto* input = find_ump_endpoint(endpoints, source_name,
                                                   true, false);
             const auto* output = find_ump_endpoint(endpoints, destination_name,
                                                    false, true);
-            if (!input || !output || input->id == output->id) return false;
+            const auto* unaffected_input = find_ump_endpoint(
+                endpoints, unaffected_source_name, true, false);
+            if (!input || !output || !unaffected_input ||
+                input->id == output->id ||
+                unaffected_input->id == input->id ||
+                unaffected_input->id == output->id) {
+                return false;
+            }
             ump_source_id = input->id;
             ump_destination_id = output->id;
+            unaffected_ump_source_id = unaffected_input->id;
             return true;
         });
         if (!ump_discovered) {
@@ -294,6 +324,24 @@ int run_harness() {
             return fail(@"production UMP destination open failed", source,
                         destination);
         }
+        auto* unaffected_input =
+            session.open_endpoint(unaffected_ump_source_id, &open_status);
+        if (!unaffected_input ||
+            open_status != pulp::midi::UmpOpenStatus::Ok ||
+            !unaffected_input->is_open()) {
+            return fail(@"production unaffected UMP source open failed", source,
+                        destination);
+        }
+        auto unaffected_received_word =
+            std::make_shared<std::atomic<uint32_t>>(0);
+        unaffected_input->set_receive_callback(
+            [unaffected_received_word](const pulp::midi::UmpPacket& packet,
+                                       double) {
+                if (packet.word_count > 0) {
+                    unaffected_received_word->store(
+                        packet.words[0], std::memory_order_release);
+                }
+            });
 
         // MT 0x6 is a complete one-word message. Following it with a valid
         // MT 0x2 message detects any private/incorrect size table that skips
@@ -465,12 +513,34 @@ int run_harness() {
         }
         MIDIEndpointDispose(destination);
         destination = 0;
+        // The destination removal must retire its open sender. Do not also
+        // require the independent source to close here: CoreMIDI is allowed to
+        // report the earlier source UID edit as a property change rather than
+        // remove/add, and an unrelated removal must not invalidate a healthy
+        // input. The old source identity is retired by the fresh-census
+        // open_endpoint() check below, which then proves the borrowed input
+        // handle stays closed.
         if (!wait_until([&] {
-                return !input->is_open() && !output->is_open();
+                return !output->is_open();
             })) {
             keep_sending.store(false, std::memory_order_release);
             for (auto& sender : senders) sender.join();
-            return fail(@"cached UMP endpoint survived topology change",
+            return fail(@"cached UMP destination survived topology change",
+                        retired_source, 0);
+        }
+        constexpr uint32_t kUnaffectedSourceWord = 0x20904004;
+        auto unaffected_event = one_word_event_list(kUnaffectedSourceWord);
+        if (!unaffected_input->is_open() ||
+            MIDIReceivedEventList(unaffected_source.value,
+                                  &unaffected_event) != noErr ||
+            !wait_until([&] {
+                return unaffected_received_word->load(
+                           std::memory_order_acquire) ==
+                       kUnaffectedSourceWord;
+            })) {
+            keep_sending.store(false, std::memory_order_release);
+            for (auto& sender : senders) sender.join();
+            return fail(@"unrelated removal retired unaffected UMP source",
                         retired_source, 0);
         }
         open_status = pulp::midi::UmpOpenStatus::Ok;
