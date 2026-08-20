@@ -168,6 +168,23 @@ class RunnerPolicyFixture(unittest.TestCase):
         member.linkname = "../../outside"
         self.assertTrue(F._archive_link_escapes(member))
 
+    def test_runner_archive_hardlink_target_is_archive_root_relative(self) -> None:
+        symlink = tarfile.TarInfo("dir/link")
+        symlink.type = tarfile.SYMTYPE
+        symlink.linkname = "../inside"
+        self.assertFalse(F._archive_link_escapes(symlink))
+
+        hardlink = tarfile.TarInfo("dir/link")
+        hardlink.type = tarfile.LNKTYPE
+        hardlink.linkname = "../inside"
+        self.assertTrue(F._archive_link_escapes(hardlink))
+
+    def test_runner_archive_allows_root_relative_hardlink_inside_root(self) -> None:
+        member = tarfile.TarInfo("dir/link")
+        member.type = tarfile.LNKTYPE
+        member.linkname = "inside/target"
+        self.assertFalse(F._archive_link_escapes(member))
+
 
 if __name__ == "__main__":
     unittest.main()
