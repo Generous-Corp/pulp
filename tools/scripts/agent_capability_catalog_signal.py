@@ -1563,7 +1563,7 @@ EXPORTS = [
                          include="pulp/signal/spectral_cross_synthesis.hpp",
                          qualified_name="pulp::signal::SpectralCrossSynthesisT<float>",
                          target="Pulp::signal",
-                         header_fingerprint="sha256:00860da91696473d18f8c276ac53a82788568640cb173b958eaa1dac9bbfee63")],
+                         header_fingerprint="sha256:15a38e26fae4a62c1069e4ce35e96b2e1c19c25b4d66719543bedd48d8822d6a")],
         _link_probes=[{"role": "entrypoint",
                        "binding": "pulp::signal::SpectralCrossSynthesisT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],

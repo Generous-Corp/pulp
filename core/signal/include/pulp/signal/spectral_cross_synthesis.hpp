@@ -308,25 +308,6 @@ template <typename SampleType = float> class SpectralCrossSynthesisT {
     }
 
   private:
-    struct ScaledSquares {
-        long double scale = 0.0L;
-        long double sum = 0.0L;
-
-        void add(SampleType value) noexcept {
-            const long double magnitude = std::abs(static_cast<long double>(value));
-            if (magnitude == 0.0L)
-                return;
-            if (scale < magnitude) {
-                const long double ratio = scale / magnitude;
-                sum = 1.0L + sum * ratio * ratio;
-                scale = magnitude;
-            } else {
-                const long double ratio = magnitude / scale;
-                sum += ratio * ratio;
-            }
-        }
-    };
-
     static bool valid_config(const Config& config) noexcept {
         const bool normalization_valid =
             config.normalization == SpectralCrossSynthesisNormalization::none ||
@@ -414,16 +395,31 @@ template <typename SampleType = float> class SpectralCrossSynthesisT {
     }
 
     static SampleType rms_ratio(const SampleType* dry, const SampleType* wet, int count) noexcept {
-        ScaledSquares dry_energy;
-        ScaledSquares wet_energy;
+        long double dry_scale = 0.0L;
+        long double dry_sum = 0.0L;
+        long double wet_scale = 0.0L;
+        long double wet_sum = 0.0L;
+        const auto add_scaled_square = [](SampleType value, long double& scale,
+                                          long double& sum) noexcept {
+            const long double magnitude = std::abs(static_cast<long double>(value));
+            if (magnitude == 0.0L)
+                return;
+            if (scale < magnitude) {
+                const long double ratio = scale / magnitude;
+                sum = 1.0L + sum * ratio * ratio;
+                scale = magnitude;
+            } else {
+                const long double ratio = magnitude / scale;
+                sum += ratio * ratio;
+            }
+        };
         for (int index = 0; index < count; ++index) {
-            dry_energy.add(dry[index]);
-            wet_energy.add(wet[index]);
+            add_scaled_square(dry[index], dry_scale, dry_sum);
+            add_scaled_square(wet[index], wet_scale, wet_sum);
         }
-        if (!(dry_energy.scale > 0.0L) || !(wet_energy.scale > 0.0L))
+        if (!(dry_scale > 0.0L) || !(wet_scale > 0.0L))
             return SampleType{1};
-        const long double ratio =
-            (dry_energy.scale / wet_energy.scale) * std::sqrt(dry_energy.sum / wet_energy.sum);
+        const long double ratio = (dry_scale / wet_scale) * std::sqrt(dry_sum / wet_sum);
         return saturate_positive(ratio);
     }
 

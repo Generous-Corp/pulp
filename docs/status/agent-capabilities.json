@@ -11686,15 +11686,6 @@
               "added_tail_samples()"
             ],
             "enums": []
-          },
-          {
-            "class": "ScaledSquares",
-            "qualified_name": "pulp::signal::ScaledSquares",
-            "template": null,
-            "methods": [
-              "add(SampleType value)"
-            ],
-            "enums": []
           }
         ],
         "spectral_delay_matrix.hpp": [
