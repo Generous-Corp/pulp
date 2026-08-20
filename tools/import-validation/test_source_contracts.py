@@ -145,11 +145,15 @@ class SourceContractsTest(unittest.TestCase):
         entry["validation"]["test_tags"] = ["[definitely-not-a-real-tag]"]
         self.assert_has_code(registry, "missing-test-tag")
 
-    def test_stale_source_contract_warns(self) -> None:
+    def test_stale_source_contract_is_advisory(self) -> None:
         registry, entry = self.mutate("stitch")
         entry["last_verified"] = "2020-01-01"
         entry["recheck_interval_days"] = 1
-        self.assert_has_code(registry, "stale-source-contract")
+        with tempfile.TemporaryDirectory() as td:
+            findings = _findings(registry, Path(td))
+        stale = [finding for finding in findings if finding.code == "stale-source-contract"]
+        self.assertTrue(stale, [str(f) for f in findings])
+        self.assertTrue(all(finding.severity == "info" for finding in stale))
 
     def test_unverified_source_contract_warns(self) -> None:
         registry, entry = self.mutate("figma")
@@ -386,18 +390,26 @@ class SourceContractsTest(unittest.TestCase):
         self.assertEqual(non_strict.returncode, 0, non_strict.stdout + non_strict.stderr)
         self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
 
-    def test_strict_real_registry_has_clean_exit(self) -> None:
-        cmd = [
-            sys.executable,
-            str(CHECKER_PATH),
-            "--root",
-            str(ROOT),
-            "--registry",
-            str(REGISTRY_PATH),
-            "--strict",
-        ]
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    def test_strict_does_not_fail_on_overdue_recheck_cadence(self) -> None:
+        registry = _load_registry()
+        for entry in registry["contracts"]:
+            if entry.get("recheck_interval") != "manual":
+                entry["last_verified"] = "2099-01-01"
+        _contract(registry, "jsx")["last_verified"] = "2020-01-01"
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = _write_registry(Path(td), registry)
+            cmd = [
+                sys.executable,
+                str(CHECKER_PATH),
+                "--root",
+                str(ROOT),
+                "--registry",
+                str(registry_path),
+                "--strict",
+            ]
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[info] stale-source-contract jsx", result.stdout)
 
 
 if __name__ == "__main__":

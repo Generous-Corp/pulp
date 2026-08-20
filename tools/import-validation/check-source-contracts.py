@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Warn-only checks for Pulp import source contracts.
+"""Checks for Pulp import source contracts.
 
-The registry is intentionally additive. This checker reports drift, but
-does not fail unless --strict is passed by a focused self-test or a human.
+The registry is intentionally additive. Structural drift can fail under
+``--strict``; scheduled-recheck cadence remains advisory because it requires
+an out-of-band upstream or human verification pass.
 """
 
 from __future__ import annotations
@@ -474,6 +475,7 @@ def _check_cadence(findings: list[Finding], entry: dict[str, Any], today: _dt.da
             "stale-source-contract",
             source,
             f"source contract recheck is overdue: last verified {verified_date}, due {due}",
+            severity="info",
         )
 
 
@@ -610,7 +612,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
-    parser.add_argument("--strict", action="store_true", help="exit 1 on warning/error findings")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 on structural warning/error findings; recheck cadence remains advisory",
+    )
     parser.add_argument("--check-upstream", action="store_true", help="accepted for future network rechecks")
     parser.add_argument("--format", choices=("text", "markdown"), default="text")
     args = parser.parse_args(argv)
