@@ -24,10 +24,10 @@ EXPORTS = [
         bindings=[
             binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+                    header_fingerprint="sha256:8b6a5cfc6946ead75a2683581c900f44737dd4a4456590233753f19ecad1203d"),
             binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+                    header_fingerprint="sha256:8b6a5cfc6946ead75a2683581c900f44737dd4a4456590233753f19ecad1203d"),
         ],
         _link_probes=[
             {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
@@ -66,12 +66,12 @@ EXPORTS = [
                     include="pulp/signal/spectral_feature_frontends.hpp",
                     qualified_name="pulp::signal::SpectralFeatureFrontEndT<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:1bcd7215e8b0bf10c1186344e22be77e8278f85415ae581afec2488ea6886dee"),
+                    header_fingerprint="sha256:90ffe2d2b8a105522e9ae4f3acf135da352ad8f02ed3c32b5c7db102d9f4016c"),
             binding(role="frame", kind="cpp_type",
                     include="pulp/signal/spectral_feature_frontends.hpp",
                     qualified_name="pulp::signal::SpectralFeatureFrameT<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:1bcd7215e8b0bf10c1186344e22be77e8278f85415ae581afec2488ea6886dee"),
+                    header_fingerprint="sha256:90ffe2d2b8a105522e9ae4f3acf135da352ad8f02ed3c32b5c7db102d9f4016c"),
         ],
         _link_probes=[
             {"role": "entrypoint", "binding": "pulp::signal::SpectralFeatureFrontEndT<float>",
