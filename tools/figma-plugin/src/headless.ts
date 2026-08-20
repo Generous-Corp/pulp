@@ -20,7 +20,7 @@
 //     description: "headless plugin export",
 //     code: `globalThis.__pulp_target_node_id = ${JSON.stringify(nodeId)}; ${HEADLESS_BUNDLE}`,
 //   });
-// The bundle reads the optional `TARGET_NODE_ID` global; if unset it
+// The bundle reads the optional `__pulp_target_node_id` global; if unset it
 // falls back to the current page selection. The result is a plain object
 // (postMessage-safe — numbers/strings/arrays only, no Uint8Array).
 
@@ -51,8 +51,8 @@ declare global {
 }
 // Faithful-vector lane: the default. Each top-level frame exports its own SVG
 // and renders via DesignFrameView with auto-detected interactive overlays,
-// instead of the legacy widget-recognition rebuild. The injected prelude sets
-// FAITHFUL_VECTOR = false to opt out (legacy flat tree).
+// instead of the legacy widget-recognition rebuild. The driver sets
+// __pulp_faithful_vector = false to opt out (legacy flat tree).
 
 interface HeadlessAssetBundle {
   content_hash: string;
@@ -76,7 +76,7 @@ interface HeadlessResult {
 // enough. The headless caller awaits this implicitly because use_figma
 // returns the resolved Promise value.
 async function run(): Promise<HeadlessResult> {
-  // Resolve the selection. Prefer an explicit TARGET_NODE_ID (preferred for
+  // Resolve the selection. Prefer an explicit target node id (preferred for
   // agent-driven extraction — deterministic), then fall back to whatever
   // the user has selected in Figma (matches the UI plugin's behavior).
   let roots: readonly SceneNode[];

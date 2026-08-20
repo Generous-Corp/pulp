@@ -16,11 +16,8 @@
 // The payload embeds dist/headless.packed.js — a self-extracting
 // deflate+base64 stub (see scripts/build.mjs packHeadless()) that sets
 // `globalThis.__pulp_packed_src` to the decompressed raw bundle. This script
-// then appends an `eval(prelude + source)` line so TARGET_NODE_ID /
-// FAITHFUL_VECTOR and the bundle run as ONE program — byte-for-byte the same
-// program text the old raw payload executed. (Code eval'd in the `use_figma`
-// sandbox does not see the caller's lexical scope, so the prelude must live
-// inside the eval'd source, not alongside it.)
+// assigns driver inputs as data-only globals, evaluates only that trusted
+// built source, and clears every staging global even if evaluation fails.
 //
 // Why a script rather than an inline template the agent constructs each
 // time? Two reasons: (1) the packed bundle is tens of KB, copy-pasting it
@@ -43,6 +40,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { buildHeadlessPayload } from "./headless-payload.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -82,30 +81,11 @@ try {
   process.exit(1);
 }
 
-// Single trailing newline → terminating semicolon is preserved.
-const trimmed = bundle.replace(/\s+$/, "");
-
-let targetAssignment;
-if (arg === "--selection") {
-  targetAssignment = "globalThis.__pulp_target_node_id = void 0;";
-} else {
-  targetAssignment =
-    `globalThis.__pulp_target_node_id = ${JSON.stringify(arg)};`;
-}
-
 // Authored data is assigned as data before the trusted built bundle is
-// evaluated. It is never concatenated into executable source.
-const payload = [
-  trimmed,
-  targetAssignment,
-  `globalThis.__pulp_faithful_vector = ${faithfulVector ? "true" : "false"};`,
-  "eval(globalThis.__pulp_packed_src);",
-  "globalThis.__pulp_packed_src = void 0;",
-  "const __pulp_result = await globalThis.__pulp_headless_result;",
-  "globalThis.__pulp_target_node_id = void 0;",
-  "globalThis.__pulp_faithful_vector = void 0;",
-  "return __pulp_result;",
-].join("\n") + "\n";
+// evaluated. It is never concatenated into executable source, and the helper
+// keeps the cleanup contract independently testable.
+const payload = buildHeadlessPayload(
+  bundle, arg === "--selection" ? undefined : arg, faithfulVector);
 
 // Size guard: the Figma MCP `use_figma` `code` parameter is capped at
 // 50000 characters. We fail loudly here so the agent sees the error
