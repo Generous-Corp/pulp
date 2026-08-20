@@ -36,6 +36,37 @@ double magnitude(std::complex<double> value) {
 }
 } // namespace
 
+TEST_CASE("Default float cross synthesis processes without realtime allocation",
+          "[signal][spectral-cross-synthesis][float][rt]") {
+    SpectralCrossSynthesis processor;
+    SpectralCrossSynthesisPrepareConfig prepare;
+    prepare.fft_size = kFftSize;
+    prepare.lifter_order = 0;
+    prepare.true_envelope_iterations = 0;
+    REQUIRE(processor.prepare(prepare));
+    auto config = processor.config();
+    config.normalization = SpectralCrossSynthesisNormalization::none;
+    REQUIRE(processor.set_config(config));
+
+    std::array<std::complex<float>, kBins> carrier{}, modulator{}, output{};
+    carrier.fill({2.0f, 0.0f});
+    modulator.fill({4.0f, 0.0f});
+    const std::complex<float>* carrier_view[] = {carrier.data()};
+    const std::complex<float>* modulator_view[] = {modulator.data()};
+    std::complex<float>* output_view[] = {output.data()};
+
+    bool processed = false;
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        processed = processor.process(carrier_view, modulator_view, output_view, 1, kBins);
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(processed);
+    REQUIRE(allocations == 0);
+    REQUIRE(std::abs(output[17]) == Catch::Approx(4.0f).margin(2e-5f));
+}
+
 TEST_CASE("Cross synthesis matches an analytic DFT and cepstral envelope oracle",
           "[signal][spectral-cross-synthesis][oracle][formant]") {
     auto processor = prepared();
