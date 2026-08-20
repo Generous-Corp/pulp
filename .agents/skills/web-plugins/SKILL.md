@@ -364,6 +364,27 @@ will tell you when you have not.
 
 ## Browser-host rules
 
+### Local demo HTTP servers are loopback-only, canonical, and non-reflecting
+
+Browser fixtures need real HTTP headers, but they are still test harnesses rather
+than general-purpose file servers. Use
+`examples/web-demos/tools/local-http-security.mjs` for local demo servers:
+
+- bind explicitly to `127.0.0.1`; an omitted host exposes Node's listener on all
+  interfaces and turns a private fixture into a LAN service;
+- validate and decode the raw origin-form request path before URL normalization,
+  reject malformed encodings, separators, dot segments, and non-allowlisted path
+  characters, then resolve the real path and prove it remains under the canonical
+  root (including after following symlinks);
+- return fixed plain-text error bodies. Never append `req.url`, a decoded path, or
+  another request-controlled value to a response body;
+- keep route aliases as explicit canonical roots. Do not fall back to a lexical
+  `startsWith(root)` check: sibling-prefix paths and symlinks bypass it.
+
+The helper's Node tests include traversal, encoded separators, malformed URLs,
+symlink escapes, reflected markup, and the loopback bind contract. Add a route-
+specific test when a fixture needs semantics beyond those shared invariants.
+
 - **Probe for WebGL2; a browser without it is a shipping configuration.**
   `pulp::view::web::browser_host_gpu_available()` is the web analogue of
   `decide_gpu_host`. The mount path must fail loudly and asynchronously so the
@@ -380,6 +401,24 @@ will tell you when you have not.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
+
+### Web-player metadata is text, and links are web-only
+
+`@danielraffel/web-player` is a library boundary: demo titles, subtitles,
+parameter choice labels, source links, gallery links, and host labels can come
+from downstream package manifests. Build those fields with `createElement`,
+`textContent`, and `setAttribute`; `innerHTML` is reserved for package-owned
+static markup. Property assignment alone is not enough for links because a
+`javascript:` or `data:` URL remains executable when clicked, so resolve the URL
+and accept only `http:` / `https:` (relative links resolve through the page's
+base URL). Invalid optional links are omitted; an invalid gallery link falls
+back to the package gallery default.
+
+The dependency-free DOM shim in `packages/pulp-web-player/test/dom-shim.mjs`
+also receives library strings. Keep its HTML/selector scanners linear and cover
+long repeated whitespace/bracket inputs in `test/dom-security.test.mjs`; a test
+helper must not turn an adversarial label into a regular-expression denial of
+service.
 
 ## Landmine: CLAP has no parameter `unit` — only `value_to_text`
 

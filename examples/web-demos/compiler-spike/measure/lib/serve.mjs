@@ -9,7 +9,10 @@
 // Usage: node serve.mjs [port]   — or import { startServer } from it.
 import http from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize, resolve, relative } from "node:path";
+import { extname, normalize, resolve, relative } from "node:path";
+import {
+  LOOPBACK_HOST, canonicalRoot, decodeLocalRequestPath, resolveCanonicalAsset, sendFixedText,
+} from "../../../tools/local-http-security.mjs";
 
 // repo root = five levels up from .../measure/lib/serve.mjs
 export const REPO_ROOT = normalize(new URL("../../../../../", import.meta.url).pathname);
@@ -29,13 +32,14 @@ const MIME = {
 };
 
 export function startServer(port = 8794, root = REPO_ROOT) {
-  const rootAbs = normalize(root.endsWith("/") ? root : root + "/");
+  const rootAbs = canonicalRoot(root);
   const srv = http.createServer(async (req, res) => {
-    let p = decodeURIComponent(req.url.split("?")[0]);
-    if (p === "/favicon.ico") { res.writeHead(204); return res.end(); }
-    if (p === "/") p = "/index.html";
-    const fp = normalize(join(rootAbs, p));
-    if (!fp.startsWith(rootAbs)) { res.writeHead(403); return res.end(); }
+    const requestPath = decodeLocalRequestPath(req.url);
+    if (!requestPath) return sendFixedText(res, 400, "bad request");
+    if (requestPath.pathname === "/favicon.ico") { res.writeHead(204); return res.end(); }
+    const segments = requestPath.segments.length ? requestPath.segments : ["index.html"];
+    const fp = resolveCanonicalAsset(rootAbs, segments);
+    if (!fp) return sendFixedText(res, 404, "not found");
     try {
       const data = await readFile(fp);
       res.writeHead(200, {
@@ -45,9 +49,9 @@ export function startServer(port = 8794, root = REPO_ROOT) {
         "cache-control": "no-store",
       });
       res.end(data);
-    } catch { res.writeHead(404); res.end("not found: " + p); }
+    } catch { sendFixedText(res, 404, "not found"); }
   });
-  return new Promise((resolve) => srv.listen(port, () => resolve(srv)));
+  return new Promise((resolve) => srv.listen(port, LOOPBACK_HOST, () => resolve(srv)));
 }
 
 // Run directly: node serve.mjs [port]

@@ -12,6 +12,7 @@
 // as a FLAT static deploy (GitHub Pages / Cloudflare Pages, no headers).
 
 import { parsePatch, encodeLKB0, diffGraphs, PARAM_META, VERBS, convertUnit, EXAMPLES, T } from "./lk-dsl.mjs";
+import { tokenizeHighlightLine } from "./highlight-tokens.mjs";
 
 const WASM_URL = "./dist/lk_kernel.wasm";
 const WORKLET_URL = "./lk-worklet.js";
@@ -158,13 +159,13 @@ function setRiff(on) {
 }
 
 // ── syntax highlight overlay (also drives scrubbing + squiggles) ─────────────
-const NUM_RE = /[+-]?(?:\d+\.?\d*|\.\d+)(?:khz|hz|ms|s|db|ct)?/y;
 function renderHighlight(text, errors) {
   const errLines = new Set((errors || []).map((e) => e.line));
   const infoLines = new Set((errors || []).filter((e) => e.level === "info" || e.level === "warn").map((e) => e.line));
   numberTokens = [];
   const lines = text.split("\n");
-  let offset = 0, nid = 0, html = "";
+  let offset = 0, nid = 0;
+  const fragment = document.createDocumentFragment();
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
     const verbM = line.match(/=\s*([a-zA-Z]\w*)\s*\(/);
@@ -172,54 +173,24 @@ function renderHighlight(text, errors) {
     let cls = "";
     if (errLines.has(li + 1)) cls = " errline";
     else if (infoLines.has(li + 1)) cls = " infoline";
-    html += `<div class="ln${cls}">` + tokenizeLine(line, offset, () => nid++, lineVerb) + "</div>";
+    const lineElement = document.createElement("div");
+    lineElement.className = `ln${cls}`;
+    const result = tokenizeHighlightLine(line, offset, lineVerb, () => nid++);
+    for (const token of result.tokens) numberTokens[token.id] = token;
+    for (const part of result.parts) {
+      if (!part.className) lineElement.append(document.createTextNode(part.text));
+      else {
+        const span = document.createElement("span");
+        span.className = part.className;
+        span.textContent = part.text;
+        if (part.dataset) span.dataset.nid = part.dataset.nid;
+        lineElement.append(span);
+      }
+    }
+    fragment.append(lineElement);
     offset += line.length + 1;
   }
-  const ov = $("overlay"); if (ov) ov.innerHTML = html || "<div class='ln'></div>";
-}
-
-function tokenizeLine(line, baseOffset, nextId, lineVerb) {
-  let out = "", i = 0, currentKey = null;
-  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  while (i < line.length) {
-    const rest = line.slice(i);
-    if (rest[0] === "#") { out += `<span class="c-com">${esc(rest)}</span>`; break; }
-    if (/\s/.test(rest[0])) { const m = rest.match(/^\s+/)[0]; out += esc(m); i += m.length; continue; }
-    // note.hz / note.gate
-    const nm = rest.match(/^note\.\w+/);
-    if (nm) { out += `<span class="c-note">${esc(nm[0])}</span>`; i += nm[0].length; continue; }
-    // number (+ unit)
-    NUM_RE.lastIndex = 0;
-    const num = NUM_RE.exec(rest);
-    if (num && num.index === 0 && /[\d.]/.test(num[0].replace(/^[+-]/, "")[0] || "")) {
-      const txt = num[0];
-      const unitM = txt.match(/(khz|hz|ms|s|db|ct)$/i);
-      const unit = unitM ? unitM[1].toLowerCase() : "";
-      const val = parseFloat(txt);
-      const id = nextId();
-      const prevCh = out.replace(/<[^>]*>/g, "").trimEnd().slice(-1);
-      const noteMul = (prevCh === "*" || prevCh === "+");
-      numberTokens[id] = { start: baseOffset + i, len: txt.length, value: val, unit, verb: lineVerb, key: currentKey, noteMul };
-      out += `<span class="c-num" data-nid="${id}">${esc(txt)}</span>`;
-      i += txt.length; continue;
-    }
-    // identifier / verb / key
-    const idm = rest.match(/^[a-zA-Z_]\w*/);
-    if (idm) {
-      const word = idm[0]; const after = line.slice(i + word.length).match(/^\s*(.)/);
-      const nxt = after ? after[1] : "";
-      let klass = "c-id";
-      if (nxt === "(") klass = "c-verb";
-      else if (nxt === ":") { klass = "c-key"; currentKey = word.toLowerCase(); }
-      else if (word === "out") klass = "c-out";
-      out += `<span class="${klass}">${esc(word)}</span>`;
-      i += word.length; continue;
-    }
-    if (rest[0] === ",") currentKey = null;
-    if (rest[0] === "~") { out += `<span class="c-fb">~</span>`; i++; continue; }
-    out += `<span class="c-punct">${esc(rest[0])}</span>`; i++;
-  }
-  return out || "&nbsp;";
+  const ov = $("overlay"); if (ov) ov.replaceChildren(fragment);
 }
 
 // ── scrubbing: drag a number, hear it ────────────────────────────────────────

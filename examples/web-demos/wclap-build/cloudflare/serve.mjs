@@ -16,8 +16,11 @@
 // what you test locally is what ships.
 
 import { createServer } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { extname, resolve } from "node:path";
+import {
+  LOOPBACK_HOST, canonicalRoot, decodeLocalRequestPath, resolveCanonicalAsset, sendFixedText,
+} from "../../tools/local-http-security.mjs";
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(k);
@@ -32,6 +35,7 @@ if (!existsSync(DIR)) {
                 `  node assemble-gallery.mjs --build <wclap-build> --wam-build <…> --ui-build <…> --gpu-build <…>`);
   process.exit(2);
 }
+const DIR_CANONICAL = canonicalRoot(DIR);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -43,16 +47,10 @@ const MIME = {
 };
 
 createServer((req, res) => {
-  const url = (req.url || "/").split("?")[0];
-  let p = join(DIR, decodeURIComponent(url));
-  try {
-    if (existsSync(p) && statSync(p).isDirectory()) p = join(p, "index.html");
-  } catch { /* fall through to the 404 */ }
-  if (!existsSync(p)) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found: " + url);
-    return;
-  }
+  const requestPath = decodeLocalRequestPath(req.url);
+  if (!requestPath) return sendFixedText(res, 400, "bad request");
+  const p = resolveCanonicalAsset(DIR_CANONICAL, requestPath.segments, { indexFile: "index.html" });
+  if (!p) return sendFixedText(res, 404, "not found");
   res.writeHead(200, {
     "Content-Type": MIME[extname(p)] || "application/octet-stream",
     // The three that make SharedArrayBuffer legal. Mirrors ./_headers.
@@ -62,7 +60,7 @@ createServer((req, res) => {
     "Cache-Control": "no-store",
   });
   res.end(readFileSync(p));
-}).listen(PORT, () => {
+}).listen(PORT, LOOPBACK_HOST, () => {
   console.log(`serving ${DIR}`);
   console.log(`  http://localhost:${PORT}/                       the gallery`);
   console.log(`  http://localhost:${PORT}/super-convolver/wclap/ SuperConvolver (WebCLAP)`);
