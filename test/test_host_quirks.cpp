@@ -55,11 +55,26 @@ TEST_CASE("make_quirks_for Logic caps channel probe at 8",
     auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
     REQUIRE(q.logic_au_channel_probe_cap == 8);
     REQUIRE(q.logic_au_tail_time_conversion == true);
-    REQUIRE(q.logic_au_v2_container_resize == true);
     // GarageBand shares the same Logic quirks.
     auto gb = make_quirks_for(HostType::GarageBand, HostVersion{});
     REQUIRE(gb.logic_au_channel_probe_cap == 8);
-    REQUIRE(gb.logic_au_v2_container_resize == false);
+}
+
+TEST_CASE("AU v2 container resize remains validated only for Logic",
+          "[format][host-quirks][logic][isolation]") {
+    REQUIRE(make_quirks_for(HostType::LogicPro, HostVersion{12, 3})
+                .logic_au_v2_container_resize);
+
+    for (const auto host : {
+             HostType::GarageBand,
+             HostType::Unknown,
+             HostType::Reaper,
+             HostType::AbletonLive,
+             HostType::StudioOne,
+         }) {
+        INFO("host type " << static_cast<int>(host));
+        REQUIRE_FALSE(make_quirks_for(host, {}).logic_au_v2_container_resize);
+    }
 }
 
 TEST_CASE("make_quirks_for Reaper flips all 6 Reaper flags",

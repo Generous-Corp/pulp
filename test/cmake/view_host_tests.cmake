@@ -387,6 +387,7 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # each suite rather than moving to a shared helper.
 pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coalescer LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
 # The Windows editor's input state machine. Deliberately NOT gated on WIN32:

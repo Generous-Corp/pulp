@@ -1223,3 +1223,80 @@ TEST_CASE("mac harness: a throwing gesture handoff still drops pointer capture",
                                        .x = 200.0f, .y = 120.0f}));
     CHECK(probe->ups == 1);
 }
+
+// ── Pointer-coalescer engagement through the real frame driver ──────────
+//
+// The coalescer unit suite (test_pointer_coalescer.cpp) exercises the
+// component directly and CANNOT see whether the host ever opened the gate —
+// which is how 2026-08-18 shipped green tests over a gate that never opened:
+// the hidden-window NSTimer driver released held motion through the same
+// display_link_callback as the CVDisplayLink but never set
+// coalescePointerInput, so motion was never held and every drag silently
+// reverted to per-event dispatch. The fail-safe made the defect invisible
+// ("no improvement", never "broken"), so the only possible pin is a test
+// that observes the gate itself.
+//
+// Construction alone starts no driver — start_display_link() /
+// start_hidden_frame_timer() run only inside run_event_loop_until() — so
+// these cases run the host's real event loop (hidden, accessory policy) and
+// read the engagement state off the live view through the harness KVC seam.
+//
+// Discrimination: with the gate OFF (the pre-fix hidden path, and the CPU
+// host by design) the same script delivers one drag PER EVENT — the
+// per-event default the gesture cases above pin (drags == 2 with no driver
+// running). With the gate OPEN the burst collapses to one delivery. Both
+// halves of that contrast are asserted, so a silent no-op cannot pass here.
+TEST_CASE("mac harness: a running frame driver engages pointer coalescing",
+          "[mac][platform-harness][coalescer]") {
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        Point last_drag{};
+        std::string order;
+        void on_mouse_down(Point) override { ++downs; order += 'p'; }
+        void on_mouse_drag(Point pt) override { ++drags; last_drag = pt; order += 'd'; }
+        void on_mouse_up(Point) override { ++ups; order += 'u'; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<Probe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    // Before any driver runs, the opt-in must be OFF — the fail-safe default
+    // the CPU host relies on, since it has no flush driver.
+    CHECK(pt::pointer_coalescing_engagement(*host) == 0);
+
+    // One turn injects the press and a three-sample drag burst, so no frame
+    // tick can interleave and split the batch. ~430ms later — dozens of
+    // 60Hz timer ticks — the release lands. Stop the loop shortly after.
+    const std::vector<pt::TimedInput> script = {
+        {60, {{.phase = pt::SimulatedMouse::Phase::down, .x = 100.0f, .y = 100.0f},
+              {.phase = pt::SimulatedMouse::Phase::drag, .x = 140.0f, .y = 120.0f},
+              {.phase = pt::SimulatedMouse::Phase::drag, .x = 160.0f, .y = 130.0f},
+              {.phase = pt::SimulatedMouse::Phase::drag, .x = 180.0f, .y = 140.0f}}},
+        {500, {{.phase = pt::SimulatedMouse::Phase::up, .x = 180.0f, .y = 140.0f}}},
+    };
+    REQUIRE(pt::run_hidden_event_loop(*host, script, 600));
+
+    // THE pin: a running frame driver must have opened the gate. On the
+    // pre-fix hidden-timer path this read 0 forever.
+    CHECK(pt::pointer_coalescing_engagement(*host) == 1);
+
+    // The burst collapsed to ONE delivery, carrying the newest position,
+    // released by the frame driver between the two turns — not by the
+    // release, not per event.
+    CHECK(probe->downs == 1);
+    CHECK(probe->drags == 1);
+    CHECK(probe->last_drag.x == 180.0f);
+    CHECK(probe->last_drag.y == 140.0f);
+    CHECK(probe->ups == 1);
+    CHECK(probe->order == "pdu");   // motion never arrives after its release
+}

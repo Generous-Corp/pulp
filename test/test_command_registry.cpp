@@ -136,6 +136,75 @@ TEST_CASE("CommandRegistry::dispatch_key_event routes through ShortcutMap",
     REQUIRE(handler.calls_ == 1);
 }
 
+TEST_CASE("the open-settings convention binds the platform chord by default",
+          "[view][command_registry][settings]") {
+    // The framework-level preferred default: one well-known CommandID, one
+    // platform-standard chord (Cmd+, on macOS, Ctrl+, elsewhere). An app
+    // registers the command and a handler; the chord comes with it.
+    CommandRegistry reg;
+    reg.register_command(make_open_settings_command_info());
+
+    CountingHandler handler({kCommandOpenSettings});
+    reg.add_handler(&handler);
+
+    KeyEvent press_settings;
+    press_settings.key = kKeyComma;
+    press_settings.modifiers = kOpenSettingsModifiers;
+    press_settings.is_down = true;
+    REQUIRE(reg.dispatch_key_event(press_settings));
+    REQUIRE(handler.calls_ == 1);
+    REQUIRE(handler.last_id_ == kCommandOpenSettings);
+
+    // The bare comma (no primary modifier) must NOT fire settings — it is
+    // ordinary text input.
+    KeyEvent bare_comma;
+    bare_comma.key = kKeyComma;
+    bare_comma.modifiers = 0;
+    bare_comma.is_down = true;
+    REQUIRE_FALSE(reg.dispatch_key_event(bare_comma));
+    REQUIRE(handler.calls_ == 1);
+}
+
+TEST_CASE("an unregistered open-settings chord reports unconsumed",
+          "[view][command_registry][settings]") {
+    // Plugin-host policy: a DAW owns the keyboard. With no settings command
+    // registered, Cmd/Ctrl+, must report unconsumed so the host forwards the
+    // event unchanged. This is the half that keeps the convention opt-in.
+    CommandRegistry reg;
+
+    KeyEvent press_settings;
+    press_settings.key = kKeyComma;
+    press_settings.modifiers = kOpenSettingsModifiers;
+    press_settings.is_down = true;
+    REQUIRE_FALSE(reg.dispatch_key_event(press_settings));
+
+    // Registered but unclaimed (no handler knows the id) also forwards.
+    reg.register_command(make_open_settings_command_info());
+    REQUIRE_FALSE(reg.dispatch_key_event(press_settings));
+}
+
+TEST_CASE("a user rebind of the settings chord beats the default",
+          "[view][command_registry][settings]") {
+    // The convention is a default, not a lock-in: a ShortcutMap loaded
+    // before registration keeps the user's chord (same ordering contract as
+    // "loaded ShortcutMap takes priority over defaults" above).
+    pulp::state::PropertiesFile props;
+    ShortcutMap saved;
+    saved.bind(kKeyComma, kModCmd | kModShift, kCommandOpenSettings);
+    saved.save_to(props);
+
+    CommandRegistry reg;
+    REQUIRE(reg.shortcuts().load_from(props));
+    reg.register_command(make_open_settings_command_info());
+
+    // The user's chord survives; the platform default must NOT be added
+    // alongside it.
+    REQUIRE(reg.shortcuts().find(kKeyComma, kModCmd | kModShift) ==
+            kCommandOpenSettings);
+    REQUIRE(reg.shortcuts().find(kKeyComma, kOpenSettingsModifiers) ==
+            kInvalidCommandID);
+}
+
 TEST_CASE("CommandRegistry remove_handler stops dispatching to it",
           "[view][command_registry]") {
     CommandRegistry reg;
