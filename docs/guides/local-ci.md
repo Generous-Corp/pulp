@@ -1004,8 +1004,8 @@ the [tartci](https://github.com/danielraffel/tartci) repo (`scripts/leases.py`,
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
-validation lane may run. The mac lane is **7200s (2h)** as of 2026-07-27, raised
-from 3600s.
+validation lane may run. The mac lane is **14400s (4h)** as of 2026-08-20,
+raised from 7200s after the earlier 3600s ceiling also proved too short.
 
 The reason the value matters more than it looks: when a lane hits it, Shipyard
 reports
@@ -1106,7 +1106,7 @@ Two things are deliberate and worth preserving:
 **Do not lift this into a lane whose timeout the build cannot finish under.**
 Arming a sentinel against a too-short cap produces an infinite
 wipe → cold rebuild → timeout → wipe loop, roughly an hour of a shared machine
-per cycle. `[targets.mac] timeout_secs` is `7200` for this reason; check it
+per cycle. `[targets.mac] timeout_secs` is `14400` for this reason; check it
 before changing either number. `tools/scripts/test_build_dir_sentinel.py` asserts
 both directions plus the arm/clear pairing — a profile that arms without clearing
 wipes its build dir on every run.

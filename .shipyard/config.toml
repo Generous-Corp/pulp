@@ -123,7 +123,7 @@ versioning_config   = "tools/scripts/versioning.json"
 # left its marker behind; `clear` removes the marker on a clean build. It is
 # armed BEFORE configure so a run killed during configure is caught too.
 #
-# This is only safe because `[targets.mac] timeout_secs` is 7200. Arming a
+# This is only safe because `[targets.mac] timeout_secs` is 14400. Arming a
 # sentinel on a cap the build cannot finish under yields an infinite
 # wipe → cold rebuild → timeout → wipe loop. Check that first if you change
 # either number.
@@ -291,7 +291,13 @@ workflow = "build"
 #
 # Queue wait is NOT charged against this budget (the clock starts when the lane
 # starts), so 3600 was only ever bounding the build itself.
-timeout_secs = 7200
+#
+# 2026-08-20: raised 7200 -> 14400 after an exact-head, clean, governed Debug
+# build with examples enabled was killed at 7337s while still making normal
+# progress at 91%. The next complete neighboring lane took 9879s wall time and
+# passed all 20,669 tests. Four hours restores hang-guard headroom without
+# changing Debug coverage, examples, governed parallelism, or the test set.
+timeout_secs = 14400
 
 # ── Cloud dispatch (manual only) ───────────────────────────────────────────
 # Namespace remains available only for explicit operator-dispatched cloud
