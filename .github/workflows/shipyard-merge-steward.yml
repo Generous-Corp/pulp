@@ -1,12 +1,15 @@
 name: Shipyard merge steward
 
 # Single logical, model-free PR-landing controller. Manual dispatch remains
-# dry-run by default; the serialized schedule applies deterministic mutations
-# and may dispatch at most one fenced recovery exception. Every exception is
+# dry-run by default. The schedule stays commented out until one manual apply +
+# recovery dispatch proves the recovery judgement wiring end to end. Once
+# enabled, each serialized scheduled tick applies deterministic mutations and
+# may dispatch at most one fenced recovery exception. Every exception is
 # mirrored into one durable GitHub issue before a failing tick exits.
 on:
-  schedule:
-    - cron: '*/10 * * * *'
+  # Activation gate: uncomment only after the manual recovery proof succeeds.
+  # schedule:
+  #   - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       apply:

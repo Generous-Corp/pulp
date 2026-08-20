@@ -19,15 +19,17 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
         cls.doc = yaml.load(cls.text, Loader=yaml.BaseLoader)
 
-    def test_controller_is_scheduled_and_serialized(self) -> None:
+    def test_controller_schedule_is_activation_disabled_and_serialized(self) -> None:
         triggers = self.doc["on"]
-        self.assertEqual(set(triggers), {"schedule", "workflow_dispatch"})
-        self.assertEqual(triggers["schedule"], [{"cron": "*/10 * * * *"}])
+        self.assertEqual(set(triggers), {"workflow_dispatch"})
+        self.assertIn("# schedule:", self.text)
+        self.assertIn("#   - cron: '*/10 * * * *'", self.text)
+        self.assertIn("manual recovery proof succeeds", self.text)
         concurrency = self.doc["concurrency"]
         self.assertIn("shipyard-merge-steward-", concurrency["group"])
         self.assertEqual(concurrency["cancel-in-progress"], "false")
 
-    def test_schedule_applies_and_dispatches_recovery_while_manual_defaults_dry(self) -> None:
+    def test_schedule_contract_applies_and_dispatches_while_manual_defaults_dry(self) -> None:
         env = self.doc["jobs"]["reconcile"]["env"]
         self.assertEqual(
             env["STEWARD_APPLY"],
