@@ -782,10 +782,22 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   counted. Deadline mode treats a zero producer return as “not ready yet,” not
   permanent EOF: later pumps retry at the same frame or seek to a playhead that
   already counted the interval as starved. Count starvation against the
-  *declared* frame count. Size the implicit ring for both the declared
-  wall-clock lookahead and the largest audio callback, while
-  `StreamingSampleSource` independently caps producer read-ahead at the
-  declaration's horizon.
+  *declared* frame count. Size the implicit ring for the declared wall-clock
+  lookahead, the largest audio callback, and any declared preroll, while
+  `StreamingSampleSource` independently caps producer read-ahead at the larger
+  of the lookahead and the preroll. A declared preroll is enforced
+  synchronously inside prepare/seek — a producer that cannot fill it fails the
+  call rather than silently under-delivering.
+- Repositioning a `BufferedContentSource` is epoch-scoped, the
+  `GeneratedEventSource::begin_playback_epoch` shape: `seek()` and
+  `loop_wrap()` are control-thread operations that must begin a nonzero,
+  strictly newer epoch, and they tolerate an in-flight producer call — it is
+  stopped through its token within one chunk and its frames are discarded with
+  the old ring before the rebuilt ring is primed at the new position.
+  `cancel_production()` interrupts the in-flight chunk without repositioning
+  and without latching; the next pump retries the same position. The source
+  never wraps on its own: the transport owns looping and calls `loop_wrap()`
+  at the declared boundary.
 - `GeneratedEventSource` is a bounded push handoff for producer-generated MIDI:
   keep revisable staging separate from immutable committed SPSC slots, begin a
   nonzero strictly newer playback epoch quiescently on seek/restart, and commit
