@@ -30,7 +30,8 @@ template <typename SampleType> struct SpectralFeatureFrameT {
 
 /// Fixed-capacity streaming centroid, flatness, rolloff, and flux analysis.
 ///
-/// This reuses the shared StreamingAnalysisWindowT FFT owner. prepare() is
+/// This reuses the shared StreamingAnalysisWindowT FFT owner with its symmetric
+/// Hann window. prepare() is
 /// control-thread work and may allocate only inside FftT. After a successful
 /// prepare, reset() and process() allocate nothing. The instance and its
 /// nothrow sink have one processing-thread owner; callers publish copied frames
@@ -47,7 +48,7 @@ class SpectralFeatureFrontEndT {
     using Frame = SpectralFeatureFrameT<SampleType>;
 
     [[nodiscard]] bool prepare(const StreamingAnalysisConfig& config) {
-        if (!window_.prepare(config, detail::AnalysisWindow::rectangular))
+        if (!window_.prepare(config, detail::AnalysisWindow::symmetric_hann))
             return false;
         previous_normalized_magnitudes_.fill(0.0);
         have_previous_ = false;

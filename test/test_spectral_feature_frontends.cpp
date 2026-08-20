@@ -43,7 +43,7 @@ std::array<float, Size> bin_tone(std::size_t bin, double amplitude = 1.0) {
 
 } // namespace
 
-TEST_CASE("spectral feature tone has closed-form centroid rolloff and low flatness",
+TEST_CASE("spectral feature tone has centered centroid bounded rolloff and low flatness",
           "[signal][spectral-feature-frontends]") {
     constexpr std::size_t size = 256;
     constexpr std::size_t tone_bin = 25;
@@ -57,9 +57,11 @@ TEST_CASE("spectral feature tone has closed-form centroid rolloff and low flatne
     REQUIRE(frames.size == 1);
     REQUIRE(frames.frames[0].valid);
     constexpr double expected_hz = 2500.0;
-    CHECK(frames.frames[0].centroid_hz == Catch::Approx(expected_hz).margin(0.01));
-    CHECK(frames.frames[0].rolloff_hz == Catch::Approx(expected_hz).margin(0.01));
-    CHECK(frames.frames[0].flatness < 1.0e-6);
+    constexpr double bin_width_hz = 100.0;
+    CHECK(frames.frames[0].centroid_hz == Catch::Approx(expected_hz).margin(1.0));
+    CHECK(frames.frames[0].rolloff_hz >= expected_hz);
+    CHECK(frames.frames[0].rolloff_hz <= expected_hz + bin_width_hz);
+    CHECK(frames.frames[0].flatness < 1.0e-3);
     CHECK(frames.frames[0].flux == 0.0);
     CHECK(frames.frames[0].window_start_frame == 0);
     CHECK(frames.frames[0].window_center_frame == size / 2);
@@ -110,6 +112,34 @@ TEST_CASE("identical consecutive spectra have exactly zero normalized flux",
     CHECK(frames.frames[1].flux == 0.0);
 }
 
+TEST_CASE("off-bin stationary tone remains stable across overlapping windows",
+          "[signal][spectral-feature-frontends]") {
+    constexpr std::size_t size = 256;
+    constexpr std::size_t hop = 64;
+    constexpr std::size_t frame_count = 4;
+    constexpr double frequency_hz = 2535.0;
+    std::array<float, size + (frame_count - 1) * hop> tone{};
+    constexpr double two_pi = 6.283185307179586476925286766559;
+    for (std::size_t i = 0; i < tone.size(); ++i) {
+        tone[i] =
+            static_cast<float>(std::sin(two_pi * frequency_hz * static_cast<double>(i) / 25600.0));
+    }
+    const float* channels[] = {tone.data()};
+
+    SpectralFeatureFrontEndT<float, size, 1> front_end;
+    REQUIRE(front_end.prepare(config(size, hop)));
+    FrameCollector<decltype(front_end)::Frame, frame_count> frames;
+    REQUIRE(front_end.process(channels, 1, tone.size(), std::ref(frames)));
+    REQUIRE(frames.size == frame_count);
+    for (std::size_t i = 0; i < frames.size; ++i) {
+        REQUIRE(frames.frames[i].valid);
+        CHECK(frames.frames[i].centroid_hz == Catch::Approx(frequency_hz).margin(3.0));
+        CHECK(frames.frames[i].flatness < 1.0e-3);
+        if (i > 0)
+            CHECK(frames.frames[i].flux < 5.0e-5);
+    }
+}
+
 TEST_CASE("silence and DC emit finite floor-bounded degenerate features",
           "[signal][spectral-feature-frontends]") {
     constexpr std::size_t size = 64;
@@ -127,8 +157,8 @@ TEST_CASE("silence and DC emit finite floor-bounded degenerate features",
     CHECK(frames.frames[0].rolloff_hz == 0.0);
     CHECK(frames.frames[0].flux == 0.0);
     REQUIRE(frames.frames[1].valid);
-    CHECK(frames.frames[1].centroid_hz == Catch::Approx(0.0).margin(1.0e-9));
-    CHECK(frames.frames[1].rolloff_hz == Catch::Approx(0.0).margin(1.0e-9));
+    CHECK(std::isfinite(frames.frames[1].centroid_hz));
+    CHECK(std::isfinite(frames.frames[1].rolloff_hz));
     CHECK(frames.frames[1].flatness >= 0.0);
     CHECK(frames.frames[1].flatness <= 1.0);
     CHECK(std::isfinite(frames.frames[1].flux));

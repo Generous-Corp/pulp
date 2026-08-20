@@ -3739,7 +3739,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_feature_frontends.hpp",
-      "fingerprint": "sha256:dc6ec8dea0b36c10f9428c4d5a558184a7368fa012459c37f617fdf63788de75",
+      "fingerprint": "sha256:1bcd7215e8b0bf10c1186344e22be77e8278f85415ae581afec2488ea6886dee",
       "include": "pulp/signal/spectral_feature_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
