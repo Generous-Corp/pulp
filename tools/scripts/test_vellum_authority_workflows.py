@@ -44,7 +44,7 @@ def step_named(job: dict[str, object], name: str) -> dict[str, object]:
 
 
 class VellumAuthorityWorkflowTests(unittest.TestCase):
-    def test_privileged_pr_gate_checks_out_only_literal_protected_main(self) -> None:
+    def test_privileged_pr_gate_checks_out_only_resolved_protected_main(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
         trigger = value.get(True) or value["on"]
         self.assertEqual(trigger["pull_request_target"]["branches"], ["main"])
@@ -55,7 +55,7 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
         self.assertEqual(
             checkout["with"],
             {
-                "ref": "refs/heads/main",
+                "ref": "${{ steps.pr.outputs.base_sha }}",
                 "fetch-depth": 0,
                 "persist-credentials": False,
             },
@@ -80,6 +80,12 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
         )
         self.assertIn('actual_base="$(git rev-parse HEAD)"', verify["run"])
         self.assertIn('[ "$actual_base" != "$EXPECTED_BASE" ]', verify["run"])
+        resolve = step_named(job, "Resolve pull request")["run"]
+        self.assertIn('git/ref/heads/main" --jq .object.sha', resolve)
+        self.assertNotIn("jq -r .base.sha", resolve)
+        target_check = resolve.index('[ "$base_repository" != "$GITHUB_REPOSITORY" ]')
+        protected_ref = resolve.index("git/ref/heads/main")
+        self.assertLess(target_check, protected_ref)
 
     def test_proposed_worktree_is_data_only(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
@@ -92,6 +98,20 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             validation,
             r'(?m)^\s*(?:bash|sh|python3)\s+"?\$proposed_tree(?:/|\")',
         )
+
+    def test_merge_result_is_bound_to_resolved_base_and_source_head(self) -> None:
+        value = workflow("vellum-trusted-gate.yml")
+        validation = step_named(
+            value["jobs"]["trusted-gate"],
+            "Validate proposed data and publish head status",
+        )["run"]
+        self.assertIn('merge_base=$(git rev-parse "$proposed_head^1")', validation)
+        self.assertIn('merge_source=$(git rev-parse "$proposed_head^2")', validation)
+        coherence = validation.index('[ "$merge_base" != "$PR_BASE" ]')
+        pending = validation.index("post_status pending")
+        validators = validation.index("run_validator python3")
+        self.assertLess(coherence, pending)
+        self.assertLess(coherence, validators)
         for trusted_script in (
             "vellum_freeze_check.py",
             "vellum_expansion_watch_check.py",

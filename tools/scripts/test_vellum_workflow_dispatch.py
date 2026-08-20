@@ -32,7 +32,8 @@ FAKE_GH = textwrap.dedent(
     [ -z "${GH_CALL_LOG:-}" ] || printf '%s\\n' "$*" >> "$GH_CALL_LOG"
     body=''
     case "$*" in
-      *pulls/111*) body='{"state":"open","base":{"sha":"BASE_OPEN","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_OPEN"}}' ;;
+      *git/ref/heads/main*) body='{"object":{"sha":"CURRENT_MAIN"}}' ;;
+      *pulls/111*) body='{"state":"open","base":{"sha":"STALE_PR_BASE","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_OPEN"}}' ;;
       *pulls/112*) body='{"state":"open","base":{"sha":"BASE_112","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_112"}}' ;;
       *pulls/113*) body='{"state":"open","base":{"sha":"BASE_113","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_113"}}' ;;
       *pulls/114*) body='{"state":"open","base":{"sha":"BASE_114","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_114"}}' ;;
@@ -42,7 +43,7 @@ FAKE_GH = textwrap.dedent(
       *pulls/222*) body='{"state":"closed","base":{"sha":"BASE_SHUT","ref":"main","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_SHUT"}}' ;;
       *pulls/333*) body='{"state":"open","base":{"sha":"BASE_OTHER","ref":"main","repo":{"full_name":"attacker/pulp"}},"head":{"sha":"HEAD_OTHER"}}' ;;
       *pulls/444*) body='{"state":"open","base":{"sha":"BASE_OTHER","ref":"develop","repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_OTHER"}}' ;;
-      *vellum-freeze-check.yml/runs*HEAD_OPEN*) body='{"workflow_runs":[{"id":9001,"event":"pull_request","head_sha":"HEAD_OPEN","status":"completed","conclusion":"failure","created_at":"2026-08-25T00:00:00Z","pull_requests":[{"number":111,"head":{"sha":"HEAD_OPEN"},"base":{"sha":"BASE_OPEN"}}]}]}' ;;
+      *vellum-freeze-check.yml/runs*HEAD_OPEN*) body='{"workflow_runs":[{"id":9001,"event":"pull_request","head_sha":"HEAD_OPEN","status":"completed","conclusion":"failure","created_at":"2026-08-25T00:00:00Z","pull_requests":[{"number":111,"head":{"sha":"HEAD_OPEN"},"base":{"sha":"STALE_PR_BASE"}}]}]}' ;;
       *vellum-freeze-check.yml/runs*HEAD_112*) body='{"workflow_runs":[{"id":9012,"event":"workflow_dispatch","head_sha":"HEAD_112","status":"completed","conclusion":"failure","created_at":"2026-08-25T00:00:00Z","pull_requests":[{"number":112,"head":{"sha":"HEAD_112"},"base":{"sha":"BASE_112"}}]}]}' ;;
       *vellum-freeze-check.yml/runs*HEAD_113*) body='{"workflow_runs":[{"id":9013,"event":"pull_request","head_sha":"HEAD_113","status":"completed","conclusion":"failure","created_at":"2026-08-25T00:00:00Z","pull_requests":[{"number":999,"head":{"sha":"HEAD_113"},"base":{"sha":"BASE_113"}}]}]}' ;;
       *vellum-freeze-check.yml/runs*HEAD_114*) body='{"workflow_runs":[{"id":9014,"event":"pull_request","head_sha":"OTHER_HEAD","status":"completed","conclusion":"failure","created_at":"2026-08-25T00:00:00Z","pull_requests":[{"number":114,"head":{"sha":"OTHER_HEAD"},"base":{"sha":"BASE_114"}}]}]}' ;;
@@ -157,9 +158,17 @@ class TrustedGateResolve(unittest.TestCase):
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out, {
-            "active": "true", "base_sha": "BASE_OPEN",
+            "active": "true", "base_sha": "CURRENT_MAIN",
             "head_sha": "HEAD_OPEN", "number": "111",
         })
+
+    def test_behind_pr_uses_protected_main_not_stale_pr_base(self):
+        rc, out, _ = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "workflow_dispatch", "DISPATCH_PR": "111",
+        })
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["base_sha"], "CURRENT_MAIN")
+        self.assertNotEqual(out["base_sha"], "STALE_PR_BASE")
 
     def test_delayed_event_for_closed_pr_is_an_inert_success(self):
         rc, out, err = _run(self.script(), {
@@ -177,7 +186,7 @@ class TrustedGateResolve(unittest.TestCase):
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out["active"], "true")
-        self.assertEqual(out["base_sha"], "BASE_OPEN")
+        self.assertEqual(out["base_sha"], "CURRENT_MAIN")
         self.assertEqual(out["head_sha"], "HEAD_OPEN")
         self.assertEqual(out["number"], "111")
 

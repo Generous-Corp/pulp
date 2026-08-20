@@ -63,7 +63,6 @@ jobs:
             echo "PR #$number is now $state — ignoring stale pull_request_target event" >&2
             exit 0
           fi
-          base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
           head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
           base_repository="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
           base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
@@ -71,6 +70,12 @@ jobs:
             echo "PR #$number targets $base_repository:$base_ref; only $GITHUB_REPOSITORY:main is trusted" >&2
             exit 1
           fi
+          # `pulls/:number.base.sha` is the base snapshot recorded for the PR,
+          # not necessarily the current protected-branch tip. Resolve main only
+          # after proving the PR targets this repository's protected branch.
+          # The post-checkout comparison below closes the remaining race before
+          # any secret is minted.
+          base="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
           {
             echo "active=true"
             echo "base_sha=$base"
@@ -83,10 +88,10 @@ jobs:
         if: steps.pr.outputs.active == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Keep the privileged checkout independent of every value resolved
-          # from the pull request. The next step proves this protected ref is
-          # still the exact live base before any secret is minted.
-          ref: refs/heads/main
+          # This exact SHA came from the protected ref only after the PR target
+          # was verified above. Do not re-resolve the moving branch here: main
+          # advancing between these steps must not wedge the required gate.
+          ref: ${{ steps.pr.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -97,7 +102,7 @@ jobs:
         run: |
           actual_base="$(git rev-parse HEAD)"
           if [ "$actual_base" != "$EXPECTED_BASE" ]; then
-            echo "protected main advanced while resolving the PR; re-run with fresh controls" >&2
+            echo "trusted checkout does not match the resolved protected-main commit" >&2
             echo "expected=$EXPECTED_BASE actual=$actual_base" >&2
             exit 1
           fi
@@ -205,6 +210,16 @@ jobs:
             # say so: a conflicted PR must not be reported as a freeze violation.
             echo "vellum-trusted-gate: refs/pull/$PR_NUMBER/merge is unavailable;" \
                  "the PR likely has merge conflicts. Resolve them and re-run." >&2
+            exit 1
+          fi
+          merge_base=$(git rev-parse "$proposed_head^1")
+          merge_source=$(git rev-parse "$proposed_head^2")
+          if [ "$merge_base" != "$PR_BASE" ] || [ "$merge_source" != "$PR_HEAD" ]; then
+            echo "vellum-trusted-gate: GitHub's merge ref is not coherent with" \
+                 "the resolved protected-main and PR-head commits; re-run after" \
+                 "GitHub refreshes refs/pull/$PR_NUMBER/merge." >&2
+            echo "expected base=$PR_BASE head=$PR_HEAD;" \
+                 "merge parents base=$merge_base head=$merge_source" >&2
             exit 1
           fi
           post_status pending 'Validating with base-branch controls'
