@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260820-pr7700-source-contract-recheck",
+  "created_at": "2026-08-20T04:15:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the scheduled 90-day recheck of the import-validation source contracts whose last_verified stamps rolled past their due date at 2026-08-20 UTC, which otherwise fails every merge_group under the strict source-contract gate. Only the five last_verified date stamps moved; no contract content, fixtures, validation scripts, or importer behavior changed, and both check-source-contracts.py --strict and test_source_contracts.py pass on the stamped tree. Watch-only: no design-import or rendering authority is transferred.",
+  "tests": [
+    "check-source-contracts.py --strict",
+    "test_source_contracts.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
