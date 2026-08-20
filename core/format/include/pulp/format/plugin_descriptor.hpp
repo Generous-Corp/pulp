@@ -150,18 +150,25 @@ void configure_native_viewport(NativeHost& host, const ViewSize& hints) {
     }
 }
 
-/// Commit viewport state after an editor-initiated host resize succeeds.  A
-/// fixed-design editor adopts the explicitly requested coordinate space (the
-/// historical behavior); a responsive editor changes only its host aspect and
-/// continues laying out against the live host bounds.
+/// Commit viewport state after an editor-initiated host resize succeeds. An
+/// completely authored viewport keeps its coordinate space so the native host
+/// scales rather than reflows it. A legacy or partially authored pinned editor
+/// adopts the requested coordinate space rather than mixing coordinate systems.
+/// A responsive editor changes only its host aspect and continues laying out at
+/// live host bounds.
 template <typename NativeHost>
 void commit_editor_requested_viewport(NativeHost& host,
                                       const ViewSize& hints,
                                       uint32_t width,
                                       uint32_t height) {
     if (should_pin_design_viewport(hints)) {
-        host.set_design_viewport(static_cast<float>(width),
-                                 static_cast<float>(height));
+        const bool has_authored_viewport =
+            hints.design_width > 0 && hints.design_height > 0;
+        host.set_design_viewport(
+            static_cast<float>(has_authored_viewport
+                ? design_viewport_width(hints) : width),
+            static_cast<float>(has_authored_viewport
+                ? design_viewport_height(hints) : height));
     }
     const double aspect_ratio = should_lock_view_aspect(hints)
         ? hints.aspect_ratio
