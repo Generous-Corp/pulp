@@ -592,8 +592,10 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
         node.audio_widget = detect_audio_widget(role);
     }
     if (node.audio_widget == AudioWidgetType::none) {
-        const auto detect_source = class_str == node.name ? node.name : node.name + " " + class_str;
-        node.audio_widget = detect_audio_widget(detect_source);
+        node.audio_widget = detect_audio_widget(node.name);
+    }
+    if (node.audio_widget == AudioWidgetType::none && class_str != node.name) {
+        node.audio_widget = detect_audio_widget(node.name + " " + class_str);
     }
 
     // Style props -> IRStyle. Only the common ones are mapped; anything

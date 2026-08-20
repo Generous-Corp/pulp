@@ -211,6 +211,9 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
         pad.appendChild(make('value', { 'data-pulp-role': 'knob' }));
         pad.appendChild(make('value slider-role', { 'data-pulp-role': 'slider' }));
         pad.appendChild(make('value dial-role', { 'data-pulp-role': 'dial' }));
+        pad.appendChild(make('value id-control', {
+            id: 'gainKnob', 'data-pulp-param': 'param_2'
+        }));
         pad.appendChild(make('ValueKnob'));
         editor.appendChild(pad);
         for (var i = 0; i < 4; ++i) editor.appendChild(make('filler-' + i));
@@ -233,6 +236,7 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
     const IRNode* explicit_role = nullptr;
     const IRNode* slider_role = nullptr;
     const IRNode* dial_role = nullptr;
+    const IRNode* id_control = nullptr;
     const IRNode* value_knob = nullptr;
     std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
         const auto it = node.attributes.find("class");
@@ -246,6 +250,7 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
         else if (cls == "value") explicit_role = &node;
         else if (cls == "value slider-role") slider_role = &node;
         else if (cls == "value dial-role") dial_role = &node;
+        else if (cls == "value id-control") id_control = &node;
         else if (cls == "ValueKnob") value_knob = &node;
         for (const auto& child : node.children) walk(child);
     };
@@ -267,6 +272,9 @@ TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
     REQUIRE(slider_role->audio_widget == AudioWidgetType::fader);
     REQUIRE(dial_role != nullptr);
     REQUIRE(dial_role->audio_widget == AudioWidgetType::knob);
+    REQUIRE(id_control != nullptr);
+    REQUIRE(id_control->audio_widget == AudioWidgetType::knob);
+    REQUIRE(id_control->attributes.at("data-pulp-param") == "param_2");
     REQUIRE(value_knob != nullptr);
     REQUIRE(value_knob->audio_widget == AudioWidgetType::knob);
 }
