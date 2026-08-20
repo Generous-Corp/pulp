@@ -20,11 +20,12 @@ import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { resolveFixtureAsset } from "./fixture-assets.mjs";
+import { LOOPBACK_HOST, decodeLocalRequestPath, sendFixedText } from "../../tools/local-http-security.mjs";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const SOURCE_DIR = resolve(HERE, "..");
 const PORT = 8734;
-const PAGE = `http://localhost:${PORT}/`;
+const PAGE = `http://${LOOPBACK_HOST}:${PORT}/`;
 
 function arg(flag, dflt) {
   const i = process.argv.indexOf(flag);
@@ -109,7 +110,9 @@ const MIME = {
 };
 
 const server = http.createServer(async (req, res) => {
-  const path = req.url.split("?")[0];
+  const requestPath = decodeLocalRequestPath(req.url);
+  if (!requestPath) return sendFixedText(res, 400, "bad request");
+  const path = requestPath.pathname;
   const head = {
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-embedder-policy": "require-corp",
@@ -119,18 +122,17 @@ const server = http.createServer(async (req, res) => {
     return res.end(INDEX_HTML);
   }
   const file = resolveFixtureAsset(req.url, { sourceDir: SOURCE_DIR, buildDir });
-  if (!file) { res.writeHead(403); return res.end(); }
+  if (!file) return sendFixedText(res, 404, "not found");
   try {
     const data = await readFile(file);
     res.writeHead(200, { ...head, "content-type": MIME[extname(file)] || "application/octet-stream" });
     res.end(data);
   } catch {
     console.log("  [404]", path);
-    res.writeHead(404);
-    res.end("not found: " + path);
+    sendFixedText(res, 404, "not found");
   }
 });
-await new Promise((r) => server.listen(PORT, r));
+await new Promise((r) => server.listen(PORT, LOOPBACK_HOST, r));
 
 const steps = [];
 const check = (name, pass, detail = "") => {

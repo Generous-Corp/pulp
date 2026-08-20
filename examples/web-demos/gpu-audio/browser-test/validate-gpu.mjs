@@ -95,6 +95,9 @@ import { existsSync } from "node:fs";
 import { extname, resolve, join } from "node:path";
 import { chromium } from "playwright-core";
 import {
+  LOOPBACK_HOST, canonicalRoot, decodeLocalRequestPath, resolveCanonicalAsset, sendFixedText,
+} from "../../tools/local-http-security.mjs";
+import {
   convolve, firstOnset, makeNoise, maxScaledDeviation, relativeRmsError, rms,
 } from "./oracle.mjs";
 
@@ -102,8 +105,11 @@ const HERE = new URL(".", import.meta.url).pathname;
 const REPO = resolve(HERE, "../../../..");
 const PLAYER = resolve(REPO, "packages/pulp-web-player/src");
 const BRIDGE = resolve(HERE, "../js");           // gpu-bridge / gpu-worker / gpu-ring
+const PLAYER_ROOT = canonicalRoot(PLAYER);
+const BRIDGE_ROOT = canonicalRoot(BRIDGE);
+const HERE_ROOT = canonicalRoot(HERE);
 const PORT = 8736;
-const PAGE = `http://localhost:${PORT}/`;
+const PAGE = `http://${LOOPBACK_HOST}:${PORT}/`;
 
 function arg(flag, dflt) {
   const i = process.argv.indexOf(flag);
@@ -152,6 +158,7 @@ const die = (m) => { console.error("FAIL: " + m); process.exit(1); };
 if (!gpuWasm || !existsSync(gpuWasm)) die("--gpu-wasm <SuperConvolverGpu.wasm> is required");
 if (!gpuBuild || !existsSync(join(gpuBuild, "pulp-gpu-dsp.js")))
   die("--gpu-build <dir with pulp-gpu-dsp.js + .wasm> is required");
+const GPU_BUILD_ROOT = canonicalRoot(gpuBuild);
 for (const f of ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs"])
   if (!existsSync(join(BRIDGE, f))) die(`the browser GPU bridge is missing: ${join(BRIDGE, f)}`);
 
@@ -431,7 +438,9 @@ const MIME = {
 };
 
 const server = http.createServer(async (req, res) => {
-  const path = decodeURIComponent(req.url.split("?")[0]);
+  const requestPath = decodeLocalRequestPath(req.url);
+  if (!requestPath) return sendFixedText(res, 400, "bad request");
+  const { pathname: path, segments } = requestPath;
   const head = {
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-embedder-policy": "require-corp",
@@ -445,21 +454,20 @@ const server = http.createServer(async (req, res) => {
   if (path === "/dsp/tamper-shim.js") return send(TAMPER_SHIM, "text/javascript");
 
   let file = null;
-  if (path.startsWith("/player/")) file = resolve(PLAYER, path.slice(8));
-  else if (path.startsWith("/bridge/")) file = resolve(BRIDGE, path.slice(8));
-  else if (path.startsWith("/fixture/")) file = resolve(HERE, path.slice(9));
+  if (segments[0] === "player") file = resolveCanonicalAsset(PLAYER_ROOT, segments.slice(1));
+  else if (segments[0] === "bridge") file = resolveCanonicalAsset(BRIDGE_ROOT, segments.slice(1));
+  else if (segments[0] === "fixture") file = resolveCanonicalAsset(HERE_ROOT, segments.slice(1));
   else if (path === "/dsp/SuperConvolverGpu.wasm") file = resolve(gpuWasm);
-  else if (path.startsWith("/dsp/")) file = resolve(gpuBuild, path.slice(5));
-  if (!file) { res.writeHead(403); return res.end(); }
+  else if (segments[0] === "dsp" && GPU_BUILD_ROOT) file = resolveCanonicalAsset(GPU_BUILD_ROOT, segments.slice(1));
+  if (!file) return sendFixedText(res, 404, "not found");
   try {
     send(await readFile(file), MIME[extname(file)] || "application/octet-stream");
   } catch {
     console.log("  [404]", path);
-    res.writeHead(404);
-    res.end("not found: " + path);
+    sendFixedText(res, 404, "not found");
   }
 });
-await new Promise((r) => server.listen(PORT, r));
+await new Promise((r) => server.listen(PORT, LOOPBACK_HOST, r));
 
 const steps = [];
 const check = (name, pass, detail = "") => {

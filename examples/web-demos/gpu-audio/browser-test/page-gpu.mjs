@@ -23,6 +23,7 @@ import { chromium } from "playwright-core";
 import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
+import { LOOPBACK_HOST, canonicalRoot, decodeLocalRequestPath, resolveCanonicalAsset, sendFixedText } from "../../tools/local-http-security.mjs";
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(k);
@@ -33,6 +34,7 @@ const die = (m) => { console.error("error: " + m); process.exit(2); };
 const SITE = resolve(arg("--site", ""));
 if (!SITE || !existsSync(join(SITE, "super-convolver-gpu", "index.html")))
   die("--site <assembled public/ dir> must contain super-convolver-gpu/index.html");
+const SITE_CANONICAL = canonicalRoot(SITE);
 
 const requireWebGpu = process.env.PULP_REQUIRE_WEBGPU === "1";
 const BROWSERS = [
@@ -53,10 +55,10 @@ const MIME = {
 // would make the handshake fail for a reason that has nothing to do with the code under
 // test, so this mirrors the real _headers file.
 const server = createServer((req, res) => {
-  const url = (req.url || "/").split("?")[0];
-  let p = join(SITE, decodeURIComponent(url));
-  if (p.endsWith("/")) p = join(p, "index.html");
-  if (!existsSync(p)) { res.writeHead(404); res.end("not found"); return; }
+  const requestPath = decodeLocalRequestPath(req.url);
+  if (!requestPath) return sendFixedText(res, 400, "bad request");
+  const p = resolveCanonicalAsset(SITE_CANONICAL, requestPath.segments, { indexFile: "index.html" });
+  if (!p) return sendFixedText(res, 404, "not found");
   res.writeHead(200, {
     "Content-Type": MIME[extname(p)] || "application/octet-stream",
     "Cross-Origin-Opener-Policy": "same-origin",
@@ -65,8 +67,8 @@ const server = createServer((req, res) => {
   });
   res.end(readFileSync(p));
 });
-await new Promise((r) => server.listen(0, r));
-const BASE = `http://localhost:${server.address().port}`;
+await new Promise((r) => server.listen(0, LOOPBACK_HOST, r));
+const BASE = `http://${LOOPBACK_HOST}:${server.address().port}`;
 
 const steps = [];
 const check = (name, pass, detail = "") => {
