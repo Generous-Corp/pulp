@@ -89,16 +89,6 @@ bool extract_zip_to_dir(const fs::path& zip_path, const fs::path& dest_dir,
     return true;
 }
 
-void absolutize_asset_paths(pulp::view::IRAssetManifest& manifest,
-                            const fs::path& base_dir) {
-    for (auto& asset : manifest.assets) {
-        if (!asset.local_path || asset.local_path->empty()) continue;
-        fs::path path(*asset.local_path);
-        if (path.is_relative()) path = base_dir / path;
-        asset.local_path = path.lexically_normal().string();
-    }
-}
-
 std::string read_text_file(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);
     return std::string((std::istreambuf_iterator<char>(in)),
@@ -174,9 +164,9 @@ int main(int argc, char** argv) {
 
     // 2) Import: parse -> hoist sprite-knob art -> enrich -> materialize.
     auto ir = pulp::view::parse_figma_plugin_json(scene_json);
-    absolutize_asset_paths(ir.asset_manifest, extract_dir);
     pulp::view::hoist_captured_art_knobs(ir);  // skin captured-art knobs, keep them turnable
-    pulp::view::enrich_imported_image_asset_metadata(ir, ir.asset_manifest);
+    pulp::view::enrich_imported_image_asset_metadata(
+        ir, ir.asset_manifest, extract_dir.string());
 
     std::vector<pulp::view::ImportDiagnostic> diagnostics;
     auto root = pulp::view::build_native_view_tree(
