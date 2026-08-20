@@ -1,8 +1,10 @@
 name: Shipyard recovery worker canary
 
-# Manual, read-only proof that a uniquely labeled disposable M5 Tart runner can
-# receive an exact-head recovery assignment. This launches no model and mutates
-# no PR. Persistent/fleet workers remain disabled until this proof passes.
+# Manual, read-only proof that exactly one disposable Tart runner from the
+# recovery pool can receive an exact-head assignment. Host preference and
+# failover are controlled by each provider's queued-age threshold. This launches
+# no model and mutates no PR. Persistent/fleet workers remain disabled until
+# this proof passes.
 on:
   workflow_dispatch:
     inputs:
@@ -29,13 +31,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  m5-disposable-proof:
+  pooled-disposable-proof:
     runs-on:
       - self-hosted
       - macOS
       - ARM64
       - pulp-build-vm
-      - shipyard-recovery-canary-m5-20260814
+      - shipyard-recovery-pool
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
