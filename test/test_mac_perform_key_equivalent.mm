@@ -27,6 +27,7 @@
 #import <Foundation/Foundation.h>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/clipboard.hpp>
+#include <pulp/view/command_registry.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
