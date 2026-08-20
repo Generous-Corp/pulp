@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -184,6 +186,41 @@ class RunnerPolicyFixture(unittest.TestCase):
         member.type = tarfile.LNKTYPE
         member.linkname = "inside/target"
         self.assertFalse(F._archive_link_escapes(member))
+
+    def test_versioned_runner_layout_switches_links_without_writing_old_tree(self) -> None:
+        for name in ("bin", "externals"):
+            old = self.runner / f"{name}.2.336.0"
+            old.mkdir()
+            (old / "sentinel").write_text("old", encoding="utf-8")
+            plain = self.runner / name
+            if plain.exists():
+                shutil.rmtree(plain)
+            plain.symlink_to(old, target_is_directory=True)
+
+        archive = self.home / "runner.tar.gz"
+        source = self.home / "package"
+        executable(source / "bin" / "Runner.Listener", "#!/bin/sh\nprintf '2.335.1\\n'\n")
+        executable(source / "externals" / "node", "#!/bin/sh\nexit 0\n")
+        with tarfile.open(archive, "w:gz") as tf:
+            tf.add(source / "bin", arcname="bin")
+            tf.add(source / "externals", arcname="externals")
+
+        with tarfile.open(archive, "r:gz") as tf:
+            F._extract_runner_package(tf, self.runner, "2.335.1")
+
+        self.assertEqual((self.runner / "bin.2.336.0/sentinel").read_text(), "old")
+        self.assertEqual((self.runner / "externals.2.336.0/sentinel").read_text(), "old")
+        self.assertEqual(
+            (self.runner / "bin").resolve(), (self.runner / "bin.2.335.1").resolve()
+        )
+        self.assertEqual(
+            (self.runner / "externals").resolve(),
+            (self.runner / "externals.2.335.1").resolve(),
+        )
+        self.assertEqual(
+            subprocess.check_output([self.runner / "bin/Runner.Listener"], text=True).strip(),
+            "2.335.1",
+        )
 
 
 if __name__ == "__main__":

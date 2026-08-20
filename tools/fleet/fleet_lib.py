@@ -634,6 +634,81 @@ def _archive_link_escapes(member):
     )
 
 
+def _extract_runner_package(tf, runner_dir, version):
+    """Extract a runner package without writing through updater symlinks."""
+    components = ("bin", "externals")
+    symlinked = [(runner_dir / name).is_symlink() for name in components]
+    if any(symlinked) and not all(symlinked):
+        raise RuntimeError("runner has a mixed versioned/unversioned package layout")
+    if not all(symlinked):
+        tf.extractall(runner_dir)
+        return
+
+    with tempfile.TemporaryDirectory(
+        prefix="runner-extract-", dir=str(runner_dir.parent)
+    ) as td:
+        stage = Path(td)
+        tf.extractall(stage)
+        for name in components:
+            source = stage / name
+            if not source.is_dir() or source.is_symlink():
+                raise RuntimeError(f"runner archive is missing its {name} directory")
+
+        # Actions Runner's self-updater keeps bin/externals as absolute links to
+        # versioned siblings. Extracting into the root follows those links and
+        # silently mixes releases. Publish fresh versioned trees first, then
+        # atomically switch the links while the listener is stopped.
+        old_targets = {}
+        targets = {}
+        for name in components:
+            link = runner_dir / name
+            old_target = Path(os.readlink(link))
+            if not old_target.is_absolute():
+                old_target = (runner_dir / old_target).resolve()
+            if old_target.parent != runner_dir or not old_target.name.startswith(f"{name}."):
+                raise RuntimeError(f"unsafe runner {name} link target {old_target}")
+            old_targets[name] = old_target
+            targets[name] = runner_dir / f"{name}.{version}"
+
+        backups = {}
+        published = []
+        try:
+            for name in components:
+                target = targets[name]
+                backup = runner_dir / f".{name}.{version}.fleet-backup-{os.getpid()}"
+                if backup.exists():
+                    raise RuntimeError(f"stale runner package backup {backup}")
+                if target.exists():
+                    os.replace(target, backup)
+                    backups[name] = backup
+                os.replace(stage / name, target)
+                published.append(name)
+
+            for name in components:
+                link = runner_dir / name
+                target = targets[name]
+                pending = runner_dir / f".{name}.fleet-link-{os.getpid()}"
+                pending.symlink_to(target, target_is_directory=True)
+                os.replace(pending, link)
+        except Exception:
+            for name, old_target in old_targets.items():
+                pending = runner_dir / f".{name}.fleet-rollback-{os.getpid()}"
+                try:
+                    pending.symlink_to(old_target, target_is_directory=True)
+                    os.replace(pending, runner_dir / name)
+                except OSError:
+                    pass
+            for name in published:
+                shutil.rmtree(targets[name], ignore_errors=True)
+            for name, backup in backups.items():
+                if backup.exists():
+                    os.replace(backup, targets[name])
+            raise
+        else:
+            for backup in backups.values():
+                shutil.rmtree(backup, ignore_errors=True)
+
+
 def _install_runner_package(runner_dir, version, expected_sha256):
     name = f"actions-runner-osx-arm64-{version}.tar.gz"
     url = f"https://github.com/actions/runner/releases/download/v{version}/{name}"
@@ -663,7 +738,7 @@ def _install_runner_package(runner_dir, version, expected_sha256):
                         raise RuntimeError(
                             f"runner archive contains unsafe link {member.linkname!r}"
                         )
-            tf.extractall(runner_dir)
+            _extract_runner_package(tf, runner_dir, version)
 
 
 def _ensure_runner_rust(runner_dir):
