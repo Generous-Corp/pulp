@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260820-pr7724-import-boundary-security",
+  "created_at": "2026-08-20T20:27:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record security hardening of Pulp-owned Figma headless tooling, browser-capture URL validation, and materialized JSX-runtime canonicalization. The change replaces shell-interpreted command construction with argument-vector process launches, rejects encoded localhost delimiter bypasses, and constrains generated runtime imports without changing source authority, the Pulp/Vellum routing projection, design contracts, or generated artifact ownership.",
+  "tests": [
+    "node tools/import-design/browser_capture/security.test.mjs",
+    "node tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+    "npm run typecheck and npm test for tools/figma-plugin",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <origin/main> --head <HEAD>",
+    "pulp-vellum-change-routing closed suite and projection validation"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
