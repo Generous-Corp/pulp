@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <span>
 
@@ -127,5 +128,27 @@ int main() {
     if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
         pulp::signal::TempoDelayError::none)
         return 33;
-    return std::isfinite(tempo_delay.next()) ? 0 : 34;
+    if (!(std::isfinite(tempo_delay.next())))
+        return 34;
+
+    pulp::signal::SpectralCrossSynthesis cross_synthesis;
+    pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
+    cross_config.fft_size = 256;
+    if (!cross_synthesis.prepare(cross_config))
+        return 35;
+    std::array<std::complex<float>, 129> cross_carrier{};
+    std::array<std::complex<float>, 129> cross_modulator{};
+    std::array<std::complex<float>, 129> cross_output{};
+    cross_carrier.fill({1.0f, 0.0f});
+    cross_modulator.fill({2.0f, 0.0f});
+    const std::complex<float>* cross_carrier_view[] = {cross_carrier.data()};
+    const std::complex<float>* cross_modulator_view[] = {cross_modulator.data()};
+    std::complex<float>* cross_output_view[] = {cross_output.data()};
+    if (!cross_synthesis.process(cross_carrier_view, cross_modulator_view, cross_output_view, 1,
+                                 129))
+        return 38;
+    if (!std::isfinite(cross_output[17].real()) || !std::isfinite(cross_output[17].imag()))
+        return 39;
+
+    return 0;
 }

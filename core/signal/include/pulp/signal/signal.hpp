@@ -75,6 +75,7 @@
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/stft.hpp>
+#include <pulp/signal/spectral_cross_synthesis.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/spectral_mask_processor.hpp>
 #include <pulp/signal/spectral_delay_matrix.hpp>
