@@ -41,6 +41,8 @@ endfunction()
 
 pulp_dsp_series_signal_suite(pulp-test-signal-analysis-frontends
                              test_signal_analysis_frontends.cpp)
+pulp_dsp_series_signal_suite(pulp-test-spectral-feature-frontends
+                             test_spectral_feature_frontends.cpp)
 
 # Each extracted production header is compiled in its own translation unit.
 # This catches accidental reliance on an umbrella header's include order while
