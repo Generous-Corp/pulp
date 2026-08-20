@@ -58,14 +58,22 @@ public:
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
+        store.add_group({.id = 10, .name = "Oscillators"});
+        store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
+        store.add_group({.id = 12, .name = std::string(1100, 'x')});
+        store.add_group({.id = 20, .name = "Cycle A", .parent_id = 21});
+        store.add_group({.id = 21, .name = "Cycle B", .parent_id = 20});
         store.add_parameter({.id = 1, .name = "Gain", .unit = "dB",
-                             .range = {-60.0f, 24.0f, 0.0f, 0.1f}});
+                             .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+                             .group_id = 11});
         store.add_parameter({.id = 2, .name = "Mode", .unit = "",
                              .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                             .group_id = 999,
                              .kind = pulp::state::ParamKind::Enum,
                              .value_labels = {"Clean", "Warm", "Hot"}});
         store.add_parameter({.id = 3, .name = "Mix", .unit = "%",
-                             .range = {0.0f, 100.0f, 50.0f, 0.5f}});
+                             .range = {0.0f, 100.0f, 50.0f, 0.5f},
+                             .group_id = 12});
 
         pulp::state::ParamInfo quality{.id = 4, .name = "Quality", .unit = "",
                                        .range = {0.0f, 1.0f, 0.75f, 0.01f}};
@@ -722,14 +730,20 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     REQUIRE(params->get_info(plugin, 0, &info));
     REQUIRE(info.id == 1);
     REQUIRE(std::string(info.name) == "Gain");
+    REQUIRE(std::string(info.module) == "Oscillators/Wavetable 1");
     REQUIRE_THAT(info.min_value, WithinAbs(-60.0, 0.01));
     REQUIRE_THAT(info.max_value, WithinAbs(24.0, 0.01));
     REQUIRE((info.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0);
 
     REQUIRE(params->get_info(plugin, 1, &info));
     REQUIRE(info.id == 2);
+    REQUIRE(std::string(info.module).empty());
     REQUIRE((info.flags & CLAP_PARAM_IS_STEPPED) != 0);
     REQUIRE_FALSE(params->get_info(plugin, 9, &info));
+
+    REQUIRE(params->get_info(plugin, 2, &info));
+    REQUIRE(std::char_traits<char>::length(info.module) == CLAP_PATH_SIZE - 1);
+    REQUIRE(info.module[CLAP_PATH_SIZE - 1] == '\0');
 
     double value = 0.0;
     REQUIRE(params->get_value(plugin, 4, &value));

@@ -249,6 +249,46 @@ tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj)
     return SingleComponentEffect::queryInterface(iid, obj);
 }
 
+int32 PLUGIN_API PulpVst3Processor::getUnitCount() {
+    return 1 + static_cast<int32>(param_groups_ ? param_groups_->entries().size() : 0);
+}
+
+tresult PLUGIN_API PulpVst3Processor::getUnitInfo(int32 unitIndex, UnitInfo& info) {
+    if (unitIndex < 0 || unitIndex >= getUnitCount()) return kResultFalse;
+    info = {};
+    info.programListId = kNoProgramListId;
+    if (unitIndex == 0) {
+        info.id = kRootUnitId;
+        info.parentUnitId = kNoParentUnitId;
+        return kResultOk;
+    }
+    const auto& group = param_groups_->entries()[static_cast<std::size_t>(unitIndex - 1)];
+    info.id = static_cast<UnitID>(group.id);
+    info.parentUnitId = group.parent_id == 0
+        ? kRootUnitId : static_cast<UnitID>(group.parent_id);
+    Steinberg::UString(info.name, 128).fromAscii(group.name.c_str());
+    return kResultOk;
+}
+
+int32 PLUGIN_API PulpVst3Processor::getProgramListCount() { return 0; }
+tresult PLUGIN_API PulpVst3Processor::getProgramListInfo(int32, ProgramListInfo&) { return kResultFalse; }
+tresult PLUGIN_API PulpVst3Processor::getProgramName(ProgramListID, int32, String128) { return kResultFalse; }
+tresult PLUGIN_API PulpVst3Processor::getProgramInfo(
+    ProgramListID, int32, Steinberg::Vst::CString, String128) { return kResultFalse; }
+tresult PLUGIN_API PulpVst3Processor::hasProgramPitchNames(ProgramListID, int32) { return kResultFalse; }
+tresult PLUGIN_API PulpVst3Processor::getProgramPitchName(ProgramListID, int32, int16, String128) { return kResultFalse; }
+UnitID PLUGIN_API PulpVst3Processor::getSelectedUnit() { return selected_unit_; }
+tresult PLUGIN_API PulpVst3Processor::selectUnit(UnitID unitId) {
+    if (unitId != kRootUnitId && (!param_groups_ || !param_groups_->find(unitId)))
+        return kResultFalse;
+    selected_unit_ = unitId;
+    return kResultOk;
+}
+tresult PLUGIN_API PulpVst3Processor::getUnitByBus(
+    Steinberg::Vst::MediaType, Steinberg::Vst::BusDirection,
+    int32, int32, UnitID&) { return kResultFalse; }
+tresult PLUGIN_API PulpVst3Processor::setUnitProgramData(int32, int32, IBStream*) { return kResultFalse; }
+
 namespace {
 
 // Entries carry -1 wildcards for port and channel, so one name can cover every
@@ -601,6 +641,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // before parameter registration so the loop below tags it kIsBypass
     // and caches bypass_param_id_. No-op when the accommodation is off.
     maybe_synthesize_bypass(store_, quirks_);
+    param_groups_ = std::make_unique<ParamGroupProjection>(store_.all_groups());
+    selected_unit_ = kRootUnitId;
 
     // Report EDITOR parameter edits to the host, via the shared provenance
     // bridge (host_parameter_edit.hpp).
@@ -752,7 +794,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         pinfo.defaultNormalizedValue = static_cast<ParamValue>(
             param.range.normalize(param.range.default_value));
         pinfo.flags = flags;
-        pinfo.unitId = static_cast<Steinberg::Vst::UnitID>(param.group_id);
+        pinfo.unitId = param_groups_->find(param.group_id)
+            ? static_cast<Steinberg::Vst::UnitID>(param.group_id)
+            : Steinberg::Vst::kRootUnitId;
 
         parameters.addParameter(pinfo);
     }

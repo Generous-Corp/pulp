@@ -150,6 +150,9 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
                                        AudioUnitElement inElement, UInt32& outDataSize,
                                        bool& outWritable)
 {
+    if (inID == kAudioUnitProperty_ParameterClumpName)
+        return fill_parameter_clump_property_info(store_, inScope, outDataSize,
+                                                  outWritable);
     if (inID == kPulpEditorContextProperty) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (inElement != 0) return kAudioUnitErr_InvalidElement;
@@ -199,6 +202,8 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
 OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                                    AudioUnitElement inElement, void* outData)
 {
+    if (inID == kAudioUnitProperty_ParameterClumpName)
+        return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kPulpEditorContextProperty) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (inElement != 0) return kAudioUnitErr_InvalidElement;

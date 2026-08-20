@@ -359,6 +359,15 @@ OSStatus fill_parameter_info(const state::StateStore& store,
                              AudioUnitParameterInfo& out_info,
                              bool advertise_value_strings);
 
+OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
+                                            AudioUnitScope scope,
+                                            UInt32& out_size,
+                                            bool& out_writable);
+
+OSStatus fill_parameter_clump_name(const state::StateStore& store,
+                                   AudioUnitScope scope,
+                                   void* out_data);
+
 /// `GetParameterValueStrings`: the enumerated display strings for a DISCRETE
 /// parameter. Continuous parameters reach the host through
 /// `kAudioUnitProperty_ParameterStringFromValue` instead and report

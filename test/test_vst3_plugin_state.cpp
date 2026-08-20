@@ -194,6 +194,7 @@ struct TestVst3Config {
     // test can raise it and assert the adapter auto-resets it after the block,
     // even when the block is bypassed.
     bool add_reset_trigger_param = false;
+    int gain_group_id = 8;
 };
 
 class TestVst3Processor : public pulp::format::Processor {
@@ -214,12 +215,16 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        store.add_group({.id = 7, .name = "Dynamics"});
+        store.add_group({.id = 8, .name = "Advanced", .parent_id = 7});
+        store.add_group({.id = 20, .name = "Cycle A", .parent_id = 21});
+        store.add_group({.id = 21, .name = "Cycle B", .parent_id = 20});
         store.add_parameter({
             .id = kGainParamId,
             .name = "Gain",
             .unit = "dB",
             .range = {-60.0f, 24.0f, 0.0f, 0.1f},
-            .group_id = 7,
+            .group_id = config_.gain_group_id,
         });
         if (config_.add_bypass_param) {
             store.add_parameter({
@@ -705,10 +710,33 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.getParameterInfo(0, gain) == Steinberg::kResultOk);
     REQUIRE(gain.id == kGainParamId);
     REQUIRE(gain.stepCount == 0);
-    REQUIRE(gain.unitId == 7);
+    REQUIRE(gain.unitId == 8);
     REQUIRE((gain.flags & ParameterInfo::kCanAutomate) != 0);
     REQUIRE((gain.flags & ParameterInfo::kIsBypass) == 0);
     REQUIRE_THAT(gain.defaultNormalizedValue, WithinAbs(60.0 / 84.0, 1e-6));
+
+    Steinberg::Vst::IUnitInfo* units = nullptr;
+    REQUIRE(processor.queryInterface(Steinberg::Vst::IUnitInfo::iid,
+                                     reinterpret_cast<void**>(&units)) == Steinberg::kResultOk);
+    REQUIRE(units != nullptr);
+    REQUIRE(units->getUnitCount() == 3);
+    Steinberg::Vst::UnitInfo root{};
+    REQUIRE(units->getUnitInfo(0, root) == Steinberg::kResultOk);
+    REQUIRE(root.id == Steinberg::Vst::kRootUnitId);
+    REQUIRE(root.parentUnitId == Steinberg::Vst::kNoParentUnitId);
+    Steinberg::Vst::UnitInfo parent{};
+    REQUIRE(units->getUnitInfo(1, parent) == Steinberg::kResultOk);
+    REQUIRE(parent.id == 7);
+    REQUIRE(parent.parentUnitId == Steinberg::Vst::kRootUnitId);
+    Steinberg::Vst::UnitInfo child{};
+    REQUIRE(units->getUnitInfo(2, child) == Steinberg::kResultOk);
+    REQUIRE(child.id == gain.unitId);
+    REQUIRE(child.parentUnitId == parent.id);
+    REQUIRE(units->getProgramListCount() == 0);
+    REQUIRE(units->selectUnit(child.id) == Steinberg::kResultOk);
+    REQUIRE(units->getSelectedUnit() == child.id);
+    REQUIRE(units->selectUnit(999) == Steinberg::kResultFalse);
+    units->release();
 
     ParameterInfo bypass{};
     REQUIRE(processor.getParameterInfo(1, bypass) == Steinberg::kResultOk);
@@ -735,6 +763,22 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
 
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(test_processor->release_count == 1);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 invalid parameter groups fall back to the declared root unit",
+          "[vst3][params][groups]")
+{
+    TestVst3Config config;
+    config.gain_group_id = 20;  // member of the cycle declared by the fixture
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    ParameterInfo gain{};
+    REQUIRE(processor.getParameterInfo(0, gain) == Steinberg::kResultOk);
+    REQUIRE(gain.unitId == Steinberg::Vst::kRootUnitId);
+    REQUIRE(processor.getUnitCount() == 3);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

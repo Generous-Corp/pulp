@@ -4426,7 +4426,7 @@ Two details differ from `build.yml` deliberately:
 * Landing it required the timeout fix first. Arming a sentinel on a cap the
   build cannot finish under produces an infinite wipe → cold rebuild → timeout →
   wipe loop, ~1h of a shared machine per cycle. `[targets.mac] timeout_secs` is
-  7200 for this reason; check it before changing either number.
+  14400 for this reason; check it before changing either number.
 
 `tools/scripts/test_build_dir_sentinel.py` asserts both directions (a stale
 marker wipes, a clean run does not) plus the arm/clear pairing across stages —

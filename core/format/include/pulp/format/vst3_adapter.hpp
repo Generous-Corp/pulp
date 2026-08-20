@@ -23,6 +23,7 @@
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
 #include <pluginterfaces/vst/ivstnoteexpression.h>
+#include <pluginterfaces/vst/ivstunits.h>
 #include <pluginterfaces/base/ibstream.h>
 
 #include <pulp/events/plugin_main_thread.hpp>
@@ -37,6 +38,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/format/adapter_boundary.hpp>
+#include <pulp/format/param_group_projection.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/runtime/alive_token.hpp>
 
@@ -138,6 +140,32 @@ public:
         Steinberg::int32 keySwitchIndex,
         Steinberg::Vst::KeyswitchInfo& info /*out*/) override;
 
+    Steinberg::int32 PLUGIN_API getUnitCount() override;
+    Steinberg::tresult PLUGIN_API getUnitInfo(
+        Steinberg::int32 unitIndex, Steinberg::Vst::UnitInfo& info) override;
+    Steinberg::int32 PLUGIN_API getProgramListCount() override;
+    Steinberg::tresult PLUGIN_API getProgramListInfo(
+        Steinberg::int32, Steinberg::Vst::ProgramListInfo&) override;
+    Steinberg::tresult PLUGIN_API getProgramName(
+        Steinberg::Vst::ProgramListID, Steinberg::int32,
+        Steinberg::Vst::String128) override;
+    Steinberg::tresult PLUGIN_API getProgramInfo(
+        Steinberg::Vst::ProgramListID, Steinberg::int32,
+        Steinberg::Vst::CString, Steinberg::Vst::String128) override;
+    Steinberg::tresult PLUGIN_API hasProgramPitchNames(
+        Steinberg::Vst::ProgramListID, Steinberg::int32) override;
+    Steinberg::tresult PLUGIN_API getProgramPitchName(
+        Steinberg::Vst::ProgramListID, Steinberg::int32, Steinberg::int16,
+        Steinberg::Vst::String128) override;
+    Steinberg::Vst::UnitID PLUGIN_API getSelectedUnit() override;
+    Steinberg::tresult PLUGIN_API selectUnit(Steinberg::Vst::UnitID) override;
+    Steinberg::tresult PLUGIN_API getUnitByBus(
+        Steinberg::Vst::MediaType, Steinberg::Vst::BusDirection,
+        Steinberg::int32, Steinberg::int32,
+        Steinberg::Vst::UnitID&) override;
+    Steinberg::tresult PLUGIN_API setUnitProgramData(
+        Steinberg::int32, Steinberg::int32, Steinberg::IBStream*) override;
+
     // IEditController — parameter value/string conversion. Route through the
     // author-supplied ParamInfo::to_string / from_string so a host's generic
     // editor and text-entry field show and accept the plugin's own formatting
@@ -215,6 +243,8 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    std::unique_ptr<ParamGroupProjection> param_groups_;
+    Steinberg::Vst::UnitID selected_unit_ = Steinberg::Vst::kRootUnitId;
     // Keeps a host setState() off the processor while process() is inside it.
     // Declared after processor_ so it outlives every render that consults it.
     StateRestoreGate state_restore_gate_;

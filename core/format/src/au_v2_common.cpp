@@ -6,6 +6,7 @@
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/param_group_projection.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
 
@@ -126,6 +127,14 @@ OSStatus fill_parameter_info(const state::StateStore& store,
                    | kAudioUnitParameterFlag_IsReadable
                    | kAudioUnitParameterFlag_HasCFNameString;
 
+    const ParamGroupProjection groups(store.all_groups());
+    if (groups.find(param->group_id)) {
+        out_info.flags |= kAudioUnitParameterFlag_HasClump;
+        out_info.clumpID = static_cast<UInt32>(param->group_id);
+    } else {
+        out_info.clumpID = 0;
+    }
+
     // Advertise author-supplied value strings so the host queries our display
     // formatting. DISCRETE params serve an enumerated list through
     // GetParameterValueStrings; CONTINUOUS params round-trip single values
@@ -159,6 +168,47 @@ OSStatus fill_parameter_info(const state::StateStore& store,
         out_info.unit = kAudioUnitParameterUnit_Generic;
     }
     return noErr;
+}
+
+OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
+                                            AudioUnitScope scope,
+                                            UInt32& out_size,
+                                            bool& out_writable)
+{
+    if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+    if (ParamGroupProjection(store.all_groups()).entries().empty())
+        return kAudioUnitErr_InvalidProperty;
+    out_size = sizeof(AudioUnitParameterNameInfo);
+    out_writable = false;
+    return noErr;
+}
+
+OSStatus fill_parameter_clump_name(const state::StateStore& store,
+                                   AudioUnitScope scope,
+                                   void* out_data)
+{
+    if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+    if (!out_data) return kAudioUnitErr_InvalidProperty;
+    auto* name = static_cast<AudioUnitParameterNameInfo*>(out_data);
+    const ParamGroupProjection groups(store.all_groups());
+    const auto* group = groups.find(static_cast<int>(name->inID));
+    if (!group) return kAudioUnitErr_InvalidPropertyValue;
+    CFStringRef full_name = CFStringCreateWithCString(
+        kCFAllocatorDefault, group->path.c_str(), kCFStringEncodingUTF8);
+    if (!full_name) return kAudioUnitErr_InvalidPropertyValue;
+    // AUBase normalizes kAudioUnitParameterName_Full (-1) to zero before
+    // dispatching CopyClumpName, so both non-positive forms request the full
+    // name. Only a positive desired length is a bounded request.
+    if (name->inDesiredLength > 0 &&
+        CFStringGetLength(full_name) > name->inDesiredLength) {
+        name->outName = CFStringCreateWithSubstring(
+            kCFAllocatorDefault, full_name,
+            CFRangeMake(0, name->inDesiredLength));
+        CFRelease(full_name);
+    } else {
+        name->outName = full_name;
+    }
+    return name->outName ? noErr : kAudioUnitErr_InvalidPropertyValue;
 }
 
 OSStatus fill_parameter_value_strings(const state::StateStore& store,
