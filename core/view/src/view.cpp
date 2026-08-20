@@ -303,6 +303,12 @@ void View::simulate_click(Point root_pos) {
 }
 
 void View::simulate_click(Point root_pos, const SimulatedPointer& pointer) {
+    if (auto* overlay = interaction().active_overlay;
+        overlay && !overlay->overlay_contains(root_pos)) {
+        const bool consume = overlay->overlay_consumes_outside_click();
+        overlay->dismiss_claimed_overlay();
+        if (consume) return;
+    }
     auto* target = hit_test(root_pos);
     // Record the synthetic input into the active motion fixture before
     // dispatch so replay sees the same target lookup the original recording
@@ -1185,19 +1191,20 @@ View* View::focused_input_ = nullptr;
 // replacement popover doesn't immediately get nulled out by our subsequent
 // clear.
 void View::dismiss_active_overlay() {
-    // Static entry point (ESC / outside-click) has no root in hand, so it acts
-    // on the process-global shim mirror: the most-recently-claimed overlay. Clear
-    // BOTH the mirror and the victim's root-owned slot (S11) BEFORE the callback,
-    // so a replacement popover the callback claims survives our clears.
     View* victim = active_overlay_;
     if (!victim) return;
-    active_overlay_ = nullptr;
-    if (RootInteractionState* s = victim->existing_interaction();
-        s && s->active_overlay == victim)
-        s->active_overlay = nullptr;
-    if (victim->on_overlay_dismissed) {
-        victim->on_overlay_dismissed();
-    }
+    victim->dismiss_claimed_overlay();
+}
+
+void View::dismiss_claimed_overlay() {
+    // Clear ownership before invoking user code. The callback may synchronously
+    // destroy this view or claim a replacement overlay.
+    RootInteractionState* state = existing_interaction();
+    if (!state || state->active_overlay != this) return;
+    state->active_overlay = nullptr;
+    if (active_overlay_ == this) active_overlay_ = nullptr;
+    auto dismissed = on_overlay_dismissed;
+    if (dismissed) dismissed();
 }
 
 void View::dismiss_active_overlay(View& scope) {
@@ -1422,6 +1429,7 @@ void View::release_overlay() {
         s && s->active_overlay == this)
         s->active_overlay = nullptr;
     if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
+    overlay_consumes_outside_click_ = false;
 }
 
 void View::set_painter(std::shared_ptr<WidgetPainter> p) {

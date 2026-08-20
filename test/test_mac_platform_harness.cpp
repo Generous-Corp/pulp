@@ -507,6 +507,30 @@ TEST_CASE("mac harness constructs a hidden GPU-backed window",
     REQUIRE(host->gpu_surface() != nullptr);
 }
 
+TEST_CASE("standalone local key monitor gives owning navigation root priority",
+          "[mac][platform-harness][keyboard][navigation-focus]") {
+    class NavigationRoot final : public View {
+    public:
+        bool accepts_navigation_input() const override { return true; }
+    } root;
+    int navigation_hits = 0;
+    int app_hits = 0;
+    root.on_navigation_key = [&](const pulp::view::KeyEvent& event) {
+        ++navigation_hits;
+        return event.key == pulp::view::KeyCode::down;
+    };
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    host->set_app_key_monitor([&](const pulp::view::KeyEvent&) {
+        ++app_hits;
+        return true;
+    });
+
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(navigation_hits == 1);
+    REQUIRE(app_hits == 0);
+}
+
 TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
           "[mac][platform-harness][issue-2001]") {
     View root;

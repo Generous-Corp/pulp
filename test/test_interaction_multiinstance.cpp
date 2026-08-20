@@ -132,6 +132,16 @@ TEST_CASE("active overlay is isolated per root across two hosted editors",
     REQUIRE(rootB.interaction().active_overlay == overlayB);
     REQUIRE(rootA.interaction().active_overlay == overlayA);  // A NOT cleared
 
+    int dismissedA = 0;
+    int dismissedB = 0;
+    overlayA->on_overlay_dismissed = [&] { ++dismissedA; };
+    overlayB->on_overlay_dismissed = [&] { ++dismissedB; };
+    overlayA->dismiss_claimed_overlay();
+    REQUIRE(dismissedA == 1);
+    REQUIRE(dismissedB == 0);
+    REQUIRE(rootA.interaction().active_overlay == nullptr);
+    REQUIRE(rootB.interaction().active_overlay == overlayB);
+
     reset_mirrors();
 }
 

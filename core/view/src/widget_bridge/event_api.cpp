@@ -147,6 +147,8 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 dispatch_event(alive, engine, id, "dismiss", "0");
             };
             it->second->claim_overlay();
+            it->second->set_overlay_consumes_outside_click(
+                args.size() > 1 && args.get<bool>(1, false));
         }
         return choc::value::Value();
     });

@@ -405,7 +405,7 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Pencil parser by source
     REQUIRE(unsupported_err.find("unsupported Pencil React export (got 'open-pencil')") != std::string::npos);
 }
 
-TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
+TEST_CASE("WidgetBridge __pulpRuntimeSettle__ defers work to host frame boundary",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;
     View root;
@@ -413,11 +413,19 @@ TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
     WidgetBridge bridge(engine, root, store);
     bridge.install_runtime_import_handlers();
 
-    // 8 rounds is the default settleRounds; should be a no-op when nothing
-    // is pending. Clamping at [1, 64] is enforced inside the handler.
+    engine.evaluate(
+        "globalThis.__settledFrameHits__ = 0;"
+        "requestAnimationFrame(function () { __settledFrameHits__ += 1; });");
+
+    // The native call must not recursively evaluate QuickJS. The queued frame
+    // remains pending until the production host-frame boundary services it.
     auto result = engine.evaluate(
         "__pulpRuntimeSettle__(8); __pulpRuntimeSettle__(0); __pulpRuntimeSettle__(999); 'ok'");
     REQUIRE(result.getWithDefault<std::string>("") == "ok");
+    REQUIRE(engine.evaluate("__settledFrameHits__").getWithDefault<int>(-1) == 0);
+
+    bridge.service_frame_callbacks();
+    REQUIRE(engine.evaluate("__settledFrameHits__").getWithDefault<int>(-1) == 1);
 }
 
 TEST_CASE("WidgetBridge install_runtime_import_handlers is idempotent",

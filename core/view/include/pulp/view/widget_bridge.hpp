@@ -517,6 +517,10 @@ private:
     std::shared_ptr<QueryService> query_service_;
 
     std::vector<int> pending_frame_ids_;
+    // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
+    // callback. Drained only from the outer host-frame boundary; this is a
+    // budget, not a synchronous recursion request.
+    int pending_runtime_settle_rounds_ = 0;
     bool frame_preamble_loaded_ = false;
     // Identity of the most-recently loaded script (via
     // `load_script(code, script_id)` or `set_active_script_id`). When

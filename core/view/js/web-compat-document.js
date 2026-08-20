@@ -534,6 +534,8 @@ globalThis.self = window;
 // with data-pulp-popup-default="off" or by preventing the incoming event.
 (function installPopupDefaults() {
     var state = null;
+    var suppressOutsideSequence = false;
+    var suppressOutsideTimer = 0;
     function optedOut(element) {
         while (element) {
             if (element.getAttribute
@@ -583,26 +585,68 @@ globalThis.self = window;
                 && options.indexOf(nodes[i]) < 0) options.push(nodes[i]);
         return options;
     }
+    function currentTrigger(popupState) {
+        if (document.body.contains(popupState.trigger)) return popupState.trigger;
+        var id = popupState.triggerId;
+        if (id) {
+            var byId = document.getElementById(id);
+            if (byId) return byId;
+        }
+        var triggers = document.querySelectorAll('[aria-haspopup="'
+            + popupState.triggerKind + '"]');
+        return popupState.triggerOrdinal >= 0
+            ? triggers[popupState.triggerOrdinal] || null : null;
+    }
     function paint() {
         if (!state) return;
         for (var i = 0; i < state.options.length; ++i) {
             var active = i === state.activeIndex;
             state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
-            state.options[i].style.background = active
+            var background = active
                 ? "rgba(120,180,255,0.18)" : state.baseBackgrounds[i];
+            state.options[i].style.background = background;
+            state.options[i].style.backgroundColor = background;
         }
         globalThis.__pulpPopupDefaultState__ = state;
     }
     function activate(trigger, edge) {
+        if (state) dismiss(false);
         var popup = popupFor(trigger);
         var options = optionsFor(popup);
         if (!popup || !options.length) return false;
         var baseBackgrounds = [];
         for (var i = 0; i < options.length; ++i)
             baseBackgrounds.push(options[i].style.background || "");
-        state = { trigger: trigger, popup: popup, options: options,
+        var hoverHandlers = [];
+        var triggerKind = trigger.getAttribute("aria-haspopup");
+        var triggerPeers = document.querySelectorAll(
+            '[aria-haspopup="' + triggerKind + '"]');
+        state = { trigger: trigger, triggerId: trigger.id || "",
+                  triggerKind: triggerKind,
+                  triggerOrdinal: Array.prototype.indexOf.call(triggerPeers, trigger),
+                  popup: popup, options: options,
                   baseBackgrounds: baseBackgrounds,
+                  hoverHandlers: hoverHandlers,
                   activeIndex: edge === "last" ? options.length - 1 : 0 };
+        state.onNativeDismiss = function() {
+            if (!state || state.popup !== popup) return;
+            var liveTrigger = currentTrigger(state);
+            if (liveTrigger) liveTrigger.click();
+            dismiss(false);
+        };
+        popup.addEventListener("dismiss", state.onNativeDismiss);
+        if (typeof claimOverlay === "function") claimOverlay(popup._id, true);
+        for (var optionIndex = 0; optionIndex < options.length; ++optionIndex) {
+            (function(index) {
+                var onEnter = function() {
+                    if (!state || state.options[index] !== options[index]) return;
+                    state.activeIndex = index;
+                    paint();
+                };
+                hoverHandlers.push(onEnter);
+                options[index].addEventListener("pointerenter", onEnter);
+            })(optionIndex);
+        }
         paint();
         if (typeof claimDocumentNavigationFocus === "function")
             claimDocumentNavigationFocus();
@@ -610,17 +654,59 @@ globalThis.self = window;
     }
     function dismiss(returnFocus) {
         if (!state) return;
-        var trigger = state.trigger;
+        var dismissedState = state;
+        var trigger = currentTrigger(state);
+        state.popup.removeEventListener("dismiss", state.onNativeDismiss);
+        if (typeof releaseOverlay === "function") releaseOverlay(state.popup._id);
         for (var i = 0; i < state.options.length; ++i) {
+            state.options[i].removeEventListener(
+                "pointerenter", state.hoverHandlers[i]);
             state.options[i].style.background = state.baseBackgrounds[i];
+            state.options[i].style.backgroundColor = state.baseBackgrounds[i];
             state.options[i].removeAttribute("data-pulp-popup-active");
         }
         state = null;
         globalThis.__pulpPopupDefaultState__ = null;
         if (typeof releaseDocumentNavigationFocus === "function")
             releaseDocumentNavigationFocus();
-        if (returnFocus && trigger) trigger.focus();
+        if (returnFocus && trigger) {
+            trigger.focus();
+            requestAnimationFrame(function() {
+                var replacement = currentTrigger(dismissedState);
+                if (replacement && replacement !== trigger) replacement.focus();
+            });
+        }
     }
+    function outsidePopupTarget(target) {
+        return state && !state.popup.contains(target)
+            && !state.trigger.contains(target);
+    }
+    function consumeOutsideSequence(event) {
+        if (event.type === "pointerdown" && outsidePopupTarget(event.target)) {
+            var trigger = currentTrigger(state);
+            if (trigger) trigger.click();
+            dismiss(false);
+            suppressOutsideSequence = true;
+            if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
+            suppressOutsideTimer = setTimeout(function() {
+                suppressOutsideSequence = false;
+                suppressOutsideTimer = 0;
+            }, 1000);
+        }
+        if (!suppressOutsideSequence) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === "click") {
+            suppressOutsideSequence = false;
+            if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
+            suppressOutsideTimer = 0;
+        }
+    }
+    // Capture at the materialized root before the underlay target sees the
+    // event. Dismissing only from document bubbling is too late: a graph or
+    // other control has already mutated on the initiating press by then.
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
+        function(type) { document.body.addEventListener(type, consumeOutsideSequence, true); });
     globalThis.__pulpPopupDefaultHandle__ = function(event) {
         if (state && (!document.body.contains(state.trigger)
                       || !document.body.contains(state.popup))) dismiss(false);
@@ -631,10 +717,6 @@ globalThis.self = window;
                     if (!activate(pointerTrigger, "first")
                         && state && state.trigger === pointerTrigger) dismiss(false);
                 });
-            } else if (state && !state.popup.contains(event.target)
-                       && !state.trigger.contains(event.target)) {
-                state.trigger.click();
-                dismiss(false);
             }
             return;
         }

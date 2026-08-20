@@ -1292,6 +1292,12 @@ public:
     /// AND the process-global shim mirror. Defined out-of-line (needs tree_root).
     void claim_input_focus();
     void claim_overlay();
+    void set_overlay_consumes_outside_click(bool consume) {
+        overlay_consumes_outside_click_ = consume;
+    }
+    bool overlay_consumes_outside_click() const {
+        return overlay_consumes_outside_click_;
+    }
     /// Guarded release — clears the root slot AND the shim mirror only when
     /// `this` currently holds them. A non-holder is a no-op, so one widget's
     /// teardown cannot blur an unrelated focused widget.
@@ -1301,8 +1307,15 @@ public:
     /// Does NOT fire `on_overlay_dismissed` — used by JSX unmount and the
     /// View destructor where React already knows the popover is closing.
     void release_overlay();
-    /// Dismiss the active overlay and fire `on_overlay_dismissed` so React state
-    /// stays synchronized. Used by platform ESC and outside-click paths.
+    /// Dismiss this exact overlay when it owns its root's overlay slot. Unlike
+    /// the legacy process-global entry point, this cannot dismiss an overlay
+    /// belonging to another hosted editor whose claim happened more recently.
+    void dismiss_claimed_overlay();
+    /// Dismiss-path release. Releases the active overlay (if any) and fires its
+    /// `on_overlay_dismissed` callback so React state can flip `setOpen(false)`
+    /// to keep the JSX tree in sync. Called by the platform window host from
+    /// the ESC keypath and the outside-click path. No-op if nothing claimed the
+    /// slot.
     static void dismiss_active_overlay();
     /// Hosted variant acts only on `scope`'s interaction slot.
     static void dismiss_active_overlay(View& scope);
@@ -1323,6 +1336,9 @@ public:
     /// Global key callback. If set on root, called before normal key dispatch.
     /// Return true to consume the event.
     std::function<bool(const KeyEvent&)> on_global_key;
+    /// Root-scoped callback installed only while a materialized document owns
+    /// the bounded navigation-focus capability.
+    std::function<bool(const KeyEvent&)> on_navigation_key;
 
     /// CSS position property
     enum class Position { static_, relative, absolute, fixed, sticky };
@@ -2408,6 +2424,7 @@ private:
     bool backface_visible_ = true;
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
+    bool overlay_consumes_outside_click_ = false;
     FrameClock* frame_clock_ = nullptr;
     // Lazily allocated on the first set_meter_source / set_scalar_source, so a
     // view that shows no live value costs one null pointer.

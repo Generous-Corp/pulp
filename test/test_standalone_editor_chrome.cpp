@@ -6,6 +6,7 @@
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <cstddef>
@@ -1940,4 +1941,29 @@ TEST_CASE("standalone Settings menu routes the standard chord before host fallba
     command.action();
     REQUIRE(chrome.tab_panel()->active_tab() ==
             chrome.tab_panel()->find_tab("Settings"));
+}
+
+TEST_CASE("standalone stop flushes an active environment trace",
+          "[standalone][tracing][lifecycle]") {
+#if PULP_TRACING_ENABLED
+    const auto path = std::filesystem::temp_directory_path()
+        / "pulp-standalone-close-flush.pftrace";
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ScopedEnv trace_path("PULP_TRACE_PATH");
+    ScopedEnv trace_seconds("PULP_TRACE_SECONDS");
+    trace_path.set(path.string());
+    trace_seconds.unset();
+
+    counted_null_processor_factory_calls = 0;
+    StandaloneApp app(counted_null_processor_factory);
+    { PULP_TRACE_SCOPE_NAMED("render", "standalone_close_flush_probe"); }
+    app.stop();
+
+    REQUIRE(std::filesystem::exists(path));
+    REQUIRE(std::filesystem::file_size(path) > 0);
+    std::filesystem::remove(path, ec);
+#else
+    SUCCEED("tracing disabled in this configuration");
+#endif
 }

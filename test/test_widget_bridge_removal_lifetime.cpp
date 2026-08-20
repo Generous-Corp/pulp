@@ -5,6 +5,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
+#include <memory>
 #include <string>
 
 using namespace pulp::state;
@@ -47,6 +48,55 @@ TEST_CASE("click callbacks can remove their own widget",
     bridge.widget("collector")->set_bounds({10, 10, 100, 80});
     root.simulate_click({20, 20});
     REQUIRE(removed_lifetime.expired());
+}
+
+TEST_CASE("a deferred pointer event is inert after its borrowed engine dies",
+          "[view][bridge][lifetime][engine]") {
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    auto engine = std::make_unique<ScriptEngine>();
+    auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
+    bridge->load_script(R"JS(
+        var hits = 0;
+        createLabel('btn', 'Btn', '');
+        on('btn', 'pointerdown', function () { hits += 1; });
+        registerPointer('btn');
+    )JS");
+    auto* btn = bridge->widget("btn");
+    REQUIRE(btn != nullptr);
+    btn->set_bounds({10, 10, 100, 80});
+
+    MouseEvent down{};
+    down.is_down = true;
+    btn->on_dom_pointer_event(down, true);
+    REQUIRE(engine->evaluate("hits").getWithDefault<int>(0) == 1);
+
+    engine.reset();
+    REQUIRE_NOTHROW(btn->on_dom_pointer_event(down, true));
+    REQUIRE(bridge->widget("btn") == btn);
+}
+
+TEST_CASE("overlay dismissal may synchronously release its own callback",
+          "[view][bridge][lifetime][overlay]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"JS(
+        var dismissed = 0;
+        createLabel('pop', 'Pop', '');
+        on('pop', 'dismiss', function () {
+            dismissed += 1;
+            releaseOverlay('pop');
+        });
+        claimOverlay('pop');
+    )JS");
+
+    View::dismiss_active_overlay();
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
+    REQUIRE(View::active_overlay_ == nullptr);
 }
 
 TEST_CASE("pointer callbacks can remove their own widget and siblings",

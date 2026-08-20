@@ -80,6 +80,15 @@ make_test_window(pulp::view::View& root,
 /// phase. Never throws.
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 
+/// Deliver a key through NSApplication's production local-monitor chain.
+/// This differs from invoking the content view's keyDown: directly: standalone
+/// app monitors (for example Musical Typing) run first and may consume it.
+/// Returns false when no native window exists or the key is unknown.
+bool simulate_app_key(pulp::view::WindowHost& host,
+                      pulp::view::KeyCode key,
+                      bool is_down = true,
+                      uint16_t modifiers = 0);
+
 /// Wrapper over `WindowHost::capture_back_buffer_png` that drains the
 /// main queue once first so any pending render / deferred state mutations
 /// are ordered before the readback. Must be called on the main thread.

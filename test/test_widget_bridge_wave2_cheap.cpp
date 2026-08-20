@@ -25,7 +25,10 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include "../core/view/src/widget_bridge/bridge_dispatch.hpp"
+#include <atomic>
 #include <chrono>
+#include <future>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
@@ -44,6 +47,34 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
     return dynamic_cast<pulp::view::CanvasWidget*>(bridge.widget(nativeId));
 }
 } // namespace
+
+TEST_CASE("Bridge callback retirement waits for in-flight engine dispatch",
+          "[view][bridge][events][lifetime]") {
+    auto state = std::make_shared<BridgeCallbackState>(nullptr, nullptr);
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+
+    std::thread dispatch([&] {
+        std::lock_guard<std::recursive_mutex> lock(state->dispatch_mutex());
+        entered.store(true, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire))
+            std::this_thread::yield();
+    });
+    while (!entered.load(std::memory_order_acquire))
+        std::this_thread::yield();
+
+    auto retirement = std::async(std::launch::async, [&] {
+        state->retire_dispatch();
+    });
+    CHECK(retirement.wait_for(std::chrono::milliseconds(10)) ==
+          std::future_status::timeout);
+
+    release.store(true, std::memory_order_release);
+    dispatch.join();
+    REQUIRE(retirement.wait_for(std::chrono::seconds(1)) ==
+            std::future_status::ready);
+    CHECK_FALSE(state->load(std::memory_order_acquire));
+}
 
 // ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
 //
@@ -799,6 +830,10 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
         trigger.textContent = popup_selected;
         var outside = document.createElement('button');
         outside.textContent = 'outside';
+        var outside_pointerdowns = 0;
+        var outside_clicks = 0;
+        outside.addEventListener('pointerdown', function() { outside_pointerdowns++; });
+        outside.addEventListener('click', function() { outside_clicks++; });
         function closePopup() {
             if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
             popup = null;
@@ -838,6 +873,14 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
         root, static_cast<int>(KeyCode::end_), 0, true));
     REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
                 .getWithDefault<int>(-1) == 2);
+    REQUIRE(engine.evaluate(
+        "__pulpPopupDefaultState__.options[2].style.backgroundColor")
+                .toString() == "rgba(120,180,255,0.18)");
+    const auto active_option_id = engine.evaluate(
+        "__pulpPopupDefaultState__.options[2]._id").toString();
+    auto* active_option = bridge.widget(active_option_id);
+    REQUIRE(active_option != nullptr);
+    REQUIRE(active_option->has_background_color());
     REQUIRE(engine.evaluate("__pulpPopupDefaultState__.options[0].style.background")
                 .toString() == "rgb(1,2,3)");
     REQUIRE(WidgetBridge::dispatch_key_for_root(
@@ -866,8 +909,14 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
     REQUIRE(WidgetBridge::dispatch_key_for_root(
         root, static_cast<int>(KeyCode::down), 0, true));
     engine.evaluate("__dispatch__(outside._id, 'pointerdown', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'mousedown', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'pointerup', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'mouseup', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'click', {clientX:1,clientY:1})");
     REQUIRE(engine.evaluate("popup_selected").toString() == "B");
     REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("outside_pointerdowns").getWithDefault<int>(-1) == 0);
+    REQUIRE(engine.evaluate("outside_clicks").getWithDefault<int>(-1) == 0);
 
     engine.evaluate("trigger.focus()");
     REQUIRE(WidgetBridge::dispatch_key_for_root(
@@ -878,6 +927,18 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
     REQUIRE(engine.evaluate("trigger.textContent").toString() == "C");
     REQUIRE(engine.evaluate("document.activeElement === trigger")
                 .getWithDefault<bool>(false));
+
+    // Native hosts dismiss the exact root-owned overlay rather than emitting
+    // a DOM pointer sequence. That callback must still reach addEventListener
+    // so the authored trigger closes its popup.
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    auto* claimed_popup = root.interaction().active_overlay;
+    REQUIRE(claimed_popup != nullptr);
+    claimed_popup->dismiss_claimed_overlay();
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(root.interaction().active_overlay == nullptr);
 
     engine.evaluate("trigger.setAttribute('data-pulp-popup-default','off'); trigger.focus()");
     REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(

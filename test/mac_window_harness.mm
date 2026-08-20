@@ -269,6 +269,48 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     }
 }
 
+bool simulate_app_key(pulp::view::WindowHost& host,
+                      pulp::view::KeyCode key,
+                      bool is_down,
+                      uint16_t modifiers) {
+    if (!is_main_thread()) return false;
+    NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+    if (window == nil || key == pulp::view::KeyCode::unknown)
+        return false;
+
+    CGKeyCode key_code = 0;
+    NSString* characters = @"";
+    switch (key) {
+        case pulp::view::KeyCode::left:   key_code = 123; characters = @"\uF702"; break;
+        case pulp::view::KeyCode::right:  key_code = 124; characters = @"\uF703"; break;
+        case pulp::view::KeyCode::down:   key_code = 125; characters = @"\uF701"; break;
+        case pulp::view::KeyCode::up:     key_code = 126; characters = @"\uF700"; break;
+        case pulp::view::KeyCode::enter:  key_code = 36; characters = @"\r"; break;
+        case pulp::view::KeyCode::escape: key_code = 53; characters = @"\x1b"; break;
+        default: return false;
+    }
+    NSEventModifierFlags flags = 0;
+    if (modifiers & pulp::view::kModShift) flags |= NSEventModifierFlagShift;
+    if (modifiers & pulp::view::kModCtrl) flags |= NSEventModifierFlagControl;
+    if (modifiers & pulp::view::kModAlt) flags |= NSEventModifierFlagOption;
+    if (modifiers & pulp::view::kModCmd) flags |= NSEventModifierFlagCommand;
+    NSEvent* event = [NSEvent keyEventWithType:(is_down ? NSEventTypeKeyDown
+                                                        : NSEventTypeKeyUp)
+                                      location:NSZeroPoint
+                                 modifierFlags:flags
+                                     timestamp:0
+                                  windowNumber:window.windowNumber
+                                       context:nil
+                                    characters:characters
+                   charactersIgnoringModifiers:characters
+                                     isARepeat:NO
+                                       keyCode:key_code];
+    if (event == nil)
+        return false;
+    [NSApp sendEvent:event];
+    return true;
+}
+
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
     if (!is_main_thread()) return {};
 

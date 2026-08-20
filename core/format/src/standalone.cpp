@@ -642,6 +642,8 @@ void StandaloneApp::render_audio_block(
 }
 
 bool StandaloneApp::start() {
+    if (!tracing_.attached())
+        tracing_ = runtime::ScopedTracingAttachment{};
     // Create the processor once and reuse it across audio reconfigurations
     // (apply_config soft-restart). Recreating it on every settings change would
     // dangle an editor ViewBridge holding a Processor&; parameters are
@@ -1380,6 +1382,11 @@ void StandaloneApp::stop() {
         processor_->release();
         processor_.reset();
     }
+    // A standalone's primary-window close calls stop() before AppKit exits its
+    // run loop. End the tracing attachment here so the capture is durably
+    // flushed before the process can terminate; reset is idempotent and start()
+    // reattaches for a later run of the same StandaloneApp.
+    tracing_.reset();
 }
 
 // ── Persisted-config helpers ────────────────────────────────────────────────

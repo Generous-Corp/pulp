@@ -98,8 +98,14 @@ public:
     JsEngine& engine();
     const JsEngine& engine() const;
 
+    // Weak observation token for deferred callbacks which borrow this object.
+    // It tracks this ScriptEngine object's storage and deliberately does not
+    // move with the backend.
+    std::weak_ptr<const void> liveness_token() const noexcept { return alive_; }
+
 private:
     std::unique_ptr<JsEngine> engine_;
+    std::shared_ptr<const void> alive_ = std::make_shared<const char>('\0');
 
     // For QuickJS backward compatibility: WidgetBridge uses CHOC's Context directly
     // for the stack size hack and pimpl access. We keep a reference to the CHOC

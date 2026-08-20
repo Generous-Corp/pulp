@@ -520,10 +520,17 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 // Go through dismiss_active_overlay() (not the
                 // bare release_overlay()) so React state can flip
                 // setOpen(false) via on_overlay_dismissed. Falls through to
-                // the standard hit_test below so the click also activates
-                // whatever view is underneath, matching existing WebView
-                // behavior where outside-click closes-and-clicks-through.
-                pulp::view::View::dismiss_active_overlay();
+                // Some overlays deliberately suppress the initiating pointer
+                // sequence so dismissing a popup cannot also mutate its
+                // underlay. Others preserve the historical click-through.
+                const bool consumeOutsideClick =
+                    overlay->overlay_consumes_outside_click();
+                overlay->dismiss_claimed_overlay();
+                if (consumeOutsideClick) {
+                    _dragTargetCapture.reset();
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
             }
         }
 
@@ -1002,6 +1009,25 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             }
         }
 
+        // A materialized document may temporarily claim the owning root for a
+        // bounded navigation interaction (for example, an open semantic
+        // listbox). Route that capability before the legacy process-global
+        // script fan-out. A handled event belongs to this root only and must
+        // not also reach another editor or the focused-view path below.
+        if (self.rootView && self.rootView->accepts_navigation_input() &&
+            self.rootView->on_navigation_key) {
+            pulp::view::KeyEvent navigation_key;
+            navigation_key.key = key;
+            navigation_key.modifiers = mods;
+            navigation_key.is_down = true;
+            navigation_key.is_repeat = event.isARepeat;
+            if (self.rootView->on_navigation_key(navigation_key)) {
+                [self startAnimationTimerIfNeeded];
+                [self setNeedsDisplay:YES];
+                return;
+            }
+        }
+
         // Fan out to every live WidgetBridge so
         // `@pulp/react` apps (Spectr) receive bare-key shortcuts like
         // 'S' or Escape that React effects bind via
@@ -1050,11 +1076,14 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // `<View overlay>` path has no widget-specific ESC owner — wire
             // it here so React popovers built from active_overlay_ close on
             // ESC like every other popover surface.
-            if (pulp::view::View::active_overlay_) {
-                pulp::view::View::dismiss_active_overlay();
-                [self startAnimationTimerIfNeeded];
-                [self setNeedsDisplay:YES];
-                return;
+            if (self.rootView) {
+                auto* overlay = self.rootView->interaction().active_overlay;
+                if (overlay) {
+                    overlay->dismiss_claimed_overlay();
+                    [self startAnimationTimerIfNeeded];
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
             }
         }
 
@@ -2193,12 +2222,24 @@ public:
         key_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
                             (NSEventMaskKeyDown | NSEventMaskKeyUp)
                         handler:^NSEvent*(NSEvent* event) {
-            if (!app_key_handler_) return event;
             pulp::view::KeyEvent ke;
             ke.key = key_code_from_ns(event.keyCode);
             ke.modifiers = modifiers_from_ns_flags(event.modifierFlags);
             ke.is_down = (event.type == NSEventTypeKeyDown);
             ke.is_repeat = (event.type == NSEventTypeKeyDown) ? event.isARepeat : NO;
+
+            // Local monitors run before the responder chain. A standalone's
+            // Musical Typing monitor therefore sees arrow/Enter/Escape before
+            // PulpView::keyDown:. Give an owning root's explicit navigation
+            // claim first refusal here, matching keyDown: ordering. Consuming
+            // the event returns nil, so Musical Typing and AppKit cannot also
+            // act on the same key.
+            if (ke.is_down && root_.accepts_navigation_input() &&
+                root_.on_navigation_key && root_.on_navigation_key(ke)) {
+                repaint();
+                return nil;
+            }
+            if (!app_key_handler_) return event;
             return app_key_handler_(ke) ? nil : event;
         }];
     }
