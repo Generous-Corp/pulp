@@ -720,13 +720,16 @@ def apply_actions_runner_policy(key, pr):
                 _install_runner_package(
                     runner_dir, str(key["runner_version"]), str(key["runner_sha256"]),
                 )
+            # Stage the private toolchain before switching the runner's env or
+            # PATH. A failed download then restarts against the old working
+            # bootstrap instead of publishing a half-applied configuration.
+            _ensure_runner_rust(runner_dir)
             config_path = runner_dir / ".runner"
             config = json.loads(config_path.read_text(encoding="utf-8-sig"))
             config["disableUpdate"] = True
             _atomic_write(config_path, json.dumps(config, indent=2, sort_keys=True) + "\n")
             _merge_runner_env(runner_dir)
             _atomic_write(runner_dir / ".path", _runner_path_value(runner_dir) + "\n")
-            _ensure_runner_rust(runner_dir)
     except Exception as exc:
         for runner_dir in stopped:
             try:

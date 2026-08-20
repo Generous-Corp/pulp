@@ -103,8 +103,13 @@ class RunnerPolicyFixture(unittest.TestCase):
             return (runner_dir / "service-state").read_text().strip() == "start" \
                 if (runner_dir / "service-state").exists() else False
 
+        def ensure_before_publish(runner_dir: Path) -> None:
+            self.assertEqual((runner_dir / ".env").read_text(), "CCACHE_DIR=/keep/me\n")
+            self.assertFalse((runner_dir / ".path").exists())
+
         before = F.Probe(F.DRIFT, "bad")
-        with mock.patch.object(F, "_runner_process_present", side_effect=process_present):
+        with mock.patch.object(F, "_runner_process_present", side_effect=process_present), \
+             mock.patch.object(F, "_ensure_runner_rust", side_effect=ensure_before_publish):
             outcome, detail = F.apply_actions_runner_policy(self.key, before)
         self.assertEqual(outcome, "fixed", detail)
         config = json.loads((self.runner / ".runner").read_text(encoding="utf-8"))
