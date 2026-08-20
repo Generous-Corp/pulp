@@ -14,6 +14,7 @@
 #include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
+#include <pulp/format/param_group_projection.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
@@ -370,6 +371,9 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     memset(info, 0, sizeof(*info));
     info->id = p.id;
     runtime::copy_c_string(info->name, p.name);
+    const ParamGroupProjection groups(self->store.all_groups());
+    if (const auto* group = groups.find(p.group_id))
+        runtime::copy_c_string(info->module, group->path);
     info->min_value = p.range.min;
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;

@@ -144,6 +144,9 @@ OSStatus PulpAUMidiProcessor::GetPropertyInfo(AudioUnitPropertyID inID,
                                               UInt32& outDataSize,
                                               bool& outWritable)
 {
+    if (inID == kAudioUnitProperty_ParameterClumpName)
+        return fill_parameter_clump_property_info(store_, inScope, outDataSize,
+                                                  outWritable);
     if (inID == kPulpEditorContextProperty) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (inElement != 0) return kAudioUnitErr_InvalidElement;
@@ -196,6 +199,8 @@ OSStatus PulpAUMidiProcessor::GetProperty(AudioUnitPropertyID inID,
                                           AudioUnitElement inElement,
                                           void* outData)
 {
+    if (inID == kAudioUnitProperty_ParameterClumpName)
+        return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kPulpEditorContextProperty) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (inElement != 0) return kAudioUnitErr_InvalidElement;
