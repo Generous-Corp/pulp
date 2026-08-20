@@ -883,6 +883,10 @@ int lower_semantic_controls(const fs::path& path,
                     control.attributes["browser_sprite_indicator_px"] =
                         device_pixel_rect(ind.left, ind.top, ind.width,
                                           ind.height, dpr);
+                } else {
+                    error = "declared knob indicator for '" + param +
+                            "' has no radial pointer geometry to reproduce";
+                    return -1;
                 }
             } else if (widget == pulp::view::AudioWidgetType::fader &&
                        dial_w > 0.0 && dial_h > 0.0 &&
