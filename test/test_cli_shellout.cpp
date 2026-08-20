@@ -1567,6 +1567,86 @@ TEST_CASE("pulp macos validates local operator arguments before gh calls",
     REQUIRE(status_missing_pr.stderr_output.find("--pr requires a value") != std::string::npos);
 }
 
+#if !defined(_WIN32)
+TEST_CASE("pulp macos keeps API branch names out of the command shell",
+          "[cli][shellout][macos][security]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    auto fixture = unique_temp_dir("pulp-macos-argv-security");
+    fs::create_directories(fixture);
+    auto marker = fixture / "injected";
+    auto log = fixture / "gh-args";
+    auto gh = fixture / "gh";
+    write_text(gh,
+               "#!/bin/sh\n"
+               "printf '[%s]\\n' \"$@\" >> \"$PULP_SECURITY_ARG_LOG\"\n"
+               "case \"$*\" in\n"
+               "  *pulls/123*) printf \"branch'; touch '%s'; #\\\"or(true))|.id#\\n\" \"$PULP_SECURITY_MARKER\" ;;\n"
+               "esac\n"
+               "exit 0\n");
+    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write |
+                        fs::perms::owner_exec, fs::perm_options::replace);
+
+    ScopedEnvVar path("PATH");
+    const auto old_path = std::getenv("PATH") ? std::getenv("PATH") : "";
+    path.set(fixture.string() + ":" + old_path);
+    ScopedEnvVar marker_env("PULP_SECURITY_MARKER");
+    marker_env.set(marker.string());
+    ScopedEnvVar log_env("PULP_SECURITY_ARG_LOG");
+    log_env.set(log.string());
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto result = run_pulp(
+        {"macos", "retarget", "--pr", "123", "--to", "github-hosted"}, 10000);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(fs::exists(marker));
+    REQUIRE(read_file(log).find("\\\"or(true))|.id#") != std::string::npos);
+    fs::remove_all(fixture);
+}
+
+TEST_CASE("pulp doctor treats GitHub metadata as argv data, never shell syntax",
+          "[cli][shellout][security]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    auto fixture = unique_temp_dir("pulp-doctor-argv-security");
+    fs::create_directories(fixture);
+    auto marker = fixture / "injected";
+    auto gh = fixture / "gh";
+    write_text(gh,
+               "#!/bin/sh\n"
+               "if [ \"$1\" = repo ]; then\n"
+               "  printf \"owner/repo'; touch '%s'; #\\n\" \"$PULP_SECURITY_MARKER\"\n"
+               "  exit 0\n"
+               "fi\n"
+               "printf '{\"secrets\":[]}\\n'\n");
+    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write |
+                        fs::perms::owner_exec, fs::perm_options::replace);
+
+    ScopedEnvVar path("PATH");
+    const auto old_path = std::getenv("PATH") ? std::getenv("PATH") : "";
+    path.set(fixture.string() + ":" + old_path);
+    ScopedEnvVar marker_env("PULP_SECURITY_MARKER");
+    marker_env.set(marker.string());
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto result = run_pulp(
+        {"doctor", "--fix", "--only", "RELEASE_BOT_TOKEN secret"}, 10000);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE_FALSE(fs::exists(marker));
+    REQUIRE(result.stdout_output.find("requires manual steps") != std::string::npos);
+    fs::remove_all(fixture);
+}
+#endif
+
 TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shellout][overflow]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
