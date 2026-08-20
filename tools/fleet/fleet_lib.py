@@ -328,7 +328,10 @@ def _runner_glob_observation_error(key):
         pattern = expand(raw_pattern)
         magic = [pos for char in "*?[" if (pos := pattern.find(char)) >= 0]
         literal = pattern[:min(magic)] if magic else pattern
-        parent = Path(literal).parent if magic else Path(literal)
+        if magic and literal.endswith(os.sep):
+            parent = Path(literal)
+        else:
+            parent = Path(literal).parent if magic else Path(literal)
         candidate = parent
         while not candidate.exists() and candidate != candidate.parent:
             candidate = candidate.parent

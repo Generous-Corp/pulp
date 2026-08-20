@@ -136,6 +136,17 @@ class RunnerPolicyFixture(unittest.TestCase):
         self.assertEqual(result.state, F.OK, result.detail)
         self.assertIn("0 configured runner", result.detail)
 
+    def test_unreadable_fixed_glob_parent_is_unobservable_not_zero_runners(self) -> None:
+        fixed_parent = self.home / "actions-ci"
+
+        def access(path: Path, mode: int) -> bool:
+            return Path(path) != fixed_parent
+
+        with mock.patch.object(F.os, "access", side_effect=access):
+            result = F.probe_actions_runner_policy(self.key)
+        self.assertEqual(result.state, F.UNOBS)
+        self.assertIn(str(fixed_parent), result.detail)
+
     def test_sha256_file_streams_the_expected_digest(self) -> None:
         sample = self.home / "sample"
         sample.write_bytes(b"known bytes")
