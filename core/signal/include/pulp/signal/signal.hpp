@@ -12,6 +12,7 @@
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
+#include <pulp/signal/diffusion_network.hpp>
 #include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/waveguide_junction.hpp>

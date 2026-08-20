@@ -2045,6 +2045,58 @@ covered by that test — when adding a build step to any workflow, give it an
 explicit count or route it through `tools/ci/governed-build.sh` (mandatory
 anyway for legs that can resolve to the shared self-hosted Macs).
 
+### `shipyard pr` can leave YOUR build dir at Debug — and a later "successful" build can be stale
+
+The local validation backend builds Debug in the editing checkout. That is
+already recorded below as a source of CI *false-fails*; the more dangerous
+direction is the opposite one, and it lands on you rather than on CI:
+**it silently converts your next local proof into a Debug proof.** You run
+`shipyard pr`, then rebuild and re-run your tests, they pass, and you record a
+green Release proof that was never Release. CLAUDE.md's warning that "something
+in the shipyard / pre-push gate / rebase paths can silently reset the cache to
+Debug" is exactly this; observed 2026-08-17 on a DSP cell whose post-reconcile
+proof had to be thrown away.
+
+**Detection is the two-way Release check, and only the two-way check works.**
+CLAUDE.md already requires both; this is the failure it is for:
+
+```bash
+grep '^CMAKE_BUILD_TYPE' build/CMakeCache.txt                       # Release?
+grep '^CXX_FLAGS ' build/<dir>/CMakeFiles/<target>.dir/flags.make   # -O3 -DNDEBUG?
+```
+
+Here both read Debug consistently (`Debug` and `-g`), so a cache-only check
+reports the cache field it was given and tells you nothing — the flip moves both
+together.
+
+**A second, independent failure rides along: binaries that never got rebuilt.**
+After the flip, a `cmake --build` that exits 0 can leave test binaries older than
+the sources you just edited, because the reported success covers the targets make
+decided were current. `Built target` is not evidence a target was compiled. So
+check freshness, not just exit status:
+
+```bash
+stat -f '%Sm %N' -t '%H:%M:%S' build/CMakeCache.txt \
+  build/test/<binary> test/<source>.cpp
+# every binary must be NEWER than both the cache and its sources
+```
+
+Two of three binaries in the observed case predated the edit that was supposedly
+under test, while the build reported success and the tests passed — they were
+proving the previous revision.
+
+**Recovery: delete the build directory.** Reconfiguring Release over a flipped
+cache leaves mixed Debug/Release objects, which surfaced as an *unrelated-looking*
+link error inside Catch2 —
+`Undefined symbols: Catch::handleExceptionMatchExpr(...)` — that reads like a
+Catch2 or dependency problem and is neither. Do not debug it; `rm -rf build`,
+configure Release, build once. Budget for a full clean build.
+
+**Prevention:** after any `shipyard pr` (or any pre-push gate run) in a checkout
+you also build proofs in, re-verify the build type before trusting the next
+result — or keep proof builds in a directory Shipyard never touches. Do not re-run
+`shipyard pr` merely to refresh an already-published PR; push the branch instead.
+
 ### Keep ONE -O0 lane: it sees UB that -O3 provably hides
 
 `.shipyard/config.toml`'s macOS validation lane builds **Debug (-O0)**. This

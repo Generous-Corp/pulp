@@ -65,6 +65,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/auto_ducked_send.cpp
     header_compile/comb_filter.cpp
     header_compile/cartesian_walk.cpp
+    header_compile/diffusion_network.cpp
     header_compile/dynamics_contract.cpp
     header_compile/dynamic_eq.cpp
     header_compile/fast_math.cpp

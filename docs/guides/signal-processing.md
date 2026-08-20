@@ -569,6 +569,48 @@ crossfeed, per-character time slew, and a physical tape tier. See the
 [Character Delay guide](character-delay.md) for lifecycle, complete per-method
 API documentation, character selection, and recipes.
 
+### DiffusionNetwork
+
+`DiffusionNetworkT` is a wet-only, fixed-capacity stereo transient diffuser. It
+cascades up to eight Schroeder allpasses and applies an orthonormal
+inter-channel rotation after each stage. It is intentionally not a reverb: it
+has no feedback tank, decay/damping policy, modulation, early-reflection model,
+or dry path.
+
+```cpp
+signal::DiffusionNetwork diffusion;
+
+// Control thread: allocates capacity for every stage and both channels.
+if (!diffusion.prepare(sample_rate, 50.0))
+    return false;
+
+signal::DiffusionNetwork::Config config;
+config.stage_count = 4;
+config.stages[0] = {.delay_ms = 3.1, .gain = 0.65};
+config.stereo_width = 0.75;
+if (!diffusion.configure(config))
+    return false;
+
+// Audio thread: wet-only stereo, including safe in-place blocks.
+diffusion.process_block(left, right, left, right, frame_count);
+```
+
+| Method | Description |
+|---|---|
+| `prepare(sample_rate, maximum_delay_ms)` | Transactionally allocates the fixed maximum delay for all eight stages. Capacity ranges from one sample through 100 ms and must fit the current configuration. A failed call preserves the live state. |
+| `configure(config)` | Transactionally validates and publishes stage count, each stage's delay/gain, and stereo width. It may be called before `prepare()` to select a configuration for a short capacity; after preparation, success resets history. Gain magnitude and stereo width are each either exactly zero or at least `0.02`, keeping declared direct and routed feed-through above the tail-flush floor; gain magnitude is capped at `0.95` and width at `1`. |
+| `process_sample(...)` / `process_block(...)` | Processes wet-only stereo without allocation; blocks may be in place and partition arbitrarily. |
+| `reset()` | Logically clears all histories in constant time without allocation. A non-finite input or internal overflow also clears state and emits silence for that sample. |
+| `latency_samples()` | Reports the earliest observable response cached during `prepare()` or `configure()`. Bounded left/right impulse probes include route cancellation and delayed rerouting in mixed zero/non-zero-gain cascades. |
+| `tail_samples()` | Returns `-1` for a recursive allpass tail, a conservative finite bound for an all-zero-gain cascade, or zero for no active stages. |
+
+The scalar allpasses have unit magnitude and the width matrix is orthonormal, so
+the complete feed-forward network preserves infinite-horizon stereo L2 energy
+apart from floating-point roundoff and the shared below-1e-15 tail flush. Width
+zero disables channel coupling; width one applies a 45-degree alternating
+rotation per stage. Left/right delay offsets are fixed and deterministic, so
+resets and separately prepared instances reproduce exactly.
+
 ---
 
 ### Chorus

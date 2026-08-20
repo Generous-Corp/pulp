@@ -54,6 +54,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/tilt_eq.hpp": "Pulp::signal",
     "pulp/signal/parallel_dynamics.hpp": "Pulp::signal",
     "pulp/signal/transfer_curve.hpp": "Pulp::signal",
+    "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
@@ -562,8 +563,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/detail/schroeder_allpass.hpp",
+        "fingerprint": "sha256:64f8f2857c873c37bc94102544459d528459dd2c422eb0bf812a3d1d4b411760",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This internal header shares the pure scalar Schroeder allpass recurrence "
+            "used by several processors; it is not an independent authoring surface."
+        ),
+    },
+    {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:be6077a922d9773b094db0cbfcdec10d43c84ba8f204ca909cff9f883861139c",
+        "fingerprint": "sha256:027d6cb42c8816b8b01b82510eaed6ee55507febc444b1dcfa1bce8257247875",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

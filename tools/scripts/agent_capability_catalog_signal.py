@@ -1572,6 +1572,46 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.diffusion-network", domain="signal",
+        summary=(
+            "Prepared stereo Schroeder allpass cascade with energy-preserving inter-channel "
+            "rotation, for transient smearing without a feedback tank or reverb policy."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates the per-stage stereo delay rings",
+                   "process": "audio; configure() is control-thread but allocation-free",
+                   "reset": "audio", "release": "none"},
+        state_model=(
+            "Fixed-capacity per-stage stereo rings sized by the prepared maximum delay, plus the "
+            "committed stage delay/gain and stereo-width configuration and its derived integer "
+            "delays. A rejected prepare or configure leaves the previous committed state in "
+            "place, and reset logically empties the rings rather than resizing them."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "stereo audio plus a bounded stage count, per-stage delay in milliseconds, stable "
+            "allpass gains, and a normalized stereo width"
+        ),
+        output_domain="diffused stereo audio with reported latency and tail bounds",
+        units=["samples", "milliseconds", "hertz", "linear gain", "normalized width"],
+        latency="earliest observable response cached by bounded left/right impulse probes during "
+                "prepare or configure; includes mixed-gain route cancellation and recursive "
+                "rerouting",
+        tail="mathematically infinite for any non-zero allpass gain, reported as -1; a zero-gain "
+             "cascade is feed-forward and reports a finite sample bound",
+        scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/diffusion_network.hpp",
+                         qualified_name="pulp::signal::DiffusionNetworkT<float>",
+                         target="Pulp::signal",
+                         header_fingerprint="sha256:f09f50d1877d090ffd1c8ea200085461b572a6e29231534c3ad1b49445c0683c")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DiffusionNetworkT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
         key="signal.spectral-cross-synthesis", domain="signal",
         summary=(
             "Prepared source-filter cross-synthesis that transfers a modulator cepstral envelope "

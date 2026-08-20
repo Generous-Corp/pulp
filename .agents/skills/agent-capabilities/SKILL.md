@@ -444,3 +444,73 @@ them to make one PR pass would be removing a deliberate guard. Declaring the hea
 the fingerprint check on its own; the baseline file, its entry count, and its digest all stay
 untouched. Confirm afterwards that the baseline entry count is unchanged and the manifest
 self-tests still pass.
+
+**Ask the prior question first: does your capability actually need that header to change?**
+Both this section and the recorded precedents jump straight to *how* to classify a frozen
+header, which quietly assumes the edit to it is load-bearing. Often it is not. A cell that adds
+a new processor and, while it is in there, refactors three existing processors onto a shared
+kernel will trip this gate on headers its capability never touches — and the whole gate
+disappears if the refactor is dropped.
+
+So triage the edit before classifying the header:
+
+- **Incidental to the capability** (a dedup, a comment, a rename, an ordering tidy) — revert it
+  and shrink the cell. Nothing about the new capability depends on it, the frozen baseline stays
+  out of the change entirely, and the diff shrinks to what a reviewer can actually check.
+- **Required by the capability** — declare the header. The recorded example is
+  `frequency_response.hpp` templated over `SampleType` so the `_64` variants could compute a
+  response without narrowing: reverting it would have shipped those variants with no response
+  inspection, so there was no smaller correct slice.
+
+The asymmetry is what makes this worth doing in that order. Reverting an incidental edit costs
+one `git checkout origin/main -- <header>`. Declaring a header is permanent: it converts an
+unreviewed legacy header into a reviewed contract the repo then owns, decided as a side effect
+of a cleanup rather than on its own merits. If the dedup is worth having, it is worth its own
+change, where the classification is the subject of review instead of collateral.
+
+When you do revert, prune whatever the reverted call sites were the only users of. A shared
+helper introduced for three call sites that no longer exist is dead public surface, and it
+enlarges the very fingerprint you are trying to keep small.
+
+### `test_signal_no_exceptions.cpp` is a shared ledger — three hazards, not two
+
+Nearly every signal capability appends to it, and it assigns a **unique non-zero exit code per
+checked capability** so each failure is identifiable from the status alone. Cells prepared in
+parallel therefore collide in it constantly. Two hazards are well known; the third is not, and
+it defeats the checks for the other two.
+
+1. **Duplicate exit codes.** Two cells both append above the same remembered maximum and take
+   the same numbers. Compiles fine, both pass in isolation, and two distinct failures become
+   indistinguishable. Only a duplicate-code scan finds it.
+2. **Duplicate capability blocks.** Rebuilding the file from main's canonical version and
+   appending your block is the right resolution, but a cell with more than one commit touching
+   the file re-adds what the resolution already appended. This one is usually loud
+   (`redefinition of ...`).
+3. **Two statements sharing a line.** A resolution can leave a declaration on the same line as
+   the preceding `return`:
+
+   ```cpp
+   if (!(formants.configure(recipe) == FormantConfigureStatus::configured))
+       return 29;    pulp::signal::ParallelDynamicsMixer parallel_dynamics;
+   if (!parallel_dynamics.prepare(8u, 16u))
+       return 31;
+   ```
+
+   This compiles, and it is *reachable* — the `if` body is only the return, so the declaration
+   still executes — so no test can see it and neither the duplicate-code nor the
+   duplicate-block check fires. Both of those are **line-oriented**, and two statements on one
+   line is precisely the shape that slips past them. Observed on a published PR in 2026-08.
+
+   It is not a correctness bug today, which is why it survives review; it is a latent one. The
+   same shape with a guarded early return (`if (cond) return N; Type x;` inside a block that
+   can be taken) silently skips the declaration and every check after it, and the capability's
+   proof quietly stops running while the binary still exits 0.
+
+**So do not hand-resolve this file.** Rebuild it from `git show origin/main:` and re-append your
+block programmatically, which removes all three by construction — that is how the line-sharing
+defect above was removed, as a side effect of the correct procedure rather than by spotting it.
+Then verify all three: no non-zero code repeats, each capability block appears exactly once, and
+no line carries two statements.
+
+Extract codes from every return form, including ternaries (`return c ? 0 : N;`) — a naive
+`grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
