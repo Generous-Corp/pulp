@@ -24,7 +24,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | css-tree | 3.2.1 | MIT | CSS value parsing and lexer validation for JSX source-contract extraction; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Dawn | chrome/m152 deps (bundled in Skia toolchain) | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-06-05 |
 | DRACO | 1.5.7 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
-| dr_libs | vendored-snapshot | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav) | pulp-audio | 2026-04-07 |
+| dr_libs | vendored-snapshot; dr_mp3@4d74802+0b12cb57 | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav); dr_mp3 carries upstream's one-line Xing frame-count overflow fix | pulp-audio | 2026-04-07 |
 | fastgltf | v0.9.0 | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |
 | Gradle Wrapper | 8.11 | Apache-2.0 | Redistributed wrapper scripts and JAR used to bootstrap the pinned Android build toolchain (JAR SHA-256 `b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13`) | Android tooling | 2026-07-14 |
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |

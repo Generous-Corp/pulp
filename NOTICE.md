@@ -248,6 +248,12 @@ dr_libs (dr_flac, dr_mp3, dr_wav) is dual-licensed under the Unlicense
 (public domain) and MIT No Attribution. Pulp redistributes the headers
 under the Unlicense terms.
 
+The vendored `dr_mp3.h` snapshot originates at upstream commit
+`4d74802a098a2abbef4d063dd211e89260521313` and carries the exact one-line
+Xing/Info frame-count overflow fix from upstream commit
+`0b12cb573cde44dc2b7aead3fc35c20a9d822f78` (`mackron/dr_libs#308`). The
+other dr_libs headers remain at their prior snapshots.
+
 This is free and unencumbered software released into the public domain.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or distribute
