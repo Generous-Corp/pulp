@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 
 try:
@@ -555,6 +556,20 @@ def _runner_process_present(runner_dir, process_name):
     return any(needle in line for line in proc.stdout.splitlines())
 
 
+def _wait_runner_process(runner_dir, process_name, expected, timeout=30):
+    """Bounded service-state convergence; never retries a workflow/job."""
+    deadline = time.monotonic() + timeout
+    while True:
+        observed = _runner_process_present(runner_dir, process_name)
+        if observed is None:
+            return None
+        if observed is expected:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
 def _run_checked(argv, *, cwd=None, env=None, timeout=600):
     proc = subprocess.run(
         [str(x) for x in argv], cwd=str(cwd) if cwd else None, env=env,
@@ -706,6 +721,13 @@ def apply_actions_runner_policy(key, pr):
             if listener:
                 _run_checked([runner_dir / "svc.sh", "stop"], cwd=runner_dir, timeout=120)
                 stopped.append(runner_dir)
+                stopped_cleanly = _wait_runner_process(
+                    runner_dir, "Runner.Listener", False,
+                )
+                if stopped_cleanly is None:
+                    raise RuntimeError(f"cannot verify listener stopped for {runner_dir}")
+                if not stopped_cleanly:
+                    raise RuntimeError(f"listener did not stop within 30s for {runner_dir}")
 
         # Close the assignment race: after listeners are stopped, no new job
         # can arrive, and every worker must still be absent before mutation.
@@ -749,6 +771,11 @@ def apply_actions_runner_policy(key, pr):
                 raise RuntimeError("cannot inspect listener after hardening")
             if not listener:
                 _run_checked([runner_dir / "svc.sh", "start"], cwd=runner_dir, timeout=120)
+                started = _wait_runner_process(runner_dir, "Runner.Listener", True)
+                if started is None:
+                    raise RuntimeError("cannot inspect listener after start")
+                if not started:
+                    raise RuntimeError("listener did not start within 30s")
         except Exception as exc:
             restart_failures.append(f"{runner_dir}: {exc}")
     if restart_failures:
