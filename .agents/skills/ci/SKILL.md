@@ -5660,11 +5660,22 @@ full lane — against a `main` that moves hourly it never converges. If the two
 jobs still disagree, re-run the trusted gate rather than moving the branch.
 
 The `pull_request_target` + `statuses: write` shape on the trusted gate is
-intentional and safe as written: it checks out `base.sha` with
-`persist-credentials: false`, executes **only** base-checkout scripts, and adds
-the PR head as a worktree that is read as data and never executed. Preserve all
-three properties when editing that workflow — running anything out of
+intentional and safe as written: it checks out literal protected `main` with
+`persist-credentials: false`, proves that commit is still the live PR base
+before minting secrets, executes **only** trusted-checkout scripts, and adds the
+PR head as a worktree that is read as data and never executed. Preserve all
+four properties when editing that workflow — running anything out of
 `$proposed_tree` would hand a fork PR the Vellum reader credentials.
+
+CodeQL treats a checkout ref carried through a preceding step output as
+untrusted in a privileged workflow, even when that step resolved the live
+`base.sha` through the API. Keep the privileged checkout ref a literal
+`refs/heads/main`, restrict the trigger and resolved PR target to this
+repository's `main`, accept manual dispatch only when the workflow itself was
+loaded from `refs/heads/main`, and compare the checked-out commit to the
+resolved live base SHA before minting any secret-bearing token. A mismatch is a
+fail-closed main-advanced race and should be re-run; never restore a PR-derived
+checkout ref to avoid that retry.
 
 ### `merge_group` belongs ONLY on workflows that produce a required context
 
