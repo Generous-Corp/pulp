@@ -487,6 +487,40 @@ namespace {
 // downstream codegen rules apply unchanged.
 IRNode json_to_ir_node(const choc::value::ValueView& v);
 
+bool is_explicit_decorative_role(const std::string& role) {
+    std::string token;
+    auto is_decorative = [](const std::string& value) {
+        return value == "label" || value == "labels" ||
+               value == "value" || value == "values" ||
+               value == "readout" || value == "readouts";
+    };
+    auto flush = [&] {
+        const bool result = is_decorative(token);
+        token.clear();
+        return result;
+    };
+    for (std::size_t i = 0; i < role.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(role[i]);
+        if (std::isalnum(ch)) {
+            if (!token.empty()) {
+                const unsigned char prev = static_cast<unsigned char>(role[i - 1]);
+                const bool camel_boundary = std::islower(prev) && std::isupper(ch);
+                const bool acronym_boundary =
+                    std::isupper(prev) && std::isupper(ch) && i + 1 < role.size() &&
+                    std::islower(static_cast<unsigned char>(role[i + 1]));
+                const bool digit_boundary =
+                    (std::isdigit(prev) != 0) != (std::isdigit(ch) != 0);
+                if ((camel_boundary || acronym_boundary || digit_boundary) && flush())
+                    return true;
+            }
+            token.push_back(static_cast<char>(std::tolower(ch)));
+        } else {
+            if (flush()) return true;
+        }
+    }
+    return flush();
+}
+
 void json_children_to_ir(const choc::value::ValueView& children, IRNode& parent) {
     if (!children.isArray()) return;
     for (uint32_t i = 0; i < children.size(); ++i) {
@@ -587,14 +621,16 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
     // keeps e.g. class="value" data-pulp-role="knob" fail-closed as a control.
     auto role = node.attributes.count("data-pulp-role")
         ? node.attributes["data-pulp-role"] : std::string{};
+    const bool explicit_decorative_role = is_explicit_decorative_role(role);
     node.audio_widget = audio_widget_from_id(role);
     if (node.audio_widget == AudioWidgetType::none && !role.empty()) {
         node.audio_widget = detect_audio_widget(role);
     }
-    if (node.audio_widget == AudioWidgetType::none) {
+    if (node.audio_widget == AudioWidgetType::none && !explicit_decorative_role) {
         node.audio_widget = detect_audio_widget(node.name);
     }
-    if (node.audio_widget == AudioWidgetType::none && class_str != node.name) {
+    if (node.audio_widget == AudioWidgetType::none && !explicit_decorative_role &&
+        class_str != node.name) {
         node.audio_widget = detect_audio_widget(node.name + " " + class_str);
     }
 
