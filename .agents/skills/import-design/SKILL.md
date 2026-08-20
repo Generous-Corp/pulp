@@ -6640,6 +6640,11 @@ remains a legitimate control name, and an explicit recognized
 of a bound control is decorative: another unbound control in the same row must
 still fail closed.
 
+The C++ classifier is shared with the Figma lanes, so this ordered readout rule
+must remain in lockstep with `audioWidgetKindFromName` and
+`widget_kind_from_name`; pin the same positive and reversed-order cases in all
+three implementations.
+
 ## Two lowering lanes read one resolver — a widget kind must reach BOTH
 
 `resolve_design_ir_native` classifies a node into a `NativeWidgetKind`, and two

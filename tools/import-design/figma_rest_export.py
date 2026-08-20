@@ -1075,11 +1075,24 @@ def _tokenize_name(name):
 def widget_kind_from_name(name):
     # WHOLE-WORD match (not substring), mirroring the C++ detect_audio_widget — so
     # "Dialog"/"Radial" no longer become knobs and "Diameter" no longer a meter.
-    toks = set(_tokenize_name(name))
+    token_list = _tokenize_name(name)
+    toks = set(token_list)
     def has(w):
         return w in toks or (w + "s") in toks
     # Vocabulary kept in lockstep with C++ detect_audio_widget
     # (core/view/src/design_import.cpp) and the TS audioWidgetKindFromName.
+    widget_words = {
+        "knob", "dial", "fader", "slider", "meter", "level", "vu", "xypad", "pad",
+        "waveform", "oscilloscope", "spectrum", "analyzer", "analyser",
+    }
+    def is_widget(w):
+        singular = w[:-1] if w.endswith("s") else w
+        return singular in widget_words
+    def is_readout(w):
+        return w in {"value", "values", "readout", "readouts"}
+    if any(is_widget(token_list[i - 1]) and is_readout(token_list[i])
+           for i in range(1, len(token_list))):
+        return None
     if has("knob") or has("dial"): return "knob"
     if has("fader") or has("slider"): return "fader"
     if has("meter") or has("level") or has("vu"): return "meter"
