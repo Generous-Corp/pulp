@@ -129,7 +129,7 @@ class SpectralFeatureFrontEndT {
     }
 
     [[nodiscard]] bool render_frame() noexcept {
-        if (!window_.render_spectrum())
+        if (!window_.render_gain_normalized_spectrum())
             return false;
 
         const auto& config = window_.config();

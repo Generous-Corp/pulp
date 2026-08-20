@@ -146,14 +146,11 @@ TEST_CASE("off-bin stationary tone remains stable across overlapping windows",
     }
 }
 
-TEST_CASE("finite double extremes are normalized before power and frequency accumulation",
+TEST_CASE("finite double extremes are normalized before FFT feature accumulation",
           "[signal][spectral-feature-frontends]") {
-    constexpr std::size_t size = 8;
+    constexpr std::size_t size = 4;
     std::array<double, size> tone{};
-    constexpr double amplitude = 1.0e200;
-    constexpr double two_pi = 6.283185307179586476925286766559;
-    for (std::size_t i = 0; i < size; ++i)
-        tone[i] = amplitude * std::sin(two_pi * static_cast<double>(i) / size);
+    tone.fill(std::numeric_limits<double>::max());
     const double* channels[] = {tone.data()};
 
     auto extreme = config(size, size);

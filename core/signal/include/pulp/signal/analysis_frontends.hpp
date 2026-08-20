@@ -146,20 +146,11 @@ class StreamingAnalysisWindowT {
     }
 
     [[nodiscard]] bool render_spectrum() noexcept {
-        if (!fft_)
-            return false;
-        for (std::size_t i = 0; i < config_.fft_size; ++i) {
-            const auto source = (write_ + i) % config_.fft_size;
-            time_frame_[i] = static_cast<SampleType>(mono_ring_[source] * window_[i]);
-            if (!std::isfinite(time_frame_[i]))
-                return false;
-        }
-        fft_->forward_real(time_frame_.data(), spectrum_.data());
-        for (std::size_t bin = 0; bin <= config_.fft_size / 2u; ++bin) {
-            if (!std::isfinite(spectrum_[bin].real()) || !std::isfinite(spectrum_[bin].imag()))
-                return false;
-        }
-        return true;
+        return render_spectrum(false);
+    }
+
+    [[nodiscard]] bool render_gain_normalized_spectrum() noexcept {
+        return render_spectrum(true);
     }
 
     [[nodiscard]] double frame_energy() const noexcept {
@@ -192,6 +183,33 @@ class StreamingAnalysisWindowT {
     }
 
   private:
+    [[nodiscard]] bool render_spectrum(bool normalize_gain) noexcept {
+        if (!fft_)
+            return false;
+        double maximum = 0.0;
+        if (normalize_gain) {
+            for (std::size_t i = 0; i < config_.fft_size; ++i) {
+                const auto source = (write_ + i) % config_.fft_size;
+                const auto windowed = mono_ring_[source] * window_[i];
+                if (!std::isfinite(windowed))
+                    return false;
+                maximum = std::max(maximum, std::abs(windowed));
+            }
+        }
+        for (std::size_t i = 0; i < config_.fft_size; ++i) {
+            const auto source = (write_ + i) % config_.fft_size;
+            const auto windowed = mono_ring_[source] * window_[i];
+            time_frame_[i] = static_cast<SampleType>(maximum > 0.0 ? windowed / maximum : windowed);
+            if (!std::isfinite(time_frame_[i]))
+                return false;
+        }
+        fft_->forward_real(time_frame_.data(), spectrum_.data());
+        for (std::size_t bin = 0; bin <= config_.fft_size / 2u; ++bin) {
+            if (!std::isfinite(spectrum_[bin].real()) || !std::isfinite(spectrum_[bin].imag()))
+                return false;
+        }
+        return true;
+    }
     static bool valid_config(const StreamingAnalysisConfig& config, bool require_fft) noexcept {
         return std::isfinite(config.sample_rate) && config.sample_rate > 0.0 &&
                config.channels > 0 && config.channels <= MaxChannels && config.fft_size >= 2 &&
