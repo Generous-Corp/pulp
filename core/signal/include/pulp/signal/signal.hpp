@@ -5,6 +5,7 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/commuted_string_excitation.hpp>
 #include <pulp/signal/formant_filter_bank.hpp>
 #include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/sos_cascade.hpp>
