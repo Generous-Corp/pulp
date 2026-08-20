@@ -382,6 +382,80 @@ class ChordScaleLane {
     std::shared_ptr<const std::vector<ChordScaleEvent>> events_;
 };
 
+/// Intensity statement in force from `position` until the next event.
+///
+/// `intensity` is normalized to [0, 1] rather than carrying a dynamic marking
+/// (pp, mf, ff): a marking is a performance-practice label whose mapping to
+/// loudness is instrument- and era-dependent, so storing one would force every
+/// reader to agree on a conversion that does not exist. A generator that wants
+/// markings can label ranges; a generator that wants a number already has one.
+///
+/// `interpolation` describes the segment *leaving* this event, matching
+/// AutomationPoint's convention, so the last event's value simply holds.
+struct DynamicsEvent {
+    /// Canonical tick at which this intensity statement takes effect.
+    timebase::TickPosition position;
+    /// Normalized intensity in [0, 1]. Must be finite; a value outside the
+    /// range is rejected rather than clamped.
+    float intensity = 0.0f;
+    /// How the segment *leaving* this event reaches the next one. The final
+    /// event's value simply holds, whatever this says.
+    AutomationInterpolation interpolation = AutomationInterpolation::Continuous;
+
+    constexpr bool operator==(const DynamicsEvent&) const = default;
+};
+
+/// Immutable intensity context lane owned by a sequence.
+///
+/// Events are strictly ordered by position with no duplicates, mirroring
+/// ChordScaleLane. The lane is sequence-owned context read through the
+/// compile-context subscription contract described in compile_context.hpp.
+///
+/// This reuses AutomationInterpolation as a shared vocabulary rather than
+/// inventing a parallel one; it is deliberately *not* an AutomationCurve. An
+/// automation curve targets a parameter and is consumed by the modulation
+/// system, while this lane is compile-time musical context with no target and
+/// no consumer. Sharing the enum costs nothing and keeps two notions of
+/// "hold versus ramp" from drifting apart.
+class DynamicsLane {
+  public:
+    /// Validates, orders, and stores intensity events.
+    static runtime::Result<DynamicsLane, ModelError> create(std::vector<DynamicsEvent> events);
+
+    /// Returns events in strictly increasing position order.
+    std::span<const DynamicsEvent> events() const noexcept {
+        return *events_;
+    }
+    /// Returns whether no intensity context is authored.
+    bool empty() const noexcept {
+        return events_->empty();
+    }
+    /// Returns the last event starting at or before `position`.
+    ///
+    /// Returns `nullptr` before the first event; no default intensity is
+    /// invented, because silence and "not yet stated" are different claims.
+    const DynamicsEvent* at(timebase::TickPosition position) const noexcept;
+    /// Returns the interpolated intensity at `position`.
+    ///
+    /// Empty before the first event, for the same reason `at` is null there.
+    /// From the last event onward the final value holds. Between two events the
+    /// earlier event's interpolation decides: Hold keeps the earlier value for
+    /// the whole span, Continuous ramps linearly to the later one.
+    std::optional<float> value_at(timebase::TickPosition position) const noexcept;
+    /// Returns whether both lanes share the same immutable event storage.
+    bool shares_storage_with(const DynamicsLane& other) const noexcept {
+        return events_.get() == other.events_.get();
+    }
+    /// Compares authored event values.
+    bool operator==(const DynamicsLane& other) const noexcept;
+
+  private:
+    explicit DynamicsLane(std::shared_ptr<const std::vector<DynamicsEvent>> events) noexcept
+        : events_(std::move(events)) {}
+
+    std::shared_ptr<const std::vector<DynamicsEvent>> events_;
+};
+
 /// Named point on a sequence's musical timeline.
 ///
 /// Position is in canonical ticks. `color` is optional packed 0xRRGGBBAA;
@@ -561,6 +635,9 @@ struct SequenceInput {
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
     std::optional<ChordScaleLane> chord_scale_lane;
+    /// Intensity context lane. Absent means the sequence is built with an empty
+    /// lane, which states no dynamics rather than stating silence.
+    std::optional<DynamicsLane> dynamics_lane;
     std::optional<GrooveTemplate> groove;
     // Authored launch order. A scene owns its slots; every non-empty slot
     // references a clip in this sequence.
@@ -677,6 +754,12 @@ class Sequence {
     const Track* find_track(ItemId id) const noexcept;
     /// Returns the always-present chord/scale context lane.
     const ChordScaleLane& chord_scale_lane() const noexcept;
+    /// Returns the always-present intensity context lane.
+    ///
+    /// A sequence that states no dynamics returns an empty lane rather than an
+    /// absence, matching chord_scale_lane: callers ask the lane what it says at
+    /// a position, and "nothing yet" is that lane's answer, not a missing lane.
+    const DynamicsLane& dynamics_lane() const noexcept;
     /// Returns the always-present groove context.
     const GrooveTemplate& groove() const noexcept;
     /// Returns markers ordered by position then identity.
@@ -737,6 +820,8 @@ class Sequence {
     runtime::Result<Sequence, ModelError> erase_slot(ItemId scene_id, ItemId slot_id) const;
     /// Returns a snapshot with replacement harmonic context.
     Sequence with_chord_scale_lane(ChordScaleLane lane) const;
+    /// Returns a snapshot with replacement intensity context.
+    Sequence with_dynamics_lane(DynamicsLane lane) const;
     /// Returns a snapshot with replacement groove context.
     Sequence with_groove(GrooveTemplate groove) const;
     /// Counts persistent launcher nodes shared with `other`.

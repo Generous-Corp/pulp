@@ -752,6 +752,17 @@ present on a host but absent from the manifest is configuration drift, even
 when it works: it will not survive fleet reconciliation, and repairs to such
 a slot start by declaring it.
 
+Persistent native Actions runners are covered by the manifest's
+`actions_runner_policy` key. The policy discovers configured runner directories
+from globs rather than names, pins one reviewed Actions runner version with
+automatic updates disabled, keeps system directories before Homebrew on the
+runner's captured `.path`, and locates `RUSTUP_HOME`/`CARGO_HOME` under the
+runner's own internal-APFS `_toolcache`. `tools/fleet/verify.sh` reports any
+deviation; `tools/fleet/apply.sh` repairs it only when no `Runner.Worker` is
+active, restarts an offline listener, and otherwise leaves a manual receipt for
+the bounded watchdog ladder. It never retries a workflow or transfers recovery
+to another host.
+
 ### Shipping a PR: `shipyard pr`
 
 `shipyard pr` is the single "ship this" orchestrator. Agents and humans should

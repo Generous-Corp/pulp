@@ -281,3 +281,11 @@ main, reddening every PR's macOS gate.)
 
 ## Store & hygiene
 **`TART_HOME` is declared by the host, never by the repo** — hosts with an external build SSD keep the store on a `/Volumes` mount, hosts on internal storage keep it under `$HOME`, and both are correct. Exclude it from Spotlight (`.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.
+
+Persistent native Actions runners have a separate storage rule: their
+`RUSTUP_HOME` and `CARGO_HOME` belong under each runner's own internal-APFS
+`_toolcache`, never behind `~/.rustup`/`~/.cargo` symlinks into the external VM
+store. Their captured `.path` starts with `/usr/bin:/bin:/usr/sbin:/sbin` so
+runner bootstrap resolves system `tar` before Homebrew. The private fleet
+manifest declares this through `actions_runner_policy`; apply is idle-gated and
+must not interrupt a live `Runner.Worker`.

@@ -47,7 +47,7 @@ source checkout (and network access for numpy/soundfile).
 Manual venv (equivalent; the lab is a standard Python package):
 
 ```bash
-cd tools/audio/quality-lab
+cd tools/audio/quality-lab  # Python 3.10+
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt   # numpy + soundfile (both permissive); add pytest to run tests
 ```

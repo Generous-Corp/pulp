@@ -937,6 +937,27 @@ TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
           "data:image/png;base64,AA==");
 }
 
+TEST_CASE("runtime asset resolution verifies a packaged asset before recovering a stale path",
+          "[design-ir-helpers][asset-resolution][package]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "bundle";
+    const auto bytes = write_bytes(document_directory / "assets" / "illustration.png",
+                                   "verified-package-asset");
+
+    IRAssetRef asset;
+    asset.asset_id = "illustration";
+    asset.local_path = "/tmp/export-host/assets/illustration.png";
+    asset.content_hash = pulp::runtime::sha256_hex("verified-package-asset");
+    asset.mime = "image/png";
+
+    CHECK(resolved_asset_uri(asset, document_directory) ==
+          "file://" + bytes.lexically_normal().generic_string());
+
+    asset.content_hash = pulp::runtime::sha256_hex("different-bytes");
+    CHECK(resolve_asset_file(asset, document_directory) == std::nullopt);
+    CHECK(resolved_asset_uri(asset, document_directory).empty());
+}
+
 TEST_CASE("an unresolvable manifest asset reports empty and logs",
           "[design-ir-helpers][asset-resolution]") {
     TempTree tree;

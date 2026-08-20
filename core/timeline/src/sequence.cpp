@@ -178,6 +178,7 @@ struct Sequence::Data {
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
     ChordScaleLane chord_scale_lane;
+    DynamicsLane dynamics_lane;
     GrooveTemplate groove;
     std::shared_ptr<const detail::LauncherStore> launcher;
     std::shared_ptr<const std::uint8_t> compile_structure;
@@ -233,6 +234,12 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
             return runtime::Err(lane.error());
         input.chord_scale_lane = std::move(lane).value();
     }
+    if (!input.dynamics_lane) {
+        auto lane = DynamicsLane::create({});
+        if (!lane)
+            return runtime::Err(lane.error());
+        input.dynamics_lane = std::move(lane).value();
+    }
     if (!input.groove) {
         auto groove = GrooveTemplate::create({});
         if (!groove)
@@ -284,7 +291,8 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
         Data{input.id, std::move(input.name), input.musical_duration, input.absolute_duration,
              std::move(input.tracks), std::move(track_id_index), std::move(input.track_order),
              std::move(input.markers), std::move(input.regions),
-             std::move(*input.chord_scale_lane), std::move(*input.groove),
+             std::move(*input.chord_scale_lane), std::move(*input.dynamics_lane),
+             std::move(*input.groove),
              std::move(launcher).value(), std::make_shared<const std::uint8_t>(0),
              std::move(outgoing_sequence_refs)})));
 }
@@ -649,6 +657,14 @@ const ChordScaleLane& Sequence::chord_scale_lane() const noexcept {
 Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
     auto next = *data_;
     next.chord_scale_lane = std::move(lane);
+    return Sequence(std::make_shared<const Data>(std::move(next)));
+}
+const DynamicsLane& Sequence::dynamics_lane() const noexcept {
+    return data_->dynamics_lane;
+}
+Sequence Sequence::with_dynamics_lane(DynamicsLane lane) const {
+    auto next = *data_;
+    next.dynamics_lane = std::move(lane);
     return Sequence(std::make_shared<const Data>(std::move(next)));
 }
 Sequence Sequence::with_groove(GrooveTemplate groove) const {

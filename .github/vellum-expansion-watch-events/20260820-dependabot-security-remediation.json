@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260820-dependabot-security-remediation",
+  "created_at": "2026-08-20T08:50:37Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record dependency-only security remediation across Pulp-owned React, import-IR, JSX runtime, Figma plugin, local-CI video tooling, and audio-quality tooling. The change updates lockfiles, package constraints, inventory, and matching documentation without changing source authority, the Pulp/Vellum routing projection, design contracts, generated artifacts, or runtime behavior owned by Vellum.",
+  "tests": [
+    "npm audit --package-lock-only --audit-level=moderate in each changed npm lockfile directory (zero findings)",
+    "npm test and npm run build for packages/pulp-react and packages/pulp-import-ir",
+    "npm run typecheck, npm test, and npm run build for tools/figma-plugin",
+    "uv lock --check and uv run --extra test pytest -q for tools/audio/quality-lab",
+    "python3 tools/deps/audit.py --strict",
+    "python3 tools/import-validation/check-source-contracts.py --strict",
+    "python3 tools/import-validation/test_source_contracts.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <origin/main> --head <HEAD>",
+    "pulp-vellum-change-routing closed suite and projection validation"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

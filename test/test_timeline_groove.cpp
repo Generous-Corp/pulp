@@ -46,7 +46,7 @@ Project project_with_groove(GrooveTemplate groove) {
     auto track = take(Track::create({3}, "track", {clip}));
     auto sequence = take(Sequence::create(SequenceInput{
         {2}, "sequence", TickDuration{100}, std::nullopt, {track}, {}, {}, std::nullopt,
-        std::move(groove)}));
+        std::nullopt, std::move(groove)}));
     return take(Project::create(ProjectInput{{1}, "project", 5, {2}, {}, {sequence}}));
 }
 
