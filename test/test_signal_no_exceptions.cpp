@@ -128,7 +128,9 @@ int main() {
         pulp::signal::TempoDelayError::none)
         return 33;
     if (!(std::isfinite(tempo_delay.next())))
-        return 34;    pulp::signal::SpectralCrossSynthesis cross_synthesis;
+        return 34;
+
+    pulp::signal::SpectralCrossSynthesis cross_synthesis;
     pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
     cross_config.fft_size = 256;
     if (!cross_synthesis.prepare(cross_config))
