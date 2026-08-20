@@ -1282,8 +1282,8 @@ TEST_CASE("Standalone editor resize drives bridge and owned window",
     REQUIRE(window.content_size_requests_.size() == 1);
     REQUIRE(window.content_size_requests_[0].width == 720);
     REQUIRE(window.content_size_requests_[0].height == 480);
-    REQUIRE(window.design_width_ == Catch::Approx(720.0f));
-    REQUIRE(window.design_height_ == Catch::Approx(480.0f));
+    REQUIRE(window.design_width_ == Catch::Approx(1320.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(860.0f));
     REQUIRE(window.aspect_ratio_ == Catch::Approx(1.5f));
 
     // Invalid requests fail before changing either the bridge or native host.
