@@ -44,6 +44,7 @@ folder and pushes it to Cloudflare Pages with no headers).
 | `lk-driver.mjs`, `index.html` | S0 main-thread driver page (start audio, param edit, structural swap) |
 | `lk-patches.mjs` | S0 shared `LKB0` blob encoder + the three test patches |
 | `editor.html`, `editor.mjs` | **M1 live editor**: scrubbable-number editor + running synth + keyboard + receipts |
+| `highlight-tokens.mjs` | Text-only syntax tokenization shared by the editor overlay and its hostile-permalink regression test |
 | `lk-dsl.mjs` | the Pulp DSL — parser, unit literals, `~` feedback, LKB0 lowering, diff, presets |
 | `deploy.sh` | stage a flat GitHub-Pages-ready site + deploy to Cloudflare Pages (no COOP/COEP) |
 | `serve.mjs` | static dev server (no COOP/COEP needed — single-thread build) |

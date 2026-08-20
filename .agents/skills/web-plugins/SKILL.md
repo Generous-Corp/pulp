@@ -364,6 +364,27 @@ will tell you when you have not.
 
 ## Browser-host rules
 
+### Local demo HTTP servers are loopback-only, canonical, and non-reflecting
+
+Browser fixtures need real HTTP headers, but they are still test harnesses rather
+than general-purpose file servers. Use
+`examples/web-demos/tools/local-http-security.mjs` for local demo servers:
+
+- bind explicitly to `127.0.0.1`; an omitted host exposes Node's listener on all
+  interfaces and turns a private fixture into a LAN service;
+- validate and decode the raw origin-form request path before URL normalization,
+  reject malformed encodings, separators, dot segments, and non-allowlisted path
+  characters, then resolve the real path and prove it remains under the canonical
+  root (including after following symlinks);
+- return fixed plain-text error bodies. Never append `req.url`, a decoded path, or
+  another request-controlled value to a response body;
+- keep route aliases as explicit canonical roots. Do not fall back to a lexical
+  `startsWith(root)` check: sibling-prefix paths and symlinks bypass it.
+
+The helper's Node tests include traversal, encoded separators, malformed URLs,
+symlink escapes, reflected markup, and the loopback bind contract. Add a route-
+specific test when a fixture needs semantics beyond those shared invariants.
+
 - **Probe for WebGL2; a browser without it is a shipping configuration.**
   `pulp::view::web::browser_host_gpu_available()` is the web analogue of
   `decide_gpu_host`. The mount path must fail loudly and asynchronously so the

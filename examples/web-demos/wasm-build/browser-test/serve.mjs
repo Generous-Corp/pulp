@@ -1,15 +1,19 @@
-import http from "node:http"; import { readFile } from "node:fs/promises"; import { extname, join, normalize } from "node:path";
+import http from "node:http"; import { readFile } from "node:fs/promises"; import { extname } from "node:path";
+import { LOOPBACK_HOST, canonicalRoot, decodeLocalRequestPath, resolveCanonicalAsset, sendFixedText } from "../../tools/local-http-security.mjs";
 const ROOT = new URL(".", import.meta.url).pathname;
+const ROOT_CANONICAL = canonicalRoot(ROOT);
 const MIME = {".html":"text/html",".js":"text/javascript",".mjs":"text/javascript",".wasm":"application/wasm",".json":"application/json"};
 const srv = http.createServer(async (req,res)=>{
-  let p = decodeURIComponent(req.url.split("?")[0]); if(p==="/")p="/index.html";
-  const fp = normalize(join(ROOT, p));
-  if(!fp.startsWith(ROOT)){res.writeHead(403);return res.end();}
+  const requestPath = decodeLocalRequestPath(req.url);
+  if(!requestPath)return sendFixedText(res,400,"bad request");
+  const segments=requestPath.segments.length?requestPath.segments:["index.html"];
+  const fp=resolveCanonicalAsset(ROOT_CANONICAL,segments);
+  if(!fp)return sendFixedText(res,404,"not found");
   try{ const data = await readFile(fp);
     // COOP/COEP set in case threads are ever used; harmless for single-thread.
     res.writeHead(200,{"content-type":MIME[extname(fp)]||"application/octet-stream",
       "cross-origin-opener-policy":"same-origin","cross-origin-embedder-policy":"require-corp"});
     res.end(data);
-  }catch{ res.writeHead(404); res.end("not found: "+p); }
+  }catch{ sendFixedText(res,404,"not found"); }
 });
-srv.listen(8731, ()=>console.log("WAM harness on http://localhost:8731/"));
+srv.listen(8731, LOOPBACK_HOST, ()=>console.log("WAM harness on http://127.0.0.1:8731/"));
