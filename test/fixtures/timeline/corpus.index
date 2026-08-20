@@ -56,6 +56,7 @@ document v3/automation-lane.json
 document v3/clip-fade-shape.json
 document v3/midi-content-lanes.json
 document v4/sequence-markers.json
+document v5/sequence-launcher-scenes.json
 document v6/sequence-track-order.json
 document v6/track-take-lanes.json
 document v6/sequence-launcher-scenes.json

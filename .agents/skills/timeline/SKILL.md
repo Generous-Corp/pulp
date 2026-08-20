@@ -411,6 +411,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,
   escapes, and member order cover the exact-byte re-save contract.
+- The `vN` directory names the `pulp.timeline.sequence` schema version its
+  fixtures were authored at (nested envelopes carry their own contemporaneous
+  versions), and **every version in the migration chain must carry at least one
+  indexed `document` fixture** — a schema bump that lands without one leaves a
+  version the corpus can never exercise. `tools/scripts/timeline_fixture_coverage_check.py`
+  enforces that: registered as the `timeline-fixture-coverage` ctest beside a
+  `-selftest` that proves it reddens on a synthetic gap, and as a job in
+  `timeline-hardening.yml`. Coverage reads `corpus.index`, not the tree — a
+  version dir whose fixtures are not indexed as documents does not count.
 - **Not every `.json` under `test/fixtures/timeline/` is a project.** The corpus
   holds three shapes and nothing in the files distinguishes them: complete
   `pulp.timeline.project` envelopes; single-entity **fragments** such as

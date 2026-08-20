@@ -236,9 +236,10 @@ struct LoweredNode {
     /// bounding box Chrome reported. Anything reasoning in PAGE space — what a
     /// clip cuts, what overlaps what — has to read this one.
     CapturedBox page_box;
-    /// Whether `box` is expressed in a frame the node's own `rotate()` turns.
-    /// A page-space rectangle has no equivalent in that frame, so a clip
-    /// cannot be written onto such a node at all.
+    /// Whether `box` is expressed in a frame a `rotate()` on the node itself —
+    /// or on the ancestor whose recovery carried it — turns. A page-space
+    /// rectangle has no equivalent in that frame, so a clip cannot be written
+    /// onto such a node at all.
     bool rotated = false;
     int parent_slot = -1;         ///< -1 means "child of the IR root"
     int dom_parent_slot = -1;     ///< where DOM parentage alone would put it
@@ -732,9 +733,15 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // declarations, not only its tag — and a rotation is answered from its box.
     std::unordered_map<int, int> layout_of;
     std::unordered_map<int, CapturedBox> box_of;
-    for (const auto& node : painted) {
-        layout_of[node.node_index] = node.layout_index;
-        box_of[node.node_index] = node.bounds;
+    std::unordered_map<int, const CapturedPaintNode*> painted_by_node;
+    // A node's position in the paint list IS the slot order the walk below
+    // assigns; the rotation-subtree checks read it before any slot exists.
+    std::unordered_map<int, int> paint_position_of;
+    for (size_t order = 0; order < painted.size(); ++order) {
+        layout_of[painted[order].node_index] = painted[order].layout_index;
+        box_of[painted[order].node_index] = painted[order].bounds;
+        painted_by_node[painted[order].node_index] = &painted[order];
+        paint_position_of[painted[order].node_index] = static_cast<int>(order);
     }
 
     // The document's child lists, built once and shared. Both the rotation
@@ -751,16 +758,112 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         return (*child_index)[static_cast<size_t>(node_index)];
     };
 
-    // A rotation the element's own rectangle can be solved back out of, for a
-    // node whose whole subtree is itself. Both conditions matter:
+    constexpr double kPi = 3.14159265358979323846;
+
+    /// The pre-rotation size of a box turned by a KNOWN angle: the same pair
+    /// of equations `recover_rotation` solves, with the angle already settled
+    /// by the ancestor whose recovery carries this node.
+    const auto rect_before_rotation =
+        [](double cos_abs, double sin_abs, double aabb_w, double aabb_h)
+        -> std::optional<std::pair<double, double>> {
+        const double det = cos_abs * cos_abs - sin_abs * sin_abs;
+        // The tolerance keeps the solve away from the 45° singularity, as in
+        // `recover_rotation` — whose own call already enforced it on the
+        // ancestor, so a descendant can only fail here on a box the rotation
+        // did not produce: a clipped child reports its VISIBLE part, which is
+        // not the rectangle that was turned.
+        if (std::abs(det) < 0.05) return std::nullopt;
+        const double width = (aabb_w * cos_abs - aabb_h * sin_abs) / det;
+        const double height = (aabb_h * cos_abs - aabb_w * sin_abs) / det;
+        if (!(width > 0.0) || !(height > 0.0)) return std::nullopt;
+        return std::pair<double, double>{width, height};
+    };
+
+    // Whether a recovered rotation can carry the node's whole subtree into the
+    // IR with it. Every descendant the walk would EMIT arrives with its box in
+    // the rotated frame, so each one is checked against what the lowering can
+    // re-derive for it:
+    //
+    //   - a text run is refused: its cached line boxes are page rectangles in
+    //     the rotated frame and nothing re-derives them. An element child has
+    //     no such sidecar, which is the asymmetry that makes a knob pointer
+    //     carrying its indicator dot recoverable and a rotated label not;
+    //   - an element that owns its subtree (`<svg>`, `<canvas>`, ...) is
+    //     refused: it lowers from its own geometry, which has the same frame
+    //     problem the text runs do;
+    //   - a descendant with its OWN non-axis-preserving transform is refused:
+    //     two rotations do not compose into one recovered angle;
+    //   - a descendant whose box the known angle cannot solve back is refused;
+    //   - a descendant Chrome painted BEFORE the rotating node is refused: it
+    //     would be hoisted out of the subtree, and a hoisted node's box is
+    //     written in the frame of the ancestor it lands on, which is no longer
+    //     this one.
+    //
+    // A refusal keeps the rotating node an honest capture fallback with its
+    // descendants pooled into it.
+    const auto rotation_carries_subtree = [&](int node_index, double cos_abs,
+                                              double sin_abs) {
+        bool carries = true;
+        std::vector<int> pending;
+        const auto push_children = [&](int node) {
+            const auto& kids = children_of(node);
+            pending.insert(pending.end(), kids.begin(), kids.end());
+        };
+        push_children(node_index);
+        while (!pending.empty() && carries) {
+            const int descendant = pending.back();
+            pending.pop_back();
+            push_children(descendant);
+            const auto painted_node = painted_by_node.find(descendant);
+            if (painted_node == painted_by_node.end()) continue;
+            const auto& pn = *painted_node->second;
+            // The walk's own skip conditions, mirrored: a node the walk
+            // discards puts nothing in the subtree to carry.
+            if (pn.node_type != kElementNode && pn.node_type != kTextNode)
+                continue;
+            if (pn.bounds.width <= 0.0 || pn.bounds.height <= 0.0) continue;
+            const bool is_text = pn.node_type == kTextNode ||
+                                 (pn.node_type == kElementNode &&
+                                  !pn.text.empty());
+            if (is_text) {
+                if (is_blank(pn.text)) continue;
+                carries = false;
+                continue;
+            }
+            if (owns_its_subtree(pn.tag_name)) {
+                carries = false;
+                continue;
+            }
+            const auto computed = index.styles_for_layout(pn.layout_index);
+            const auto transform = computed.find("transform");
+            if (transform != computed.end() &&
+                !is_axis_preserving_transform(transform->second)) {
+                carries = false;
+                continue;
+            }
+            if (!rect_before_rotation(cos_abs, sin_abs, pn.bounds.width,
+                                      pn.bounds.height)) {
+                carries = false;
+                continue;
+            }
+            if (paint_position_of[descendant] < paint_position_of[node_index])
+                carries = false;
+        }
+        return carries;
+    };
+
+    // A rotation the element's own rectangle can be solved back out of. Two
+    // conditions matter:
     //
     //   - the SOLVE has to succeed, and it is refused near the diagonals where
     //     the bounding box stops determining the rectangle (see
     //     `recover_rotation`);
-    //   - the element must have no children, because un-refusing it also
-    //     un-pools them, and a child's own box is a bounding box in the ROTATED
-    //     frame that nothing here re-derives. A childless bar is the shape this
-    //     recovery is for; anything richer stays an honest hole.
+    //   - every descendant the walk would emit must come along into the
+    //     pre-rotation frame, because un-refusing the element also un-pools
+    //     them, and a child's box arrives as a bounding box in the ROTATED
+    //     frame. The known angle makes that frame recoverable for the shapes
+    //     `rotation_carries_subtree` accepts; anything richer stays an honest
+    //     hole.
     std::unordered_map<int, std::optional<RecoveredRotation>> rotation_memo;
     const auto recovered_rotation_of =
         [&](int node_index) -> const std::optional<RecoveredRotation>& {
@@ -769,8 +872,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         std::optional<RecoveredRotation> answer;
         const auto layout = layout_of.find(node_index);
         const auto box = box_of.find(node_index);
-        if (layout != layout_of.end() && box != box_of.end() &&
-            children_of(node_index).empty()) {
+        if (layout != layout_of.end() && box != box_of.end()) {
             const auto computed = index.styles_for_layout(layout->second);
             const auto transform = computed.find("transform");
             // Only a transform that took the outline OFF the axes needs
@@ -780,9 +882,22 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // scaled node — a counter that ticks on designs with no rotation
             // in them at all.
             if (transform != computed.end() &&
-                !is_axis_preserving_transform(transform->second))
+                !is_axis_preserving_transform(transform->second)) {
                 answer = recover_rotation(transform->second, box->second.width,
                                           box->second.height);
+                if (answer && !children_of(node_index).empty()) {
+                    // The flattened emission hangs every node directly off the
+                    // root, where a child re-expressed in its ancestor's frame
+                    // has no ancestor left to turn it back — so subtree
+                    // recovery is the hierarchical lane's alone.
+                    const double radians = answer->angle_deg * kPi / 180.0;
+                    if (flatten_to_paint_order ||
+                        !rotation_carries_subtree(
+                            node_index, std::abs(std::cos(radians)),
+                            std::abs(std::sin(radians))))
+                        answer.reset();
+                }
+            }
         }
         return rotation_memo.emplace(node_index, answer).first->second;
     };
@@ -946,6 +1061,61 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             box.width = rotation->width;
             box.height = rotation->height;
             ++counts.rotation_recovered;
+        }
+
+        // A node INSIDE a recovered rotation arrives with its box in the
+        // rotated frame: Chrome turned the whole subtree, so each descendant's
+        // bounds are the bounding box of its own rectangle after the ancestor's
+        // angle. The ancestor's recovery already proved every emitted
+        // descendant solvable; map the box back here so the node is placed in
+        // the same pre-rotation frame the ancestor's recovered rectangle is
+        // written in, and let the ancestor's `rotate()` carry it from there.
+        // The inverse turn is taken about the ancestor's reported centre,
+        // which a rigid rotation makes pivot-independent: the renderer rotates
+        // about the view's own centre, and re-centring plus a centre turn
+        // reproduces the browser's image whatever `transform-origin` said.
+        const RecoveredRotation* frame_rotation = nullptr;
+        CapturedBox frame_ancestor_box;
+        if (!rotation) {
+            walk_ancestry(index, index.parent_of(node.node_index),
+                          [&](int current) {
+                              const auto& recovered =
+                                  recovered_rotation_of(current);
+                              if (recovered) {
+                                  frame_rotation = &recovered.value();
+                                  frame_ancestor_box = box_of[current];
+                                  return false;
+                              }
+                              return true;
+                          });
+        }
+        if (frame_rotation != nullptr) {
+            const double cx =
+                frame_ancestor_box.left + frame_ancestor_box.width * 0.5;
+            const double cy =
+                frame_ancestor_box.top + frame_ancestor_box.height * 0.5;
+            const double radians = frame_rotation->angle_deg * kPi / 180.0;
+            const double cosine = std::cos(radians);
+            const double sine = std::sin(radians);
+            const double off_x =
+                node.bounds.left + node.bounds.width * 0.5 - cx;
+            const double off_y =
+                node.bounds.top + node.bounds.height * 0.5 - cy;
+            const auto size =
+                rect_before_rotation(std::abs(cosine), std::abs(sine),
+                                     node.bounds.width, node.bounds.height);
+            // The ancestor's recovery proved this solve; a failure here means
+            // the two passes disagreed, which is a defect to surface rather
+            // than geometry to invent.
+            if (size) {
+                box.left = cx + off_x * cosine + off_y * sine -
+                           size->first * 0.5;
+                box.top = cy - off_x * sine + off_y * cosine -
+                          size->second * 0.5;
+                box.width = size->first;
+                box.height = size->second;
+                ++counts.rotation_recovered_children;
+            }
         }
 
         // `transform` is deliberately not carried into the IR, because the box
@@ -1228,7 +1398,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         slot.paint_order = node.paint_order;
         slot.box = box;
         slot.page_box = node.bounds;
-        slot.rotated = rotation.has_value();
+        // True of a node inside a recovered rotation too: the renderer applies
+        // a stored clip inside the node's own canvas, which the ancestor's
+        // `rotate()` has already turned out of page space.
+        slot.rotated = rotation.has_value() || frame_rotation != nullptr;
         slots.push_back(std::move(slot));
 
         // One vector node per shape, immediately after the `<svg>` that owns
