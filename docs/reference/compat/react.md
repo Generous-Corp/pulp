@@ -28,6 +28,12 @@ unit, so `window.addEventListener('keydown', ...)` and
 `registerShortcut(...)` continue to work for React apps without forcing
 core-only `pulp::view-core` consumers to link the JS runtime.
 
+The global-key translation also preserves the W3C punctuation value for the
+standard settings chord: Command+Comma on macOS and Control+Comma elsewhere
+arrive with `key === ","` (or `"<"` when Shift is held). Applications may
+therefore use the same global listener or shortcut registration in native and
+browser-backed React surfaces.
+
 The renderer exposes a typed `<VirtualList>` intrinsic for large rich-row
 lists. It lowers to the native `VirtualList` widget, keeps a bounded recycled
 row pool, and routes `rowCount`, fixed `rowHeight`, `overscan`,

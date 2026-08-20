@@ -110,4 +110,33 @@ std::vector<BackBufferFrameCapture>
 capture_settled_back_buffer_png(pulp::view::WindowHost& host,
                                 uint32_t frame_count = 3);
 
+/// One scripted input step: deliver every `events` entry, in order, inside a
+/// SINGLE main-queue turn at `at_ms` after the loop starts. Grouping matters:
+/// a burst delivered in one turn cannot be interleaved by a frame-driver tick,
+/// which is what lets a test assert how motion was batched.
+struct TimedInput {
+    uint32_t at_ms = 0;
+    std::vector<SimulatedMouse> events;
+};
+
+/// Test-only seam: run the host's REAL event loop for `stop_after_ms`,
+/// injecting `script` at their offsets, then stop the loop and return.
+///
+/// Construction alone never starts a frame driver — `start_display_link()` /
+/// `start_hidden_frame_timer()` run only inside `run_event_loop_until()` — so
+/// no state reachable only from a running driver (e.g. pointer-coalescer
+/// engagement) can be observed without this. The window stays hidden and the
+/// app stays at accessory activation policy, exactly as in production.
+/// Must be called on the main thread. Returns false on null handles.
+bool run_hidden_event_loop(pulp::view::WindowHost& host,
+                           const std::vector<TimedInput>& script,
+                           uint32_t stop_after_ms);
+
+/// Test-only KVC seam: read the content view's `coalescePointerInput`
+/// engagement state. PulpView is private to the production translation unit,
+/// so (like `backingChangedBlock` above) the harness reaches the property by
+/// key instead of exposing a release API. Must be called on the main thread.
+/// Returns -1 when the view is missing or the key is absent, else 0 or 1.
+int pointer_coalescing_engagement(pulp::view::WindowHost& host);
+
 } // namespace pulp::test::mac

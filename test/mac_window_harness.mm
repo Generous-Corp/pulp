@@ -333,4 +333,68 @@ capture_settled_back_buffer_png(pulp::view::WindowHost& host,
     return frames;
 }
 
+bool run_hidden_event_loop(pulp::view::WindowHost& host,
+                           const std::vector<TimedInput>& script,
+                           uint32_t stop_after_ms) {
+    if (!is_main_thread()) return false;
+
+    @autoreleasepool {
+        (void)[NSApplication sharedApplication];
+        if (!host.native_window_handle() || !host.native_content_view_handle())
+            return false;
+
+        for (const auto& step : script) {
+            // Captured by value: the host reference stays valid because the
+            // caller blocks inside run_event_loop_until until every step and
+            // the stop block have run.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                         static_cast<int64_t>(step.at_ms) * NSEC_PER_MSEC),
+                           dispatch_get_main_queue(), ^{
+                for (const auto& event : step.events)
+                    simulate_mouse(host, event);
+            });
+        }
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     static_cast<int64_t>(stop_after_ms) * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            // Same idiom as production's request_cocoa_app_stop(): stop: only
+            // flags the run loop, so post an application-defined event to wake
+            // the loop and make the flag observed.
+            [NSApp stop:nil];
+            NSEvent* wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                               location:NSZeroPoint
+                                          modifierFlags:0
+                                              timestamp:0
+                                           windowNumber:0
+                                                context:nil
+                                                subtype:0
+                                                  data1:0
+                                                  data2:0];
+            [NSApp postEvent:wake atStart:NO];
+        });
+
+        // [NSApp run] returns once the stop block above fires; the drain
+        // predicate is already satisfied, so this returns right after.
+        host.run_event_loop_until([] { return true; });
+        return true;
+    }
+}
+
+int pointer_coalescing_engagement(pulp::view::WindowHost& host) {
+    if (!is_main_thread()) return -1;
+
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!view) return -1;
+        @try {
+            NSNumber* value = [view valueForKey:@"coalescePointerInput"];
+            if (!value) return -1;
+            return [value boolValue] ? 1 : 0;
+        } @catch (NSException*) {
+            return -1;
+        }
+    }
+}
+
 } // namespace pulp::test::mac

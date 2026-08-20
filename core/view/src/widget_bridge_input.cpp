@@ -69,6 +69,9 @@ std::string keycode_to_w3c_key(int key_code, bool shift_held) {
     if (key_code >= '0' && key_code <= '9') {
         return std::string(1, static_cast<char>(key_code));
     }
+    // Named punctuation: the open-settings chord's key must report as ","
+    // (W3C form) or a JS `e.key === ','` listener never fires.
+    if (key_code == ',') return shift_held ? "<" : ",";
     return "Unidentified";
 }
 
