@@ -16,10 +16,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "tools" / "packages" / "registry.json"
@@ -56,13 +58,24 @@ def run_gh(args: list[str]) -> dict | list | None:
 
 def extract_owner_repo(url: str) -> tuple[str, str] | None:
     """Extract owner/repo from a GitHub URL."""
-    url = url.rstrip("/").removesuffix(".git")
-    parts = url.split("/")
-    if "github.com" in parts:
-        idx = parts.index("github.com")
-        if idx + 2 < len(parts):
-            return parts[idx + 1], parts[idx + 2]
-    return None
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (parsed.scheme.lower() != "https" or parsed.hostname != "github.com" or
+            parsed.username is not None or parsed.password is not None or port is not None or
+            parsed.query or parsed.fragment):
+        return None
+    parts = parsed.path.rstrip("/").split("/")
+    if len(parts) != 3 or parts[0] or not parts[1] or not parts[2]:
+        return None
+    owner, repo = parts[1], parts[2].removesuffix(".git")
+    if (owner in {".", ".."} or repo in {".", ".."} or
+            re.fullmatch(r"[A-Za-z0-9_.-]+", owner) is None or
+            re.fullmatch(r"[A-Za-z0-9_.-]+", repo) is None):
+        return None
+    return owner, repo
 
 
 def check_package(slug: str, pkg: dict) -> CheckResult:

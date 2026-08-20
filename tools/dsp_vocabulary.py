@@ -357,21 +357,146 @@ def matching_brace(text: str, opening: int) -> int:
     raise ValueError("unclosed class body")
 
 
+def _skip_whitespace(text: str, position: int) -> int:
+    while position < len(text) and text[position].isspace():
+        position += 1
+    return position
+
+
+def _consume_balanced(text: str, position: int, opening: str, closing: str) -> int | None:
+    """Consume one body-free balanced C++ group without regex backtracking."""
+    if position >= len(text) or text[position] != opening:
+        return None
+    depth = 0
+    for index in range(position, len(text)):
+        char = text[index]
+        if char in "{};":
+            return None
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _template_parameter_closings(text: str, position: int) -> list[int]:
+    """Return plausible ends of a generic-lambda template parameter list.
+
+    C++ permits both ``<`` and ``>`` operators in non-type defaults, so angle
+    counting alone cannot identify the close. Try each bounded candidate and
+    let the declarator-tail parser decide which one is structurally valid.
+    """
+    if position >= len(text) or text[position] != "<":
+        return []
+    closings = []
+    for index in range(position + 1, len(text)):
+        if text[index] in "{};":
+            break
+        if text[index] != ">":
+            continue
+        body = text[position + 1:index]
+        if ("->" in body or "[[" in body or
+                re.search(r"\b(?:mutable|constexpr|consteval|noexcept|requires)\b", body)):
+            continue
+        closings.append(index + 1)
+    return closings
+
+
+def _consume_attributes(text: str, position: int) -> int:
+    while True:
+        position = _skip_whitespace(text, position)
+        if not text.startswith("[[", position):
+            return position
+        closing = text.find("]]", position + 2)
+        if closing < 0 or any(char in "{};" for char in text[position + 2:closing]):
+            return position
+        position = closing + 2
+
+
+def _consume_keyword(text: str, position: int, keyword: str) -> int | None:
+    if not text.startswith(keyword, position):
+        return None
+    end = position + len(keyword)
+    if end < len(text) and (text[end].isalnum() or text[end] == "_"):
+        return None
+    return end
+
+
+def _lambda_declarator_tail_is_valid(text: str, position: int) -> bool:
+    """Validate a lambda declarator after its optional template parameter list."""
+    if position < len(text) and text[position] == "(":
+        consumed = _consume_balanced(text, position, "(", ")")
+        if consumed is None:
+            return False
+        position = _skip_whitespace(text, consumed)
+
+    while True:
+        consumed = next(
+            (end for keyword in ("mutable", "constexpr", "consteval")
+             if (end := _consume_keyword(text, position, keyword)) is not None),
+            None,
+        )
+        if consumed is None:
+            break
+        position = _skip_whitespace(text, consumed)
+
+    consumed = _consume_keyword(text, position, "noexcept")
+    if consumed is not None:
+        position = _skip_whitespace(text, consumed)
+        if position < len(text) and text[position] == "(":
+            consumed_group = _consume_balanced(text, position, "(", ")")
+            if consumed_group is None:
+                return False
+            position = _skip_whitespace(text, consumed_group)
+
+    position = _consume_attributes(text, position)
+    position = _skip_whitespace(text, position)
+
+    if text.startswith("->", position):
+        position = _skip_whitespace(text, position + 2)
+        if position >= len(text):
+            return False
+        requires = re.search(r"\brequires\b", text[position:])
+        attributes = text.find("[[", position)
+        boundaries = [position + requires.start()] if requires else []
+        if attributes >= 0:
+            boundaries.append(attributes)
+        end = min(boundaries, default=len(text))
+        if end == position or any(char in "{};" for char in text[position:end]):
+            return False
+        position = _skip_whitespace(text, end)
+
+    consumed = _consume_keyword(text, position, "requires")
+    if consumed is not None:
+        position = _skip_whitespace(text, consumed)
+        # A constraint may itself contain a requires-expression body. The
+        # enclosing source scanner already balances those braces, including
+        # declarations inside the expression. Require content, then let that
+        # scanner own the nested C++ syntax exactly as the old matcher did.
+        return position < len(text)
+
+    position = _consume_attributes(text, position)
+    return _skip_whitespace(text, position) == len(text)
+
+
+def _lambda_suffix_is_valid(text: str) -> bool:
+    """Validate the declarator between a lambda capture and its body without backtracking."""
+    position = _skip_whitespace(text, 0)
+    if position < len(text) and text[position] == "<":
+        return any(
+            _lambda_declarator_tail_is_valid(text, _skip_whitespace(text, closing))
+            for closing in _template_parameter_closings(text, position)
+        )
+    return _lambda_declarator_tail_is_valid(text, position)
+
+
 def opens_lambda_body(text: str, opening: int) -> bool:
     """Whether a parameter-list brace starts a lambda rather than an initializer."""
     prefix = text[max(0, opening - 512):opening]
-    suffix = re.compile(
-        r"(?:\s*<[^{};]*>)?"
-        r"\s*(?:\([^{};]*\))?"
-        r"\s*(?:(?:mutable|constexpr|consteval)\s+)*"
-        r"(?:noexcept(?:\s*\([^{};]*\))?\s*)?"
-        r"(?:\s*\[\[[^{};]*\]\])*"
-        r"(?:\s*->\s*[^{};]+?)?"
-        r"(?:\s*requires\b[\s\S]+)?"
-        r"(?:\s*\[\[[^{};]*\]\])*\s*$",
-    )
     for closing in range(len(prefix) - 1, -1, -1):
-        if prefix[closing] != "]" or suffix.fullmatch(prefix[closing + 1:]) is None:
+        if prefix[closing] != "]" or not _lambda_suffix_is_valid(prefix[closing + 1:]):
             continue
         depth = 0
         for pos in range(closing, -1, -1):
