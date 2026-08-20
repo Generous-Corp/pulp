@@ -562,14 +562,6 @@ public:
     /// take focus.
     virtual bool accepts_text_input() const { return false; }
 
-    /// Does this widget temporarily need host-delivered navigation keys?
-    ///
-    /// Plugin roots must not become general keyboard sinks: doing so steals
-    /// transport and musical-typing keys from the DAW. Interactive controls
-    /// may opt in while a bounded navigation interaction is active (for
-    /// example, ComboBox returns true only while its menu is open).
-    virtual bool accepts_navigation_input() const { return false; }
-
     /// CSS :disabled equivalent — blocks input, reduces opacity
     bool enabled() const { return enabled_; }
     void set_enabled(bool e) { enabled_ = e; }
@@ -1919,6 +1911,16 @@ public:
     /// MUST call the base to keep the propagation.
     virtual void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
+
+    /// Does this widget temporarily need host-delivered navigation keys?
+    ///
+    /// Plugin roots must not become general keyboard sinks: doing so steals
+    /// transport and musical-typing keys from the DAW. Interactive controls
+    /// may opt in while a bounded navigation interaction is active (for
+    /// example, ComboBox returns true only while its menu is open).
+    /// Appended after the pre-existing View virtual surface so older slots do
+    /// not move for installed-SDK consumers.
+    virtual bool accepts_navigation_input() const { return false; }
 
     /// The runtime host-parameter accessor for this view tree, or nullptr in
     /// previews/screenshots (a view degrades to local state when null, exactly

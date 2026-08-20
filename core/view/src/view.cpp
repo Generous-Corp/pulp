@@ -734,6 +734,11 @@ std::unique_ptr<View> View::remove_child(View* child) {
         View* focused = state->focused_input;
         state->focused_input = nullptr;
         if (focused_input_ == focused) focused_input_ = nullptr;
+        // The subtree is leaving this interaction realm, so its base visual
+        // focus must leave with it. Qualify the base implementation: invoking
+        // an arbitrary derived blur/commit callback while remove_child still
+        // owns the subtree would permit re-entrant structural mutation.
+        focused->View::on_focus_changed(false);
     }
 
     // on_detached() intentionally runs while the old parent/clock is still

@@ -1,6 +1,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <algorithm>
 
 namespace pulp::view {
@@ -316,9 +317,16 @@ void ComboBox::open_dropdown() {
     // fallback slot, so among unhosted widgets this stays "one popup at a time".
     if (ComboBox* prev = interaction().active_popup; prev && prev != this)
         prev->close_dropdown();
+
+    View* root = this;
+    while (root->parent()) root = root->parent();
+    // Opening can be programmatic, so it cannot rely on the platform pointer
+    // path to blur the previous owner. Use the same root-scoped transfer
+    // protocol: a focused TextEditor commits exactly once before navigation
+    // focus moves to this menu, and re-entrant unmount fails closed.
+    if (!transfer_input_focus(*root, this)) return;
     set_overflow(Overflow::visible);
     open_ = true;
-    claim_input_focus();
     hover_index_ = selected_;  // highlight the current selection on open so
                                // keyboard navigation has a visible starting row
     interaction().active_popup = this;  // root-owned slot
@@ -340,6 +348,7 @@ void ComboBox::close_dropdown() {
     if (!open_) return;
     open_ = false;
     release_input_focus();
+    if (has_focus()) View::on_focus_changed(false);
     set_overflow(Overflow::hidden);
     // Clear both the root-owned slot (non-allocating) and the shim mirror.
     if (RootInteractionState* s = existing_interaction(); s && s->active_popup == this)
@@ -629,6 +638,7 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
 }
 
 void ComboBox::on_focus_changed(bool focused) {
+    View::on_focus_changed(focused);
     if (!focused) close_dropdown();
 }
 

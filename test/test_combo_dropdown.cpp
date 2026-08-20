@@ -6,6 +6,7 @@
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/state/store.hpp>
@@ -363,11 +364,109 @@ TEST_CASE("ComboBox: navigation focus exists only for an open menu", "[combo][ke
     REQUIRE(combo->on_key_event(open));
     REQUIRE(combo->accepts_navigation_input());
     REQUIRE(focused_input_under_root(root) == combo);
+    REQUIRE(combo->has_focus());
 
     KeyEvent escape{.key = KeyCode::escape, .is_down = true};
     REQUIRE(combo->on_key_event(escape));
     REQUIRE_FALSE(combo->accepts_navigation_input());
     REQUIRE(focused_input_under_root(root) == nullptr);
+    REQUIRE_FALSE(combo->has_focus());
+}
+
+TEST_CASE("ComboBox: opening transfers focus through the prior blur contract",
+          "[combo][key-focus][focus-transfer]") {
+    View root;
+    root.set_bounds({0, 0, 300, 120});
+
+    auto editor = std::make_unique<TextEditor>();
+    auto* editor_ptr = editor.get();
+    editor->set_bounds({0, 0, 120, 24});
+    editor->set_text("committed");
+    int commit_count = 0;
+    editor->on_focus_lost = [&](const std::string& text) {
+        REQUIRE(text == "committed");
+        ++commit_count;
+    };
+    root.add_child(std::move(editor));
+
+    auto combo = std::make_unique<ComboBox>();
+    auto* combo_ptr = combo.get();
+    combo->set_bounds({0, 32, 120, 24});
+    combo->set_items({"A", "B"});
+    root.add_child(std::move(combo));
+
+    REQUIRE(transfer_input_focus(root, editor_ptr));
+    REQUIRE(editor_ptr->has_focus());
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo_ptr->on_key_event(open));
+
+    CHECK(commit_count == 1);
+    CHECK_FALSE(editor_ptr->has_focus());
+    CHECK(combo_ptr->has_focus());
+    CHECK(focused_input_under_root(root) == combo_ptr);
+
+    // Closing the new owner must not replay the previous widget's commit.
+    KeyEvent escape{.key = KeyCode::escape, .is_down = true};
+    REQUIRE(combo_ptr->on_key_event(escape));
+    CHECK(commit_count == 1);
+    CHECK_FALSE(combo_ptr->has_focus());
+    CHECK(focused_input_under_root(root) == nullptr);
+}
+
+TEST_CASE("ComboBox: programmatic opening cannot blur another editor root",
+          "[combo][key-focus][root-scope]") {
+    View root_a;
+    View root_b;
+    root_a.set_bounds({0, 0, 200, 100});
+    root_b.set_bounds({0, 0, 200, 100});
+
+    auto editor = std::make_unique<TextEditor>();
+    auto* editor_ptr = editor.get();
+    int root_a_commits = 0;
+    editor->on_focus_lost = [&](const std::string&) { ++root_a_commits; };
+    root_a.add_child(std::move(editor));
+
+    auto combo = std::make_unique<ComboBox>();
+    auto* combo_ptr = combo.get();
+    combo->set_items({"A", "B"});
+    root_b.add_child(std::move(combo));
+
+    REQUIRE(transfer_input_focus(root_a, editor_ptr));
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo_ptr->on_key_event(open));
+
+    CHECK(root_a_commits == 0);
+    CHECK(focused_input_under_root(root_a) == editor_ptr);
+    CHECK(focused_input_under_root(root_b) == combo_ptr);
+}
+
+TEST_CASE("ComboBox: opening fails closed when prior blur detaches the menu",
+          "[combo][key-focus][lifecycle][reentrant]") {
+    View root;
+    auto editor = std::make_unique<TextEditor>();
+    auto* editor_ptr = editor.get();
+    root.add_child(std::move(editor));
+
+    auto combo = std::make_unique<ComboBox>();
+    auto* combo_ptr = combo.get();
+    combo->set_items({"A", "B"});
+    root.add_child(std::move(combo));
+
+    std::unique_ptr<View> detached;
+    editor_ptr->on_focus_lost = [&](const std::string&) {
+        detached = root.remove_child(combo_ptr);
+    };
+    REQUIRE(transfer_input_focus(root, editor_ptr));
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo_ptr->on_key_event(open));
+
+    REQUIRE(detached != nullptr);
+    CHECK_FALSE(combo_ptr->is_open());
+    CHECK_FALSE(combo_ptr->has_focus());
+    CHECK(ComboBox::active_popup_in(root) == nullptr);
+    CHECK(focused_input_under_root(root) == nullptr);
 }
 
 TEST_CASE("ComboBox: detaching an open menu clears root navigation state",
@@ -388,8 +487,26 @@ TEST_CASE("ComboBox: detaching an open menu clears root navigation state",
     auto detached = root.remove_child(combo);
     REQUIRE(detached != nullptr);
     REQUIRE_FALSE(combo->is_open());
+    REQUIRE_FALSE(combo->has_focus());
     REQUIRE(ComboBox::active_popup_in(root) == nullptr);
     REQUIRE(focused_input_under_root(root) == nullptr);
+}
+
+TEST_CASE("View: detaching a focused subtree clears base visual focus",
+          "[combo][key-focus][lifecycle][detach]") {
+    View root;
+    auto owned = std::make_unique<View>();
+    auto* focused = owned.get();
+    focused->set_focusable(true);
+    root.add_child(std::move(owned));
+
+    REQUIRE(transfer_input_focus(root, focused));
+    REQUIRE(focused->has_focus());
+
+    auto detached = root.remove_child(focused);
+    REQUIRE(detached != nullptr);
+    CHECK_FALSE(focused->has_focus());
+    CHECK(focused_input_under_root(root) == nullptr);
 }
 
 // ── Regression: dropdown overlay click routing ───────────────────────────

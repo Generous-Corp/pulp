@@ -1143,6 +1143,11 @@ Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
   navigation control. Text input has priority. Clear the root slot when the
   owning subtree detaches or is destroyed. This is the JUCE default
   (`wantsKeyboardFocus = false`; grab only for an active interaction).
+- A control that opens navigation programmatically must enter through
+  `transfer_input_focus(root, control)`, not overwrite the slot with
+  `claim_input_focus()`. The transfer blurs and commits the previous text
+  editor exactly once, is scoped to the owning root, and tolerates that blur
+  synchronously unmounting the requested control.
 
 ## GPU view host auto-selection — never hardcode `use_gpu=false`
 
