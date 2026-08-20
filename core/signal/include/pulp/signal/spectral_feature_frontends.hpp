@@ -135,35 +135,45 @@ class SpectralFeatureFrontEndT {
         const auto& config = window_.config();
         const auto& spectrum = window_.spectrum();
         const auto bins = config.fft_size / 2u + 1u;
-        long double magnitude_sum = 0.0L;
-        long double power_sum = 0.0L;
+        double maximum_magnitude = 0.0;
         for (std::size_t bin = 0; bin < bins; ++bin) {
             const auto magnitude = static_cast<double>(std::abs(spectrum[bin]));
             if (!std::isfinite(magnitude))
                 return false;
-            magnitude_sum += static_cast<long double>(magnitude);
-            power_sum += static_cast<long double>(magnitude) * static_cast<long double>(magnitude);
+            maximum_magnitude = std::max(maximum_magnitude, magnitude);
         }
-        if (!std::isfinite(magnitude_sum) || !std::isfinite(power_sum))
-            return false;
 
         Frame next{};
-        if (magnitude_sum > 0.0L && power_sum > 0.0L) {
+        if (maximum_magnitude > 0.0) {
             constexpr long double rolloff_fraction = 0.85L;
             constexpr long double flatness_floor = 1.0e-20L;
             constexpr long double inverse_sqrt_two = 0.70710678118654752440L;
+            long double scaled_magnitude_sum = 0.0L;
+            long double scaled_power_sum = 0.0L;
+            for (std::size_t bin = 0; bin < bins; ++bin) {
+                const auto scaled_magnitude = static_cast<long double>(std::abs(spectrum[bin])) /
+                                              static_cast<long double>(maximum_magnitude);
+                scaled_magnitude_sum += scaled_magnitude;
+                scaled_power_sum += scaled_magnitude * scaled_magnitude;
+            }
+            if (!std::isfinite(scaled_magnitude_sum) || !std::isfinite(scaled_power_sum) ||
+                scaled_magnitude_sum <= 0.0L || scaled_power_sum <= 0.0L)
+                return false;
+
             long double weighted_frequency = 0.0L;
             long double log_sum = 0.0L;
             long double cumulative_power = 0.0L;
             long double flux_squared = 0.0L;
             bool rolloff_found = false;
             for (std::size_t bin = 0; bin < bins; ++bin) {
-                const auto frequency = static_cast<long double>(config.sample_rate) *
-                                       static_cast<long double>(bin) /
-                                       static_cast<long double>(config.fft_size);
-                const auto magnitude = static_cast<long double>(std::abs(spectrum[bin]));
-                weighted_frequency += frequency * magnitude;
-                const auto normalized = static_cast<double>(magnitude / magnitude_sum);
+                const auto frequency =
+                    static_cast<long double>(config.sample_rate) *
+                    (static_cast<long double>(bin) / static_cast<long double>(config.fft_size));
+                const auto scaled_magnitude = static_cast<long double>(std::abs(spectrum[bin])) /
+                                              static_cast<long double>(maximum_magnitude);
+                const auto normalized =
+                    static_cast<double>(scaled_magnitude / scaled_magnitude_sum);
+                weighted_frequency += frequency * static_cast<long double>(normalized);
                 log_sum += std::log(std::max(static_cast<long double>(normalized), flatness_floor));
                 if (have_previous_) {
                     const auto delta =
@@ -171,13 +181,13 @@ class SpectralFeatureFrontEndT {
                     flux_squared += delta * delta;
                 }
                 previous_normalized_magnitudes_[bin] = normalized;
-                cumulative_power += magnitude * magnitude;
-                if (!rolloff_found && cumulative_power >= rolloff_fraction * power_sum) {
+                cumulative_power += scaled_magnitude * scaled_magnitude;
+                if (!rolloff_found && cumulative_power >= rolloff_fraction * scaled_power_sum) {
                     next.rolloff_hz = static_cast<double>(frequency);
                     rolloff_found = true;
                 }
             }
-            next.centroid_hz = static_cast<double>(weighted_frequency / magnitude_sum);
+            next.centroid_hz = static_cast<double>(weighted_frequency);
             const auto arithmetic_mean = 1.0L / static_cast<long double>(bins);
             const auto geometric_mean = std::exp(log_sum / static_cast<long double>(bins));
             next.flatness =

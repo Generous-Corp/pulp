@@ -146,6 +146,30 @@ TEST_CASE("off-bin stationary tone remains stable across overlapping windows",
     }
 }
 
+TEST_CASE("finite double extremes are normalized before power and frequency accumulation",
+          "[signal][spectral-feature-frontends]") {
+    constexpr std::size_t size = 8;
+    std::array<double, size> tone{};
+    constexpr double amplitude = 1.0e200;
+    constexpr double two_pi = 6.283185307179586476925286766559;
+    for (std::size_t i = 0; i < size; ++i)
+        tone[i] = amplitude * std::sin(two_pi * static_cast<double>(i) / size);
+    const double* channels[] = {tone.data()};
+
+    auto extreme = config(size, size);
+    extreme.sample_rate = std::numeric_limits<double>::max();
+    SpectralFeatureFrontEndT<double, size, 1> front_end;
+    REQUIRE(front_end.prepare(extreme));
+    FrameCollector<decltype(front_end)::Frame, 1> frames;
+    REQUIRE(front_end.process(channels, 1, tone.size(), std::ref(frames)));
+    REQUIRE(frames.size == 1);
+    REQUIRE(frames.frames[0].valid);
+    CHECK(std::isfinite(frames.frames[0].centroid_hz));
+    CHECK(std::isfinite(frames.frames[0].flatness));
+    CHECK(std::isfinite(frames.frames[0].rolloff_hz));
+    CHECK(std::isfinite(frames.frames[0].flux));
+}
+
 TEST_CASE("silence and DC emit finite floor-bounded degenerate features",
           "[signal][spectral-feature-frontends]") {
     constexpr std::size_t size = 64;
