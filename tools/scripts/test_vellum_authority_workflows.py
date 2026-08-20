@@ -14,6 +14,10 @@ PINNED_TOKEN_ACTION = (
     "actions/create-github-app-token@"
     "fee1f7d63c2ff003460e3d139729b119787bc349"
 )
+PINNED_CHECKOUT_ACTION = (
+    "actions/checkout@"
+    "11d5960a326750d5838078e36cf38b85af677262"
+)
 
 
 def workflow(name: str) -> dict[str, object]:
@@ -40,6 +44,63 @@ def step_named(job: dict[str, object], name: str) -> dict[str, object]:
 
 
 class VellumAuthorityWorkflowTests(unittest.TestCase):
+    def test_privileged_pr_gate_checks_out_only_literal_protected_main(self) -> None:
+        value = workflow("vellum-trusted-gate.yml")
+        trigger = value.get(True) or value["on"]
+        self.assertEqual(trigger["pull_request_target"]["branches"], ["main"])
+
+        job = value["jobs"]["trusted-gate"]
+        checkout = step_named(job, "Check out trusted base controls")
+        self.assertEqual(checkout["uses"], PINNED_CHECKOUT_ACTION)
+        self.assertEqual(
+            checkout["with"],
+            {
+                "ref": "refs/heads/main",
+                "fetch-depth": 0,
+                "persist-credentials": False,
+            },
+        )
+
+        steps = job["steps"]
+        verify_index = next(
+            i
+            for i, step in enumerate(steps)
+            if step.get("name") == "Verify trusted controls match live PR base"
+        )
+        token_index = next(
+            i
+            for i, step in enumerate(steps)
+            if step.get("name") == "Mint one-repository Vellum reader token"
+        )
+        self.assertLess(verify_index, token_index)
+        verify = steps[verify_index]
+        self.assertEqual(
+            verify["env"]["EXPECTED_BASE"],
+            "${{ steps.pr.outputs.base_sha }}",
+        )
+        self.assertIn('actual_base="$(git rev-parse HEAD)"', verify["run"])
+        self.assertIn('[ "$actual_base" != "$EXPECTED_BASE" ]', verify["run"])
+
+    def test_proposed_worktree_is_data_only(self) -> None:
+        value = workflow("vellum-trusted-gate.yml")
+        validation = step_named(
+            value["jobs"]["trusted-gate"],
+            "Validate proposed data and publish head status",
+        )["run"]
+        self.assertNotIn('working-directory: "$proposed_tree"', validation)
+        self.assertNotRegex(
+            validation,
+            r'(?m)^\s*(?:bash|sh|python3)\s+"?\$proposed_tree(?:/|\")',
+        )
+        for trusted_script in (
+            "vellum_freeze_check.py",
+            "vellum_expansion_watch_check.py",
+            "pulp_tooling_disposition.py",
+            "generate_vellum_cut_manifest.py",
+            "generate_vellum_ownership_projection.py",
+        ):
+            self.assertIn(f'"$trusted_root/tools/scripts/{trusted_script}"', validation)
+
     def test_trusted_lanes_mint_exact_reader_identity_and_one_repo_token(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
         jobs = value["jobs"]

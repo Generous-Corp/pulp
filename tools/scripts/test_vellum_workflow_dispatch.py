@@ -24,8 +24,22 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
-OPEN_PR = '{"state":"open","base":{"sha":"BASE_OPEN"},"head":{"sha":"HEAD_OPEN"}}'
-CLOSED_PR = '{"state":"closed","base":{"sha":"BASE_SHUT"},"head":{"sha":"HEAD_SHUT"}}'
+OPEN_PR = (
+    '{"state":"open","base":{"sha":"BASE_OPEN","ref":"main",'
+    '"repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_OPEN"}}'
+)
+CLOSED_PR = (
+    '{"state":"closed","base":{"sha":"BASE_SHUT","ref":"main",'
+    '"repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_SHUT"}}'
+)
+WRONG_REPOSITORY_PR = (
+    '{"state":"open","base":{"sha":"BASE_OTHER","ref":"main",'
+    '"repo":{"full_name":"attacker/pulp"}},"head":{"sha":"HEAD_OTHER"}}'
+)
+WRONG_BRANCH_PR = (
+    '{"state":"open","base":{"sha":"BASE_OTHER","ref":"develop",'
+    '"repo":{"full_name":"Generous-Corp/pulp"}},"head":{"sha":"HEAD_OTHER"}}'
+)
 
 FAKE_GH = textwrap.dedent(
     """\
@@ -34,6 +48,8 @@ FAKE_GH = textwrap.dedent(
     case "$*" in
       *pulls/111*) body='%s' ;;
       *pulls/222*) body='%s' ;;
+      *pulls/333*) body='%s' ;;
+      *pulls/444*) body='%s' ;;
     esac
     prev=''
     for a in "$@"; do
@@ -42,7 +58,7 @@ FAKE_GH = textwrap.dedent(
     done
     printf '%%s\\n' "$body"
     """
-) % (OPEN_PR, CLOSED_PR)
+) % (OPEN_PR, CLOSED_PR, WRONG_REPOSITORY_PR, WRONG_BRANCH_PR)
 
 # The dispatch path fetches the base and reads the already-checked-out merge
 # commit; neither should reach the network in a test.
@@ -165,6 +181,22 @@ class TrustedGateResolve(unittest.TestCase):
         self.assertEqual(out, {})
         self.assertIn("closed", err)
 
+    def test_dispatch_refuses_a_pr_targeting_another_repository(self):
+        rc, out, err = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "workflow_dispatch", "DISPATCH_PR": "333",
+        })
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, {})
+        self.assertIn("only Generous-Corp/pulp:main is trusted", err)
+
+    def test_dispatch_refuses_a_pr_targeting_another_branch(self):
+        rc, out, err = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "workflow_dispatch", "DISPATCH_PR": "444",
+        })
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, {})
+        self.assertIn("only Generous-Corp/pulp:main is trusted", err)
+
 
 class FreezeCheckResolve(unittest.TestCase):
     def script(self) -> str:
@@ -246,6 +278,7 @@ class TrustedGateScheduling(unittest.TestCase):
         condition = self.workflow["jobs"]["trusted-gate"]["if"]
         self.assertIn("github.event.pull_request.state == 'open'", condition)
         self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
 
     def test_only_live_open_prs_reach_status_publishing_steps(self):
         steps = self.workflow["jobs"]["trusted-gate"]["steps"]
