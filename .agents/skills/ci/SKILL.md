@@ -3163,8 +3163,11 @@ period (see Generous-Corp/pulp#120).
 ### Central merge steward (Shipyard v0.88.4+)
 
 `.github/workflows/shipyard-merge-steward.yml` is the single logical
-repository-wide PR landing controller. The proof stage is manual-only and
-dry-run by default; a later gate enables ten-minute scheduled apply. It runs on GitHub-hosted Ubuntu so
+repository-wide PR landing controller. Manual dispatch is dry-run by default;
+the ten-minute schedule is present but commented out until one manual apply +
+recovery dispatch proves the recovery judgement wiring end to end. Once
+enabled, it applies deterministic mutations and may dispatch at most one fenced
+recovery exception per serialized tick. It runs on GitHub-hosted Ubuntu so
 all three Macs may be offline, serializes mutations with one repository-scoped
 concurrency group, restores a small bounded-retry cache, uses GitHub's durable
 run-attempt counter to prevent retry-budget reset after cache loss, and configures its ephemeral
@@ -3222,6 +3225,12 @@ is not an acceptable provenance window.
 Do not add a second scheduled or per-Mac mutating controller. M1, M3, and M5 may
 serve as fenced recovery workers only after disposable-runner proof; they do
 not independently poll or mutate the merge queue.
+
+The Shipyard CLI does not wake itself up. Once the schedule is enabled, GitHub
+Actions is the durable clock: the scheduled controller re-reads GitHub truth,
+reconciles the exact-head ledger/outbox, and invokes Shipyard without a model.
+Recovery runners consume only the exceptional durable jobs that controller
+emits; they are not a second polling authority.
 
 Enable the ten-minute schedule only after live canaries prove an unmanaged
 negative control, exact-head handoff, native queue landing without an agent,

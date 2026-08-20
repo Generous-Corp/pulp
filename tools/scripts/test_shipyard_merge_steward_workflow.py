@@ -19,12 +19,30 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
         cls.doc = yaml.load(cls.text, Loader=yaml.BaseLoader)
 
-    def test_proof_stage_is_manual_only_and_serialized(self) -> None:
+    def test_controller_schedule_is_activation_disabled_and_serialized(self) -> None:
         triggers = self.doc["on"]
         self.assertEqual(set(triggers), {"workflow_dispatch"})
+        self.assertIn("# schedule:", self.text)
+        self.assertIn("#   - cron: '*/10 * * * *'", self.text)
+        self.assertIn("manual recovery proof succeeds", self.text)
         concurrency = self.doc["concurrency"]
         self.assertIn("shipyard-merge-steward-", concurrency["group"])
         self.assertEqual(concurrency["cancel-in-progress"], "false")
+
+    def test_schedule_contract_applies_and_dispatches_while_manual_defaults_dry(self) -> None:
+        env = self.doc["jobs"]["reconcile"]["env"]
+        self.assertEqual(
+            env["STEWARD_APPLY"],
+            "${{ github.event_name == 'schedule' || inputs.apply }}",
+        )
+        self.assertEqual(
+            env["STEWARD_DISPATCH_RECOVERY"],
+            "${{ github.event_name == 'schedule' || inputs.dispatch_recovery }}",
+        )
+        self.assertIn("env.STEWARD_APPLY == 'true'", self.text)
+        self.assertIn("env.STEWARD_DISPATCH_RECOVERY == 'true'", self.text)
+        self.assertNotIn("if: inputs.apply", self.text)
+        self.assertNotIn("if: always() && inputs.dispatch_recovery", self.text)
 
     def test_controller_runs_off_fleet_with_minimum_mutation_permissions(self) -> None:
         job = self.doc["jobs"]["reconcile"]
@@ -145,7 +163,11 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("-f attempt_repair=true", self.text)
         self.assertNotIn("actions/runners?per_page=100", self.text)
         self.assertNotIn("shipyard_recovery_worker_select.py", self.text)
-        self.assertIn("inputs.apply && inputs.dispatch_recovery", self.text)
+        self.assertIn(
+            "env.STEWARD_APPLY == 'true' && "
+            "env.STEWARD_DISPATCH_RECOVERY == 'true'",
+            self.text,
+        )
 
     def test_stale_merge_group_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
         self.assertIn("shipyard_merge_queue_run_cleanup.py", self.text)
@@ -157,7 +179,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn(".event == \"merge_group\"", self.text)
         self.assertIn(".head_sha == $head", self.text)
         self.assertIn("actions/runs/${run_id}/cancel", self.text)
-        self.assertIn("inputs.apply && steps.merge_group_cleanup_plan.outcome", self.text)
+        self.assertIn("env.STEWARD_APPLY == 'true' && steps.merge_group_cleanup_plan.outcome", self.text)
         self.assertIn("steps.merge_group_cleanup_apply.outcome", self.text)
 
     def test_superseded_pull_request_cleanup_is_exact_head_revalidated_and_bounded(self) -> None:
@@ -171,7 +193,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn('.event == "pull_request"', self.text)
         self.assertIn(".head_sha == $head", self.text)
         self.assertIn("actions/runs/${run_id}/cancel", self.text)
-        self.assertIn("inputs.apply && steps.pull_request_cleanup_plan.outcome", self.text)
+        self.assertIn("env.STEWARD_APPLY == 'true' && steps.pull_request_cleanup_plan.outcome", self.text)
         self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
         self.assertNotIn('.event == "pull_request_target"', self.text)
 
@@ -184,7 +206,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn('[ "${#labels[@]}" -eq 0 ] || continue', self.text)
         self.assertIn('elif [ "$mutation" = remove ]', self.text)
         self.assertIn('[ "${#labels[@]}" -gt 1 ] || continue', self.text)
-        self.assertIn("inputs.apply && steps.provenance_label_plan.outcome", self.text)
+        self.assertIn("env.STEWARD_APPLY == 'true' && steps.provenance_label_plan.outcome", self.text)
         self.assertIn("steps.provenance_label_apply.outcome", self.text)
 
 
