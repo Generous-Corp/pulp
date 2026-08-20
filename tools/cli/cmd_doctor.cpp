@@ -10,11 +10,14 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_type.hpp>
 #include <pulp/format/host_version.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <ostream>
+#include <set>
+#include <sstream>
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <sys/wait.h>
@@ -27,6 +30,34 @@
 fs::path update_cache_path();
 
 namespace {
+
+std::optional<std::vector<std::string>> automatic_fix_argv(const std::string& fix) {
+    if (fix.empty() || fix.find_first_of("\r\n;&|<>`$()") != std::string::npos)
+        return std::nullopt;
+
+    std::istringstream input(fix);
+    std::vector<std::string> argv;
+    for (std::string word; input >> word;)
+        argv.push_back(std::move(word));
+    if (argv.empty()) return std::nullopt;
+
+    static const std::set<std::string> allowed_programs{
+        "brew", "cmake", "git", "pulp", "sdkmanager", "sudo", "winget", "xcode-select"
+    };
+    if (!allowed_programs.contains(argv.front())) return std::nullopt;
+    return argv;
+}
+
+int apply_automatic_fix(const std::string& fix) {
+    auto argv = automatic_fix_argv(fix);
+    if (!argv) return -1;
+    const auto program = argv->front();
+    argv->erase(argv->begin());
+    auto result = pulp::platform::exec(program, *argv, 300000);
+    std::cout << result.stdout_output;
+    std::cerr << result.stderr_output;
+    return result.exit_code;
+}
 
 // Populate a ProjectEntry for a given root by reading the project's
 // sdk_version (CMakeLists.txt for source-tree projects, pulp.toml
@@ -238,7 +269,8 @@ int cmd_doctor(const std::vector<std::string>& args) {
             return 0;
         }
         std::cout << "[pulp doctor --au-cache] refreshing AU registrar...\n";
-        const int rc = std::system(cmd);
+        const int rc = pulp::platform::exec(
+            "killall", {"-9", "AudioComponentRegistrar"}).exit_code;
         // killall returns 1 when no matching process is running. That's
         // not an error in our context — the registrar will simply be
         // re-spawned the next time a host scans AU plugins.
@@ -249,14 +281,13 @@ int cmd_doctor(const std::vector<std::string>& args) {
                          "Info.plist metadata.\n";
             return 0;
         }
-        const int exit_status = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
-        if (exit_status == 1) {
+        if (rc == 1) {
             std::cout << "[pulp doctor --au-cache] AudioComponentRegistrar "
                          "wasn't running (already cold). Nothing to do.\n";
             return 0;
         }
         std::cerr << "[pulp doctor --au-cache] killall returned "
-                  << exit_status << " — manual `killall -9 "
+                  << rc << " — manual `killall -9 "
                      "AudioComponentRegistrar` may be required.\n";
         return 1;
 #else
@@ -639,7 +670,12 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 if (!c.fix.empty()) {
                     if (fix_mode && !dry_run) {
                         std::cout << "    " << color::cyan() << "Fixing:" << color::reset() << " " << c.fix << "\n";
-                        int rc = std::system(c.fix.c_str());
+                        int rc = apply_automatic_fix(c.fix);
+                        if (rc == -1) {
+                            std::cout << "    This remediation requires manual steps; it was not executed.\n";
+                            std::cout << "      " << color::yellow() << c.fix << color::reset() << "\n";
+                            continue;
+                        }
                         if (rc == 0) {
                             print_ok("Fixed");
                             --fail_count;

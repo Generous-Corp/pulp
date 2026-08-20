@@ -18,22 +18,18 @@
 //   pulp overflow disable                — set the `local-only` sentinel
 //   pulp overflow threshold [<N>]        — get or set the BUSY threshold
 //
-// All commands are thin gh CLI shells. Source of truth = GitHub repo vars.
+// All commands are thin gh CLI clients. Source of truth = GitHub repo vars.
 
 #include "cli_common.hpp"
 #include "overflow_selector.hpp"
 
-#include <cstdio>
+#include <pulp/platform/child_process.hpp>
+
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#ifdef _WIN32
-#define popen _popen
-#define pclose _pclose
-#endif
 
 namespace {
 
@@ -68,23 +64,11 @@ void print_overflow_usage() {
     std::cout << "  " << kVarProbeLabel << "\n";
 }
 
-std::string capture(const std::string& cmd) {
-    std::string out;
-#if defined(_WIN32)
-    FILE* p = _popen(cmd.c_str(), "r");
-#else
-    FILE* p = popen(cmd.c_str(), "r");
-#endif
-    if (!p)
-        return out;
-    char buf[1024];
-    while (fgets(buf, sizeof(buf), p))
-        out += buf;
-#if defined(_WIN32)
-    _pclose(p);
-#else
-    pclose(p);
-#endif
+std::string capture(const std::vector<std::string>& args) {
+    auto result = pulp::platform::exec("gh", args);
+    if (result.exit_code != 0)
+        return {};
+    auto out = std::move(result.stdout_output);
     while (!out.empty() && (out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) {
         out.pop_back();
     }
@@ -92,15 +76,13 @@ std::string capture(const std::string& cmd) {
 }
 
 std::string read_var(const std::string& name) {
-    std::string cmd =
-        "gh api repos/" + kRepo + "/actions/variables/" + name + " --jq .value 2>/dev/null";
-    return capture(cmd);
+    return capture({"api", "repos/" + kRepo + "/actions/variables/" + name,
+                    "--jq", ".value"});
 }
 
 int set_var(const std::string& name, const std::string& value) {
-    std::string cmd =
-        "gh variable set " + name + " --repo " + kRepo + " --body " + shell_quote(value);
-    return run(cmd);
+    return pulp::platform::exec(
+        "gh", {"variable", "set", name, "--repo", kRepo, "--body", value}).exit_code;
 }
 
 int run_status(const std::vector<std::string>&) {
@@ -140,14 +122,10 @@ int run_status(const std::vector<std::string>&) {
         std::cout << "    (invalid probe label; refusing to interpolate it into the query)\n";
         return 1;
     }
-    auto runners = capture("gh api repos/" + kRepo +
-                           "/actions/runners "
-                           "--jq '.runners[] | select(.labels[].name == \"" +
-                           probe_label +
-                           "\") "
-                           "| \"    \" + .name + \" (status=\" + .status + (if .busy then \", "
-                           "busy\" else \", idle\" end) + \")\"' "
-                           "2>/dev/null");
+    const auto query = ".runners[] | select(.labels[].name == \"" + probe_label +
+                       "\") | \"    \" + .name + \" (status=\" + .status + "
+                       "(if .busy then \", busy\" else \", idle\" end) + \")\"";
+    auto runners = capture({"api", "repos/" + kRepo + "/actions/runners", "--jq", query});
     if (runners.empty()) {
         std::cout << "    (no self-hosted runners with `" << probe_label
                   << "` label registered, OR\n";

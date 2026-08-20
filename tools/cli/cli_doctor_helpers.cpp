@@ -6,6 +6,8 @@
 // shared CLI helpers.
 
 #include "cli_common.hpp"
+
+#include <pulp/platform/child_process.hpp>
 #include "package_registry.hpp"
 
 #ifndef PULP_CLI_HAS_CONTROL_HEALTH
@@ -697,8 +699,11 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     // because none of those mean the user did anything wrong; the
     // existing `gh` row already reports the gh tool's health.
     {
-        auto repo_slug = first_line(exec_output(
-            "gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null"));
+        auto repo_result = pulp::platform::exec(
+            "gh", {"repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"});
+        auto repo_slug = repo_result.exit_code == 0
+            ? first_line(repo_result.stdout_output)
+            : std::string{};
         if (!repo_slug.empty() && repo_slug.find('/') != std::string::npos) {
             // Probe WITHOUT --jq so we can distinguish:
             //   - empty-response-from-gh (means gh errored: no auth, no
@@ -709,8 +714,11 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             //     '.secrets[].name' and gated on the output being non-empty,
             //     which made the bootstrap case (zero secrets) look the
             //     same as the "gh failed" case and skipped silently.
-            auto raw = exec_output(
-                "gh api 'repos/" + repo_slug + "/actions/secrets' --paginate 2>/dev/null");
+            auto secrets_result = pulp::platform::exec(
+                "gh", {"api", "repos/" + repo_slug + "/actions/secrets", "--paginate"});
+            auto raw = secrets_result.exit_code == 0
+                ? std::move(secrets_result.stdout_output)
+                : std::string{};
             if (!raw.empty()) {
                 if (doctor_check_matches_only_filter(only_filter, "RELEASE_BOT_TOKEN secret")) {
                     DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
