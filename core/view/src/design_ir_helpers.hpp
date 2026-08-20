@@ -17,6 +17,7 @@
 #pragma once
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <algorithm>
@@ -136,6 +137,44 @@ inline std::string asset_content_hash_stem(const IRAssetRef& asset) {
         : asset.content_hash.substr(separator + 1);
 }
 
+inline bool is_sha256_hex(std::string_view value) {
+    return value.size() == 64 &&
+        std::all_of(value.begin(), value.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        });
+}
+
+// A packaged archive may carry an old producer-host local_path even though it
+// correctly includes the referenced bytes under its own assets/ directory.
+// Recovering by leaf name alone would let an unrelated same-name file satisfy
+// the manifest, so this fallback is available only for a declared SHA-256 and
+// only when the package-local candidate hashes to that exact digest.
+inline std::optional<std::filesystem::path> verified_packaged_asset_file(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory) {
+    if (asset_base_directory.empty() || !asset.local_path || asset.local_path->empty())
+        return std::nullopt;
+
+    const auto expected = asset_content_hash_stem(asset);
+    if (!is_sha256_hex(expected)) return std::nullopt;
+
+    const auto leaf = std::filesystem::path(*asset.local_path).filename();
+    if (leaf.empty()) return std::nullopt;
+    const auto candidate = existing_asset_file(asset_base_directory / "assets" / leaf);
+    if (!candidate) return std::nullopt;
+
+    constexpr std::uint64_t kMaxPackagedAssetBytes = 256ull * 1024 * 1024;
+    const auto actual = runtime::sha256_file_hex(*candidate, kMaxPackagedAssetBytes);
+    if (!actual || actual->size() != expected.size() ||
+        !std::equal(actual->begin(), actual->end(), expected.begin(),
+                    [](unsigned char a, unsigned char b) {
+                        return std::tolower(a) == std::tolower(b);
+                    })) {
+        return std::nullopt;
+    }
+    return candidate;
+}
+
 // The extension (including the dot) of a URI or path, ignoring any query or
 // fragment; "" when there is none.
 inline std::string asset_uri_extension(std::string_view uri) {
@@ -184,6 +223,17 @@ inline std::optional<std::filesystem::path> resolve_asset_file(
         if (auto found =
                 existing_asset_file(std::filesystem::path(asset.original_uri.substr(7))))
             return found;
+    }
+
+    if (auto found = verified_packaged_asset_file(asset, asset_base_directory)) {
+        runtime::log_warn(
+            "design-import: asset '{}' recovered from verified package asset '{}' — "
+            "manifest local_path '{}' does not resolve under '{}'",
+            asset.asset_id,
+            found->generic_string(),
+            asset.local_path.value_or(std::string{}),
+            asset_base_directory.generic_string());
+        return found;
     }
 
     const auto stem = asset_content_hash_stem(asset);

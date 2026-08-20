@@ -62,7 +62,7 @@ Managed install — provisions an isolated venv under `~/.pulp/tools/`, the same
 [`pulp tool`](../reference/extending-pulp.md) lane as `ffmpeg`/`uv`:
 
 ```bash
-pulp tool install audio-quality-lab          # needs a Pulp source checkout + network (numpy/soundfile)
+pulp tool install audio-quality-lab          # Python 3.10+; needs a Pulp source checkout + network (numpy/soundfile)
 pulp tool run audio-quality-lab -- run --case drum --degradation smear
 ```
 

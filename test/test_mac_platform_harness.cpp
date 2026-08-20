@@ -240,15 +240,6 @@ bool extract_zip_to_dir(const fs::path& zip_path, const fs::path& dest_dir, std:
     return true;
 }
 
-void absolutize_asset_paths(pulp::view::IRAssetManifest& manifest, const fs::path& base_dir) {
-    for (auto& asset : manifest.assets) {
-        if (!asset.local_path || asset.local_path->empty()) continue;
-        fs::path path(*asset.local_path);
-        if (path.is_relative()) path = base_dir / path;
-        asset.local_path = path.lexically_normal().string();
-    }
-}
-
 uint32_t count_ir_nodes(const pulp::view::IRNode& node) {
     uint32_t count = 1;
     for (const auto& child : node.children) count += count_ir_nodes(child);
@@ -279,7 +270,6 @@ std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
     REQUIRE_FALSE(scene_json.empty());
 
     ir = pulp::view::parse_figma_plugin_json(scene_json);
-    absolutize_asset_paths(ir.asset_manifest, extracted.path);
     REQUIRE(ir.root.name == "VST Style");
     REQUIRE(count_ir_nodes(ir.root) == 187);  // rasterized: 3 vector frames -> image leaves
     REQUIRE(ir.asset_manifest.assets.size() == 75);  // +3 rasterized illustration PNGs
@@ -290,7 +280,8 @@ std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
     // interactive via the native notch overlay. Runs after the structural
     // assertions above, which pin the raw parsed scene.
     pulp::view::hoist_captured_art_knobs(ir);
-    pulp::view::enrich_imported_image_asset_metadata(ir, ir.asset_manifest);
+    pulp::view::enrich_imported_image_asset_metadata(
+        ir, ir.asset_manifest, extracted.path.string());
 
     // Per-shape gradient sampling: the four illustration shapes (DEPTH /
     // POSITION / OFFSET / SHIMMER) are colorful, so enrich samples each one's
@@ -303,7 +294,8 @@ std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
     auto view = pulp::view::build_native_view_tree(
         ir,
         ir.asset_manifest,
-        {.diagnostics_out = &diagnostics});
+        {.diagnostics_out = &diagnostics,
+         .asset_base_directory = extracted.path});
     REQUIRE(view != nullptr);
     view->set_bounds({0, 0, 1000.0f, 600.0f});
 
@@ -666,7 +658,6 @@ TEST_CASE("mac harness captures ELYSIUM default C++ import through GPU path",
     REQUIRE_FALSE(scene_json.empty());
 
     auto ir = pulp::view::parse_figma_plugin_json(scene_json);
-    absolutize_asset_paths(ir.asset_manifest, extracted.path);
     REQUIRE(ir.root.name == "VST Style");
     REQUIRE(count_ir_nodes(ir.root) == 187);  // rasterized: 3 vector frames -> image leaves
     REQUIRE(ir.asset_manifest.assets.size() == 75);  // +3 rasterized illustration PNGs
@@ -677,13 +668,15 @@ TEST_CASE("mac harness captures ELYSIUM default C++ import through GPU path",
     // interactive via the native notch overlay. Runs after the structural
     // assertions above, which pin the raw parsed scene.
     pulp::view::hoist_captured_art_knobs(ir);
-    pulp::view::enrich_imported_image_asset_metadata(ir, ir.asset_manifest);
+    pulp::view::enrich_imported_image_asset_metadata(
+        ir, ir.asset_manifest, extracted.path.string());
 
     std::vector<pulp::view::ImportDiagnostic> diagnostics;
     auto view = pulp::view::build_native_view_tree(
         ir,
         ir.asset_manifest,
-        {.diagnostics_out = &diagnostics});
+        {.diagnostics_out = &diagnostics,
+         .asset_base_directory = extracted.path});
     REQUIRE(view != nullptr);
     view->set_bounds({0, 0, 1000.0f, 600.0f});
 

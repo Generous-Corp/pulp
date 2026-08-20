@@ -14,7 +14,7 @@ npm install
 ```
 
 Pulls React 18.3.1, ReactDOM 18.3.1, react-reconciler 0.29.2, scheduler
-0.23.2, esbuild 0.24.0, `@babel/parser` 7.29.7, and `css-tree` 3.2.1 into
+0.23.2, esbuild 0.25.12, `@babel/parser` 7.29.7, and `css-tree` 3.2.1 into
 the local `node_modules/`. Not committed (see `.gitignore`);
 `package-lock.json` IS committed for reproducible installs.
 The transform aliases `@pulp/react` to the repo's `packages/pulp-react/src`
