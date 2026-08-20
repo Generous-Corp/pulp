@@ -1718,7 +1718,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
-      "fingerprint": "sha256:8b6a5cfc6946ead75a2683581c900f44737dd4a4456590233753f19ecad1203d",
+      "fingerprint": "sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93",
       "include": "pulp/signal/analysis_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3739,7 +3739,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_feature_frontends.hpp",
-      "fingerprint": "sha256:b20196583f01a4a6290743e97104be62712d05735d789375c12b3520a92e1fc7",
+      "fingerprint": "sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273",
       "include": "pulp/signal/spectral_feature_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

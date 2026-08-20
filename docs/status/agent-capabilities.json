@@ -6255,6 +6255,7 @@
               "reject_sample()",
               "push(double mono, double channel_power)",
               "render_spectrum()",
+              "render_gain_normalized_spectrum()",
               "frame_energy()",
               "spectrum()",
               "config()",
