@@ -693,7 +693,7 @@
       "display_name": "JSX Instrument",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-05-21",
+      "last_verified": "2026-08-19",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "not-applicable",
@@ -716,7 +716,7 @@
           "url": "tools/import-design/jsx-runtime/README.md",
           "kind": "docs",
           "proves": "Local JSX runtime transform contract and current CLI wiring status.",
-          "last_verified": "2026-05-21",
+          "last_verified": "2026-08-19",
           "recheck_interval_days": 90
         }
       ],
@@ -858,7 +858,7 @@
       "display_name": "JSX runtime-import (instrument)",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-05-21",
+      "last_verified": "2026-08-19",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "not-applicable",
@@ -888,14 +888,14 @@
           "url": "tools/import-design/jsx-runtime/README.md",
           "kind": "local-docs",
           "proves": "Documents the supported local JSX transform and runtime import path.",
-          "last_verified": "2026-05-21",
+          "last_verified": "2026-08-19",
           "recheck_interval_days": 90
         },
         {
           "url": "tools/import-design/jsx-runtime/jsx-transform.mjs",
           "kind": "tooling",
           "proves": "Local Node/esbuild transform turns JSX/TSX input into the runtime bundle consumed by parse_jsx_react.",
-          "last_verified": "2026-05-21",
+          "last_verified": "2026-08-19",
           "recheck_interval_days": 90
         }
       ],
