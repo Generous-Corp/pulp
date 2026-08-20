@@ -93,13 +93,9 @@ TEST_CASE("WidgetBridge::dispatch_global_key fans out to every live bridge",
     REQUIRE(a_settings() == 1);
     REQUIRE(a_count() == 0);
     REQUIRE(b_count() == 1);
-    // ',' (ASCII 44) is not in keycode_to_w3c_key's mapped set (only
-    // letters/digits + named keys), so the bridge emits "Unidentified".
-    // The actual ui.js codegen path emits explicit thunks that
-    // re-dispatch with a known key string — that route is covered by
-    // pulp-test-platform-key-wireup's E2E TEST_CASE. Here we pin only
-    // the fan-out + modifier propagation contract.
-    REQUIRE(engine_b.evaluate("bEventAt(0)").toString() == "Unidentified|M");
+    // The native settings chord must reach script listeners with the same
+    // printable key value that a browser KeyboardEvent exposes.
+    REQUIRE(engine_b.evaluate("bEventAt(0)").toString() == ",|M");
 
     // Now fire a mapped key ('s') to confirm string translation works
     // and that a SECOND dispatch lands on each bridge independently.
