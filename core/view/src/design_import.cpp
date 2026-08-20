@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include "design_import_internal.hpp"
+#include "design_ir_helpers.hpp"
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -1012,11 +1013,8 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
             if (const auto* ref = manifest.resolve(asset_ref->second)) {
                 std::vector<uint8_t> bytes;
                 std::pair<int, int> dims{ref->width.value_or(0), ref->height.value_or(0)};
-                if (ref->local_path && !ref->local_path->empty()) {
-                    fs::path path(*ref->local_path);
-                    if (path.is_relative() && !base_dir.empty())
-                        path = base_dir / path;
-                    path = path.lexically_normal();
+                if (auto resolved = resolve_asset_file(*ref, base_dir)) {
+                    const fs::path path = *resolved;
                     node.attributes["asset_path"] = path.string();
                     bytes = read_binary_file(path);
                     if (!bytes.empty()) {
