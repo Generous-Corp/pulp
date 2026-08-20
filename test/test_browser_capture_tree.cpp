@@ -1990,7 +1990,7 @@ TEST_CASE("a pure rotation recovers its own box and angle",
     // nodes: 0 #document, 1 HTML, 2 BODY,
     //        3 DIV 100×20 rotated 30°, childless — recovered
     //        4 DIV rotated 45°, childless      — refused, ambiguous angle
-    //        5 DIV rotated 30° with a child    — refused, subtree in the way
+    //        5 DIV rotated 30° with a child    — recovered, subtree carried
     //        6 SPAN inside 5
     const auto lowered = lower_snapshot(
         {
@@ -2012,7 +2012,7 @@ TEST_CASE("a pure rotation recovers its own box and angle",
         "recovered-rotation");
     const auto& root = lowered.root;
 
-    CHECK(lowered.counts.rotation_recovered == 1);
+    CHECK(lowered.counts.rotation_recovered == 2);
     const auto* bar = find_node(root, [](const IRNode& node) {
         return node.style.transform.has_value();
     });
@@ -2035,14 +2035,187 @@ TEST_CASE("a pure rotation recovers its own box and angle",
     CHECK_THAT(*bar->style.top + *bar->style.height * 0.5f,
                Catch::Matchers::WithinAbs(50.0 + 67.32051 / 2.0, 0.05));
 
-    // Both refusals, each for its own reason. At 45° a 100×20 bar and a 20×100
-    // bar have the SAME bounding box, so the width is not recoverable and a
-    // guess would be a fabricated shape rather than a missing one. And a
-    // rotated element with a subtree cannot be un-refused without un-pooling
-    // children whose own boxes are bounding boxes in the rotated frame.
-    CHECK(lowered.counts.element_capture_fallback == 2);
+    // At 45° a 100×20 bar and a 20×100 bar have the SAME bounding box, so the
+    // width is not recoverable and a guess would be a fabricated shape rather
+    // than a missing one. That refusal stands.
+    CHECK(lowered.counts.element_capture_fallback == 1);
+    CHECK(lowered.counts.pooled_into_fallback == 0);
+
+    // Node 5's rotation recovers too, and its child comes along: the SPAN is
+    // lowered INSIDE the recovered frame, re-expressed in the pre-rotation
+    // coordinate system the parent's rectangle is written in.
+    CHECK(lowered.counts.rotation_recovered_children == 1);
+    const auto* span = find_named(root, "span");
+    REQUIRE(span != nullptr);
+    CHECK(attribute(*span, "paint_class") == "native");
+    CHECK_FALSE(span->style.transform.has_value());
+    const auto* carrier = find_node(root, [](const IRNode& node) {
+        return node.style.transform.has_value() && !node.children.empty();
+    });
+    REQUIRE(carrier != nullptr);
+    REQUIRE(contains(*carrier, span));
+    // The recovered rectangle, solved from the 30×20 bounding box at the
+    // ancestor's known 30°: (30·cos − 20·sin) / cos 60° wide, and centred
+    // where the inverse turn about the ancestor's centre puts it.
+    REQUIRE(span->style.width.has_value());
+    REQUIRE(span->style.height.has_value());
+    CHECK_THAT(*span->style.width, Catch::Matchers::WithinAbs(31.9615, 0.001));
+    CHECK_THAT(*span->style.height, Catch::Matchers::WithinAbs(4.6410, 0.001));
+    REQUIRE(span->style.left.has_value());
+    REQUIRE(span->style.top.has_value());
+    CHECK_THAT(*span->style.left, Catch::Matchers::WithinAbs(7.0095, 0.001));
+    CHECK_THAT(*span->style.top, Catch::Matchers::WithinAbs(7.4994, 0.001));
+
+    CHECK(lowered.counts.native == 5);   // html, body, both bars, and the span
+}
+
+TEST_CASE("a rotated knob pointer carries its indicator dot",
+          "[browser-capture][native-lowering]") {
+    // The shape this recovery exists for: a square pointer element rotated
+    // −30°, whose only child is the 8×8 dot a knob turns under its value.
+    // The dot's box arrives as the bounding box of a turned square, centred
+    // where the PARENT's rotation put it — both solved back here.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.pointer rotated −30°,
+    //        4 SPAN.dot inside it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,4]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[10,11],[10,12]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[6,8,8],[6,8,8],[6,8,8],[6,9,8],[6,8,14]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[92.6795,92.6795,54.641,54.641],"
+                      "[110.5359,107.6077,10.9282,10.9282]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names =
+                R"(["display","transform","background-color"])",
+            .strings =
+                R"J("#document","HTML","BODY","DIV","SPAN","display","block",)J"
+                R"J("transform","none",)J"
+                R"J("matrix(0.866025, -0.5, 0.5, 0.866025, 0, 0)",)J"
+                R"J("class","pointer","dot","background-color",)J"
+                R"J("rgb(240, 240, 240)")J",
+        },
+        "rotation-carries-dot");
+    const auto& root = lowered.root;
+
+    CHECK(lowered.counts.element_capture_fallback == 0);
+    CHECK(lowered.counts.pooled_into_fallback == 0);
+    CHECK(lowered.counts.rotation_recovered == 1);
+    CHECK(lowered.counts.rotation_recovered_children == 1);
+
+    const auto* pointer = find_named(root, "div.pointer");
+    REQUIRE(pointer != nullptr);
+    // The 40×40 square, back out of its 54.64² bounding box.
+    REQUIRE(pointer->style.width.has_value());
+    REQUIRE(pointer->style.height.has_value());
+    CHECK_THAT(*pointer->style.width, Catch::Matchers::WithinAbs(40.0, 0.01));
+    CHECK_THAT(*pointer->style.height, Catch::Matchers::WithinAbs(40.0, 0.01));
+    REQUIRE(pointer->style.transform.has_value());
+    CHECK(pointer->style.transform->rfind("rotate(-30", 0) == 0);
+
+    // The dot lowers INSIDE the pointer, in the pointer's pre-rotation frame:
+    // 8×8, centred across the 40-wide square, 8px from its top. It carries no
+    // angle of its own — the parent's rotation draws it.
+    const auto* dot = find_named(root, "span.dot");
+    REQUIRE(dot != nullptr);
+    REQUIRE(contains(*pointer, dot));
+    CHECK_FALSE(dot->style.transform.has_value());
+    REQUIRE(dot->style.left.has_value());
+    REQUIRE(dot->style.top.has_value());
+    REQUIRE(dot->style.width.has_value());
+    REQUIRE(dot->style.height.has_value());
+    CHECK_THAT(*dot->style.left, Catch::Matchers::WithinAbs(16.0, 0.01));
+    CHECK_THAT(*dot->style.top, Catch::Matchers::WithinAbs(8.0, 0.01));
+    CHECK_THAT(*dot->style.width, Catch::Matchers::WithinAbs(8.0, 0.01));
+    CHECK_THAT(*dot->style.height, Catch::Matchers::WithinAbs(8.0, 0.01));
+    // And its own fill survived — it is drawn, not pooled into a hole.
+    CHECK(dot->style.background_color.has_value());
+}
+
+TEST_CASE("a rotated element whose subtree cannot come along stays a hole",
+          "[browser-capture][native-lowering]") {
+    // One rotating parent per refusal shape, so each reason stays pinned
+    // against the one recovery that works:
+    //        3 DIV rotated 30°, 4 DIV inside with its OWN rotation
+    //        5 DIV rotated 30°, 6 #text inside — line boxes are page
+    //          rectangles in the rotated frame, and nothing re-derives them
+    //        7 DIV rotated 30°, 8 SPAN inside that Chrome painted FIRST —
+    //          it would hoist out of the subtree it is being re-framed into
+    //        9 DIV rotated 30°, 10 SPAN inside whose box the known angle
+    //          solves to a negative rectangle — a box the rotation did not
+    //          produce, so no rectangle it can be given
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,28,3,49,3,49]",
+            .node_types = "[9,1,1,1,1,1,3,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,2,5,2,7,2,9]",
+            .attributes =
+                "[[],[],[],[],[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6,7,8,9,10]",
+            .styles = "[[14,11],[14,11],[14,11],[14,61],[14,47],[14,61],"
+                      "[14,11],[14,61],[14,11],[14,61],[14,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,96.6025,67.32051],[20,20,30,20],"
+                      "[10,120,96.6025,67.32051],[20,130,30,20],"
+                      "[10,230,96.6025,67.32051],[20,240,30,20],"
+                      "[10,340,96.6025,67.32051],[20,350,5,60]]",
+            .paint_orders = "[0,1,1,2,3,4,5,7,6,8,9]",
+            .texts = "[-1,-1,-1,-1,-1,-1,30,-1,-1,-1,-1]",
+            .computed_names = R"(["display","transform"])",
+        },
+        "rotation-subtree-refusals");
+    const auto& root = lowered.root;
+
+    CHECK(lowered.counts.rotation_recovered == 0);
+    CHECK(lowered.counts.rotation_recovered_children == 0);
+    CHECK(lowered.counts.element_capture_fallback == 4);
+    CHECK(lowered.counts.pooled_into_fallback == 4);
+    CHECK(lowered.counts.native == 2);   // html and body; nothing else drawn
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return attribute(node, "capture_fallback_reason") == "transform";
+          }) == 4);
+}
+
+TEST_CASE("the flattened emission keeps a rotated subtree captured",
+          "[browser-capture][native-lowering]") {
+    // Flattening hangs every node directly off the root, where a child
+    // re-expressed in its ancestor's pre-rotation frame has no ancestor left
+    // to turn it back. Subtree recovery is therefore the hierarchical lane's
+    // alone; under `flatten_to_paint_order` the same document stays an honest
+    // fallback rather than scattering its children across the page.
+    //
+    // The knob-pointer document from the recovery case above, lowered flat.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,4]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[10,11],[10,12]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[6,8,8],[6,8,8],[6,8,8],[6,9,8],[6,8,14]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[92.6795,92.6795,54.641,54.641],"
+                      "[110.5359,107.6077,10.9282,10.9282]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names =
+                R"(["display","transform","background-color"])",
+            .strings =
+                R"J("#document","HTML","BODY","DIV","SPAN","display","block",)J"
+                R"J("transform","none",)J"
+                R"J("matrix(0.866025, -0.5, 0.5, 0.866025, 0, 0)",)J"
+                R"J("class","pointer","dot","background-color",)J"
+                R"J("rgb(240, 240, 240)")J",
+        },
+        "rotation-flat-stays-captured",
+        {},
+        true);
+    CHECK(lowered.counts.rotation_recovered == 0);
+    CHECK(lowered.counts.element_capture_fallback == 1);
     CHECK(lowered.counts.pooled_into_fallback == 1);
-    CHECK(lowered.counts.native == 3);   // html, body, and the recovered bar
 }
 
 TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",

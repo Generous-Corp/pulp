@@ -75,6 +75,28 @@ using CommandID = std::uint32_t;
 
 inline constexpr CommandID kInvalidCommandID = 0;
 
+/// ASCII comma as a KeyCode. Punctuation-valued key codes are part of the
+/// input contract even when a platform header does not expose a named enum
+/// member for every punctuation key.
+inline constexpr KeyCode kKeyComma = static_cast<KeyCode>(',');
+
+/// Framework-reserved CommandID for "open the app's settings / preferences"
+/// (ASCII 'PLST'). Reserving ONE well-known id is what makes Cmd/Ctrl+, a
+/// platform convention rather than a per-app accident: any handler
+/// registered for this id gets the standard chord by default, and shells,
+/// docs, and rebind UIs can all point at the same name.
+inline constexpr CommandID kCommandOpenSettings = 0x504C5354;  // 'PLST'
+
+/// The platform-standard open-settings chord: Cmd+, on macOS, Ctrl+,
+/// elsewhere. Exposed so a host that builds its own CommandInfo (rather
+/// than calling make_open_settings_command_info()) still binds the same
+/// chord.
+#ifdef __APPLE__
+inline constexpr std::uint16_t kOpenSettingsModifiers = kModCmd;
+#else
+inline constexpr std::uint16_t kOpenSettingsModifiers = kModCtrl;
+#endif
+
 /// Metadata for one command. Used by `KeyMappingEditor` to render the
 /// list of rebindable actions and by the registry for display/debug.
 struct CommandInfo {
@@ -85,6 +107,25 @@ struct CommandInfo {
     std::uint16_t default_modifiers = 0;
     bool enabled = true;       ///< False = greyed out / not dispatched.
 };
+
+/// CommandInfo for kCommandOpenSettings with the platform-standard chord as
+/// its default binding. `register_command()` skips the default binding when
+/// the chord (or the command) is already bound in the ShortcutMap, so a
+/// user rebind loaded from disk always wins over this default.
+///
+/// Nothing fires unless the app also registers a handler that claims
+/// kCommandOpenSettings — an app without settings leaves the chord
+/// unclaimed, and `dispatch_key_event` returns false so the host (a DAW
+/// owning the keyboard, or the OS menu bar) sees the event unchanged.
+inline CommandInfo make_open_settings_command_info() {
+    CommandInfo info;
+    info.id = kCommandOpenSettings;
+    info.name = "Settings…";
+    info.category = "App";
+    info.default_key = kKeyComma;
+    info.default_modifiers = kOpenSettingsModifiers;
+    return info;
+}
 
 /// Interface implemented by any object that can perform commands.
 ///

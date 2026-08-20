@@ -699,8 +699,6 @@ static bool pulp_plugin_end_text_input(NSView* host, pulp::view::View* root) {
 bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
-    auto* fv = pulp_focus_under_root(root);
-    if (!fv) return false;
     // Only intercept actual command chords; let everything else flow normally
     // so host menu shortcuts (⌘W, ⌘Q, ⌘S) keep working.
     if ((event.modifierFlags & NSEventModifierFlagCommand) == 0) return false;
@@ -709,7 +707,19 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
     ke.is_down = true;
     ke.is_repeat = event.isARepeat;
-    if (fv->on_key_event(ke)) {
+    if (auto* fv = pulp_focus_under_root(root)) {
+        if (fv->on_key_event(ke)) {
+            root->request_repaint();
+            return true;
+        }
+    }
+    // The focused view declined. A framework-level global hook — e.g. a
+    // CommandRegistry carrying the open-settings convention
+    // (kCommandOpenSettings, Cmd+,) — sees the chord next. The DAW owns the
+    // keyboard: a chord no view and no hook claims returns false here and
+    // forwards to the host unchanged, so an app that never registered a
+    // settings command changes nothing about what the host receives.
+    if (root->on_global_key && root->on_global_key(ke)) {
         root->request_repaint();
         return true;
     }

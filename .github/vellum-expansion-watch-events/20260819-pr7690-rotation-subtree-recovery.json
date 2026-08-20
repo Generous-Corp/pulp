@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260819-pr7690-rotation-subtree-recovery",
+  "created_at": "2026-08-19T15:30:40Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record teaching the browser capture tree that a recovered rotation can carry its subtree into the IR instead of forcing every rotated node with children onto the painted-element fallback path, which is what blocked knob pointers whose rotation owns a pseudo-element dot child. The recovery walk refuses text runs, subtree-owning tags, nested rotations, unsolvable boxes, and descendants that paint before their ancestor, and stays off under flatten_to_paint_order. Watch-only: no design-import or rendering authority is transferred, and the painted fallback path is unchanged for everything the walk refuses.",
+  "tests": [
+    "a pure rotation recovers its own box and angle",
+    "a rotated knob pointer carries its indicator dot",
+    "a rotated element whose subtree cannot come along stays a hole",
+    "the flattened emission keeps a rotated subtree captured",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

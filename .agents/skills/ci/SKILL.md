@@ -144,6 +144,68 @@ Material-site render is a preview artifact and has no business on the merge
 critical path. That is the mistake this repo already made with example
 validators.
 
+### A documented guard may not run — check registration, not existence
+
+`.shipyard/config.toml` stated the macro-gated-header ODR class was "Guarded by
+`tools/scripts/test_odr_macro_gated_headers.py`". The script existed, worked, and
+**ran nowhere**: not a ctest, not a workflow, not `tools/check-docs.sh`. The claim
+was true of the file and false of its execution, and nothing in the repo could tell
+the difference — a prose reference in a config comment reads exactly like
+enforcement.
+
+That left the class enforced only by the Shipyard mac lane's Debug build, which is
+`backend = local` — so the signal existed on a host large enough to finish the
+build and was simply absent on one that was not. The gate you got depended on which
+machine typed `shipyard pr`, which is the same divergent-semantics class
+`.agents/contract.toml` #6 was bought with, reached through host capacity instead
+of tool version.
+
+It is now `add_test(NAME odr-macro-gated-headers …)` in
+`test/cmake/quality_tests.cmake`, so it rides the required `macos` gate and the
+enforcement no longer depends on the shipping host.
+
+**The generalizable check:** when a comment, doc, or config says a class is
+"guarded by X", confirm X is *invoked* somewhere —
+
+```bash
+git grep -l "X" -- test tools .github   # references
+git grep -n "X" -- test/cmake .github/workflows tools/check-docs.sh   # invocations
+```
+
+If every hit is prose, the guard is decorative. `tools/scripts/tools_registry_check.py`
+enforces this property for the tools registry; nothing enforces it for guards named
+in passing.
+
+### The schema-fixture coverage gate runs on three surfaces, and only one has teeth on every PR
+
+`tools/scripts/timeline_fixture_coverage_check.py` fails when a
+`pulp.timeline.sequence` schema version lacks an indexed document fixture under
+`test/fixtures/timeline/v<N>/` — the check a schema bump without fixtures used
+to slip past. It executes in three places with different force:
+
+- **ctest `timeline-fixture-coverage`** (registered in
+  `test/cmake/timeline_tests.cmake`, no `LABELS`) — unlabeled, so it rides the
+  required `macos` gate on every PR. This is the surface that blocks.
+- **ctest `timeline-fixture-coverage-selftest`** — drives the script over
+  synthetic corpora and proves it goes red on a missing version, on a version
+  dir carrying only non-document kinds, and on an unindexed fixture, and that
+  operational errors stay exit 2. Without it the gate could silently never
+  fire, the same class as the ODR guard above.
+- **job `fixture-coverage` in `timeline-hardening.yml`** — a no-build second
+  opinion on the lane the corpus already cares about. That lane is advisory and
+  `paths`-filtered (timeline
+  cores, the fixture tree, the gate scripts, its own workflow file), so a PR
+  outside the filter never runs it; the required-gate ctest is what every PR
+  answers to.
+
+### Running `gates.sh` before committing can be a false green
+
+`config_doc_check.py`, `skill_sync_check.py`, and `version_bump_check.py` all diff a
+**commit range** (`origin/main...HEAD`). Staged-but-uncommitted work is invisible to
+them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
+0 on a change that will fail the moment it is committed. Commit first, then run
+gates — a green run over an empty range is not evidence about your change.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
@@ -1087,7 +1149,94 @@ du -sh "$FETCHCONTENT_BASE_DIR" 2>/dev/null || echo "nothing cached"
 Same idea applies to the self-hosted golden images: bake with the flags CI actually
 uses, or the golden warms a cache the real jobs never touch.
 
+## Autonomous repair: the fences count, they do not judge
+
+Every fence on the recovery lane bounds **how much** a repair changed — exact
+head, epoch, fingerprint, force-with-lease, changed-file count, patch bytes,
+control-plane path prefixes. On 2026-08-17 every one of them held while the
+lane, asked to satisfy `static_assert(std::is_trivially_copyable_v<ParamValue>)`,
+removed all five `std::atomic` members from `ParamValue` and rewrote its docs to
+make thread-safety the caller's problem. `ParamValue` is the audio-thread to
+UI-thread primitive; the repair introduced data races on the audio thread of a
+real-time framework, and **it would have gone green**, because the assertion
+passes once the atomics are gone.
+
+`tools/scripts/shipyard_recovery_judgement.py` is the check that reads meaning.
+Two independent tests, either of which escalates to `needs_human`:
+
+- **Surface** — an ALLOWLIST (`test/` only today), not a denylist. A denylist
+  fails open on the surface nobody named, and the dangerous surfaces are not
+  only `core/`: a repair could make a failing gate pass by editing
+  `.github/workflows/build.yml`, or disable a check in `tools/cmake`.
+- **Invariant removal** — surface alone is insufficient. A test-only diff that
+  merely deletes `REQUIRE` lines satisfies any surface rule and is the same
+  failure: a model can make a check pass by making the claim true **or by
+  deleting the claim**, and it chose to delete.
+
+Two things to know before "fixing" it:
+
+1. **It escalates the CORRECT repair too.** The right fix on 2026-08-17 was to
+   delete the false assertion, and the invariant test refuses that as well.
+   That is intended. The lane's job is to never land a catastrophic change
+   unattended, not to land every correct one unattended.
+2. **It is enforced in the publisher, not the worker.** The worker still
+   uploads its artifact so an escalated repair stays inspectable; the publisher
+   is the step that applies and pushes, so that is where refusing matters. On
+   escalation it exits `3` (distinct from `1`, which means the check itself
+   broke) and records the reason on the exact head as
+   `shipyard/recovery-judgement`.
+
+Like `shipyard_recovery_result_check.py`, it lives under
+`tools/scripts/shipyard_recovery_`, which is in `FORBIDDEN_PREFIXES` in
+`shipyard_recovery_repair.py` — so a fenced repair model cannot weaken the check
+that constrains it. `test_shipyard_recovery_judgement.py` asserts that
+containment rather than assuming it, and its central case is the verbatim diff
+from `a08ec2d4abd8`.
+
 ## GitHub workflow gotchas
+
+- **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
+  storage is billed per ACCOUNT and shared across every repository in it.** That
+  makes it the rare CI cost that becomes a *different repo's* outage: when the
+  account's storage quota is exhausted, uploads start failing in repositories
+  that never uploaded anything large, and the workflow whose artifacts filled it
+  is not the one that goes red. Diagnosing from the failing repo alone leads
+  nowhere, because nothing there is wrong.
+  - **Read a storage-quota symptom as account-wide, not repo-local.** Check
+    every repo in the account for large uncapped uploads, not just the one that
+    failed.
+  - **Cap by what the artifact is for, not uniformly.** A per-platform release
+    binary that also ships as a GitHub Release asset is a job-to-job hand-off
+    and wants days, not months. A failure-only fuzz reproducer wants the long
+    retention, because a crash input that expires before anyone downloads it is a
+    lost bug — and it costs almost nothing, since green runs upload nothing.
+  - **Set the long retention explicitly when you mean it.** An inherited 90 and
+    a deliberate 90 look identical in the YAML, so the next audit cannot tell a
+    considered decision from a forgotten default and will "fix" it.
+### Action major pins drift silently — the gate is a test, not a warning
+
+GitHub retires the Node runtime under an action's *old* major and then forces
+that major onto the newer runtime, emitting a deprecation annotation. That
+annotation only exists on a live run, so a stale pin is invisible to every
+local gate and is normally found by a human reading warnings. Pulp therefore
+pins the major in one place and asserts it:
+
+- `tools/scripts/test_workflow_lint.py::ActionMajorPinTests` scans every
+  `.github/workflows/*.yml` and fails when any `actions/<name>@vN` falls below
+  `MINIMUM_MAJOR`, or when one action is pinned to two different majors across
+  workflows. The split-pin check is the one that catches real drift: a new
+  workflow copies the current pin while the old ones keep the obsolete major.
+- `actions/setup-python` is pinned at **v6**; v5 was forced onto Node 24 and
+  began emitting a Node 20 deprecation annotation.
+- Raise `MINIMUM_MAJOR` when bumping an action — do **not** add a second
+  version assertion to an individual workflow's test. The per-workflow tests
+  deliberately match `@v\d+` so a routine bump touches one invariant.
+
+`actions/checkout`, `actions/cache`, `actions/setup-node`, and
+`actions/upload-artifact` are still split across majors and are NOT yet under
+this invariant; add them one action per PR so a runtime regression stays
+bisectable.
+
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
   github.ref == 'refs/heads/main'` is dead code unless the workflow has a
@@ -3243,6 +3392,235 @@ renames, and adds; run the real bundle commands and the real
 fenced head and compare. Under the pre-fix commands that rehearsal reports
 `validator: PASS` and `parity check: PASS` while leaving the deleted file in
 place — which is precisely why no amount of green CI would have caught it.
+
+### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
+
+Two independent traps, found across three days and roughly six mis-routed
+required legs on 2026-08-18. Together they are the whole story.
+
+**1. `gh run rerun --failed` freezes the routing decision.** `build.yml` computes
+routing in a `resolve-provider` job and bakes the answer into the downstream job
+*name* (`macOS (ARM64) [local]` vs `[github-hosted]`). `--failed` re-runs only
+**failed** jobs — and `resolve-provider` **succeeded**, so it is carried forward
+and every retry re-uses the *original* dispatch's decision, however stale.
+
+Verified: on one run's attempt 3, `resolve-provider` showed `2026-08-17` while
+the macOS job showed `2026-08-18`. Same PR, same head, same host state; the only
+variable was the re-run mode, and it produced opposite labels.
+
+> **To change routing, use a full `ghapp run rerun <id>` — never `--failed`.**
+> It re-executes `resolve-provider` against current conditions. It does not move
+> the head, so head-exact Shipyard receipts survive. It costs re-running green
+> advisory lanes, which is nothing next to a leg that never executes.
+
+A run that is still `queued` refuses a re-run (`This workflow is already
+running`) — cancel it first; cancelling does not move the head either.
+
+**2. Every intuitive capacity check reads the wrong thing.**
+`_count_busy_local_mac_runners()` counts **other `in_progress` "Build and Test"
+runs whose macOS job is RIGHT NOW `in_progress` with the local self-hosted label**.
+Overflow fires at `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (3). Queued runs,
+not-yet-registered jobs, and completed jobs are deliberately excluded — that
+exclusion is scar tissue from an older pessimistic fallback that starved the
+local runners during deep queues.
+
+| what people reach for | why it is wrong |
+| --- | --- |
+| `tart list` VM count | measures the machine, not in-flight GitHub jobs |
+| load average | **never a routing input**; affects duration only |
+| org runner-group `busy` | wrong scope, and ephemeral runners are invisible while idle |
+
+**All three measure the host. The selector measures in-flight jobs** — and
+host-level signals cannot see merge-queue work at all, which is usually what is
+holding the slots.
+
+The probe that actually predicts routing:
+
+```sh
+for r in $(ghapp api "repos/OWNER/REPO/actions/runs?status=in_progress&per_page=100" \
+      --jq '[.workflow_runs[]|select(.name=="Build and Test")|.id]|.[]'); do
+  ghapp api "repos/OWNER/REPO/actions/runs/$r/jobs" \
+    --jq '[.jobs[]|select((.name|test("macOS \\(ARM64\\)")) and .status=="in_progress")|.labels|join(",")]|first // empty'
+done | grep -c self-hosted
+```
+
+Dispatch only when it reads **< 3**.
+
+**Two consequences that bite in practice:**
+
+- **Merge-queue runs consume the same budget.** They are "Build and Test" runs
+  with local macOS legs, so a working queue holds slots and starves PR
+  dispatches — often leaving only ~1 of 3 available.
+- **Serial dispatch self-defeats.** Dispatching PR B right after PR A's leg
+  *starts* guarantees B sees a higher count than A did. Wait for A's leg to
+  **finish**, not to start. Two PRs three minutes apart routed oppositely for
+  exactly this reason: A's leg started 11 seconds before B's resolver ran.
+
+**The probe is read at the wrong moment by default.** The counter above is
+correct; the *timing* is not. `resolve-provider` does not run at dispatch — it
+runs roughly **two minutes later** and reads the counter then. Anything claiming
+a slot in that gap changes the answer, including a dispatch you made moments
+earlier:
+
+```
+[7679] BUSY=1  -- dispatched      23:38:03Z
+[7679] resolver_started=          23:40:07Z   ->  [github-hosted]
+```
+
+One slot busy at dispatch; three by the time the resolver counted, because our
+own previous dispatch had just gone `in_progress` and a merge-queue run started.
+**The dispatch was starved by its own predecessor.** A threshold with no
+headroom fails *intermittently* — it works whenever the gap happens to be quiet
+— and intermittent failure gets misfiled as flakiness.
+
+1. **Dispatch at `BUSY <= 1`, not `< 3`.** Headroom for one arrival during the lag.
+2. **After dispatching, wait until that leg reports `in_progress` before probing
+   again.** Until it does, the slot it will consume is invisible. This is what
+   makes sequential dispatch safe; the threshold alone does not.
+
+**The hosted lane fails *before* a test, not at one.** Legs routed
+`[github-hosted]` run to completion (90-105 min) and fail on exactly one item out
+of ~20,000: `cmake-control-sdk-consumer` — a **compile** failure, not a timeout
+or assertion. That is what makes it deterministic rather than flaky, and it has
+two consequences:
+
+- **A PR routed hosted cannot pass the required gate at any duration.** Waiting,
+  re-running, or catching a quiet window changes nothing. Local routing is not an
+  optimisation; it is the only path to green.
+- **The failure is independent of the diff.** When unrelated changes fail
+  identically on one lane and pass on another, the lane is the variable. The
+  cleanest evidence is a single PR whose **same commit failed hosted and passed
+  local in 72 minutes** — one head, two lanes, opposite verdicts, diff removed as
+  a variable entirely.
+
+**Corollary for triage: hosted never cancelled anything.** It ran every leg and
+returned a real verdict; the cancellations in that investigation were all
+self-inflicted. "The hosted queue kills our jobs" is the wrong story and sends
+the next person hunting a phantom. The true one is "hosted runs our jobs and
+fails one specific compile, and `--failed` re-runs kept us routed there."
+
+### Verify through the real harness, not a lookalike — five instances in one week
+
+Every hard bug in this section shares one shape: **a check that passes against
+something resembling the real artifact, and fails against the artifact.** It is
+worth stating on its own because it is the cheapest to prevent and the most
+expensive to diagnose.
+
+| what was verified | what actually runs | result |
+| --- | --- | --- |
+| a hand-written inline JSON schema | the committed schema file (has `$schema`) | CLI rejected it; a live recovery job died |
+| `rerun` observed twice re-routing | `rerun --failed`, which skips the resolver | ~6 legs mis-routed over 3 days |
+| `tart list` VM count, host load | `resolve-provider`'s in-flight-legs counter | dispatch strategy built on the wrong variable |
+| the busy counter read **at dispatch** | the resolver reads it **~2 min later** | a dispatch starved by its own predecessor |
+| `bash test/foo.sh` run directly | `ctest -R foo` with CMake's registered path | script never executed: `0.00 sec`, `No such file or directory` |
+
+The last one is the sharpest, because the test existed *specifically* to prove a
+mechanism was genuinely enforced rather than merely configured — and it was
+merely configured. A wrong `${CMAKE_CURRENT_SOURCE_DIR}/../` (the file is
+`include()`d, so the variable is the *including* scope, not the file's own
+directory) made ctest invoke a path that did not exist. It reports as `Failed`,
+not `Timeout`, and takes `0.00 sec`.
+
+**Why the pattern is seductive: the stand-in always passes.** That is what makes
+"I verified it" feel true. A direct `bash test/foo.sh` run, a hand-written
+schema, an observed `rerun` — each behaves exactly as hoped, which is precisely
+why it never prompts a second look. The lookalike does not fail and then get
+ignored; it succeeds and closes the question.
+
+**So prefer a guard that makes the real artifact refuse, over a check that
+confirms the stand-in.** The strongest fix found this week was not a better
+test — it was a **configure-time `EXISTS` assertion** on the path a test is
+registered with. A wrong path was previously invisible until run time, where it
+surfaces as `***Failed 0.00 sec`, which reads like the test ran and disagreed.
+The guard converts a silent run-time lie into a loud configure-time `FATAL_ERROR`.
+
+Generalised: when something is *registered* now and *executed* later — a test
+path, a runner label, a routing decision, a cached gate result — assert its
+validity at registration time. Otherwise the gap between the two is where a
+lookalike gets to vouch for the real thing.
+
+**And the gap is invisible in the artifact you are looking at.** `add_test(...)`
+looks complete on the line where it is written. `rerun --failed` looks like a
+re-run. Nothing on the surface of either says "something else consumes this
+later, and nobody re-checks it then" — so the question *is this still true at
+consumption time?* never occurs to you unless you already know the answer.
+
+That is why a guard beats discipline here. Being careful does not help, because
+carefulness is applied to the thing in front of you and the defect is in a
+relationship you cannot see. A configure-time assertion asks the question on
+your behalf, at the one moment when the answer is cheap.
+
+A useful tell: **any two-phase mechanism where phase one succeeds and phase two
+consumes its output is a candidate.** `resolve-provider` → the build job.
+`add_test` → `ctest`. A receipt → a publish step. If phase two never re-validates
+what phase one handed it, a stale or wrong value survives every retry, and the
+retry is precisely when someone will be relying on it.
+
+**The rules that fall out:**
+
+- **Run a new test through its real runner before claiming it passes.** `ctest -R
+  <name>`, not the script directly. A registration bug is invisible to the
+  script and fatal in CI.
+- **`0.00 sec` plus `Failed` means it never ran.** Read that as a registration or
+  path fault, never as a behavioural failure — and never as contention.
+- **A green result in a simplified mode proves only what that mode exercises.**
+  Script-mode arithmetic passing says nothing about whether CMake applied the
+  property to a registered test. Say which half is proven.
+- **When a remedy stops working, re-verify the remedy** rather than adding
+  conditions around it.
+
+**Two conditions, not one — they answer different questions.** This distinction
+took a week to separate and is the single most useful thing here:
+
+| condition | answers | why |
+| --- | --- | --- |
+| `BUSY <= 1` | **routing** — local or hosted | `resolve-provider` counts in-flight local legs; load is not an input |
+| host `load` low | **passing** — whether a timing-sensitive test survives | timeouts fire under contention *after* routing is decided |
+
+**Load does not affect where a job runs; it affects whether a job already in the
+right place can pass.** Both prior conclusions stand — routing really is
+load-independent — and that turns out to be only half the picture. Check both
+before dispatching anything whose subject matter is itself timing-sensitive.
+
+**Several test families are contention-sensitive, not just one.** Under a loaded
+host, observed failures include `test_control_broker_daemon.cpp` waits (fixed by
+deadline-bounding), the coverage FDN oracle, and `rack-acid-preflight` /
+`rack-acid-runtime-gate` (both `Timeout`, `rack safety`). Before blaming a diff,
+check whether the failure is a **timeout** and whether the host was loaded — a
+timeout under contention on a test the diff does not touch is a lane/host
+symptom, not a regression.
+
+**A timeout ceiling equal to its enclosing budget is worse than no ceiling.** A
+test clamped at the lane's own `job_timeout` can never fire first — the job is
+killed at the same instant, and the run reports `cancelled` with **no failing
+test named**. That inverts the purpose of the budget: finite per-test budgets
+exist so a hung test *identifies itself* rather than taking the lane down
+anonymously, and a ceiling at the job cap converts precisely those cases into
+unattributed cancellations, which are the most expensive kind to diagnose.
+
+Bound a per-test ceiling **strictly inside** the enclosing budget — here 3600s
+against a 7200s `job_timeout` — and assert the inequality in a test so nobody
+can raise it back silently. The general form: whenever a limit nests inside
+another limit, the inner one must be able to fire first, or its diagnostics are
+unreachable by construction.
+
+**Prefer exact-value assertions over shape assertions in config code.** A
+two-line `set(... CACHE STRING ...)` docstring reads as ordinary formatting and
+silently folded a cache variable into a list
+(`3600;CACHE;STRING;Hard upper bound…`). A test checking "is it a number" would
+have passed; one comparing the exact expected string caught it immediately.
+Config-language defects are usually invisible as defects, which is exactly when
+a stricter-than-necessary assertion earns its keep.
+
+**Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
+is indistinguishable from a real test failure at PR level — so read the leg, not
+just the alias. And when a remedy stops working, re-verify the remedy still does
+what it did when you first observed it, rather than adding conditions around it:
+"re-running re-routes" was observed twice, generalised, then applied through
+`--failed` where it silently does not hold.
+
+**The authority for "why did CI route this way" is the workflow file, not the
+API.** The API shows outcomes; the workflow states the rule.
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
