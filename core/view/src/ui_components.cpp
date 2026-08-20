@@ -1075,10 +1075,97 @@ bool SegmentedControl::on_key_event(const KeyEvent& event) {
 
 // ── ScrollView ───────────────────────────────────────────────────────────
 
-void ScrollView::clamp_scroll_targets() {
-    auto b = local_bounds();
-    target_scroll_x_ = std::clamp(target_scroll_x_, 0.0f, std::max(0.0f, content_size_.width - b.width));
-    target_scroll_y_ = std::clamp(target_scroll_y_, 0.0f, std::max(0.0f, content_size_.height - b.height));
+namespace {
+
+void accumulate_visible_descendant_extent(const View& parent,
+                                          float parent_x,
+                                          float parent_y,
+                                          float& right,
+                                          float& bottom,
+                                          bool& found) {
+    for (size_t i = 0; i < parent.child_count(); ++i) {
+        const auto* child = parent.child_at(i);
+        if (!child || !child->visible()) continue;
+
+        const auto bounds = child->bounds();
+        const float child_x = parent_x + bounds.x;
+        const float child_y = parent_y + bounds.y;
+        right = std::max(right, child_x + std::max(0.0f, bounds.width));
+        bottom = std::max(bottom, child_y + std::max(0.0f, bounds.height));
+        found = true;
+        accumulate_visible_descendant_extent(*child, child_x, child_y,
+                                             right, bottom, found);
+    }
+}
+
+}  // namespace
+
+float ScrollView::max_scroll_x() const {
+    const float overflow = content_size_.width - local_bounds().width;
+    return overflow > kOverflowEpsilon ? overflow : 0.0f;
+}
+
+float ScrollView::max_scroll_y() const {
+    const float overflow = content_size_.height - local_bounds().height;
+    return overflow > kOverflowEpsilon ? overflow : 0.0f;
+}
+
+bool ScrollView::wants_wheel_scroll() const {
+    const bool horizontal = direction_ != Direction::vertical &&
+                            max_scroll_x() > 0.0f;
+    const bool vertical = direction_ != Direction::horizontal &&
+                          max_scroll_y() > 0.0f;
+    return horizontal || vertical;
+}
+
+void ScrollView::clamp_scroll_targets(bool clamp_current) {
+    const float max_x = max_scroll_x();
+    const float max_y = max_scroll_y();
+    const float previous_target_x = target_scroll_x_;
+    const float previous_target_y = target_scroll_y_;
+    target_scroll_x_ = std::clamp(target_scroll_x_, 0.0f, max_x);
+    target_scroll_y_ = std::clamp(target_scroll_y_, 0.0f, max_y);
+    if (clamp_current) {
+        const bool x_invalid = smooth_scroll_x_.value() < 0.0f ||
+                               smooth_scroll_x_.value() > max_x ||
+                               target_scroll_x_ != previous_target_x;
+        const bool y_invalid = smooth_scroll_y_.value() < 0.0f ||
+                               smooth_scroll_y_.value() > max_y ||
+                               target_scroll_y_ != previous_target_y;
+        if (x_invalid) smooth_scroll_x_.set(target_scroll_x_);
+        if (y_invalid) smooth_scroll_y_.set(target_scroll_y_);
+    }
+}
+
+void ScrollView::set_content_size(Size size) {
+    automatic_content_size_ = false;
+    content_size_ = {std::max(0.0f, size.width), std::max(0.0f, size.height)};
+    clamp_scroll_targets(true);
+}
+
+void ScrollView::update_automatic_content_size() {
+    const auto viewport = local_bounds();
+    float right = 0.0f;
+    float bottom = 0.0f;
+    bool found = false;
+    accumulate_visible_descendant_extent(*this, 0.0f, 0.0f,
+                                         right, bottom, found);
+
+    if (found) {
+        const auto& style = flex();
+        right += style.padding_right >= 0.0f ? style.padding_right : style.padding;
+        bottom += style.padding_bottom >= 0.0f ? style.padding_bottom : style.padding;
+    }
+
+    Size derived{std::max(viewport.width, right),
+                 std::max(viewport.height, bottom)};
+    if (derived.width - viewport.width <= kOverflowEpsilon)
+        derived.width = viewport.width;
+    if (derived.height - viewport.height <= kOverflowEpsilon)
+        derived.height = viewport.height;
+
+    content_size_ = derived;
+    clamp_scroll_targets(true);
 }
 
 void ScrollView::set_scroll(float x, float y) {
@@ -1150,16 +1237,27 @@ void ScrollView::advance_animations(float dt) {
 }
 
 void ScrollView::layout_children() {
-    // Temporarily expand bounds to content_size for child layout,
-    // then restore. This prevents children from squishing when the
-    // ScrollView is smaller than its content.
     auto saved = bounds();
+
+    if (automatic_content_size_) {
+        // Measure from the viewport every time. Reusing the previous expanded
+        // bounds would prevent removed or hidden content from shrinking the
+        // scroll range on a later layout pass.
+        View::layout_children();
+        update_automatic_content_size();
+    }
+
+    // Temporarily expand bounds to the resolved content extent for child
+    // layout, then restore the actual viewport used for clipping and input.
     auto content_bounds = saved;
     if (content_size_.width > 0) content_bounds.width = std::max(saved.width, content_size_.width);
     if (content_size_.height > 0) content_bounds.height = std::max(saved.height, content_size_.height);
     set_bounds(content_bounds);
     View::layout_children();  // call base with expanded bounds
     set_bounds(saved);  // restore actual bounds for painting/clipping
+
+    if (automatic_content_size_)
+        update_automatic_content_size();
 }
 
 void ScrollView::paint_all(canvas::Canvas& canvas) {
@@ -1224,10 +1322,10 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     float width = bar_width_.value();
 
     // Vertical scroll bar
-    if (direction_ != Direction::horizontal && content_size_.height > b.height) {
+    if (direction_ != Direction::horizontal && max_scroll_y() > 0.0f) {
         float ratio = b.height / content_size_.height;
         float bar_h = std::max(20.0f, b.height * ratio);
-        float max_scroll = content_size_.height - b.height;
+        float max_scroll = max_scroll_y();
         float bar_y = b.y + (max_scroll > 0 ? (sy / max_scroll) * (b.height - bar_h) : 0);
         auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
         canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
@@ -1235,10 +1333,10 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     }
 
     // Horizontal scroll bar
-    if (direction_ != Direction::vertical && content_size_.width > b.width) {
+    if (direction_ != Direction::vertical && max_scroll_x() > 0.0f) {
         float ratio = b.width / content_size_.width;
         float bar_w = std::max(20.0f, b.width * ratio);
-        float max_scroll = content_size_.width - b.width;
+        float max_scroll = max_scroll_x();
         float bar_x = b.x + (max_scroll > 0 ? (sx / max_scroll) * (b.width - bar_w) : 0);
         auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
         canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
@@ -1260,10 +1358,10 @@ View* ScrollView::hit_test(Point local_point) {
     auto b = local_bounds();
     float bar_w = bar_width_.value();
     bool in_v_bar = direction_ != Direction::horizontal &&
-                    content_size_.height > b.height &&
+                    max_scroll_y() > 0.0f &&
                     local_point.x >= b.x + b.width - bar_w - 6;
     bool in_h_bar = direction_ != Direction::vertical &&
-                    content_size_.width > b.width &&
+                    max_scroll_x() > 0.0f &&
                     local_point.y >= b.y + b.height - bar_w - 6;
     // Scrollbar hits target the ScrollView itself. box_none disables
     // self-targeting; box_only still routes scrollbar interactions to
@@ -1385,19 +1483,19 @@ void ScrollView::on_mouse_event(const MouseEvent& event) {
 
     // Vertical scrollbar hit zone (right edge)
     bool in_v_bar = direction_ != Direction::horizontal &&
-                    content_size_.height > b.height &&
+                    max_scroll_y() > 0.0f &&
                     event.position.x >= b.x + b.width - bar_w - 6;
 
     // Horizontal scrollbar hit zone (bottom edge)
     bool in_h_bar = direction_ != Direction::vertical &&
-                    content_size_.width > b.width &&
+                    max_scroll_x() > 0.0f &&
                     event.position.y >= b.y + b.height - bar_w - 6;
 
     if (event.is_down && event.button == MouseButton::left) {
         if (in_v_bar) {
             float ratio = b.height / content_size_.height;
             float bar_h = std::max(20.0f, b.height * ratio);
-            float max_scroll = content_size_.height - b.height;
+            float max_scroll = max_scroll_y();
             float sy = smooth_scroll_y_.value();
             float bar_y = b.y + (max_scroll > 0 ? (sy / max_scroll) * (b.height - bar_h) : 0);
 
@@ -1418,7 +1516,7 @@ void ScrollView::on_mouse_event(const MouseEvent& event) {
         if (in_h_bar) {
             float ratio = b.width / content_size_.width;
             float bar_w_px = std::max(20.0f, b.width * ratio);
-            float max_scroll = content_size_.width - b.width;
+            float max_scroll = max_scroll_x();
             float sx = smooth_scroll_x_.value();
             float bar_x = b.x + (max_scroll > 0 ? (sx / max_scroll) * (b.width - bar_w_px) : 0);
 
@@ -1450,7 +1548,7 @@ void ScrollView::on_mouse_drag(Point pos) {
     if (dragging_v_bar_) {
         float ratio = b.height / content_size_.height;
         float bar_h = std::max(20.0f, b.height * ratio);
-        float max_scroll = content_size_.height - b.height;
+        float max_scroll = max_scroll_y();
         float track_h = b.height - bar_h;
         if (track_h > 0) {
             float bar_top = pos.y - drag_offset_;
@@ -1465,7 +1563,7 @@ void ScrollView::on_mouse_drag(Point pos) {
     if (dragging_h_bar_) {
         float ratio = b.width / content_size_.width;
         float bar_w_px = std::max(20.0f, b.width * ratio);
-        float max_scroll = content_size_.width - b.width;
+        float max_scroll = max_scroll_x();
         float track_w = b.width - bar_w_px;
         if (track_w > 0) {
             float bar_left = pos.x - drag_offset_;

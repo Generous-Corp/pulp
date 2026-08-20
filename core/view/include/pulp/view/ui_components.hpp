@@ -490,12 +490,12 @@ public:
     enum class Direction { vertical, horizontal, both };
 
     void set_direction(Direction d) { direction_ = d; }
-    void set_content_size(Size size) { content_size_ = size; }
+    /// Sets a caller-owned content extent and disables automatic child-derived
+    /// sizing. Materialized overflow containers use the automatic default;
+    /// native callers can continue to manage virtual or offscreen content.
+    void set_content_size(Size size);
     Size content_size() const { return content_size_; }
-    bool wants_wheel_scroll() const override {
-        const auto b = local_bounds();
-        return content_size_.height > b.height || content_size_.width > b.width;
-    }
+    bool wants_wheel_scroll() const override;
 
     float scroll_x() const { return smooth_scroll_x_.value(); }
     float scroll_y() const { return smooth_scroll_y_.value(); }
@@ -546,10 +546,16 @@ public:
     void advance_animations(float dt) override;
 
 private:
-    void clamp_scroll_targets();
+    static constexpr float kOverflowEpsilon = 1.0f;
+
+    void update_automatic_content_size();
+    void clamp_scroll_targets(bool clamp_current = false);
+    float max_scroll_x() const;
+    float max_scroll_y() const;
 
     Direction direction_ = Direction::vertical;
     Size content_size_{0, 0};
+    bool automatic_content_size_ = true;
     float target_scroll_x_ = 0, target_scroll_y_ = 0;
     ValueAnimation smooth_scroll_x_{0.0f};  // smoothly interpolated scroll position
     ValueAnimation smooth_scroll_y_{0.0f};

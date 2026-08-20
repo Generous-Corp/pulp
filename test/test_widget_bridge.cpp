@@ -6512,6 +6512,13 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
         panel.style.borderStyle = 'solid';
         panel.style.borderRadius = '8px';
         document.body.appendChild(panel);
+        var content = document.createElement('div');
+        content.style.position = 'absolute';
+        content.style.left = '8px';
+        content.style.top = '70px';
+        content.style.width = '80px';
+        content.style.height = '40px';
+        panel.appendChild(content);
         var scrollPanelNativeId = panel._id;
     )js");
     const auto native_id = engine.evaluate("scrollPanelNativeId")
@@ -6522,6 +6529,20 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
     REQUIRE(scroll->has_background_color());
     REQUIRE(scroll->has_border());
     REQUIRE(scroll->border_width() == Catch::Approx(1.0f));
+
+    // The materialized container needs no explicit setScrollContentSize call:
+    // its native ScrollView derives overflow from the child boxes it owns.
+    scroll->set_bounds({0.0f, 0.0f, 120.0f, 80.0f});
+    scroll->layout_children();
+    CHECK(scroll->content_size().width == Catch::Approx(120.0f));
+    CHECK(scroll->content_size().height == Catch::Approx(110.0f));
+    CHECK(scroll->wants_wheel_scroll());
+
+    bridge.load_script("content.style.display = 'none';");
+    scroll->layout_children();
+    CHECK(scroll->content_size().width == Catch::Approx(120.0f));
+    CHECK(scroll->content_size().height == Catch::Approx(80.0f));
+    CHECK_FALSE(scroll->wants_wheel_scroll());
 
     // Exercise the shared primitive independently of CSS longhand precedence:
     // a ScrollView must paint its own box before applying child scroll offset.
