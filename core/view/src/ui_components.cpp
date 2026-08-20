@@ -1093,6 +1093,10 @@ void accumulate_visible_descendant_extent(const View& parent,
         right = std::max(right, child_x + std::max(0.0f, bounds.width));
         bottom = std::max(bottom, child_y + std::max(0.0f, bounds.height));
         found = true;
+        // A nested scroll container owns its private overflow extent. The
+        // outer container measures the nested viewport box, not descendants
+        // that the nested container clips and scrolls independently.
+        if (dynamic_cast<const ScrollView*>(child)) continue;
         accumulate_visible_descendant_extent(*child, child_x, child_y,
                                              right, bottom, found);
     }
@@ -1240,24 +1244,23 @@ void ScrollView::layout_children() {
     auto saved = bounds();
 
     if (automatic_content_size_) {
-        // Measure from the viewport every time. Reusing the previous expanded
-        // bounds would prevent removed or hidden content from shrinking the
-        // scroll range on a later layout pass.
+        // Resolve percentage/flex geometry against the viewport exactly once,
+        // then derive overflow from those boxes. Feeding the derived extent
+        // into a second layout creates a growth loop (100%-wide child plus
+        // trailing padding expands again on every measurement).
         View::layout_children();
         update_automatic_content_size();
+        return;
     }
 
-    // Temporarily expand bounds to the resolved content extent for child
-    // layout, then restore the actual viewport used for clipping and input.
+    // Explicit manual extents preserve the historical contract: callers that
+    // own virtual/offscreen content may lay children out against that extent.
     auto content_bounds = saved;
     if (content_size_.width > 0) content_bounds.width = std::max(saved.width, content_size_.width);
     if (content_size_.height > 0) content_bounds.height = std::max(saved.height, content_size_.height);
     set_bounds(content_bounds);
     View::layout_children();  // call base with expanded bounds
     set_bounds(saved);  // restore actual bounds for painting/clipping
-
-    if (automatic_content_size_)
-        update_automatic_content_size();
 }
 
 void ScrollView::paint_all(canvas::Canvas& canvas) {
