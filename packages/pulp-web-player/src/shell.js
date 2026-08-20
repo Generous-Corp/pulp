@@ -41,6 +41,7 @@ import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
 import { mountCustomUi, reserveCustomUiSlot } from "./ui/custom-ui.js";
 import { mountFileUpload } from "./ui/file-upload.js";
+import { buildShellDom } from "./ui/shell-dom.js";
 import { parseContainer, buildContainer } from "./state/plugin-state.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
@@ -48,18 +49,6 @@ import { triggeredView } from "./vendor/pulp-wasm/wam-scope.mjs";
 
 const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const noteName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
-
-// play.svg from the shipped Ink & Signal icon set (Lucide-derived, ISC — see
-// NOTICE.md / DEPENDENCIES.md). Original hardcodes fill="#16DAC2"; swapped to
-// currentColor so the glyph follows --accent-primary like everything else.
-// The source path's bbox spans x 8..18.83 (center 13.42), so centring the <svg>
-// leaves the triangle ~1.4u right of center. OPTICAL, not bbox, centering: a
-// right-pointing triangle's visual mass is its base (left) — its centroid sits at
-// base + width/3 ≈ 11.1, ~0.9u LEFT of the circle center — so a purely bbox-centered
-// glyph (translate −1.42, bbox center at 12) reads noticeably left in the circle.
-// Split the difference toward the centroid: translate −0.6 nudges it ~0.8u right so
-// it looks centered to the eye (a hair right of bbox-center, as play buttons want).
-const PLAY_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(-0.6 0)"><path d="M8 6.1v11.8a1 1 0 0 0 1.53.85l9.3-5.9a1 1 0 0 0 0-1.7L9.53 5.25A1 1 0 0 0 8 6.1Z" fill="currentColor"/></g></svg>`;
 
 // ————————————————————————————————————————————————————————————— shared styles
 // Skinnable: the consumer supplies their own design-token stylesheet + font face
@@ -468,11 +457,6 @@ export async function mountDemo(opts) {
   const sourceHref = opts.sourceHref
     || document.querySelector('meta[name="pulp:source"]')?.getAttribute("content")
     || null;
-  const sourceLink = sourceHref
-    ? ` &middot; <a href="${sourceHref}" target="_blank" rel="noopener">source</a>`
-    : "";
-
-  document.title = `${title} — Pulp web demo`;
 
   // Host-adapter seam. The shell drives ONLY this factory (and the adapter it
   // returns), never a backend directly. REQUIRED — the package entry (index.js)
@@ -493,30 +477,9 @@ export async function mountDemo(opts) {
   const coarse = matchMedia("(hover: none) and (pointer: coarse)").matches;
   const startWord = coarse ? "Tap to start" : "Click to start";
 
-  root.innerHTML = `
-    <div class="pp-top">
-      <a href="${galleryHref}">&larr; Gallery</a>
-      <span>Pulp <a href="${hostDocsHref}" target="_blank" rel="noopener">${hostLabel}</a> demo${sourceLink}</span>
-    </div>
-    <div id="panel" class="pulp">
-      <h1>${title}</h1>
-      <div class="sub">${subtitle}</div>
-      <div id="params"></div>
-      <div id="fileup"></div>
-      <div id="body"></div>
-      <div id="footer">
-        <button id="stop">Stop Audio</button>
-        <div id="status"></div>
-      </div>
-      <div id="overlay" role="dialog" aria-label="Start ${title}">
-        <h2 id="ov-name">${title}</h2>
-        ${subtitle ? `<p id="ov-desc">${subtitle}</p>` : ""}
-        <div id="ov-start" role="button" tabindex="0" aria-label="Start audio">${PLAY_SVG}</div>
-        <div id="ov-hint">${startWord}</div>
-      </div>
-    </div>`;
-
-  const $ = (s) => root.querySelector(s);
+  const $ = buildShellDom({
+    root, title, subtitle, galleryHref, sourceHref, hostLabel, hostDocsHref, startWord,
+  });
   const status = (m) => { $("#status").textContent = m; };
 
   // ——— shared demo state
@@ -1090,7 +1053,14 @@ export async function mountDemo(opts) {
         const c = classifyMidi(bytes);
         const row = document.createElement("div");
         row.className = "ev";
-        row.innerHTML = `<span class="nm">${c.name}</span><span class="ch">ch ${c.ch + 1}</span><span class="by">${hex(bytes)}</span>`;
+        for (const [className, text] of [
+          ["nm", c.name], ["ch", `ch ${c.ch + 1}`], ["by", hex(bytes)],
+        ]) {
+          const field = document.createElement("span");
+          field.className = className;
+          field.textContent = text;
+          row.appendChild(field);
+        }
         const l = log(); l.appendChild(row);
         while (l.childElementCount > 200) l.removeChild(l.firstChild);
         l.scrollTop = l.scrollHeight;
