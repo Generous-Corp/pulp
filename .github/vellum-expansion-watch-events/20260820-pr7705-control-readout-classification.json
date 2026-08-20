@@ -6,7 +6,9 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "chromium-authoring-frontend",
     "design-ir-contract",
+    "design-output-and-packaging",
     "design-source-ingest",
     "render-assets-and-backends"
   ],
