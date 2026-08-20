@@ -28,7 +28,7 @@ class RecoveryWorkerCanaryWorkflowTests(unittest.TestCase):
         self.assertIn("inputs.expected_head", group)
         self.assertEqual(self.doc["concurrency"]["cancel-in-progress"], "false")
 
-    def test_unique_m5_disposable_label_is_not_a_generic_fleet_selector(self) -> None:
+    def test_canary_uses_the_dedicated_recovery_pool(self) -> None:
         labels = self.doc["jobs"]["m5-disposable-proof"]["runs-on"]
         self.assertEqual(
             labels,
@@ -37,7 +37,7 @@ class RecoveryWorkerCanaryWorkflowTests(unittest.TestCase):
                 "macOS",
                 "ARM64",
                 "pulp-build-vm",
-                "shipyard-recovery-canary-m5-20260814",
+                "shipyard-recovery-pool",
             ],
         )
 
