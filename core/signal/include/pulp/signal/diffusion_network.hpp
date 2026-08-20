@@ -111,6 +111,8 @@ template <typename SampleType = float> class DiffusionNetworkT {
         derived_ = replacement_derived;
         prepared_ = true;
         reset();
+        derived_.latency_samples = calculate_latency_samples();
+        reset();
         return true;
     }
 
@@ -126,6 +128,8 @@ template <typename SampleType = float> class DiffusionNetworkT {
             return false;
         config_ = candidate;
         derived_ = replacement;
+        reset();
+        derived_.latency_samples = calculate_latency_samples();
         reset();
         return true;
     }
@@ -156,21 +160,7 @@ template <typename SampleType = float> class DiffusionNetworkT {
     /// Earliest non-zero response. A non-zero allpass coefficient has direct
     /// feed-through; a zero coefficient degenerates to a pure delay.
     int latency_samples() const noexcept {
-        int left_latency = 0;
-        int right_latency = 0;
-        for (std::size_t i = 0; i < config_.stage_count; ++i) {
-            if (config_.stages[i].gain != 0.0)
-                continue;
-            if (config_.stereo_width == 0.0) {
-                left_latency += derived_.left_delay[i];
-                right_latency += derived_.right_delay[i];
-            } else {
-                const int stage_latency = std::min(derived_.left_delay[i], derived_.right_delay[i]);
-                left_latency += stage_latency;
-                right_latency += stage_latency;
-            }
-        }
-        return std::min(left_latency, right_latency);
+        return prepared_ ? derived_.latency_samples : 0;
     }
 
     /// `-1` denotes the mathematical infinite tail of any recursive allpass.
@@ -237,6 +227,7 @@ template <typename SampleType = float> class DiffusionNetworkT {
         std::array<int, kMaxStages> right_delay{};
         SampleType rotation_cos = SampleType{1};
         SampleType rotation_sin = SampleType{};
+        int latency_samples = 0;
     };
 
     static constexpr std::array<int, kMaxStages> kRightOffsets{{3, 5, 7, 11, 13, 17, 19, 23}};
@@ -295,6 +286,35 @@ template <typename SampleType = float> class DiffusionNetworkT {
 
     static bool finite(SampleType value) noexcept {
         return std::isfinite(static_cast<double>(value));
+    }
+
+    int calculate_latency_samples() noexcept {
+        int direct_path_horizon = 0;
+        for (std::size_t stage = 0; stage < config_.stage_count; ++stage) {
+            if (config_.stages[stage].gain == 0.0) {
+                direct_path_horizon +=
+                    std::max(derived_.left_delay[stage], derived_.right_delay[stage]);
+            }
+        }
+
+        int earliest = std::numeric_limits<int>::max();
+        for (std::size_t input_channel = 0; input_channel < 2u; ++input_channel) {
+            reset();
+            for (int sample = 0; sample <= direct_path_horizon; ++sample) {
+                SampleType left{};
+                SampleType right{};
+                const SampleType impulse = sample == 0 ? SampleType{1} : SampleType{};
+                process_sample(input_channel == 0u ? impulse : SampleType{},
+                               input_channel == 1u ? impulse : SampleType{}, left, right);
+                if (left != SampleType{} || right != SampleType{}) {
+                    earliest = std::min(earliest, sample);
+                    break;
+                }
+            }
+            if (earliest == 0)
+                break;
+        }
+        return earliest == std::numeric_limits<int>::max() ? 0 : earliest;
     }
 
     std::size_t base_index(std::size_t stage, std::size_t channel) const noexcept {

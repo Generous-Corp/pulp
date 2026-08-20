@@ -199,6 +199,39 @@ TEST_CASE("diffusion preparation and configuration are bounded and transactional
     path_latency.process_sample(0.0, 0.0, routed_left, routed_right);
     REQUIRE(std::abs(routed_left) >= pulp::signal::snap_threshold<double>());
 
+    auto cancellation_route = uncoupled;
+    cancellation_route.stage_count = 3;
+    cancellation_route.stages[0] = {.delay_ms = 1.0, .gain = 0.0};
+    cancellation_route.stages[1] = {.delay_ms = 20.0, .gain = 0.5};
+    cancellation_route.stages[2] = {.delay_ms = 18.0, .gain = 0.0};
+    cancellation_route.stereo_width = 1.0;
+    REQUIRE(path_latency.configure(cancellation_route));
+    // The first two opposite rotations cancel on the direct path. The shorter
+    // delay from each zero-gain stage therefore cannot be chained: the first
+    // reachable route is right -> 4 samples -> right -> 11 samples -> output.
+    REQUIRE(path_latency.latency_samples() == 15);
+    for (int sample = 0; sample < 15; ++sample) {
+        path_latency.process_sample(0.0, sample == 0 ? 1.0 : 0.0, routed_left, routed_right);
+        REQUIRE(routed_left == 0.0);
+        REQUIRE(routed_right == 0.0);
+    }
+    path_latency.process_sample(0.0, 0.0, routed_left, routed_right);
+    REQUIRE(std::abs(routed_right) >= pulp::signal::snap_threshold<double>());
+
+    auto recursive_reroute = cancellation_route;
+    recursive_reroute.stages[1].delay_ms = 1.0;
+    REQUIRE(path_latency.configure(recursive_reroute));
+    // The recursive branch of the middle allpass reaches the final stage's
+    // shorter right delay before either direct cancellation route completes.
+    REQUIRE(path_latency.latency_samples() == 13);
+    for (int sample = 0; sample < 13; ++sample) {
+        path_latency.process_sample(sample == 0 ? 1.0 : 0.0, 0.0, routed_left, routed_right);
+        REQUIRE(routed_left == 0.0);
+        REQUIRE(routed_right == 0.0);
+    }
+    path_latency.process_sample(0.0, 0.0, routed_left, routed_right);
+    REQUIRE(std::abs(routed_right) >= pulp::signal::snap_threshold<double>());
+
     Network single_sample_capacity;
     auto single_sample = compact_config();
     single_sample.stage_count = 1;
@@ -386,8 +419,15 @@ TEST_CASE("diffusion realtime paths allocate no memory", "[signal][diffusion][rt
         left[i] = 0.5f * std::sin(0.1f * static_cast<float>(i));
         right[i] = 0.4f * std::cos(0.07f * static_cast<float>(i));
     }
-    pulp::test::RtAllocationProbe probe;
-    network.process_block(left.data(), right.data(), left.data(), right.data(), left.size());
-    network.reset();
-    REQUIRE_FALSE(probe.saw_allocation());
+    bool configured = false;
+    bool allocated = false;
+    {
+        pulp::test::RtAllocationProbe probe;
+        configured = network.configure(network.config());
+        network.process_block(left.data(), right.data(), left.data(), right.data(), left.size());
+        network.reset();
+        allocated = probe.saw_allocation();
+    }
+    REQUIRE(configured);
+    REQUIRE_FALSE(allocated);
 }

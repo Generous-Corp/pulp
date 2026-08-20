@@ -601,7 +601,7 @@ diffusion.process_block(left, right, left, right, frame_count);
 | `configure(config)` | Transactionally validates and publishes stage count, each stage's delay/gain, and stereo width. It may be called before `prepare()` to select a configuration for a short capacity; after preparation, success resets history. Gain magnitude and stereo width are each either exactly zero or at least `0.02`, keeping declared direct and routed feed-through above the tail-flush floor; gain magnitude is capped at `0.95` and width at `1`. |
 | `process_sample(...)` / `process_block(...)` | Processes wet-only stereo without allocation; blocks may be in place and partition arbitrarily. |
 | `reset()` | Logically clears all histories in constant time without allocation. A non-finite input or internal overflow also clears state and emits silence for that sample. |
-| `latency_samples()` | Reports the earliest non-zero response. Normal allpass stages have direct feed-through; a zero-gain stage becomes a pure delay. |
+| `latency_samples()` | Reports the earliest observable response cached during `prepare()` or `configure()`. Bounded left/right impulse probes include route cancellation and delayed rerouting in mixed zero/non-zero-gain cascades. |
 | `tail_samples()` | Returns `-1` for a recursive allpass tail, a conservative finite bound for an all-zero-gain cascade, or zero for no active stages. |
 
 The scalar allpasses have unit magnitude and the width matrix is orthonormal, so

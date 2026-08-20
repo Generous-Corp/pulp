@@ -2131,7 +2131,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/diffusion_network.hpp",
-      "fingerprint": "sha256:3e905149b0ac4cec0df9f15989da012cbe02ace8e163ee34393c1fa4b3ffa4f5",
+      "fingerprint": "sha256:f09f50d1877d090ffd1c8ea200085461b572a6e29231534c3ad1b49445c0683c",
       "include": "pulp/signal/diffusion_network.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
