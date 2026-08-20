@@ -6378,6 +6378,14 @@ drift; humans run `shipyard update` to apply.
 
 ### Pulp-specific gotchas (real wedge patterns)
 
+- **Persistent native runners need an offline-safe bootstrap.** A runner can
+  wedge inside `SystemNative_OpenDir` / `open$NOCANCEL` before a workflow step
+  starts when its captured `.path` probes Homebrew first or its Rust homes are
+  symlinked onto a slow/offline external volume. Fleet policy keeps
+  `/usr/bin:/bin:/usr/sbin:/sbin` first, pins Actions runner `2.335.1` with
+  auto-update disabled, and places `RUSTUP_HOME` / `CARGO_HOME` under each
+  runner's local `_toolcache`. Verify/apply this through the fleet manifest;
+  apply refuses an active `Runner.Worker` and never retries or reroutes a job.
 - **iOS AUv3 try-compile hangs.** `test/cmake/test_ios_auv3_configure.sh`
   shells `xcodebuild CMAKE_TRY_COMPILE.xcodeproj build` which can
   deadlock on `simctl` / keychain / codesign on the self-hosted host

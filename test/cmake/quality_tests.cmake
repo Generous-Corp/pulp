@@ -279,6 +279,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME tart-home-resolution COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tart_home_resolution.py")
 
+    # Fleet runner policy: pin the Actions runner without auto-update, keep
+    # system tools ahead of Homebrew, isolate Rust state under each runner, and
+    # refuse recovery while a Worker is active.
+    add_test(NAME fleet-runner-policy-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/fleet/test_fleet_lib.py")
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.
