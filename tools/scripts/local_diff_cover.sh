@@ -52,6 +52,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
+GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 
 # shellcheck source=../../scripts/coverage_ctest_policy.sh
 source "${REPO_ROOT}/scripts/coverage_ctest_policy.sh"
@@ -89,6 +90,14 @@ run_coverage_ctest() {
         args+=(-R "${test_regex}")
     fi
     ctest "${args[@]}"
+}
+
+run_coverage_build() {
+    # Coverage is a mandatory pre-push gate and may run directly on a shared
+    # fleet host, outside the pulp CLI. Negotiate one governed host share for
+    # every build phase; governed-build retains the bounded core/memory fallback
+    # for ordinary clones and CI hosts without tartci lease state.
+    "${GOVERNED_BUILD}" cmake --build "$@"
 }
 
 # The report lives beside the coverage data it describes, under this
@@ -395,8 +404,6 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${BUILD_DIR}/CMakeCache.txt" 2>/d
     exit 1
 fi
 
-JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-
 # ── Importer CLI coverage auto-inclusion ────────────────────────────────────
 # The framework-importer SDK CLI helpers (tools/cli/import_*.cpp,
 # importer_install.cpp, tool_registry.cpp, cmd_import.cpp) are in the measured
@@ -489,10 +496,10 @@ if [ "$#" -gt 0 ]; then
         echo "[local_diff_cover] importer CLI source changed — added importer test targets to the build set" >&2
     fi
     echo "=== Building targets: ${BUILD_TARGETS[*]} ==="
-    cmake --build "${BUILD_DIR}" -j"${JOBS}" --target "${BUILD_TARGETS[@]}"
+    run_coverage_build "${BUILD_DIR}" --target "${BUILD_TARGETS[@]}"
 else
     echo "=== Building all targets (slow) ==="
-    cmake --build "${BUILD_DIR}" -j"${JOBS}"
+    run_coverage_build "${BUILD_DIR}"
 fi
 
 # Plugin-slot diff: the main build above ran with PULP_BUILD_EXAMPLES=OFF (no
@@ -505,7 +512,7 @@ fi
 if [ "${hosted_slot_diff_touched}" -eq 1 ]; then
     echo "[local_diff_cover] plugin-slot source changed — building PulpGain fixtures for hosted-slot coverage" >&2
     cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" -DPULP_BUILD_EXAMPLES=ON >/dev/null
-    cmake --build "${BUILD_DIR}" -j"${JOBS}" --target "${HOSTED_SLOT_COVERAGE_TARGETS[@]}"
+    run_coverage_build "${BUILD_DIR}" --target "${HOSTED_SLOT_COVERAGE_TARGETS[@]}"
 fi
 
 # ── Run tests with profile output ───────────────────────────────────────────

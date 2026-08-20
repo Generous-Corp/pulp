@@ -35,6 +35,7 @@ SCRIPT = REPO_ROOT / "tools" / "scripts" / "local_diff_cover.sh"
 CONFIG = REPO_ROOT / "tools" / "scripts" / "coverage_config.json"
 CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
+GOVERNED_BUILD = REPO_ROOT / "tools" / "ci" / "governed-build.sh"
 
 
 class ConfigTests(unittest.TestCase):
@@ -781,12 +782,16 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     """
     root = tmp / name
     (root / "tools" / "scripts").mkdir(parents=True)
+    (root / "tools" / "ci").mkdir(parents=True)
     (root / "scripts").mkdir(parents=True)
     dest = root / "tools" / "scripts" / "local_diff_cover.sh"
     dest.write_text(SCRIPT.read_text())
     (root / "scripts" / "coverage_ctest_policy.sh").write_text(
         CTEST_POLICY.read_text()
     )
+    governor = root / "tools" / "ci" / "governed-build.sh"
+    governor.write_text(GOVERNED_BUILD.read_text())
+    governor.chmod(0o755)
     return root
 
 
@@ -801,8 +806,94 @@ def _lib_eval(root: pathlib.Path, snippet: str, timeout: float = 30,
     script = root / "tools" / "scripts" / "local_diff_cover.sh"
     return subprocess.run(
         ["bash", "-c", f'source "{script}"\n{snippet}'],
-        env=env, capture_output=True, text=True, timeout=timeout,
+        env=env, capture_output=True, text=True, timeout=timeout, cwd=root,
     )
+
+
+class CoverageBuildGovernorTests(unittest.TestCase):
+    """Every compiler phase in the mandatory local gate shares host capacity."""
+
+    PHASES = {
+        "normal": ('run_coverage_build "$BUILD_DIR"', []),
+        "targeted": (
+            'run_coverage_build "$BUILD_DIR" --target alpha beta',
+            ["--target", "alpha", "beta"],
+        ),
+        "hosted-slot": (
+            'run_coverage_build "$BUILD_DIR" --target slot-fixture host-tests',
+            ["--target", "slot-fixture", "host-tests"],
+        ),
+    }
+
+    def test_fixture_executes_from_the_fake_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            result = _lib_eval(root, "pwd")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                pathlib.Path(result.stdout.strip()).resolve(),
+                root.resolve(),
+                "governor fixtures must not create or remove live-build markers "
+                "in the real checkout running this test",
+            )
+
+    def _run_phase(self, snippet: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            root = _fake_worktree(tmp, "wt")
+            fake_bin = tmp / "bin"
+            fake_bin.mkdir()
+            cmake = fake_bin / "cmake"
+            cmake.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'parallel=%s\\n' \"${CMAKE_BUILD_PARALLEL_LEVEL:-unset}\"\n"
+                "printf 'arg=%s\\n' \"$@\"\n",
+                encoding="utf-8",
+            )
+            cmake.chmod(0o755)
+            return _lib_eval(
+                root,
+                snippet,
+                env_extra={
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                    "PULP_TARTCI_LEASES": "0",
+                    "PULP_TARTCI_TASKPOLICY": "0",
+                },
+            )
+
+    def test_normal_targeted_and_hosted_slot_builds_use_governor(self) -> None:
+        for phase, (snippet, expected_tail) in self.PHASES.items():
+            with self.subTest(phase):
+                result = self._run_phase(snippet)
+                self.assertEqual(
+                    result.returncode, 0, result.stdout + result.stderr
+                )
+                self.assertRegex(result.stdout, r"(?m)^parallel=[1-9][0-9]*$")
+                args = [
+                    line.removeprefix("arg=")
+                    for line in result.stdout.splitlines()
+                    if line.startswith("arg=")
+                ]
+                self.assertGreaterEqual(len(args), 2, args)
+                self.assertEqual(args[0], "--build")
+                self.assertEqual(args[2:], expected_tail)
+                self.assertFalse(
+                    any(arg.startswith("-j") or arg == "--parallel" for arg in args),
+                    f"{phase} overrode the governor's granted jobs: {args}",
+                )
+                self.assertIn("[governed-build]", result.stderr)
+
+    def test_each_production_build_site_uses_the_shared_helper(self) -> None:
+        text = SCRIPT.read_text()
+        for command in (
+            'run_coverage_build "${BUILD_DIR}" --target "${BUILD_TARGETS[@]}"',
+            'run_coverage_build "${BUILD_DIR}"',
+            'run_coverage_build "${BUILD_DIR}" --target "${HOSTED_SLOT_COVERAGE_TARGETS[@]}"',
+        ):
+            self.assertIn(command, text)
+        self.assertNotIn('cmake --build "${BUILD_DIR}"', text)
+        self.assertNotIn('JOBS=$(command -v nproc', text)
+        self.assertNotIn('-j"${JOBS}"', text)
 
 
 class ReportPathTests(unittest.TestCase):
