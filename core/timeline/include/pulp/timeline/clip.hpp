@@ -68,6 +68,12 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidSessionStart,
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
+    /// A dynamics event carries a negative position, or an intensity that is
+    /// not finite and within [0, 1], or an unrecognized interpolation.
+    InvalidDynamicsEvent,
+    /// Dynamics events were supplied out of position order, or two share a
+    /// position. Authored order is the document's order and is never sorted.
+    UnorderedDynamicsLane,
     InvalidGrooveTemplate,
     InvalidNoteModifier,
     InvalidMidiLane,
