@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <span>
 
@@ -129,7 +130,28 @@ int main() {
         pulp::signal::TempoDelayError::none)
         return 33;
     if (!(std::isfinite(tempo_delay.next())))
-        return 34;    pulp::signal::DiffusionNetwork diffusion;
+        return 34;
+
+    pulp::signal::SpectralCrossSynthesis cross_synthesis;
+    pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
+    cross_config.fft_size = 256;
+    if (!cross_synthesis.prepare(cross_config))
+        return 35;
+    std::array<std::complex<float>, 129> cross_carrier{};
+    std::array<std::complex<float>, 129> cross_modulator{};
+    std::array<std::complex<float>, 129> cross_output{};
+    cross_carrier.fill({1.0f, 0.0f});
+    cross_modulator.fill({2.0f, 0.0f});
+    const std::complex<float>* cross_carrier_view[] = {cross_carrier.data()};
+    const std::complex<float>* cross_modulator_view[] = {cross_modulator.data()};
+    std::complex<float>* cross_output_view[] = {cross_output.data()};
+    if (!cross_synthesis.process(cross_carrier_view, cross_modulator_view, cross_output_view, 1,
+                                 129))
+        return 38;
+    if (!std::isfinite(cross_output[17].real()) || !std::isfinite(cross_output[17].imag()))
+        return 39;
+
+    pulp::signal::DiffusionNetwork diffusion;
     if (!diffusion.prepare(48000.0, 50.0))
         return 36;
     float diffusion_left = 0.0f;
@@ -137,6 +159,5 @@ int main() {
     diffusion.process_sample(1.0f, 0.0f, diffusion_left, diffusion_right);
     if (!std::isfinite(diffusion_left) || !std::isfinite(diffusion_right))
         return 37;
-
     return 0;
 }

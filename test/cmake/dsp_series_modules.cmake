@@ -63,6 +63,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/rungler.cpp
     header_compile/scale_quantizer.cpp
     header_compile/scanner_vibrato.cpp
+    header_compile/spectral_cross_synthesis.cpp
     header_compile/stage_sequencer.cpp
     header_compile/transport_edge.cpp
     header_compile/yin_tracker.cpp

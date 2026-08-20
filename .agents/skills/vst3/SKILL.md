@@ -113,9 +113,13 @@ addEventInput / addEventOutput                   // gated on desc.{accepts,produ
 parameters.addParameter(…)                       // one per StateStore param
 ```
 
-The `unitId` field on each VST3 `ParameterInfo` is populated from
-Pulp's `ParamInfo::group_id` — that's how VST3 hosts render a
-parameter tree / folder structure.
+Parameter groups require both sides of VST3's unit contract. The adapter
+publishes every valid `StateStore` group through its inherited `IUnitInfo`
+surface (root first, then parent before child), and each `ParameterInfo.unitId`
+references one of those declared units. Missing parents, cycles, duplicate IDs,
+reserved/non-positive IDs, and their descendants are omitted; affected
+parameters fall back to the root unit. Assigning a raw `unitId` without a
+discoverable `IUnitInfo` entry does not create host-visible grouping.
 
 Context-aware behaviour: if `context` resolves to an
 `IHostApplication`, the adapter logs `kVst3AraFactoryContextKey` for

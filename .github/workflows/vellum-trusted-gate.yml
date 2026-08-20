@@ -2,6 +2,7 @@ name: Vellum trusted gate
 
 on:
   pull_request_target:
+    branches: [main]
     types: [opened, synchronize, reopened, edited]
   merge_group:
   # Manual re-run. This check is REQUIRED and posts its own commit status, so a
@@ -31,7 +32,7 @@ jobs:
   trusted-gate:
     name: Trusted base executor
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
     runs-on: ubuntu-latest
     steps:
@@ -64,6 +65,12 @@ jobs:
           fi
           base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
           head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+          base_repository="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
+          base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
+          if [ "$base_repository" != "$GITHUB_REPOSITORY" ] || [ "$base_ref" != "main" ]; then
+            echo "PR #$number targets $base_repository:$base_ref; only $GITHUB_REPOSITORY:main is trusted" >&2
+            exit 1
+          fi
           {
             echo "active=true"
             echo "base_sha=$base"
@@ -76,9 +83,24 @@ jobs:
         if: steps.pr.outputs.active == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ steps.pr.outputs.base_sha }}
+          # Keep the privileged checkout independent of every value resolved
+          # from the pull request. The next step proves this protected ref is
+          # still the exact live base before any secret is minted.
+          ref: refs/heads/main
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify trusted controls match live PR base
+        if: steps.pr.outputs.active == 'true'
+        env:
+          EXPECTED_BASE: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          actual_base="$(git rev-parse HEAD)"
+          if [ "$actual_base" != "$EXPECTED_BASE" ]; then
+            echo "protected main advanced while resolving the PR; re-run with fresh controls" >&2
+            echo "expected=$EXPECTED_BASE actual=$actual_base" >&2
+            exit 1
+          fi
 
       - name: Install inventory parser dependency without secrets
         if: steps.pr.outputs.active == 'true'

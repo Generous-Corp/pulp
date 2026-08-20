@@ -584,13 +584,42 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_tool_registry_reminder_hook.sh)
     set_tests_properties(tool-registry-reminder-hook PROPERTIES TIMEOUT 15)
 
+    # Coverage widens every declared test TIMEOUT (a coverage tree runs the
+    # same work at -O0 with instrumentation). Two halves, deliberately split:
+    # the arithmetic is provable in cmake script mode without configuring
+    # Pulp, while "a wedged process is still killed" needs a real CTest run
+    # and is the control that keeps the widening honest.
+    add_test(NAME pulp-test-timeout-scaling
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_test_timeout.cmake)
+    set_tests_properties(pulp-test-timeout-scaling PROPERTIES TIMEOUT 60)
+    # Fail at CONFIGURE if the script is not where the registration says.
+    # A wrong path here does not fail configure on its own -- it produces
+    # `***Failed 0.00 sec  No such file or directory` at run time, which reads
+    # like the test executed and disagreed rather than never having run. Note
+    # that this file is include()d from test/CMakeLists.txt, so
+    # CMAKE_CURRENT_SOURCE_DIR is `test/`, NOT `test/cmake/`.
+    set(_wedged_script "${CMAKE_CURRENT_SOURCE_DIR}/test_ctest_timeout_kills_wedged.sh")
+    if(NOT EXISTS "${_wedged_script}")
+        message(FATAL_ERROR
+            "pulp-test-timeout-enforced points at a missing script: ${_wedged_script}")
+    endif()
+    add_test(NAME pulp-test-timeout-enforced
+        COMMAND bash "${_wedged_script}")
+    # Deliberately sleeps to the scaled budget; the wall time IS the assertion.
+    set_tests_properties(pulp-test-timeout-enforced PROPERTIES TIMEOUT 120)
+
     # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
     # (stub tartci): asserts bounded parallelism with no tartci, lease
-    # acquire+release when granted, and a non-failing leaseless fallback when
-    # the lease is denied.
+    # acquire+release when granted, a non-failing leaseless fallback when the
+    # lease is denied, and that a held lease keeps beating for the life of the
+    # build without leaking the refresher.
+    #
+    # The heartbeat cases sleep on purpose — one runs at the default 60s
+    # interval to prove teardown does not block on it — so the budget is
+    # wall-clock, not CPU. It is not a candidate for tightening.
     add_test(NAME governed-build-wrapper
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_governed_build.sh)
-    set_tests_properties(governed-build-wrapper PROPERTIES TIMEOUT 30)
+    set_tests_properties(governed-build-wrapper PROPERTIES TIMEOUT 120)
 endif()
 
 # install.sh contract: install CLI + matching SDK in one

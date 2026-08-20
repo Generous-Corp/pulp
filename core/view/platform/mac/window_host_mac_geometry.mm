@@ -280,6 +280,9 @@ pulp::view::KeyCode key_code_from_ns(unsigned short code) {
         // `;` (kVK_ANSI_Semicolon=41) and `'` (kVK_ANSI_Quote=39) arrive as
         // `unknown`, so the physical keys never trigger their on-screen slices.
         case 41: return KC::semicolon; case 39: return KC::apostrophe;
+        // kVK_ANSI_Comma=43 — the open-settings chord (Cmd/Ctrl+,) needs the
+        // key nameable or the chord arrives as `unknown` and no binding matches.
+        case 43: return static_cast<KC>(',');
         case 36: return KC::enter; case 53: return KC::escape;
         case 48: return KC::tab; case 51: return KC::backspace;
         case 117: return KC::delete_;

@@ -28,7 +28,7 @@
 # build can actually finish under produces an infinite
 # wipe → cold rebuild → timeout → wipe loop, each cycle burning an hour of a
 # shared machine. This is safe here only because `[targets.mac] timeout_secs`
-# was raised to 7200 first. Do not lift the sentinel into a lane without
+# was raised to 14400. Do not lift the sentinel into a lane without
 # checking that the cap and the granted `-j` are reconciled.
 #
 # A cleanly FAILED stage is not an interrupted one, and the difference matters.

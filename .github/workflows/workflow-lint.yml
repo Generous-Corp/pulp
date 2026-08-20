@@ -90,6 +90,9 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
+      - 'tools/scripts/shipyard_recovery_judgement.py'
+      - 'tools/scripts/test_shipyard_recovery_judgement.py'
+      - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -168,6 +171,9 @@ on:
       - 'tools/scripts/test_shipyard_recovery_worker.py'
       - 'tools/scripts/test_shipyard_recovery_repair.py'
       - 'tools/scripts/test_shipyard_recovery_worker_workflow.py'
+      - 'tools/scripts/shipyard_recovery_judgement.py'
+      - 'tools/scripts/test_shipyard_recovery_judgement.py'
+      - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -190,7 +196,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -271,6 +277,7 @@ jobs:
           python3 tools/scripts/test_shipyard_recovery_repair.py
           python3 tools/scripts/test_shipyard_recovery_result_check.py
           python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
+          python3 tools/scripts/test_shipyard_recovery_judgement.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:

@@ -53,6 +53,12 @@ struct PaintedTreeCounts {
     /// the same zero in `element_capture_fallback` and mean different things
     /// about how much of the design the renderer is actually reproducing.
     int rotation_recovered = 0;
+    /// Descendants re-expressed in the pre-rotation frame of an ancestor whose
+    /// rotation was recovered. Counted apart from `rotation_recovered`: the
+    /// ancestor's own solve and the subtree it carried are different proofs,
+    /// and a panel whose pointers recover while their dots silently pool is
+    /// not distinguishable from a full recovery without it.
+    int rotation_recovered_children = 0;
     /// `<svg>` elements whose whole shape tree became vector nodes.
     int svg_lowered = 0;
     /// `<svg>` elements that still arrive as a captured element. Each carries

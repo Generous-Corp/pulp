@@ -411,6 +411,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,
   escapes, and member order cover the exact-byte re-save contract.
+- The `vN` directory names the `pulp.timeline.sequence` schema version its
+  fixtures were authored at (nested envelopes carry their own contemporaneous
+  versions), and **every version in the migration chain must carry at least one
+  indexed `document` fixture** — a schema bump that lands without one leaves a
+  version the corpus can never exercise. `tools/scripts/timeline_fixture_coverage_check.py`
+  enforces that: registered as the `timeline-fixture-coverage` ctest beside a
+  `-selftest` that proves it reddens on a synthetic gap, and as a job in
+  `timeline-hardening.yml`. Coverage reads `corpus.index`, not the tree — a
+  version dir whose fixtures are not indexed as documents does not count.
 - **Not every `.json` under `test/fixtures/timeline/` is a project.** The corpus
   holds three shapes and nothing in the files distinguishes them: complete
   `pulp.timeline.project` envelopes; single-entity **fragments** such as
@@ -2747,6 +2756,70 @@ gives a peer-edge kind a producer, not by the subscription contract. Reserving
 the enum slot is safe on its own; wiring a producer to one is the point where
 the ordering proof becomes load-bearing.
 
+## Adding a *serialized* sequence member is a schema version bump, not a field
+
+A sequence-owned lane looks like a small addition — a struct, a field, an
+accessor. Adding it to the **in-memory** model really is that small. Adding it to
+the **document** is a different job, and the difference is invisible from the
+type system.
+
+`chord_scale_lane` is the worked example. Persisting it required, beyond the
+model:
+
+- a canonical member list per schema version in `sequence_schema_migrations.cpp`
+  (`v3_members[]`, `v4_members[]`, …), because member order is canonical;
+- a `RawEdit` migration that injects `,"chord_scale_lane":[]` into documents
+  written before the member existed;
+- `<member>_introduced_version` in `sequence_schema_policy.hpp`, guarded by
+  static_asserts that check the boundary from *both* sides (the version before
+  it must not require the member; the version itself must);
+- entries in `schema_registry.cpp`, `structural_registry_validation.cpp`, and
+  `schema_json_preflight.cpp`;
+- encode/decode in `serialize_encode.cpp` and `serialize_project_decode.cpp`;
+- a regenerated `core/timeline/schema/timeline_types.d.ts`, which is **generated
+  and drift-checked in CI** by `tools/scripts/schema_drift_check.py` — editing
+  it by hand fails, and forgetting it also fails.
+
+So budget a serialized member as a document-format change with a migration, and
+expect roughly fifteen files before writing any feature logic. An in-memory-only
+lane (model + compile context) is genuinely small and can land on its own;
+`DynamicsLane` deliberately did exactly that, and its serialization is a separate
+piece of work for this reason.
+
+## Every "rebuild a Sequence from its parts" site must carry a new lane
+
+`SequenceInput` is populated in several places that reconstruct a sequence rather
+than copy it — `id_remap.cpp` most importantly, plus the decode path. Each names
+its members explicitly, so a new lane is **silently dropped** by any site you do
+not update: the code compiles, the tests that do not exercise that path pass, and
+the loss only shows up as authored data vanishing after a remap or a load.
+
+Grep every site that names an existing lane (`chord_scale_lane` is the reliable
+probe) and make each one a deliberate decision. A test that round-trips the new
+lane through `remap_ids` is the cheapest guard.
+
+## A new `SequenceInput` field breaks positional brace-inits you cannot grep for
+
+`SequenceInput` is normally built with designated initializers, but at least one
+test builds it **positionally across multiple lines**. A new field shifts every
+later argument, and the failure surfaces as a confusing conversion error far from
+the change (`no viable conversion from 'GrooveTemplate' to
+'std::optional<DynamicsLane>'`).
+
+A single-line grep for `SequenceInput{` followed by a non-`.` character will
+**not** find these — the brace is followed by a newline. Use a multiline-aware
+search:
+
+```sh
+find core test tools examples -name '*.cpp' -o -name '*.hpp' | while read -r f; do
+  perl -0ne 'print "positional: $ARGV\n" if /SequenceInput\{\s*[^.}\s]/' "$f"
+done
+```
+
+Note BSD `grep` has no `-P`, so a `grep -P` version of this check silently
+reports nothing rather than erroring if stderr is suppressed. Run the full build
+regardless: these fail closed at compile time, but only a build over **all**
+targets surfaces them.
 ## Offline rendering a timeline region: use the transport-aware renderer
 
 `OfflineSignalGraphHost` will not render a timeline slice. It drives the

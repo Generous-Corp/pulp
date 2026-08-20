@@ -1276,12 +1276,20 @@ jobs:
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
+          # Job-to-job hand-off only; the durable copy is the GitHub Release
+          # asset published below. These are the largest artifacts the repo
+          # produces, once per platform per release.
+          retention-days: 7
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v6
         with:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
+          # Job-to-job hand-off only; the durable copy is the GitHub Release
+          # asset published below. These are the largest artifacts the repo
+          # produces, once per platform per release.
+          retention-days: 7
 
   # ── Portable-binary smoke gate (#391) ─────────────────────────────
   #

@@ -11,6 +11,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/param_processing.hpp>
+#include <pulp/format/param_group_projection.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
@@ -967,4 +968,34 @@ TEST_CASE("boundary parity: the snapshot diff compares bits, not numeric equalit
     // Signed zeros are distinct bit patterns, so a store write that flips the
     // sign is a real change even though `-0.0f == 0.0f`.
     CHECK(boundary::changed_since_snapshot(-0.0f, 0.0f));
+}
+
+TEST_CASE("parameter group projection preserves valid order and rejects invalid graphs",
+          "[format][params][groups]")
+{
+    const std::vector<state::ParamGroup> groups{
+        {11, "Wavetable", 10},
+        {10, "Oscillators", 0},
+        {20, "Missing Parent", 999},
+        {21, "Invalid Descendant", 20},
+        {30, "Cycle A", 31},
+        {31, "Cycle B", 30},
+        {40, "Duplicate A", 0},
+        {40, "Duplicate B", 0},
+        {0, "Reserved Root", 0},
+        {50, "", 0},
+    };
+    const ParamGroupProjection projection(groups);
+    REQUIRE(projection.entries().size() == 2);
+    CHECK(projection.entries()[0].id == 10);
+    CHECK(projection.entries()[1].id == 11);
+    CHECK(projection.entries()[1].parent_id == 10);
+    CHECK(projection.entries()[1].path == "Oscillators/Wavetable");
+    CHECK(projection.find(20) == nullptr);
+    CHECK(projection.find(21) == nullptr);
+    CHECK(projection.find(30) == nullptr);
+    CHECK(projection.find(31) == nullptr);
+    CHECK(projection.find(40) == nullptr);
+    CHECK(projection.find(0) == nullptr);
+    CHECK(projection.find(50) == nullptr);
 }

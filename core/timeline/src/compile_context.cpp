@@ -18,6 +18,18 @@ CompileContextView::chord_scale_at(timebase::TickPosition position) const noexce
     return lane ? lane->at(position) : nullptr;
 }
 
+const DynamicsLane* CompileContextView::dynamics_lane() const noexcept {
+    if (!sequence_ || !subscriptions_.reads(CompileContextKind::Dynamics))
+        return nullptr;
+    return &sequence_->dynamics_lane();
+}
+
+std::optional<float>
+CompileContextView::dynamics_at(timebase::TickPosition position) const noexcept {
+    const auto* lane = dynamics_lane();
+    return lane ? lane->value_at(position) : std::nullopt;
+}
+
 const GrooveTemplate* CompileContextView::groove() const noexcept {
     if (!sequence_ || !subscriptions_.reads(CompileContextKind::Groove))
         return nullptr;

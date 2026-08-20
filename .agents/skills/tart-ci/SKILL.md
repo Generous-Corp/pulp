@@ -244,6 +244,11 @@ main, reddening every PR's macOS gate.)
    ```
 
 ## Gotchas (hard-won)
+- **A held lease must keep beating, and the refresher is harder to write than it looks.** tartci stamps a heartbeat at `leases acquire` and marks the lease stale once it ages past `TARTCI_LEASE_STALE_SECS` (default **300s**). Any build longer than that reads as `stale_heartbeat_live_owner` in `tartci status` while its owner PID and whole descendant tree are healthy — telemetry that invites a controller or an operator to preempt a working build. `tools/ci/governed-build.sh` refreshes every 60s via `tartci leases heartbeat --id`, stops refreshing *before* releasing, and watches the parent PID so a SIGKILLed build cannot leave a keepalive refreshing a lease nobody owns. Two bash traps bit this in review, and both are invisible until you run it:
+  1. `while sleep N; do …` **cannot be stopped promptly** — bash defers a trapped signal until the current *foreground* command returns, so the refresher ignores its own SIGTERM until the interval elapses and adds up to a full interval to every build's exit. Background the `sleep` and `wait` on it; `wait` is signal-interruptible.
+  2. A background child **inherits the caller's stdout**, and a caller that runs the wrapper inside a command substitution blocks until every holder of that pipe closes it. An un-redirected refresher makes `out="$(governed-build.sh …)"` hang for a full interval after the build finished. Detach the refresher's fds at spawn.
+
+  Tests: `test/test_governed_build.sh` (ctest `governed-build-wrapper`) — the granted-lease case is timed at the default interval specifically to catch trap 1.
 - **NEVER run signing/keychain tests on a non-VM host.** `check_notarization`/codesign tests call `security`/`codesign`/`notarytool`, which on an interactive host pop GUI keychain dialogs and can disrupt the default keychain. Run them **only in the disposable VM**. Never click "Reset To Defaults" on a keychain prompt on a real Mac; never wipe a host keychain.
 - **Gatekeeper disabled in the CI base:** the cirruslabs base ships `spctl --master-disable`, so `spctl --assess` returns 0 for *any* path (even nonexistent). `check_notarization` was hardened with an `fs::exists` short-circuit so it's correct in both environments (see the `ship` skill).
 - **Clean the build dir on build-type flips.** Shipyard `backend=local` reconfiguring Debug over a Release `build/` reproduces the ODR churn → false test failures. `rm -rf build` first, or (better) validate in the VM, not the editing checkout.
@@ -276,3 +281,11 @@ main, reddening every PR's macOS gate.)
 
 ## Store & hygiene
 **`TART_HOME` is declared by the host, never by the repo** — hosts with an external build SSD keep the store on a `/Volumes` mount, hosts on internal storage keep it under `$HOME`, and both are correct. Exclude it from Spotlight (`.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.
+
+Persistent native Actions runners have a separate storage rule: their
+`RUSTUP_HOME` and `CARGO_HOME` belong under each runner's own internal-APFS
+`_toolcache`, never behind `~/.rustup`/`~/.cargo` symlinks into the external VM
+store. Their captured `.path` starts with `/usr/bin:/bin:/usr/sbin:/sbin` so
+runner bootstrap resolves system `tar` before Homebrew. The private fleet
+manifest declares this through `actions_runner_policy`; apply is idle-gated and
+must not interrupt a live `Runner.Worker`.

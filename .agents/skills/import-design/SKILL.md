@@ -124,6 +124,14 @@ alignment, no MCP, no REST, no rate limit. Note the thumbnail is ~0.4× (400 px
 wide for a 1004 px design), so it adjudicates layout, colour, and presence —
 NOT glyph-level detail. Do not draw fine conclusions from a 5× upscale of it.
 
+**Packaged asset recovery stays hash-gated.** A `.pulp.zip` may contain the
+right bytes under its own `assets/` directory while an older producer left an
+export-machine path in `asset_manifest.local_path`. Runtime resolution may
+recover the same leaf from `<document-dir>/assets/` only when the manifest
+declares a SHA-256 and the candidate's bytes match it exactly. A same-name file
+with different bytes remains unresolved and must keep the fail-closed
+`native-materialize-unresolved-asset` diagnostic.
+
 **`--validate` renders at the design's own canvas size** by default. Do not
 pass `--render-size` unless you specifically want a different size; a mismatched
 render and reference makes every similarity score meaningless.
@@ -386,9 +394,11 @@ knowing before you touch that file:
     draw too much, not too little. A clipper's `border-radius` is likewise not
     carried, so a rounded clipper under-clips at its corners; the audit compares
     axis-aligned rectangles and cannot see that, deliberately — counting every
-    rounded card would bury the defects it exists to find. A rotated clipper
-    cannot arise at all: a
-    rotated element is `element_capture_fallback` and its whole subtree pools
+    rounded card would bury the defects it exists to find. A rotated node
+    carries no stored clip either — a page-space rectangle has no meaning in
+    its turned frame, so the audit books it as `clip_lost` with
+    `clip_inexpressible="rotate"`. A rotated element whose rotation could not
+    be recovered is `element_capture_fallback` and its whole subtree pools
     into it.
   - **JS and Swift codegen do not lower it yet** (allowlisted in
     `test_design_import_parity.cpp`); the JS lane needs a `setClipRect` bridge

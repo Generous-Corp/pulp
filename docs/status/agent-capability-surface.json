@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 439,
-    "reviewed_headers": 143,
+    "public_headers": 440,
+    "reviewed_headers": 144,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 92,
+      "capability_entrypoint": 93,
       "capability_support": 38,
       "infrastructure": 11,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 260,
-        "reviewed_headers": 101,
+        "public_headers": 261,
+        "reviewed_headers": 102,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -2126,7 +2126,7 @@
       "include": "pulp/signal/detail/schroeder_allpass.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
+      "rationale": "This internal header shares the pure scalar Schroeder allpass recurrence used by several processors; it is not an independent authoring surface."
     },
     {
       "domain": "signal",
@@ -3610,7 +3610,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:cfeebb24ed9b066e2571762f3e4c9d981f7a51649a3fda404153e7d874663307",
+      "fingerprint": "sha256:027d6cb42c8816b8b01b82510eaed6ee55507febc444b1dcfa1bce8257247875",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3720,6 +3720,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.spectral-band-mask"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_cross_synthesis.hpp",
+      "fingerprint": "sha256:15a38e26fae4a62c1069e4ce35e96b2e1c19c25b4d66719543bedd48d8822d6a",
+      "include": "pulp/signal/spectral_cross_synthesis.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-cross-synthesis"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

@@ -146,6 +146,7 @@ inline constexpr uint32_t kVkDelete = 0x2E;
 inline constexpr uint32_t kVkF1     = 0x70;
 inline constexpr uint32_t kVkF12    = 0x7B;
 inline constexpr uint32_t kVkOem1   = 0xBA;
+inline constexpr uint32_t kVkOemComma = 0xBC;
 inline constexpr uint32_t kVkOem7   = 0xDE;
 
 // ── Coordinates ──────────────────────────────────────────────────────────
@@ -268,6 +269,7 @@ constexpr KeyCode key_code_from_virtual_key(uint32_t vk) noexcept {
         case kVkDown: return KeyCode::down;
         case kVkDelete: return KeyCode::delete_;
         case kVkOem1: return KeyCode::semicolon;
+        case kVkOemComma: return static_cast<KeyCode>(',');
         case kVkOem7: return KeyCode::apostrophe;
         default: return KeyCode::unknown;
     }

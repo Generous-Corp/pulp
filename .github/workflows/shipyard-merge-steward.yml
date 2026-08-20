@@ -1,9 +1,15 @@
 name: Shipyard merge steward
 
-# Single logical, model-free PR-landing controller. This proof stage remains
-# workflow_dispatch-only and dry-run by default. Every exception is mirrored
-# into one durable GitHub issue before a failing tick exits.
+# Single logical, model-free PR-landing controller. Manual dispatch remains
+# dry-run by default. The schedule stays commented out until one manual apply +
+# recovery dispatch proves the recovery judgement wiring end to end. Once
+# enabled, each serialized scheduled tick applies deterministic mutations and
+# may dispatch at most one fenced recovery exception. Every exception is
+# mirrored into one durable GitHub issue before a failing tick exits.
 on:
+  # Activation gate: uncomment only after the manual recovery proof succeeds.
+  # schedule:
+  #   - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       apply:
@@ -32,6 +38,8 @@ jobs:
     timeout-minutes: 15
     env:
       STEWARD_LEDGER: ${{ github.workspace }}/.shipyard-steward/ledger.json
+      STEWARD_APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+      STEWARD_DISPATCH_RECOVERY: ${{ github.event_name == 'schedule' || inputs.dispatch_recovery }}
 
     steps:
       - uses: actions/checkout@v5
@@ -139,7 +147,7 @@ jobs:
 
       - name: Cancel bounded stale merge-group runs
         id: merge_group_cleanup_apply
-        if: inputs.apply && steps.merge_group_cleanup_plan.outcome == 'success'
+        if: env.STEWARD_APPLY == 'true' && steps.merge_group_cleanup_plan.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
@@ -239,7 +247,7 @@ jobs:
 
       - name: Converge truthful provenance sentinel labels
         id: provenance_label_apply
-        if: inputs.apply && steps.provenance_label_plan.outcome == 'success'
+        if: env.STEWARD_APPLY == 'true' && steps.provenance_label_plan.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
@@ -285,7 +293,7 @@ jobs:
 
       - name: Cancel bounded superseded pull-request runs
         id: pull_request_cleanup_apply
-        if: inputs.apply && steps.pull_request_cleanup_plan.outcome == 'success'
+        if: env.STEWARD_APPLY == 'true' && steps.pull_request_cleanup_plan.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
@@ -338,7 +346,7 @@ jobs:
         if: always() && steps.install.outcome == 'success' && steps.configure.outcome == 'success'
         shell: bash
         env:
-          APPLY: ${{ inputs.apply }}
+          APPLY: ${{ env.STEWARD_APPLY }}
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
         run: |
           set -euo pipefail
@@ -449,7 +457,7 @@ jobs:
 
       - name: Dispatch one fenced recovery assignment
         id: recovery_dispatch
-        if: inputs.apply && inputs.dispatch_recovery && steps.recovery_plan.outcome == 'success'
+        if: env.STEWARD_APPLY == 'true' && env.STEWARD_DISPATCH_RECOVERY == 'true' && steps.recovery_plan.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
@@ -604,7 +612,7 @@ jobs:
           [ "${{ steps.pull_request_cleanup_census.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_plan.outcome }}" = success ]
           [ "${{ steps.provenance_label_plan.outcome }}" = success ]
-          if [ "${{ inputs.apply }}" = true ]; then
+          if [ "$STEWARD_APPLY" = true ]; then
             [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]
             [ "${{ steps.pull_request_cleanup_apply.outcome }}" = success ]
             [ "${{ steps.provenance_label_apply.outcome }}" = success ]
@@ -614,7 +622,7 @@ jobs:
           [ "${{ steps.sync_outbox.outcome }}" = success ]
           [ "${{ steps.recovery_statuses.outcome }}" = success ]
           [ "${{ steps.recovery_plan.outcome }}" = success ]
-          if [ "${{ inputs.apply }}" = true ] && [ "${{ inputs.dispatch_recovery }}" = true ]; then
+          if [ "$STEWARD_APPLY" = true ] && [ "$STEWARD_DISPATCH_RECOVERY" = true ]; then
             [ "${{ steps.recovery_dispatch.outcome }}" = success ]
           fi
           [ "${{ steps.reconcile.outputs.exit_code }}" = 0 ]

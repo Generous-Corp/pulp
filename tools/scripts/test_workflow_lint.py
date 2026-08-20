@@ -5,6 +5,11 @@ The workflow lint gate is the first release-watchdog layer: it must run
 on CI-definition changes and keep the three local checks that catch
 workflow-file failures before merge.
 
+It also owns the fleet-wide action-pin invariant below: GitHub retires a
+runtime under an action's old major, and the resulting deprecation
+annotation is only visible on a real run, so a drifting pin is otherwise
+found by reading warnings rather than by a gate.
+
 Run:
     python3 tools/scripts/test_workflow_lint.py
 """
@@ -118,7 +123,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertRegex(checkout, r"(?m)^\s{10}fetch-depth:\s*1\s*$")
 
         setup_python = _find_step(self.text, "Set up Python")
-        self.assertIn("uses: actions/setup-python@v5", setup_python)
+        # The major lives in ActionMajorPinTests so a routine action bump
+        # touches one invariant instead of every workflow assertion.
+        self.assertRegex(setup_python, r"uses: actions/setup-python@v\d+")
         self.assertRegex(setup_python, r"(?m)^\s{10}python-version:\s*'3\.12'\s*$")
 
     def test_yamllint_step_uses_pinned_local_workflow_lint(self) -> None:
@@ -165,6 +172,57 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertRegex(step, r"(?m)^\s{10}shellcheck:\s*false\s*$")
         self.assertRegex(step, r"(?m)^\s{10}pyflakes:\s*false\s*$")
         self.assertRegex(step, r"(?m)^\s{10}flags:\s*''\s*$")
+
+
+class ActionMajorPinTests(unittest.TestCase):
+    """Every workflow must agree on one non-retired major per action.
+
+    A split pin is the failure mode that actually happens: a new workflow
+    copies a current pin while the older ones keep an obsolete major, and
+    the deprecation surfaces only as a warning annotation on a live run.
+    Comparing the pins against each other catches the drift without this
+    test needing to know GitHub's current runtime deprecation schedule.
+    """
+
+    #: Minimum major per action, raised as GitHub retires the runtime under
+    #: the previous one. `setup-python` moved to 6 when v5 was forced onto
+    #: Node 24 and started emitting a Node 20 deprecation annotation.
+    MINIMUM_MAJOR = {"setup-python": 6}
+
+    def _pins(self) -> dict[str, dict[str, set[int]]]:
+        found: dict[str, dict[str, set[int]]] = {}
+        pattern = re.compile(r"uses:\s*actions/([a-z0-9-]+)@v(\d+)")
+        for workflow in sorted((REPO_ROOT / ".github" / "workflows").rglob("*.yml")):
+            for action, major in pattern.findall(workflow.read_text(encoding="utf-8")):
+                found.setdefault(action, {}).setdefault(workflow.name, set()).add(int(major))
+        return found
+
+    def test_setup_python_is_pinned_above_the_retired_major(self) -> None:
+        pins = self._pins()
+        for action, minimum in self.MINIMUM_MAJOR.items():
+            with self.subTest(action=action):
+                usage = pins.get(action)
+                self.assertIsNotNone(usage, f"no workflow uses actions/{action}")
+                stale = {
+                    name: sorted(majors)
+                    for name, majors in usage.items()
+                    if any(major < minimum for major in majors)
+                }
+                self.assertEqual(
+                    stale,
+                    {},
+                    f"actions/{action} must be pinned to v{minimum} or newer; "
+                    f"stale pins: {stale}",
+                )
+
+    def test_setup_python_major_does_not_split_across_workflows(self) -> None:
+        usage = self._pins().get("setup-python") or {}
+        majors = sorted({major for majors in usage.values() for major in majors})
+        self.assertEqual(
+            len(majors),
+            1,
+            f"actions/setup-python is pinned to more than one major: {majors}",
+        )
 
 
 if __name__ == "__main__":

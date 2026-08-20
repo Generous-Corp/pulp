@@ -180,7 +180,10 @@ and enumerated to the host by the `params` extension in
 
 - `params_count` → `store.param_count()`.
 - `params_get_info` → builds a `clap_param_info_t` from the stored
-  `ParamInfo`. `CLAP_PARAM_IS_AUTOMATABLE` is always set.
+  `ParamInfo`. A valid `StateStore` group supplies its full root-to-leaf path
+  in `module`, using `/` as CLAP's hierarchy separator; invalid, unknown, and
+  ungrouped parameters leave `module` empty. The fixed `CLAP_PATH_SIZE` buffer
+  is safely truncated and NUL-terminated. `CLAP_PARAM_IS_AUTOMATABLE` is always set.
   `CLAP_PARAM_IS_STEPPED` is set when `range.step >= 1` and the range
   is narrow (`< 10`).
 - `params_get_value` returns the current **base** value (without

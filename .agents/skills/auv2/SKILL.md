@@ -173,6 +173,7 @@ The three adapters derive three different SDK bases, so anything that does not
 need a specific base lives in `core/format/include/pulp/format/au_v2_common.hpp`
 (+ `src/au_v2_common.cpp`) and all three call it: the parameter surface
 (`fill_parameter_list` / `fill_parameter_info` /
+`fill_parameter_clump_property_info` / `fill_parameter_clump_name` /
 `fill_parameter_value_strings` / `parameter_string_from_value` /
 `parameter_value_from_string`), the editor→host parameter bridge
 (`wire_host_parameter_bridge` + the `ScopedHostParamWrite` echo guard), preset
@@ -181,6 +182,14 @@ handoff (`MidiOutputCallbackPublisher`, `make_midi_output_names`), the Cocoa-vie
 hook, `decode_midi_event`, the render `ProcessContext` builders, and
 `MidiOutputPacketBuilder`. Add a fourth adapter by calling these, not by copying
 a third implementation.
+
+Valid `StateStore` parameter groups project to AU v2 clumps on all three
+adapters: parameter info carries `kAudioUnitParameterFlag_HasClump` and the
+group ID, while `kAudioUnitProperty_ParameterClumpName` returns the validated
+full root-to-leaf path. AU clumps are flat metadata, so the full path represents
+nested groups honestly; invalid graphs and unknown/ungrouped parameters expose
+no clump. Honor `AudioUnitParameterNameInfo::inDesiredLength` when serving a
+bounded name request.
 
 **Do NOT introduce a `pulp::format::au::detail` namespace.** `pulp::format::detail`
 already exists and carries `PlayheadSnapshot`, `au_output_offset`,

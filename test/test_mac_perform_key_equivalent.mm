@@ -27,6 +27,7 @@
 #import <Foundation/Foundation.h>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/clipboard.hpp>
+#include <pulp/view/command_registry.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
@@ -414,4 +415,93 @@ TEST_CASE("PulpPluginView performKeyEquivalent: spacebar passes through with no 
 
     BOOL handled = [view performKeyEquivalent:make_space_event()];
     REQUIRE(handled == NO);  // host still gets the spacebar for transport
+}
+
+// ── Open-settings convention (kCommandOpenSettings) through the plugin host ──
+//
+// The DAW owns the keyboard. The plugin's Cmd-chord route used to stop at the
+// focused view, so a framework-level global hook (a CommandRegistry carrying
+// the open-settings chord) never fired in an embedded editor. These cases pin
+// both halves: a claimed chord is consumed, an unclaimed one forwards.
+
+TEST_CASE("PulpPluginView performKeyEquivalent: a claimed Cmd chord reaches on_global_key",
+          "[mac][platform][keyboard][plugin][settings]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    int global_hits = 0;
+    KeyCode last_key = KeyCode::unknown;
+    uint16_t last_mods = 0;
+    root.on_global_key = [&](const KeyEvent& e) {
+        ++global_hits;
+        last_key = e.key;
+        last_mods = e.modifiers;
+        return true;   // a CommandRegistry that claimed the chord
+    };
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) return;
+
+    BOOL handled = [view performKeyEquivalent:make_cmd_comma_event()];
+
+    REQUIRE(handled == YES);
+    REQUIRE(global_hits == 1);
+    // The chord arrives NAMED: kVK_ANSI_Comma must map to the comma key or
+    // no ShortcutMap binding can ever match it.
+    REQUIRE(last_key == kKeyComma);
+    REQUIRE((last_mods & kModCmd) != 0);
+}
+
+TEST_CASE("PulpPluginView performKeyEquivalent: an unclaimed Cmd chord forwards to the DAW",
+          "[mac][platform][keyboard][plugin][settings]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    int global_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) { ++global_hits; return false; };
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) return;
+
+    BOOL handled = [view performKeyEquivalent:make_cmd_comma_event()];
+
+    // The hook saw the chord and declined it; NO keeps the host's own
+    // shortcuts (and transport) working exactly as before the fallthrough
+    // existed.
+    REQUIRE(handled == NO);
+    REQUIRE(global_hits == 1);
+}
+
+TEST_CASE("PulpPluginView performKeyEquivalent: a focused field declining passes the chord to the global hook",
+          "[mac][platform][keyboard][plugin][settings]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+    int global_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) { ++global_hits; return true; };
+
+    auto editor_owned = std::make_unique<TextEditor>();
+    auto* editor = editor_owned.get();
+    editor->set_bounds({0, 0, 160, 32});
+    editor->set_text("hi");
+    root.add_child(std::move(editor_owned));
+    editor->on_focus_changed(true);
+    editor->claim_input_focus();
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) {
+        editor->release_input_focus();
+        return;
+    }
+
+    BOOL handled = [view performKeyEquivalent:make_cmd_comma_event()];
+    const std::string text_after = editor->text();
+    editor->release_input_focus();
+
+    // The TextEditor has no use for Cmd+, — it declines, the global hook
+    // claims, and the field's text is untouched.
+    REQUIRE(handled == YES);
+    REQUIRE(global_hits == 1);
+    REQUIRE(text_after == "hi");
 }

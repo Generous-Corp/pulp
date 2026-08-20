@@ -9,11 +9,11 @@
     "smoke-video-proof": "node scripts/smoke-video-proof.mjs"
   },
   "devDependencies": {
-    "@remotion/bundler": "4.0.476",
-    "@remotion/renderer": "4.0.476",
+    "@remotion/bundler": "4.0.513",
+    "@remotion/renderer": "4.0.513",
     "ffmpeg-static": "5.2.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "remotion": "4.0.476"
+    "remotion": "4.0.513"
   }
 }

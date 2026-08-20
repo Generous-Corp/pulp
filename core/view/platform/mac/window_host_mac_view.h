@@ -35,6 +35,23 @@
 // whose closure references freed bridge/engine state.
 - (void)prepareForTeardown;
 - (void)setRelativeMouseMode:(BOOL)enabled;
+/// Opt IN to per-frame drag coalescing. Default NO, and that default is
+/// deliberate: a host that does not drive `flushCoalescedPointerInput` every
+/// frame would strand held motion forever, so holding is enabled only by a
+/// host that has committed to flushing. The GPU host sets this when it starts
+/// its display link; the CPU host (no display link) leaves it NO and keeps
+/// dispatching each sample immediately, exactly as before.
+@property (nonatomic, assign) BOOL coalescePointerInput;
+
+/// Deliver drag motion held since the last presented frame.
+///
+/// `mouseDragged:` holds motion rather than dispatching it, so the host MUST
+/// call this once per presented frame — otherwise held input is never
+/// delivered. Call it before the frame's render decision, not after: a frame
+/// that decides not to paint must still release input, or latency grows
+/// without bound while the UI is visually idle. Safe to call when nothing is
+/// held.
+- (void)flushCoalescedPointerInput;
 @end
 
 #endif

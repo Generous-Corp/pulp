@@ -301,6 +301,11 @@ pulp_add_test_suite(pulp-test-spectral-gate-blur
 pulp_add_test_suite(pulp-test-spectral-morph
     SOURCES test_spectral_morph.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Cepstral source-filter cross-synthesis with independent envelope-transfer,
+# normalization, phase, temporal-history, negative-control, and RT proof.
+pulp_add_test_suite(pulp-test-spectral-cross-synthesis
+    SOURCES test_spectral_cross_synthesis.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)

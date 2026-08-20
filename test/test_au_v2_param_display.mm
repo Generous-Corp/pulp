@@ -63,9 +63,12 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        store.add_group({.id = 10, .name = "Oscillators"});
+        store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
         // Continuous (step 0) frequency param with a custom formatter.
         pulp::state::ParamInfo freq{.id = kFreqId, .name = "Freq", .unit = "Hz",
-                                    .range = {20.0f, 20000.0f, 1000.0f, 0.0f}};
+                                    .range = {20.0f, 20000.0f, 1000.0f, 0.0f},
+                                    .group_id = 11};
         freq.to_string = [](float v) {
             char b[32];
             std::snprintf(b, sizeof(b), "%.0f Hz", v);
@@ -78,7 +81,8 @@ public:
 
         // No converters — flag must not be set, string property must decline.
         store.add_parameter({.id = kPlainId, .name = "Plain",
-                             .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+                             .range = {0.0f, 1.0f, 0.5f, 0.0f},
+                             .group_id = 999});
         for (pulp::state::ParamID id = 3; id <= kLastMacroId; ++id) {
             store.add_parameter({
                 .id = id,
@@ -208,7 +212,77 @@ struct ThrowWhenArmedOnCopy {
     std::shared_ptr<bool> armed;
 };
 
+template <typename Adapter>
+void require_group_clump_surface(Adapter& adapter)
+{
+    AudioUnitParameterInfo grouped{};
+    REQUIRE(adapter.GetParameterInfo(kAudioUnitScope_Global, kFreqId,
+                                     grouped) == noErr);
+    REQUIRE((grouped.flags & kAudioUnitParameterFlag_HasClump) != 0);
+    REQUIRE(grouped.clumpID == 11);
+
+    AudioUnitParameterInfo ungrouped{};
+    REQUIRE(adapter.GetParameterInfo(kAudioUnitScope_Global, kPlainId,
+                                     ungrouped) == noErr);
+    REQUIRE((ungrouped.flags & kAudioUnitParameterFlag_HasClump) == 0);
+    REQUIRE(ungrouped.clumpID == 0);
+
+    UInt32 size = 0;
+    bool writable = true;
+    REQUIRE(adapter.GetPropertyInfo(kAudioUnitProperty_ParameterClumpName,
+                                    kAudioUnitScope_Global, 0, size,
+                                    writable) == noErr);
+    REQUIRE(size == sizeof(AudioUnitParameterNameInfo));
+    REQUIRE_FALSE(writable);
+
+    AudioUnitParameterNameInfo name{.inID = 11,
+                                    .inDesiredLength = kAudioUnitParameterName_Full};
+    REQUIRE(adapter.GetProperty(kAudioUnitProperty_ParameterClumpName,
+                                kAudioUnitScope_Global, 0, &name) == noErr);
+    REQUIRE(name.outName != nullptr);
+    char text[128]{};
+    REQUIRE(CFStringGetCString(name.outName, text, sizeof(text),
+                               kCFStringEncodingUTF8));
+    REQUIRE(std::string(text) == "Oscillators/Wavetable 1");
+    CFRelease(name.outName);
+
+    AudioUnitParameterNameInfo short_name{.inID = 11,
+                                          .inDesiredLength = 11};
+    REQUIRE(adapter.GetProperty(kAudioUnitProperty_ParameterClumpName,
+                                kAudioUnitScope_Global, 0,
+                                &short_name) == noErr);
+    REQUIRE(CFStringGetLength(short_name.outName) == 11);
+    CFRelease(short_name.outName);
+
+    AudioUnitParameterNameInfo zero_length{.inID = 11,
+                                            .inDesiredLength = 0};
+    REQUIRE(adapter.GetProperty(kAudioUnitProperty_ParameterClumpName,
+                                kAudioUnitScope_Global, 0,
+                                &zero_length) == noErr);
+    REQUIRE(CFStringGetCString(zero_length.outName, text, sizeof(text),
+                               kCFStringEncodingUTF8));
+    REQUIRE(std::string(text) == "Oscillators/Wavetable 1");
+    CFRelease(zero_length.outName);
+
+    AudioUnitParameterNameInfo invalid{.inID = 999};
+    REQUIRE(adapter.GetProperty(kAudioUnitProperty_ParameterClumpName,
+                                kAudioUnitScope_Global, 0, &invalid) ==
+            kAudioUnitErr_InvalidPropertyValue);
+}
+
 }  // namespace
+
+TEST_CASE("AU v2 projects validated groups through every adapter clump surface",
+          "[au][au-v2][params][groups]")
+{
+    ScopedFactory factory;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    require_group_clump_surface(effect);
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    require_group_clump_surface(instrument);
+    pulp::format::au::PulpAUMidiProcessor midi(nullptr);
+    require_group_clump_surface(midi);
+}
 
 TEST_CASE("AU v2 continuous param advertises ValuesHaveStrings when to_string is set",
           "[au][au-v2][params][display]") {

@@ -26,3 +26,6 @@ jobs:
         with:
           name: dependency-audit
           path: dependency-audit.md
+          # The same report is written to the run's step summary, which persists
+          # with the run, so the artifact is a convenience download.
+          retention-days: 14

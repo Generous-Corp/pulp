@@ -16,7 +16,7 @@ name = "quality-lab"
 version = "0.1.2"
 description = "Pulp Audio Quality Lab — offline reference-vs-candidate audio artifact detection"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "numpy>=1.21",
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=9.0.3"]
 
 [tool.setuptools.packages.find]
 include = ["quality_lab*"]

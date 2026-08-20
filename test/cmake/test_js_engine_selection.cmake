@@ -13,9 +13,33 @@ file(TO_CMAKE_PATH "${_repo_root}/core/view/cmake/PulpViewJsEngines.cmake"
 set(_probe_dir "${CMAKE_CURRENT_BINARY_DIR}/js-engine-selection-probes")
 file(MAKE_DIRECTORY "${_probe_dir}")
 
+# A `cmake -P` script starts with no policy floor, so policies newer than the
+# running CMake's baseline default to OLD. The engine module validates with
+# `if(... IN_LIST ...)`, which needs CMP0057 NEW; under OLD it fails to parse and
+# the probe dies with "Unknown arguments specified" instead of the diagnostic
+# under test. A real build always includes the module under the root's
+# cmake_minimum_required, so give the probe that same floor rather than testing
+# the module in a policy state production never puts it in. Read the floor from
+# the root so the two cannot drift apart.
+file(READ "${_repo_root}/CMakeLists.txt" _root_cmakelists)
+if(NOT _root_cmakelists MATCHES "cmake_minimum_required\\(VERSION ([0-9]+\\.[0-9]+)")
+    message(FATAL_ERROR
+        "could not read the policy floor from ${_repo_root}/CMakeLists.txt")
+endif()
+set(_policy_floor "${CMAKE_MATCH_1}")
+unset(_root_cmakelists)
+
 function(_expect_engine_failure name prelude expected_error)
     set(_probe "${_probe_dir}/${name}.cmake")
+    # The module is written for the policy context its includer establishes, and
+    # the real configure supplies that from the top-level cmake_minimum_required.
+    # A bare `cmake -P` script has no such context, so CMP0057 is unset and
+    # `if(... IN_LIST ...)` is not the IN_LIST operator: the validation the probe
+    # exists to exercise never runs, and the probe then fails on the missing
+    # diagnostic rather than on the behavior. Give it the project's own baseline
+    # so the probe measures the module instead of the ambient policy defaults.
     file(WRITE "${_probe}"
+        "cmake_minimum_required(VERSION ${_policy_floor})\n"
         "${prelude}\n"
         "include(\"${_engine_module}\")\n")
     execute_process(

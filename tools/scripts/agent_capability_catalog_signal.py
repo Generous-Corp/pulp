@@ -1566,4 +1566,45 @@ EXPORTS = [
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DiffusionNetworkT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
+    capability(
+        key="signal.spectral-cross-synthesis", domain="signal",
+        summary=(
+            "Prepared source-filter cross-synthesis that transfers a modulator cepstral envelope "
+            "onto carrier phase and residual in the log-magnitude domain."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates the analyzer, envelope history, and frame scratch",
+                   "process": "audio frame owner", "reset": "audio frame owner", "release": "none"},
+        state_model=(
+            "Prepared channel/bin geometry and cepstral analyzer scratch plus per-channel smoothed "
+            "carrier and modulator log-envelope history with validity flags; spectral frames are "
+            "caller-owned. Rejected prepare and set_config calls are transactional and leave the "
+            "committed configuration and history in place, and reset clears only the temporal "
+            "envelope history."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "two coherent one-sided complex channel groups, carrier and modulator, plus a bounded "
+            "envelope transfer amount, dry/wet mix, smoothing time in frames, symmetric transfer "
+            "bound, and analysis magnitude floor"
+        ),
+        output_domain=(
+            "caller-owned complex spectra carrying the carrier phase and residual under the "
+            "transferred modulator envelope, optionally RMS-matched to the carrier"
+        ),
+        units=["bins", "channels", "linear magnitude", "decibels", "frames", "normalized amount"],
+        latency="zero additional frame-domain latency", tail="none",
+        scheduling="one supplied coherent carrier and modulator frame pair per prepared channel group",
+        bindings=[binding(role="entrypoint", kind="cpp_type",
+                         include="pulp/signal/spectral_cross_synthesis.hpp",
+                         qualified_name="pulp::signal::SpectralCrossSynthesisT<float>",
+                         target="Pulp::signal",
+                         header_fingerprint="sha256:15a38e26fae4a62c1069e4ce35e96b2e1c19c25b4d66719543bedd48d8822d6a")],
+        _link_probes=[{"role": "entrypoint",
+                       "binding": "pulp::signal::SpectralCrossSynthesisT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
 ]

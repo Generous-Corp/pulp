@@ -3,8 +3,11 @@
 #include "chord_scale_names.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace pulp::timeline {
@@ -75,6 +78,57 @@ const ChordScaleEvent* ChordScaleLane::at(timebase::TickPosition position) const
 }
 
 bool ChordScaleLane::operator==(const ChordScaleLane& other) const noexcept {
+    return events_.get() == other.events_.get() || *events_ == *other.events_;
+}
+
+runtime::Result<DynamicsLane, ModelError> DynamicsLane::create(std::vector<DynamicsEvent> events) {
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        // Intensity is a closed normalized range, so a value outside it is a
+        // rejection rather than a clamp: clamping would silently rewrite what
+        // the caller authored and hand back a lane they did not describe.
+        if (event.position.value < 0 || !std::isfinite(event.intensity) ||
+            event.intensity < 0.0f || event.intensity > 1.0f ||
+            (event.interpolation != AutomationInterpolation::Hold &&
+             event.interpolation != AutomationInterpolation::Continuous))
+            return fail<DynamicsLane>(ModelErrorCode::InvalidDynamicsEvent);
+        // Authored order is the document's order, matching ChordScaleLane.
+        if (index != 0 && events[index - 1].position.value >= event.position.value)
+            return fail<DynamicsLane>(ModelErrorCode::UnorderedDynamicsLane);
+    }
+    return runtime::Result<DynamicsLane, ModelError>(runtime::Ok(
+        DynamicsLane(std::make_shared<const std::vector<DynamicsEvent>>(std::move(events)))));
+}
+
+const DynamicsEvent* DynamicsLane::at(timebase::TickPosition position) const noexcept {
+    const auto found = std::upper_bound(events_->begin(), events_->end(), position,
+                                        [](timebase::TickPosition wanted, const DynamicsEvent& e) {
+                                            return wanted.value < e.position.value;
+                                        });
+    return found == events_->begin() ? nullptr : &*(found - 1);
+}
+
+std::optional<float> DynamicsLane::value_at(timebase::TickPosition position) const noexcept {
+    const auto* event = at(position);
+    if (event == nullptr)
+        return std::nullopt;
+    // A Hold segment, the final event, and a position exactly on an event all
+    // answer with that event's own value; only a Continuous segment with a
+    // successor interpolates.
+    const auto index = static_cast<std::size_t>(event - events_->data());
+    if (event->interpolation == AutomationInterpolation::Hold || index + 1 >= events_->size())
+        return event->intensity;
+    const auto& next = (*events_)[index + 1];
+    const auto span = next.position.value - event->position.value;
+    if (span <= 0)
+        return event->intensity;
+    const auto elapsed = static_cast<double>(position.value - event->position.value);
+    const auto ratio = elapsed / static_cast<double>(span);
+    return static_cast<float>(event->intensity +
+                              ratio * (static_cast<double>(next.intensity) - event->intensity));
+}
+
+bool DynamicsLane::operator==(const DynamicsLane& other) const noexcept {
     return events_.get() == other.events_.get() || *events_ == *other.events_;
 }
 
