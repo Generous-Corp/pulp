@@ -373,6 +373,7 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFix
         .markers = std::move(markers),
         .regions = std::move(regions),
         .chord_scale_lane = sequence.chord_scale_lane(),
+        .dynamics_lane = sequence.dynamics_lane(),
         .groove = sequence.groove(),
         .scenes = std::move(scenes),
         .track_order = std::move(track_order),
