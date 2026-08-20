@@ -85,23 +85,26 @@ try {
 // Single trailing newline → terminating semicolon is preserved.
 const trimmed = bundle.replace(/\s+$/, "");
 
-let prelude;
+let targetAssignment;
 if (arg === "--selection") {
-  prelude = "/* fall back to figma.currentPage.selection */";
+  targetAssignment = "globalThis.__pulp_target_node_id = void 0;";
 } else {
-  // JSON-encode the node id so any quotes/escapes are safe inside the JS string.
-  prelude = `const TARGET_NODE_ID = ${JSON.stringify(arg)};`;
+  targetAssignment =
+    `globalThis.__pulp_target_node_id = ${JSON.stringify(arg)};`;
 }
-prelude += ` const FAITHFUL_VECTOR = ${faithfulVector ? "true" : "false"};`;
 
-// The stub sets globalThis.__pulp_packed_src; eval prelude + source as one
-// program (JSON.stringify makes the prelude a safe JS string literal), then
-// clear the staging global and await the bundle's surfaced result.
+// Authored data is assigned as data before the trusted built bundle is
+// evaluated. It is never concatenated into executable source.
 const payload = [
   trimmed,
-  `eval(${JSON.stringify(prelude + " ")} + globalThis.__pulp_packed_src);`,
+  targetAssignment,
+  `globalThis.__pulp_faithful_vector = ${faithfulVector ? "true" : "false"};`,
+  "eval(globalThis.__pulp_packed_src);",
   "globalThis.__pulp_packed_src = void 0;",
-  "return await globalThis.__pulp_headless_result;",
+  "const __pulp_result = await globalThis.__pulp_headless_result;",
+  "globalThis.__pulp_target_node_id = void 0;",
+  "globalThis.__pulp_faithful_vector = void 0;",
+  "return __pulp_result;",
 ].join("\n") + "\n";
 
 // Size guard: the Figma MCP `use_figma` `code` parameter is capped at
