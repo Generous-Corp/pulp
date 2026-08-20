@@ -474937,7 +474937,7 @@
       "manifest": {
         "schema": "pulp.agent-capabilities.v1",
         "schema_minor": 1,
-        "manifest_revision": 35,
+        "manifest_revision": 34,
         "required_features": [
           "capability-contract-version-v1",
           "coverage-state-v1",
@@ -474972,7 +474972,7 @@
             },
             "signal": {
               "state": "partial",
-              "capabilities": 53
+              "capabilities": 52
             },
             "timebase": {
               "state": "partial",
@@ -477121,68 +477121,6 @@
               }
             },
             "contract_digest": "sha256:90abeb2e448f9dd9d234513eb26de9c675f8a1bb67a18fbfbacf27d301f7cded"
-          },
-          {
-            "key": "signal.diffusion-network",
-            "domain": "signal",
-            "summary": "Prepared stereo Schroeder allpass cascade with energy-preserving inter-channel rotation, for transient smearing without a feedback tank or reverb policy.",
-            "rt_class": "audio",
-            "lifecycle": {
-              "construction": "control",
-              "prepare": "control; allocates the per-stage stereo delay rings",
-              "process": "audio; configure() is control-thread but allocation-free",
-              "reset": "audio",
-              "release": "none"
-            },
-            "state_model": "Fixed-capacity per-stage stereo rings sized by the prepared maximum delay, plus the committed stage delay/gain and stereo-width configuration and its derived integer delays. A rejected prepare or configure leaves the previous committed state in place, and reset logically empties the rings rather than resizing them.",
-            "seed_model": "none",
-            "determinism": {
-              "repeatability": "bit_exact",
-              "block_partition": "invariant",
-              "platform_scope": "same_build",
-              "transport_history": "irrelevant"
-            },
-            "input_domain": "stereo audio plus a bounded stage count, per-stage delay in milliseconds, stable allpass gains, and a normalized stereo width",
-            "output_domain": "diffused stereo audio with reported latency and tail bounds",
-            "units": [
-              "samples",
-              "milliseconds",
-              "hertz",
-              "linear gain",
-              "normalized width"
-            ],
-            "latency": "earliest non-zero response reported by latency_samples(); zero while any stage gain is non-zero, since an allpass feeds through directly",
-            "tail": "mathematically infinite for any non-zero allpass gain, reported as -1; a zero-gain cascade is feed-forward and reports a finite sample bound",
-            "scheduling": "sample-synchronous",
-            "bindings": [
-              {
-                "role": "entrypoint",
-                "kind": "cpp_type",
-                "include": "pulp/signal/diffusion_network.hpp",
-                "qualified_name": "pulp::signal::DiffusionNetworkT<float>",
-                "target": "Pulp::signal",
-                "availability": {
-                  "state": "available",
-                  "platforms": [
-                    "all"
-                  ],
-                  "required_features": []
-                }
-              }
-            ],
-            "contract_version": {
-              "major": 1,
-              "minor": 0
-            },
-            "status": "usable",
-            "evolution": {
-              "state": "active",
-              "introduced_in": {
-                "major": 1,
-                "minor": 0
-              }
-            },
-            "contract_digest": "sha256:14f93ef94ade8c0f6fd308ee0a59aa1f5d6f89373790e341376809304b8e1c82"
           },
           {
             "key": "signal.dither-quantizer",
@@ -481018,14 +480956,14 @@
         ],
         "tombstones": [],
         "counts": {
-          "total": 86,
+          "total": 85,
           "by_domain": {
             "audio": 7,
             "midi": 9,
             "music": 7,
             "offline": 0,
             "sequence": 1,
-            "signal": 53,
+            "signal": 52,
             "timebase": 9
           }
         },
@@ -482301,29 +482239,6 @@
                     "advance(double exact_hop, int minimum_hop, int maximum_hop)",
                     "residual()",
                     "correction_debt()"
-                  ],
-                  "enums": []
-                }
-              ],
-              "diffusion_network.hpp": [
-                {
-                  "class": "DiffusionNetworkT",
-                  "qualified_name": "pulp::signal::DiffusionNetworkT",
-                  "template": "typename SampleType = float",
-                  "methods": [
-                    "prepare(double sample_rate, double maximum_delay_ms = 50.0)",
-                    "reset()",
-                    "configure(const Config& candidate)",
-                    "prepared()",
-                    "sample_rate()",
-                    "maximum_delay_ms()",
-                    "config()",
-                    "stage_delay_samples(std::size_t stage, std::size_t channel)",
-                    "retained_bytes()",
-                    "latency_samples()",
-                    "tail_samples()",
-                    "process_sample(SampleType input_left, SampleType input_right, SampleType& output_left, SampleType& output_right)",
-                    "process_block(const SampleType* input_left, const SampleType* input_right, SampleType* output_left, SampleType* output_right, std::size_t sample_count)"
                   ],
                   "enums": []
                 }
@@ -487980,7 +487895,7 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 52,
+        "inventory_version": 51,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
@@ -489048,16 +488963,6 @@
             "disposition": "legacy_unreviewed"
           },
           {
-            "include": "pulp/signal/detail/schroeder_allpass.hpp",
-            "fingerprint": "sha256:64f8f2857c873c37bc94102544459d528459dd2c422eb0bf812a3d1d4b411760",
-            "disposition": "infrastructure"
-          },
-          {
-            "include": "pulp/signal/diffusion_network.hpp",
-            "fingerprint": "sha256:3e905149b0ac4cec0df9f15989da012cbe02ace8e163ee34393c1fa4b3ffa4f5",
-            "disposition": "capability_entrypoint"
-          },
-          {
             "include": "pulp/signal/diode_bridge_compressor.hpp",
             "fingerprint": "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3",
             "disposition": "capability_support"
@@ -489814,7 +489719,7 @@
           },
           {
             "include": "pulp/signal/signal.hpp",
-            "fingerprint": "sha256:027d6cb42c8816b8b01b82510eaed6ee55507febc444b1dcfa1bce8257247875",
+            "fingerprint": "sha256:be6077a922d9773b094db0cbfcdec10d43c84ba8f204ca909cff9f883861139c",
             "disposition": "infrastructure"
           },
           {
@@ -490185,7 +490090,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:a4c9ed32cfd552bb418b559b82a4cefd18ee3e8f3528e9a486ffd2919a9c365f"
+      "entry_digest": "sha256:b29d2004a61f79e7825e72f38740cdf323e6b70ca8bffe171926a215bd3f1865"
     }
   ]
 }

@@ -2216,7 +2216,7 @@
         "linear gain",
         "normalized width"
       ],
-      "latency": "earliest non-zero response reported by latency_samples(); zero while any stage gain is non-zero, since an allpass feeds through directly",
+      "latency": "earliest non-zero response reported by latency_samples(); non-zero-gain stages feed through directly, while zero-gain stages accumulate their pure-delay latency",
       "tail": "mathematically infinite for any non-zero allpass gain, reported as -1; a zero-gain cascade is feed-forward and reports a finite sample bound",
       "scheduling": "sample-synchronous",
       "bindings": [
@@ -2247,7 +2247,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:14f93ef94ade8c0f6fd308ee0a59aa1f5d6f89373790e341376809304b8e1c82"
+      "contract_digest": "sha256:5a6228f4426d737cc6336eb4d857b5ef19a2375fee6a716d306673ba6d948c91"
     },
     {
       "key": "signal.dither-quantizer",

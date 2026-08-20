@@ -1553,8 +1553,9 @@ EXPORTS = [
         ),
         output_domain="diffused stereo audio with reported latency and tail bounds",
         units=["samples", "milliseconds", "hertz", "linear gain", "normalized width"],
-        latency="earliest non-zero response reported by latency_samples(); zero while any stage "
-                "gain is non-zero, since an allpass feeds through directly",
+        latency="earliest non-zero response reported by latency_samples(); non-zero-gain stages "
+                "feed through directly, while zero-gain stages accumulate their pure-delay "
+                "latency",
         tail="mathematically infinite for any non-zero allpass gain, reported as -1; a zero-gain "
              "cascade is feed-forward and reports a finite sample bound",
         scheduling="sample-synchronous",
