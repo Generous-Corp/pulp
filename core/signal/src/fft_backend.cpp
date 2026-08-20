@@ -412,7 +412,7 @@ struct MultiBackendFft::Impl {
             int step = size / len;
             for (int i = 0; i < size; i += len) {
                 for (int j = 0; j < half; ++j) {
-                    auto w = twiddles[j * step];
+                    auto w = twiddles[detail::fft_twiddle_index(j, step)];
                     auto u = data[i + j];
                     auto v = data[i + j + half] * w;
                     data[i + j] = u + v;
