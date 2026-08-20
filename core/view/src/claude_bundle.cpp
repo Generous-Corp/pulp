@@ -583,11 +583,15 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
     auto class_str = get_str("class");
     if (!class_str.empty()) node.attributes["class"] = class_str;
 
-    // Detect audio widget from id/class/data-pulp-role.
+    // An explicit recognized role outranks cosmetic id/class tokens. This
+    // keeps e.g. class="value" data-pulp-role="knob" fail-closed as a control.
     auto role = node.attributes.count("data-pulp-role")
         ? node.attributes["data-pulp-role"] : std::string{};
-    auto detect_source = node.name + " " + class_str + " " + role;
-    node.audio_widget = detect_audio_widget(detect_source);
+    node.audio_widget = audio_widget_from_id(role);
+    if (node.audio_widget == AudioWidgetType::none) {
+        const auto detect_source = class_str == node.name ? node.name : node.name + " " + class_str;
+        node.audio_widget = detect_audio_widget(detect_source);
+    }
 
     // Style props -> IRStyle. Only the common ones are mapped; anything
     // else stays in attributes for future extension.

@@ -6629,6 +6629,17 @@ all non-browser sources still require an explicit `--reference`; if browser
 capture cannot produce its source image, the import must fail closed. Keep a
 browser-backed regression test for both halves of this rule.
 
+### Control-adjacent text is not another control
+
+Agent HTML commonly places a bound control, its label, and its current-value
+readout as siblings. Class names such as `knob-value`, `KnobValue`, and
+`knob-readout` contain a real widget token followed by a readout marker, so
+automatic recognition must leave them as text. The order matters: `ValueKnob`
+remains a legitimate control name, and an explicit recognized
+`data-pulp-role` outranks cosmetic class tokens. Do not infer that every sibling
+of a bound control is decorative: another unbound control in the same row must
+still fail closed.
+
 ## Two lowering lanes read one resolver — a widget kind must reach BOTH
 
 `resolve_design_ir_native` classifies a node into a `NativeWidgetKind`, and two

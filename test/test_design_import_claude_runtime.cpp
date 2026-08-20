@@ -190,6 +190,77 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     REQUIRE(found_role);
 }
 
+TEST_CASE("agent HTML keeps sibling readouts distinct from explicit controls",
+          "[view][import][claude][audio-widget]") {
+    const std::string app_js = R"JS(
+        var root = document.getElementById('root');
+        function make(cls, attrs, text) {
+            var el = document.createElement('div');
+            el.className = cls;
+            if (attrs) for (var k in attrs) el.setAttribute(k, attrs[k]);
+            if (text) el.textContent = text;
+            return el;
+        }
+        var editor = make('editor');
+        var pad = make('pad-cell');
+        pad.appendChild(make('pulp-knob', { 'data-pulp-param': 'param_1' }));
+        pad.appendChild(make('knob-label', null, 'TIME'));
+        pad.appendChild(make('knob-value active', null, '1/4'));
+        pad.appendChild(make('xy-pad-value active', null, 'X 0.4 / Y 0.7'));
+        pad.appendChild(make('pulp-knob'));
+        pad.appendChild(make('value', { 'data-pulp-role': 'knob' }));
+        pad.appendChild(make('ValueKnob'));
+        editor.appendChild(pad);
+        for (var i = 0; i < 4; ++i) editor.appendChild(make('filler-' + i));
+        root.appendChild(editor);
+    )JS";
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), R"(<div id="root"></div><script src="u-app"></script>)"), opts);
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+
+    const IRNode* bound = nullptr;
+    const IRNode* label = nullptr;
+    const IRNode* value = nullptr;
+    const IRNode* xy_value = nullptr;
+    const IRNode* unbound = nullptr;
+    const IRNode* explicit_role = nullptr;
+    const IRNode* value_knob = nullptr;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        const auto it = node.attributes.find("class");
+        const auto cls = it == node.attributes.end() ? std::string{} : it->second;
+        if (cls == "pulp-knob") {
+            if (node.attributes.count("data-pulp-param")) bound = &node;
+            else unbound = &node;
+        } else if (cls == "knob-label") label = &node;
+        else if (cls == "knob-value active") value = &node;
+        else if (cls == "xy-pad-value active") xy_value = &node;
+        else if (cls == "value") explicit_role = &node;
+        else if (cls == "ValueKnob") value_knob = &node;
+        for (const auto& child : node.children) walk(child);
+    };
+    walk(ir.root);
+    REQUIRE(bound != nullptr);
+    REQUIRE(bound->audio_widget == AudioWidgetType::knob);
+    REQUIRE(bound->attributes.at("data-pulp-param") == "param_1");
+    REQUIRE(label != nullptr);
+    REQUIRE(label->audio_widget == AudioWidgetType::none);
+    REQUIRE(value != nullptr);
+    REQUIRE(value->audio_widget == AudioWidgetType::none);
+    REQUIRE(xy_value != nullptr);
+    REQUIRE(xy_value->audio_widget == AudioWidgetType::none);
+    REQUIRE(unbound != nullptr);
+    REQUIRE(unbound->audio_widget == AudioWidgetType::knob);
+    REQUIRE(explicit_role != nullptr);
+    REQUIRE(explicit_role->audio_widget == AudioWidgetType::knob);
+    REQUIRE(value_knob != nullptr);
+    REQUIRE(value_knob->audio_widget == AudioWidgetType::knob);
+}
+
 TEST_CASE("a Claude DOM node's inline border/gradient/shadow survive to codegen",
           "[view][import][claude][border]") {
     // End-to-end for the Claude HTML DOM lane's INLINE-style path (the runtime
