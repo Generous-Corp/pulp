@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260820-screenshot-crop-size-arithmetic",
+  "kind": "change",
+  "created_at": "2026-08-20T20:32:12Z",
+  "slices": [
+    "capture-primitives"
+  ],
+  "rationale": "Pulp source commit f95ee0c4ef3b80fb6a60264319b2cfdb98ca5635 hardens crop_png allocation and row-offset arithmetic against uint32_t multiplication wrap for CodeQL alert 98. The approved exact-route projection assigns core/view/src/screenshot_compare.cpp to Generous-Corp/pulp as the pulp_implementation for harness.pixel-diff-goldens-montage, so this is a Pulp-owned visual-harness safety repair rather than a change to Vellum framework capture semantics or a backport of a named Vellum commit. The source fix is unchanged by this receipt.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-screenshot-compare",
+    "pulp-vellum ownership projection validation",
+    "pulp-vellum-change-route closed eight-case suite"
+  ],
+  "disposition": "pulp-only"
+}
