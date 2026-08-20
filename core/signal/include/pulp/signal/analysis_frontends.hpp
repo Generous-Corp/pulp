@@ -70,6 +70,8 @@ class StreamingAnalysisWindowT {
                     config.fft_size, config.max_retained_fft_bytes, retained_fft_bytes))
                 return false;
             fft.emplace(static_cast<int>(config.fft_size));
+            if (!fft->ready())
+                return false;
         }
         std::array<double, MaxFftSize> coefficients{};
         for (std::size_t i = 0; i < config.fft_size; ++i) {

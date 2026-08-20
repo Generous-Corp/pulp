@@ -48,6 +48,8 @@ class SpectralFeatureFrontEndT {
     using Frame = SpectralFeatureFrameT<SampleType>;
 
     [[nodiscard]] bool prepare(const StreamingAnalysisConfig& config) {
+        if (config.fft_size < 4u)
+            return false;
         if (!window_.prepare(config, detail::AnalysisWindow::symmetric_hann))
             return false;
         previous_normalized_magnitudes_.fill(0.0);
@@ -133,14 +135,12 @@ class SpectralFeatureFrontEndT {
         const auto& config = window_.config();
         const auto& spectrum = window_.spectrum();
         const auto bins = config.fft_size / 2u + 1u;
-        std::array<double, MaxFftSize / 2u + 1u> magnitudes{};
         long double magnitude_sum = 0.0L;
         long double power_sum = 0.0L;
         for (std::size_t bin = 0; bin < bins; ++bin) {
             const auto magnitude = static_cast<double>(std::abs(spectrum[bin]));
             if (!std::isfinite(magnitude))
                 return false;
-            magnitudes[bin] = magnitude;
             magnitude_sum += static_cast<long double>(magnitude);
             power_sum += static_cast<long double>(magnitude) * static_cast<long double>(magnitude);
         }
@@ -161,16 +161,16 @@ class SpectralFeatureFrontEndT {
                 const auto frequency = static_cast<long double>(config.sample_rate) *
                                        static_cast<long double>(bin) /
                                        static_cast<long double>(config.fft_size);
-                const auto magnitude = static_cast<long double>(magnitudes[bin]);
+                const auto magnitude = static_cast<long double>(std::abs(spectrum[bin]));
                 weighted_frequency += frequency * magnitude;
-                const auto normalized = magnitude / magnitude_sum;
-                log_sum += std::log(std::max(normalized, flatness_floor));
+                const auto normalized = static_cast<double>(magnitude / magnitude_sum);
+                log_sum += std::log(std::max(static_cast<long double>(normalized), flatness_floor));
                 if (have_previous_) {
                     const auto delta =
-                        normalized - static_cast<long double>(previous_normalized_magnitudes_[bin]);
+                        static_cast<long double>(normalized - previous_normalized_magnitudes_[bin]);
                     flux_squared += delta * delta;
                 }
-                previous_normalized_magnitudes_[bin] = static_cast<double>(normalized);
+                previous_normalized_magnitudes_[bin] = normalized;
                 cumulative_power += magnitude * magnitude;
                 if (!rolloff_found && cumulative_power >= rolloff_fraction * power_sum) {
                     next.rolloff_hz = static_cast<double>(frequency);

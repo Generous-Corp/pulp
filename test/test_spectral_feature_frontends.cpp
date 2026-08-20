@@ -71,6 +71,12 @@ TEST_CASE("spectral feature tone has centered centroid bounded rolloff and low f
     CHECK(front_end.startup_samples() == size);
 }
 
+TEST_CASE("spectral feature frontend rejects a degenerate two-sample Hann window",
+          "[signal][spectral-feature-frontends]") {
+    SpectralFeatureFrontEndT<float, 4, 1> front_end;
+    CHECK_FALSE(front_end.prepare(config(2, 2)));
+}
+
 TEST_CASE("flat-spectrum noise is high-flatness and centered on the spectral mean",
           "[signal][spectral-feature-frontends]") {
     constexpr std::size_t size = 512;
