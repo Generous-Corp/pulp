@@ -709,6 +709,81 @@ TEST_CASE("Event contract: root-scoped key dispatch cannot cross plugin editors"
     REQUIRE(engine_b.evaluate("root_hits").getWithDefault<int>(0) == 0);
 }
 
+TEST_CASE("Materialized document navigation focus is explicit, root-scoped, and bounded",
+          "[view][bridge][events][navigation-focus]") {
+    struct FocusCommitView final : View {
+        int blur_count = 0;
+        bool accepts_text_input() const override { return true; }
+        void on_focus_changed(bool focused) override {
+            View::on_focus_changed(focused);
+            if (!focused) ++blur_count;
+        }
+    };
+
+    ScriptEngine engine_a;
+    ScriptEngine engine_b;
+    View root_a;
+    View root_b;
+    StateStore store_a;
+    StateStore store_b;
+    auto text = std::make_unique<FocusCommitView>();
+    auto* text_ptr = text.get();
+    root_a.add_child(std::move(text));
+    text_ptr->claim_input_focus();
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+    bridge_a.load_script(R"(
+        var nav_hits = 0;
+        window.addEventListener('keydown', function(e) {
+            nav_hits++;
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+    )");
+    bridge_b.load_script(R"(
+        var nav_hits = 0;
+        window.addEventListener('keydown', function() { nav_hits++; });
+    )");
+
+    REQUIRE_FALSE(root_a.accepts_navigation_input());
+    REQUIRE(engine_a.evaluate("claimDocumentNavigationFocus()")
+                .getWithDefault<bool>(false));
+    REQUIRE(root_a.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root_a) == &root_a);
+    REQUIRE(text_ptr->blur_count == 1);
+
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine_a.evaluate("nav_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine_b.evaluate("nav_hits").getWithDefault<int>(0) == 0);
+    // The root capability does not make unrelated keys handled, and another
+    // editor cannot observe this root's delivery.
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::a), 0, true));
+    REQUIRE(engine_a.evaluate("nav_hits").getWithDefault<int>(0) == 2);
+    REQUIRE(engine_b.evaluate("nav_hits").getWithDefault<int>(0) == 0);
+
+    engine_a.evaluate("releaseDocumentNavigationFocus()");
+    REQUIRE_FALSE(root_a.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root_a) == nullptr);
+    REQUIRE(text_ptr->blur_count == 1);
+}
+
+TEST_CASE("Materialized document navigation claim clears on bridge teardown",
+          "[view][bridge][events][navigation-focus][lifecycle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    {
+        WidgetBridge bridge(engine, root, store);
+        REQUIRE(engine.evaluate("claimDocumentNavigationFocus()")
+                    .getWithDefault<bool>(false));
+        REQUIRE(root.accepts_navigation_input());
+        REQUIRE(focused_input_under_root(root) == &root);
+    }
+    REQUIRE_FALSE(root.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
+}
+
 TEST_CASE("Materialized ComboBox exposes bounded navigation focus and native keys",
           "[view][bridge][combo][navigation-focus]") {
     ScriptEngine engine;

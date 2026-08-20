@@ -736,6 +736,13 @@ private:
     // `set_repaint_callback`.
     void request_repaint();
 
+    // Temporarily lend this bridge's owning root to a materialized document
+    // interaction that handles only the host navigation-key allowlist. The
+    // implementation transfers/commits any prior text focus, records a single
+    // owner per root, and releases only its own claim.
+    bool claim_document_navigation_focus();
+    void release_document_navigation_focus() noexcept;
+
     // The ~75 bridge sub-API registrars used to be private member
     // declarations here. Every added API changed this PUBLIC header and forced
     // a recompile of the whole view/render/host surface that includes it.

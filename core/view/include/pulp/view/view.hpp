@@ -1920,7 +1920,9 @@ public:
     /// example, ComboBox returns true only while its menu is open).
     /// Appended after the pre-existing View virtual surface so older slots do
     /// not move for installed-SDK consumers.
-    virtual bool accepts_navigation_input() const { return false; }
+    virtual bool accepts_navigation_input() const {
+        return scripted_navigation_input_;
+    }
 
     /// The runtime host-parameter accessor for this view tree, or nullptr in
     /// previews/screenshots (a view degrades to local state when null, exactly
@@ -2395,6 +2397,11 @@ private:
     bool enabled_ = true;
     bool layout_dirty_ = false;
     bool has_focus_ = false;
+    // WidgetBridge may lend the root focus slot to a materialized document
+    // while that document has an explicit, bounded navigation interaction.
+    // This is intentionally private: ordinary roots must never become general
+    // keyboard sinks, and the bridge clears the capability on release/teardown.
+    bool scripted_navigation_input_ = false;
     bool hovered_ = false;
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;

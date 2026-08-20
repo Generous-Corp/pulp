@@ -13,6 +13,7 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/virtual_list.hpp>
 #include <pulp/view/virtual_grid.hpp>
@@ -391,6 +392,10 @@ std::unordered_set<WidgetBridge*>& all_bridges_set() {
     static std::unordered_set<WidgetBridge*> set;
     return set;
 }
+std::unordered_map<View*, WidgetBridge*>& document_navigation_owners() {
+    static std::unordered_map<View*, WidgetBridge*> owners;
+    return owners;
+}
 }  // namespace
 
 WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
@@ -487,6 +492,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 }
 
 WidgetBridge::~WidgetBridge() {
+    release_document_navigation_focus();
     unregister_global_dispatch();
     if (callback_alive_) {
         callback_alive_->store(false, std::memory_order_release);
@@ -509,6 +515,43 @@ WidgetBridge::~WidgetBridge() {
         } catch (...) {
             std::cerr << "WidgetBridge quarantine repaint error: unknown exception\n";
         }
+    }
+}
+
+bool WidgetBridge::claim_document_navigation_focus() {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    auto& owners = document_navigation_owners();
+    if (auto it = owners.find(&root_);
+        it != owners.end() && it->second != this) {
+        // A replacement realm for the same root supersedes the old claim.
+        // Clear it before transferring focus so only one bridge can ever make
+        // this editor navigation-capable.
+        it->second->release_document_navigation_focus();
+    }
+
+    root_.scripted_navigation_input_ = true;
+    const bool was_focusable = root_.focusable();
+    root_.set_focusable(true);
+    const bool claimed = transfer_input_focus(root_, &root_);
+    root_.set_focusable(was_focusable);
+    if (!claimed) {
+        root_.scripted_navigation_input_ = false;
+        return false;
+    }
+    owners[&root_] = this;
+    return true;
+}
+
+void WidgetBridge::release_document_navigation_focus() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    auto& owners = document_navigation_owners();
+    const auto it = owners.find(&root_);
+    if (it == owners.end() || it->second != this) return;
+    owners.erase(it);
+    root_.scripted_navigation_input_ = false;
+    if (focused_input_under_root(root_) == &root_) {
+        root_.release_input_focus();
+        root_.View::on_focus_changed(false);
     }
 }
 
