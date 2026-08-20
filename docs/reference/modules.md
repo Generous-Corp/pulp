@@ -925,6 +925,7 @@ a working convolution and would hide the bug. Assert
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
+| Diffusion Network | `diffusion_network.hpp` | Fixed-capacity wet-only true-stereo Schroeder cascade with transactional configuration, deterministic decorrelation, and an energy-preserving width matrix |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
 | [Reverse Buffer](reverse-buffer.md) | `reverse_buffer.hpp` | Prepared fixed-capacity streaming window reversal with transactional configuration, explicit raw or raised-cosine boundaries, hard-bypass state, startup latency, and finite tail |
 | [Early Reflections](early-reflections.md) | `early_reflections.hpp` | Fixed-capacity true-stereo caller-authored taps with fractional timing, equal-power pan/width routing, transactional publication, and explicit peak-normalized or raw headroom |

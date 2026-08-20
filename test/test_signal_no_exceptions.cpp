@@ -1,3 +1,4 @@
+#include <pulp/signal/diffusion_network.hpp>
 #include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
@@ -150,5 +151,13 @@ int main() {
     if (!std::isfinite(cross_output[17].real()) || !std::isfinite(cross_output[17].imag()))
         return 39;
 
+    pulp::signal::DiffusionNetwork diffusion;
+    if (!diffusion.prepare(48000.0, 50.0))
+        return 36;
+    float diffusion_left = 0.0f;
+    float diffusion_right = 0.0f;
+    diffusion.process_sample(1.0f, 0.0f, diffusion_left, diffusion_right);
+    if (!std::isfinite(diffusion_left) || !std::isfinite(diffusion_right))
+        return 37;
     return 0;
 }
