@@ -146,7 +146,41 @@ const serialize = (n) =>
     : `<${n.tagName.toLowerCase()}>${n.childNodes.map(serialize).join("")}</${n.tagName.toLowerCase()}>`;
 
 const TAG = /<\/?([a-zA-Z][a-zA-Z0-9-]*)/y;
-const ATTR = /\s*([a-zA-Z_:@-][a-zA-Z0-9:._-]*)(\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+)))?/y;
+const isSpace = (c) => c === " " || c === "\n" || c === "\r" || c === "\t" || c === "\f";
+const isAttrStart = (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+  || c === "_" || c === ":" || c === "@" || c === "-";
+const isAttrPart = (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+  || (c >= "0" && c <= "9") || c === ":" || c === "." || c === "_" || c === "-";
+
+// Linear attribute scanner. The former optional-whitespace/optional-value regex
+// backtracked quadratically on long malformed library input, which made the test
+// shim itself a denial-of-service surface.
+function readAttribute(html, from) {
+  let i = from;
+  while (i < html.length && isSpace(html[i])) i++;
+  if (!isAttrStart(html[i])) return null;
+  const nameStart = i++;
+  while (i < html.length && isAttrPart(html[i])) i++;
+  const name = html.slice(nameStart, i);
+  while (i < html.length && isSpace(html[i])) i++;
+  let value = "";
+  if (html[i] === "=") {
+    i++;
+    while (i < html.length && isSpace(html[i])) i++;
+    const quote = html[i] === '"' || html[i] === "'" ? html[i++] : null;
+    const valueStart = i;
+    if (quote) {
+      while (i < html.length && html[i] !== quote) i++;
+      value = html.slice(valueStart, i);
+      if (html[i] === quote) i++;
+    } else {
+      while (i < html.length && !isSpace(html[i]) && html[i] !== ">"
+        && html[i] !== "'" && html[i] !== '"') i++;
+      value = html.slice(valueStart, i);
+    }
+  }
+  return { name, value, next: i };
+}
 function parseHTML(html) {
   const out = [];
   const stack = [];
@@ -165,11 +199,10 @@ function parseHTML(html) {
     if (closing) { i = html.indexOf(">", j) + 1; stack.pop(); continue; }
     const el = new El(name);
     for (;;) {
-      ATTR.lastIndex = j;
-      const a = ATTR.exec(html);
-      if (!a || !a[1]) break;
-      el.setAttribute(a[1], a[4] ?? a[5] ?? a[6] ?? "");
-      j = ATTR.lastIndex;
+      const a = readAttribute(html, j);
+      if (!a) break;
+      el.setAttribute(a.name, a.value);
+      j = a.next;
     }
     while (j < html.length && html[j] !== ">") j++;
     const selfClosing = html[j - 1] === "/" || VOID.has(name.toLowerCase());
@@ -182,17 +215,49 @@ function parseHTML(html) {
 
 // Selector engine: comma groups of descendant-combined compounds; a compound is
 // any mix of tag / #id / .class / [attr="value"].
+function compoundTokens(comp) {
+  const out = [];
+  let i = 0;
+  while (i < comp.length) {
+    if (comp[i] === "[") {
+      const end = comp.indexOf("]", i + 1);
+      if (end < 0) return null;
+      out.push(comp.slice(i, end + 1));
+      i = end + 1;
+      continue;
+    }
+    const start = i;
+    if (comp[i] === "#" || comp[i] === ".") i++;
+    while (i < comp.length && ((comp[i] >= "a" && comp[i] <= "z")
+      || (comp[i] >= "A" && comp[i] <= "Z") || (comp[i] >= "0" && comp[i] <= "9")
+      || comp[i] === "_" || comp[i] === "*" || comp[i] === "-")) i++;
+    if (i === start || (i === start + 1 && (comp[start] === "#" || comp[start] === "."))) return null;
+    out.push(comp.slice(start, i));
+  }
+  return out;
+}
+function parseAttributeSelector(token) {
+  const body = token.slice(1, -1);
+  const eq = body.indexOf("=");
+  const name = (eq < 0 ? body : body.slice(0, eq)).trim();
+  if (!name) return null;
+  if (eq < 0) return { name, value: undefined };
+  let value = body.slice(eq + 1).trim();
+  if ((value[0] === '"' && value[value.length - 1] === '"')
+    || (value[0] === "'" && value[value.length - 1] === "'")) value = value.slice(1, -1);
+  return { name, value };
+}
 function matchesCompound(el, comp) {
-  const toks = comp.match(/(\[[^\]]+\]|[#.]?[a-zA-Z0-9_*-]+)/g) || [];
+  const toks = compoundTokens(comp);
+  if (!toks?.length) return false;
   for (const t of toks) {
     if (t === "*") continue;
     if (t[0] === "#") { if (el.id !== t.slice(1)) return false; }
     else if (t[0] === ".") { if (!el.classList.contains(t.slice(1))) return false; }
     else if (t[0] === "[") {
-      const m = /^\[([^=\]]+)(?:=["']?([^"'\]]*)["']?)?\]$/.exec(t);
-      if (!m) return false;
-      if (!el.hasAttribute(m[1])) return false;
-      if (m[2] !== undefined && el.getAttribute(m[1]) !== m[2]) return false;
+      const attr = parseAttributeSelector(t);
+      if (!attr || !el.hasAttribute(attr.name)) return false;
+      if (attr.value !== undefined && el.getAttribute(attr.name) !== attr.value) return false;
     } else if (el.tagName !== t.toUpperCase()) return false;
   }
   return true;
