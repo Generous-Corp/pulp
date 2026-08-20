@@ -16,6 +16,49 @@ requires:
 - Responding to a cli-plugin-sync hook reminder
 - Auditing CLI / plugin / docs consistency
 
+## Doctor gating: separate capability-to-BUILD from capability-to-PUBLISH
+
+`DoctorCheck` carries two independent flags, and picking the wrong one has
+opposite failure modes:
+
+- **`optional`** — advisory everywhere, including `pulp doctor`'s exit code. For
+  things that are a speedup, not a requirement (e.g. the Google Android CLI
+  accelerator).
+- **`release_only`** — still gates `pulp doctor`, but must NOT gate commands
+  that merely build or scaffold. For credentials and capabilities needed to
+  PUBLISH.
+
+`RELEASE_BOT_TOKEN` is the worked example. It was neither flag, so it gated
+`pulp create`, which then refused to scaffold a project on any machine lacking
+the secret — every contributor's, since a repo secret is not theirs to set, and
+every fleet host that is not the release host. The error printed a PAT
+walkthrough to people who were only trying to create a project.
+
+**Do not "fix" this class by marking such a check `optional`.** That silences it
+in `pulp doctor` too, and the release-readiness signal is load-bearing: a missing
+`RELEASE_BOT_TOKEN` once caused a 22-hour release drought. Add `release_only`
+and let the *consuming command* decide, as `cmd_create.cpp` does:
+
+```cpp
+if (c.optional || c.release_only) { /* advisory: print, do not gate */ }
+```
+
+Equally, do not fix it by configuring the secret on more hosts — that makes the
+test pass without making the behaviour correct, and spreads a release credential
+to machines with no use for it.
+
+### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
+
+These checks query live GitHub state, so a test asserting "the command succeeds"
+proves nothing on a machine where the credential happens to BE configured —
+which is exactly the maintainer machine the test usually runs on. Stub `gh` on
+`PATH` so the check deterministically reports the state you are testing. It needs
+to answer two calls: `repo view` (the guard deciding whether the check runs at
+all) and the `actions/secrets` probe. See
+`test/test_cli_create_shellout.cpp`'s *"pulp create is not gated by
+release-publishing credentials"*, and verify any such test FAILS with the
+scoping removed before trusting it.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source

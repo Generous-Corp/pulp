@@ -1865,6 +1865,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // rotations or its rotations were recovered, and only one of those is
         // evidence the recovery ran.
         record_if("native_nodes_rotation_recovered", tree.rotation_recovered);
+        record_if("native_nodes_rotation_recovered_children",
+                  tree.rotation_recovered_children);
         record_if("native_nodes_overlapping_reorders",
                   tree.overlapping_reorders);
         // The count says a panel can paint wrong; the pairs say where. Without

@@ -411,6 +411,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,
   escapes, and member order cover the exact-byte re-save contract.
+- The `vN` directory names the `pulp.timeline.sequence` schema version its
+  fixtures were authored at (nested envelopes carry their own contemporaneous
+  versions), and **every version in the migration chain must carry at least one
+  indexed `document` fixture** — a schema bump that lands without one leaves a
+  version the corpus can never exercise. `tools/scripts/timeline_fixture_coverage_check.py`
+  enforces that: registered as the `timeline-fixture-coverage` ctest beside a
+  `-selftest` that proves it reddens on a synthetic gap, and as a job in
+  `timeline-hardening.yml`. Coverage reads `corpus.index`, not the tree — a
+  version dir whose fixtures are not indexed as documents does not count.
 - **Not every `.json` under `test/fixtures/timeline/` is a project.** The corpus
   holds three shapes and nothing in the files distinguishes them: complete
   `pulp.timeline.project` envelopes; single-entity **fragments** such as
@@ -2746,3 +2755,31 @@ reads, never **when** it may be compiled. So acyclicity is owned by whoever
 gives a peer-edge kind a producer, not by the subscription contract. Reserving
 the enum slot is safe on its own; wiring a producer to one is the point where
 the ordering proof becomes load-bearing.
+
+## Offline rendering a timeline region: use the transport-aware renderer
+
+`OfflineSignalGraphHost` will not render a timeline slice. It drives the
+no-transport `SignalGraph::process()` overload by design, so timeline nodes
+never receive the transport that note scheduling, automation and PDC read.
+**It does not fail — it renders silence**, which is the expensive way to learn
+this.
+
+Use `render_timeline_offline()` (`pulp/host/timeline_offline_renderer.hpp`).
+Its loop is `MasterTransport::begin_block()` →
+`TimelineGraphPlaybackBinding::process()`, and it takes a freshly built or
+quiesced graph because it prepares the binding and drives its own transport — a
+graph already bound to a live transport would be double-driven.
+
+Two gotchas worth knowing before you debug an output that looks *almost* right:
+
+- **A region that does not start on a block boundary is pre-rolled from tick
+  origin with output discarded.** If you "optimise" that away by seeking
+  straight to the start, stateful nodes enter with an empty delay line and a
+  cold PDC pipeline: the region will still render, still be non-silent, and
+  still be wrong — it will merely resemble the same slice of a full bounce
+  instead of equalling it sample-for-sample.
+- **Bounds are ticks and are derived only through the program's compiled tempo
+  map.** `CompiledTempoMap::ticks_to_samples()` saturates rather than trapping,
+  which is correct for a real-time reader but would silently turn an absurd
+  region into a plausible bounce here, so the renderer rejects a saturated
+  derivation instead of using it.

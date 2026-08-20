@@ -384,6 +384,7 @@ jobs:
         with:
           name: web-plugins-screenshots
           path: /tmp/*-browser.png
+          retention-days: 14
           if-no-files-found: ignore
 
   # ── THE REAL GPU GATE ───────────────────────────────────────────────────────
@@ -582,4 +583,5 @@ jobs:
         with:
           name: gpu-audio-macos
           path: /tmp/gpu-audio-macos.png
+          retention-days: 14
           if-no-files-found: ignore

@@ -386,9 +386,11 @@ knowing before you touch that file:
     draw too much, not too little. A clipper's `border-radius` is likewise not
     carried, so a rounded clipper under-clips at its corners; the audit compares
     axis-aligned rectangles and cannot see that, deliberately — counting every
-    rounded card would bury the defects it exists to find. A rotated clipper
-    cannot arise at all: a
-    rotated element is `element_capture_fallback` and its whole subtree pools
+    rounded card would bury the defects it exists to find. A rotated node
+    carries no stored clip either — a page-space rectangle has no meaning in
+    its turned frame, so the audit books it as `clip_lost` with
+    `clip_inexpressible="rotate"`. A rotated element whose rotation could not
+    be recovered is `element_capture_fallback` and its whole subtree pools
     into it.
   - **JS and Swift codegen do not lower it yet** (allowlisted in
     `test_design_import_parity.cpp`); the JS lane needs a `setClipRect` bridge

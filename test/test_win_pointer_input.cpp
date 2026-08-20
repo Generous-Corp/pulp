@@ -263,6 +263,7 @@ TEST_CASE("Windows virtual keys map to Pulp key codes",
     REQUIRE(key_code_from_virtual_key(kVkDelete) == KeyCode::delete_);
     REQUIRE(key_code_from_virtual_key(kVkF12) == KeyCode::f12);
     REQUIRE(key_code_from_virtual_key(kVkOem1) == KeyCode::semicolon);
+    REQUIRE(key_code_from_virtual_key(kVkOemComma) == static_cast<KeyCode>(','));
     REQUIRE(key_code_from_virtual_key(kVkOem7) == KeyCode::apostrophe);
     REQUIRE(key_code_from_virtual_key(0xFF) == KeyCode::unknown);
 

@@ -1951,6 +1951,45 @@ TEST_CASE("ViewBridge::set_preferred_size updates an in-bounds mode size",
     REQUIRE(bridge.size_hints().preferred_height == 700);
 }
 
+TEST_CASE("ViewBridge resize transaction preserves authored coordinates",
+          "[view_bridge][editor-resize][viewport]") {
+    class AuthoredViewportProcessor final : public StubProcessor {
+    public:
+        format::ViewSize view_size() const override {
+            return format::ViewSize{
+                990, 645, 792, 516, 2640, 1720,
+                1320.0 / 860.0, 1320, 860,
+                format::ViewportPolicy::FixedDesign,
+            };
+        }
+    } processor;
+    state::StateStore store;
+    format::ViewBridge bridge(processor, store);
+
+    REQUIRE(format::detail::negotiate_preferred_size(
+        bridge, 1560, 1016,
+        [](uint32_t, uint32_t) { return true; }));
+    REQUIRE(bridge.size_hints().preferred_width == 1560);
+    REQUIRE(bridge.size_hints().preferred_height == 1016);
+    REQUIRE(bridge.size_hints().design_width == 1320);
+    REQUIRE(bridge.size_hints().design_height == 860);
+
+    struct RecordingHost {
+        float design_width = 0.0f;
+        float design_height = 0.0f;
+        float aspect_ratio = 0.0f;
+        void set_design_viewport(float width, float height) {
+            design_width = width;
+            design_height = height;
+        }
+        void set_fixed_aspect_ratio(float ratio) { aspect_ratio = ratio; }
+    } host;
+    format::commit_editor_requested_viewport(
+        host, bridge.size_hints(), 1560, 1016);
+    REQUIRE(host.design_width == 1320.0f);
+    REQUIRE(host.design_height == 860.0f);
+}
+
 TEST_CASE("design-derived Forge bounds contain the 900x800 mode exactly",
           "[view_bridge][editor-resize][forge]") {
     const auto base = format::view_size_from_design(1280, 800, 640, 400);

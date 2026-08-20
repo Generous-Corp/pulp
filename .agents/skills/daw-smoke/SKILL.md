@@ -76,6 +76,47 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
   build. `DAW-Smoke: skip reason="..."` trailer bypasses a single commit.
 
 ## Gotchas (the expensive lessons)
+
+### Copy a bundle with `ditto`, never `shutil.copytree`
+
+A macOS code signature lives partly in extended attributes, and `copytree` does
+not carry them. The copy the harness handed REAPER verified as **"code object is
+not signed at all"** while the original was clean under `--deep --strict`. Use
+`ditto`, and verify the COPY rather than the source:
+
+```
+ditto "$SRC" "$DST" && codesign --verify --deep --strict "$DST"
+```
+
+(The failure named a subcomponent — a non-executable `.json` in
+`Contents/MacOS/`, where bundle convention expects only executables. Worth
+knowing when reading such an error; `--deep --strict` treats everything in
+`MacOS/` as a subcomponent.)
+
+### A custom scan path does not publish on REAPER 7.78 — the editor modes cannot prove anything there
+
+`editor-open` (and any mode needing the FX inserted) currently reports
+INCONCLUSIVE on REAPER 7.78 with:
+
+```
+pre-warm scan did not publish the target into REAPER's plugin cache before timeout
+REAPER did not open the FX within timeout (flaky launch) — INCONCLUSIVE
+```
+
+Reproduced four times at 90s, 150s and 240s timeouts, before AND after the
+`ditto` fix, and with the plugin also present at the standard VST3 path — the
+harness redirects REAPER to its temp `scan_dir` regardless, so installing
+normally does not change the outcome. The user's own REAPER cache DOES contain
+these plugins, so REAPER scans them fine through its ordinary paths; it is the
+harness's `vstpath_arm64=<temp>` redirection that is not taking effect on 7.78.
+
+**So a SKIP or INCONCLUSIVE here is not a PASS, and right now it is the
+expected result rather than evidence about the plugin.** Note these modes also
+exit **0** while reporting INCONCLUSIVE, so anything reading exit codes scores
+them as passes. Until the scan-path redirection is fixed, prove editors another
+way and say plainly that this rung is unproven.
+
+
 - **Headless capture hides adapter-only bugs.** The format adapter injects state no
   headless path has. 2026-07-04: it *synthesizes a Bypass parameter* in a host, so
   the reload param-contract gate rejected every in-DAW reload (`parameter contract

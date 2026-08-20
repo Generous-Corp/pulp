@@ -9,6 +9,9 @@ on:
       - 'core/playback/**'
       - 'test/test_timeline_scale.cpp'
       - 'test/cmake/timeline_tests.cmake'
+      - 'test/fixtures/timeline/**'
+      - 'tools/scripts/timeline_fixture_coverage_check.py'
+      - 'tools/scripts/test_timeline_fixture_coverage_check.py'
       - '.github/workflows/timeline-hardening.yml'
       - 'CMakeLists.txt'
       - 'tools/cmake/**'
@@ -20,6 +23,9 @@ on:
       - 'core/playback/**'
       - 'test/test_timeline_scale.cpp'
       - 'test/cmake/timeline_tests.cmake'
+      - 'test/fixtures/timeline/**'
+      - 'tools/scripts/timeline_fixture_coverage_check.py'
+      - 'tools/scripts/test_timeline_fixture_coverage_check.py'
       - '.github/workflows/timeline-hardening.yml'
       - 'CMakeLists.txt'
       - 'tools/cmake/**'
@@ -73,3 +79,22 @@ jobs:
         run: |
           build-timeline-hardening/test/pulp-test-timeline-scale \
             --rng-seed 1
+
+  fixture-coverage:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
+    name: Schema fixture coverage
+    # Advisory lane on GitHub-hosted ubuntu: no build, a seconds-long script
+    # over committed artifacts, so local capacity is never the constraint.
+    # See docs/guides/local-ci.md for lane routing and fallback behavior.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Enforce schema fixture coverage
+        run: python3 tools/scripts/timeline_fixture_coverage_check.py
+
+      - name: Prove the coverage gate can go red
+        run: python3 tools/scripts/test_timeline_fixture_coverage_check.py

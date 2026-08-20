@@ -8,6 +8,36 @@ import json
 import re
 import subprocess
 import sys
+import time
+
+
+# A degraded GitHub API is not a policy answer. These signatures mean the request
+# never reached a verdict, so retrying can still produce one; anything else is
+# either a real refusal or a real misconfiguration and must not be retried.
+TRANSIENT_API_SIGNATURES = (
+    "no server is currently available",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+    "bad gateway",
+    "service unavailable",
+    "server error",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection refused",
+    "temporary failure in name resolution",
+    "secondary rate limit",
+    "api rate limit exceeded",
+)
+API_ATTEMPTS = 4
+API_BACKOFF_SECONDS = 3.0
+
+
+def is_transient_api_error(message: str) -> bool:
+    lowered = message.lower()
+    return any(signature in lowered for signature in TRANSIENT_API_SIGNATURES)
 
 
 POLICIES = {
@@ -27,11 +57,42 @@ POLICIES = {
 }
 
 
-def api_json(gh: str, path: str) -> dict:
-    result = subprocess.run([gh, "api", path], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "GitHub API request failed")
-    return json.loads(result.stdout)
+def api_json(
+    gh: str,
+    path: str,
+    *,
+    attempts: int = API_ATTEMPTS,
+    backoff_seconds: float = API_BACKOFF_SECONDS,
+    sleep=time.sleep,
+) -> dict:
+    """Read one API document, retrying only while the API has given no verdict.
+
+    A degraded API used to be indistinguishable from a failed policy check, so a
+    provider slot restarted every RestartSec into the same outage. The pool unit
+    is Restart=always with no start limit -- deliberately, because exit 75 is the
+    governor's back-pressure and must keep retrying -- so systemd cannot bound
+    this on our behalf, and a multi-hour outage became thousands of restarts
+    hammering the same degraded API.
+
+    Retrying here bounds that without weakening anything: a transient signature
+    is retried a few times and then still fails closed, and a policy refusal or
+    misconfiguration is never retried at all.
+    """
+    last_error = "GitHub API request failed"
+    for attempt in range(1, max(1, attempts) + 1):
+        result = subprocess.run([gh, "api", path], capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        last_error = result.stderr.strip() or "GitHub API request failed"
+        if attempt >= attempts or not is_transient_api_error(last_error):
+            break
+        print(
+            f"runner-group verify: transient API failure on {path} "
+            f"(attempt {attempt}/{attempts}): {last_error}",
+            file=sys.stderr,
+        )
+        sleep(backoff_seconds * attempt)
+    raise RuntimeError(last_error)
 
 
 def validate_policy(
