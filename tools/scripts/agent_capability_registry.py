@@ -33,6 +33,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
+    "pulp/signal/spectral_feature_frontends.hpp": "Pulp::signal",
     "pulp/signal/audio_matrix_mixer.hpp": "Pulp::signal",
     "pulp/signal/breakpoint_envelope.hpp": "Pulp::signal",
     "pulp/signal/beat_repeat_kernel.hpp": "Pulp::signal",

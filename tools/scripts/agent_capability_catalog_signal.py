@@ -37,6 +37,50 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.spectral-feature-frontends", domain="signal",
+        summary=(
+            "Prepared streaming spectral centroid, flatness, rolloff, and normalized flux "
+            "feature frames for bounded modulation consumers."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate retained FFT storage",
+                   "process": "audio analysis owner", "reset": "audio analysis owner",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Fixed-capacity window, FFT scratch, previous normalized spectrum, cadence, "
+            "timestamp, sequence, and current feature frame."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="prepared planar finite audio blocks",
+        output_domain=(
+            "timestamped centroid, flatness, 85-percent power rolloff, and gain-invariant "
+            "normalized flux frames"
+        ),
+        units=["samples", "frames", "hertz", "normalized magnitude", "ratio"],
+        latency="analysis center lookback N/2; startup N samples",
+        tail="no padded analysis tail", scheduling="streaming hop cadence",
+        bindings=[
+            binding(role="entrypoint", kind="cpp_type",
+                    include="pulp/signal/spectral_feature_frontends.hpp",
+                    qualified_name="pulp::signal::SpectralFeatureFrontEndT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:dc6ec8dea0b36c10f9428c4d5a558184a7368fa012459c37f617fdf63788de75"),
+            binding(role="frame", kind="cpp_type",
+                    include="pulp/signal/spectral_feature_frontends.hpp",
+                    qualified_name="pulp::signal::SpectralFeatureFrameT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:dc6ec8dea0b36c10f9428c4d5a558184a7368fa012459c37f617fdf63788de75"),
+        ],
+        _link_probes=[
+            {"role": "entrypoint", "binding": "pulp::signal::SpectralFeatureFrontEndT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "frame", "binding": "pulp::signal::SpectralFeatureFrameT<float>",
+             "operation": "construct", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.routing-primitives", domain="signal",
         summary=(
             "Bounded matrix, mid-side, N-way crossfade, click-free switching, and path-latency "

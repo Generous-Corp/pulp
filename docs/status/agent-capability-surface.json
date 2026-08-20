@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 51,
+  "inventory_version": 52,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 438,
-    "reviewed_headers": 142,
+    "public_headers": 439,
+    "reviewed_headers": 143,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 92,
+      "capability_entrypoint": 93,
       "capability_support": 38,
       "infrastructure": 10,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 259,
-        "reviewed_headers": 100,
+        "public_headers": 260,
+        "reviewed_headers": 101,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -3735,6 +3735,17 @@
         "signal.source-filter-analysis"
       ],
       "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_feature_frontends.hpp",
+      "fingerprint": "sha256:dc6ec8dea0b36c10f9428c4d5a558184a7368fa012459c37f617fdf63788de75",
+      "include": "pulp/signal/spectral_feature_frontends.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-feature-frontends"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
