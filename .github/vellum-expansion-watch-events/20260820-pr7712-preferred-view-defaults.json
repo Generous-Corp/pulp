@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260820-pr7712-preferred-view-defaults",
+  "created_at": "2026-08-20T10:07:05Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned pointer coalescing and standard Settings shortcut defaults at the watched view boundary without transferring rendering or UI authority.",
+  "tests": [
+    "pulp-test-pointer-coalescer",
+    "pulp-test-mac-platform-harness",
+    "pulp-test-command-registry",
+    "pulp-test-mac-perform-key-equivalent",
+    "pulp-test-widget-bridge-dispatch-global-key",
+    "pulp-test-win-pointer-input",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
