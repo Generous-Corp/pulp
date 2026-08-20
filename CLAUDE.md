@@ -1476,6 +1476,19 @@ a source tree or the primary `build/`), scans sibling worktrees by default
 (override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
 
+**A full volume now fails fast and says so.** Before configuring or compiling
+anything, `local_diff_cover.sh` checks free space on the volume that holds
+`build-cov` and exits **3** with an explicit "NOT ENOUGH FREE DISK SPACE"
+banner naming the volume, the free space, the requirement, and the
+`clean_build_cov.sh` remedy. Without it a full disk read as
+`[pre-push] gate failure(s) above; blocking push` roughly 20 minutes in, with
+the word "disk" nowhere in the output — so the obvious next move was to go
+debug the diff. The floor is `min_free_disk_gib` in
+`tools/scripts/coverage_config.json` (15 GiB; a completed `build-cov` measures
+14-24 GB, so this is a floor that catches a nearly-full volume, not a promise
+that a from-scratch build fits). Override per run with
+`PULP_DIFF_COVER_MIN_FREE_GIB=<gib>`; `0` disables the check.
+
 ### Pre-Push Gates Check
 
 `tools/scripts/gates.sh` is the on-demand runner for the cheap
