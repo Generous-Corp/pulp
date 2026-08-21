@@ -659,7 +659,8 @@ int lower_semantic_controls(const fs::path& path,
             control.audio_default = value;
             control.attributes["checked"] =
                 pulp::view::toggle_on_from_normalized(value) ? "1" : "0";
-        } else if (!declared_value.empty()) {
+        } else if (widget != pulp::view::AudioWidgetType::stepper &&
+                   !declared_value.empty()) {
             if (const auto parsed = strict_finite_float(declared_value))
                 control.audio_default = *parsed;
         }
@@ -707,6 +708,19 @@ int lower_semantic_controls(const fs::path& path,
             // makes the next semantic pass reject its own lowered output.
             control.attributes["pulpStep"] =
                 step.empty() ? std::to_string(parsed_step) : step;
+            // Browser semantics report host-normalized values. The IR stores
+            // defaults in the widget's plain domain, then normalizes exactly
+            // once for the parameter store downstream. Convert at this
+            // boundary so a 1..8 voice count at 0.5 opens at 5, not at 1 after
+            // the downstream normalizer interprets 0.5 as a plain value.
+            if (!declared_value.empty()) {
+                if (const auto value = strict_finite_float(declared_value)) {
+                    control.audio_default = static_cast<float>(
+                        pulp::view::stepper_plain_value(
+                            std::clamp(*value, 0.0f, 1.0f),
+                            control.audio_min, control.audio_max, parsed_step));
+                }
+            }
         }
         control.style.position = "absolute";
         control.style.left =
