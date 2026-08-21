@@ -1355,6 +1355,205 @@ class FailedGenerationTransaction(unittest.TestCase):
             self.assertEqual(before, after)
 
 
+class BehaviourGateInfrastructureSafety(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O dependency proof")
+    def test_real_plugin_records_accelerate_load_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            (pack / "src").mkdir(parents=True)
+            (pack / "src" / "FFTUSER.cpp").write_text(
+                "#include <pulp/signal/fft.hpp>\n"
+                "extern \"C\" __attribute__((visibility(\"default\"))) "
+                "void init() { pulp::signal::FftT<double> fft(8); }\n")
+            with mock.patch.object(generate, "PACK", str(pack)):
+                ok, dylib, _objects = generate.compile_all(root)
+
+            self.assertTrue(ok, dylib)
+            dependencies = __import__("subprocess").run(
+                ["otool", "-L", dylib], capture_output=True, text=True,
+                check=True).stdout
+            self.assertIn("Accelerate.framework", dependencies)
+
+    def test_plugin_links_public_signal_platform_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            (pack / "src").mkdir(parents=True)
+            (pack / "src" / "DUBECHO.cpp").write_text("// generated\n")
+            commands = []
+
+            def run(command, **_kwargs):
+                commands.append(command)
+                stdout = " T _init\n" if command[0] == "nm" else ""
+                return mock.Mock(returncode=0, stdout=stdout, stderr="")
+
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                    mock.patch.object(generate.sys, "platform", "darwin"), \
+                    mock.patch.object(generate.subprocess, "run", side_effect=run):
+                ok, output, _objects = generate.compile_all(root)
+
+            self.assertTrue(ok, output)
+            link = next(command for command in commands
+                        if command[0] == "clang++" and "-shared" in command)
+            framework = link.index("-framework")
+            self.assertEqual("Accelerate", link[framework + 1])
+
+    def test_gate_links_public_signal_platform_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            (pack / "src").mkdir(parents=True)
+            commands = []
+
+            def run(command, **_kwargs):
+                commands.append(command)
+                return mock.Mock(returncode=0, stdout="gate passed\n", stderr="")
+
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                    mock.patch.object(generate.sys, "platform", "darwin"), \
+                    mock.patch.object(generate.subprocess, "run", side_effect=run):
+                result = generate.run_behaviour_gate(
+                    root, "DUBECHO", {"inputs": [], "outputs": []},
+                    ["DUBECHO.o"])
+
+            self.assertTrue(result.ok, result.output)
+            self.assertEqual("clang++", commands[0][0])
+            self.assertIn("-framework", commands[0])
+            framework = commands[0].index("-framework")
+            self.assertEqual("Accelerate", commands[0][framework + 1])
+
+    def test_gate_process_failure_always_has_a_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            (pack / "src").mkdir(parents=True)
+            results = [
+                mock.Mock(returncode=0, stdout="", stderr=""),
+                mock.Mock(returncode=-11, stdout="", stderr=""),
+            ]
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                    mock.patch.object(generate.subprocess, "run",
+                                      side_effect=results):
+                result = generate.run_behaviour_gate(
+                    root, "DUBECHO", {"inputs": [], "outputs": []},
+                    ["DUBECHO.o"])
+
+            self.assertFalse(result.ok)
+            self.assertIn("FAIL  behavioural gate process exited with status -11",
+                          result.output)
+            self.assertEqual("generated-runtime", result.failure_kind)
+
+    def test_gate_preflight_executes_with_the_runtime_loader_path(self) -> None:
+        results = [
+            mock.Mock(returncode=0, stdout="", stderr=""),
+            mock.Mock(returncode=0, stdout="gate passed\n", stderr=""),
+        ]
+        with mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                mock.patch.object(generate.subprocess, "run", side_effect=results) as run:
+            generate.preflight_behaviour_gate()
+
+        runtime = run.call_args_list[1]
+        self.assertEqual(1, len(runtime.args[0]))
+        self.assertEqual("/rack-sdk", runtime.kwargs["env"]["DYLD_LIBRARY_PATH"])
+        self.assertEqual(30, runtime.kwargs["timeout"])
+
+    def test_gate_preflight_runtime_failure_stops_before_a_model_call(self) -> None:
+        results = [
+            mock.Mock(returncode=0, stdout="", stderr=""),
+            mock.Mock(returncode=-6, stdout="", stderr="dyld: Library not loaded"),
+        ]
+        with mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                mock.patch.object(generate.subprocess, "run", side_effect=results):
+            with self.assertRaisesRegex(
+                    generate.BehaviourGateUnavailable, "could not run"):
+                generate.preflight_behaviour_gate()
+
+    def test_gate_preflight_timeout_is_infrastructure_unavailable(self) -> None:
+        results = [
+            mock.Mock(returncode=0, stdout="", stderr=""),
+            __import__("subprocess").TimeoutExpired("gate-preflight", 30),
+        ]
+        with mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                mock.patch.object(generate.subprocess, "run", side_effect=results):
+            with self.assertRaisesRegex(
+                    generate.BehaviourGateUnavailable, "hung"):
+                generate.preflight_behaviour_gate()
+
+    def test_unavailable_gate_stops_before_a_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            for subdir in ("modules", "src", "res"):
+                (pack / subdir).mkdir(parents=True)
+
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate.fetch_sdk, "compiler_missing",
+                                      return_value=None), \
+                    mock.patch.object(generate, "preflight"), \
+                    mock.patch.object(generate, "ensure_writable_toolchain"), \
+                    mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(
+                        generate, "preflight_behaviour_gate",
+                        side_effect=generate.BehaviourGateUnavailable(
+                            "linker could not resolve a platform dependency")), \
+                    mock.patch.object(generate, "ask_model", side_effect=AssertionError(
+                        "provider call is forbidden")):
+                with self.assertRaisesRegex(
+                        SystemExit, "no model call was made"):
+                    generate.main([
+                        "generate.py", "VCA with gain CV and audio input",
+                        "--retries", "4"])
+
+    def test_generated_link_failure_prints_the_linker_tail(self) -> None:
+        response_text = (
+            "```json manifest\n"
+            '{"slug":"REPLAYVCA","name":"Replay VCA","hp":4,'
+            '"params":[],"inputs":[],"outputs":[],"tags":[]}'
+            "\n```\n```cpp dsp\n"
+            "#include <pulp/signal/vca.hpp>\n"
+            "pulp::signal::VcaT<float> amplifier;\n"
+            "```\n")
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            for subdir in ("modules", "src", "res"):
+                (pack / subdir).mkdir(parents=True)
+            response = pathlib.Path(root) / "response.txt"
+            response.write_text(response_text)
+            messages = []
+            result = generate.BehaviourGateResult(
+                False,
+                "the generated module could not be linked into the behavioural "
+                "gate:\nUndefined symbols for architecture arm64:\n"
+                "_missing_generated_symbol\nlinker command failed\n",
+                "generated-link")
+
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate.fetch_sdk, "compiler_missing",
+                                      return_value=None), \
+                    mock.patch.object(generate, "preflight"), \
+                    mock.patch.object(generate, "ensure_writable_toolchain"), \
+                    mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"), \
+                    mock.patch.object(generate, "_write_generated_module"), \
+                    mock.patch.object(generate, "_wire_entry"), \
+                    mock.patch.object(generate, "_assert_no_duplicate_models"), \
+                    mock.patch.object(generate, "run_emitter",
+                                      return_value=(True, "validated")), \
+                    mock.patch.object(generate, "compile_all",
+                                      return_value=(True, "/tmp/plugin.dylib", [])), \
+                    mock.patch.object(generate, "run_behaviour_gate",
+                                      return_value=result), \
+                    mock.patch.object(generate, "log", side_effect=messages.append):
+                with self.assertRaisesRegex(SystemExit, "gave up after 1 attempts"):
+                    generate.main([
+                        "generate.py", "VCA with gain CV and audio input",
+                        "--response-file", str(response)])
+
+            output = "\n".join(messages)
+            self.assertIn("generated module did not link into the gate", output)
+            self.assertIn("Undefined symbols for architecture arm64", output)
+            self.assertIn("_missing_generated_symbol", output)
+
+
 class ZeroModelReplay(unittest.TestCase):
     def test_failed_provider_partial_response_is_retained(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -1370,6 +1569,7 @@ class ZeroModelReplay(unittest.TestCase):
                     mock.patch.object(generate, "preflight"), \
                     mock.patch.object(generate, "ensure_writable_toolchain"), \
                     mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"), \
                     mock.patch.object(
                         generate, "ask_model",
                         side_effect=generate.ModelCallFailed(
@@ -1396,6 +1596,7 @@ class ZeroModelReplay(unittest.TestCase):
                     mock.patch.object(generate, "preflight"), \
                     mock.patch.object(generate, "ensure_writable_toolchain"), \
                     mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"), \
                     mock.patch.object(
                         generate, "ask_model",
                         side_effect=AssertionError("provider call is forbidden")):
@@ -1419,7 +1620,8 @@ class ZeroModelReplay(unittest.TestCase):
                                       return_value=None), \
                     mock.patch.object(generate, "preflight"), \
                     mock.patch.object(generate, "ensure_writable_toolchain"), \
-                    mock.patch.object(generate, "resolve_sdk", return_value="/sdk"):
+                    mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"):
                 with self.assertRaisesRegex(
                         SystemExit, "gave up after 1 attempts; pack restored unchanged"):
                     generate.main([
@@ -1450,6 +1652,7 @@ class ZeroModelReplay(unittest.TestCase):
                     mock.patch.object(generate, "preflight"), \
                     mock.patch.object(generate, "ensure_writable_toolchain"), \
                     mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"), \
                     mock.patch.object(generate, "ask_model", side_effect=AssertionError(
                         "provider must not run during response replay")), \
                     mock.patch.object(generate, "run_emitter",
@@ -1457,7 +1660,8 @@ class ZeroModelReplay(unittest.TestCase):
                     mock.patch.object(generate, "compile_all",
                                       return_value=(True, "/tmp/plugin.dylib", [])), \
                     mock.patch.object(generate, "run_behaviour_gate",
-                                      return_value=(True, "gate passed")), \
+                                      return_value=generate.BehaviourGateResult(
+                                          True, "gate passed")), \
                     mock.patch.object(generate, "install",
                                       return_value="/tmp/replay.vcvplugin") as install:
                 rc = generate.main([

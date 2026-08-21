@@ -66,6 +66,25 @@ Consequences that have each cost a cycle:
   any argument. **Print which artifact you selected** — a silent choice between
   two same-named apps is how the wrong one shipped.
 
+## Push capability down, then prove every Forge descendant
+
+Forge Modular, Sequencer, Instrument, MIDI, and FX share Pulp infrastructure
+but do not share one product path. A fix discovered in one app therefore starts
+with two questions: can the capability or invariant live in Pulp, and which
+Forge descendants consume the affected seam? Put reusable behavior in Pulp or
+the common Forge layer rather than copying it between apps. Then record every
+descendant as one of:
+
+- inherited by construction, with the shared source and a contract test named;
+- adapted for a product-specific host or generator, with that adapter tested; or
+- not applicable, with the differing path identified.
+
+Never infer product acceptance from common ancestry. Modular still needs its
+module/Rack/standalone/DAW ladder; Sequencer needs its own timeline, MIDI,
+transport, persistence, and control-surface ladder. The durable win is one
+shared repair plus narrow product-specific proofs, not identical code or a
+single sibling's green build standing in for the rest.
+
 ## Ship the runtime, not just the binary
 
 A Forge app runs a Python generator. If the installer carries the app and not the
