@@ -88,6 +88,21 @@ TEST_CASE("SubOscillator float follows the same divided-phase contract",
                  WithinAbs(std::sin(2.0f * std::numbers::pi_v<float> * expected_phase), 2.0e-6));
 }
 
+TEST_CASE("SubOscillator preserves parent history when switching octaves",
+          "[signal][sub-oscillator][regression]") {
+    SubOscillator64 oscillator;
+    REQUIRE(oscillator.set_octave(1));
+    oscillator.on_parent_cycle();
+    oscillator.on_parent_cycle();
+    oscillator.on_parent_cycle();
+    REQUIRE(oscillator.next(0.0) == -1.0);
+
+    REQUIRE(oscillator.set_octave(2));
+    REQUIRE_THAT(oscillator.phase(), WithinAbs(0.5, 1.0e-14));
+    REQUIRE(oscillator.next(0.0) == -1.0);
+    REQUIRE_THAT(oscillator.phase(), WithinAbs(0.75, 1.0e-14));
+}
+
 TEST_CASE("SubOscillator follows parent reset and phase jump instead of free running",
           "[signal][sub-oscillator][negative-control]") {
     SubOscillator64 oscillator;

@@ -34,7 +34,6 @@ template <typename SampleType = float> class SubOscillatorT {
         if (octave != 1 && octave != 2)
             return false;
         octave_ = octave;
-        cycle_index_ %= divisor();
         return true;
     }
 
@@ -51,13 +50,13 @@ template <typename SampleType = float> class SubOscillatorT {
 
     /// Re-anchor the divider to a known completed parent-cycle count.
     void reset(std::uint32_t completed_parent_cycles = 0) noexcept {
-        cycle_index_ = completed_parent_cycles % divisor();
+        cycle_index_ = completed_parent_cycles % max_divisor;
         phase_ = SampleType{0};
     }
 
     /// Report one completed parent cycle. Call before `next(0)` on a wrap.
     void on_parent_cycle() noexcept {
-        cycle_index_ = (cycle_index_ + 1u) % divisor();
+        cycle_index_ = (cycle_index_ + 1u) % max_divisor;
     }
 
     /// Render from the parent's current normalized phase in [0, 1).
@@ -70,7 +69,7 @@ template <typename SampleType = float> class SubOscillatorT {
             return SampleType{0};
         }
 
-        phase_ = (static_cast<SampleType>(cycle_index_) + parent_phase) /
+        phase_ = (static_cast<SampleType>(cycle_index_ % divisor()) + parent_phase) /
                  static_cast<SampleType>(divisor());
         if (waveform_ == SubOscillatorWaveform::square)
             return phase_ < SampleType{0.5} ? SampleType{1} : SampleType{-1};
@@ -91,6 +90,8 @@ template <typename SampleType = float> class SubOscillatorT {
     }
 
   private:
+    static constexpr std::uint32_t max_divisor = 4;
+
     std::uint32_t divisor() const noexcept {
         return std::uint32_t{1} << octave_;
     }
