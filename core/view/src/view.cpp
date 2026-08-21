@@ -756,7 +756,18 @@ std::unique_ptr<View> View::remove_child(View* child) {
         // owns the subtree would permit re-entrant structural mutation.
         focused->View::on_focus_changed(false);
     }
-
+    if (RootInteractionState* state = structure_root->interaction_state_.get();
+        state && belongs_to_removed_subtree(state->active_overlay)) {
+        View* overlay = state->active_overlay;
+        state->active_overlay = nullptr;
+        if (active_overlay_ == overlay) active_overlay_ = nullptr;
+        // Structural removal is already the dismissal outcome. Do not invoke
+        // on_overlay_dismissed here: that callback may synchronously mutate the
+        // same tree while remove_child owns its iterators. Clearing the root
+        // slot while parent links are still valid is the lifecycle operation;
+        // it also prevents a callback-retired overlay from being reused by the
+        // next synthetic or platform click.
+    }
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.
     set_subtree_detaching(*child, true);
