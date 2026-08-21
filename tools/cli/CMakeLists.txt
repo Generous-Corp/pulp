@@ -621,6 +621,15 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-dsp-capabilities-json PROPERTIES
         PASS_REGULAR_EXPRESSION "\"baked_params\"")
 
+    # Keep the state-changing projection isolated from the source tree: the
+    # fixture owns its catalog, script copy, and generated snapshot.
+    add_test(NAME cli-dsp-capabilities-write
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPULP_CLI=$<TARGET_FILE:pulp-cli>"
+            "-DSCRIPT_SOURCE=${CMAKE_SOURCE_DIR}/tools/scripts/dsp_capability_registry.py"
+            "-DFIXTURE_ROOT=${CMAKE_BINARY_DIR}/test-tmp/cli-dsp-capabilities-write"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/test_dsp_capabilities_write.cmake")
+
     # Exercise the `pulp minos` dispatch (cmd_minos.cpp): usage banner,
     # help alias, unknown-subcommand error, the measure->script handoff
     # (measure the CLI binary itself, which always exists), and the

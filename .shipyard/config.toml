@@ -130,7 +130,7 @@ versioning_config   = "tools/scripts/versioning.json"
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
 build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
 # `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
 # cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
@@ -167,6 +167,7 @@ test      = "tools/ci/governed-build.sh ctest --test-dir build --output-on-failu
 #                     under SSH + cross-compile emulation overhead)
 [validation.default.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+
 # --parallel is capped at 4 to limit MSBuild parallelism. Unlimited
 # parallelism causes LNK1104 (cannot open file) on ARM64 Windows because
 # concurrent x64-emulated link steps create file contention that Windows'
@@ -177,6 +178,12 @@ build     = "cmake --build build --config Release --parallel 4"
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
 test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+
+# The exact inventory is specific to the required macOS target. Optional Linux
+# targets inherit the default recipe but register a different platform-gated
+# CTest inventory, so they must not validate against the macOS cardinality.
+[validation.default.overrides.macos]
+configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
@@ -312,7 +319,7 @@ schema_version = 2
 # Exact current-main inventory plus the policy contract test added with this
 # declaration. Test-topology changes force a full-suite decision. This remains
 # shadow-only: [validation.default] is still the authoritative execution.
-full_test_count = 20725
+full_test_count = 20727
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [
@@ -381,6 +388,7 @@ tests = [
   "cli-forge-catalog-write",
   "cli-dsp-capabilities-check",
   "cli-dsp-capabilities-json",
+  "cli-dsp-capabilities-write",
   "cli-dsp-help",
   "cli-dsp-help-flag",
   "cli-dsp-unknown-subcommand",
