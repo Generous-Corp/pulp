@@ -6535,8 +6535,16 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
     scroll->set_bounds({0.0f, 0.0f, 120.0f, 80.0f});
     scroll->layout_children();
     CHECK(scroll->content_size().width == Catch::Approx(120.0f));
-    CHECK(scroll->content_size().height == Catch::Approx(110.0f));
+    CHECK(scroll->content_size().height == Catch::Approx(111.0f));
     CHECK(scroll->wants_wheel_scroll());
+
+    // A materialized adapter may temporarily own an extent while replacing a
+    // captured container. Omitting dimensions restores automatic sizing and
+    // refreshes from the already-laid-out live descendants immediately.
+    bridge.load_script("setScrollContentSize(scrollPanelNativeId, 120, 240);");
+    REQUIRE(scroll->content_size().height == Catch::Approx(240.0f));
+    bridge.load_script("setScrollContentSize(scrollPanelNativeId);");
+    CHECK(scroll->content_size().height == Catch::Approx(111.0f));
 
     bridge.load_script("content.style.display = 'none';");
     scroll->layout_children();

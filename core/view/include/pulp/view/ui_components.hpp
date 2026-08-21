@@ -494,6 +494,9 @@ public:
     /// sizing. Materialized overflow containers use the automatic default;
     /// native callers can continue to manage virtual or offscreen content.
     void set_content_size(Size size);
+    /// Restores child-derived sizing after a caller-owned extent and refreshes
+    /// it immediately from the current laid-out descendant boxes.
+    void use_automatic_content_size();
     Size content_size() const { return content_size_; }
     bool wants_wheel_scroll() const override;
 

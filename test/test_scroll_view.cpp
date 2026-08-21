@@ -335,6 +335,28 @@ TEST_CASE("ScrollView: paint_all renders without crash", "[scrollview]") {
     REQUIRE(rc.commands().size() > 0);
 }
 
+TEST_CASE("ScrollView keeps direct sticky chrome above scrolled content",
+          "[scrollview][sticky][hit-test]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+    scroll.set_content_size({200, 300});
+
+    auto sticky = std::make_unique<View>();
+    auto* sticky_ptr = sticky.get();
+    sticky->set_position(View::Position::sticky);
+    sticky->set_bounds({0, 0, 200, 30});
+    sticky->set_hit_testable(true);
+    scroll.add_child(std::move(sticky));
+
+    auto content = std::make_unique<View>();
+    content->set_bounds({0, 50, 200, 80});
+    content->set_hit_testable(true);
+    scroll.add_child(std::move(content));
+
+    scroll.set_scroll(0, 50);
+    REQUIRE(scroll.hit_test({10, 10}) == sticky_ptr);
+}
+
 TEST_CASE("ScrollView: paint and hit testing share its fitted scale",
           "[scrollview][transform][hit_test]") {
     pulp::canvas::RecordingCanvas rc;

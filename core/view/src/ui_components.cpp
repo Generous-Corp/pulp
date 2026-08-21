@@ -1147,6 +1147,11 @@ void ScrollView::set_content_size(Size size) {
     clamp_scroll_targets(true);
 }
 
+void ScrollView::use_automatic_content_size() {
+    automatic_content_size_ = true;
+    layout_children();
+}
+
 void ScrollView::update_automatic_content_size() {
     const auto viewport = local_bounds();
     float right = 0.0f;
@@ -1297,12 +1302,24 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     float sx = smooth_scroll_x_.value();
     float sy = smooth_scroll_y_.value();
 
-    // Paint children WITH scroll offset applied
+    // Paint ordinary children with the scroll offset applied. Direct sticky
+    // children are painted in a second pass below so authored scroll chrome
+    // (for example a dialog header) remains fixed to the viewport.
     canvas.save();
     canvas.clip_rect(0, 0, b.width, b.height);
     canvas.translate(-sx, -sy);
     for (size_t i = 0; i < child_count(); ++i) {
-        child_at(i)->paint_all(canvas);
+        if (child_at(i)->position() != View::Position::sticky)
+            child_at(i)->paint_all(canvas);
+    }
+    canvas.restore();
+
+    canvas.save();
+    canvas.clip_rect(0, 0, b.width, b.height);
+    canvas.translate(-sx, 0.0f);
+    for (size_t i = 0; i < child_count(); ++i) {
+        if (child_at(i)->position() == View::Position::sticky)
+            child_at(i)->paint_all(canvas);
     }
     canvas.restore();
 
@@ -1377,9 +1394,25 @@ View* ScrollView::hit_test(Point local_point) {
     float sy = smooth_scroll_y_.value();
 
     if (pointer_events() != PointerEvents::box_only) {
+        // Sticky children paint in viewport coordinates and sit above the
+        // scrolling content, so test them first without the vertical offset.
         for (size_t i = child_count(); i > 0; --i) {
             auto* child = child_at(i - 1);
-            if (!child->visible()) continue;
+            if (!child->visible()
+                || child->position() != View::Position::sticky)
+                continue;
+            Point child_point = {local_point.x + sx - child->bounds().x,
+                                 local_point.y - child->bounds().y};
+            if (!child->inverse_scale_transform(child_point)) continue;
+            if (child->local_bounds().contains(child_point)) {
+                if (auto* hit = child->hit_test(child_point)) return hit;
+            }
+        }
+        for (size_t i = child_count(); i > 0; --i) {
+            auto* child = child_at(i - 1);
+            if (!child->visible()
+                || child->position() == View::Position::sticky)
+                continue;
 
             Point child_point = {local_point.x + sx - child->bounds().x,
                                  local_point.y + sy - child->bounds().y};
