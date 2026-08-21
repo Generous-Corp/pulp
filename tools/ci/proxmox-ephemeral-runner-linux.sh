@@ -65,6 +65,8 @@ GH_CLI="${TARTCI_GH_CLI:-${PULP_LINUX_GH_CLI:-gh}}"
 FIREWALL_STATUS_BIN="${PULP_LINUX_FIREWALL_STATUS_BIN:-pve-firewall}"
 FIREWALL_DIR="${PULP_LINUX_FIREWALL_DIR:-/etc/pve/firewall}"
 VMID_LOCK=/var/lock/pulp-ephemeral-vmid.lock
+RUNNER_LEASE_DIR=/run/pulp-ephemeral-runner
+RUNNER_KEEP_DIR=/var/lib/pulp/ephemeral-runner-keep
 HOST_NETWORK_LOCK=/var/lock/pulp-ci-host-network.lock
 AUTOMATIC_NETWORK_ISOLATION=0
 GITHUB_API_READY=0
@@ -328,7 +330,7 @@ deferred_cleanup() {
         return
     fi
     clone_generation="$(qm config "$vmid" 2>/dev/null \
-        | sed -n 's/^description: pulp-runner-generation=//p')" \
+        | sed -n 's/^description: pulp-runner-generation=\([^;]*\).*/\1/p')" \
         || die "cannot inspect deferred-cleanup clone generation"
     [ "$clone_generation" = "$runner_name" ] \
         || die "deferred-cleanup VMID $vmid belongs to a different clone generation"
@@ -733,7 +735,17 @@ cleanup() {
     fi
     [ -n "${GUEST_IP:-}" ] && ssh-keygen -f /root/.ssh/known_hosts -R "$GUEST_IP" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+remove_runner_lease() {
+    local lease_file
+    [ -n "${VMID:-}" ] && [ -n "${RUNNER_NAME:-}" ] || return 0
+    lease_file="${RUNNER_LEASE_DIR}/${VMID}.lease"
+    if [ -r "$lease_file" ] \
+        && grep -Fxq "pid=$$" "$lease_file" \
+        && grep -Fxq "runner=${RUNNER_NAME}" "$lease_file"; then
+        rm -f -- "$lease_file"
+    fi
+}
+trap 'cleanup; remove_runner_lease' EXIT
 
 # ── clone ────────────────────────────────────────────────────────────────────
 # Linked clone: near-instant and thin, because the golden's 120G disk is shared
@@ -748,6 +760,37 @@ fi
 # read on every exit path, so leaving it unset means nothing is ever destroyed
 # and the pool silently becomes persistent runners that leak VMIDs.
 CLONED=1
+if [ "$KEEP" = 1 ]; then
+    install -d -o root -g root -m 0700 "$RUNNER_KEEP_DIR" \
+        || die "cannot create durable keep directory"
+    KEEP_TMP="$(mktemp "${RUNNER_KEEP_DIR}/.${VMID}.keep.XXXXXX")" \
+        || die "cannot allocate durable keep marker"
+    printf 'runner=%s\n' "$RUNNER_NAME" >"$KEEP_TMP" \
+        && chmod 0600 "$KEEP_TMP" \
+        && mv -f -- "$KEEP_TMP" "${RUNNER_KEEP_DIR}/${VMID}.keep" \
+        || { rm -f -- "$KEEP_TMP"; die "cannot publish durable keep marker"; }
+else
+    rm -f -- "${RUNNER_KEEP_DIR}/${VMID}.keep" \
+        || die "cannot clear stale durable keep marker for new clone"
+fi
+# For --keep, publish the generation-bound disposition before making this
+# clone eligible for automatic recovery. A crash in the opposite order could
+# leave an explicitly retained clone with recovery provenance but no marker.
+# For the normal path, clearing the prior generation's marker first is also
+# fail-closed: a crash before this description leaves a legacy/no-scope clone
+# that the reaper only reports and never mutates.
+qm set "$VMID" \
+    --description "pulp-runner-generation=${RUNNER_NAME};pulp-runner-scope=${REGISTRATION_API}" \
+    >/dev/null || die "cannot persist clone generation and registration scope"
+install -d -o root -g root -m 0755 "$RUNNER_LEASE_DIR" \
+    || die "cannot create runner lease directory"
+LEASE_TMP="$(mktemp "${RUNNER_LEASE_DIR}/.${VMID}.lease.XXXXXX")" \
+    || die "cannot allocate runner lease"
+printf 'pid=%s\nrunner=%s\n' "$$" "$RUNNER_NAME" >"$LEASE_TMP" \
+    || die "cannot write runner lease"
+chmod 0600 "$LEASE_TMP" || die "cannot secure runner lease"
+mv -f -- "$LEASE_TMP" "${RUNNER_LEASE_DIR}/${VMID}.lease" \
+    || die "cannot publish runner lease"
 
 # Keep the allocation lock until the clone is attached and its active firewall
 # policy is proved. The host-network rollback takes this same lock before its
@@ -811,7 +854,6 @@ EOF
 fi
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
     --cpuunits 50 --balloon 0 --onboot 0 \
-    --description "pulp-runner-generation=${RUNNER_NAME}" \
     --net0 "$NET0" \
     --ipconfig0 "ip=${GUEST_IP}/${GUEST_IPV4_PREFIX_LENGTH},gw=${GUEST_IPV4_GATEWAY}" \
     --nameserver "$GUEST_DNS_SERVER" >/dev/null \
