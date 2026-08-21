@@ -765,12 +765,16 @@ jobs:
     # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
     # required-gate preamble off the saturated GitHub-hosted pool when opted in.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 10
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          # Classification needs two immutable trees, not Pulp's entire
+          # history. Full history made a traveling runner fetch into a 70 GiB
+          # .git directory before this cheap preamble could report.
+          fetch-depth: 1
           lfs: false
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
@@ -781,10 +785,18 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           base="$(python3 tools/scripts/resolve_classify_base.py)"
-          python3 tools/scripts/classify_changes.py --mode=diff --base "$base"
+          if [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]] \
+             && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            # A failed bounded fetch is not a failed gate: the classifier below
+            # cannot resolve the tree and safely requests the native build.
+            git fetch --no-tags --depth=1 origin "$base" || true
+          fi
+          python3 tools/scripts/classify_changes.py \
+            --mode=diff --comparison=trees --base "$base"
 
   build:
     needs: [resolve-provider, classify]

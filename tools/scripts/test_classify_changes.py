@@ -167,6 +167,26 @@ class DiffModeTests(unittest.TestCase):
         self.assertIsNone(files)
         self.assertIn("[classify] git diff failed (exit 128)", stderr.getvalue())
 
+    def test_exact_tree_comparison_does_not_require_merge_history(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["git"], 0, stdout="README.md\n", stderr=""
+        )
+
+        with mock.patch.object(
+            classify.subprocess, "run", return_value=completed
+        ) as run:
+            files = classify._changed_files_from_diff(
+                "a" * 40, comparison="trees"
+            )
+
+        self.assertEqual(files, ["README.md"])
+        run.assert_called_once_with(
+            ["git", "diff", "--no-renames", "--name-only", f"{'a' * 40}..HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     def test_main_diff_empty_output_is_fail_closed_json(self) -> None:
         completed = subprocess.CompletedProcess(["git"], 0, stdout="\n\n", stderr="")
         stdout = io.StringIO()
