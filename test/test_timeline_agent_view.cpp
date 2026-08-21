@@ -3,16 +3,26 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <cstdlib>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 using namespace pulp;
 
 namespace {
+
+constexpr std::size_t kPagingTrackCount = 100;
+constexpr std::size_t kPagingClipsPerTrack = 100;
+constexpr std::uint64_t kPagingFirstTrackId = 10'000;
+constexpr std::uint64_t kPagingFirstClipId = 20'000;
 
 template <class T, class E> T take(runtime::Result<T, E> result) {
     REQUIRE(result);
@@ -75,6 +85,33 @@ timeline::Project project_with(std::vector<std::int64_t> starts = {30, 10, 20},
                                            .sequences = {std::move(sequence)}}));
 }
 
+timeline::Project paging_scale_project() {
+    std::vector<timeline::Track> tracks;
+    tracks.reserve(kPagingTrackCount);
+    for (std::size_t track_index = 0; track_index < kPagingTrackCount; ++track_index) {
+        std::vector<timeline::Clip> clips;
+        clips.reserve(kPagingClipsPerTrack);
+        for (std::size_t clip_index = 0; clip_index < kPagingClipsPerTrack; ++clip_index) {
+            const auto id = kPagingFirstClipId + track_index * kPagingClipsPerTrack + clip_index;
+            const auto interleaved =
+                clip_index * kPagingTrackCount + (track_index * 37) % kPagingTrackCount;
+            clips.push_back(take(timeline::Clip::create(
+                {id}, {static_cast<std::int64_t>(2 * interleaved)}, {1},
+                timeline::EmptyContent{})));
+        }
+        tracks.push_back(take(timeline::Track::create(
+            {kPagingFirstTrackId + track_index}, "paging-track", std::move(clips))));
+    }
+    auto sequence = take(timeline::Sequence::create(
+        {.id = {2}, .name = "paging-sequence", .tracks = std::move(tracks)}));
+    return take(timeline::Project::create(
+        {.id = {1},
+         .name = "paging-scale",
+         .next_item_id = kPagingFirstClipId + kPagingTrackCount * kPagingClipsPerTrack,
+         .root_sequence_id = {2},
+         .sequences = {std::move(sequence)}}));
+}
+
 timeline_agent_view::AgentView pin(timeline::Project project,
                                    timeline::DocumentRevision revision = {7}) {
     return take(timeline_agent_view::AgentView::create(
@@ -99,6 +136,41 @@ std::size_t census_omissions(const timeline::ProjectSnapshotCounts& c) {
            c.automation_points + c.take_lanes + c.takes + c.take_comp_segments + c.markers +
            c.regions + c.scenes + c.slots + c.chord_scale_events + c.groove_steps +
            c.midi_lanes + c.midi_lane_points;
+}
+
+bool strict_performance() {
+    const auto* value = std::getenv("PULP_PERF_STRICT");
+    return value && value[0] && value[0] != '0';
+}
+
+std::optional<std::chrono::milliseconds> performance_budget(const char* name) {
+    const auto* value = std::getenv(name);
+    if (!value || !value[0]) {
+        INFO("missing performance budget: " << name);
+        REQUIRE_FALSE(strict_performance());
+        return std::nullopt;
+    }
+
+    const std::string_view text(value);
+    std::chrono::milliseconds::rep milliseconds = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), milliseconds);
+    INFO("invalid performance budget " << name << '=' << text);
+    REQUIRE(parsed.ec == std::errc{});
+    REQUIRE(parsed.ptr == text.data() + text.size());
+    REQUIRE(milliseconds > 0);
+    return std::chrono::milliseconds(milliseconds);
+}
+
+template <class Rep, class Period>
+void enforce_performance_budget(const char* name,
+                                std::chrono::duration<Rep, Period> elapsed) {
+    const auto budget = performance_budget(name);
+    if (!budget)
+        return;
+    INFO(name << " elapsed_us="
+              << std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()
+              << " budget_ms=" << budget->count());
+    REQUIRE(elapsed <= *budget);
 }
 
 } // namespace
@@ -288,4 +360,56 @@ TEST_CASE("AgentView bounds work and rejects untrusted dirty ownership") {
     const auto rejected_dirty = view.diff({7}, {{6}, {7}}, forged);
     REQUIRE_FALSE(rejected_dirty);
     REQUIRE(rejected_dirty.error().code == timeline_agent_view::ErrorCode::InvalidDirtySet);
+}
+
+TEST_CASE("AgentView outlines and canonically pages ten thousand interleaved clips",
+          "[timeline][agent-view][scale][performance]") {
+    auto project = paging_scale_project();
+    const auto outline_started = std::chrono::steady_clock::now();
+    auto view = take(timeline_agent_view::AgentView::create(
+        {std::make_shared<const timeline::Project>(std::move(project)), {7}}));
+    const auto outline = take(view.outline({7}));
+    const auto outline_elapsed = std::chrono::steady_clock::now() - outline_started;
+
+    constexpr auto expected_clips = kPagingTrackCount * kPagingClipsPerTrack;
+    REQUIRE(outline.explicit_item_count == 2 + kPagingTrackCount + expected_clips);
+    REQUIRE(outline.census.sequences == 1);
+    REQUIRE(outline.census.tracks == kPagingTrackCount);
+    REQUIRE(outline.census.clips == expected_clips);
+    REQUIRE(outline.sequences.size() == 1);
+    REQUIRE(outline.sequences[0].tracks.size() == kPagingTrackCount);
+
+    timeline_agent_view::RegionRequest request{{7}, {2},
+                                               timeline::ClipTimeAnchor::Musical,
+                                               0,
+                                               static_cast<std::int64_t>(2 * expected_clips),
+                                               1'000,
+                                               {}};
+    std::vector<std::pair<std::int64_t, std::uint64_t>> observed;
+    observed.reserve(expected_clips);
+    std::size_t pages = 0;
+    const auto paging_started = std::chrono::steady_clock::now();
+    do {
+        const auto page = take(view.region(request));
+        ++pages;
+        for (const auto& item : page.items)
+            observed.emplace_back(item.start, item.id.value);
+        request.after = page.next;
+    } while (request.after);
+    const auto paging_elapsed = std::chrono::steady_clock::now() - paging_started;
+
+    REQUIRE(pages == 10);
+    REQUIRE_FALSE(request.after);
+    REQUIRE(observed.size() == expected_clips);
+    REQUIRE(std::is_sorted(observed.begin(), observed.end()));
+    REQUIRE(std::adjacent_find(observed.begin(), observed.end()) == observed.end());
+    REQUIRE(observed.front().first == 0);
+    REQUIRE(observed.back().first == static_cast<std::int64_t>(2 * (expected_clips - 1)));
+
+    if (strict_performance()) {
+        enforce_performance_budget("PULP_TIMELINE_AGENT_VIEW_OUTLINE_BUDGET_MS",
+                                   outline_elapsed);
+        enforce_performance_budget("PULP_TIMELINE_AGENT_VIEW_PAGING_BUDGET_MS",
+                                   paging_elapsed);
+    }
 }

@@ -1,5 +1,6 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_json.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline/transaction.hpp>
@@ -11,9 +12,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -32,6 +37,11 @@ constexpr std::size_t kNoteTrackCount = 50;
 constexpr std::size_t kNotesPerClip = 100'000;
 constexpr std::size_t kAutomationTrackCount = 100;
 constexpr std::size_t kAutomationPointsPerLane = 10'000;
+constexpr std::size_t kCollaborationWriterCount = 32;
+constexpr std::size_t kCollaborationEditsPerWriter = 16;
+constexpr std::size_t kDeepUndoCount = 512;
+constexpr std::uint64_t kCollaborationFirstTrackId = 20'000;
+constexpr std::uint64_t kCollaborationFirstClipId = 30'000;
 
 template <typename T, typename E> T take(runtime::Result<T, E> result) {
     if (!result)
@@ -150,6 +160,26 @@ std::shared_ptr<const Project> automation_scale_project() {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+Project collaboration_scale_project() {
+    std::vector<Track> tracks;
+    tracks.reserve(kCollaborationWriterCount);
+    for (std::size_t index = 0; index < kCollaborationWriterCount; ++index) {
+        auto clip = take(Clip::create({kCollaborationFirstClipId + index}, {0}, {1},
+                                      EmptyContent{}));
+        tracks.push_back(take(Track::create({kCollaborationFirstTrackId + index},
+                                            "collaboration-track", {std::move(clip)})));
+    }
+    auto sequence = take(Sequence::create({2}, "collaboration-sequence", std::nullopt,
+                                          std::move(tracks)));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "collaboration-scale";
+    input.next_item_id = kCollaborationFirstClipId + kCollaborationWriterCount;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return take(Project::create(std::move(input)));
+}
+
 ProgramCompileRequest compile_request(std::shared_ptr<const Project> project,
                                       std::shared_ptr<const CompiledTempoMap> map,
                                       std::uint64_t revision, DirtyTrackSet dirty) {
@@ -177,9 +207,54 @@ Transaction move_transaction(std::uint64_t sequence, ItemId track_id, const Clip
     return transaction;
 }
 
+Transaction session_move_transaction(WriterToken& writer, DocumentRevision revision,
+                                     ItemId track_id, const Clip& clip) {
+    Transaction transaction;
+    transaction.id = writer.allocate_transaction_id();
+    transaction.expected_revision = revision;
+    transaction.commands.push_back(
+        {writer.allocate_command_id(),
+         MoveClip{{2},
+                  track_id,
+                  clip.id(),
+                  clip.time_range(),
+                  MusicalTimeRange{{clip.start().value + 1}, clip.duration()}}});
+    return transaction;
+}
+
 bool strict_performance() {
     const auto* value = std::getenv("PULP_PERF_STRICT");
     return value && value[0] && value[0] != '0';
+}
+
+std::optional<std::chrono::milliseconds> performance_budget(const char* name) {
+    const auto* value = std::getenv(name);
+    if (!value || !value[0]) {
+        INFO("missing performance budget: " << name);
+        REQUIRE_FALSE(strict_performance());
+        return std::nullopt;
+    }
+
+    const std::string_view text(value);
+    std::chrono::milliseconds::rep milliseconds = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), milliseconds);
+    INFO("invalid performance budget " << name << '=' << text);
+    REQUIRE(parsed.ec == std::errc{});
+    REQUIRE(parsed.ptr == text.data() + text.size());
+    REQUIRE(milliseconds > 0);
+    return std::chrono::milliseconds(milliseconds);
+}
+
+template <class Rep, class Period>
+void enforce_performance_budget(const char* name,
+                                std::chrono::duration<Rep, Period> elapsed) {
+    const auto budget = performance_budget(name);
+    if (!budget)
+        return;
+    INFO(name << " elapsed_us="
+              << std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()
+              << " budget_ms=" << budget->count());
+    REQUIRE(elapsed <= *budget);
 }
 
 bool wait_for_revision(PlaybackProgramCompiler& compiler, std::uint64_t revision,
@@ -227,7 +302,7 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
         REQUIRE(Project::identity_stats().nodes_created - before_restore_nodes ==
                 2 + kTrackCount + kTrackCount * kClipsPerTrack);
         if (strict_performance())
-            REQUIRE(load_elapsed < std::chrono::seconds(2));
+            enforce_performance_budget("PULP_TIMELINE_LOAD_BUDGET_MS", load_elapsed);
     }
 
     PlaybackProgramStore store;
@@ -289,9 +364,9 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
     REQUIRE(status.latest_published_revision == 101);
     REQUIRE(store.read()->document_revision() == 101);
     if (strict_performance()) {
-        REQUIRE(cold_elapsed < std::chrono::seconds(2));
-        REQUIRE(edits_elapsed < std::chrono::seconds(1));
-        REQUIRE(maximum_edit_latency < std::chrono::milliseconds(30));
+        enforce_performance_budget("PULP_TIMELINE_COLD_COMPILE_BUDGET_MS", cold_elapsed);
+        enforce_performance_budget("PULP_TIMELINE_EDIT_BATCH_BUDGET_MS", edits_elapsed);
+        enforce_performance_budget("PULP_TIMELINE_EDIT_MAX_BUDGET_MS", maximum_edit_latency);
     }
 }
 
@@ -322,7 +397,7 @@ TEST_CASE("full note scale compiles five million events with one hundred thousan
     REQUIRE_FALSE(status.has_error);
     REQUIRE(store.read()->document_revision() == 1);
     if (strict_performance())
-        REQUIRE(elapsed < std::chrono::seconds(20));
+        enforce_performance_budget("PULP_TIMELINE_NOTE_COMPILE_BUDGET_MS", elapsed);
 }
 
 TEST_CASE("full automation scale compiles one million points with ten thousand per lane",
@@ -352,5 +427,159 @@ TEST_CASE("full automation scale compiles one million points with ten thousand p
     REQUIRE_FALSE(status.has_error);
     REQUIRE(store.read()->document_revision() == 1);
     if (strict_performance())
-        REQUIRE(elapsed < std::chrono::seconds(20));
+        enforce_performance_budget("PULP_TIMELINE_AUTOMATION_COMPILE_BUDGET_MS", elapsed);
+}
+
+TEST_CASE("thirty-two writers sustain concurrent revisioned edits with immutable readers",
+          "[timeline][scale][performance][collaboration]") {
+#if defined(PULP_TEST_WITH_SANITIZER)
+    SKIP("full-scale coverage runs in non-instrumented builds");
+#endif
+    auto initial = collaboration_scale_project();
+    SessionLimits limits;
+    limits.max_writers = kCollaborationWriterCount;
+    limits.journal.max_transactions =
+        kCollaborationWriterCount * kCollaborationEditsPerWriter;
+    auto session = take(DocumentSession::create(initial, limits));
+
+    std::vector<WriterToken> writers;
+    writers.reserve(kCollaborationWriterCount);
+    for (std::size_t index = 0; index < kCollaborationWriterCount; ++index)
+        writers.push_back(take(session->register_writer()));
+
+    std::atomic<bool> reader_failed{false};
+    std::atomic<std::uint64_t> reader_iterations{0};
+    std::jthread reader([&](std::stop_token stop) {
+        std::uint64_t last_revision = 0;
+        while (!stop.stop_requested()) {
+            const auto view = session->current();
+            const auto* sequence = view.snapshot->find_sequence({2});
+            if (!sequence || sequence->tracks().size() != kCollaborationWriterCount ||
+                view.revision.value < last_revision)
+                reader_failed.store(true, std::memory_order_relaxed);
+            last_revision = view.revision.value;
+            reader_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    std::atomic<std::size_t> accepted{0};
+    std::atomic<std::size_t> incomplete_writers{0};
+    std::atomic<std::size_t> unexpected_errors{0};
+    std::vector<std::thread> workers;
+    workers.reserve(kCollaborationWriterCount);
+    const auto started = std::chrono::steady_clock::now();
+    for (std::size_t writer_index = 0; writer_index < kCollaborationWriterCount;
+         ++writer_index) {
+        workers.emplace_back([&, writer_index] {
+            const ItemId track_id{kCollaborationFirstTrackId + writer_index};
+            const ItemId clip_id{kCollaborationFirstClipId + writer_index};
+            std::size_t writer_accepts = 0;
+            for (std::size_t attempt = 0;
+                 attempt < 16'384 && writer_accepts < kCollaborationEditsPerWriter; ++attempt) {
+                const auto view = session->current();
+                const auto* sequence = view.snapshot->find_sequence({2});
+                const auto* track = sequence ? sequence->find_track(track_id) : nullptr;
+                const auto* clip = track ? track->find_clip(clip_id) : nullptr;
+                if (!clip) {
+                    unexpected_errors.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+                auto result = session->submit(
+                    writers[writer_index],
+                    session_move_transaction(writers[writer_index], view.revision, track_id, *clip));
+                if (result) {
+                    ++writer_accepts;
+                    accepted.fetch_add(1, std::memory_order_relaxed);
+                } else if (result.error().code != ConflictCode::StaleRevision) {
+                    unexpected_errors.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+            }
+            if (writer_accepts != kCollaborationEditsPerWriter)
+                incomplete_writers.fetch_add(1, std::memory_order_relaxed);
+        });
+    }
+    for (auto& worker : workers)
+        worker.join();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    reader.request_stop();
+    reader.join();
+
+    constexpr auto expected_edits =
+        kCollaborationWriterCount * kCollaborationEditsPerWriter;
+    REQUIRE_FALSE(reader_failed.load(std::memory_order_relaxed));
+    REQUIRE(reader_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(unexpected_errors.load(std::memory_order_relaxed) == 0);
+    REQUIRE(incomplete_writers.load(std::memory_order_relaxed) == 0);
+    REQUIRE(accepted.load(std::memory_order_relaxed) == expected_edits);
+    REQUIRE(session->revision().value == expected_edits);
+    REQUIRE(session->journal().entries().size() == expected_edits);
+    for (std::size_t index = 0; index < kCollaborationWriterCount; ++index) {
+        const auto* clip = session->snapshot()
+                               ->find_sequence({2})
+                               ->find_track({kCollaborationFirstTrackId + index})
+                               ->find_clip({kCollaborationFirstClipId + index});
+        REQUIRE(clip);
+        REQUIRE(clip->start().value == kCollaborationEditsPerWriter);
+    }
+    if (strict_performance())
+        enforce_performance_budget("PULP_TIMELINE_N_WRITER_BUDGET_MS", elapsed);
+}
+
+TEST_CASE("five-hundred-twelve-deep undo and real journal replay stay within budgets",
+          "[timeline][scale][performance][journal][undo]") {
+#if defined(PULP_TEST_WITH_SANITIZER)
+    SKIP("full-scale coverage runs in non-instrumented builds");
+#endif
+    const auto initial = collaboration_scale_project();
+    SessionLimits limits;
+    limits.undo.max_groups = kDeepUndoCount;
+    limits.undo.max_retained_bytes = 64 * 1024 * 1024;
+    limits.journal.max_transactions = 2 * kDeepUndoCount;
+    limits.journal.max_commands = 2 * kDeepUndoCount;
+    limits.journal.max_retained_bytes = 64 * 1024 * 1024;
+    auto session = take(DocumentSession::create(initial, limits));
+    auto writer = take(session->register_writer());
+    const ItemId track_id{kCollaborationFirstTrackId};
+    const ItemId clip_id{kCollaborationFirstClipId};
+
+    const auto undo_started = std::chrono::steady_clock::now();
+    for (std::size_t edit = 0; edit < kDeepUndoCount; ++edit) {
+        const auto view = session->current();
+        const auto* clip = view.snapshot->find_sequence({2})->find_track(track_id)->find_clip(clip_id);
+        REQUIRE(clip);
+        REQUIRE(session->submit(writer,
+                                session_move_transaction(writer, view.revision, track_id, *clip)));
+    }
+    for (std::size_t undo = 0; undo < kDeepUndoCount; ++undo) {
+        REQUIRE(session->can_undo());
+        REQUIRE(session->undo(writer));
+    }
+    const auto undo_elapsed = std::chrono::steady_clock::now() - undo_started;
+
+    REQUIRE_FALSE(session->can_undo());
+    REQUIRE(session->can_redo());
+    REQUIRE(session->revision().value == 2 * kDeepUndoCount);
+    REQUIRE(session->journal().entries().size() == 2 * kDeepUndoCount);
+    REQUIRE(session->snapshot()
+                ->find_sequence({2})
+                ->find_track(track_id)
+                ->find_clip(clip_id)
+                ->start()
+                .value == 0);
+
+    const auto journal = session->journal();
+    const auto replay_started = std::chrono::steady_clock::now();
+    const auto replayed = journal.replay(initial, {});
+    const auto replay_elapsed = std::chrono::steady_clock::now() - replay_started;
+    REQUIRE(replayed);
+    const auto registry = take(make_builtin_timeline_registry());
+    REQUIRE(take(serialize_project(replayed.value(), registry)).json ==
+            take(serialize_project(*session->snapshot(), registry)).json);
+
+    if (strict_performance()) {
+        enforce_performance_budget("PULP_TIMELINE_DEEP_UNDO_BUDGET_MS", undo_elapsed);
+        enforce_performance_budget("PULP_TIMELINE_JOURNAL_REPLAY_BUDGET_MS", replay_elapsed);
+    }
 }
