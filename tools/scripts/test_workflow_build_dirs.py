@@ -158,6 +158,15 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("CXX_STANDARD_REQUIRED ON", text)
         self.assertIn("CMAKE_CXX_EXTENSIONS OFF", text)
         self.assertIn(
+            "set_target_properties(InstalledControlStandalone_Core PROPERTIES\n"
+            "    CXX_STANDARD 20\n"
+            "    CXX_STANDARD_REQUIRED ON\n"
+            "    CXX_EXTENSIONS OFF)",
+            text,
+            "the generated plugin target must pin C++20 authoritatively; "
+            "compile features alone can lose to a lower explicit target standard",
+        )
+        self.assertIn(
             "target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)",
             text,
             "the generated consumer uses C++20 threading and must set a "

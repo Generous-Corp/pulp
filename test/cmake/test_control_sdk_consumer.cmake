@@ -336,6 +336,10 @@ pulp_add_plugin(InstalledControlStandalone
         dev.pulp.runtime/evaluate@1)
 target_compile_definitions(InstalledControlStandalone_Core PRIVATE
     INSTALLED_PARITY_UI_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/ui.js")
+set_target_properties(InstalledControlStandalone_Core PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
 target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)
 ]=])
 
