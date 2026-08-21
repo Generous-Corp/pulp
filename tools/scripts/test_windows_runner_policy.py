@@ -468,6 +468,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         """Advisory results neither delay nor determine required macOS."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
         self.assertIn("github.event_name == 'pull_request'", condition)
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
         self.assertIn("native_build_required != 'true'", condition)
         self.assertEqual(
             self.workflow["jobs"]["macos"]["needs"],
@@ -495,6 +496,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
 
         build_name = self.workflow["jobs"]["build"]["name"]
         self.assertIn("github.event_name == 'pull_request'", build_name)
+        self.assertIn("github.event_name == 'workflow_dispatch'", build_name)
         self.assertIn("github.event_name == 'merge_group'", build_name)
         self.assertIn("matrix.key == 'macos'", build_name)
         self.assertIn("'macos'", build_name)

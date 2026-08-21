@@ -112,12 +112,13 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
-For native pull requests and merge groups, the macOS matrix child publishes the
-literal required `macos` context directly. It must not wait on the combined
-matrix: Linux and Windows are advisory during the macOS-focused product phase
-and may continue after queue admission. The `macos` and `macos-merge-group`
-bootstrap jobs own the required name only for an intentional native skip or a
-fail-closed provider/classifier failure; their inactive names end in `-unused`.
+For native pull requests, Shipyard `workflow_dispatch` validation, and merge
+groups, the macOS matrix child publishes the literal required `macos` context
+directly. It must not wait on the combined matrix: Linux and Windows are
+advisory during the macOS-focused product phase and may continue after queue
+admission. The `macos` and `macos-merge-group` bootstrap jobs own the required
+name only for an intentional native skip or a fail-closed provider/classifier
+failure; their inactive names end in `-unused`.
 `tools/scripts/test_required_macos_alias.py` and
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.

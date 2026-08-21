@@ -814,12 +814,13 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    # The macOS child owns the required `macos` context directly on both PR
-    # heads and merge groups. A reporter cannot depend on one matrix child, so
+    # The macOS child owns the required `macos` context directly on PR heads,
+    # Shipyard workflow dispatches, and merge groups. A reporter cannot depend
+    # on one matrix child, so
     # waiting for the combined `build` job would let advisory Linux delay queue
     # admission even after macOS passed. Non-macOS children keep descriptive,
     # non-required names and may finish asynchronously.
-    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group') && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -1631,22 +1632,23 @@ jobs:
   # intentionally skipped or trusted routing/classification failed.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
-  # On a skip-safe PR this reports a fast green without touching a macOS
-  # runner. On a native PR the direct matrix child owns `macos`; this inactive
-  # bootstrap is renamed so it cannot satisfy or collide with that context.
-  # Routing/classification uncertainty remains fail-closed.
+  # On a skip-safe PR or Shipyard workflow dispatch this reports a fast green
+  # without touching a macOS runner. On native work the direct matrix child
+  # owns `macos`; this inactive bootstrap is renamed so it cannot satisfy or
+  # collide with that context. Routing/classification uncertainty remains
+  # fail-closed.
   macos:
-    name: ${{ github.event_name == 'pull_request' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
     needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       always()
-      && github.event_name == 'pull_request'
+      && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
           || needs.classify.outputs.native_build_required != 'true')
     steps:
-      - name: macOS PR bootstrap (required when native leg is absent)
+      - name: macOS PR/dispatch bootstrap (required when native leg is absent)
         run: |
           set -euo pipefail
           if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
@@ -1657,7 +1659,7 @@ jobs:
             echo "classify did not succeed — failing macos gate closed"
             exit 1
           fi
-          echo "Skip-safe PR — macos gate ✓ (native matrix intentionally omitted)"
+          echo "Skip-safe PR/dispatch — macos gate ✓ (native matrix intentionally omitted)"
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
