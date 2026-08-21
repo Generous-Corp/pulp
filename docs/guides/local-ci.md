@@ -230,6 +230,13 @@ are rejected without a verified organization group.
 Install the supervisor, role wrappers, verifier, units, and network helper
 before enabling either protected role:
 
+The scheduled reaper deliberately does **not** read the long-lived runner token.
+Before enabling its timer, install Shipyard's GitHub App helper at the exact
+root-owned, non-symlink, non-group/world-writable path
+`/usr/local/bin/ghapp`. The token-file mode below remains supported by the pool
+supervisor, but it is not a reaper authentication fallback; if the helper is
+missing or insecure, recovery exits before inspecting or changing any VM.
+
 ```sh
 apt-get update
 apt-get install -y gh
@@ -241,12 +248,16 @@ install -o root -g root -m 0755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.
   /usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
 install -o root -g root -m 0755 tools/ci/configure-proxmox-ci-network.sh \
   /usr/local/sbin/configure-proxmox-ci-network
+install -o root -g root -m 0755 tools/ci/proxmox-ephemeral-reap-linux.sh \
+  /usr/local/sbin/pulp-ephemeral-reap.sh
 install -d -o root -g root -m 0755 /usr/local/lib/pulp
 install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
 install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
   tools/ci/pulp-pr-safe-ephemeral-pool@.service \
-  tools/ci/proxmox-ephemeral-pool@.service /etc/systemd/system/
+  tools/ci/proxmox-ephemeral-pool@.service \
+  tools/ci/pulp-ephemeral-reap.service \
+  tools/ci/pulp-ephemeral-reap.timer /etc/systemd/system/
 ```
 
 Create separate root-owned role environments; never share one:
@@ -277,9 +288,22 @@ before registration.
 /usr/local/sbin/configure-proxmox-ci-network --apply
 /usr/local/sbin/configure-proxmox-ci-network --verify
 systemctl daemon-reload
+systemctl enable --now pulp-ephemeral-reap.timer
 systemctl enable --now pulp-trusted-ephemeral-pool@1.service
 systemctl enable --now pulp-pr-safe-ephemeral-pool@1.service
 ```
+Before enabling the timer on a host that already has clones in the managed
+VMID range, run the reaper in report-only mode and classify each reported
+legacy generation. The reaper will never mutate a pre-upgrade clone whose
+Proxmox description lacks the updated supervisor's exact
+`pulp-runner-scope=...` provenance, because the old supervisor did not persist
+whether `--keep` was requested. Preserve an intentionally retained clone by
+creating its root-owned mode-0600 generation marker under
+`/var/lib/pulp/ephemeral-runner-keep`; only after proving a legacy clone is
+disposable may an operator add its exact repository or organization recovery
+scope to the Proxmox description. Newly allocated clones carry that scope by
+construction, so scheduled recovery is automatic after the migration boundary.
+
 `--apply` and `--verify` both assert a **default-deny egress policy** per
 isolated bridge, not merely that the bridge exists. MASQUERADE is address
 translation, not filtering: with NAT alone and Proxmox's stock
@@ -410,6 +434,21 @@ exactly one job, and the clone is destroyed. Nothing accumulates, so nothing nee
 cleaning — and the cache a job inherits cannot be poisoned by the job before it.
 This closes the reused-build-dir class outright, which matters because `build.yml`
 sets `clean: false` on self-hosted runners.
+
+The supervisor publishes a root-owned per-generation lease while it owns a
+clone. `pulp-ephemeral-reap.timer` is the crash-recovery backstop: after one
+hour it considers only an ownerless Pulp slot, then requires the exact GitHub
+registration to be idle, one `Runner.Listener --jitconfig`, no worker or
+configuration process, and an empty `_work`. Execution first replaces all
+routing labels with a shutdown fence, proves the idle state twice, stops and
+deregisters the runner, and rechecks the unchanged VM config under the VMID
+allocation lock before destroy. Missing, duplicate, unreachable, busy, or
+otherwise ambiguous evidence always preserves the VM. Run
+`pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
+An operator's explicit `--keep` disposition is generation-bound under
+`/var/lib/pulp/ephemeral-runner-keep`, so it survives a host reboot; a newly
+allocated generation clears only the old marker for its own VMID while holding
+the allocation lock.
 
 Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
 what provisions the next clone. Add a slot by enabling `@3` — but check the governor

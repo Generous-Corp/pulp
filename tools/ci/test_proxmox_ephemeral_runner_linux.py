@@ -14,6 +14,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools" / "ci" / "proxmox-ephemeral-runner-linux.sh"
+REAPER_TEST = ROOT / "tools" / "ci" / "test_proxmox_ephemeral_reap_linux.py"
 SERVICE = ROOT / "tools" / "ci" / "pulp-ephemeral-pool@.service"
 TRUSTED_WRAPPER = ROOT / "tools" / "ci" / "proxmox-trusted-ephemeral-runner-linux.sh"
 PR_SAFE_WRAPPER = ROOT / "tools" / "ci" / "proxmox-pr-safe-ephemeral-runner-linux.sh"
@@ -48,6 +49,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn(marker, self.quality_tests)
         linux_block = self.quality_tests.split(marker, 1)[1].split("endif()", 1)[0]
         self.assertIn("proxmox-ephemeral-linux-runner-selftest", linux_block)
+        self.assertIn("test_proxmox_ephemeral_reap_linux.py", self.quality_tests)
 
     def test_repository_registration_remains_the_default(self) -> None:
         self.assertIn('REGISTRATION_API="repos/${REPO}"', self.script)
@@ -230,10 +232,13 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             allocation.rindex("flock -u 9"),
         )
         self.assertIn(
-            '--description "pulp-runner-generation=${RUNNER_NAME}"', allocation
+            '--description "pulp-runner-generation=${RUNNER_NAME};pulp-runner-scope=${REGISTRATION_API}"',
+            allocation,
         )
         self.assertLess(
-            allocation.index('--description "pulp-runner-generation=${RUNNER_NAME}"'),
+            allocation.index(
+                '--description "pulp-runner-generation=${RUNNER_NAME};pulp-runner-scope=${REGISTRATION_API}"'
+            ),
             allocation.rindex("flock -u 9"),
         )
         self.assertIn('exec 8>"$HOST_NETWORK_LOCK"', allocation)
@@ -263,7 +268,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
             delegation_start:cleanup_start
         ]
         cleanup = self.script[
-            cleanup_start : self.script.index("trap cleanup EXIT")
+            cleanup_start : self.script.index("trap 'cleanup; remove_runner_lease' EXIT")
         ]
         self.assertIn('systemd-run --quiet --collect', delegation)
         self.assertIn('--service-type=oneshot', delegation)
@@ -318,7 +323,7 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         ]
         helper = routing_helper + self.script[
             self.script.index("delegate_deferred_cleanup() {") : self.script.index(
-                "trap cleanup EXIT"
+                "trap 'cleanup; remove_runner_lease' EXIT"
             )
         ]
         with tempfile.TemporaryDirectory() as raw_tmp:
@@ -942,11 +947,11 @@ class ProxmoxEphemeralRunnerLinuxTests(unittest.TestCase):
         self.assertIn('-A tap${VMID}i0-OUT-PROTO -j DROP', self.script)
         self.assertNotIn('chmod 600 "$VM_FIREWALL_TMP"', self.script)
         self.assertGreater(
-            self.script.index('qm set "$VMID"'),
+            self.script.index('qm set "$VMID" --cores'),
             self.script.index('VM_FIREWALL_FILE="${FIREWALL_DIR}/${VMID}.fw"'),
         )
         self.assertLess(
-            self.script.index('qm set "$VMID"'),
+            self.script.index('qm set "$VMID" --cores'),
             self.script.index('"$FIREWALL_STATUS_BIN" compile'),
         )
         self.assertLess(
