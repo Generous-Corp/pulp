@@ -94,15 +94,21 @@ void edt_1d(const float* f, float* d, int n) {
 // pixel-wise floating-point distance image, positive outside the
 // shape, negative inside. Same width × height as input.
 std::vector<float> distance_transform(const std::uint8_t* mask, int w, int h) {
-    std::vector<float> outside(static_cast<std::size_t>(w * h));
-    std::vector<float> inside(static_cast<std::size_t>(w * h));
-    for (int i = 0; i < w * h; ++i) {
+    if (mask == nullptr || w <= 0 || h <= 0) return {};
+    const auto width = static_cast<std::size_t>(w);
+    const auto height = static_cast<std::size_t>(h);
+    if (height > std::numeric_limits<std::size_t>::max() / width) return {};
+    const auto pixel_count = width * height;
+
+    std::vector<float> outside(pixel_count);
+    std::vector<float> inside(pixel_count);
+    for (std::size_t i = 0; i < pixel_count; ++i) {
         if (mask[i] != 0) {
-            outside[static_cast<std::size_t>(i)] = 0.0f;
-            inside[static_cast<std::size_t>(i)]  = kInf;
+            outside[i] = 0.0f;
+            inside[i]  = kInf;
         } else {
-            outside[static_cast<std::size_t>(i)] = kInf;
-            inside[static_cast<std::size_t>(i)]  = 0.0f;
+            outside[i] = kInf;
+            inside[i]  = 0.0f;
         }
     }
     auto pass2d = [&](std::vector<float>& buf) {
@@ -110,24 +116,32 @@ std::vector<float> distance_transform(const std::uint8_t* mask, int w, int h) {
         std::vector<float> col_out(static_cast<std::size_t>(std::max(w, h)));
         // Rows
         for (int y = 0; y < h; ++y) {
-            edt_1d(buf.data() + y * w, col_out.data(), w);
-            std::copy_n(col_out.begin(), w, buf.begin() + y * w);
+            const auto row_offset = static_cast<std::size_t>(y) * width;
+            edt_1d(buf.data() + row_offset, col_out.data(), w);
+            std::copy_n(col_out.begin(), w, buf.begin() + row_offset);
         }
         // Columns
         for (int x = 0; x < w; ++x) {
-            for (int y = 0; y < h; ++y) col[static_cast<std::size_t>(y)] = buf[static_cast<std::size_t>(y * w + x)];
+            for (int y = 0; y < h; ++y) {
+                col[static_cast<std::size_t>(y)] =
+                    buf[static_cast<std::size_t>(y) * width +
+                        static_cast<std::size_t>(x)];
+            }
             edt_1d(col.data(), col_out.data(), h);
-            for (int y = 0; y < h; ++y) buf[static_cast<std::size_t>(y * w + x)] = col_out[static_cast<std::size_t>(y)];
+            for (int y = 0; y < h; ++y) {
+                buf[static_cast<std::size_t>(y) * width +
+                    static_cast<std::size_t>(x)] = col_out[static_cast<std::size_t>(y)];
+            }
         }
     };
     pass2d(outside);
     pass2d(inside);
 
-    std::vector<float> result(static_cast<std::size_t>(w * h));
-    for (int i = 0; i < w * h; ++i) {
-        float d_out = std::sqrt(outside[static_cast<std::size_t>(i)]);
-        float d_in  = std::sqrt(inside[static_cast<std::size_t>(i)]);
-        result[static_cast<std::size_t>(i)] = d_out - d_in;
+    std::vector<float> result(pixel_count);
+    for (std::size_t i = 0; i < pixel_count; ++i) {
+        float d_out = std::sqrt(outside[i]);
+        float d_in  = std::sqrt(inside[i]);
+        result[i] = d_out - d_in;
     }
     return result;
 }
@@ -336,22 +350,44 @@ bool SdfAtlas::build(const std::string& font_family,
                      int base_size,
                      int padding,
                      int max_atlas_size) {
-    if (chars.empty() || base_size <= 0 || padding < 0) return false;
+    if (chars.empty() || base_size <= 0 || padding < 0 || max_atlas_size <= 0 ||
+        padding > (std::numeric_limits<int>::max() - base_size) / 2 ||
+        chars.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return false;
+    }
+
+    const int tile = base_size + 2 * padding;
+    const auto tile_size = static_cast<std::size_t>(tile);
+    if (tile_size > static_cast<std::size_t>(std::numeric_limits<int>::max()) /
+                        tile_size) {
+        return false;
+    }
 
     impl_ = std::make_unique<Impl>();
     impl_->base_size = base_size;
     impl_->padding   = padding;
 
-    const int tile = base_size + 2 * padding;
     const int cols = std::max(1, max_atlas_size / tile);
-    const int rows = (static_cast<int>(chars.size()) + cols - 1) / cols;
-    impl_->width  = cols * tile;
-    impl_->height = rows * tile;
-    if (impl_->width > max_atlas_size || impl_->height > max_atlas_size) {
+    const auto rows = (chars.size() + static_cast<std::size_t>(cols) - 1) /
+                      static_cast<std::size_t>(cols);
+    if (rows > std::numeric_limits<std::size_t>::max() / tile_size) {
         impl_.reset();
         return false;
     }
-    impl_->pixels.assign(static_cast<std::size_t>(impl_->width * impl_->height), 0);
+    const auto atlas_width = static_cast<std::size_t>(cols) *
+                             tile_size;
+    const auto atlas_height = rows * tile_size;
+    if (atlas_width > static_cast<std::size_t>(max_atlas_size) ||
+        atlas_height > static_cast<std::size_t>(max_atlas_size) ||
+        atlas_height > std::numeric_limits<std::size_t>::max() / atlas_width ||
+        atlas_height > static_cast<std::size_t>(std::numeric_limits<int>::max()) /
+                           atlas_width) {
+        impl_.reset();
+        return false;
+    }
+    impl_->width = static_cast<int>(atlas_width);
+    impl_->height = static_cast<int>(atlas_height);
+    impl_->pixels.assign(atlas_width * atlas_height, 0);
 
 #if PULP_HAS_SKIA
     auto shared_face = resolve_typeface(font_family);

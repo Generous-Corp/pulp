@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 
 using namespace pulp::canvas;
@@ -91,6 +92,8 @@ TEST_CASE("SvgImage rasterize guards invalid image and dimensions", "[canvas][sv
     REQUIRE(img.rasterize(16, 0).empty());
     REQUIRE(img.rasterize(-1, 16).empty());
     REQUIRE(img.rasterize(16, -1).empty());
+    REQUIRE(img.rasterize(std::numeric_limits<int>::max(), 1).empty());
+    REQUIRE(img.rasterize(1, std::numeric_limits<int>::max()).empty());
 }
 
 TEST_CASE("SvgImage render to RecordingCanvas", "[canvas][svg]") {

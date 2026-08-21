@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 using pulp::canvas::SdfAtlas;
 using pulp::canvas::SdfGlyph;
 
@@ -86,6 +88,18 @@ TEST_CASE("SdfAtlas rejects invalid build arguments without allocation",
     REQUIRE_FALSE(invalid_padding.build("stub", {U'A'}, 32, -1, 256));
     REQUIRE(invalid_padding.glyph_count() == 0);
     REQUIRE(invalid_padding.pixels() == nullptr);
+
+    SdfAtlas overflowing_tile;
+    REQUIRE_FALSE(overflowing_tile.build(
+        "stub", {U'A'}, 1, std::numeric_limits<int>::max(),
+        std::numeric_limits<int>::max()));
+    REQUIRE(overflowing_tile.glyph_count() == 0);
+    REQUIRE(overflowing_tile.pixels() == nullptr);
+
+    SdfAtlas overflowing_tile_area;
+    REQUIRE_FALSE(overflowing_tile_area.build("stub", {U'A'}, 65536, 0, 65536));
+    REQUIRE(overflowing_tile_area.glyph_count() == 0);
+    REQUIRE(overflowing_tile_area.pixels() == nullptr);
 }
 
 TEST_CASE("SdfAtlas invalid rebuild preserves prior atlas but overflow clears it",

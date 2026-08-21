@@ -41,6 +41,20 @@ endfunction()
 
 pulp_dsp_series_signal_suite(pulp-test-signal-analysis-frontends
                              test_signal_analysis_frontends.cpp)
+pulp_dsp_series_signal_suite(pulp-test-spectral-feature-frontends
+                             test_spectral_feature_frontends.cpp)
+
+add_executable(pulp-test-spectral-feature-frontends-no-exceptions
+    test_spectral_feature_frontends_no_exceptions.cpp)
+target_link_libraries(pulp-test-spectral-feature-frontends-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-spectral-feature-frontends-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-spectral-feature-frontends-no-exceptions PRIVATE
+        -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME spectral-feature-frontends-no-exceptions
+    COMMAND pulp-test-spectral-feature-frontends-no-exceptions)
 
 # Each extracted production header is compiled in its own translation unit.
 # This catches accidental reliance on an umbrella header's include order while
