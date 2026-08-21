@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/sequencer-exposure.schema.json",
+  "title": "Pulp sequencer cross-surface exposure ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ledger_id", "audit", "rows", "tombstones"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "ledger_id": { "const": "dev.pulp.sequencer-exposure@1" },
+    "audit": { "$ref": "#/$defs/audit" },
+    "rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/row" }
+    },
+    "tombstones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tombstone" }
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "auditGap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "surface", "owner", "dependencies", "rationale"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "surface": {
+          "enum": [
+            "historical_census", "installed_sdk", "offline_timeline_cli",
+            "offline_timeline_mcp", "live_product_control",
+            "design_time_agent_manifest"
+          ]
+        },
+        "owner": { "type": "string", "minLength": 1 },
+        "dependencies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "scope", "owner", "dependencies", "gaps"],
+      "properties": {
+        "status": { "enum": ["in_progress", "complete"] },
+        "scope": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "gaps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/auditGap" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "in_progress" } } },
+          "then": { "properties": { "gaps": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "complete" } } },
+          "then": { "properties": { "gaps": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "needles"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "sdk_header", "sdk_target", "cli_definition", "cli_handler",
+            "mcp_definition", "mcp_handler", "capability_definition",
+            "operation_definition", "executor_binding", "profile_policy",
+            "cli_projection", "mcp_projection", "test", "agent_manifest",
+            "doc", "skill", "other"
+          ]
+        },
+        "path": { "type": "string", "minLength": 1 },
+        "needles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "pathEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "needles"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "needles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "rationale"],
+      "properties": {
+        "disposition": {
+          "enum": ["exposed", "gap", "not_applicable", "deferred"]
+        },
+        "rationale": { "type": "string", "minLength": 1 },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "owner": { "type": "string", "minLength": 1 },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "disposition": { "enum": ["gap", "deferred"] }
+            },
+            "required": ["disposition"]
+          },
+          "then": {
+            "required": ["owner", "dependencies"],
+            "properties": {
+              "dependencies": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "disposition": { "const": "exposed" }
+            },
+            "required": ["disposition"]
+          },
+          "then": {
+            "required": ["evidence"],
+            "properties": {
+              "evidence": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr", "accepted_head", "merge_sha", "integration_mode"],
+      "properties": {
+        "pr": { "type": "integer", "minimum": 1 },
+        "accepted_head": { "$ref": "#/$defs/sha" },
+        "merge_sha": { "$ref": "#/$defs/sha" },
+        "integration_mode": { "enum": ["merge", "squash"] }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "delivery_state", "claim_id", "owned_paths",
+        "classification", "evidence", "surfaces"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 1 },
+        "delivery_state": { "enum": ["pending", "released"] },
+        "claim_id": { "type": "string", "minLength": 1 },
+        "owned_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "classification": {
+          "enum": [
+            "ci_test_only", "engine_internal", "public_sdk",
+            "offline_cli_mcp", "live_product_control"
+          ]
+        },
+        "release": { "$ref": "#/$defs/release" },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pathEvidence" }
+        },
+        "surfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "installed_sdk", "offline_timeline_cli", "offline_timeline_mcp",
+            "live_product_control", "design_time_agent_manifest"
+          ],
+          "properties": {
+            "installed_sdk": { "$ref": "#/$defs/surface" },
+            "offline_timeline_cli": { "$ref": "#/$defs/surface" },
+            "offline_timeline_mcp": { "$ref": "#/$defs/surface" },
+            "live_product_control": { "$ref": "#/$defs/surface" },
+            "design_time_agent_manifest": { "$ref": "#/$defs/surface" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "delivery_state": { "const": "pending" } } },
+          "then": { "not": { "required": ["release"] } }
+        },
+        {
+          "if": { "properties": { "delivery_state": { "const": "released" } } },
+          "then": { "required": ["release"] }
+        }
+      ]
+    },
+    "tombstone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "delivery_state", "claim_id", "owned_paths", "rationale"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "delivery_state": { "enum": ["pending", "released"] },
+        "claim_id": { "type": "string", "minLength": 1 },
+        "owned_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "replaced_by": { "$ref": "#/$defs/identifier" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "removed_in_merge": { "$ref": "#/$defs/sha" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "delivery_state": { "const": "pending" } } },
+          "then": { "not": { "required": ["removed_in_merge"] } }
+        },
+        {
+          "if": { "properties": { "delivery_state": { "const": "released" } } },
+          "then": { "required": ["removed_in_merge"] }
+        }
+      ]
+    }
+  }
+}

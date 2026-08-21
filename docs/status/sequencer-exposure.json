@@ -1,0 +1,969 @@
+{
+  "schema_version": 1,
+  "ledger_id": "dev.pulp.sequencer-exposure@1",
+  "audit": {
+    "status": "in_progress",
+    "scope": "Protected-merged modern sequencer, timeline, playback, and sequencer-adjacent platform slices on current main.",
+    "owner": "sequencer-exposure-audit",
+    "dependencies": [
+      "historical-release-census",
+      "p2-21-ios-simulator-roundtrip",
+      "product-a-sequencer-control-tranche"
+    ],
+    "gaps": [
+      {
+        "id": "historical-release-census-incomplete",
+        "surface": "historical_census",
+        "owner": "sequencer-exposure-audit",
+        "dependencies": ["historical-release-census"],
+        "rationale": "The initial ledger contains only releases whose protected head, merge, and source evidence were reverified; older planning RELEASE prose still requires protected-main reconciliation before the audit may be called complete."
+      },
+      {
+        "id": "live-product-control-semantic-zero",
+        "surface": "live_product_control",
+        "owner": "sequencer-control-closure",
+        "dependencies": ["product-a-timeline-document-session", "product-a-sequencer-control-tranche"],
+        "rationale": "The Product A registry has generic state and test-input operations, including a transport-shaped test event, but no sequencer or timeline document capability ID, operation, executor, or policy projection."
+      },
+      {
+        "id": "p2-21-ios-simulator-acceptance-held",
+        "surface": "historical_census",
+        "owner": "sequencer-p2-21-acceptance",
+        "dependencies": ["p2-21-ios-simulator-roundtrip"],
+        "rationale": "PR #7644 protected-delivered the backend, but planning acceptance remains held until a fresh PULP_IOS_REQUIRE_SIMULATOR=1 run captures the live virtual-CoreMIDI source/destination enumeration, bidirectional I/O, teardown, and disappearance artifact. A released delivery row records merge provenance only and does not release that planning claim."
+      }
+    ]
+  },
+  "rows": [
+    {
+      "id": "step-sequencer-state-channel",
+      "title": "Parametric SequencerStateChannel and StepGridView",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-5740",
+      "owned_paths": [
+        "core/state/include/pulp/state/sequencer_state_channel.hpp",
+        "core/state/include/pulp/state/step_edit_reducer.hpp",
+        "core/view/include/pulp/view/step_grid_view.hpp",
+        "core/view/src/step_grid_view.cpp"
+      ],
+      "release": {
+        "pr": 5740,
+        "accepted_head": "ed93e6a8942b1b209d59d060a220c7e92a31dcbe",
+        "merge_sha": "33ab807eacbfe6a772e6c3e3745f7758d39aba20",
+        "integration_mode": "squash"
+      },
+      "evidence": [
+        {
+          "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
+          "needles": ["class SequencerStateChannelT", "using SequencerStateChannel"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The public state header installs the fixed-capacity lock-free channel and reference alias.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
+              "needles": ["class SequencerStateChannelT", "using SequencerStateChannel"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This is a live plugin state transport primitive, not a persisted timeline-document operation."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "This is a live plugin state transport primitive, not a persisted timeline-document operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed operation and executor for sequencer grid snapshots or edits.",
+          "dependencies": ["product-a-sequencer-state-operation"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The design-time installed capability manifest describes offline SDK composition contracts, not live runtime authority."
+        }
+      }
+    },
+    {
+      "id": "p0-9-midi-content",
+      "title": "MidiContent clip model and typed note edits",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-6930",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/clip.hpp",
+        "core/timeline/include/pulp/timeline/midi_lane.hpp",
+        "core/timeline/src/model.cpp",
+        "core/timeline/src/serialize_project_decode.cpp",
+        "test/test_timeline_midi_content.cpp"
+      ],
+      "release": {
+        "pr": 6930,
+        "accepted_head": "3b620370b66d01856a550e2ce4b899903c2f0e68",
+        "merge_sha": "7529ead3c5e67291e91ad6760fec481009b47ed3",
+        "integration_mode": "squash"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/clip.hpp",
+          "needles": ["class MidiContent", "using ClipContent"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "MidiContent is an installed public timeline model type.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/clip.hpp",
+              "needles": ["class MidiContent"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The timeline CLI exposes the typed replace-note-content command through the canonical command-apply handler.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": ["pulp.timeline.command.replace_note_content"]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": ["command_apply", "ProjectSource::file"]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The generated MCP definition carries the typed note command vocabulary and binds it to the real timeline handler.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": ["pulp_timeline_command_apply", "pulp.timeline.command.replace_note_content"]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": ["handle_timeline_command_apply", "kTimelineCommandApplyToolName"]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Offline document commands are not Product A grants; no live typed note-content operation is registered.",
+          "dependencies": ["product-a-timeline-document-session"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The design-time manifest is separate from timeline document control and does not grant runtime authority."
+        }
+      }
+    },
+    {
+      "id": "p0-17-section-role-tuning",
+      "title": "Section roles and document tuning",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-6970",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/tuning.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/src/sequence.cpp",
+        "test/test_timeline_tuning.cpp"
+      ],
+      "release": {
+        "pr": 6970,
+        "accepted_head": "937a26c289db0fc082eb48b46c94a8040d8b08aa",
+        "merge_sha": "e6b05f7870f254a6a4cfda4f6185f2aebef9fdac",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/tuning.hpp",
+          "needles": ["struct TuningReference", "valid_tuning_reference"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The tuning contract is an installed public timeline header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/tuning.hpp",
+              "needles": ["struct TuningReference"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The CLI can read and validate tuning in a project, but the typed command vocabulary has no tuning mutation.",
+          "dependencies": ["offline-timeline-tuning-command"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP schema advertises tuning documents but has no typed tuning mutation command.",
+          "dependencies": ["offline-timeline-tuning-command"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed tuning read or mutation operation for a live sequencer document.",
+          "dependencies": ["product-a-timeline-document-session", "offline-timeline-tuning-command"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Project tuning is persisted timeline state, not an offline SDK-composition capability entry."
+        }
+      }
+    },
+    {
+      "id": "p0-21-modulation-macros",
+      "title": "Timeline modulation routes and macro schema",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7052",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/modulation.hpp",
+        "core/timeline/include/pulp/timeline/parameter_target.hpp",
+        "core/timeline/src/modulation_document_internal.cpp",
+        "core/timeline/src/serialize_modulation_decode.cpp",
+        "test/test_timeline_modulation.cpp"
+      ],
+      "release": {
+        "pr": 7052,
+        "accepted_head": "7db50f2e5a3138fa4d3b9b9ad29e6cf020061791",
+        "merge_sha": "a30c13c8ed737f4a31a3cded748a4252fc619305",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/modulation.hpp",
+          "needles": ["struct Modulator", "struct MacroControl"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "Modulator, macro, route, and target types are installed public timeline APIs.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/modulation.hpp",
+              "needles": ["struct Modulator", "struct MacroControl"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The CLI can read and validate modulation state but has no typed modulator, macro, or route mutation command.",
+          "dependencies": ["offline-timeline-modulation-commands"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP document schema includes modulation types but its command enum has no typed modulation mutation.",
+          "dependencies": ["offline-timeline-modulation-commands"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live timeline macro or modulation-route operation.",
+          "dependencies": ["product-a-timeline-document-session", "offline-timeline-modulation-commands"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Timeline macro state is not the separate design-time SDK capability manifest."
+        }
+      }
+    },
+    {
+      "id": "p0-38-agent-view",
+      "title": "Bounded AgentView projection",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7040",
+      "owned_paths": [
+        "core/timeline_agent_view/include/pulp/timeline_agent_view/agent_view.hpp",
+        "core/timeline_agent_view/src/agent_view.cpp",
+        "test/test_timeline_agent_view.cpp"
+      ],
+      "release": {
+        "pr": 7040,
+        "accepted_head": "c146151773481906c8ccfa94fced6304f36c38c7",
+        "merge_sha": "38c4118279c398eadc1e87700070cfbd98057143",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline_agent_view/include/pulp/timeline_agent_view/agent_view.hpp",
+          "needles": ["class AgentView", "kAgentViewVersion"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "AgentView is an installed versioned public projection over immutable document snapshots.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline_agent_view/include/pulp/timeline_agent_view/agent_view.hpp",
+              "needles": ["class AgentView", "kAgentViewVersion"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The offline CLI has project open and explain but no bounded AgentView paging/diff projection.",
+          "dependencies": ["offline-agent-view-projection"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The offline MCP tools do not expose AgentView outline, paging, or dirty-set projection.",
+          "dependencies": ["offline-agent-view-projection"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A state read is parameter-oriented and has no exact-document AgentView executor binding.",
+          "dependencies": ["product-a-timeline-document-session", "offline-agent-view-projection"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "AgentView is a runtime/document projection; it is not the installed design-time capability manifest."
+        }
+      }
+    },
+    {
+      "id": "p0-8-compile-context-capacity",
+      "title": "Compile-context capacity and reserved kind vocabulary",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7593",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/compile_context.hpp",
+        "test/test_playback_compile_context.cpp"
+      ],
+      "release": {
+        "pr": 7593,
+        "accepted_head": "aec37fd4edd4f06a127478b8e7a77fccc2c26fff",
+        "merge_sha": "aa12f840e4b0bf70f53ebdc5857d9fb71d44a3a9",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/compile_context.hpp",
+          "needles": ["kCompileContextKindCount = 5", "using Bits = std::uint16_t"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The wider subscription bitset and reserved kinds are part of the installed compile-context header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/compile_context.hpp",
+              "needles": ["kCompileContextKindCount = 5", "using Bits = std::uint16_t"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Subscription capacity and reserved enum slots are compiler bookkeeping, not document operations."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Subscription capacity and reserved enum slots are compiler bookkeeping, not MCP operations."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The bitset width is an implementation capacity behind higher-level sequencer controls."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Compiler subscription storage is not an offline algorithm-composition capability."
+        }
+      }
+    },
+    {
+      "id": "p0-18-device-chains",
+      "title": "Durable typed device chains",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7512",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/device_placement.hpp",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/src/transaction_device_internal.cpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "test/test_timeline_device_placement.cpp"
+      ],
+      "release": {
+        "pr": 7512,
+        "accepted_head": "0df0ef8836ef90322441d232fb02cd644e6dc6b1",
+        "merge_sha": "60f2f706d671056c61d4172de3b61ff4bb0f4903",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/device_placement.hpp",
+          "needles": ["struct DevicePlacement", "DeviceConfiguration"]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": ["struct InsertDevice", "struct SetDeviceState"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "Device placement and typed device commands are installed public timeline contracts.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/device_placement.hpp",
+              "needles": ["struct DevicePlacement"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The generated CLI vocabulary and real command-apply handler carry typed device operations.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": ["pulp.timeline.command.insert_device", "pulp.timeline.command.set_device_state"]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": ["command_apply", "ProjectSource::file"]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP command definition includes typed device commands and binds them to the real handler.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": ["pulp.timeline.command.insert_device", "pulp.timeline.command.set_device_state"]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": ["handle_timeline_command_apply", "kTimelineCommandApplyToolName"]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Offline typed device commands are not live Product A device-chain authority.",
+          "owner": "sequencer-control-closure",
+          "dependencies": ["product-a-timeline-document-session", "product-a-device-chain-operations"]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Persisted device placement is timeline state, not the separate design-time capability manifest."
+        }
+      }
+    },
+    {
+      "id": "p1-5-built-in-instrument-lowering",
+      "title": "Built-in timeline instrument lowering",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7532",
+      "owned_paths": [
+        "core/host/include/pulp/host/timeline_device_resolver.hpp",
+        "core/host/src/timeline_device_resolver.cpp",
+        "core/host/include/pulp/host/timeline_graph_binding.hpp",
+        "core/host/src/timeline_graph_binding.cpp",
+        "core/playback/include/pulp/playback/program.hpp",
+        "test/test_timeline_graph_binding.cpp"
+      ],
+      "release": {
+        "pr": 7532,
+        "accepted_head": "b0b168701ebdd0eb80a696e2c3dc9c38a44ebcc4",
+        "merge_sha": "3b9ebb314b9503d39b85a8626fe4b794b2f222bc",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/host/src/timeline_device_resolver.cpp",
+          "needles": ["PluginFormat::BuiltIn", "DeviceKind::BuiltIn"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The resolver and graph-binding composition seams are installed host APIs.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
+              "needles": ["load_builtin_plugin"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Built-in lowering is consumed behind existing compile and render operations, not a separate document verb."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Built-in lowering is consumed behind existing compile and render operations, not a separate MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Resolver mechanics are not independent user authority; live device-chain edits are tracked by the device-chain row."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Host lowering mechanics are not an offline algorithm selection contract."
+        }
+      }
+    },
+    {
+      "id": "p1-6-sparse-live-edit-compile",
+      "title": "Sparse live edit, compile, and playback adoption",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7594",
+      "owned_paths": [
+        "examples/timeline-phase1/timeline_example_engine.cpp",
+        "examples/timeline-phase1/timeline_example_engine.hpp",
+        "examples/timeline-phase1/timeline_step_sequencer.cpp",
+        "examples/timeline-phase1/timeline_step_sequencer.hpp",
+        "examples/timeline-phase1/test_timeline_phase1_examples.cpp"
+      ],
+      "release": {
+        "pr": 7594,
+        "accepted_head": "e23fe32e4a9ff5251137d464d0978eba7189650b",
+        "merge_sha": "867ca3ad046c3aae55d5b866a5d3577ee4768fd8",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "examples/timeline-phase1/timeline_example_engine.cpp",
+          "needles": ["CompileInvalidationInput", "committed"]
+        },
+        {
+          "path": "examples/timeline-phase1/test_timeline_phase1_examples.cpp",
+          "needles": ["sparse recompile reuses the clean sentinel track", "sentinel_after.get() == sentinel_before.get()"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This slice integrates existing APIs inside a repository example and adds no installed SDK contract."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Sparse live adoption is an example runtime integration, not an offline document operation."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Sparse live adoption is an example runtime integration, not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "The example proves in-process adoption but Product A has no live sequencer document session that can drive it.",
+          "owner": "sequencer-control-closure",
+          "dependencies": ["product-a-timeline-document-session"]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "An example adoption path is not a design-time SDK capability."
+        }
+      }
+    },
+    {
+      "id": "p2-21-ios-coremidi-backend",
+      "title": "iOS CoreMIDI device backend",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7644",
+      "owned_paths": [
+        "core/midi/platform/mac/coremidi_device.mm",
+        "core/midi/platform/mac/coremidi_shared_client.h",
+        "core/midi/platform/mac/ump_session_coremidi.mm",
+        "core/midi/src/ump_session.cpp",
+        "test/ios/coremidi_backend_harness.mm",
+        "test/test_coremidi_shared_client.cpp"
+      ],
+      "release": {
+        "pr": 7644,
+        "accepted_head": "4eab656f750e3598465ed5232a18e8b8b59e6d56",
+        "merge_sha": "9fd858cb67ff8cdc7df73acaf4d6b3fdc7620482",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/midi/platform/mac/coremidi_device.mm",
+          "needles": ["TARGET_OS_IPHONE", "create_midi_system"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This slice implements the platform backend behind the existing MIDI system API without adding a public header."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "A live operating-system MIDI backend is not a persisted timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "A live operating-system MIDI backend is not an offline MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Backend enumeration and I/O are infrastructure; any live MIDI authority selection belongs to a separately typed higher-level operation."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A platform MIDI backend is not an offline algorithm-composition capability."
+        }
+      }
+    },
+    {
+      "id": "p0-15a-dynamics-lane",
+      "title": "Sequence-owned dynamics lane",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7656",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/include/pulp/timeline/compile_context.hpp",
+        "core/timeline/src/compile_context.cpp",
+        "test/test_timeline_dynamics_lane.cpp"
+      ],
+      "release": {
+        "pr": 7656,
+        "accepted_head": "4540e80adab433bfe8355bf38222bc1e7b36ca4d",
+        "merge_sha": "fe4f28340ed688b7c294668f7e332ab312eceff5",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": ["class DynamicsLane", "with_dynamics_lane"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "DynamicsLane and sequence ownership are installed public timeline model APIs.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": ["class DynamicsLane", "with_dynamics_lane"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The CLI can persist and inspect the lane but has no typed dynamics-lane mutation command.",
+          "dependencies": ["offline-timeline-dynamics-command"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation.",
+          "dependencies": ["offline-timeline-dynamics-command"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live dynamics-lane operation or executor.",
+          "dependencies": ["product-a-timeline-document-session", "offline-timeline-dynamics-command"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A persisted dynamics lane is timeline state, not a design-time algorithm capability."
+        }
+      }
+    },
+    {
+      "id": "p1-7-timeline-offline-render",
+      "title": "Transport-aware timeline offline render",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7640",
+      "owned_paths": [
+        "core/host/include/pulp/host/timeline_offline_renderer.hpp",
+        "core/host/src/timeline_offline_renderer.cpp",
+        "test/test_timeline_offline_renderer.cpp"
+      ],
+      "release": {
+        "pr": 7640,
+        "accepted_head": "543ceb6ec6ba67e458d669137c6b1ac3e15e8695",
+        "merge_sha": "08b56c7e8d62c32fbd344bc6caeef0530d0dcb4b",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/host/include/pulp/host/timeline_offline_renderer.hpp",
+          "needles": ["render_timeline_offline", "TimelineOfflineRenderResult"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The transport-aware renderer is an installed host header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_offline_renderer.hpp",
+              "needles": ["render_timeline_offline"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The existing render command still uses ArrangementAudioRenderer and does not call this transport-aware hosted renderer.",
+          "dependencies": ["x-a6-hosted-render-tool-integration"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The existing MCP render handler still uses ArrangementAudioRenderer and does not call this transport-aware hosted renderer.",
+          "dependencies": ["x-a6-hosted-render-tool-integration"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A's generic offline-audio executor does not accept or render a live sequencer document through this timeline path.",
+          "dependencies": ["product-a-timeline-document-session", "product-a-timeline-render-operation"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Rendering a project is an operation, not an offline SDK-composition capability entry."
+        }
+      }
+    },
+    {
+      "id": "xc1-p5-7-schema-fixture-coverage",
+      "title": "Document fixture coverage for every sequence schema version",
+      "classification": "ci_test_only",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7691",
+      "owned_paths": [
+        ".github/workflows/timeline-hardening.yml",
+        "tools/scripts/timeline_fixture_coverage_check.py",
+        "tools/scripts/test_timeline_fixture_coverage_check.py",
+        "test/fixtures/timeline/corpus.index"
+      ],
+      "release": {
+        "pr": 7691,
+        "accepted_head": "3d3135c97270fadf78e004ff7a9454b48c7ce133",
+        "merge_sha": "6096a3ac251dc32c20f7511d8243c3669dc7aa1e",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "tools/scripts/timeline_fixture_coverage_check.py",
+          "needles": ["every persisted sequence schema version", "versions lacking a corpus document"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This slice is a repository validation gate, not a shipped SDK feature."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This slice validates fixtures in CI and adds no user operation."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "This slice validates fixtures in CI and adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "A schema-fixture gate is not independently controllable at runtime."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A schema-fixture gate is not an installed design-time capability."
+        }
+      }
+    },
+    {
+      "id": "p4-3-buffered-content-source-v2",
+      "title": "BufferedContentSource v2 epochs, seek, loop wrap, and preroll",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7698",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/buffered_content_source.hpp",
+        "test/test_playback_buffered_content_source.cpp"
+      ],
+      "release": {
+        "pr": 7698,
+        "accepted_head": "85f4197a8959d7c0102a3a7f93e79cb1a9d72fd2",
+        "merge_sha": "67c3a85fd70174d71ea5b570350559b93a9a8a13",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/buffered_content_source.hpp",
+          "needles": ["class BufferedContentSource", "BufferedContentSourceConfig"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The playback source and its configuration are public installed headers for engine composition.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/buffered_content_source.hpp",
+              "needles": ["class BufferedContentSource", "BufferedContentSourceConfig"]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This is a playback backend consumed behind existing project operations, not a standalone document verb."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "This is a playback backend consumed behind existing project operations, not a standalone MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Epoch, seek, wrap, and preroll bookkeeping are engine mechanics; user transport authority belongs to the higher-level transport owner."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The playback backend is not an offline algorithm-selection capability."
+        }
+      }
+    },
+    {
+      "id": "p5-9a-large-session-performance",
+      "title": "Large-session scale and AgentView performance budgets",
+      "classification": "ci_test_only",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7739",
+      "owned_paths": [
+        ".github/workflows/timeline-hardening.yml",
+        "test/test_timeline_agent_view.cpp",
+        "test/test_timeline_scale.cpp"
+      ],
+      "release": {
+        "pr": 7739,
+        "accepted_head": "89738b158fcb64dd0d28d7e46f37d039d712b985",
+        "merge_sha": "9fe0c0b7c35bdedf11f2cec449ad61e4b6c54f6e",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "test/test_timeline_scale.cpp",
+          "needles": ["missing performance budget", "kAutomationPointsPerLane = 10'000"]
+        },
+        {
+          "path": "test/test_timeline_agent_view.cpp",
+          "needles": ["missing performance budget", "kPagingFirstTrackId = 10'000"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This slice tightens tests and workflow budgets without adding a shipped SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Performance budgets are CI policy, not an offline user command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Performance budgets are CI policy, not an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Performance test budgets are not independently controllable runtime behavior."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Performance test budgets are not installed capability metadata."
+        }
+      }
+    },
+    {
+      "id": "e0-sequencer-exposure-governance",
+      "title": "Cross-surface sequencer exposure ledger and required omission gate",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "82c86cc8-c36b-4ef0-bddf-df47798a1f94",
+      "owned_paths": [
+        ".github/workflows/version-skill-check.yml",
+        "docs/reference/capability-control.md",
+        "docs/status/sequencer-exposure.json",
+        "docs/status/sequencer-exposure.schema.json",
+        "tools/scripts/sequencer_exposure_check.py",
+        "tools/scripts/test_sequencer_exposure_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/sequencer_exposure_check.py",
+          "needles": ["validate_transition", "validate_release_evidence", "validate_tombstone_provenance"]
+        },
+        {
+          "path": ".github/workflows/version-skill-check.yml",
+          "needles": ["Sequencer exposure ledger", "sequencer_exposure_check.py --base"]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This slice governs delivery evidence and adds no installed SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This slice adds a repository validation gate, not a timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "This slice adds a repository validation gate, not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Exposure governance prevents false runtime-control claims but is not itself a runtime operation."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The ledger audits the design-time manifest as a distinct surface without adding a capability entry."
+        }
+      }
+    }
+  ],
+  "tombstones": []
+}

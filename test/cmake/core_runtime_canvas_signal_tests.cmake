@@ -446,25 +446,31 @@ endif()
 
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
-# Standalone editor chrome helpers
-# These construct a StandaloneApp, which opens the real audio device on init
-# (standalone.cpp create_device/open/start) — same RT-thread-starved teardown
-# hazard as pulp-test-audio above, so they get the same PROCESSORS reservation.
+# Standalone editor chrome helpers. These never call StandaloneApp::start() or
+# open a real audio device, so PROCESSORS remains a scheduling weight, not
+# isolation.
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# This suite calls StandaloneApp::start(), which opens and starts the real audio
+# device. RUN_SERIAL preserves the device/RT teardown isolation contract at any
+# dynamically granted CTest width; PROCESSORS remains its weighted cost.
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
-    PROPERTIES PROCESSORS 8)
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
 # Screenshot-only launches skip the audio backend; the device lifecycle is
 # asserted through an injected fake system, so this one opens no real device
 # and needs no PROCESSORS reservation.
 pulp_add_test_suite(pulp-test-standalone-capture-audio LIBRARIES pulp::standalone pulp::audio)
-pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
-pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-audio-capture-wav
+    LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav
+    LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
+# Like apply-config above, this suite calls StandaloneApp::start() and opens the
+# real output device before exercising its probe wiring.
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
-    LIBRARIES pulp::standalone pulp::view PROPERTIES PROCESSORS 8)
+    LIBRARIES pulp::standalone pulp::view PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
 # Headless screenshot capture state machine
 pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)

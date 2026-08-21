@@ -11,18 +11,26 @@ tier-0 bound is not safe — on a big-RAM host the memory axis never binds and
 tier-0 degrades to the full core count, i.e. the denial would be answered by
 running wider than the request that was just refused.
 
-These tests drive the script with a stub `tartci` on PATH, so they need no
+Most tests drive the script with a stub `tartci` on PATH, so they need no
 compile, no real lease store, and no particular host size. The stub is written
 once and steered by env vars: some hosts security-scan a newly written
 executable on first exec (seconds), so a per-test stub file would pay that
-repeatedly.
+repeatedly. When tartci is installed, integration cases use a private
+temporary store to pin dead-owner reaping without touching host lease state.
+If this test itself is running under a tartci-governed CTest, the wrapper passes
+the exact binary path down and an unsupported lease contract fails rather than
+silently skipping.
 
 Run:  python3 tools/ci/test_governed_build.py
 """
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -104,14 +112,17 @@ class GovernedBuildTests(unittest.TestCase):
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "PULP_GOVERNED_BUILD_MIN_JOBS": str(FLOOR),
         }
-        for k in ("PULP_TARTCI_BIN", "PULP_TARTCI_LEASES", "STUB_PROFILE_JOBS",
-                  "STUB_FREE_CORES", "STUB_MAX_GRANT", "STUB_FAIL_ALL",
-                  "STUB_HOLDER_PIDS"):
+        for k in ("PULP_TARTCI_BIN", "PULP_TARTCI_LEASES",
+                  "PULP_GOVERNED_TARTCI_BIN", "PULP_REAL_TARTCI_BIN",
+                  "STUB_PROFILE_JOBS", "STUB_FREE_CORES", "STUB_MAX_GRANT",
+                  "STUB_FAIL_ALL", "STUB_HOLDER_PIDS"):
             env.pop(k, None)
         env.update(stub_env)
         return subprocess.run(
             ["bash", str(SCRIPT), "sh", "-c",
-             'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL CTEST=$CTEST_PARALLEL_LEVEL"'],
+             'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL '
+             'CTEST=$CTEST_PARALLEL_LEVEL '
+             'TARTCI=${PULP_GOVERNED_TARTCI_BIN:-}"'],
             capture_output=True, text=True, check=False, env=env,
         )
 
@@ -120,6 +131,12 @@ class GovernedBuildTests(unittest.TestCase):
             if tok.startswith("JOBS="):
                 return int(tok.split("=", 1)[1])
         self.fail(f"wrapper never ran the build command\n{r.stdout}\n{r.stderr}")
+
+    def _ctest_granted(self, r: subprocess.CompletedProcess) -> int:
+        for tok in r.stdout.split():
+            if tok.startswith("CTEST="):
+                return int(tok.split("=", 1)[1])
+        self.fail(f"wrapper never exported CTest parallelism\n{r.stdout}\n{r.stderr}")
 
     # --- the denial path (the reason this wrapper exists) --------------------
 
@@ -150,6 +167,11 @@ class GovernedBuildTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), FLOOR, r.stderr)
 
+    def test_ctest_denial_falls_back_to_the_same_bounded_floor(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._ctest_granted(r), FLOOR, r.stderr)
+
     def test_zero_free_cores_uses_floor_not_core_count(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -175,11 +197,9 @@ class GovernedBuildTests(unittest.TestCase):
 
     # --- a denial must say WHO holds the cores -------------------------------
     #
-    # A real denial and a stale-lease lie both produced exactly one log line and
-    # a slow build, so an operator could not tell "the host is busy" from "the
-    # store is wrong" without three more commands. On 2026-08-16 two leases held
-    # on behalf of VMs that no longer existed pinned a critical-path build to the
-    # floor for its whole run. The holder's liveness is what separates the two.
+    # A holder can die after acquire's locked identity check and before denial
+    # diagnostics run. Name it accurately: the next acquire reaps it, whereas a
+    # live holder remains real contention.
 
     @staticmethod
     def _dead_pid() -> int:
@@ -206,15 +226,15 @@ class GovernedBuildTests(unittest.TestCase):
                       STUB_HOLDER_PIDS=str(os.getpid()))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("alive=yes", r.stderr)
-        self.assertNotIn("likely stale", r.stderr)
+        self.assertNotIn("next acquire will reap", r.stderr)
 
-    def test_dead_holder_is_reported_as_stale(self) -> None:
-        """The 2026-08-16 shape: cores held on behalf of a process that is gone."""
+    def test_dead_holder_reports_next_acquire_recovery(self) -> None:
+        """A post-admission owner death is bounded by the next acquire."""
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
                       STUB_HOLDER_PIDS=str(self._dead_pid()))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("alive=no", r.stderr)
-        self.assertIn("likely stale", r.stderr)
+        self.assertIn("next acquire will reap", r.stderr)
 
     def test_holder_reporting_does_not_change_parallelism(self) -> None:
         """Diagnostics are diagnostics: the floor is still the floor."""
@@ -245,6 +265,18 @@ class GovernedBuildTests(unittest.TestCase):
                       STUB_MAX_GRANT=str(PROFILE_JOBS))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
+
+    def test_ctest_parallelism_uses_the_granted_lease_size(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._ctest_granted(r), PROFILE_JOBS, r.stderr)
+
+    def test_detected_tartci_path_is_exported_to_validation(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"TARTCI={self.bindir / 'tartci'}", r.stdout)
 
     def test_no_tartci_still_builds_bounded(self) -> None:
         """Plain checkout / build VM: tier-0 bound, still >= 1 and finite."""
@@ -373,6 +405,187 @@ class GovernedBuildTests(unittest.TestCase):
         r = subprocess.run(["bash", str(SCRIPT)],
                            capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+
+class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
+    """Out-of-process proof of the store contract used after SIGKILL.
+
+    The Pulp wrapper cannot run its EXIT trap after SIGKILL. Current tartci
+    makes recovery bounded anyway: every acquire revalidates owner PID, process
+    start time, and host boot identity under the store lock before capacity is
+    calculated. These tests use a private temporary store and never touch host
+    lease state.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        governed_candidate = os.environ.get("PULP_GOVERNED_TARTCI_BIN")
+        candidate = (
+            governed_candidate
+            or os.environ.get("PULP_REAL_TARTCI_BIN")
+            or shutil.which("tartci")
+        )
+        if not candidate:
+            raise unittest.SkipTest("tartci unavailable; hermetic governor tests still run")
+        probe = subprocess.run(
+            [candidate, "leases", "acquire", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            if governed_candidate:
+                raise AssertionError(
+                    "governed CTest's tartci lacks the required lease-store contract: "
+                    + probe.stdout
+                    + probe.stderr
+                )
+            raise unittest.SkipTest("installed tartci lacks the lease-store contract")
+        cls.tartci = candidate
+
+    def _acquire(
+        self, store: Path, lease_id: str, pid: int, *, stale_secs: int = 300
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                self.tartci,
+                "leases",
+                "acquire",
+                "--store-dir",
+                str(store),
+                "--capacity",
+                "2",
+                "--capacity-mem-mb",
+                "0",
+                "--reserved-gate-cores",
+                "0",
+                "--stale-secs",
+                str(stale_secs),
+                "--cores",
+                "2",
+                "--priority",
+                "build",
+                "--pid",
+                str(pid),
+                "--id",
+                lease_id,
+                "--kind",
+                "shipyard-local",
+                "--owner",
+                "governed-build-regression",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def _replace_record_identity(store: Path, lease_id: str, **fields: object) -> None:
+        path = store / "leases.json"
+        records = json.loads(path.read_text(encoding="utf-8"))
+        matches = [record for record in records if record.get("id") == lease_id]
+        if len(matches) != 1:
+            raise AssertionError(f"expected one private-store record for {lease_id}")
+        matches[0].update(fields)
+        path.write_text(
+            json.dumps(records, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_next_acquire_reaps_a_fresh_sigkilled_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            owner = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"]
+            )
+            try:
+                first = self._acquire(store, "sigkilled-owner", owner.pid)
+                self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+
+                os.kill(owner.pid, signal.SIGKILL)
+                owner.wait(timeout=5)
+
+                recovered = self._acquire(store, "replacement", os.getpid())
+                self.assertEqual(
+                    recovered.returncode, 0, recovered.stdout + recovered.stderr
+                )
+                body = json.loads(recovered.stdout)
+                self.assertEqual(
+                    body["reaped"],
+                    [{"id": "sigkilled-owner", "reason": "identity_mismatch"}],
+                )
+                self.assertEqual(body["capacity"]["used_cores"], 2)
+            finally:
+                if owner.poll() is None:
+                    owner.kill()
+                    owner.wait(timeout=5)
+
+    def test_stale_live_owner_still_blocks_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            held = self._acquire(store, "live-owner", os.getpid())
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+
+            # Zero makes the just-written heartbeat deterministically stale;
+            # identity, not elapsed time, remains the authority for eviction.
+            denied = self._acquire(
+                store, "contender", os.getpid(), stale_secs=0
+            )
+            self.assertEqual(denied.returncode, 75, denied.stdout + denied.stderr)
+            body = json.loads(denied.stdout)
+            self.assertEqual(body["reason"], "capacity_exceeded")
+            self.assertEqual(body["reaped"], [])
+            self.assertEqual(
+                body["problems"],
+                ["stale_heartbeat_live_owner:live-owner"],
+            )
+            self.assertEqual(body["capacity"]["used_cores"], 2)
+
+    def test_live_pid_with_wrong_process_start_is_reaped(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            held = self._acquire(store, "reused-pid-owner", os.getpid())
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            self._replace_record_identity(
+                store,
+                "reused-pid-owner",
+                process_start_time="Mon Jan 1 00:00:00 2001",
+            )
+
+            recovered = self._acquire(store, "replacement", os.getpid())
+            self.assertEqual(
+                recovered.returncode, 0, recovered.stdout + recovered.stderr
+            )
+            body = json.loads(recovered.stdout)
+            self.assertEqual(
+                body["reaped"],
+                [{"id": "reused-pid-owner", "reason": "identity_mismatch"}],
+            )
+
+    def test_live_pid_from_another_boot_is_reaped(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            store = Path(raw_tmp) / "leases"
+            held = self._acquire(store, "old-boot-owner", os.getpid())
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            record = json.loads(held.stdout)["lease"]
+            if record["host_boot_time"] == "unknown":
+                self.skipTest("host does not expose a boot identity")
+            self._replace_record_identity(
+                store,
+                "old-boot-owner",
+                host_boot_time="definitely-not-the-current-boot",
+            )
+
+            recovered = self._acquire(store, "replacement", os.getpid())
+            self.assertEqual(
+                recovered.returncode, 0, recovered.stdout + recovered.stderr
+            )
+            body = json.loads(recovered.stdout)
+            self.assertEqual(
+                body["reaped"],
+                [{"id": "old-boot-owner", "reason": "identity_mismatch"}],
+            )
 
 
 if __name__ == "__main__":

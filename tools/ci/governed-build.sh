@@ -8,8 +8,11 @@
 #
 # This wrapper closes that gap: when tartci is installed it acquires a build
 # lease sized from the host profile, exports the granted parallelism, runs the
-# build, and releases on exit. When tartci is absent (e.g. inside a build VM,
-# or a plain checkout) it falls back to the tier-0 bound. Usage:
+# build, and releases on exit. SIGKILL cannot run shell cleanup; tartci bounds
+# that recovery by revalidating PID + process-start + boot identity under the
+# store lock at the next acquire, before capacity is calculated. When tartci is
+# absent (e.g. inside a build VM, or a plain checkout) this falls back to the
+# tier-0 bound. Usage:
 #
 #   tools/ci/governed-build.sh cmake --build build [--target ...]
 #
@@ -81,18 +84,16 @@ available_cores() {
 # Print who currently holds the host's cores, and whether each holder's process
 # is still alive.
 #
-# A denial and a lie look identical from here: both produce a slow build and one
-# log line. They are not the same event. A denial is the governor working — the
-# host really is busy. A lie is a lease left behind by a VM or build that died
-# uncleanly, and nothing reconciles the store against reality, so those cores
-# stay spoken for indefinitely. On 2026-08-16 two dead VMs held 12 of 14 cores
-# and pinned a critical-path build to the floor for its whole run; the store read
-# 0/14 minutes later.
+# A denial and a dead-looking holder can briefly look alike here. A denial is
+# the governor working — the host really is busy. Current tartci reconciles
+# owner identity under the store lock before every acquire, so a holder that
+# was already dead could not consume the capacity used for this denial. A
+# process can still die after that check and before this diagnostic snapshot.
 #
-# `alive=no` is the tell, and it is the reason this prints the owning pid rather
-# than only the core counts: a holder whose process is gone is a stale lease, and
-# the correct response is to reap and restart rather than to wait. An incremental
-# `cmake --build` loses no objects across a restart.
+# `alive=no` is the tell for that race, and it is the reason this prints the
+# owning pid rather than only the core counts. The next acquire will reap that
+# row before admission; no elapsed-time eviction or manual capacity override is
+# needed.
 #
 # Diagnostics only: never fails, never changes the build's parallelism or its
 # exit status.
@@ -134,8 +135,8 @@ for lease in leases:
              pid, alive, lease.get("created_at", "?")))
 if stale:
     print("[governed-build] %d holder(s) reference a process that no longer exists — "
-          "this denial is likely stale, not real contention. Reap the store "
-          "(`tartci leases reap`) and restart the build to re-acquire." % stale)
+          "the next acquire will reap them under the store lock before "
+          "calculating capacity." % stale)
 ' >&2 || true
   else
     # No python3: dump whatever the human-readable view says. Less precise (no
@@ -156,6 +157,7 @@ find_tartci() {
 LEASE_ID=""
 TARTCI_BIN=""
 HEARTBEAT_PID=""
+unset PULP_GOVERNED_TARTCI_BIN
 
 # --- live-build marker -------------------------------------------------------
 #
@@ -296,6 +298,9 @@ if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
 fi
 
 if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; then
+  # Child validation can exercise the exact lease implementation on which this
+  # invocation relied, even when tartci was found outside the child's PATH.
+  export PULP_GOVERNED_TARTCI_BIN="$TARTCI_BIN"
   # Host profile is available → size the lease from it.
   jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
   qos="$(printf '%s\n' "$profile" | awk -F= '/^TARTCI_AGENT_QOS=/{print $2; exit}')"
