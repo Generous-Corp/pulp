@@ -45,8 +45,12 @@ sequencer and playback slices. A feature change records a `pending` row with
 its durable claim ID and exact owned paths before it can know its protected
 merge identity. A post-merge ledger follow-up promotes that same row to
 `released` and pins the PR, accepted source head, and protected merge SHA.
-Planning RELEASE waits for that promotion. Every row also records source
-evidence and gives every exposure surface one disposition:
+That state proves protected source delivery and cross-surface disposition; it
+does not waive feature-specific acceptance artifacts. When planning remains
+held after merge, the audit retains a named gap with an owner and dependency
+until the artifact is captured, and planning RELEASE remains forbidden.
+Otherwise, planning RELEASE waits only for the row promotion. Every row also
+records source evidence and gives every exposure surface one disposition:
 
 - `exposed` includes evidence for the real implementation;
 - `gap` names an owner and concrete dependency identifiers;

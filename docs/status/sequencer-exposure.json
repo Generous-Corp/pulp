@@ -5,7 +5,11 @@
     "status": "in_progress",
     "scope": "Protected-merged modern sequencer, timeline, playback, and sequencer-adjacent platform slices on current main.",
     "owner": "sequencer-exposure-audit",
-    "dependencies": ["historical-release-census", "product-a-sequencer-control-tranche"],
+    "dependencies": [
+      "historical-release-census",
+      "p2-21-ios-simulator-roundtrip",
+      "product-a-sequencer-control-tranche"
+    ],
     "gaps": [
       {
         "id": "historical-release-census-incomplete",
@@ -20,6 +24,13 @@
         "owner": "sequencer-control-closure",
         "dependencies": ["product-a-timeline-document-session", "product-a-sequencer-control-tranche"],
         "rationale": "The Product A registry has generic state and test-input operations, including a transport-shaped test event, but no sequencer or timeline document capability ID, operation, executor, or policy projection."
+      },
+      {
+        "id": "p2-21-ios-simulator-acceptance-held",
+        "surface": "historical_census",
+        "owner": "sequencer-p2-21-acceptance",
+        "dependencies": ["p2-21-ios-simulator-roundtrip"],
+        "rationale": "PR #7644 protected-delivered the backend, but planning acceptance remains held until a fresh PULP_IOS_REQUIRE_SIMULATOR=1 run captures the live virtual-CoreMIDI source/destination enumeration, bidirectional I/O, teardown, and disappearance artifact. A released delivery row records merge provenance only and does not release that planning claim."
       }
     ]
   },
