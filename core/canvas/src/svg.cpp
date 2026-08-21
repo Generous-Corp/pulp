@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 namespace pulp::canvas {
@@ -60,17 +61,32 @@ float SvgImage::height() const {
 std::vector<uint8_t> SvgImage::rasterize(int w, int h) const {
     if (!image_ || w <= 0 || h <= 0) return {};
 
+    constexpr auto bytes_per_pixel = std::size_t{4};
+    const auto pixel_width = static_cast<std::size_t>(w);
+    const auto pixel_height = static_cast<std::size_t>(h);
+    if (pixel_width > static_cast<std::size_t>(std::numeric_limits<int>::max()) /
+                          bytes_per_pixel) {
+        return {};
+    }
+    const auto row_bytes = pixel_width * bytes_per_pixel;
+    if (pixel_height > std::numeric_limits<std::size_t>::max() / row_bytes) return {};
+    const auto byte_count = pixel_height * row_bytes;
+    if (byte_count > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+
+    std::vector<uint8_t> pixels(byte_count);
+
     auto* rast = nsvgCreateRasterizer();
     if (!rast) return {};
-
-    std::vector<uint8_t> pixels(w * h * 4);
 
     float sx = static_cast<float>(w) / width();
     float sy = static_cast<float>(h) / height();
     float scale = std::min(sx, sy);
 
     nsvgRasterize(rast, static_cast<NSVGimage*>(image_),
-                  0, 0, scale, pixels.data(), w, h, w * 4);
+                  0, 0, scale, pixels.data(), w, h,
+                  static_cast<int>(row_bytes));
 
     nsvgDeleteRasterizer(rast);
     return pixels;
