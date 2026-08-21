@@ -2660,16 +2660,16 @@ TEST_CASE("a bound stepper lowers with a declared or normalized fallback grid",
       "candidates":[
         {"kind":"stepper","binding_status":"bound","name":"voices",
          "bounds":{"left":24,"top":40,"width":80,"height":28},
-         "data_pulp":{"param":"voices","min":"1","max":"8","step":"1"}},
+         "data_pulp":{"param":"voices","value":"0.5","min":"1","max":"8","step":"1"}},
         {"kind":"stepper","binding_status":"bound","name":"normalized",
          "bounds":{"left":24,"top":90,"width":80,"height":28},
-         "data_pulp":{"param":"normalized"}},
+         "data_pulp":{"param":"normalized","value":"0.37"}},
         {"kind":"stepper","binding_status":"bound","name":"partial",
          "bounds":{"left":24,"top":140,"width":80,"height":28},
          "data_pulp":{"param":"partial","min":"-2"}},
         {"kind":"stepper","binding_status":"bound","name":"bipolar",
          "bounds":{"left":24,"top":190,"width":80,"height":28},
-         "data_pulp":{"param":"bipolar","min":"-2","max":"2","step":"1"}},
+         "data_pulp":{"param":"bipolar","value":"0.5","min":"-2","max":"2","step":"1"}},
         {"kind":"stepper","binding_status":"bound","name":"frequency",
          "bounds":{"left":24,"top":240,"width":80,"height":28},
          "data_pulp":{"param":"frequency","min":"20","max":"20000","step":"10"}},
@@ -2731,17 +2731,20 @@ TEST_CASE("a bound stepper lowers with a declared or normalized fallback grid",
     REQUIRE(voices.audio_max == 8.0f);
     REQUIRE(std::stof(voices.attributes.at("pulpStep")) == 1.0f);
     REQUIRE(voices.attributes.at("pulpParamKey") == "voices");
+    REQUIRE(voices.audio_default == 5.0f);
 
     const auto& normalized = find_stepper("normalized");
     REQUIRE(normalized.audio_min == 0.0f);
     REQUIRE(normalized.audio_max == 1.0f);
     REQUIRE(std::stof(normalized.attributes.at("pulpStep")) == 0.01f);
     REQUIRE(normalized.attributes.at("pulpParamKey") == "normalized");
+    REQUIRE(normalized.audio_default == Catch::Approx(0.37f));
 
     const auto& bipolar = find_stepper("bipolar");
     REQUIRE(bipolar.audio_min == -2.0f);
     REQUIRE(bipolar.audio_max == 2.0f);
     REQUIRE(std::stof(bipolar.attributes.at("pulpStep")) == 1.0f);
+    REQUIRE(bipolar.audio_default == 0.0f);
 
     const auto& frequency = find_stepper("frequency");
     REQUIRE(frequency.audio_min == 20.0f);
