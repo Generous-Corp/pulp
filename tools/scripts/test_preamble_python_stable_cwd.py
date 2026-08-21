@@ -69,8 +69,8 @@ def test_all_preamble_inline_python_uses_stable_cwd() -> None:
         )
 
     _assert(
-        inline_count == 3,
-        f"expected exactly 3 preamble inline Python invocations, found {inline_count}; "
+        inline_count == 2,
+        f"expected exactly 2 preamble inline Python invocations, found {inline_count}; "
         "classify new helpers explicitly",
     )
 
