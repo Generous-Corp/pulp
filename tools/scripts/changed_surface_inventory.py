@@ -424,7 +424,6 @@ def validate_manifest(manifest: dict[str, Any], contract: dict[str, Any]) -> Non
         "duplicate_name_excess_count",
         "duplicate_composite_group_count",
         "target_contract_digest",
-        "toolchain_digest",
         "authoritative_filter_digest",
         "inventory_digest",
     )

@@ -171,7 +171,6 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             inventory.authoritative_filter_digest(),
         )
         self.assertRegex(self.contract["target_contract_digest"], r"^[0-9a-f]{64}$")
-        self.assertRegex(self.contract["toolchain_digest"], r"^[0-9a-f]{64}$")
         self.assertRegex(self.contract["inventory_digest"], r"^[0-9a-f]{64}$")
 
     def test_authoritative_filter_matches_validation_command(self) -> None:
@@ -341,6 +340,11 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         observed["inventory_digest"] = "0" * 64
         with self.assertRaisesRegex(inventory.InventoryError, "require full suite"):
             inventory.validate_manifest(observed, self.contract)
+
+    def test_toolchain_patch_drift_is_telemetry_not_a_repository_failure(self) -> None:
+        observed = dict(self.contract)
+        observed["toolchain_digest"] = "f" * 64
+        inventory.validate_manifest(observed, self.contract)
 
     def test_literal_selection_rejects_missing_or_repeated_requests(self) -> None:
         groups = inventory.inventory_groups(
