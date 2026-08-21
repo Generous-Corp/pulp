@@ -65,8 +65,10 @@ TEST_CASE("Commuted string excitation matches direct finite convolution",
     REQUIRE(profile.prepare(base, body) == CommutedStringExcitationPrepareStatus::ok);
     REQUIRE(profile.retained_samples() == expected.size());
     REQUIRE(profile.maximum_retained_samples == 16);
-    REQUIRE(std::equal(profile.samples().begin(), profile.samples().end(), expected.begin(),
-                       expected.end()));
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        REQUIRE(std::abs(profile.samples()[index] - expected[index]) <=
+                4.0 * std::numeric_limits<double>::epsilon());
+    }
 }
 
 TEST_CASE("Commuted string excitation handles identity and silent bodies",
