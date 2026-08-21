@@ -121,7 +121,10 @@ def _build_fake_subprocess(in_progress_run_ids, jobs_by_run, *, raise_for=None):
         count = sum(
             1
             for j in jobs
-            if j.get("name", "").startswith("macOS")
+            if (
+                j.get("name") == "macos"
+                or j.get("name", "").startswith("macOS")
+            )
             and j.get("status") == "in_progress"
             and wanted in (j.get("labels") or [])
         )
@@ -167,6 +170,22 @@ def _macos_job(status: str, *, local: bool = True, name: str = "macOS (ARM64) [l
 def test_counts_macos_leg_in_progress_on_local() -> None:
     probe = _make_probe(["1"], {"1": [_macos_job("in_progress", local=True)]})
     _assert(probe() == 1, "an in_progress macOS leg on a local M1 must count 1")
+
+
+def test_counts_required_literal_macos_leg_in_progress_on_local() -> None:
+    probe = _make_probe(
+        ["1"],
+        {"1": [_macos_job("in_progress", local=True, name="macos")]},
+    )
+    _assert(probe() == 1, "the required literal macos job must count as local busy")
+
+
+def test_does_not_count_unused_macos_bootstrap_job() -> None:
+    probe = _make_probe(
+        ["1"],
+        {"1": [_macos_job("in_progress", local=True, name="macos-pr-unused")]},
+    )
+    _assert(probe() == 0, "an unused bootstrap job must not count as a macOS leg")
 
 
 def test_two_in_progress_local_legs_count_two() -> None:

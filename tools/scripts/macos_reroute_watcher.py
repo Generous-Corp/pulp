@@ -234,7 +234,8 @@ def _macos_job_targets_cloud(run_id: int) -> bool:
         labels_str = _gh([
             f"repos/{REPO}/actions/runs/{run_id}/jobs",
             "--jq",
-            '[.jobs[] | select(.name | startswith("macOS")) | .labels] '
+            '[.jobs[] | select(.name == "macos" or (.name | startswith("macOS"))) '
+            '| .labels] '
             '| flatten | join(",")',
         ])
     except subprocess.SubprocessError:

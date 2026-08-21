@@ -76,8 +76,12 @@ class MacosRerouteWatcherTests(unittest.TestCase):
             self.assertIsNone(watcher.local_is_busy())
 
     def test_macos_job_target_detection(self) -> None:
-        with mock.patch.object(watcher, "_gh", return_value="self-hosted,macOS"):
+        with mock.patch.object(watcher, "_gh", return_value="self-hosted,macOS") as gh:
             self.assertFalse(watcher._macos_job_targets_cloud(10))
+        query = " ".join(gh.call_args.args[0])
+        self.assertIn('.name == "macos"', query)
+        self.assertIn('startswith("macOS")', query)
+        self.assertNotIn('startswith("macos")', query)
 
         for labels in ("macos-15,ARM64", "nscloud-macos,macOS", "namespace-profile-macos"):
             with self.subTest(labels=labels), mock.patch.object(watcher, "_gh", return_value=labels):

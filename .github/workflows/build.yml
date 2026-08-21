@@ -330,7 +330,7 @@ jobs:
                               "--jq",
                               (
                                   f'[.jobs[] '
-                                  f'| select(.name | startswith("macOS")) '
+                                  f'| select(.name == "macos" or (.name | startswith("macOS"))) '
                                   f'| select(.status == "in_progress") '
                                   f'| select((.labels // []) '
                                   f'| index({json.dumps(local_label)})) '
