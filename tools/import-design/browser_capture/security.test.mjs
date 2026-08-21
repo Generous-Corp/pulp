@@ -535,7 +535,10 @@ test("failed browser launch still removes the ephemeral profile", {
       "probe",
       "--browser", path.join(tree, "definitely-not-a-browser"),
       "--profile-dir", profile,
-      "--timeout-ms", "500",
+      // Keep this deadline bounded but comfortably above loaded CI scheduling
+      // latency. The assertion is about failed-launch cleanup, not whether an
+      // ENOENT callback beats an unrelated 500 ms global deadline.
+      "--timeout-ms", "5000",
     ]),
     /browser-capture-failed|browser exited before CDP was ready/);
   await assert.rejects(stat(profile), /ENOENT/);

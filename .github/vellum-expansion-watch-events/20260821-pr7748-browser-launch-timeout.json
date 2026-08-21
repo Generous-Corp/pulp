@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260821-pr7748-browser-launch-timeout",
+  "created_at": "2026-08-21T12:32:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record widening only the failed-browser-launch cleanup fixture's inner deadline from 500 ms to 5 seconds. The assertion still requires the same launch failure and ephemeral-profile removal; the wider hang guard prevents loaded hosted macOS scheduling from reporting a timeout before the missing executable is classified. Production browser capture, network policy, output, and packaging behavior are unchanged. Watch-only: the exact capture route remains Pulp-owned and no design-import, Chromium, rendering, or packaging authority is transferred.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/security.test.mjs (five consecutive passes)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
