@@ -364,6 +364,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
+    # Changed-surface selection remains shadow-only. Python 3.11 is required
+    # for stdlib tomllib. Ordinary developer configurations run the static
+    # policy contract only; the exact inventory check is explicitly enabled by
+    # Shipyard's declared target so a different optional feature set cannot be
+    # mistaken for inventory drift.
+    if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+        set(_changed_surface_policy_args)
+        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
+            list(APPEND _changed_surface_policy_args --build-dir "${CMAKE_BINARY_DIR}")
+        endif()
+        add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
+            ${_changed_surface_policy_args})
+    endif()
+
     # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
     # --diag-dir contract that copies captured validator output out of the temp
     # dir before it is deleted. Runs the validators nowhere — the capture

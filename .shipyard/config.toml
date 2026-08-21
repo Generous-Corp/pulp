@@ -167,6 +167,7 @@ test      = "tools/ci/governed-build.sh ctest --test-dir build --output-on-failu
 #                     under SSH + cross-compile emulation overhead)
 [validation.default.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+
 # --parallel is capped at 4 to limit MSBuild parallelism. Unlimited
 # parallelism causes LNK1104 (cannot open file) on ARM64 Windows because
 # concurrent x64-emulated link steps create file contention that Windows'
@@ -177,6 +178,12 @@ build     = "cmake --build build --config Release --parallel 4"
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
 test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+
+# The exact inventory is specific to the required macOS target. Optional Linux
+# targets inherit the default recipe but register a different platform-gated
+# CTest inventory, so they must not validate against the macOS cardinality.
+[validation.default.overrides.macos]
+configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
@@ -278,6 +285,7 @@ build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCOD
 backend  = "local"
 platform = "macos-arm64"
 workflow = "build"
+validation_build_type = "debug"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
 # git history for context.
 #
@@ -305,6 +313,92 @@ timeout_secs = 14400
 # Namespace remains available only for explicit operator-dispatched cloud
 # runs. It is not the default mac target and should not be used as
 # automatic PR-validation failover while the repo variables are unset.
+
+[targets.mac.changed_surface_selection]
+schema_version = 2
+# Exact current-main inventory plus the policy contract test added with this
+# declaration. Test-topology changes force a full-suite decision. This remains
+# shadow-only: [validation.default] is still the authoritative execution.
+full_test_count = 20668
+build_type = "debug"
+build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
+baseline_tests = [
+  "build-check",
+  "decisions-contract-validate",
+  "cmake-sdk-provenance-contract",
+  "agent-hook-paths",
+  "cli-help",
+]
+baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
+
+# Known global build, toolchain, ABI, security, provenance, packaging, and
+# dependency surfaces are ineligible for bounded execution. Unknown paths also
+# fall back to full in Shipyard.
+full_required_paths = [
+  "CMakeLists.txt",
+  "**/CMakeLists.txt",
+  "cmake/**",
+  "tools/cmake/**",
+  "tools/ci/**",
+  ".github/**",
+  ".agents/contract.toml",
+  ".shipyard/**",
+  "tools/shipyard.toml",
+  "setup.sh",
+  "setup.ps1",
+  "core/**/include/**",
+  "include/**",
+  "inspect/include/**",
+  "ship/**",
+  "security/**",
+  "apple/**",
+  "tools/scripts/*release*",
+  "tools/scripts/*checksum*",
+  "tools/scripts/*sign*",
+  "tools/scripts/*provenance*",
+  "tools/rack/provenance_check.py",
+  "tools/local-ci/provenance*.py",
+  "tools/import-design/browser_capture/security*",
+  "examples/web-demos/tools/local-http-security*",
+  "packages/**/package.json",
+  "packages/**/package-lock.json",
+]
+policy_paths = [
+  "tools/scripts/test_changed_surface_policy.py",
+  ".agents/skills/ci/SKILL.md",
+]
+test_topology_paths = [
+  "CMakeLists.txt",
+  "**/CMakeLists.txt",
+  "test/**",
+  "tools/scripts/test_*.py",
+]
+
+# Start with one narrow command-projection family. Broader core mappings stay
+# unknown and therefore select full until shadow evidence supports graduation.
+[[targets.mac.changed_surface_selection.families]]
+name = "forge-dsp-catalog-projection"
+paths = ["tools/cli/cmd_forge.cpp", "tools/cli/cmd_dsp.cpp"]
+tests = [
+  "cli-forge-catalog-json",
+  "cli-forge-catalog-check",
+  "cli-forge-help",
+  "cli-forge-help-flag",
+  "cli-forge-unknown-subcommand",
+  "cli-forge-catalog-write",
+  "cli-dsp-capabilities-check",
+  "cli-dsp-capabilities-json",
+  "cli-dsp-capabilities-write",
+  "cli-dsp-help",
+  "cli-dsp-help-flag",
+  "cli-dsp-unknown-subcommand",
+]
+supported_build_types = ["debug", "release"]
+risk_class = "medium"
+extended_tests = [
+  "Forge catalog index covers every catalog header",
+  "Forge catalog index comparison detects add and remove drift",
+]
 
 [cloud]
 provider   = "namespace"

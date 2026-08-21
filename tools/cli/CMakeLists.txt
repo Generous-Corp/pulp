@@ -315,6 +315,30 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-forge-catalog-check PROPERTIES
         PASS_REGULAR_EXPRESSION "Forge catalog snapshot is current")
 
+    add_test(NAME cli-forge-help
+        COMMAND pulp-cli forge
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-forge-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "pulp forge")
+
+    add_test(NAME cli-forge-help-flag
+        COMMAND pulp-cli forge --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-forge-help-flag PROPERTIES
+        PASS_REGULAR_EXPRESSION "catalog export")
+
+    add_test(NAME cli-forge-unknown-subcommand
+        COMMAND pulp-cli forge bogus-subcommand
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-forge-unknown-subcommand PROPERTIES
+        WILL_FAIL TRUE)
+
+    add_test(NAME cli-forge-catalog-write
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+            -DFIXTURE_ROOT=${CMAKE_BINARY_DIR}/test-tmp/forge-catalog-write
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/test_forge_catalog_write.cmake)
+
     add_test(NAME cli-doctor
         COMMAND pulp-cli doctor
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -596,6 +620,15 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-dsp-capabilities-json PROPERTIES
         PASS_REGULAR_EXPRESSION "\"baked_params\"")
+
+    # Keep the state-changing projection isolated from the source tree: the
+    # fixture owns its catalog, script copy, and generated snapshot.
+    add_test(NAME cli-dsp-capabilities-write
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPULP_CLI=$<TARGET_FILE:pulp-cli>"
+            "-DSCRIPT_SOURCE=${CMAKE_SOURCE_DIR}/tools/scripts/dsp_capability_registry.py"
+            "-DFIXTURE_ROOT=${CMAKE_BINARY_DIR}/test-tmp/cli-dsp-capabilities-write"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/test_dsp_capabilities_write.cmake")
 
     # Exercise the `pulp minos` dispatch (cmd_minos.cpp): usage banner,
     # help alias, unknown-subcommand error, the measure->script handoff

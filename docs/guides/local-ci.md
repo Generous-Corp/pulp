@@ -1164,6 +1164,30 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+### Changed-surface risk selection (shadow mode)
+
+The required macOS target also declares a schema-v2
+`changed_surface_selection` policy. It classifies an exact diff into mandatory,
+affected, extended, or full validation and records the selected test set, but
+it does not yet reduce the authoritative `[validation.default]` run. This
+shadow period lets maintainers compare selected receipts with the full suite
+before changing a merge gate.
+
+The mandatory kernel always runs. Known build-system, CI, ABI, public-header,
+security, provenance, packaging, dependency, policy, and test-topology changes
+require the full suite; unknown paths fail safely to full as well. The first
+bounded family covers only Forge/DSP catalog projection commands, with explicit
+affected and extended tests. The declared inventory is tied to the required
+macOS Debug configuration, which enables
+`PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
+that platform-specific cardinality.
+
+Do not promote selection from shadow to authoritative based on a few green
+runs. Graduation requires per-risk-class comparison evidence showing that the
+selected receipts agree with full validation, plus a separately reviewed
+policy change. Tests remain in the repository and continue to run in full for
+unknown/high-risk work, main, nightly, release, and audit surfaces.
+
 ## Cache-warming runs on `main`
 
 `build.yml` triggers on `push: branches: [main]` in addition to
