@@ -387,13 +387,17 @@ TEST_CASE("AgentView outlines and canonically pages ten thousand interleaved cli
                                                {}};
     std::vector<std::pair<std::int64_t, std::uint64_t>> observed;
     observed.reserve(expected_clips);
+    std::vector<std::uint64_t> observed_ids;
+    observed_ids.reserve(expected_clips);
     std::size_t pages = 0;
     const auto paging_started = std::chrono::steady_clock::now();
     do {
         const auto page = take(view.region(request));
         ++pages;
-        for (const auto& item : page.items)
+        for (const auto& item : page.items) {
             observed.emplace_back(item.start, item.id.value);
+            observed_ids.push_back(item.id.value);
+        }
         request.after = page.next;
     } while (request.after);
     const auto paging_elapsed = std::chrono::steady_clock::now() - paging_started;
@@ -403,6 +407,8 @@ TEST_CASE("AgentView outlines and canonically pages ten thousand interleaved cli
     REQUIRE(observed.size() == expected_clips);
     REQUIRE(std::is_sorted(observed.begin(), observed.end()));
     REQUIRE(std::adjacent_find(observed.begin(), observed.end()) == observed.end());
+    std::sort(observed_ids.begin(), observed_ids.end());
+    REQUIRE(std::adjacent_find(observed_ids.begin(), observed_ids.end()) == observed_ids.end());
     REQUIRE(observed.front().first == 0);
     REQUIRE(observed.back().first == static_cast<std::int64_t>(2 * (expected_clips - 1)));
 
