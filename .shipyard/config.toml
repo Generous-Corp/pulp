@@ -312,7 +312,7 @@ schema_version = 2
 # Exact current-main inventory plus the policy contract test added with this
 # declaration. Test-topology changes force a full-suite decision. This remains
 # shadow-only: [validation.default] is still the authoritative execution.
-full_test_count = 20931
+full_test_count = 20935
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON"]
 baseline_tests = [
@@ -375,6 +375,10 @@ paths = ["tools/cli/cmd_forge.cpp", "tools/cli/cmd_dsp.cpp"]
 tests = [
   "cli-forge-catalog-json",
   "cli-forge-catalog-check",
+  "cli-forge-help",
+  "cli-forge-help-flag",
+  "cli-forge-unknown-subcommand",
+  "cli-forge-catalog-write",
   "cli-dsp-capabilities-check",
   "cli-dsp-capabilities-json",
   "cli-dsp-help",
