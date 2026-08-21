@@ -486,9 +486,16 @@ guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
 macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
 and asset metadata should move together.
 
+The current v0.100.0 floor also hardens unattended fleet updates under stripped
+non-login SSH environments. Machine-global command auth and executable paths
+are explicit, exact-tag downloads are staged and verified before replacement,
+and a daemon refresh occurs only after the installed version is proven. Keep
+the workflow `SHIPYARD_VERSION` and `tools/shipyard.toml` in lockstep; the pin
+gate rejects drift.
+
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.89.0 — exact-head stewardship is load-bearing
+### Exact-head stewardship remains load-bearing
 
 v0.88.0 adds an explicit handoff contract for unattended PR stewardship. A PR
 is mutable only when its current commit has a successful
