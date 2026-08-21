@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260821-pr7738-canvas-integer-width-backport",
+  "created_at": "2026-08-21T01:34:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the Vellum-originated checked image-extent backport at Pulp's retained SDF and SVG rendering boundary. The arithmetic guard changes failure behavior for oversized render assets but does not transfer design-import or rendering authority beyond the existing canvas-kernel framework-backport event.",
+  "tests": [
+    "SdfAtlas rejects invalid build arguments without allocation",
+    "SvgImage rasterize guards invalid image and dimensions",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
