@@ -227,6 +227,27 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         )
         self.assertNotEqual(first[0]["fingerprint"], second[0]["fingerprint"])
 
+    def test_external_basename_portability_retains_resolution_in_toolchain_digest(self) -> None:
+        first_tests = [fixture("same", "/opt/tool-a/bin/runner")]
+        second_tests = [fixture("same", "/opt/tool-b/bin/runner")]
+        first_groups = inventory.inventory_groups(
+            first_tests, self.source_root, self.build_dir
+        )
+        second_groups = inventory.inventory_groups(
+            second_tests, self.source_root, self.build_dir
+        )
+        self.assertEqual(first_groups, second_groups)
+        first_toolchain = inventory._toolchain_contract(
+            self.build_dir, first_groups, first_tests, self.source_root
+        )
+        second_toolchain = inventory._toolchain_contract(
+            self.build_dir, second_groups, second_tests, self.source_root
+        )
+        self.assertNotEqual(
+            inventory.contract_digest(first_toolchain),
+            inventory.contract_digest(second_toolchain),
+        )
+
     def test_missing_or_relative_path_command_is_ambiguous(self) -> None:
         missing = fixture("missing")
         missing["command"] = []

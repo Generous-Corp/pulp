@@ -1237,8 +1237,11 @@ missing commands, duplicate properties, duplicate composite identities, or
 digest drift require the full suite. The contract also pins stable target
 semantics. Source-head, source-tree, and toolchain provenance remain in the
 emitted manifest for comparison, but otherwise-valid Python or CTest patch
-updates are not repository-contract failures. Raw worktree paths and CTest
-registration order are intentionally excluded from identity.
+updates are not repository-contract failures. External executables use a
+portable basename in the registration fingerprint while the toolchain digest
+binds their raw and resolved paths plus a bounded content digest, so same-named
+tools remain distinguishable. Raw worktree paths and CTest registration order
+are intentionally excluded from portable identity.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the

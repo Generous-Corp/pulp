@@ -317,7 +317,77 @@ def _git_value(source_root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _toolchain_contract(build_dir: Path, groups: list[dict[str, Any]]) -> dict[str, Any]:
+def _absolute_path_words(value: str) -> list[str]:
+    if _path_like_absolute(value):
+        return [value]
+    paths: list[str] = []
+    if "=" in value:
+        possible_path = value.split("=", 1)[1]
+        if _path_like_absolute(possible_path):
+            paths.append(possible_path)
+    paths.extend(
+        match.group("path")
+        for match in re.finditer(r"(?P<prefix>(?<!\S)|=)(?P<path>/[^\s]+)", value)
+    )
+    return paths
+
+
+def _path_like_absolute(value: str) -> bool:
+    return os.path.isabs(value) and not any(character.isspace() for character in value)
+
+
+def _external_resolution_contract(
+    tests: Iterable[dict[str, Any]], source_root: Path, build_dir: Path
+) -> list[dict[str, Any]]:
+    paths: set[str] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            for candidate in _absolute_path_words(value):
+                anchored = _path_anchor(candidate, source_root, build_dir)
+                if anchored is not None and anchored.startswith("external:"):
+                    paths.add(os.path.normpath(candidate))
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+
+    for test in tests:
+        collect(test.get("command", []))
+        collect(test.get("properties", []))
+
+    records: list[dict[str, Any]] = []
+    for raw_path in sorted(paths):
+        record: dict[str, Any] = {
+            "basename": Path(raw_path).name,
+            "raw_path": raw_path,
+            "resolved_path": os.path.realpath(raw_path),
+        }
+        try:
+            stat = os.stat(raw_path)
+        except OSError:
+            record["state"] = "unavailable"
+        else:
+            record["size"] = stat.st_size
+            record["state"] = "regular" if os.path.isfile(raw_path) else "other"
+            if os.path.isfile(raw_path) and stat.st_size <= 32 * 1024 * 1024:
+                digest = hashlib.sha256()
+                with open(raw_path, "rb") as external_file:
+                    for chunk in iter(lambda: external_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                record["sha256"] = digest.hexdigest()
+        records.append(record)
+    return records
+
+
+def _toolchain_contract(
+    build_dir: Path,
+    groups: list[dict[str, Any]],
+    tests: Iterable[dict[str, Any]],
+    source_root: Path,
+) -> dict[str, Any]:
     cache: dict[str, str] = {}
     cache_path = build_dir / "CMakeCache.txt"
     if cache_path.is_file():
@@ -356,6 +426,9 @@ def _toolchain_contract(build_dir: Path, groups: list[dict[str, Any]]) -> dict[s
         "ctest_version": subprocess.run(
             ["ctest", "--version"], check=True, capture_output=True, text=True
         ).stdout.splitlines()[0],
+        "external_resolutions": _external_resolution_contract(
+            tests, source_root, build_dir
+        ),
         "external_tools": sorted(external_tools),
         "machine": platform.machine(),
         "python_version": platform.python_version(),
@@ -372,7 +445,8 @@ def build_manifest(
     repository: str = "Generous-Corp/pulp",
     target: str = "mac",
 ) -> dict[str, Any]:
-    groups = inventory_groups(tests, source_root, build_dir)
+    filtered_tests = authoritative_tests(tests)
+    groups = inventory_groups(filtered_tests, source_root, build_dir)
     registration_count = sum(group["multiplicity"] for group in groups)
     names = Counter(
         group["composite"]["name"]
@@ -390,7 +464,7 @@ def build_manifest(
         "build_type": policy["build_type"],
         "target": target,
     }
-    toolchain = _toolchain_contract(build_dir, groups)
+    toolchain = _toolchain_contract(build_dir, groups, filtered_tests, source_root)
     return {
         "schema": INVENTORY_SCHEMA,
         "schema_version": 1,
