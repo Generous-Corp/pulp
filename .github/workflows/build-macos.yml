@@ -20,6 +20,11 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      pr_number:
+        description: "Pull request number to retarget (resolved from target_ref when omitted)"
+        required: false
+        default: ""
+        type: string
       runner:
         description: "Where to run the macOS build/test"
         required: true
@@ -35,6 +40,10 @@ on:
         default: ""
         type: string
 
+permissions:
+  contents: read
+  pull-requests: read
+
 concurrency:
   # Independent of build.yml's `build-${{ github.ref }}` group so a manual
   # retarget doesn't cancel the matrix workflow_run, and vice versa.
@@ -47,6 +56,9 @@ jobs:
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
       route: ${{ steps.resolve.outputs.route }}
+      pr_number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
     steps:
       - id: resolve
         env:
@@ -78,6 +90,76 @@ jobs:
           echo "route=$RUNNER_CHOICE" >> "$GITHUB_OUTPUT"
           echo "resolve-runner: macOS retarget route = $RUNNER_CHOICE; selector = $SELECTOR"
 
+      - name: Resolve exact pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          TARGET_REF: ${{ inputs.target_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGET_REF" ]; then
+            echo "target_ref is required to resolve an exact pull request" >&2
+            exit 1
+          fi
+
+          number="$INPUT_PR_NUMBER"
+          if [ -z "$number" ]; then
+            matches="$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=open \
+              -f base=main \
+              -f "head=$GITHUB_REPOSITORY_OWNER:$TARGET_REF")"
+            count="$(printf '%s' "$matches" | jq 'length')"
+            if [ "$count" != "1" ]; then
+              echo "target_ref '$TARGET_REF' resolved to $count open PRs targeting main; expected exactly one" >&2
+              exit 1
+            fi
+            number="$(printf '%s' "$matches" | jq -r '.[0].number')"
+          fi
+          case "$number" in
+            ''|*[!0-9]*)
+              echo "PR number must contain only decimal digits" >&2
+              exit 1
+              ;;
+          esac
+
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number")"
+          state="$(printf '%s' "$pr_json" | jq -r .state)"
+          base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+          base_repository="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
+          base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
+          head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+          head_repository="$(printf '%s' "$pr_json" | jq -r .head.repo.full_name)"
+          head_ref="$(printf '%s' "$pr_json" | jq -r .head.ref)"
+          if [ "$state" != "open" ]; then
+            echo "PR #$number is $state; refusing to retarget a closed PR" >&2
+            exit 1
+          fi
+          if [ "$base_repository" != "$GITHUB_REPOSITORY" ] || [ "$base_ref" != "main" ]; then
+            echo "PR #$number targets $base_repository:$base_ref; expected $GITHUB_REPOSITORY:main" >&2
+            exit 1
+          fi
+          if [ "$head_repository" != "$GITHUB_REPOSITORY" ] || [ "$head_ref" != "$TARGET_REF" ]; then
+            echo "PR #$number head is $head_repository:$head_ref; expected $GITHUB_REPOSITORY:$TARGET_REF" >&2
+            exit 1
+          fi
+          case "$base" in
+            *[!0-9a-f]*|'') echo "PR #$number returned an invalid base SHA" >&2; exit 1 ;;
+          esac
+          case "$head" in
+            *[!0-9a-f]*|'') echo "PR #$number returned an invalid head SHA" >&2; exit 1 ;;
+          esac
+          if [ "${#base}" -ne 40 ] || [ "${#head}" -ne 40 ]; then
+            echo "PR #$number did not return full 40-character base/head SHAs" >&2
+            exit 1
+          fi
+          {
+            echo "number=$number"
+            echo "base_sha=$base"
+            echo "head_sha=$head"
+          } >> "$GITHUB_OUTPUT"
+          echo "retargeting PR #$number: base=$base head=$head ref=$head_ref" >&2
+
   build-test:
     needs: resolve-runner
     runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
@@ -90,18 +172,41 @@ jobs:
       - uses: actions/checkout@v5
         with:
           lfs: false
-          ref: ${{ inputs.target_ref || github.ref }}
+          ref: ${{ needs.resolve-runner.outputs.head_sha }}
           # Self-hosted runner reuses its workspace across runs so ccache /
           # FetchContent / CMake configure persist between PRs.
           clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
 
-      # The capability-history check fails closed when a workflow_dispatch
-      # checkout has no protected-base ref. Keep the retarget lane aligned with
-      # build.yml instead of relying on whatever a warm runner happened to
-      # retain from an earlier job.
-      - name: Fetch protected capability base
+      - name: Verify exact pull request head
+        env:
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
         shell: bash
-        run: git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$EXPECTED_HEAD" ]; then
+            echo "retarget checkout drifted from the resolved PR head" >&2
+            echo "expected=$EXPECTED_HEAD actual=$actual_head" >&2
+            exit 1
+          fi
+
+      # Capability history is relative to the immutable base recorded on the
+      # PR, not whichever commits reached main while a recovery waited. The
+      # merge queue validates the combined tree against current main later.
+      - name: Fetch protected capability base
+        env:
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin \
+            "+$EXPECTED_BASE:refs/remotes/origin/main"
+          actual_base="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$actual_base" != "$EXPECTED_BASE" ]; then
+            echo "retarget capability base drifted from the resolved PR base" >&2
+            echo "expected=$EXPECTED_BASE actual=$actual_base" >&2
+            exit 1
+          fi
 
       # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
       # Persist brew + ccache + Pulp FetchContent across runs on the
@@ -150,6 +255,28 @@ jobs:
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
+
+      # Keep browser-source fidelity identical to build.yml's required macOS
+      # lane. The VM images intentionally do not carry mutable system Chrome.
+      - name: Install pinned Chrome for browser-source fidelity (macOS ARM64)
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_root="$RUNNER_TEMP/pulp-chrome-for-testing-151.0.7922.47"
+          chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          if [ ! -x "$chrome" ]; then
+            archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
+            curl --fail --location --retry 3 --output "$archive" \
+              https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
+            expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
+            actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+            [ "$actual" = "$expected" ] || { echo "Chrome archive SHA-256 mismatch" >&2; exit 1; }
+            mkdir -p "$chrome_root"
+            unzip -q "$archive" -d "$chrome_root"
+          fi
+          [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
+          echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |

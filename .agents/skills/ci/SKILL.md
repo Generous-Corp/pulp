@@ -4057,11 +4057,13 @@ Branch protection's required `macos` check accepts the latest
 same-named check from either workflow, so `build-macos.yml`'s `macos`
 job supersedes the matrix's `macos` job when fresher.
 
-It must remain semantically identical to the required macOS gate: fetch
-protected `main` for capability-history checks and exclude
+It must remain semantically identical to the required macOS gate: resolve an
+open internal PR, check out its exact head SHA, fetch the immutable base SHA
+recorded on that PR for capability-history checks, install the same pinned and
+checksum-verified Chrome used by `build.yml`, and exclude
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the
-provider; it must not turn required CI into a full benchmark lane or depend on
-a warm runner's stale refs.
+provider; it must not turn required CI into a full benchmark lane, compare a
+behind PR against newer live `main`, or depend on a warm runner's stale refs.
 
 The macOS lane configures with `-DPULP_LOTTIE=ON` so the opt-in skottie
 render path (LottieAnimation → SkiaCanvas) gets real CI coverage — it is

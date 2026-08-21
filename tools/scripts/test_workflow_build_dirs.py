@@ -29,6 +29,18 @@ TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.ym
 CONTROL_SDK_CONSUMER = REPO_ROOT / "test" / "cmake" / "test_control_sdk_consumer.cmake"
 
 
+def workflow_named_step(path: Path, job: str, name: str) -> dict[str, object]:
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - workflow-lint installs PyYAML
+        raise unittest.SkipTest("PyYAML not installed")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return next(
+        step for step in document["jobs"][job]["steps"]
+        if step.get("name") == name
+    )
+
+
 class WorkflowBuildDirTests(unittest.TestCase):
     def test_build_matrix_uses_matrix_scoped_build_dir(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
@@ -133,9 +145,19 @@ class WorkflowBuildDirTests(unittest.TestCase):
     def test_macos_retarget_matches_required_gate_selection(self) -> None:
         text = BUILD_MACOS_WORKFLOW.read_text(encoding="utf-8")
 
+        self.assertIn("pr_number:", text)
+        self.assertIn("- name: Resolve exact pull request", text)
+        self.assertIn("base_sha: ${{ steps.pr.outputs.base_sha }}", text)
+        self.assertIn("head_sha: ${{ steps.pr.outputs.head_sha }}", text)
+        self.assertIn("ref: ${{ needs.resolve-runner.outputs.head_sha }}", text)
+        self.assertIn("- name: Verify exact pull request head", text)
         self.assertIn("- name: Fetch protected capability base", text)
         self.assertIn(
-            'git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"',
+            '"+$EXPECTED_BASE:refs/remotes/origin/main"',
+            text,
+        )
+        self.assertNotIn(
+            '"+refs/heads/main:refs/remotes/origin/main"',
             text,
         )
         self.assertIn(
@@ -146,6 +168,12 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertLess(
             text.index("- name: Fetch protected capability base"),
             text.index("- name: Test"),
+        )
+        chrome_step = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"
+        self.assertEqual(
+            workflow_named_step(BUILD_MACOS_WORKFLOW, "build-test", chrome_step),
+            workflow_named_step(BUILD_WORKFLOW, "build", chrome_step),
+            "retarget must use the exact verified Chrome install from build.yml",
         )
 
     def test_installed_control_consumer_requests_cxx20(self) -> None:
