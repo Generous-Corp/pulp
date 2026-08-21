@@ -56,7 +56,12 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.92.1 (current pin) — keeps v0.90.2's atomic PR handoff and v0.91.1's bounded
+# v0.98.0 (current pin) — adds schema-v2 shadow test selection with
+#   mandatory/affected/extended/full risk tiers while keeping full validation
+#   authoritative. It also carries v0.97's durable daemon-owned execution and
+#   repository-scoped state, plus v0.92.1's bounded recovery behavior below.
+#
+# v0.92.1 (earlier pin) — keeps v0.90.2's atomic PR handoff and v0.91.1's bounded
 #   in-process recovery for transient GitHub token-helper/network preparation
 #   failures in `shipyard wait`. A brief App-token acquisition outage no longer
 #   drops a long-lived landing monitor; permanent auth/configuration failures
@@ -136,7 +141,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.92.1"
+version = "v0.98.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
