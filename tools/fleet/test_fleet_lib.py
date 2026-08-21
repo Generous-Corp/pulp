@@ -53,6 +53,14 @@ class RunnerPolicyFixture(unittest.TestCase):
             }),
             encoding="utf-8",
         )
+        (self.runner / ".runner_migrated").write_text(
+            json.dumps({
+                "agentName": "Shipyard-test-01",
+                "gitHubUrl": "https://github.com/danielraffel/Shipyard",
+                "disableUpdate": disable_update,
+            }),
+            encoding="utf-8",
+        )
         executable(
             self.runner / "bin" / "Runner.Listener",
             "#!/bin/sh\nprintf '2.335.1\\n'\n",
@@ -117,6 +125,10 @@ class RunnerPolicyFixture(unittest.TestCase):
         self.assertEqual(outcome, "fixed", detail)
         config = json.loads((self.runner / ".runner").read_text(encoding="utf-8"))
         self.assertIs(config["disableUpdate"], True)
+        migrated = json.loads(
+            (self.runner / ".runner_migrated").read_text(encoding="utf-8")
+        )
+        self.assertIs(migrated["disableUpdate"], True)
         self.assertTrue((self.runner / ".path").read_text().startswith(F.SYSTEM_PATH_PREFIX))
         env = F._read_env_file(self.runner / ".env")
         self.assertEqual(env["CCACHE_DIR"], "/keep/me")
@@ -131,6 +143,16 @@ class RunnerPolicyFixture(unittest.TestCase):
         self.assertEqual(outcome, "manual")
         self.assertIn("active Runner.Worker", detail)
         self.assertEqual((self.runner / ".runner").read_bytes(), original)
+
+    def test_migrated_runtime_config_without_update_pin_is_drift(self) -> None:
+        migrated_path = self.runner / ".runner_migrated"
+        migrated = json.loads(migrated_path.read_text(encoding="utf-8"))
+        migrated.pop("disableUpdate")
+        migrated_path.write_text(json.dumps(migrated), encoding="utf-8")
+        with mock.patch.object(F, "_runner_process_present", return_value=True):
+            result = F.probe_actions_runner_policy(self.key)
+        self.assertEqual(result.state, F.DRIFT)
+        self.assertIn(".runner_migrated disableUpdate", result.detail)
 
     def test_no_configured_runners_is_observed_and_compliant(self) -> None:
         self.runner.rename(self.runner.with_name("not-a-runner"))

@@ -440,13 +440,22 @@ def _runner_policy_findings(key):
     dirs = _runner_dirs(key)
     for runner_dir in dirs:
         label = str(runner_dir)
-        try:
-            config = json.loads((runner_dir / ".runner").read_text(encoding="utf-8-sig"))
-        except Exception as exc:
-            unobservable.append(f"{label}: unreadable .runner ({exc})")
+        config_paths = [runner_dir / ".runner"]
+        migrated_path = runner_dir / ".runner_migrated"
+        if migrated_path.exists():
+            config_paths.append(migrated_path)
+        config_unreadable = False
+        for config_path in config_paths:
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+            except Exception as exc:
+                unobservable.append(f"{label}: unreadable {config_path.name} ({exc})")
+                config_unreadable = True
+                continue
+            if config.get("disableUpdate") is not True:
+                findings.append(f"{label}: {config_path.name} disableUpdate is not true")
+        if config_unreadable:
             continue
-        if config.get("disableUpdate") is not True:
-            findings.append(f"{label}: disableUpdate is not true")
         listener = _runner_process_present(runner_dir, "Runner.Listener")
         if listener is None:
             unobservable.append(f"{label}: cannot inspect Runner.Listener process")
@@ -840,10 +849,14 @@ def apply_actions_runner_policy(key, pr):
             # PATH. A failed download then restarts against the old working
             # bootstrap instead of publishing a half-applied configuration.
             _ensure_runner_rust(runner_dir)
-            config_path = runner_dir / ".runner"
-            config = json.loads(config_path.read_text(encoding="utf-8-sig"))
-            config["disableUpdate"] = True
-            _atomic_write(config_path, json.dumps(config, indent=2, sort_keys=True) + "\n")
+            config_paths = [runner_dir / ".runner"]
+            migrated_path = runner_dir / ".runner_migrated"
+            if migrated_path.exists():
+                config_paths.append(migrated_path)
+            for config_path in config_paths:
+                config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+                config["disableUpdate"] = True
+                _atomic_write(config_path, json.dumps(config, indent=2, sort_keys=True) + "\n")
             _merge_runner_env(runner_dir)
             _atomic_write(runner_dir / ".path", _runner_path_value(runner_dir) + "\n")
     except Exception as exc:
