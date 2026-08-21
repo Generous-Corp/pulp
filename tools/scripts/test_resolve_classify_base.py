@@ -175,6 +175,10 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertNotIn("fetch-depth: 0", classify_job)
         self.assertIn('git fetch --no-tags --depth=1 origin "$base"', classify_job)
         self.assertIn("--mode=diff --comparison=trees", classify_job)
+        self.assertIn("python3 tools/scripts/classify_changes.py --mode=files", classify_job)
+        self.assertIn(
+            "Never trust a retained remote-tracking ref", classify_job
+        )
 
     def test_classify_no_longer_hardcodes_origin_main_as_the_base(self) -> None:
         # The dead inline expression this replaces.
