@@ -26,9 +26,16 @@ template <typename SampleType = float> class BlitOscillatorT {
     /// Set the sample rate in Hz. Failure leaves the complete prior
     /// configuration unchanged.
     [[nodiscard]] bool prepare(SampleType sample_rate) noexcept {
-        if (!valid_configuration(sample_rate, frequency_hz_))
+        return prepare(sample_rate, frequency_hz_);
+    }
+
+    /// Atomically set sample rate and fundamental. Use this overload when a
+    /// valid pair cannot be reached through either default-backed setter first.
+    [[nodiscard]] bool prepare(SampleType sample_rate, SampleType frequency_hz) noexcept {
+        if (!valid_configuration(sample_rate, frequency_hz))
             return false;
         sample_rate_ = sample_rate;
+        frequency_hz_ = frequency_hz;
         update_harmonics();
         return true;
     }

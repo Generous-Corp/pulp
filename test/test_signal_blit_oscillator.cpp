@@ -133,6 +133,19 @@ TEST_CASE("BlitOscillator excludes a rounded quotient above Nyquist",
     REQUIRE(static_cast<long double>(oscillator.harmonic_count()) * below <= 24000.0L);
 }
 
+TEST_CASE("BlitOscillator atomically reaches valid pairs outside its defaults",
+          "[signal][blit][regression]") {
+    BlitOscillator64 oscillator;
+    REQUIRE(oscillator.prepare(1.0, 1.0e-9));
+    REQUIRE(oscillator.sample_rate() == 1.0);
+    REQUIRE(oscillator.frequency() == 1.0e-9);
+    const int expected =
+        static_cast<int>(std::floor(0.5L / static_cast<long double>(oscillator.frequency())));
+    REQUIRE(oscillator.harmonic_count() == expected);
+    REQUIRE(static_cast<long double>(expected) * oscillator.frequency() <= 0.5L);
+    REQUIRE(std::isfinite(oscillator.next()));
+}
+
 TEST_CASE("BlitOscillator spectrum contains no partial above its Nyquist cap",
           "[signal][blit][spectrum]") {
     constexpr std::size_t length = 256;
