@@ -653,7 +653,11 @@ target_sources(pulp-test-analog-vcf PRIVATE
     $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
 target_link_libraries(pulp-test-analog-vcf
     PRIVATE pulp::signal pulp::audio-analysis pulp::native-components Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-analog-vcf)
+catch_discover_tests(pulp-test-analog-vcf TEST_SPEC "~[slow]")
+catch_discover_tests(pulp-test-analog-vcf
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow)
 
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.

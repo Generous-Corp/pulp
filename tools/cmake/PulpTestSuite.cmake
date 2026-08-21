@@ -29,6 +29,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/PulpTestTimeout.cmake)
 #     [SOURCES src1 src2 ...]            # default: derived "<NAME>.cpp" stripped of leading "pulp-test-"
 #     [LIBRARIES lib1 lib2 ...]          # additional Pulp / system libraries (Catch2WithMain is always linked)
 #     [TEST_SPEC "spec"]                 # catch_discover_tests TEST_SPEC
+#     [TEST_PREFIX "prefix"]             # catch_discover_tests TEST_PREFIX
 #     [LABELS "label1;label2"]           # catch_discover_tests PROPERTIES LABELS
 #     [TIMEOUT seconds]                  # catch_discover_tests PROPERTIES TIMEOUT
 #     [PROPERTIES name value ...]        # additional catch_discover_tests PROPERTIES
@@ -38,7 +39,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/PulpTestTimeout.cmake)
 # )
 function(pulp_add_test_suite NAME)
     set(options "")
-    set(oneValueArgs TIMEOUT TEST_SPEC)
+    set(oneValueArgs TIMEOUT TEST_SPEC TEST_PREFIX)
     set(multiValueArgs SOURCES LIBRARIES INCLUDE_DIRS COMPILE_DEFINITIONS PROPERTIES DISCOVERY_ARGS LABELS)
     cmake_parse_arguments(P "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     if(P_UNPARSED_ARGUMENTS)
@@ -71,6 +72,9 @@ function(pulp_add_test_suite NAME)
     set(_discover_args ${P_DISCOVERY_ARGS})
     if(P_TEST_SPEC)
         list(APPEND _discover_args TEST_SPEC "${P_TEST_SPEC}")
+    endif()
+    if(P_TEST_PREFIX)
+        list(APPEND _discover_args TEST_PREFIX "${P_TEST_PREFIX}")
     endif()
     if(P_LABELS OR P_TIMEOUT OR P_PROPERTIES)
         if(P_TIMEOUT OR P_PROPERTIES)

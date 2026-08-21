@@ -17,7 +17,14 @@
 pulp_add_test_suite(pulp-test-fdn-reverb
     SOURCES test_fdn_reverb.cpp test_fdn_reverb_acceptance.cpp
     LIBRARIES pulp::signal pulp::audio-analysis
+    TEST_SPEC "~[slow]"
     TIMEOUT 900)
+pulp_scaled_test_timeout(_pulp_fdn_slow_timeout 900)
+catch_discover_tests(pulp-test-fdn-reverb
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow
+    PROPERTIES TIMEOUT "${_pulp_fdn_slow_timeout}")
 
 # The catalog node. Same RT-probe wiring as the lo-fi catalog: proves every
 # declared knob reaches the baked DSP over the production injection path, and
