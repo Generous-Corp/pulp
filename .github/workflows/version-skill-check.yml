@@ -262,6 +262,16 @@ jobs:
         run: |
           python3 tools/scripts/check_cli_mcp_parity.py --mode=report --no-color
 
+      - name: Sequencer exposure ledger
+        # Base-aware enforcement: a sequencer/playback delivery slice must
+        # classify installed SDK, offline CLI/MCP, live Product A, and the
+        # separate design-time manifest in the durable ledger. Removed rows
+        # require immutable tombstones.
+        run: |
+          BASE_SHA="${{ steps.base.outputs.ref }}"
+          python3 tools/scripts/sequencer_exposure_check.py --base "$BASE_SHA"
+          python3 tools/scripts/test_sequencer_exposure_check.py
+
       - name: SignalGraph single-backend governance (issue-keyed I1/I10/I11/I12)
         # Authoritative gate for the SignalGraph / linear-authoring structural
         # invariants. Whole-tree (not diff-scoped) — the way these drift is a new
