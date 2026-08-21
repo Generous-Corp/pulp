@@ -319,7 +319,7 @@ schema_version = 2
 # Exact current-main inventory plus the policy contract test added with this
 # declaration. Test-topology changes force a full-suite decision. This remains
 # shadow-only: [validation.default] is still the authoritative execution.
-full_test_count = 20727
+full_test_count = 20668
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [
