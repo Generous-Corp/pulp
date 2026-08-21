@@ -149,8 +149,11 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("- name: Resolve exact pull request", text)
         self.assertIn("base_sha: ${{ steps.pr.outputs.base_sha }}", text)
         self.assertIn("head_sha: ${{ steps.pr.outputs.head_sha }}", text)
-        self.assertIn("ref: ${{ needs.resolve-runner.outputs.head_sha }}", text)
-        self.assertIn("- name: Verify exact pull request head", text)
+        self.assertIn("WORKFLOW_REF: ${{ github.ref_name }}", text)
+        self.assertIn('if [ "$WORKFLOW_REF" != "main" ]', text)
+        self.assertIn("ref: ${{ github.sha }}", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn("- name: Checkout exact pull request head", text)
         self.assertIn("- name: Fetch protected capability base", text)
         self.assertIn(
             '"+$EXPECTED_BASE:refs/remotes/origin/main"',
@@ -167,6 +170,10 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("--repeat until-pass:2", text)
         self.assertLess(
             text.index("- name: Fetch protected capability base"),
+            text.index("- name: Checkout exact pull request head"),
+        )
+        self.assertLess(
+            text.index("- name: Checkout exact pull request head"),
             text.index("- name: Test"),
         )
         chrome_step = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"

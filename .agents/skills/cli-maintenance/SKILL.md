@@ -1438,7 +1438,12 @@ Gotchas:
 `pulp macos retarget --pr N --to <local|namespace|github-hosted>` cancels
 any in-flight macOS-bearing workflow_runs for PR N (from both `build.yml`'s
 matrix and any prior `build-macos.yml` dispatch) and fires a fresh
-`gh workflow run build-macos.yml --ref <pr-head> --field runner=<choice>`.
+`gh workflow run build-macos.yml --ref main --field pr_number=N --field
+target_ref=<pr-head> --field runner=<choice>`. The workflow definition must
+come from protected `main`: running PR-authored workflow control on a manual
+dispatch can poison persistent CI state before the exact PR checks execute.
+The trusted workflow validates the open internal PR's repository, base, ref,
+and immutable SHAs before fetching and detaching to its head.
 
 Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
 flag): the `build.yml` matrix couples Linux/Windows/macOS into one

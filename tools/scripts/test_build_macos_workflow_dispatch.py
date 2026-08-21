@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-macos.yml"
+MACOS_COMMAND = REPO_ROOT / "tools" / "cli" / "cmd_macos.cpp"
 BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
 
@@ -45,6 +46,7 @@ def _resolver_script() -> str:
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
+         workflow_ref: str = "main",
          detail: dict[str, object] | None = None,
          matches: list[dict[str, object]] | None = None) -> tuple[int, dict[str, str], str]:
     detail = detail if detail is not None else _pr()
@@ -79,6 +81,7 @@ def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
             "GITHUB_REPOSITORY_OWNER": "Generous-Corp",
             "INPUT_PR_NUMBER": explicit,
             "TARGET_REF": target_ref,
+            "WORKFLOW_REF": workflow_ref,
             "GH_TOKEN": "test-token",
         })
         process = subprocess.run(
@@ -146,6 +149,18 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(output, {})
         self.assertIn("40-character", error)
+
+    def test_non_main_workflow_definition_is_rejected(self) -> None:
+        rc, output, error = _run(workflow_ref="repair/security-7723")
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, {})
+        self.assertIn("protected main", error)
+
+    def test_cli_dispatches_the_trusted_workflow_with_explicit_pr_identity(self) -> None:
+        source = MACOS_COMMAND.read_text(encoding="utf-8")
+        self.assertIn('" --ref main"', source)
+        self.assertIn('" --field pr_number=" + shell_quote(pr_number)', source)
+        self.assertNotIn('" --ref " + shell_quote(head_ref)', source)
 
 
 if __name__ == "__main__":

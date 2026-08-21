@@ -1760,14 +1760,18 @@ pulp macos status --pr 1910
 `build-macos.yml` is independent of `build.yml`'s matrix — they share check names but not workflow_runs. The matrix workflow continues running Linux/Windows as usual; only the macOS leg is replaced.
 
 The retarget lane consumes the same reduced required-gate CTest labels and the
-same pinned, checksum-verified Chrome as `build.yml`. Before claiming a macOS
-runner, it resolves one open internal PR, validates that PR still targets
-`Generous-Corp/pulp:main`, and pins both the exact head checkout and the
-immutable base SHA recorded on that PR. Capability-history checks compare
-against that event-pinned base, not newer live `main`; the native merge queue
+same pinned, checksum-verified Chrome as `build.yml`. The CLI dispatches the
+workflow definition from protected `main`, never from the PR branch. Before
+claiming a macOS runner, that trusted control path resolves one open internal
+PR, validates that PR still targets `Generous-Corp/pulp:main`, and pins both its
+exact head and the immutable base SHA recorded on the PR. The build runner first
+checks out the trusted workflow SHA with Git credentials disabled, then fetches,
+verifies, and detaches to the exact PR head. Capability-history checks compare
+against the event-pinned base, not newer live `main`; the native merge queue
 validates the eventual combined tree separately. Keep these contracts mirrored:
 a provider reroute must not turn the required gate into a full benchmark lane,
-validate a different commit pair, or depend on stale runner checkout history.
+run PR-authored control code, validate a different commit pair, or depend on
+stale runner checkout history.
 
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 

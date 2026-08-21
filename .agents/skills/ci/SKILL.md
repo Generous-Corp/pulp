@@ -4058,9 +4058,11 @@ same-named check from either workflow, so `build-macos.yml`'s `macos`
 job supersedes the matrix's `macos` job when fresher.
 
 It must remain semantically identical to the required macOS gate: resolve an
-open internal PR, check out its exact head SHA, fetch the immutable base SHA
-recorded on that PR for capability-history checks, install the same pinned and
-checksum-verified Chrome used by `build.yml`, and exclude
+open internal PR from the workflow definition on protected `main`, check out
+trusted control code with credentials disabled, then fetch and detach to the
+PR's exact head SHA and immutable base SHA for capability-history checks. It
+also installs the same pinned and checksum-verified Chrome used by `build.yml`
+and excludes
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the
 provider; it must not turn required CI into a full benchmark lane, compare a
 behind PR against newer live `main`, or depend on a warm runner's stale refs.
