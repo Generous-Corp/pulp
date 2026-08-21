@@ -70,7 +70,23 @@ TEMPLATE="$REPO_ROOT/tools/launchd/pulp-tart-runner.plist.template"
 # ── 1. prereqs ──────────────────────────────────────────────────────────────
 note "1/6 prerequisites"
 command -v brew >/dev/null || die "Homebrew required: https://brew.sh"
-command -v tart >/dev/null || { note "installing tart"; brew install cirruslabs/cli/tart; }
+if brew list cirruslabs/cli/tart >/dev/null 2>&1; then
+  die "legacy cirruslabs/cli/tart is installed and must be migrated before onboarding.
+  Do not replace Tart under a running VM. Follow docs/guides/mac-ci-host-setup.md
+  to migrate one idle host at a time to openai/tools/tart."
+fi
+if ! command -v tart >/dev/null; then
+  if brew list openai/tools/tart >/dev/null 2>&1; then
+    die "openai/tools/tart is installed but unreachable from this launch environment.
+  Fix PATH or the host profile's absolute tart_bin; do not reinstall a running
+  provider to compensate for a stripped SSH or launchd PATH."
+  fi
+  note "installing Tart from the official OpenAI channel"
+  brew tap openai/tools
+  brew trust --formula openai/tools/softnet
+  brew trust --formula openai/tools/tart
+  brew install openai/tools/tart
+fi
 command -v sshpass >/dev/null || { note "installing sshpass (first-boot key inject if baking)"; brew install hudochenkov/sshpass/sshpass || warn "sshpass install failed — only needed if you bake"; }
 ok "tart $(tart --version 2>/dev/null)"
 [ -f "$HOME/.ssh/id_ed25519" ] || warn "no ~/.ssh/id_ed25519 — the golden must trust your key (ssh-keygen -t ed25519, then re-inject or re-bake)"

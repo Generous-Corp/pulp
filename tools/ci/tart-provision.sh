@@ -50,7 +50,7 @@ die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # store gets resolved — no subcommand can reach `tart` with an unresolved store.
 need_tart(){
   pulp_require_tart_home
-  command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart"
+  command -v tart >/dev/null 2>&1 || die "tart not installed — brew install openai/tools/tart"
 }
 have_sshpass(){ command -v sshpass >/dev/null 2>&1; }
 

@@ -39,7 +39,7 @@
   online runners — keep the bare-metal runners until the VM lane is proven.
 
   Requires on this host:
-    * tart (brew install cirruslabs/cli/tart) + the pulp-build-runner golden in TART_HOME
+    * tart (brew install openai/tools/tart) + the pulp-build-runner golden in TART_HOME
     * gh authenticated for Generous-Corp/pulp (config-file token storage avoids
       the keychain dependency) — minting JIT runner configs needs repo admin
     * ~/.ssh/id_ed25519 injected into the golden (Tier 0)

@@ -2,7 +2,7 @@
 name: tart-ci
 description: Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. Use when setting up VM-based CI for Pulp or generalizing it to another repo, building/refreshing golden images, wiring ephemeral runners, or debugging the VM lane.
 requires:
-  - tart            # brew install cirruslabs/cli/tart
+  - tart            # brew install openai/tools/tart
   - sshpass         # brew install hudochenkov/sshpass/sshpass (first-boot key injection only)
   - gh              # authenticated; minting JIT runner configs needs repo admin
 ---
@@ -37,6 +37,27 @@ The reusable runner path is now the sibling `tartci` repo:
   baselines.
 - `shipyard --json runner fleet-status --target macos` is the cross-host pool
   view for macOS VM slots and supervisor freshness.
+
+## Tart upstream and fleet upgrades
+
+Tart's maintained upstream is `openai/tart`; new hosts install the official
+`openai/tools/tart` formula. Do not add or preserve `cirruslabs/cli/tart` in
+bootstrap instructions. Homebrew cannot install both same-named tap formulae,
+so migrate an existing host only at a proven idle boundary. First stop new work
+from being routed to that host without unloading its providers, then prove its
+GitHub runners are not busy, its configured `TART_HOME` has zero running VMs,
+and no `tart run` process remains. Only then stop the idle providers, prefetch
+both the installed legacy formulae (for rollback) and the new Tart/Softnet
+formulae, uninstall the old kegs, and install the OpenAI kegs. Canary inventory,
+CoW clone, boot, network, shared directory, discard, lease accounting, and a
+real ephemeral job before restoring admission. Roll one host at a time and
+preserve another fleet host as capacity/rollback.
+
+Never diagnose Tart as absent from raw `ssh host 'command -v tart'`: stripped
+non-login shells commonly omit `/opt/homebrew/bin`. Probe the host profile's
+absolute `tart_bin` (normally `/opt/homebrew/bin/tart`) with its configured
+`TART_HOME`. Report `installed but unreachable from launch environment`
+separately from `absent`; the former is a PATH/profile convergence defect.
 
 ## The vm-image manifest (the unit of reuse)
 A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh manifest <path>` bakes it — no hand-provisioning. Two strategies:

@@ -3831,7 +3831,13 @@ then the VM is destroyed (no build-dir churn / state drift). Driven by
 for the `/Volumes` VM store; launchd doesn't expand `$HOME`). Add VM
 runners additively while the bare-metal runners remain the safety net;
 never leave the required label with zero online runners. Full guide:
-the `tart-ci` skill. NOTE: shipyard `backend = "local"` validates in the
+the `tart-ci` skill. New hosts install Tart from `openai/tools/tart`.
+Existing `cirruslabs/cli/tart` hosts migrate one at a time only after
+admission is stopped and GitHub runner, VM, and `tart run` state all prove
+the host idle; `pool off`/launchd unload is not a drain operation. A stripped
+SSH or launchd PATH must be classified as installed-but-unreachable by probing
+the configured absolute binary, not mistaken for an absent Tart install.
+NOTE: shipyard `backend = "local"` validates in the
 editing checkout, which false-fails via Debug-over-Release build-dir
 churn + host-keychain prompts — Phase 2 points that validation at the
 VM lane instead.

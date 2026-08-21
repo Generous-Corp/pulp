@@ -35,7 +35,7 @@ It's idempotent and prints the one thing it can't automate (the Full Disk Access
 ## 0. Prerequisites
 ```bash
 # Apple Silicon, macOS matching the golden (Tahoe for Xcode 26.5).
-brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
+brew install openai/tools/tart hudochenkov/sshpass/sshpass
 # SSH keypair the golden will trust (or already trusts):
 test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 gh auth login -h github.com            # config-file token storage (no keychain dependency); repo admin to mint JIT runner configs
@@ -43,6 +43,19 @@ git clone https://github.com/Generous-Corp/pulp.git ~/Code/pulp   # tools/ci/* +
 echo 'export TART_HOME=$HOME/VMs' >> ~/.zprofile && export TART_HOME=$HOME/VMs
 mkdir -p ~/VMs && touch ~/VMs/.metadata_never_index              # keep Spotlight off the VM store
 ```
+
+Tart moved from `cirruslabs/tart` to `openai/tart`. Existing provider hosts
+must migrate one at a time at a natural idle boundary. Stop new routing to the
+host without unloading an active provider, then prove its GitHub runners are
+not busy, the configured `TART_HOME` has zero running VMs, and no `tart run`
+process remains. Only then stop the idle providers, prefetch both the installed
+legacy formulae (rollback) and `openai/tools/{softnet,tart}`, uninstall the old
+same-named kegs, and install the OpenAI formulae. Prove
+clone/boot/network/shared-cache/discard/governor and a real ephemeral job before
+restoring admission. Homebrew refuses both taps' same-named formulae
+simultaneously. A stripped SSH shell may omit `/opt/homebrew/bin`, so probe
+`/opt/homebrew/bin/tart --version` directly; ambient `command -v` failure means
+launch-environment drift, not proof that Tart is absent.
 
 ## 1. Get the golden image
 The golden chain is `macos-build-base → macos-apple-xcode → pulp-build-base → pulp-build-runner`. You only need **`pulp-build-runner:latest`** to run jobs.

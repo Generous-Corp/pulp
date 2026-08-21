@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-command -v tart >/dev/null 2>&1 || { echo "ERROR: tart not installed (brew install cirruslabs/cli/tart)"; exit 3; }
+command -v tart >/dev/null 2>&1 || { echo "ERROR: tart not installed (brew install openai/tools/tart)"; exit 3; }
 tart list 2>/dev/null | grep -q "${GOLDEN%%:*}" || { echo "ERROR: golden '$GOLDEN' not found on this host. Bake/replicate it first (see .shipyard/vm-image.intel.toml)."; exit 3; }
 
 # Deterministic-ish ephemeral name (no Math.random needed; PID + ref).
