@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Execute a Shipyard-selected literal CTest file without regex construction.
+
+This adapter is intentionally narrow. Shipyard owns exact-head selection and
+writes one literal test name per line. This script independently proves that
+the current CTest inventory matches Pulp's protected contract, that every
+requested name expands to the expected registrations (including duplicate
+display names), and only then invokes CTest with ``--tests-from-file`` as an
+argv element. Any ambiguity exits before a test process starts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+from typing import Any, Sequence
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+
+import build_dir_lock
+import changed_surface_inventory as inventory
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
+DEFAULT_CONTRACT = REPO_ROOT / ".shipyard" / "changed-surface-inventory.json"
+EXCLUDE_NAME = inventory.EXCLUDED_NAME_REGEX
+EXCLUDE_LABEL = inventory.EXCLUDED_LABEL_REGEX
+MINIMUM_CTEST_VERSION = (3, 29)
+# Shipyard keeps the base64-expanded command below cmd.exe's 8,191-character
+# ceiling. Larger selections conservatively stay on the full validation path.
+MAX_SELECTED_TEST_BYTES = 4 * 1024
+
+
+class SelectionExecutionError(ValueError):
+    """The literal selection cannot safely replace the full test stage."""
+
+
+def parse_literal_selection(payload: bytes) -> list[str]:
+    """Parse a UTF-8, newline-delimited set of literal test names."""
+
+    if b"\0" in payload or b"\r" in payload:
+        raise SelectionExecutionError("selected-tests file contains an invalid line boundary")
+    try:
+        text = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise SelectionExecutionError("selected-tests file is not UTF-8") from error
+    if not text.endswith("\n"):
+        raise SelectionExecutionError("selected-tests file must end with one newline")
+    names = text[:-1].split("\n")
+    if not names or any(not name.strip() for name in names):
+        raise SelectionExecutionError("selected-tests file contains an empty test name")
+    if len(names) != len(set(names)):
+        raise SelectionExecutionError("selected-tests file contains duplicate names")
+    return names
+
+
+def decode_selection_receipt(
+    encoded: str, expected_sha256: str
+) -> tuple[list[str], bytes, dict[str, Any]]:
+    """Authenticate and parse Shipyard's exact-identity selection receipt."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise SelectionExecutionError("selected-tests SHA-256 is malformed")
+    if not encoded or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
+        raise SelectionExecutionError("selected-tests payload is not canonical URL-safe base64")
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        payload = base64.b64decode(encoded + padding, altchars=b"-_", validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise SelectionExecutionError("selected-tests payload is malformed") from error
+    canonical = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    if canonical != encoded:
+        raise SelectionExecutionError("selected-tests payload is not canonically encoded")
+    if len(payload) > MAX_SELECTED_TEST_BYTES:
+        raise SelectionExecutionError("selected-tests payload exceeds the safe execution limit")
+    if hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise SelectionExecutionError("selected-tests payload digest mismatch")
+    try:
+        receipt = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SelectionExecutionError("selection receipt is not valid UTF-8 JSON") from error
+    required = {
+        "schema_version",
+        "repository",
+        "pull_request",
+        "target",
+        "base_sha",
+        "head_sha",
+        "tree_sha",
+        "policy_digest",
+        "selection_receipt_digest",
+        "validation_contract_digest",
+        "workflow_digest",
+        "selected_tests_digest",
+        "selected_tests",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != required:
+        raise SelectionExecutionError("selection receipt has an unexpected schema")
+    if receipt["schema_version"] != 1:
+        raise SelectionExecutionError("selection receipt schema version is unsupported")
+    if not isinstance(receipt["pull_request"], int) or receipt["pull_request"] <= 0:
+        raise SelectionExecutionError("selection receipt PR identity is invalid")
+    for key in ("repository", "target"):
+        if not isinstance(receipt[key], str) or not receipt[key]:
+            raise SelectionExecutionError(f"selection receipt {key} is invalid")
+    for key in ("base_sha", "head_sha", "tree_sha"):
+        if not isinstance(receipt[key], str) or not re.fullmatch(
+            r"[0-9a-fA-F]{40}", receipt[key]
+        ):
+            raise SelectionExecutionError(f"selection receipt {key} is invalid")
+    for key in (
+        "policy_digest",
+        "selection_receipt_digest",
+        "validation_contract_digest",
+        "workflow_digest",
+        "selected_tests_digest",
+    ):
+        if not isinstance(receipt[key], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", receipt[key]
+        ):
+            raise SelectionExecutionError(f"selection receipt {key} is invalid")
+    selected_tests = receipt["selected_tests"]
+    if not isinstance(selected_tests, list) or not all(
+        isinstance(name, str) for name in selected_tests
+    ):
+        raise SelectionExecutionError("selection receipt selected_tests is invalid")
+    literal_payload = "".join(f"{name}\n" for name in selected_tests).encode("utf-8")
+    names = parse_literal_selection(literal_payload)
+    if hashlib.sha256(literal_payload).hexdigest() != receipt["selected_tests_digest"]:
+        raise SelectionExecutionError("selection receipt literal-test digest mismatch")
+    return names, literal_payload, receipt
+
+
+def git_value(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            shell=False,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SelectionExecutionError(f"cannot verify checkout identity: {error}") from error
+    return result.stdout.strip()
+
+
+def validate_receipt_identity(receipt: dict[str, Any], target: str) -> None:
+    """Bind the receipt to the clean Pulp checkout consumed by this adapter."""
+
+    if receipt["repository"] != "Generous-Corp/pulp" or receipt["target"] != target:
+        raise SelectionExecutionError("selection receipt repository or target mismatch")
+    current_head = git_value("rev-parse", "HEAD")
+    current_tree = git_value("rev-parse", "HEAD^{tree}")
+    if current_head != receipt["head_sha"] or current_tree != receipt["tree_sha"]:
+        raise SelectionExecutionError("selection receipt does not match checkout HEAD and tree")
+    if git_value("status", "--porcelain", "--untracked-files=all"):
+        raise SelectionExecutionError("selection execution checkout is dirty")
+
+
+def require_ctest_version() -> tuple[int, int]:
+    """Require the literal-file selector introduced by CTest 3.29."""
+
+    try:
+        result = subprocess.run(
+            ["ctest", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            shell=False,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SelectionExecutionError(f"cannot determine CTest version: {error}") from error
+    match = re.search(r"ctest version (\d+)\.(\d+)", result.stdout)
+    if match is None:
+        raise SelectionExecutionError("cannot parse CTest version")
+    version = (int(match.group(1)), int(match.group(2)))
+    if version < MINIMUM_CTEST_VERSION:
+        raise SelectionExecutionError(
+            "authoritative literal selection requires CTest 3.29 or newer"
+        )
+    return version
+
+
+def write_private_selection(directory: Path, payload: bytes) -> Path:
+    """Materialize one owner-private, read-only snapshot for this process."""
+
+    snapshot = directory / "selected-tests.txt"
+    descriptor = os.open(snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as selection_file:
+            selection_file.write(payload)
+            selection_file.flush()
+            os.fsync(selection_file.fileno())
+    except BaseException:
+        snapshot.unlink(missing_ok=True)
+        raise
+    snapshot.chmod(0o400)
+    return snapshot
+
+
+def load_policy(config_path: Path, target: str) -> dict[str, Any]:
+    with config_path.open("rb") as config_file:
+        config = tomllib.load(config_file)
+    try:
+        policy = config["targets"][target]["changed_surface_selection"]
+    except (KeyError, TypeError) as error:
+        raise SelectionExecutionError(
+            f"config has no changed-surface policy for target {target!r}"
+        ) from error
+    if not isinstance(policy, dict):
+        raise SelectionExecutionError("changed-surface policy is not a table")
+    return policy
+
+
+def declared_literal_tests(policy: dict[str, Any]) -> set[str]:
+    names = set(policy.get("baseline_tests", []))
+    for family in policy.get("families", []):
+        names.update(family.get("tests", []))
+        names.update(family.get("extended_tests", []))
+    if not names or not all(isinstance(name, str) and name for name in names):
+        raise SelectionExecutionError("policy has no valid literal test inventory")
+    return names
+
+
+def validate_build_configuration(build_dir: Path, policy: dict[str, Any]) -> None:
+    """Prove the live CMake cache matches every selector build declaration."""
+
+    cache_path = build_dir / "CMakeCache.txt"
+    try:
+        lines = cache_path.read_text(encoding="utf-8", errors="strict").splitlines()
+    except OSError as error:
+        raise SelectionExecutionError(f"cannot read CMake cache: {error}") from error
+    observed: dict[str, str] = {}
+    for line in lines:
+        if line.startswith(("//", "#")) or ":" not in line or "=" not in line:
+            continue
+        key = line.split(":", 1)[0]
+        observed[key] = line.split("=", 1)[1]
+
+    build_types = {
+        "debug": "Debug",
+        "release": "Release",
+        "rel_with_deb_info": "RelWithDebInfo",
+        "min_size_rel": "MinSizeRel",
+    }
+    declared_type = policy.get("build_type")
+    if declared_type not in build_types:
+        raise SelectionExecutionError("policy build_type is missing or unsupported")
+    expected = {"CMAKE_BUILD_TYPE": build_types[declared_type]}
+    flags = policy.get("build_flags")
+    if not isinstance(flags, list):
+        raise SelectionExecutionError("policy build_flags is not an array")
+    for flag in flags:
+        if not isinstance(flag, str) or not flag.startswith("-D") or "=" not in flag[2:]:
+            raise SelectionExecutionError(
+                f"policy build flag is not an exact -DKEY=VALUE declaration: {flag!r}"
+            )
+        key, value = flag[2:].split("=", 1)
+        if not key or (key in expected and expected[key] != value):
+            raise SelectionExecutionError(f"conflicting policy build flag: {flag!r}")
+        expected[key] = value
+
+    mismatches = [
+        f"{key}: expected {value!r}, observed {observed.get(key)!r}"
+        for key, value in sorted(expected.items())
+        if observed.get(key) != value
+    ]
+    if mismatches:
+        raise SelectionExecutionError(
+            "live CMake configuration differs from selector policy: " + "; ".join(mismatches)
+        )
+
+
+def ctest_json(build_dir: Path, selected_file: Path | None = None) -> list[dict[str, Any]]:
+    command = ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"]
+    if selected_file is not None:
+        command.extend(["--tests-from-file", str(selected_file)])
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            shell=False,
+        )
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        raise SelectionExecutionError(f"CTest inventory query failed: {error}") from error
+    tests = payload.get("tests")
+    if not isinstance(tests, list):
+        raise SelectionExecutionError("CTest JSON has no tests array")
+    return tests
+
+
+def validate_selection(
+    *,
+    selected_names: Sequence[str],
+    full_tests: list[dict[str, Any]],
+    selected_tests: list[dict[str, Any]],
+    source_root: Path,
+    build_dir: Path,
+    policy: dict[str, Any],
+    contract: dict[str, Any],
+    target: str,
+) -> None:
+    """Fail closed unless CTest's file selection equals the reviewed expansion."""
+
+    baseline = policy.get("baseline_tests")
+    if not isinstance(baseline, list) or not set(baseline).issubset(selected_names):
+        raise SelectionExecutionError("selected-tests file omits the mandatory baseline")
+    undeclared = sorted(set(selected_names) - declared_literal_tests(policy))
+    if undeclared:
+        raise SelectionExecutionError(f"selection contains undeclared names: {undeclared}")
+
+    live_manifest = inventory.build_manifest(
+        full_tests,
+        source_root,
+        build_dir,
+        policy,
+        target=target,
+    )
+    inventory.validate_manifest(live_manifest, contract)
+    expected_groups = inventory.expand_literal_selection(live_manifest, selected_names)
+    observed_groups = inventory.inventory_groups(selected_tests, source_root, build_dir)
+    if inventory.canonical_json(expected_groups) != inventory.canonical_json(observed_groups):
+        raise SelectionExecutionError(
+            "CTest --tests-from-file expansion differs from the reviewed literal selection"
+        )
+
+
+def execution_argv(build_dir: Path, selected_file: Path) -> list[str]:
+    """Return the exact shell-free governed CTest argv."""
+
+    return [
+        str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"),
+        "ctest",
+        "--test-dir",
+        str(build_dir),
+        "--output-on-failure",
+        "--repeat",
+        "until-pass:2",
+        "--exclude-regex",
+        EXCLUDE_NAME,
+        "--label-exclude",
+        EXCLUDE_LABEL,
+        "--tests-from-file",
+        str(selected_file),
+        "--no-tests=error",
+    ]
+
+
+def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
+    """Verify and execute one selection while the build tree is exclusive."""
+
+    config_path = args.config.resolve(strict=True)
+    contract_path = args.inventory_contract.resolve(strict=True)
+    selected_names, selected_payload, selection_receipt = decode_selection_receipt(
+        args.selection_receipt_b64, args.selection_receipt_sha256
+    )
+    validate_receipt_identity(selection_receipt, args.target)
+    require_ctest_version()
+    policy = load_policy(config_path, args.target)
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    source_root = inventory.source_root_for_build(build_dir).resolve(strict=True)
+    if source_root != REPO_ROOT.resolve():
+        raise SelectionExecutionError(
+            f"build source root {source_root} does not match checkout {REPO_ROOT.resolve()}"
+        )
+    validate_build_configuration(build_dir, policy)
+    with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
+        selected_file = write_private_selection(Path(directory), selected_payload)
+        snapshot_identity = selected_file.stat()
+        full_tests = ctest_json(build_dir)
+        selected_tests = ctest_json(build_dir, selected_file)
+        validate_selection(
+            selected_names=selected_names,
+            full_tests=full_tests,
+            selected_tests=selected_tests,
+            source_root=source_root,
+            build_dir=build_dir,
+            policy=policy,
+            contract=contract,
+            target=args.target,
+        )
+        completed = subprocess.run(execution_argv(build_dir, selected_file), shell=False)
+        final_identity = selected_file.stat()
+        if (
+            (snapshot_identity.st_dev, snapshot_identity.st_ino)
+            != (final_identity.st_dev, final_identity.st_ino)
+            or selected_file.read_bytes() != selected_payload
+        ):
+            raise SelectionExecutionError("private selected-tests snapshot changed during execution")
+        return completed.returncode
+
+
+def run(args: argparse.Namespace) -> int:
+    build_dir = args.build_dir.resolve(strict=True)
+    with build_dir_lock.exclusive_build_dir(build_dir):
+        return run_locked(args, build_dir)
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--selection-receipt-b64", required=True)
+    parser.add_argument("--selection-receipt-sha256", required=True)
+    parser.add_argument("--build-dir", default=REPO_ROOT / "build", type=Path)
+    parser.add_argument("--config", default=DEFAULT_CONFIG, type=Path)
+    parser.add_argument("--inventory-contract", default=DEFAULT_CONTRACT, type=Path)
+    parser.add_argument("--target", default="mac")
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    try:
+        return run(parse_args())
+    except (SelectionExecutionError, inventory.InventoryError, OSError, json.JSONDecodeError) as error:
+        print(f"changed-surface execution refused: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
