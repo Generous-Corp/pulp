@@ -87,10 +87,10 @@ template <typename SampleType = float> class BlitOscillatorT {
             !std::isfinite(frequency) || !(frequency > SampleType{0}) ||
             frequency >= sample_rate * SampleType{0.5})
             return false;
-        const double requested =
-            std::floor((static_cast<double>(sample_rate) * 0.5) / static_cast<double>(frequency));
-        return std::isfinite(requested) && requested >= 1.0 &&
-               requested <= static_cast<double>(max_harmonics);
+        const long double requested = std::floor((static_cast<long double>(sample_rate) * 0.5L) /
+                                                 static_cast<long double>(frequency));
+        return std::isfinite(requested) && requested >= 1.0L &&
+               requested <= static_cast<long double>(max_harmonics);
     }
 
     static double normalized_sinc(double x) noexcept {
@@ -103,8 +103,11 @@ template <typename SampleType = float> class BlitOscillatorT {
     }
 
     void update_harmonics() noexcept {
-        harmonics_ = static_cast<int>(std::floor((static_cast<double>(sample_rate_) * 0.5) /
-                                                 static_cast<double>(frequency_hz_)));
+        const long double nyquist = static_cast<long double>(sample_rate_) * 0.5L;
+        const long double frequency = static_cast<long double>(frequency_hz_);
+        harmonics_ = static_cast<int>(std::floor(nyquist / frequency));
+        if (static_cast<long double>(harmonics_) * frequency > nyquist)
+            --harmonics_;
     }
 
     SampleType sample_rate_ = SampleType{48000};
