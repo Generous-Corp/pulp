@@ -577,11 +577,6 @@ static std::vector<std::string> tokenize_name(const std::string& name) {
     return tokens;
 }
 
-// Recognize audio widgets by WHOLE-WORD name tokens, not substrings. The old
-// substring match promoted any name *containing* "dial"/"meter"/… — so
-// "Dialog"/"Radial"/"Medallion" became knobs and "Parameter"/"diameter" became
-// meters. Token matching (pulp design-import gap survey) fixes those while
-// keeping "xy_pad"/"xypad" and acronym names like "VUMeter".
 AudioWidgetType detect_audio_widget(const std::string& name) {
     const auto toks = tokenize_name(name);
     const std::unordered_set<std::string> t(toks.begin(), toks.end());
@@ -591,12 +586,17 @@ AudioWidgetType detect_audio_widget(const std::string& name) {
     auto has = [&](const std::string& w) {
         return t.find(w) != t.end() || t.find(w + "s") != t.end();
     };
-    // A "label" token names the TEXT that annotates a control, never the control
-    // itself: "sound / knob label", "fader label", "value label" are all text.
-    // Without this the "knob" in "knob label" promoted the label frame to a
-    // built-in knob, painting a stock knob disc over a text label ("Classic"
-    // under a filter-mode picker rendered as a dark knob instead of the word).
-    if (has("label"))                                          return AudioWidgetType::none;
+    if (has("label")) return AudioWidgetType::none;
+    static const std::unordered_set<std::string> widget_words{
+        "knob", "dial", "fader", "slider", "meter", "level", "vu", "xypad", "pad",
+        "waveform", "oscilloscope", "spectrum", "analyzer", "analyser"};
+    auto is_widget = [&](std::string w) {
+        if (w.ends_with('s')) w.pop_back();
+        return widget_words.count(w) != 0;
+    };
+    auto is_readout = [](const std::string& w) { return w == "value" || w == "values" || w == "readout" || w == "readouts"; };
+    for (size_t i = 1; i < toks.size(); ++i)
+        if (is_widget(toks[i - 1]) && is_readout(toks[i])) return AudioWidgetType::none;
     if (has("knob") || has("dial"))                            return AudioWidgetType::knob;
     if (has("fader") || has("slider"))                         return AudioWidgetType::fader;
     if (has("meter") || has("level") || has("vu"))             return AudioWidgetType::meter;

@@ -1604,6 +1604,20 @@ export function audioWidgetKindFromName(name: string): AudioWidgetKind | undefin
   const list = tokenizeName(name);
   for (let i = 0; i < list.length; i++) toks[list[i]] = true;
   const has = (w: string) => toks[w] === true || toks[w + "s"] === true;
+  const widgetWords: { [t: string]: true } = {
+    knob: true, dial: true, fader: true, slider: true, meter: true,
+    level: true, vu: true, xypad: true, pad: true, waveform: true,
+    oscilloscope: true, spectrum: true, analyzer: true, analyser: true,
+  };
+  const isWidget = (w: string) => {
+    if (w.endsWith("s")) w = w.slice(0, -1);
+    return widgetWords[w] === true;
+  };
+  const isReadout = (w: string) =>
+    w === "value" || w === "values" || w === "readout" || w === "readouts";
+  for (let i = 1; i < list.length; i++) {
+    if (isWidget(list[i - 1]) && isReadout(list[i])) return undefined;
+  }
   if (has("knob") || has("dial")) return "knob";
   if (has("fader") || has("slider")) return "fader";
   if (has("meter") || has("level") || has("vu")) return "meter";

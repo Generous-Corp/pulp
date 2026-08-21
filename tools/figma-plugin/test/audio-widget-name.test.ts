@@ -38,3 +38,10 @@ test("audioWidgetKindFromName rejects substring false positives (the fix)", () =
   assert.equal(audioWidgetKindFromName("Medallion"), undefined);    // was knob (substring "dal"? no) — stays clean
   assert.equal(audioWidgetKindFromName("Reverb"), undefined);       // no signal either way
 });
+
+test("audioWidgetKindFromName keeps control readouts decorative", () => {
+  assert.equal(audioWidgetKindFromName("KnobValue"), undefined);
+  assert.equal(audioWidgetKindFromName("fader-readout"), undefined);
+  assert.equal(audioWidgetKindFromName("xy-pad-values"), undefined);
+  assert.equal(audioWidgetKindFromName("ValueKnob"), "knob");
+});

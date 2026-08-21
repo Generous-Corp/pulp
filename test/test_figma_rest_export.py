@@ -1544,6 +1544,12 @@ class WidgetKindFromNameTest(unittest.TestCase):
         self.assertIsNone(frx.widget_kind_from_name("Parameter"))  # was meter ("meter")
         self.assertIsNone(frx.widget_kind_from_name("Reverb"))
 
+    def test_control_readouts_remain_decorative(self):
+        self.assertIsNone(frx.widget_kind_from_name("KnobValue"))
+        self.assertIsNone(frx.widget_kind_from_name("fader-readout"))
+        self.assertIsNone(frx.widget_kind_from_name("xy-pad-values"))
+        self.assertEqual(frx.widget_kind_from_name("ValueKnob"), "knob")
+
     def test_tokenize_name_matches_cpp_boundaries(self):
         self.assertEqual(frx._tokenize_name("VUMeter"), ["vu", "meter"])
         self.assertEqual(frx._tokenize_name("Knob_1"), ["knob", "1"])
