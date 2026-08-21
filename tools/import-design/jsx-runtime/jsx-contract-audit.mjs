@@ -89,6 +89,10 @@ const CSS_IDENT_PROPS = new Set([
     'textTransform', 'fontWeight', 'fontStyle', 'alignSelf', 'flexWrap',
 ]);
 
+const CONTINUOUS_EVENT_PROPS = new Set([
+    'onMouseMove', 'onPointerMove', 'onTouchMove', 'onWheel',
+]);
+
 function parserVersion() {
     try {
         return require('@babel/parser/package.json').version;
@@ -106,7 +110,10 @@ function cssTreeVersion() {
 }
 
 function parseArgs(argv) {
-    const out = { input: '', json: '', markdown: '', failOnWeakProof: false };
+    const out = {
+        input: '', json: '', markdown: '', failOnWeakProof: false,
+        failOnContinuousCommittedState: false,
+    };
     for (let i = 2; i < argv.length; i += 1) {
         const a = argv[i];
         const v = argv[i + 1];
@@ -114,8 +121,11 @@ function parseArgs(argv) {
         else if (a === '--json' || a === '--out') { out.json = v; i += 1; }
         else if (a === '--markdown') { out.markdown = v; i += 1; }
         else if (a === '--fail-on-weak-proof') { out.failOnWeakProof = true; }
+        else if (a === '--fail-on-continuous-committed-state') {
+            out.failOnContinuousCommittedState = true;
+        }
         else if (a === '--help' || a === '-h') {
-            console.log('Usage: jsx-contract-audit.mjs --in file.jsx [--json out.json] [--markdown out.md] [--fail-on-weak-proof]');
+            console.log('Usage: jsx-contract-audit.mjs --in file.jsx [--json out.json] [--markdown out.md] [--fail-on-weak-proof] [--fail-on-continuous-committed-state]');
             process.exit(0);
         } else {
             throw new Error(`unknown arg: ${a}`);
@@ -228,6 +238,63 @@ function reactUseStateSetter(node) {
     const setter = node.id.elements?.[1];
     if (state?.type !== 'Identifier' || setter?.type !== 'Identifier') return null;
     return { state: state.name, setter: setter.name };
+}
+
+function isCreateTransientInteractionCall(node) {
+    if (node?.type !== 'CallExpression') return false;
+    const callee = node.callee;
+    if (callee?.type === 'Identifier') return callee.name === 'createTransientInteraction';
+    return callee?.type === 'MemberExpression' && keyName(callee.property) === 'createTransientInteraction';
+}
+
+function transientOnUpdateContract(node, stateSetters, src) {
+    if (!isCreateTransientInteractionCall(node)) return null;
+    const options = node.arguments?.[0];
+    if (options?.type !== 'ObjectExpression') return null;
+    const onUpdate = options.properties?.find((property) =>
+        (property.type === 'ObjectMethod' || property.type === 'ObjectProperty') &&
+        keyName(property.key) === 'onUpdate');
+    if (!onUpdate) return null;
+    const body = onUpdate.type === 'ObjectMethod' ? onUpdate.body : onUpdate.value;
+    const committedStateSetters = new Set();
+    visit(body, (child) => {
+        if (child.type === 'CallExpression' &&
+            child.callee?.type === 'Identifier' && stateSetters.has(child.callee.name)) {
+            committedStateSetters.add(child.callee.name);
+        }
+    });
+    return {
+        line: lineCol(onUpdate).line,
+        committed_state_setters: [...committedStateSetters].sort(),
+        recommendation: committedStateSetters.size > 0
+            ? 'Keep onUpdate lightweight and move committed framework setters to onCommit.'
+            : '',
+        expression: expressionText(src, body),
+    };
+}
+
+function continuousHandlerContract(name, node, stateSetters, src) {
+    if (!CONTINUOUS_EVENT_PROPS.has(name) || !node) return null;
+    const committedStateSetters = new Set();
+    let transientUpdates = 0;
+    visit(node, (child) => {
+        if (child.type !== 'CallExpression') return;
+        if (child.callee?.type === 'Identifier' && stateSetters.has(child.callee.name)) {
+            committedStateSetters.add(child.callee.name);
+        }
+        if (child.callee?.type === 'MemberExpression' && keyName(child.callee.property) === 'update') {
+            transientUpdates += 1;
+        }
+    });
+    return {
+        frequency: 'continuous',
+        committed_state_setters: [...committedStateSetters].sort(),
+        transient_updates: transientUpdates,
+        recommendation: committedStateSetters.size > 0
+            ? 'Keep per-sample state in pulp.createTransientInteraction.onUpdate and publish committed framework state from onCommit.'
+            : '',
+        expression: expressionText(src, node),
+    };
 }
 
 function eventValueRead(node) {
@@ -674,6 +741,7 @@ function jsxAttributeContract(attr, src, stateSetters = new Map()) {
         out.event_contract = event ||
             reactStateSetterContract(withSource, stateSetters, src) ||
             { kind: 'handler', expression: out.expression };
+        out.transient_interaction = continuousHandlerContract(name, withSource, stateSetters, src);
     }
     const paramKey = paramsMemberKey(valueNode);
     if (paramKey) out.param_key = paramKey;
@@ -711,11 +779,22 @@ export function auditJsxContract(source, options = {}) {
     const setParamCalls = [];
     const styleContracts = [];
     const stateSetters = new Map();
+    let transientInteractionControllers = 0;
+    const transientOnUpdateCallbacks = [];
     const sourceComponentImports = collectSourceComponentImports(ast);
 
     visit(ast, (node) => {
         const setter = reactUseStateSetter(node);
         if (setter) stateSetters.set(setter.setter, setter.state);
+    });
+    visit(ast, (node) => {
+        if (node.type === 'VariableDeclarator' && isCreateTransientInteractionCall(node.init)) {
+            transientInteractionControllers += 1;
+        }
+        if (node.type === 'CallExpression') {
+            const contract = transientOnUpdateContract(node, stateSetters, source);
+            if (contract) transientOnUpdateCallbacks.push(contract);
+        }
     });
 
     visit(ast, (node) => {
@@ -836,6 +915,21 @@ export function auditJsxContract(source, options = {}) {
             .filter((attr) => attr.event_contract)
             .map((attr) => ({ element: component.name, prop: attr.name, line: attr.line, ...attr.event_contract })));
     const setStateEvents = eventContracts.filter((event) => event.kind?.startsWith('set_state'));
+    const continuousHandlers = components.flatMap((component) =>
+        component.attributes
+            .filter((attr) => attr.transient_interaction)
+            .map((attr) => ({
+                element: component.name,
+                prop: attr.name,
+                line: attr.line,
+                ...attr.transient_interaction,
+                prefers_transient_interaction:
+                    transientInteractionControllers > 0 &&
+                    attr.transient_interaction.committed_state_setters.length === 0 &&
+                    attr.transient_interaction.transient_updates > 0,
+            })));
+    const continuousCommittedStateHandlers = continuousHandlers.filter(
+        (handler) => handler.committed_state_setters.length > 0);
     const hostNativeControlCandidates = eventContracts.filter((event) =>
         (event.element === 'input' && event.kind === 'set_state_from_event_value') ||
         (event.element === 'button' && event.kind === 'set_state_toggle'));
@@ -855,6 +949,11 @@ export function auditJsxContract(source, options = {}) {
         event_contracts: eventContracts.length,
         set_param_events: eventContracts.filter((event) => event.kind === 'set_param' || event.kind === 'set_param_factory').length,
         set_state_events: setStateEvents.length,
+        transient_interaction_controllers: transientInteractionControllers,
+        continuous_event_handlers: continuousHandlers.length,
+        continuous_committed_state_handlers: continuousCommittedStateHandlers.length,
+        transient_on_update_committed_state_callbacks: transientOnUpdateCallbacks.filter(
+            (callback) => callback.committed_state_setters.length > 0).length,
         map_literal_expansions: mapCalls.filter((call) => Array.isArray(call.literal_values) && call.literal_values.length > 0).length,
         svg_vector_nodes: svg.length,
     };
@@ -906,6 +1005,9 @@ export function auditJsxContract(source, options = {}) {
             standard_source_component_instances: materiality.standard_source_component_instances,
             expanded_native_candidate_instances: expandedNativeCandidates.length,
             expanded_choice_instances: materiality.expanded_choice_instances,
+            continuous_committed_state_handlers: materiality.continuous_committed_state_handlers,
+            transient_on_update_committed_state_callbacks:
+                materiality.transient_on_update_committed_state_callbacks,
         },
         materiality,
         proof,
@@ -917,12 +1019,23 @@ export function auditJsxContract(source, options = {}) {
         native_candidates: nativeCandidates,
         expanded_native_candidates: expandedNativeCandidates,
         event_contracts: eventContracts,
+        transient_interaction: {
+            controllers: transientInteractionControllers,
+            continuous_handlers: continuousHandlers,
+            direct_committed_state_handlers: continuousCommittedStateHandlers,
+            on_update_callbacks: transientOnUpdateCallbacks,
+        },
         map_calls: mapCalls,
         svg,
         style_contracts: styleContracts,
         css_values: cssValueRows,
         parse_errors: (ast.errors || []).map((err) => ({ message: err.message, loc: err.loc || null })),
     };
+}
+
+export function transientInteractionViolations(audit) {
+    return (audit?.materiality?.continuous_committed_state_handlers || 0) +
+        (audit?.materiality?.transient_on_update_committed_state_callbacks || 0);
 }
 
 function markdownReport(audit) {
@@ -993,6 +1106,10 @@ function main() {
     }
     if (args.failOnWeakProof && !audit.proof.source_contract_extraction_is_materially_useful) {
         console.error('source-contract extraction did not meet materiality thresholds');
+        process.exit(1);
+    }
+    if (args.failOnContinuousCommittedState && transientInteractionViolations(audit) > 0) {
+        console.error('continuous handlers publish committed framework state; use pulp.createTransientInteraction and keep onUpdate lightweight');
         process.exit(1);
     }
 }

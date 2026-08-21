@@ -456,6 +456,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
     eval_or_throw(engine_, "web_compat_animation", preludes::web_compat_animation);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
+    eval_or_throw(engine_, "web_compat_transient_interaction",
+                  preludes::web_compat_transient_interaction);
     // CSS selector engine must eval after document and Element so the
     // selector helpers are resolvable when document.querySelector /
     // .querySelectorAll dispatch into them.
