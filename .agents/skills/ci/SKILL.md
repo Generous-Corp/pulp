@@ -3944,14 +3944,14 @@ enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
 serializing the audio tests among themselves still leaves unrelated tests
 starving the RT thread.)
 
-The required `macos` alias deliberately needs the complete combined build
-matrix on pull-request and manual-dispatch runs. That may delay the reporter
-behind advisory Linux/Windows work, but it removes the false-timeout race where
-a queued macOS leg had not started before a fixed polling window expired. The
-reporter queries the terminal run and derives its verdict only from exactly one
-macOS job's conclusion; advisory failures must never contaminate it through
-`needs.build.result`. Merge groups retain a macOS-only matrix, so their dedicated
-alias reports promptly after the owned leg completes.
+The required `macos` context comes directly from the native macOS matrix child
+on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore
+becomes terminal as soon as the owned macOS leg does, without waiting for the
+combined matrix or polling the jobs API. A small event-specific bootstrap owns
+the same name only when routing/classification fails closed or classification
+proves the native build is unnecessary; inactive bootstrap jobs use an
+`-unused` name so they cannot satisfy or collide with the required context.
+Advisory Linux/Windows work may continue without delaying queue admission.
 
 **Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
 alias reports its failure promptly, a *flaky* failure on the required leg wedges
