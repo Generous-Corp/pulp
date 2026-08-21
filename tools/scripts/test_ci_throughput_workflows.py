@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import unittest
@@ -64,6 +65,21 @@ def toml_json_value(table: str, key: str):
     if match is None:
         raise AssertionError(f"missing TOML key {key}")
     return json.loads(match.group(1))
+
+
+def shipyard_ctest_contract_errors(command: str) -> list[str]:
+    argv = shlex.split(command)
+    errors = []
+    if argv[:2] != ["tools/ci/governed-build.sh", "ctest"]:
+        errors.append("CTest is not routed through the host-share governor")
+    if any(
+        arg == "--parallel"
+        or arg.startswith("--parallel=")
+        or re.fullmatch(r"-j[0-9]*", arg)
+        for arg in argv
+    ):
+        errors.append("CTest overrides the governor-provided parallelism")
+    return errors
 
 
 class ExamplesValidationWorkflowTests(unittest.TestCase):
@@ -237,6 +253,43 @@ class ShipyardTopologyContractTests(unittest.TestCase):
             "-DPULP_BUILD_EXAMPLES=ON",
             toml_json_value(default, "configure"),
         )
+
+    def test_required_shipyard_ctest_uses_the_governed_host_share(self) -> None:
+        config = (ROOT / ".shipyard" / "config.toml").read_text(encoding="utf-8")
+        default = toml_table(config, "validation.default")
+        command = toml_json_value(default, "test")
+
+        self.assertEqual(shipyard_ctest_contract_errors(command), [])
+        for preserved in (
+            "--repeat until-pass:2",
+            "--exclude-regex AudioWorkgroup",
+            '--label-exclude "validation|slow|performance|bench|quality-lab"',
+        ):
+            self.assertIn(preserved, command)
+
+    def test_parser_shipyard_ctest_uses_the_governed_host_share(self) -> None:
+        config = (ROOT / ".shipyard" / "config.toml").read_text(encoding="utf-8")
+        parser = toml_table(config, "validation.parser")
+        command = toml_json_value(parser, "test")
+
+        self.assertEqual(shipyard_ctest_contract_errors(command), [])
+        for preserved in (
+            "--label-include parser-import",
+            "--exclude-regex AudioWorkgroup",
+            "--label-exclude slow",
+        ):
+            self.assertIn(preserved, command)
+
+    def test_shipyard_ctest_contract_rejects_serial_and_unbounded_forms(self) -> None:
+        suffix = "--test-dir build --output-on-failure"
+        for command in (
+            f"ctest {suffix}",
+            f"tools/ci/governed-build.sh ctest -j {suffix}",
+            f"tools/ci/governed-build.sh ctest -j8 {suffix}",
+            f"tools/ci/governed-build.sh ctest --parallel=8 {suffix}",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(shipyard_ctest_contract_errors(command))
 
     def test_shipyard_required_macos_targets_match_topology_contract(self) -> None:
         profile = SHIPYARD_PROFILE.read_text(encoding="utf-8")

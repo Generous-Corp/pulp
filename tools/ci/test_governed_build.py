@@ -121,6 +121,12 @@ class GovernedBuildTests(unittest.TestCase):
                 return int(tok.split("=", 1)[1])
         self.fail(f"wrapper never ran the build command\n{r.stdout}\n{r.stderr}")
 
+    def _ctest_granted(self, r: subprocess.CompletedProcess) -> int:
+        for tok in r.stdout.split():
+            if tok.startswith("CTEST="):
+                return int(tok.split("=", 1)[1])
+        self.fail(f"wrapper never exported CTest parallelism\n{r.stdout}\n{r.stderr}")
+
     # --- the denial path (the reason this wrapper exists) --------------------
 
     def test_denial_retries_at_available_capacity(self) -> None:
@@ -149,6 +155,11 @@ class GovernedBuildTests(unittest.TestCase):
                       STUB_FREE_CORES=str(FREE_CORES))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), FLOOR, r.stderr)
+
+    def test_ctest_denial_falls_back_to_the_same_bounded_floor(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._ctest_granted(r), FLOOR, r.stderr)
 
     def test_zero_free_cores_uses_floor_not_core_count(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0")
@@ -245,6 +256,12 @@ class GovernedBuildTests(unittest.TestCase):
                       STUB_MAX_GRANT=str(PROFILE_JOBS))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
+
+    def test_ctest_parallelism_uses_the_granted_lease_size(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._ctest_granted(r), PROFILE_JOBS, r.stderr)
 
     def test_no_tartci_still_builds_bounded(self) -> None:
         """Plain checkout / build VM: tier-0 bound, still >= 1 and finite."""

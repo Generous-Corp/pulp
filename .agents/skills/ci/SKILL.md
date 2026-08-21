@@ -6965,7 +6965,7 @@ run and the open `release-guard` issue, not the individual legs. Most of the
 time the answer is that it is still building and the reconciler is correctly
 doing nothing.
 
-## Build strings must take a share, not the machine
+## Build and test strings must take a share, not the machine
 
 A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
 Mac, so it must take a *share* of the host — route it through
@@ -7004,6 +7004,13 @@ VM / plain checkout) or the lease is denied (it never fails the build and never
 piles onto a saturated host). Keep new POSIX build strings routed through it;
 don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
 `local`/ssh-linux lanes.
+
+Every POSIX `test` stage uses that wrapper too. The wrapper exports
+`CTEST_PARALLEL_LEVEL` from the leased share, so a bare `ctest` command does not
+silently serialize the full suite and an explicit `-j$(nproc)` cannot consume
+the shared host. Do not add a `-j` or `--parallel` to the Shipyard test string:
+the leased environment value is authoritative, while CTest continues to honor
+`RUN_SERIAL` and `RESOURCE_LOCK` test properties.
 
 ## macOS Intel (x86_64) CI tiering
 

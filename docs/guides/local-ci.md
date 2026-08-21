@@ -992,14 +992,17 @@ It is tiered:
   wired but placing nothing yet. See the tartci runbook's Orchard section.
 
 The **mac local lane** is the one that historically escaped the CLI: Shipyard's
-`local` backend runs the `.shipyard/config.toml` build string directly on the
-host and does not pass through the `pulp` CLI. Every build stage in that config
-— `default`, `parser`, **and** `smoke` — is therefore wrapped by
-`tools/ci/governed-build.sh`, which acquires a tartci build lease sized from the
-host profile, exports the granted `-j`, runs the build as a child process, and
-releases the lease on exit. When tartci is absent (a build VM or a plain
-checkout) or the lease is denied (host saturated), it falls back to the Tier-0
-bound — it never fails the build and never piles onto a saturated host. (The
+`local` backend runs `.shipyard/config.toml` commands directly on the host and
+does not pass through the `pulp` CLI. Every build stage in that config —
+`default`, `parser`, **and** `smoke` — and all POSIX CTest stages are therefore
+wrapped by `tools/ci/governed-build.sh`. It acquires a tartci build lease sized
+from the host profile, exports the granted CMake and CTest parallelism, runs the
+workload as a child process, and releases the lease on exit. CTest applies that
+bounded share while still honoring each test's `RUN_SERIAL` and `RESOURCE_LOCK`
+properties. When tartci is absent (a build VM or a plain checkout), it uses the
+Tier-0 bound. A lease denial retries at reported free capacity, then uses the
+conservative floor if capacity disappears; it never fails the workload or
+piles onto a saturated host. (The
 `smoke` lane previously used a raw `--parallel $(getconf _NPROCESSORS_ONLN)` and
 so ran whole-machine on the shared Mac while the required gate validated
 alongside it; it now takes a governed share like the other lanes.) The
