@@ -249,6 +249,21 @@ a suite that measures nothing goes green. It caught one on its first run.
 
 ## What the model knows about a module
 
+Before a module-generation request can reach a model, it must select at least
+one direct primary DSP capability from
+`tools/rack/knowledge/module/dsp-primitives.json`. The installed public
+capability manifest is necessary but not sufficient: a type can be exported by
+the SDK and still be unavailable to Forge when this curated projection omits
+it. The intentional symptom is `this request matches only generic module
+helpers and no direct DSP capability`; no provider request has started.
+
+When adding an SDK primitive that Forge should author directly, add a narrow
+primary row with unambiguous intent terms and a focused
+`tools/test_dsp_vocabulary.py` positive. Also retain helper-only and generic
+lookalike negatives so ordinary words do not accidentally authorize a model
+request. Diagnose this projection first; do not retry the GUI or spend another
+model call on the same prompt.
+
 `render_inventory()` in `patch.py` is the catalogue the model receives. It
 carries ports AND params (name, range, default). It did not carry params for a
 long time, and the model wrote values blindly — which is how a kick drum came
