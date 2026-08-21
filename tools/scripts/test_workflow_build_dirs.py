@@ -151,8 +151,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
     def test_installed_control_consumer_requests_cxx20(self) -> None:
         text = CONTROL_SDK_CONSUMER.read_text(encoding="utf-8")
 
-        self.assertIn("std::jthread", text)
-        self.assertIn("std::stop_token", text)
+        self.assertIn("static_assert(__cplusplus >= 202002L", text)
+        self.assertIn("std::thread", text)
         self.assertIn("set(CMAKE_CXX_STANDARD 20)", text)
         self.assertIn("CXX_STANDARD 20", text)
         self.assertIn("CXX_STANDARD_REQUIRED ON", text)
