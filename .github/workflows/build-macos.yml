@@ -1,5 +1,8 @@
 name: Build and Test (macOS retarget)
 
+permissions:
+  contents: read
+
 # Dedicated workflow for re-running JUST the macOS leg of CI on a different
 # runner pool, without disturbing the Linux/Windows legs that are part of
 # `build.yml`'s matrix. Triggered manually (`workflow_dispatch`) or via the

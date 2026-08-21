@@ -1,5 +1,8 @@
 name: Templates smoke
 
+permissions:
+  contents: read
+
 # Structural smoke for the `pulp create` template tree.
 #
 # `pulp create --type <effect|instrument|app|bare>` materializes a Pulp

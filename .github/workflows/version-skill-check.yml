@@ -1,5 +1,8 @@
 name: Versioning & Skill-Sync
 
+permissions:
+  contents: read
+
 # Authoritative gate (Layer 3) for the versioning-v2 design:
 # runs version_bump_check.py and skill_sync_check.py on every PR and
 # refuses to merge when either reports a required bump or missing

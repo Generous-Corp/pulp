@@ -5,6 +5,9 @@
 # and no self-hosted runner needed for a headless-browser web lane.
 name: Web Plugins
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
