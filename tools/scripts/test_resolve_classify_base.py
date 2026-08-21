@@ -71,8 +71,12 @@ class ResolveBaseTests(unittest.TestCase):
             BASE_SHA,
         )
 
-    def test_merge_group_defaults_to_origin_main(self) -> None:
-        # A merge group's tree is genuinely meant to be compared against main.
+    def test_merge_group_uses_the_pinned_base_sha(self) -> None:
+        self.assertEqual(
+            resolve_base("merge_group", merge_group_base_sha=BASE_SHA), BASE_SHA
+        )
+
+    def test_merge_group_without_a_valid_base_fails_back(self) -> None:
         self.assertEqual(resolve_base("merge_group"), DEFAULT_BASE)
 
     def test_workflow_dispatch_defaults_to_origin_main(self) -> None:
@@ -132,6 +136,15 @@ class CliTests(unittest.TestCase):
             BASE_SHA,
         )
 
+    def test_cli_reads_merge_group_context_from_env(self) -> None:
+        self.assertEqual(
+            self._run(
+                GITHUB_EVENT_NAME="merge_group",
+                MERGE_GROUP_BASE_SHA=BASE_SHA,
+            ),
+            BASE_SHA,
+        )
+
     def test_cli_defaults_with_no_context(self) -> None:
         self.assertEqual(self._run(GITHUB_EVENT_NAME=""), DEFAULT_BASE)
 
@@ -143,12 +156,29 @@ class WorkflowWiringTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
-    def test_classify_calls_the_resolver_with_both_event_shas(self) -> None:
+    def test_classify_calls_the_resolver_with_event_shas(self) -> None:
         self.assertIn("tools/scripts/resolve_classify_base.py", self.text)
         self.assertIn(
             "PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}", self.text
         )
         self.assertIn("PUSH_BEFORE_SHA: ${{ github.event.before }}", self.text)
+        self.assertIn(
+            "MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}",
+            self.text,
+        )
+
+    def test_classify_uses_bounded_exact_tree_checkout(self) -> None:
+        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
+            "\n  build:\n", 1
+        )[0]
+        self.assertIn("fetch-depth: 1", classify_job)
+        self.assertNotIn("fetch-depth: 0", classify_job)
+        self.assertIn('git fetch --no-tags --depth=1 origin "$base"', classify_job)
+        self.assertIn("--mode=diff --comparison=trees", classify_job)
+        self.assertIn("python3 tools/scripts/classify_changes.py --mode=files", classify_job)
+        self.assertIn(
+            "Never trust a retained remote-tracking ref", classify_job
+        )
 
     def test_classify_no_longer_hardcodes_origin_main_as_the_base(self) -> None:
         # The dead inline expression this replaces.
@@ -184,7 +214,7 @@ class WorkflowWiringTests(unittest.TestCase):
         # Coverage and scheduled validation deliberately retain latest.
         shipyard_profile = SHIPYARD_PROFILE.read_text(encoding="utf-8")
         pr_policy = shipyard_profile.split(
-            '[repo."danielraffel/pulp".pr.windows]', 1
+            '[repo."Generous-Corp/pulp".pr.windows]', 1
         )[1].split("\n[", 1)[0]
         self.assertIn('targets = ["github.windows-x64-runtime"]', pr_policy)
 
@@ -268,13 +298,12 @@ class CacheSaveScopeTests(unittest.TestCase):
             self.text.count("if: always() && github.event_name != 'push'"), 3
         )
         # windows-msvc-release-gate, windows-midi2-gate, windows-ble-gate.
-        self.assertEqual(
-            self.text.count(
-                "if: needs.classify.outputs.native_build_required == 'true'"
-                " && github.event_name != 'push'"
-            ),
-            3,
+        advisory_condition = re.compile(
+            r"if:\s*>-\s*\n"
+            r"\s+needs\.classify\.outputs\.native_build_required == 'true'\s*\n"
+            r"\s+&& github\.event_name != 'push'"
         )
+        self.assertEqual(len(advisory_condition.findall(self.text)), 3)
         # Every windows-latest job is accounted for above — a new one must not
         # silently start running on cache-warming pushes.
         self.assertEqual(self.text.count("runs-on: windows-latest"), 3)
@@ -376,6 +405,103 @@ class PushDiffIntegrationTests(unittest.TestCase):
         self.assertFalse(result["native_build_required"])
         # Same push, old base: indistinguishable from a core merge.
         self.assertTrue(self._classify("origin/main")["native_build_required"])
+
+
+class ShallowExactTreeIntegrationTests(unittest.TestCase):
+    """A distant pinned base works without fetching intervening history."""
+
+    def test_two_exact_shallow_commits_are_sufficient(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote = root / "remote.git"
+            source = root / "source"
+            shallow = root / "shallow"
+            subprocess.run(
+                ["git", "init", "-q", "--bare", str(remote)], check=True
+            )
+            subprocess.run(
+                ["git", "clone", "-q", str(remote), str(source)], check=True
+            )
+            for key, value in (("user.email", "ci@example.invalid"),
+                               ("user.name", "ci")):
+                subprocess.run(
+                    ["git", "config", key, value], cwd=source, check=True
+                )
+            subprocess.run(
+                ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+                cwd=source,
+                check=True,
+            )
+            (source / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=source, check=True
+            )
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=source, text=True
+            ).strip()
+            (source / "middle.txt").write_text("unneeded history\n", encoding="utf-8")
+            subprocess.run(["git", "add", "middle.txt"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "middle"], cwd=source, check=True
+            )
+            (source / "core").mkdir()
+            (source / "core" / "x.cpp").write_text("int x;\n", encoding="utf-8")
+            subprocess.run(["git", "add", "core/x.cpp"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "head"], cwd=source, check=True
+            )
+            subprocess.run(
+                ["git", "push", "-q", "origin", "main"], cwd=source, check=True
+            )
+            subprocess.run(
+                [
+                    "git", "clone", "-q", "--depth=1", "--branch", "main",
+                    remote.as_uri(), str(shallow),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "fetch", "-q", "--no-tags", "--depth=1", "origin", base],
+                cwd=shallow,
+                check=True,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "tools" / "scripts" / "classify_changes.py"),
+                    "--mode=diff", "--comparison=trees", "--base", base, "--json",
+                ],
+                cwd=shallow,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            payload = __import__("json").loads(result.stdout)
+            self.assertTrue(payload["native_build_required"])
+            self.assertEqual(payload["changed_file_count"], 2)
+            self.assertIn("core/x.cpp", payload["reason"])
+            for ref in ("HEAD", base):
+                self.assertEqual(
+                    subprocess.check_output(
+                        ["git", "rev-list", "--count", ref],
+                        cwd=shallow,
+                        text=True,
+                    ).strip(),
+                    "1",
+                )
+            self.assertNotEqual(
+                subprocess.run(
+                    ["git", "merge-base", base, "HEAD"],
+                    cwd=shallow,
+                    capture_output=True,
+                    check=False,
+                ).returncode,
+                0,
+            )
 
 
 if __name__ == "__main__":

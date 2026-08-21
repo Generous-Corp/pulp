@@ -19,10 +19,14 @@ push
     never distinguishes a docs merge from a core merge. The correct base is
     `github.event.before`: the branch tip the push moved away from.
 
-merge_group / workflow_dispatch / anything else
-    No event-pinned base exists. `origin/main` is the right default; a merge
-    group's ref is a synthetic `gh-readonly-queue/...` branch whose merged
-    tree is genuinely meant to be compared against main.
+merge_group
+    GitHub supplies `github.event.merge_group.base_sha`. Use that immutable
+    base rather than fetching the entire main history merely to resolve
+    `origin/main`.
+
+workflow_dispatch / anything else
+    No event-pinned base exists. Fall back to `origin/main`; a shallow caller
+    without that ref fails closed to a native build.
 
 FALLBACK CONTRACT
 -----------------
@@ -36,7 +40,8 @@ optimization degrades; the build never wrongly skips.
 
 Usage (reads the GitHub Actions context from the environment):
     python3 tools/scripts/resolve_classify_base.py
-        env: GITHUB_EVENT_NAME, PR_BASE_SHA, PUSH_BEFORE_SHA
+        env: GITHUB_EVENT_NAME, PR_BASE_SHA, PUSH_BEFORE_SHA,
+             MERGE_GROUP_BASE_SHA
 
 Prints the resolved base ref to stdout. Exit code is always 0 — the base is
 data, not a pass/fail signal.
@@ -69,6 +74,7 @@ def resolve_base(
     event_name: str,
     pr_base_sha: str | None = None,
     push_before_sha: str | None = None,
+    merge_group_base_sha: str | None = None,
     *,
     default: str = DEFAULT_BASE,
 ) -> str:
@@ -78,6 +84,8 @@ def resolve_base(
         return _usable_sha(pr_base_sha) or default
     if event in PUSH_EVENTS:
         return _usable_sha(push_before_sha) or default
+    if event == "merge_group":
+        return _usable_sha(merge_group_base_sha) or default
     return default
 
 
@@ -86,6 +94,7 @@ def main() -> int:
         os.environ.get("GITHUB_EVENT_NAME", ""),
         os.environ.get("PR_BASE_SHA"),
         os.environ.get("PUSH_BEFORE_SHA"),
+        os.environ.get("MERGE_GROUP_BASE_SHA"),
     )
     sys.stderr.write(
         f"[classify-base] event={os.environ.get('GITHUB_EVENT_NAME', '') or '(unset)'} "
