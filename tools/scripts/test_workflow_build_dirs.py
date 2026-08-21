@@ -157,6 +157,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("CXX_STANDARD 20", text)
         self.assertIn("CXX_STANDARD_REQUIRED ON", text)
         self.assertIn("CMAKE_CXX_EXTENSIONS OFF", text)
+        self.assertIn("set(CMAKE_EXPORT_COMPILE_COMMANDS ON)", text)
         self.assertIn(
             "set_target_properties(InstalledControlStandalone_Core PROPERTIES\n"
             "    CXX_STANDARD 20\n"
@@ -171,6 +172,26 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
             "the generated consumer uses C++20 threading and must set a "
             "directory-wide language contract before importing Pulp",
+        )
+        self.assertIn(
+            "target_compile_options(InstalledControlStandalone_Core PRIVATE -std=c++20)",
+            text,
+            "the generated child must carry an explicit compiler-mode option",
+        )
+        self.assertIn(
+            'string(JSON _standalone_compile_command GET',
+            text,
+            "the fixture must inspect the generated child compile entry",
+        )
+        self.assertIn(
+            'string(REGEX MATCHALL "(^|[ \\t])-std=[^ \\t]+"',
+            text,
+            "the fixture must enumerate language modes in the child command",
+        )
+        self.assertIn(
+            "list(GET _standalone_language_modes -1 _standalone_effective_language_mode)",
+            text,
+            "the fixture must prove the final effective mode before building",
         )
 
     def test_event_pinned_fetch_repairs_a_shallow_pull_request_checkout(self) -> None:
