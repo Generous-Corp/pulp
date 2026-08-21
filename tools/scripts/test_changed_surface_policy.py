@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mutation contract for Pulp's Shipyard changed-surface policy."""
+"""Static, mutation, and exact-inventory contract for changed-surface policy."""
 
 from __future__ import annotations
 
@@ -7,16 +7,18 @@ import argparse
 import copy
 import fnmatch
 import json
-import re
-import subprocess
+import os
 import sys
 import tomllib
 import unittest
 from pathlib import Path
 
+import changed_surface_inventory as inventory
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / ".shipyard" / "config.toml"
+INVENTORY_CONTRACT_PATH = REPO_ROOT / ".shipyard" / "changed-surface-inventory.json"
 
 
 def load_config() -> dict:
@@ -26,6 +28,10 @@ def load_config() -> dict:
 
 def load_policy() -> dict:
     return load_config()["targets"]["mac"]["changed_surface_selection"]
+
+
+def load_inventory_contract() -> dict:
+    return json.loads(INVENTORY_CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -54,15 +60,37 @@ def literal_tests(policy: dict) -> set[str]:
     return tests
 
 
+def fixture(
+    name: str,
+    executable: str = "/repo/build/bin/tests",
+    *argv: str,
+    properties: list[dict] | None = None,
+) -> dict:
+    return {
+        "name": name,
+        "command": [executable, *argv],
+        "properties": properties
+        if properties is not None
+        else [{"name": "WORKING_DIRECTORY", "value": "/repo/build"}],
+    }
+
+
 class ChangedSurfacePolicyTest(unittest.TestCase):
     def setUp(self) -> None:
         self.policy = load_policy()
+        self.contract = load_inventory_contract()
+        self.source_root = Path("/repo")
+        self.build_dir = Path("/repo/build")
 
     def test_schema_v2_is_shadow_safe_and_literal(self) -> None:
         self.assertEqual(self.policy["schema_version"], 2)
         self.assertEqual(self.policy["build_type"], "debug")
         self.assertGreater(self.policy["full_test_count"], 20_000)
+        self.assertEqual(
+            self.policy["full_test_count"], self.contract["registration_count"]
+        )
         self.assertTrue(self.policy["baseline_tests"])
+        self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
         self.assertTrue(self.policy["families"])
         self.assertNotIn("**", self.policy.get("baseline_only_paths", []))
         for family in self.policy["families"]:
@@ -93,6 +121,8 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "tools/rack/provenance_check.py": "full_required",
             "test/cmake/quality_tests.cmake": "test_topology",
             ".shipyard/config.toml": "selector_policy",
+            ".shipyard/changed-surface-inventory.json": "selector_policy",
+            "tools/scripts/changed_surface_inventory.py": "selector_policy",
             "core/future_subsystem/new_runtime.cpp": "unknown_full",
         }
         for path, reason in expected.items():
@@ -128,73 +158,258 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(disposition(self.policy, "tools/cli/cmd_misc.cpp"), "unknown_full")
         self.assertEqual(disposition(self.policy, "tools/cli/new_command.cpp"), "unknown_full")
 
-    def test_inventory_cardinality_drift_is_rejected(self) -> None:
-        inventory = literal_tests(self.policy)
-        inventory.update(
-            f"inventory-placeholder-{index}"
-            for index in range(self.policy["full_test_count"] - len(inventory))
+    def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
+        self.assertEqual(self.contract["schema_version"], 1)
+        self.assertEqual(self.contract["registration_count"], 20_727)
+        self.assertEqual(self.contract["unique_name_count"], 20_668)
+        self.assertEqual(self.contract["unique_composite_count"], 20_727)
+        self.assertEqual(self.contract["duplicate_name_group_count"], 55)
+        self.assertEqual(self.contract["duplicate_name_excess_count"], 59)
+        self.assertEqual(self.contract["duplicate_composite_group_count"], 0)
+        self.assertEqual(
+            self.contract["authoritative_filter_digest"],
+            inventory.authoritative_filter_digest(),
         )
-        validate_inventory(self.policy, inventory)
-        inventory.pop()
-        with self.assertRaisesRegex(AssertionError, "full_test_count"):
-            validate_inventory(self.policy, inventory)
+        self.assertRegex(self.contract["target_contract_digest"], r"^[0-9a-f]{64}$")
+        self.assertRegex(self.contract["inventory_digest"], r"^[0-9a-f]{64}$")
 
     def test_authoritative_filter_matches_validation_command(self) -> None:
         tests = [
-            {"name": "keep", "properties": []},
-            {"name": "AudioWorkgroup fixture", "properties": []},
-            {"name": "slow fixture", "properties": [{"name": "LABELS", "value": ["slow"]}]},
-            {"name": "quality fixture", "properties": [{"name": "LABELS", "value": ["quality-lab"]}]},
+            fixture("keep"),
+            fixture("AudioWorkgroup fixture"),
+            fixture(
+                "slow fixture",
+                properties=[
+                    {"name": "LABELS", "value": ["slow"]},
+                    {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+                ],
+            ),
+            fixture(
+                "quality fixture",
+                properties=[
+                    {"name": "LABELS", "value": ["quality-lab"]},
+                    {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+                ],
+            ),
         ]
-        self.assertEqual(authoritative_inventory(tests), {"keep"})
-
-
-def validate_inventory(policy: dict, inventory: set[str]) -> None:
-    expected_count = policy["full_test_count"]
-    if len(inventory) != expected_count:
-        raise AssertionError(
-            f"full_test_count={expected_count} but CTest inventory has {len(inventory)} tests"
+        self.assertEqual(
+            [test["name"] for test in inventory.authoritative_tests(tests)], ["keep"]
         )
-    missing = sorted(literal_tests(policy) - inventory)
-    if missing:
-        raise AssertionError(f"policy names tests absent from CTest inventory: {missing}")
+
+    def test_duplicate_names_keep_distinct_commands_and_expand_all_instances(self) -> None:
+        tests = [
+            fixture("same title", "/repo/build/bin/one", "case"),
+            fixture("same title", "/repo/build/bin/two", "case"),
+        ]
+        groups = inventory.inventory_groups(tests, self.source_root, self.build_dir)
+        manifest = {"groups": groups, "duplicate_composite_group_count": 0}
+        expanded = inventory.expand_literal_selection(manifest, ["same title"])
+        self.assertEqual(len(expanded), 2)
+        self.assertEqual(
+            {group["composite"]["executable"] for group in expanded},
+            {"build:bin/one", "build:bin/two"},
+        )
+
+    def test_registration_order_does_not_change_composite_inventory(self) -> None:
+        tests = [fixture("a", "/repo/build/a"), fixture("b", "/repo/build/b")]
+        forward = inventory.inventory_groups(tests, self.source_root, self.build_dir)
+        reverse = inventory.inventory_groups(
+            list(reversed(tests)), self.source_root, self.build_dir
+        )
+        self.assertEqual(forward, reverse)
+
+    def test_command_change_changes_registration_fingerprint(self) -> None:
+        first = inventory.inventory_groups(
+            [fixture("same", "/repo/build/a")], self.source_root, self.build_dir
+        )
+        second = inventory.inventory_groups(
+            [fixture("same", "/repo/build/b")], self.source_root, self.build_dir
+        )
+        self.assertNotEqual(first[0]["fingerprint"], second[0]["fingerprint"])
+
+    def test_external_basename_portability_retains_resolution_in_toolchain_digest(self) -> None:
+        first_tests = [fixture("same", "/opt/tool-a/bin/runner")]
+        second_tests = [fixture("same", "/opt/tool-b/bin/runner")]
+        first_groups = inventory.inventory_groups(
+            first_tests, self.source_root, self.build_dir
+        )
+        second_groups = inventory.inventory_groups(
+            second_tests, self.source_root, self.build_dir
+        )
+        self.assertEqual(first_groups, second_groups)
+        first_toolchain = inventory._toolchain_contract(
+            self.build_dir, first_groups, first_tests, self.source_root
+        )
+        second_toolchain = inventory._toolchain_contract(
+            self.build_dir, second_groups, second_tests, self.source_root
+        )
+        self.assertNotEqual(
+            inventory.contract_digest(first_toolchain),
+            inventory.contract_digest(second_toolchain),
+        )
+
+    def test_missing_or_relative_path_command_is_ambiguous(self) -> None:
+        missing = fixture("missing")
+        missing["command"] = []
+        with self.assertRaisesRegex(inventory.InventoryError, "command"):
+            inventory.inventory_groups([missing], self.source_root, self.build_dir)
+        with self.assertRaisesRegex(inventory.InventoryError, "relative executable"):
+            inventory.inventory_groups(
+                [fixture("relative", "bin/test")], self.source_root, self.build_dir
+            )
+
+    def test_property_order_is_not_registration_identity(self) -> None:
+        properties = [
+            {"name": "LABELS", "value": ["one", "two"]},
+            {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+        ]
+        forward = inventory.inventory_groups(
+            [fixture("same", properties=properties)], self.source_root, self.build_dir
+        )
+        reverse = inventory.inventory_groups(
+            [fixture("same", properties=list(reversed(properties)))],
+            self.source_root,
+            self.build_dir,
+        )
+        self.assertEqual(forward, reverse)
+
+    def test_canonical_json_uses_jcs_number_boundaries(self) -> None:
+        self.assertEqual(inventory.canonical_json({"n": 900.0}), b'{"n":900}')
+        self.assertEqual(inventory.canonical_json({"n": 0.000001}), b'{"n":0.000001}')
+        self.assertEqual(inventory.canonical_json({"n": 1e-7}), b'{"n":1e-7}')
+        self.assertEqual(inventory.canonical_json({"n": 1e21}), b'{"n":1e+21}')
+
+    def test_exact_duplicate_composite_is_ambiguous_and_fails_full(self) -> None:
+        repeated = fixture("same", "/repo/build/a")
+        groups = inventory.inventory_groups(
+            [repeated, copy.deepcopy(repeated)], self.source_root, self.build_dir
+        )
+        self.assertEqual(groups[0]["multiplicity"], 2)
+        with self.assertRaisesRegex(inventory.InventoryError, "ambiguous"):
+            inventory.expand_literal_selection(
+                {"groups": groups, "duplicate_composite_group_count": 1}, ["same"]
+            )
+
+    def test_duplicate_property_names_and_newline_names_fail_full(self) -> None:
+        with self.assertRaisesRegex(inventory.InventoryError, "duplicate CTest property"):
+            inventory.inventory_groups(
+                [
+                    fixture(
+                        "same",
+                        properties=[
+                            {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+                            {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+                        ],
+                    )
+                ],
+                self.source_root,
+                self.build_dir,
+            )
+        with self.assertRaisesRegex(inventory.InventoryError, "newlines"):
+            inventory.inventory_groups(
+                [fixture("bad\nname")], self.source_root, self.build_dir
+            )
+
+    def test_path_anchors_are_boundary_safe_and_environment_is_structural(self) -> None:
+        anchored = fixture(
+            "paths",
+            "/repo/build/bin/test",
+            "/repo/source.cpp",
+            properties=[
+                {"name": "ENVIRONMENT", "value": ["ROOT=/repo", "OTHER=/repo-other"]},
+                {"name": "WORKING_DIRECTORY", "value": "/repo/build"},
+            ],
+        )
+        composite = inventory.registration_composite(
+            anchored, self.source_root, self.build_dir
+        )
+        self.assertEqual(composite["executable"], "build:bin/test")
+        self.assertEqual(composite["argv"], ["source:source.cpp"])
+        environment = next(
+            prop["value"]
+            for prop in composite["properties"]
+            if prop["name"] == "ENVIRONMENT"
+        )
+        self.assertEqual(environment, ["ROOT=source:.", "OTHER=external:repo-other"])
+
+    def test_embedded_command_paths_are_word_boundary_anchored(self) -> None:
+        first = fixture(
+            "emit",
+            "/repo/build/python",
+            "--emit-cmd",
+            "/usr/bin/python3 /repo/tools/emit.py --input /repo/data.json",
+        )
+        second = copy.deepcopy(first)
+        second["command"] = [
+            "/other/build/python",
+            "--emit-cmd",
+            "/opt/bin/python3 /other/tools/emit.py --input /other/data.json",
+        ]
+        second["properties"] = [
+            {"name": "WORKING_DIRECTORY", "value": "/other/build"}
+        ]
+        first_group = inventory.inventory_groups(
+            [first], Path("/repo"), Path("/repo/build")
+        )
+        second_group = inventory.inventory_groups(
+            [second], Path("/other"), Path("/other/build")
+        )
+        self.assertEqual(first_group, second_group)
+
+    def test_contract_digest_drift_forces_full(self) -> None:
+        observed = dict(self.contract)
+        observed["inventory_digest"] = "0" * 64
+        with self.assertRaisesRegex(inventory.InventoryError, "require full suite"):
+            inventory.validate_manifest(observed, self.contract)
+
+    def test_toolchain_patch_drift_is_telemetry_not_a_repository_failure(self) -> None:
+        observed = dict(self.contract)
+        observed["toolchain_digest"] = "f" * 64
+        inventory.validate_manifest(observed, self.contract)
+
+    def test_literal_selection_rejects_missing_or_repeated_requests(self) -> None:
+        groups = inventory.inventory_groups(
+            [fixture("one")], self.source_root, self.build_dir
+        )
+        manifest = {"groups": groups, "duplicate_composite_group_count": 0}
+        with self.assertRaisesRegex(inventory.InventoryError, "absent"):
+            inventory.expand_literal_selection(manifest, ["missing"])
+        with self.assertRaisesRegex(inventory.InventoryError, "duplicate requested"):
+            inventory.expand_literal_selection(manifest, ["one", "one"])
 
 
-def authoritative_inventory(tests: list[dict]) -> set[str]:
-    excluded_labels = re.compile(r"validation|slow|performance|bench|quality-lab")
-    inventory: set[str] = set()
-    for test in tests:
-        name = test["name"]
-        if re.search(r"AudioWorkgroup", name):
-            continue
-        labels: list[str] = []
-        for prop in test.get("properties", []):
-            if prop.get("name") == "LABELS":
-                value = prop.get("value", [])
-                labels.extend(value if isinstance(value, list) else [str(value)])
-        if any(excluded_labels.search(label) for label in labels):
-            continue
-        inventory.add(name)
-    return inventory
-
-
-def validate_ctest_inventory(build_dir: Path) -> None:
-    result = subprocess.run(
-        ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
-        check=True,
-        capture_output=True,
-        text=True,
+def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
+    policy = load_policy()
+    source_root = inventory.source_root_for_build(build_dir)
+    manifest = inventory.build_manifest(
+        inventory.load_ctest_json(build_dir),
+        source_root,
+        Path(os.path.abspath(build_dir)),
+        policy,
     )
-    inventory = authoritative_inventory(json.loads(result.stdout)["tests"])
-    validate_inventory(load_policy(), inventory)
+    inventory.validate_manifest(manifest, load_inventory_contract())
+    missing = sorted(
+        literal_tests(policy)
+        - {group["composite"]["name"] for group in manifest["groups"]}
+    )
+    if missing:
+        raise inventory.InventoryError(
+            f"policy names tests absent from CTest inventory: {missing}"
+        )
+    inventory.expand_literal_selection(manifest, literal_tests(policy))
+    if manifest_output is not None:
+        manifest_output.write_bytes(inventory.canonical_json(manifest) + b"\n")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-dir", type=Path)
+    parser.add_argument("--write-manifest", type=Path)
     args, _ = parser.parse_known_args()
+    if args.write_manifest is not None and args.build_dir is None:
+        parser.error("--write-manifest requires --build-dir")
     if args.build_dir is not None:
-        validate_ctest_inventory(args.build_dir)
+        validate_ctest_inventory(args.build_dir, args.write_manifest)
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(ChangedSurfacePolicyTest)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1

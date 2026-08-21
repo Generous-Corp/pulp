@@ -316,10 +316,12 @@ timeout_secs = 14400
 
 [targets.mac.changed_surface_selection]
 schema_version = 2
-# Exact current-main inventory plus the policy contract test added with this
-# declaration. Test-topology changes force a full-suite decision. This remains
-# shadow-only: [validation.default] is still the authoritative execution.
-full_test_count = 20668
+# Exact current-main registration count. CTest permits duplicate display names,
+# so this is deliberately not the unique-name count. The canonical multiset
+# contract in changed-surface-inventory.json pins all 20,727 registrations.
+# Test-topology changes force a full-suite decision. This remains shadow-only:
+# [validation.default] is still the authoritative execution.
+full_test_count = 20727
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [
@@ -328,6 +330,7 @@ baseline_tests = [
   "cmake-sdk-provenance-contract",
   "agent-hook-paths",
   "cli-help",
+  "changed-surface-policy-selftest",
 ]
 baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
 
@@ -364,6 +367,8 @@ full_required_paths = [
   "packages/**/package-lock.json",
 ]
 policy_paths = [
+  ".shipyard/changed-surface-inventory.json",
+  "tools/scripts/changed_surface_inventory.py",
   "tools/scripts/test_changed_surface_policy.py",
   ".agents/skills/ci/SKILL.md",
 ]
