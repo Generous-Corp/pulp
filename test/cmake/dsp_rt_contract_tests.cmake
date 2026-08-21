@@ -78,7 +78,14 @@ pulp_add_test_suite(pulp-test-midi-subblock
 pulp_add_test_suite(pulp-test-modal-bank
     SOURCES test_modal_bank.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
+    TEST_SPEC "~[bench]"
     TIMEOUT 300)
+pulp_scaled_test_timeout(_pulp_modal_bank_bench_timeout 300)
+catch_discover_tests(pulp-test-modal-bank
+    TEST_SPEC "[bench]"
+    TEST_PREFIX "bench::"
+    LABELS bench
+    PROPERTIES TIMEOUT "${_pulp_modal_bank_bench_timeout}")
 
 pulp_add_test_suite(pulp-test-bridged-t-resonator
     SOURCES test_bridged_t_resonator.cpp harness/rt_allocation_probe.cpp
