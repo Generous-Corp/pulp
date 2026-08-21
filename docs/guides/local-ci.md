@@ -1270,7 +1270,7 @@ Each trigger runs a deliberately different slice of the matrix:
 | Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
 | Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
 | `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
-| required `macos` alias | yes | yes, after the macOS build completes | no |
+| required direct `macos` context | yes | yes | no |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
 The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
@@ -1367,56 +1367,25 @@ branch when a Windows-touching change needs proof before merge.
 Windows are absent on `merge_group`, Windows remains reachable through
 `workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## The required macOS alias reports after the native matrix is terminal
+## The native macOS job publishes the required context directly
 
-Branch protection requires the stable `macos` alias so local/overflow provider
-changes cannot rename the gate. Both event-specific reporters depend on the
-terminal build matrix, then query the current workflow run's paginated jobs API
-and require exactly one `macOS ...` matrix leg with conclusion `success`.
-Missing, duplicate, null, skipped, cancelled, failed, and unknown conclusions
-all fail closed. The query is retried three times only for transport failure;
-there is no fixed-duration build poll that can expire before a queued macOS leg
-starts.
+Branch protection requires the literal `macos` context. On pull requests,
+Shipyard manual dispatches, and merge groups, the native macOS matrix child
+publishes that context directly. It becomes terminal with the macOS work and
+does not wait for the combined matrix, a reporter runner, or the jobs API.
+Advisory Linux and Windows legs may therefore continue after queue admission.
 
-The reporters use `gh api --paginate` and decode its concatenated JSON object
-stream directly. Keep that compatibility boundary: some preamble images support
-pagination but do not provide the newer `--slurp` flag. The parser still reads
-every page and rejects an empty response or any non-object page.
-
-Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
-Linux or Windows work can therefore delay when the reporter starts, but neither
-`needs.build.result` nor an advisory leg's conclusion determines the required
-macOS verdict. On `merge_group`, the matrix contains only the real self-hosted
-macOS leg, and the dedicated merge-group reporter retains the same stable
-`macos` check name.
-
-An alias is the **last job in the run**: it waits for the matrix leg and reports
-the outcome. Starve it of a runner and it never starts, so the *run* never
-reaches a terminal state. A run that never terminates holds its `concurrency`
-group, and `build.yml` sets `cancel-in-progress` on that group — so the next
-push's run sits at status `pending` with **zero jobs** and never dispatches. The
-pull request is then wedged: no checks, no failure, nothing to re-run. It
-survives further pushes and clears only by cancelling the older run by hand.
-
-The tell is a `Build and Test` run whose `status` is `pending` and whose `jobs`
-array is **empty**, while the sibling workflows from the same trigger dispatched
-normally. If you hit it:
-
-```bash
-# find the older, non-terminal run on the same ref and cancel it
-ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel
-```
-
-Reporter runner isolation still matters: the PR/dispatch reporter uses the
-dedicated alias selector, while merge-group and advisory reporters use the
-preamble selector so no bare hosted-runner dependency can hold a run open.
-`tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
-through the toggle and that none is pinned to a bare `ubuntu-latest`.
+Event-specific bootstrap jobs own `macos` only when classification intentionally
+omits native work or provider/classifier resolution fails closed. When a native
+matrix child exists, the corresponding bootstrap is inactive and uses an
+`-unused` display name so it cannot collide with or satisfy branch protection.
+`tools/scripts/test_required_macos_alias.py` and
+`tools/scripts/test_windows_runner_policy.py` pin both ownership paths.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
-stdin script, so a wedged checkout volume can freeze the routing probe or a
-terminal `macos` jobs-response parser even though the API response is available.
+stdin script, so a wedged checkout volume can freeze the routing probe even
+though the API response is available.
 `RUNNER_TEMP` is not a safe boundary here: on self-hosted Studios it can also
 live below `/Volumes/Workshop`. Those three helpers first `cd /tmp` (`/private/tmp`
 on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
@@ -2282,9 +2251,9 @@ YAML:
   `workflow_dispatch`. Only the `validation` label is excluded — every
   `slow`-labelled test runs before code lands on the release lane.
 
-Both paths satisfy the branch-protection-required `macos` /
-advisory `linux` / advisory `windows` alias gates because the alias
-jobs read each matrix leg's outcome via the GitHub API.
+Both paths satisfy the branch-protection-required direct `macos` context and
+the advisory `linux` / `windows` aliases. The macOS matrix child reports its
+own result; only the advisory aliases read matrix outcomes.
 
 ### iOS library compile gate
 
