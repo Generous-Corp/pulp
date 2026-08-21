@@ -292,11 +292,12 @@ class CacheSaveScopeTests(unittest.TestCase):
         self.assertIn('PUSH_ONLY_CACHE_EVENTS = ("push",)', self.text)
 
     def test_reporting_aliases_and_extra_gates_skip_push_runs(self) -> None:
-        # The `macos` alias polls for a macOS job for up to 60 minutes before
-        # failing; with the leg dropped it would spin the whole time.
+        # Linux/Windows aliases skip cache-warming pushes. Native macOS now
+        # reports directly from its matrix child; its bootstrap is PR-only.
         self.assertEqual(
-            self.text.count("if: always() && github.event_name != 'push'"), 3
+            self.text.count("if: always() && github.event_name != 'push'"), 2
         )
+        self.assertIn("&& github.event_name == 'pull_request'", self.text)
         # windows-msvc-release-gate, windows-midi2-gate, windows-ble-gate.
         advisory_condition = re.compile(
             r"if:\s*>-\s*\n"

@@ -112,6 +112,16 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+For native pull requests and merge groups, the macOS matrix child publishes the
+literal required `macos` context directly. It must not wait on the combined
+matrix: Linux and Windows are advisory during the macOS-focused product phase
+and may continue after queue admission. The `macos` and `macos-merge-group`
+bootstrap jobs own the required name only for an intentional native skip or a
+fail-closed provider/classifier failure; their inactive names end in `-unused`.
+`tools/scripts/test_required_macos_alias.py` and
+`test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
+whose `needs` contains the combined `build` job.
+
 ### An advisory check that names a main-breaking defect is worse than none
 
 `api-contracts.yml` runs the public-header doc-contract pass on its own
@@ -686,28 +696,31 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
-## A red `macos` or `linux` alias does not mean tests failed
+## A red advisory alias does not necessarily mean tests failed
 
-`macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
-The required `macos` alias reports after the build matrix is terminal; it does
-not poll while the native build runs. Alias jobs run no build and produce no
-build output of their own — a `linux` alias log is about 48 lines, and it says
-so outright:
+`linux` and `windows` are **alias checks**: jobs that mirror real advisory
+lanes. Native `macos` is not an alias; the macOS matrix child owns that required
+context directly so advisory work cannot delay it. The macOS bootstrap jobs run
+only for intentional native skips or fail-closed routing/classification errors.
+Alias jobs run no build and produce no build output of their own — a `linux`
+alias log is about 48 lines, and it says so outright:
 
 ```
 Linux leg conclusion: cancelled
 Linux leg cancelled — failing linux alias (advisory only; not required)
 ```
 
-**The alias exits non-zero on anything not green — including `CANCELLED`.** So a
-cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
+**An advisory alias exits non-zero on anything not green — including
+`CANCELLED`.** So a cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
 interrupted produces a red alias beside its own `CANCELLED` entry in the same
 check list. Reading that as a second, independent failure is the trap; it is one
 event reported twice.
 
-Before treating either alias as a real break, fetch **the underlying leg's job**
-(`Linux (x64) [github-hosted]`, the macOS build job) or the alias's own short
-log. Do not infer from the alias name alone.
+Before treating an advisory alias as a real break, fetch **the underlying leg's
+job** (`Linux (x64) [github-hosted]`, for example) or the alias's own short log.
+Do not infer from the alias name alone. A red direct `macos` context is the real
+required macOS job (except the explicitly named bootstrap path) and must be
+triaged as such.
 
 Two more things that mislead here:
 
