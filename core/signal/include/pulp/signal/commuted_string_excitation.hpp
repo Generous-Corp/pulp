@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <span>
 #include <type_traits>
 
@@ -129,10 +130,17 @@ class CommutedStringExcitationProfileT {
         }
 
         const auto retained = base_excitation.size() + body_impulse_response.size() - 1;
+        constexpr auto sample_lowest =
+            static_cast<Accumulator>(std::numeric_limits<SampleType>::lowest());
+        constexpr auto sample_maximum =
+            static_cast<Accumulator>(std::numeric_limits<SampleType>::max());
         for (std::size_t index = 0; index < retained; ++index) {
             const auto value = convolve_at(index, base_excitation, body_impulse_response);
+            if (!std::isfinite(value) || value < sample_lowest || value > sample_maximum) {
+                return CommutedStringExcitationPrepareStatus::non_finite_output;
+            }
             const auto stored = static_cast<SampleType>(value);
-            if (!std::isfinite(value) || !std::isfinite(stored)) {
+            if (!std::isfinite(stored)) {
                 return CommutedStringExcitationPrepareStatus::non_finite_output;
             }
         }

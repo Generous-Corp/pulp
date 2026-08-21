@@ -107,7 +107,12 @@ TEST_CASE("Commuted string excitation rejects invalid preparation transactionall
                        preserved.end()));
 
     constexpr std::array maximum_base{std::numeric_limits<float>::max()};
+    constexpr std::array lowest_base{std::numeric_limits<float>::lowest()};
     REQUIRE(profile.prepare(maximum_base, overflowing_body) ==
+            CommutedStringExcitationPrepareStatus::non_finite_output);
+    REQUIRE(std::equal(profile.samples().begin(), profile.samples().end(), preserved.begin(),
+                       preserved.end()));
+    REQUIRE(profile.prepare(lowest_base, overflowing_body) ==
             CommutedStringExcitationPrepareStatus::non_finite_output);
     REQUIRE(std::equal(profile.samples().begin(), profile.samples().end(), preserved.begin(),
                        preserved.end()));
