@@ -8,6 +8,7 @@ on:
       - 'core/timeline/**'
       - 'core/playback/**'
       - 'test/test_timeline_scale.cpp'
+      - 'test/test_timeline_agent_view.cpp'
       - 'test/cmake/timeline_tests.cmake'
       - 'test/fixtures/timeline/**'
       - 'tools/scripts/timeline_fixture_coverage_check.py'
@@ -22,6 +23,7 @@ on:
       - 'core/timeline/**'
       - 'core/playback/**'
       - 'test/test_timeline_scale.cpp'
+      - 'test/test_timeline_agent_view.cpp'
       - 'test/cmake/timeline_tests.cmake'
       - 'test/fixtures/timeline/**'
       - 'tools/scripts/timeline_fixture_coverage_check.py'
@@ -68,16 +70,31 @@ jobs:
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BENCHMARK=ON
 
-      - name: Build timeline scale gate
+      - name: Build timeline scale gates
         run: |
           cmake --build build-timeline-hardening \
-            --target pulp-test-timeline-scale
+            --target pulp-test-timeline-scale pulp-test-timeline-agent-view \
+            -j 2
 
-      - name: Enforce scale and compile-latency budgets
+      - name: Enforce scale, replay, and paging budgets
         env:
+          # Milliseconds; these advisory-lane ceilings are reviewed like code.
           PULP_PERF_STRICT: '1'
+          PULP_TIMELINE_LOAD_BUDGET_MS: '2000'
+          PULP_TIMELINE_COLD_COMPILE_BUDGET_MS: '2000'
+          PULP_TIMELINE_EDIT_BATCH_BUDGET_MS: '1000'
+          PULP_TIMELINE_EDIT_MAX_BUDGET_MS: '30'
+          PULP_TIMELINE_NOTE_COMPILE_BUDGET_MS: '20000'
+          PULP_TIMELINE_AUTOMATION_COMPILE_BUDGET_MS: '20000'
+          PULP_TIMELINE_N_WRITER_BUDGET_MS: '5000'
+          PULP_TIMELINE_DEEP_UNDO_BUDGET_MS: '5000'
+          PULP_TIMELINE_JOURNAL_REPLAY_BUDGET_MS: '3000'
+          PULP_TIMELINE_AGENT_VIEW_OUTLINE_BUDGET_MS: '3000'
+          PULP_TIMELINE_AGENT_VIEW_PAGING_BUDGET_MS: '8000'
         run: |
           build-timeline-hardening/test/pulp-test-timeline-scale \
+            --rng-seed 1
+          build-timeline-hardening/test/pulp-test-timeline-agent-view \
             --rng-seed 1
 
   fixture-coverage:
