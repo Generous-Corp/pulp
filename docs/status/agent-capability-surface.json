@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 52,
+  "inventory_version": 53,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 440,
-    "reviewed_headers": 144,
+    "public_headers": 441,
+    "reviewed_headers": 145,
     "legacy_unreviewed_headers": 296,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 93,
+      "capability_entrypoint": 94,
       "capability_support": 38,
       "infrastructure": 11,
       "legacy_unreviewed": 296,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 261,
-        "reviewed_headers": 102,
+        "public_headers": 262,
+        "reviewed_headers": 103,
         "legacy_unreviewed_headers": 159,
         "unsupported_headers": 2
       },
@@ -1718,7 +1718,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
-      "fingerprint": "sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e",
+      "fingerprint": "sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93",
       "include": "pulp/signal/analysis_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3755,6 +3755,17 @@
         "signal.source-filter-analysis"
       ],
       "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_feature_frontends.hpp",
+      "fingerprint": "sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273",
+      "include": "pulp/signal/spectral_feature_frontends.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-feature-frontends"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

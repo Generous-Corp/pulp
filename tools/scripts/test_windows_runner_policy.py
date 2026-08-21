@@ -484,12 +484,18 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         merge_alias = self.workflow["jobs"]["macos-merge-group"]
         self.assertIn("macos-merge-unused", merge_alias["name"])
         self.assertIn("'macos'", merge_alias["name"])
-        self.assertIn("build", merge_alias["needs"])
+        self.assertNotIn("build", merge_alias["needs"])
+        self.assertIn("resolve-provider", merge_alias["needs"])
         self.assertIn("classify", merge_alias["needs"])
         merge_condition = " ".join(merge_alias["if"].split())
-        self.assertEqual(
-            merge_condition, "always() && github.event_name == 'merge_group'"
-        )
+        self.assertIn("github.event_name == 'merge_group'", merge_condition)
+        self.assertIn("native_build_required != 'true'", merge_condition)
+        self.assertIn("resolve-provider.result != 'success'", merge_condition)
+
+        build_name = self.workflow["jobs"]["build"]["name"]
+        self.assertIn("github.event_name == 'merge_group'", build_name)
+        self.assertIn("matrix.key == 'macos'", build_name)
+        self.assertIn("'macos'", build_name)
 
     def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
         for name in ("linux", "windows"):

@@ -24,16 +24,60 @@ EXPORTS = [
         bindings=[
             binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+                    header_fingerprint="sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93"),
             binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+                    header_fingerprint="sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93"),
         ],
         _link_probes=[
             {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
              "operation": "member_call", "member": "reset", "arguments": ""},
             {"role": "onset_novelty", "binding": "pulp::signal::OnsetNoveltyFrontEndT<float>",
              "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.spectral-feature-frontends", domain="signal",
+        summary=(
+            "Prepared streaming spectral centroid, flatness, rolloff, and normalized flux "
+            "feature frames for bounded modulation consumers."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate retained FFT storage",
+                   "process": "audio analysis owner", "reset": "audio analysis owner",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Fixed-capacity window, FFT scratch, previous normalized spectrum, cadence, "
+            "timestamp, sequence, and current feature frame."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="prepared planar finite audio blocks",
+        output_domain=(
+            "timestamped centroid, flatness, 85-percent power rolloff, and gain-invariant "
+            "normalized flux frames"
+        ),
+        units=["samples", "frames", "hertz", "normalized magnitude", "ratio"],
+        latency="analysis center lookback N/2; startup N samples",
+        tail="no padded analysis tail", scheduling="streaming hop cadence",
+        bindings=[
+            binding(role="entrypoint", kind="cpp_type",
+                    include="pulp/signal/spectral_feature_frontends.hpp",
+                    qualified_name="pulp::signal::SpectralFeatureFrontEndT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273"),
+            binding(role="frame", kind="cpp_type",
+                    include="pulp/signal/spectral_feature_frontends.hpp",
+                    qualified_name="pulp::signal::SpectralFeatureFrameT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273"),
+        ],
+        _link_probes=[
+            {"role": "entrypoint", "binding": "pulp::signal::SpectralFeatureFrontEndT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "frame", "binding": "pulp::signal::SpectralFeatureFrameT<float>",
+             "operation": "construct", "arguments": ""},
         ],
     ),
     capability(
