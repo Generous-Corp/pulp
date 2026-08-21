@@ -27,6 +27,7 @@
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <iostream>
 #include <memory>   // shared_ptr liveness token for deferred clicks
 #include <mutex>
@@ -1919,7 +1920,10 @@ public:
                 partial_repaint_enabled_ = (env[0] == '1');
             }
             if (const char* env = std::getenv("PULP_TEST_POINTER_DRAG")) {
-                test_pointer_drag_enabled_ = (env[0] == '1');
+                test_pointer_drag_mode_ = std::strcmp(env, "minimap") == 0
+                    ? TestPointerDragMode::minimap
+                    : env[0] == '1' ? TestPointerDragMode::bands
+                                    : TestPointerDragMode::disabled;
             }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
@@ -2504,32 +2508,70 @@ private:
     // invoked on main only.
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
-    bool test_pointer_drag_enabled_ = false;
+    enum class TestPointerDragMode { disabled, bands, minimap };
+    TestPointerDragMode test_pointer_drag_mode_ = TestPointerDragMode::disabled;
     int test_pointer_drag_tick_ = 0;
 
     void pump_test_pointer_drag() {
-        if (!test_pointer_drag_enabled_ || !window_ || !metal_view_) return;
+        if (test_pointer_drag_mode_ == TestPointerDragMode::disabled
+            || !window_ || !metal_view_) return;
         constexpr int kWarmupFrames = 45;
         constexpr int kSamples = 180;
         const int tick = test_pointer_drag_tick_++;
-        if (tick < kWarmupFrames || tick > kWarmupFrames + kSamples + 1) return;
+        if (tick < kWarmupFrames) return;
 
-        const int sample = std::clamp(tick - kWarmupFrames, 0, kSamples);
-        const CGFloat t = static_cast<CGFloat>(sample) / kSamples;
+        const int workload_tick = tick - kWarmupFrames;
         const NSSize size = metal_view_.bounds.size;
-        const NSPoint location = NSMakePoint(
-            (0.073 + 0.848 * t) * size.width,
-            (1.0 - (0.453 + std::sin(t * M_PI * 5.0) * 0.198)) * size.height);
-        const NSEventType type = sample == 0 ? NSEventTypeLeftMouseDown
-            : sample == kSamples ? NSEventTypeLeftMouseUp
-                                 : NSEventTypeLeftMouseDragged;
+        NSPoint location{};
+        NSEventType type{};
+        int event_number = workload_tick;
+        if (test_pointer_drag_mode_ == TestPointerDragMode::bands) {
+            if (workload_tick > kSamples) return;
+            const int sample = std::clamp(workload_tick, 0, kSamples);
+            const CGFloat t = static_cast<CGFloat>(sample) / kSamples;
+            location = NSMakePoint(
+                (0.073 + 0.848 * t) * size.width,
+                (1.0 - (0.453 + std::sin(t * M_PI * 5.0) * 0.198)) * size.height);
+            type = sample == 0 ? NSEventTypeLeftMouseDown
+                : sample == kSamples ? NSEventTypeLeftMouseUp
+                                     : NSEventTypeLeftMouseDragged;
+        } else {
+            // Three equal, independently hit-tested gestures exercise both
+            // resize handles and the selected-window pan. The normalized
+            // points are derived from the authored 56 px side padding and
+            // minimap y = height - 92 in Spectr's 1320 x 860 design viewport.
+            constexpr int kGestureSamples = 60;
+            constexpr int kGestureEvents = kGestureSamples + 1;
+            constexpr int kSettleFrames = 8;
+            constexpr int kGestureStride = kGestureEvents + kSettleFrames;
+            constexpr int kTotalTicks = 3 * kGestureStride;
+            if (workload_tick >= kTotalTicks) return;
+            const int gesture = workload_tick / kGestureStride;
+            const int sample = workload_tick % kGestureStride;
+            if (sample >= kGestureEvents) return;
+            const CGFloat t = static_cast<CGFloat>(sample) / kGestureSamples;
+            constexpr CGFloat kMiniY = 768.0 / 860.0;
+            const CGFloat start_x = gesture == 0 ? 56.0 / 1320.0
+                : gesture == 1 ? 1264.0 / 1320.0
+                               : 0.5;
+            const CGFloat end_x = gesture == 0 ? 0.18
+                : gesture == 1 ? 0.82
+                               : 0.58;
+            location = NSMakePoint(
+                (start_x + (end_x - start_x) * t) * size.width,
+                (1.0 - kMiniY) * size.height);
+            type = sample == 0 ? NSEventTypeLeftMouseDown
+                : sample == kGestureSamples ? NSEventTypeLeftMouseUp
+                                            : NSEventTypeLeftMouseDragged;
+            event_number = gesture * 1000 + sample;
+        }
         NSEvent* event = [NSEvent mouseEventWithType:type
                                            location:location
                                       modifierFlags:0
                                           timestamp:NSProcessInfo.processInfo.systemUptime
                                        windowNumber:window_.windowNumber
                                             context:nil
-                                        eventNumber:sample
+                                        eventNumber:event_number
                                          clickCount:1
                                            pressure:type == NSEventTypeLeftMouseUp ? 0.0 : 1.0];
         // Enter through PulpMetalView's real AppKit method so the exact native
