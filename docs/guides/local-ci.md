@@ -445,6 +445,11 @@ deregisters the runner, and rechecks the unchanged VM config under the VMID
 allocation lock before destroy. Missing, duplicate, unreachable, busy, or
 otherwise ambiguous evidence always preserves the VM. Run
 `pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
+After a controller reboot leaves an `onboot=0` clone stopped, recovery accepts
+only its one exact generation-bound GitHub registration in `offline` and
+`busy=false` state, deregisters that exact ID under the same VMID lock, and
+then destroys the clone. Online, busy, duplicate, or unreadable stopped-clone
+registrations remain preserved.
 An operator's explicit `--keep` disposition is generation-bound under
 `/var/lib/pulp/ephemeral-runner-keep`, so it survives a host reboot; a newly
 allocated generation clears only the old marker for its own VMID while holding

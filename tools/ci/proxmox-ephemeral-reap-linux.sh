@@ -232,17 +232,26 @@ for id in $(seq "$BASE" "$MAX"); do
     vm_status="$($QM status "$id" 2>/dev/null)" \
         || { log "SKIP $id — VM status is unavailable"; continue; }
     cleanup_state=""
+    registration_present=0
     ip=""
     runner_name="$host_generation"
 
     if [ "$vm_status" = "status: stopped" ]; then
         [[ "$host_generation" =~ ^[A-Za-z0-9._-]+$ ]] \
             || { log "SKIP $id — stopped legacy clone lacks a host generation"; continue; }
-        runner_record "$runner_name" "$host_scope" >/dev/null
-        record_status=$?
-        [ "$record_status" -eq 1 ] \
-            || { log "SKIP $id — stopped clone registration is present or ambiguous"; continue; }
-        cleanup_state="stopped-post-job"
+        record="$(runner_record "$runner_name" "$host_scope")"; record_status=$?
+        if [ "$record_status" -eq 1 ]; then
+            cleanup_state="stopped-post-job"
+        elif [ "$record_status" -eq 0 ]; then
+            IFS=$'\t' read -r registration_api rid _ status busy <<< "$record"
+            [ "$busy" = false ] && [ "$status" = offline ] \
+                || { log "SKIP $id — stopped clone registration is not idle and offline"; continue; }
+            registration_present=1
+            cleanup_state="stopped-idle-registration"
+        else
+            log "SKIP $id — stopped clone registration is ambiguous"
+            continue
+        fi
     elif [ "$vm_status" = "status: running" ]; then
         ip="$($QM guest cmd "$id" network-get-interfaces 2>/dev/null \
             | grep -oE '(10\.240\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+)' | head -1)"
@@ -276,6 +285,7 @@ for id in $(seq "$BASE" "$MAX"); do
             IFS=$'\t' read -r registration_api rid _ status busy <<< "$record"
             [ "$busy" = false ] && { [ "$status" = online ] || [ "$status" = offline ]; } \
                 || { log "SKIP $id — exact GitHub runner is busy or invalid"; continue; }
+            registration_present=1
             cleanup_state="idle-listener"
         elif [ "$listener_count" = 0 ]; then
             [[ "$host_generation" =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -348,16 +358,22 @@ for id in $(seq "$BASE" "$MAX"); do
         [ "$stopped" = 1 ] \
             || { log "SKIP $id — proved clone did not stop"; flock -u 9; continue; }
     fi
-    if [ "$cleanup_state" = idle-listener ]; then
+    if [ "$registration_present" = 1 ]; then
         for _ in $(seq 1 30); do
             record="$(runner_record "$runner_name" "$host_scope")"; record_status=$?
             [ "$record_status" -eq 0 ] || break
-            IFS=$'\t' read -r registration_api rid _ status busy <<< "$record"
-            [ "$busy" = false ] && [ "$status" = offline ] && break
+            IFS=$'\t' read -r current_registration_api current_rid _ current_status current_busy <<< "$record"
+            [ "$current_registration_api" = "$registration_api" ] \
+                && [ "$current_rid" = "$rid" ] \
+                && [ "$current_busy" = false ] \
+                && [ "$current_status" = offline ] && break
             sleep 2
         done
         if [ "$record_status" -eq 0 ]; then
-            [ "$busy" = false ] && [ "$status" = offline ] \
+            [ "$current_registration_api" = "$registration_api" ] \
+                && [ "$current_rid" = "$rid" ] \
+                && [ "$current_busy" = false ] \
+                && [ "$current_status" = offline ] \
                 || { log "SKIP $id — fenced runner did not become idle and offline"; flock -u 9; continue; }
             env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
                 -u GITHUB_ENTERPRISE_TOKEN HOME=/root \

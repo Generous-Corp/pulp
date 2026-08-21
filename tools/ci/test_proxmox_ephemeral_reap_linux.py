@@ -81,6 +81,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
         host_scope: str = "",
         guest_identity: str = "pulp-auto-ephemeral-200",
         github_present: bool = True,
+        github_status: str = "online",
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = pathlib.Path(tmp_name)
@@ -138,7 +139,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                     #!/bin/sh
                     echo "$*" >> {operations}
                     case "$*" in
-                      *'orgs/Generous-Corp/actions/runners?per_page=100'*) {'printf "17\\tpulp-auto-ephemeral-200\\tonline\\t' + ('true' if busy else 'false') + '\\n"' if github_present else ':'} ;;
+                      *'orgs/Generous-Corp/actions/runners?per_page=100'*) {'printf "17\\tpulp-auto-ephemeral-200\\t' + github_status + '\\t' + ('true' if busy else 'false') + '\\n"' if github_present else ':'} ;;
                       *'repos/Generous-Corp/pulp/actions/runners?per_page=100'*) : ;;
                       *) exit 2 ;;
                     esac
@@ -244,6 +245,30 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("stopped-post-job", result.stdout)
         self.assertNotIn("ci@", operations)
+
+    def test_report_recovers_stopped_generation_with_exact_idle_offline_registration(self) -> None:
+        result, operations = self._run_reaper(
+            vm_status="stopped",
+            host_generation="pulp-auto-ephemeral-200",
+            busy=False,
+            github_present=True,
+            github_status="offline",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped-idle-registration", result.stdout)
+        self.assertNotIn("ci@", operations)
+
+    def test_stopped_generation_preserves_busy_registration(self) -> None:
+        result, operations = self._run_reaper(
+            vm_status="stopped",
+            host_generation="pulp-auto-ephemeral-200",
+            busy=True,
+            github_present=True,
+            github_status="offline",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("registration is not idle and offline", result.stdout)
+        self.assertNotIn("destroy 200", operations)
 
 
 if __name__ == "__main__":
