@@ -462,6 +462,7 @@ GENERATOR_ENDED_BADLY = (
     "model cli is not installed",
     "the rack sdk is not installed",
     "could not download the rack sdk",
+    "behavioural gate infrastructure failure; no model call was",
     "unknown setting",
     "two manifests claim",
     "already running against this module pack",

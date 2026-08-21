@@ -962,6 +962,13 @@ Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-respons
 Change one line in a copy, replay both, and the control/test differ by exactly
 that line.
 
+The module gate is a consumer of Pulp's public signal headers, so it must also
+inherit the platform link requirements exported by `pulp::signal`. On macOS
+that includes Accelerate for vDSP-backed FFT users. A gate compile or link
+failure means the harness is unavailable; stop immediately, retain its exact
+diagnostic, and spend no model retry. Only a successfully built gate can reject
+generated DSP and provide actionable retry context.
+
 **Generation writes into the pack**, so never run it inside a checkout you are
 using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and
 the next Forge configure fails.
