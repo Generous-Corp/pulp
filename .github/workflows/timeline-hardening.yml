@@ -78,6 +78,7 @@ jobs:
 
       - name: Enforce scale, replay, and paging budgets
         env:
+          # Milliseconds; these advisory-lane ceilings are reviewed like code.
           PULP_PERF_STRICT: '1'
           PULP_TIMELINE_LOAD_BUDGET_MS: '2000'
           PULP_TIMELINE_COLD_COMPILE_BUDGET_MS: '2000'
