@@ -4333,6 +4333,19 @@ GitHub UI on slow CI runs.
 
 ## PR test selection
 
+Pulp's base-owned `[targets.mac.changed_surface_selection]` declaration is a
+**shadow planner only**. Schema v2 records a mandatory kernel, complete literal
+tests for one narrowly reviewed CLI projection family, medium-risk extended
+neighbors, and known full-required surfaces. The existing full
+`[validation.default]` suite remains authoritative; do not turn a shadow receipt
+into a skip, merge gate, or reusable execution receipt. Unknown paths and
+changes to build/toolchain, public ABI, security, provenance, selector policy,
+or test topology select full. `changed-surface-policy-selftest` verifies those
+dispositions with negative mutations and, on the declared macOS
+Debug/examples-on target, checks exact cardinality and every declared literal
+identity against the configured CTest inventory. Add broader mappings only after shadow
+receipts show they contain the relevant full-suite failures.
+
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`
 events and `workflow_dispatch` because Shipyard PR validation dispatches
 the Build-and-Test workflow manually. Preserve that split: slow configure

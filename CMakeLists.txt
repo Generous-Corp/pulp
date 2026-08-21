@@ -79,6 +79,9 @@ else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
+option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
+       "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
+       OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_ENABLE_PROJECT_PACKAGE
        "Build and export the durable project-package subsystem and dependent C++ timeline authoring tools"
