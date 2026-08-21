@@ -6583,6 +6583,39 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     CHECK(passes <= 1);
 }
 
+TEST_CASE("replaying an identical flex value does not dirty geometry",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 60; ++i) {
+        engine.evaluate("setFlex('leaf', 'height', 24)");
+        engine.evaluate("getLayoutRect('leaf').height");
+    }
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for 60 identical style writes: " << passes);
+    CHECK(passes <= 1);
+
+    engine.evaluate("setFlex('leaf', 'height', 72)");
+    const auto changed = engine.evaluate("getLayoutRect('leaf').height")
+                             .getWithDefault<double>(-1.0);
+    CHECK(changed == 72.0);
+}
+
 TEST_CASE("a mutation on a DEEP child still forces a fresh layout",
           "[view][bridge][layout][perf]") {
     // The reachable negative for the elision, and the reason the root's
