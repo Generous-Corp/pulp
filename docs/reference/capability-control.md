@@ -19,6 +19,86 @@ Status observes registration only: without an operation to evaluate,
 `implemented`, `built`, `host_available`, `activated`, and `session_live` are
 reported as `not_evaluated`, never inferred as satisfied from registration.
 
+## Keep the five exposure surfaces separate
+
+A public sequencer API is not automatically controllable, and an MCP tool is
+not automatically a Product A operation. Pulp records five independent
+surfaces:
+
+| Surface | What it proves | What it does not prove |
+|---|---|---|
+| Installed SDK | A consumer can compile against and link the public API. | A CLI, MCP, or live operation exists. |
+| Offline timeline CLI | The repository CLI has a real typed definition and handler for a persisted timeline operation. | The operation is remotely callable or authorized against a live product instance. |
+| Offline timeline MCP | The MCP server has a real typed definition and handler for a persisted timeline operation. | The per-user broker granted live authority. |
+| Live Product A control | The canonical registry, operation, executor, policy, CLI projection, MCP projection, and tests compose through the broker. | An unrelated build manifest or offline tool can issue a grant. |
+| Design-time agent manifest | The installed SDK describes an offline algorithm or composition capability to an authoring agent. | Runtime discovery, transport, consent, or control authority exists. |
+
+The design-time manifest in `docs/status/agent-capabilities.json` is deliberately
+separate from the Product A registry. Do not add an entry there merely to make a
+live-control gap appear closed. Conversely, an offline CLI/MCP pairing remains
+useful even when a live Product A adapter is not yet appropriate.
+
+## Sequencer exposure ledger
+
+`docs/status/sequencer-exposure.json` is the durable delivery ledger for
+sequencer and playback slices. A feature change records a `pending` row with
+its durable claim ID and exact owned paths before it can know its protected
+merge identity. A post-merge ledger follow-up promotes that same row to
+`released` and pins the PR, accepted source head, and protected merge SHA.
+Planning RELEASE waits for that promotion. Every row also records source
+evidence and gives every exposure surface one disposition:
+
+- `exposed` includes evidence for the real implementation;
+- `gap` names an owner and concrete dependency identifiers;
+- `deferred` names an owner and the dependency that must clear first;
+- `not_applicable` explains why the slice is not independently meaningful on
+  that surface.
+
+Live Product A exposure has the strongest evidence bar. A row may say
+`exposed` only when it points to a canonical capability definition, typed
+operation definition, executor binding, grant-profile policy, CLI projection,
+MCP projection, and an executable test. A generic timeline tool, public header,
+or design-time manifest entry cannot substitute for any of those layers.
+
+For every sequencer delivery slice:
+
+1. Add or update its `pending` ledger row in the same change as the feature;
+   every watched changed path must be covered by that row's `owned_paths`.
+   A cross-module sequencer slice also carries the exact
+   `Sequencer-Exposure: <row-id>` commit trailer so generic ownership paths are
+   bound to that pending row.
+2. Classify infrastructure and backend-only work explicitly instead of
+   inventing a user control for it.
+3. Preserve unresolved gaps with an owner and dependency; do not silently
+   downgrade them to `not_applicable`.
+4. After the protected merge, publish a ledger-only follow-up that promotes the
+   row to `released` with exact merge evidence; only then release its planning
+   claim.
+5. When removing or superseding a row, add a `pending` tombstone with its claim
+   ID in the removal change. Promote it to `released` with the protected merge
+   SHA in the same ledger-only follow-up used for release evidence. Released
+   tombstones are immutable; never reuse their IDs.
+6. Validate the ledger and its calibrated negative controls:
+
+   ```sh
+   python3 tools/scripts/sequencer_exposure_check.py --base origin/main
+   python3 tools/scripts/test_sequencer_exposure_check.py
+   ```
+
+The required version-and-skill workflow runs the same base-aware check. A
+change under the watched timeline, playback, timeline CLI/MCP, test, skill,
+documentation, or workflow surfaces fails if it omits the ledger. The checker
+requires every changed watched path to belong to an added or materially changed
+row, so an unrelated ledger edit cannot satisfy the gate. It also requires a
+tombstone when a live row disappears and refuses changes to an existing
+tombstone.
+
+The ledger's top-level audit state is separate from row delivery. It stays
+`in_progress` while any historical release is unreconciled or any program-wide
+surface fact remains unresolved, and names the owner and dependencies for each
+gap. A set of valid rows must not be presented as a complete census while that
+audit state remains open.
+
 ## Author a target manifest
 
 Ordinary `pulp_add_plugin` targets remain production-stripped unless they opt in.
