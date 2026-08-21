@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -25,9 +26,7 @@ template <typename SampleType = float> class BlitOscillatorT {
     /// Set the sample rate in Hz. Failure leaves the complete prior
     /// configuration unchanged.
     [[nodiscard]] bool prepare(SampleType sample_rate) noexcept {
-        if (!std::isfinite(sample_rate) || !(sample_rate > SampleType{0}))
-            return false;
-        if (!(frequency_hz_ > SampleType{0}) || frequency_hz_ >= sample_rate * SampleType{0.5})
+        if (!valid_configuration(sample_rate, frequency_hz_))
             return false;
         sample_rate_ = sample_rate;
         update_harmonics();
@@ -37,8 +36,7 @@ template <typename SampleType = float> class BlitOscillatorT {
     /// Set the fundamental in Hz. The open Nyquist bound guarantees at least
     /// one representable positive harmonic. Failure is transactional.
     [[nodiscard]] bool set_frequency(SampleType frequency_hz) noexcept {
-        if (!std::isfinite(frequency_hz) || !(frequency_hz > SampleType{0}) ||
-            frequency_hz >= sample_rate_ * SampleType{0.5})
+        if (!valid_configuration(sample_rate_, frequency_hz))
             return false;
         frequency_hz_ = frequency_hz;
         update_harmonics();
@@ -59,46 +57,59 @@ template <typename SampleType = float> class BlitOscillatorT {
     [[nodiscard]] bool reset_phase(SampleType phase = SampleType{0}) noexcept {
         if (!std::isfinite(phase) || phase < SampleType{0} || phase >= SampleType{1})
             return false;
-        phase_ = phase;
+        phase_ = static_cast<double>(phase);
         return true;
     }
 
-    SampleType phase() const noexcept {
+    double phase() const noexcept {
         return phase_;
     }
 
     /// Render the current phase and advance one sample.
     SampleType next() noexcept {
-        const SampleType x = std::numbers::pi_v<SampleType> * phase_;
-        const SampleType denominator = std::sin(x);
-        const SampleType terms = static_cast<SampleType>(2 * harmonics_ + 1);
+        const double distance = std::min(phase_, 1.0 - phase_);
+        const double x = std::numbers::pi * distance;
+        const double terms = static_cast<double>(2 * harmonics_ + 1);
+        const double out = normalized_sinc(terms * x) / normalized_sinc(x);
 
-        SampleType out = SampleType{1};
-        if (std::fabs(denominator) > SampleType{16} * std::numeric_limits<SampleType>::epsilon())
-            out = std::sin(terms * x) / (terms * denominator);
-
-        phase_ += frequency_hz_ / sample_rate_;
+        phase_ += static_cast<double>(frequency_hz_) / static_cast<double>(sample_rate_);
         phase_ -= std::floor(phase_);
         if (!std::isfinite(phase_))
             phase_ = SampleType{0};
-        return std::isfinite(out) ? out : SampleType{0};
+        return std::isfinite(out) ? static_cast<SampleType>(out) : SampleType{0};
     }
 
   private:
-    void update_harmonics() noexcept {
-        const SampleType positive = std::floor((sample_rate_ * SampleType{0.5}) / frequency_hz_);
-        if (!std::isfinite(positive) || positive < SampleType{1}) {
-            harmonics_ = 1;
-            return;
+    static constexpr int max_harmonics = (std::numeric_limits<int>::max() - 1) / 2;
+
+    static bool valid_configuration(SampleType sample_rate, SampleType frequency) noexcept {
+        if (!std::isfinite(sample_rate) || !(sample_rate > SampleType{0}) ||
+            !std::isfinite(frequency) || !(frequency > SampleType{0}) ||
+            frequency >= sample_rate * SampleType{0.5})
+            return false;
+        const double requested =
+            std::floor((static_cast<double>(sample_rate) * 0.5) / static_cast<double>(frequency));
+        return std::isfinite(requested) && requested >= 1.0 &&
+               requested <= static_cast<double>(max_harmonics);
+    }
+
+    static double normalized_sinc(double x) noexcept {
+        const double magnitude = std::fabs(x);
+        if (magnitude < 1.0e-4) {
+            const double squared = x * x;
+            return 1.0 - squared / 6.0 + squared * squared / 120.0;
         }
-        constexpr int max_harmonics = (std::numeric_limits<int>::max() - 1) / 2;
-        const SampleType max_int = static_cast<SampleType>(max_harmonics);
-        harmonics_ = positive >= max_int ? max_harmonics : static_cast<int>(positive);
+        return std::sin(x) / x;
+    }
+
+    void update_harmonics() noexcept {
+        harmonics_ = static_cast<int>(std::floor((static_cast<double>(sample_rate_) * 0.5) /
+                                                 static_cast<double>(frequency_hz_)));
     }
 
     SampleType sample_rate_ = SampleType{48000};
     SampleType frequency_hz_ = SampleType{440};
-    SampleType phase_ = SampleType{0};
+    double phase_ = 0.0;
     int harmonics_ = 54;
 };
 

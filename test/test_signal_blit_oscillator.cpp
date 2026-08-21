@@ -71,6 +71,29 @@ TEST_CASE("BlitOscillator float matches the discrete-summation oracle", "[signal
     REQUIRE_THAT(oscillator.next(), WithinAbs(direct_sum(7, 0.137f), 2.0e-5));
 }
 
+TEST_CASE("BlitOscillator float evaluates large-count impulse neighborhoods",
+          "[signal][blit][regression]") {
+    BlitOscillator oscillator;
+    REQUIRE(oscillator.prepare(48000.0f));
+    REQUIRE(oscillator.set_frequency(0.01f));
+    REQUIRE(oscillator.reset_phase());
+    REQUIRE(oscillator.next() == 1.0f);
+    REQUIRE(std::fabs(oscillator.next()) < 1.0e-5f);
+}
+
+TEST_CASE("BlitOscillator float phase advances at accepted sub-Hz frequencies",
+          "[signal][blit][regression]") {
+    BlitOscillator oscillator;
+    REQUIRE(oscillator.prepare(48000.0f));
+    REQUIRE(oscillator.set_frequency(0.001f));
+    REQUIRE(oscillator.reset_phase(0.5f));
+    (void)oscillator.next();
+    const double first = oscillator.phase();
+    (void)oscillator.next();
+    REQUIRE(first > 0.5);
+    REQUIRE(oscillator.phase() > first);
+}
+
 TEST_CASE("BlitOscillator evaluates the removable impulse limit", "[signal][blit]") {
     BlitOscillator64 oscillator;
     REQUIRE(oscillator.set_frequency(100.0));
@@ -147,6 +170,8 @@ TEST_CASE("BlitOscillator rejects invalid controls transactionally", "[signal][b
     REQUIRE(oscillator.frequency() == 1000.0);
     REQUIRE_FALSE(oscillator.reset_phase(-0.1));
     REQUIRE_FALSE(oscillator.reset_phase(1.0));
+    REQUIRE_FALSE(oscillator.set_frequency(1.0e-9));
+    REQUIRE(oscillator.frequency() == 1000.0);
 }
 
 TEST_CASE("BlitOscillator audio-thread operations allocate no memory", "[signal][blit][rt]") {
