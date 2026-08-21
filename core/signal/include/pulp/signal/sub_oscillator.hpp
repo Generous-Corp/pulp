@@ -26,7 +26,7 @@ enum class SubOscillatorWaveform {
 /// The output has normalized amplitude, zero latency, and no tail.
 template <typename SampleType = float> class SubOscillatorT {
   public:
-    static_assert(std::is_floating_point_v<SampleType>);
+    static_assert(std::is_same_v<SampleType, float> || std::is_same_v<SampleType, double>);
 
     /// Select one or two octaves below the parent. Failure leaves the previous
     /// setting and phase relationship unchanged.
