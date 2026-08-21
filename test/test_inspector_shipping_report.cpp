@@ -1,19 +1,17 @@
 #include "tools/cli/inspector_shipping_report.hpp"
+#include "reload_test_support.hpp"
 
 #include <pulp/inspect/control_manifest.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <fstream>
 
 namespace fs = std::filesystem;
 
 namespace {
 struct TemporaryDirectory {
-    fs::path path = fs::temp_directory_path() /
-        ("pulp-inspector-shipping-report-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::path path = pulp::test::unique_tmp_dir("pulp-inspector-shipping-report-");
     TemporaryDirectory() { fs::create_directories(path / "pulp-inspector-manifests"); }
     ~TemporaryDirectory() { std::error_code error; fs::remove_all(path, error); }
 };
