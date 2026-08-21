@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 35,
+  "manifest_revision": 36,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 53
+        "capabilities": 54
       },
       "timebase": {
         "state": "partial",
@@ -4478,6 +4478,82 @@
       "contract_digest": "sha256:7e5a490e4adc22e564e28d5acb59ff2f8ae176e1db1fdde21484fe88ae27dbd3"
     },
     {
+      "key": "signal.spectral-feature-frontends",
+      "domain": "signal",
+      "summary": "Prepared streaming spectral centroid, flatness, rolloff, and normalized flux feature frames for bounded modulation consumers.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; may allocate retained FFT storage",
+        "process": "audio analysis owner",
+        "reset": "audio analysis owner",
+        "release": "destruction off audio"
+      },
+      "state_model": "Fixed-capacity window, FFT scratch, previous normalized spectrum, cadence, timestamp, sequence, and current feature frame.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "prepared planar finite audio blocks",
+      "output_domain": "timestamped centroid, flatness, 85-percent power rolloff, and gain-invariant normalized flux frames",
+      "units": [
+        "samples",
+        "frames",
+        "hertz",
+        "normalized magnitude",
+        "ratio"
+      ],
+      "latency": "analysis center lookback N/2; startup N samples",
+      "tail": "no padded analysis tail",
+      "scheduling": "streaming hop cadence",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_feature_frontends.hpp",
+          "qualified_name": "pulp::signal::SpectralFeatureFrontEndT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "frame",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_feature_frontends.hpp",
+          "qualified_name": "pulp::signal::SpectralFeatureFrameT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:1d4103a9e936ed29b12e796d24132d289b6fdb0cb3599a33aa9984d307f2cb71"
+    },
+    {
       "key": "signal.spectral-frame-blur",
       "domain": "signal",
       "summary": "Prepared causal finite moving-average blur of complex spectral-frame magnitudes.",
@@ -6083,14 +6159,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 86,
+    "total": 87,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 53,
+      "signal": 54,
       "timebase": 9
     }
   },
@@ -6241,6 +6317,7 @@
               "reject_sample()",
               "push(double mono, double channel_power)",
               "render_spectrum()",
+              "render_gain_normalized_spectrum()",
               "frame_energy()",
               "spectrum()",
               "config()",
@@ -11807,6 +11884,23 @@
               "num_bins()",
               "order()",
               "process_group(std::complex<SampleType>* const* frames, int channels, int num_bins, SampleType warp)"
+            ],
+            "enums": []
+          }
+        ],
+        "spectral_feature_frontends.hpp": [
+          {
+            "class": "SpectralFeatureFrontEndT",
+            "qualified_name": "pulp::signal::SpectralFeatureFrontEndT",
+            "template": "typename SampleType = float, std::size_t MaxFftSize = 4096, std::size_t MaxChannels = 8",
+            "methods": [
+              "prepare(const StreamingAnalysisConfig& config)",
+              "reset()",
+              "process(const SampleType* const* channels, std::size_t channel_count, std::size_t frames, Sink&& sink)",
+              "current()",
+              "algorithmic_latency_samples()",
+              "startup_samples()",
+              "retained_fft_bytes()"
             ],
             "enums": []
           }

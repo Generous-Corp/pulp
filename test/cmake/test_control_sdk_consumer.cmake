@@ -79,6 +79,7 @@ project(PulpControlSdkConsumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Pulp REQUIRED COMPONENTS
     inspect-protocol
@@ -336,7 +337,15 @@ pulp_add_plugin(InstalledControlStandalone
         dev.pulp.runtime/evaluate@1)
 target_compile_definitions(InstalledControlStandalone_Core PRIVATE
     INSTALLED_PARITY_UI_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/ui.js")
+set_target_properties(InstalledControlStandalone_Core PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
 target_compile_features(InstalledControlStandalone_Core PRIVATE cxx_std_20)
+# Keep the language mode visible in the generated child command. Directory and
+# target standard metadata have both regressed independently in hosted SDK
+# consumer builds, so this fixture verifies the compiler invocation below.
+target_compile_options(InstalledControlStandalone_Core PRIVATE -std=c++20)
 ]=])
 
 file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
@@ -639,6 +648,49 @@ if(NOT _configure_result EQUAL 0)
     message(FATAL_ERROR
         "Control SDK consumer configure failed (${_configure_result})\n"
         "${_configure_output}\n${_configure_error}")
+endif()
+
+set(_consumer_compile_database "${_consumer_build}/compile_commands.json")
+if(NOT EXISTS "${_consumer_compile_database}")
+    message(FATAL_ERROR
+        "Control SDK consumer did not export compile_commands.json")
+endif()
+file(READ "${_consumer_compile_database}" _consumer_compile_commands)
+string(JSON _consumer_compile_count LENGTH "${_consumer_compile_commands}")
+if(_consumer_compile_count EQUAL 0)
+    message(FATAL_ERROR "Control SDK consumer compilation database is empty")
+endif()
+math(EXPR _consumer_compile_last "${_consumer_compile_count} - 1")
+set(_standalone_compile_entry_found OFF)
+foreach(_consumer_compile_index RANGE 0 ${_consumer_compile_last})
+    string(JSON _consumer_compile_file GET
+        "${_consumer_compile_commands}" ${_consumer_compile_index} file)
+    if(_consumer_compile_file STREQUAL
+       "${_consumer_source}/standalone-consumer/standalone.cpp")
+        set(_standalone_compile_entry_found ON)
+        string(JSON _standalone_compile_command GET
+            "${_consumer_compile_commands}" ${_consumer_compile_index} command)
+        string(REGEX MATCHALL "(^|[ \t])-std=[^ \t]+"
+            _standalone_language_modes "${_standalone_compile_command}")
+        if(NOT _standalone_language_modes)
+            message(FATAL_ERROR
+                "InstalledControlStandalone_Core lacks explicit C++20 mode:\n"
+                "${_standalone_compile_command}")
+        endif()
+        list(GET _standalone_language_modes -1 _standalone_effective_language_mode)
+        string(STRIP "${_standalone_effective_language_mode}"
+            _standalone_effective_language_mode)
+        if(NOT _standalone_effective_language_mode MATCHES
+           "^-std=(c\\+\\+|gnu\\+\\+)20$")
+            message(FATAL_ERROR
+                "InstalledControlStandalone_Core ends in ${_standalone_effective_language_mode}, not C++20:\n"
+                "${_standalone_compile_command}")
+        endif()
+    endif()
+endforeach()
+if(NOT _standalone_compile_entry_found)
+    message(FATAL_ERROR
+        "Control SDK consumer compilation database lacks standalone.cpp")
 endif()
 
 execute_process(
