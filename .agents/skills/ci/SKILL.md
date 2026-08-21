@@ -4342,8 +4342,14 @@ into a skip, merge gate, or reusable execution receipt. Unknown paths and
 changes to build/toolchain, public ABI, security, provenance, selector policy,
 or test topology select full. `changed-surface-policy-selftest` verifies those
 dispositions with negative mutations and, on the declared macOS
-Debug/examples-on target, checks exact cardinality and every declared literal
-identity against the configured CTest inventory. Add broader mappings only after shadow
+Debug/examples-on target, checks every authoritative CTest registration rather
+than collapsing duplicate display names. The canonical composite binds name,
+anchored executable and arguments, working directory, and every CTest property;
+the inventory is an order-independent multiset with a pinned count and digest.
+Literal selection expands all composites that share a requested name. Missing
+commands, duplicate properties or composites, and digest drift fail closed to
+the full suite. The selector self-test itself is in the mandatory kernel. Add
+broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`

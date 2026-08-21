@@ -1217,7 +1217,8 @@ it does not yet reduce the authoritative `[validation.default]` run. This
 shadow period lets maintainers compare selected receipts with the full suite
 before changing a merge gate.
 
-The mandatory kernel always runs. Known build-system, CI, ABI, public-header,
+The mandatory kernel always runs, including the selector's own
+`changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. The first
 bounded family covers only Forge/DSP catalog projection commands, with explicit
@@ -1225,6 +1226,16 @@ affected and extended tests. The declared inventory is tied to the required
 macOS Debug configuration, which enables
 `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
 that platform-specific cardinality.
+
+CTest display names are not identities: the authoritative target currently has
+20,727 registrations but only 20,668 unique names. The inventory validator
+therefore fingerprints a canonical `{name, executable, argv,
+working_directory, properties}` composite and treats the suite as a multiset.
+Literal selection expands every composite with the requested name. The pinned
+`.shipyard/changed-surface-inventory.json` count and digest must match exactly;
+missing commands, duplicate properties, duplicate composite identities, or
+digest drift require the full suite. Raw worktree paths and CTest registration
+order are intentionally excluded from identity.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the
