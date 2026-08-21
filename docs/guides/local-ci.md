@@ -999,10 +999,19 @@ wrapped by `tools/ci/governed-build.sh`. It acquires a tartci build lease sized
 from the host profile, exports the granted CMake and CTest parallelism, runs the
 workload as a child process, and releases the lease on exit. CTest applies that
 bounded share while still honoring each test's `RUN_SERIAL` and `RESOURCE_LOCK`
-properties. When tartci is absent (a build VM or a plain checkout), it uses the
-Tier-0 bound. A lease denial retries at reported free capacity, then uses the
-conservative floor if capacity disappears; it never fails the workload or
-piles onto a saturated host. (The
+properties. Suites that open the real CoreAudio device use `RUN_SERIAL`; their
+`PROCESSORS 8` value is a timing weight, not an assumption that the dynamically
+granted share is always eight. When tartci is absent (a build VM or a plain
+checkout), the wrapper uses the Tier-0 bound. A lease denial retries at reported
+free capacity, then uses the conservative floor if capacity disappears; it
+never fails the workload or piles onto a saturated host.
+
+An uncatchable `SIGKILL` cannot run the wrapper's release trap. Recovery is
+still bounded without weakening admission: tartci's next `leases acquire`
+revalidates each owner's PID, process start time, and host boot identity under
+the store lock, removes dead/reused owners, and only then calculates available
+capacity. A stale heartbeat with a still-matching live owner is reported but
+retained; elapsed time alone never steals capacity from live work. (The
 `smoke` lane previously used a raw `--parallel $(getconf _NPROCESSORS_ONLN)` and
 so ran whole-machine on the shared Mac while the required gate validated
 alongside it; it now takes a governed share like the other lanes.) The

@@ -132,17 +132,23 @@ pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp
     LIBRARIES pulp::audio pulp::format)
 
-# CoreAudio follow-default output-device live switch (macOS only).
+# CoreAudio follow-default output-device live switch (macOS only). These two
+# suites normally skip their hardware-opening cases, but their explicit opt-ins
+# open/start a real device (and the first changes the system default). Keep the
+# whole registered suites isolated so an opt-in run cannot overlap any other
+# CTest work, regardless of the dynamically granted width.
 if(APPLE AND NOT PULP_IOS)
     pulp_add_test_suite(pulp-test-coreaudio-default-follow
         SOURCES test_coreaudio_default_follow.mm
-        LIBRARIES pulp::audio)
+        LIBRARIES pulp::audio
+        PROPERTIES RUN_SERIAL TRUE)
     target_link_libraries(pulp-test-coreaudio-default-follow PRIVATE "-framework CoreAudio")
 
     # CoreAudio input-only open (capture without opening any output).
     pulp_add_test_suite(pulp-test-coreaudio-input-only
         SOURCES test_coreaudio_input_only.mm
-        LIBRARIES pulp::audio)
+        LIBRARIES pulp::audio
+        PROPERTIES RUN_SERIAL TRUE)
     target_link_libraries(pulp-test-coreaudio-input-only PRIVATE "-framework CoreAudio")
     # The RT-safety case reads the device source to assert the render callback
     # actually USES the clamp — arithmetic alone would keep passing if the call

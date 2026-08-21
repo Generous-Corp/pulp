@@ -24,16 +24,17 @@ pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-impulse-response LIBRARIES pulp::audio pulp::signal)
 
 # Audio tests
-# PROCESSORS reservation for suites that open the REAL CoreAudio output device.
+# Isolation for suites that open the REAL CoreAudio output device.
 # CoreAudioDevice::stop()/close() call AudioOutputUnitStop / AudioUnitUninitialize
 # (coreaudio_device.mm), which block until the real-time I/O thread observes the
 # request. Under `ctest -j8` heavy load that RT thread is CPU-starved and never
 # observes it, so teardown hangs to the 120s timeout — the full-suite-only flake
-# that wedged the macOS self-hosted runner. Reserving PROCESSORS == the CI -j
-# makes ctest schedule these alone, so the RT thread gets the machine and
-# teardown returns promptly. (Root-cause fix replacing the build.yml exclude.)
+# that wedged the macOS self-hosted runner. RUN_SERIAL is the capacity-independent
+# contract that makes CTest schedule these alone; PROCESSORS retains the suite's
+# weighted cost without assuming the runner is still exactly `-j8`.
+# (Root-cause fix replacing the build.yml exclude.)
 pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
-    PROPERTIES PROCESSORS 8)
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
 
 pulp_add_test_suite(pulp-test-system-volume LIBRARIES pulp::audio)
 
