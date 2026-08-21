@@ -7,9 +7,9 @@ import argparse
 import copy
 import fnmatch
 import json
+import re
 import subprocess
 import sys
-import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -139,25 +139,14 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "full_test_count"):
             validate_inventory(self.policy, inventory)
 
-    def test_inventory_scope_requires_the_declared_mac_debug_configuration(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            build_dir = Path(temp_dir)
-            cache = build_dir / "CMakeCache.txt"
-            cache.write_text(
-                "CMAKE_BUILD_TYPE:STRING=Debug\n"
-                "PULP_BUILD_TESTS:BOOL=ON\n"
-                "PULP_BUILD_EXAMPLES:BOOL=ON\n",
-                encoding="utf-8",
-            )
-            self.assertTrue(inventory_matches_policy_target(build_dir, platform="darwin"))
-            self.assertFalse(inventory_matches_policy_target(build_dir, platform="linux"))
-            cache.write_text(
-                "CMAKE_BUILD_TYPE:STRING=Release\n"
-                "PULP_BUILD_TESTS:BOOL=ON\n"
-                "PULP_BUILD_EXAMPLES:BOOL=OFF\n",
-                encoding="utf-8",
-            )
-            self.assertFalse(inventory_matches_policy_target(build_dir, platform="darwin"))
+    def test_authoritative_filter_matches_validation_command(self) -> None:
+        tests = [
+            {"name": "keep", "properties": []},
+            {"name": "AudioWorkgroup fixture", "properties": []},
+            {"name": "slow fixture", "properties": [{"name": "LABELS", "value": ["slow"]}]},
+            {"name": "quality fixture", "properties": [{"name": "LABELS", "value": ["quality-lab"]}]},
+        ]
+        self.assertEqual(authoritative_inventory(tests), {"keep"})
 
 
 def validate_inventory(policy: dict, inventory: set[str]) -> None:
@@ -171,40 +160,32 @@ def validate_inventory(policy: dict, inventory: set[str]) -> None:
         raise AssertionError(f"policy names tests absent from CTest inventory: {missing}")
 
 
-def inventory_matches_policy_target(build_dir: Path, *, platform: str = sys.platform) -> bool:
-    if platform != "darwin":
-        return False
-    cache_path = build_dir / "CMakeCache.txt"
-    if not cache_path.is_file():
-        return False
-    values: dict[str, str] = {}
-    for line in cache_path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith(("#", "//")) or "=" not in line:
+def authoritative_inventory(tests: list[dict]) -> set[str]:
+    excluded_labels = re.compile(r"validation|slow|performance|bench|quality-lab")
+    inventory: set[str] = set()
+    for test in tests:
+        name = test["name"]
+        if re.search(r"AudioWorkgroup", name):
             continue
-        key_with_type, value = line.split("=", 1)
-        key = key_with_type.split(":", 1)[0]
-        values[key] = value
-    return (
-        values.get("CMAKE_BUILD_TYPE", "").casefold() == "debug"
-        and values.get("PULP_BUILD_TESTS") == "ON"
-        and values.get("PULP_BUILD_EXAMPLES") == "ON"
-    )
+        labels: list[str] = []
+        for prop in test.get("properties", []):
+            if prop.get("name") == "LABELS":
+                value = prop.get("value", [])
+                labels.extend(value if isinstance(value, list) else [str(value)])
+        if any(excluded_labels.search(label) for label in labels):
+            continue
+        inventory.add(name)
+    return inventory
 
 
 def validate_ctest_inventory(build_dir: Path) -> None:
-    if not inventory_matches_policy_target(build_dir):
-        print(
-            "changed-surface-policy: inventory check skipped outside the "
-            "declared macOS Debug/examples-on target"
-        )
-        return
     result = subprocess.run(
         ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
         check=True,
         capture_output=True,
         text=True,
     )
-    inventory = {test["name"] for test in json.loads(result.stdout)["tests"]}
+    inventory = authoritative_inventory(json.loads(result.stdout)["tests"])
     validate_inventory(load_policy(), inventory)
 
 
