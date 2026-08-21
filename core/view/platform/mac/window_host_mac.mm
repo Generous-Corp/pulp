@@ -1918,6 +1918,9 @@ public:
             if (const char* env = std::getenv("PULP_PARTIAL_REPAINT")) {
                 partial_repaint_enabled_ = (env[0] == '1');
             }
+            if (const char* env = std::getenv("PULP_TEST_POINTER_DRAG")) {
+                test_pointer_drag_enabled_ = (env[0] == '1');
+            }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
             // Shared NSWindow construction (style, released-when-closed,
@@ -2501,6 +2504,46 @@ private:
     // invoked on main only.
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
+    bool test_pointer_drag_enabled_ = false;
+    int test_pointer_drag_tick_ = 0;
+
+    void pump_test_pointer_drag() {
+        if (!test_pointer_drag_enabled_ || !window_ || !metal_view_) return;
+        constexpr int kWarmupFrames = 45;
+        constexpr int kSamples = 180;
+        const int tick = test_pointer_drag_tick_++;
+        if (tick < kWarmupFrames || tick > kWarmupFrames + kSamples + 1) return;
+
+        const int sample = std::clamp(tick - kWarmupFrames, 0, kSamples);
+        const CGFloat t = static_cast<CGFloat>(sample) / kSamples;
+        const NSSize size = metal_view_.bounds.size;
+        const NSPoint location = NSMakePoint(
+            (0.073 + 0.848 * t) * size.width,
+            (1.0 - (0.453 + std::sin(t * M_PI * 5.0) * 0.198)) * size.height);
+        const NSEventType type = sample == 0 ? NSEventTypeLeftMouseDown
+            : sample == kSamples ? NSEventTypeLeftMouseUp
+                                 : NSEventTypeLeftMouseDragged;
+        NSEvent* event = [NSEvent mouseEventWithType:type
+                                           location:location
+                                      modifierFlags:0
+                                          timestamp:NSProcessInfo.processInfo.systemUptime
+                                       windowNumber:window_.windowNumber
+                                            context:nil
+                                        eventNumber:sample
+                                         clickCount:1
+                                           pressure:type == NSEventTypeLeftMouseUp ? 0.0 : 1.0];
+        // Enter through PulpMetalView's real AppKit method so the exact native
+        // hit-test, pointer translation, and PointerCoalescer path execute. A
+        // queued synthetic event is silently discarded for non-key windows on
+        // unattended machines, which would produce a plausible GPU trace with
+        // no input workload at all.
+        if (type == NSEventTypeLeftMouseDown)
+            [metal_view_ mouseDown:event];
+        else if (type == NSEventTypeLeftMouseUp)
+            [metal_view_ mouseUp:event];
+        else
+            [metal_view_ mouseDragged:event];
+    }
 
     // The continuous-frame predicate and the widget/CSS animation walk are the
     // shared pulp::view::needs_continuous_frames() / advance_host_frame() —
@@ -2890,6 +2933,7 @@ private:
                     // others. The invariant is cheap to state and was
                     // expensive to rediscover, so state it out loud. Once per
                     // process; this is the frame callback.
+                    self->pump_test_pointer_drag();
                     if (!self->metal_view_.coalescePointerInput) {
                         static std::once_flag warned_no_coalescing;
                         std::call_once(warned_no_coalescing, [] {
