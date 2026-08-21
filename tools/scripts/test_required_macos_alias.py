@@ -63,60 +63,63 @@ require(
     "jobs API reporters require explicit actions:read and contents:read",
 )
 
-aliases = {
-    "macos": job_body(text, "macos"),
-    "macos-merge-group": job_body(text, "macos-merge-group"),
-}
-for name, job in aliases.items():
-    require(
-        "needs: [build, classify]" in job,
-        f"{name} must wait for the terminal build matrix and classification",
-    )
-    require("if: always()" in job, f"{name} must report after failed dependencies")
-    require(
-        "max_attempts" not in job and "sleep 10" not in job,
-        f"{name} must not race runner assignment with a polling deadline",
-    )
-    require(
-        "needs.build.result" not in job,
-        f"{name} must not let advisory matrix conclusions determine macos",
-    )
-    require(
-        "gh api --paginate" in job
-        and "--slurp" not in job
-        and "filter=latest&per_page=100" in job,
-        f"{name} must read every page without requiring new-gh-only --slurp",
-    )
-    require(
-        "for attempt in 1 2 3" in job,
-        f"{name} must make exactly three bounded transport attempts",
-    )
-    require(
-        'startswith("macOS")' in job and "if len(matches) != 1" in job,
-        f"{name} must accept exactly one macOS matrix leg",
-    )
-    require(
-        'if [ "$conclusion" = "success" ]' in job,
-        f"{name} may accept only the success conclusion",
-    )
-    require("cd /tmp" in job, f"{name} inline Python must use a stable cwd")
+pr_alias = job_body(text, "macos")
+merge_bootstrap = job_body(text, "macos-merge-group")
+build = job_body(text, "build")
 
-require("Skip-safe PR" in aliases["macos"], "native skip must remain green")
 require(
-    "classify job did not succeed" in aliases["macos"],
+    "needs: [build, classify]" in pr_alias,
+    "PR alias must wait for the terminal build matrix and classification",
+)
+require("if: always()" in pr_alias, "PR alias must report after failed dependencies")
+require("needs.build.result" not in pr_alias, "advisory results may not determine macos")
+require(
+    "gh api --paginate" in pr_alias
+    and "--slurp" not in pr_alias
+    and "filter=latest&per_page=100" in pr_alias,
+    "PR alias must read every jobs page without new-gh-only --slurp",
+)
+require("for attempt in 1 2 3" in pr_alias, "PR alias needs bounded transport retries")
+require(
+    'startswith("macOS")' in pr_alias and "if len(matches) != 1" in pr_alias,
+    "PR alias must accept exactly one macOS matrix leg",
+)
+require('if [ "$conclusion" = "success" ]' in pr_alias, "PR alias accepts only success")
+require("cd /tmp" in pr_alias, "PR alias inline Python must use a stable cwd")
+
+require("Skip-safe PR" in pr_alias, "native skip must remain green")
+require(
+    "classify job did not succeed" in pr_alias,
     "classification uncertainty must remain fail-closed",
 )
 require(
-    "github.event_name == 'merge_group'" in aliases["macos-merge-group"],
-    "merge_group must retain the stable macos alias",
+    "github.event_name == 'merge_group'" in build
+    and "matrix.key == 'macos'" in build
+    and "&& 'macos'" in build,
+    "merge-group macOS matrix leg must own the stable required context",
+)
+require(
+    "needs: [resolve-provider, classify]" in merge_bootstrap
+    and "needs: [build" not in merge_bootstrap,
+    "merge bootstrap must not depend on the advisory build matrix",
+)
+require("gh api" not in merge_bootstrap, "merge bootstrap must not poll jobs")
+require(
+    "macos-merge-unused" in merge_bootstrap
+    and "native_build_required != 'true'" in merge_bootstrap,
+    "native merge groups must not emit a duplicate required context",
+)
+require(
+    "provider resolution did not succeed" in merge_bootstrap
+    and "classify did not succeed" in merge_bootstrap,
+    "merge bootstrap must fail closed when its dependencies are untrusted",
+)
+require(
+    "Skip-safe merge group" in merge_bootstrap,
+    "merge bootstrap must green only the intentional native-skip path",
 )
 
-parsers = {name: parser_from(job) for name, job in aliases.items()}
-require(
-    len(set(parsers.values())) == 1,
-    "PR and merge-group aliases must interpret jobs identically",
-)
-parser = next(iter(parsers.values()))
+parser = parser_from(pr_alias)
 
 success = run_parser(
     parser,
