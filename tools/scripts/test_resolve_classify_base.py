@@ -293,11 +293,15 @@ class CacheSaveScopeTests(unittest.TestCase):
 
     def test_reporting_aliases_and_extra_gates_skip_push_runs(self) -> None:
         # Linux/Windows aliases skip cache-warming pushes. Native macOS now
-        # reports directly from its matrix child; its bootstrap is PR-only.
+        # reports directly from its matrix child; its bootstrap is limited to
+        # PR and Shipyard workflow-dispatch validation.
         self.assertEqual(
             self.text.count("if: always() && github.event_name != 'push'"), 2
         )
-        self.assertIn("&& github.event_name == 'pull_request'", self.text)
+        self.assertIn(
+            "&& (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')",
+            self.text,
+        )
         # windows-msvc-release-gate, windows-midi2-gate, windows-ble-gate.
         advisory_condition = re.compile(
             r"if:\s*>-\s*\n"
