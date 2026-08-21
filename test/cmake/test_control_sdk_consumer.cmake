@@ -370,6 +370,9 @@ file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <string>
 #include <thread>
 
+static_assert(__cplusplus >= 202002L,
+              "installed Standalone consumer must compile as C++20");
+
 class InstalledParityInputNode final : public pulp::view::View {
  public:
   void paint(pulp::canvas::Canvas& canvas) override {
@@ -410,15 +413,21 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
  public:
   InstalledStandaloneProcessor() {
     telemetry_level_ = channels_.declare_scalar("author-level", "normalized", 0.25f);
-    telemetry_thread_ = std::jthread([this](std::stop_token stop) {
+    telemetry_thread_ = std::thread([this] {
       float value = 0.0f;
-      while (!stop.stop_requested()) {
+      while (!telemetry_stop_.load(std::memory_order_acquire)) {
         if (telemetry_level_)
           telemetry_level_->publish(value);
         value = value >= 1.0f ? 0.0f : value + 0.01f;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     });
+  }
+
+  ~InstalledStandaloneProcessor() override {
+    telemetry_stop_.store(true, std::memory_order_release);
+    if (telemetry_thread_.joinable())
+      telemetry_thread_.join();
   }
 
   pulp::format::PluginDescriptor descriptor() const override {
@@ -503,7 +512,8 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
   pulp::view::ValueChannelSet channels_;
   pulp::view::ScalarSource* telemetry_level_ = nullptr;
   std::unique_ptr<pulp::view::ScriptedUiSession> scripted_session_;
-  std::jthread telemetry_thread_;
+  std::atomic<bool> telemetry_stop_{false};
+  std::thread telemetry_thread_;
   std::atomic<int> observed_note_{-1};
   std::atomic<int> observed_channel_{-1};
   std::atomic<int> observed_velocity_{-1};
