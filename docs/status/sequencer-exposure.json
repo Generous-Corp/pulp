@@ -921,8 +921,14 @@
       "id": "e0-sequencer-exposure-governance",
       "title": "Cross-surface sequencer exposure ledger and required omission gate",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "82c86cc8-c36b-4ef0-bddf-df47798a1f94",
+      "release": {
+        "pr": 7744,
+        "accepted_head": "fce66633894145288efceb9bbc7416ea20e733b7",
+        "merge_sha": "0dddfb4170d7593fed1ee81fe2ca87d3719e22b2",
+        "integration_mode": "merge"
+      },
       "owned_paths": [
         ".github/workflows/version-skill-check.yml",
         "docs/reference/capability-control.md",
@@ -961,6 +967,635 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "The ledger audits the design-time manifest as a distinct surface without adding a capability entry."
+        }
+      }
+    },
+    {
+      "id": "p0-11-granular-note-commands",
+      "title": "Granular set-scoped note identity commands",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7434",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_note_internal.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_commands.cpp",
+        "test/test_timeline_schema_registry.cpp"
+      ],
+      "release": {
+        "pr": 7434,
+        "accepted_head": "19d6fb4bea75846bfa3ce9dd269160dc97129a5f",
+        "merge_sha": "1973f82da5eb364633ea22a10a1671edec68c616",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct SetNoteEvents",
+            "struct InsertNotes",
+            "struct RemoveNotes"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_note_internal.cpp",
+          "needles": [
+            "reduce_insert_notes",
+            "reduce_remove_notes",
+            "reduce_set_note_events"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The set-scoped note command payloads are installed public Timeline command types.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct SetNoteEvents",
+                "struct InsertNotes",
+                "struct RemoveNotes"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The generated Timeline CLI vocabulary carries all three commands through the real command-apply handler.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_notes",
+                "pulp.timeline.command.remove_notes",
+                "pulp.timeline.command.set_note_events"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The generated Timeline MCP definition carries all three commands and binds the command vocabulary to the real handler.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_notes",
+                "pulp.timeline.command.remove_notes",
+                "pulp.timeline.command.set_note_events"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Offline document commands are not live Product-A authority, and Product A has no exact-instance semantic note operation or executor.",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-sequencer-note-operations"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Persisted note edits are Timeline document operations, not offline SDK-composition capability metadata."
+        }
+      }
+    },
+    {
+      "id": "p1-10-program-wire-automation-cursor",
+      "title": "Program-wire automation cursor production consumer",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7432",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        "core/playback/include/pulp/playback/automation_cursor.hpp",
+        "core/playback/include/pulp/playback/program_wire.hpp",
+        "core/playback/src/automation_cursor.cpp",
+        "core/playback/src/program_wire.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_playback_automation_cursor.cpp",
+        "test/test_playback_program_wire.cpp"
+      ],
+      "release": {
+        "pr": 7432,
+        "accepted_head": "08bc31a0453bd33b0204c70558185bdd7174e88b",
+        "merge_sha": "ed2326a4253fa9565b7305f7f9e94f1d395fce01",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_wire.hpp",
+          "needles": [
+            "kProgramWireVersion = 2",
+            "struct ProgramWireAutomationLaneRecord"
+          ]
+        },
+        {
+          "path": "test/test_playback_program_wire.cpp",
+          "needles": [
+            "wire automation consumer matches every direct production cursor lane",
+            "wire decode adoption and production cursor render are realtime safe"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "Program-wire v2 records and the automation cursor/view consumer are installed public playback headers.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_wire.hpp",
+              "needles": [
+                "kProgramWireVersion = 2",
+                "struct ProgramWireAutomationLaneRecord"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/automation_cursor.hpp",
+              "needles": [
+                "class AutomationProgramView",
+                "class AutomationCursor"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Wire encoding and realtime automation cursor adoption are playback-engine mechanics behind higher-level operations."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Wire encoding and realtime automation cursor adoption are playback-engine mechanics, not an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Wire publication identity and cursor adoption are engine mechanics; user automation authority belongs to separately typed operations."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The installed design-time manifest does not yet describe the reusable playback program-wire and automation-consumer composition contract.",
+          "dependencies": [
+            "design-time-playback-program-wire-capability"
+          ],
+          "owner": "agent-capability-maintainers"
+        }
+      }
+    },
+    {
+      "id": "p1-4-piano-roll-10k-paint",
+      "title": "Bounded ten-thousand-note piano-roll paint",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7435",
+      "owned_paths": [
+        "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+        "core/timeline_view/src/piano_roll_view.cpp",
+        "test/test_timeline_piano_roll_view.cpp"
+      ],
+      "release": {
+        "pr": 7435,
+        "accepted_head": "5a102f2c0bddb22854b377b4dda28ce354720f55",
+        "merge_sha": "135bd1bb2e8953b0bc80fb0cae92bf3f468e5934",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+          "needles": [
+            "visited_candidate_count()"
+          ]
+        },
+        {
+          "path": "test/test_timeline_piano_roll_view.cpp",
+          "needles": [
+            "Piano roll paint bounds candidate work for ten thousand real notes",
+            "Piano roll culling stays bounded with one long note among ten thousand short notes"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "PianoRollView exposes deterministic candidate-work accounting in an installed public Timeline view header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+              "needles": [
+                "class PianoRollView",
+                "visited_candidate_count()"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Viewport culling and paint-work accounting are live view mechanics, not an offline Timeline document command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Viewport culling and paint-work accounting are live view mechanics, not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no semantic sequencer snapshot or edit operation that binds an exact live PianoRollView document.",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-piano-roll-operations"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Piano-roll rendering is a runtime view surface, not an offline SDK-composition capability."
+        }
+      }
+    },
+    {
+      "id": "p1-4-continuous-piano-roll-gestures",
+      "title": "Continuous piano-roll gesture lowering",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7475",
+      "owned_paths": [
+        "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+        "core/timeline_view/src/piano_roll_view.cpp",
+        "test/test_timeline_piano_roll_view.cpp"
+      ],
+      "release": {
+        "pr": 7475,
+        "accepted_head": "424dd5449489df43529e9446605875af4f80f05e",
+        "merge_sha": "7bf5d30674a52df906c3be5fb4436348fae3de30",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+          "needles": [
+            "set_continuous_gestures",
+            "GesturePhase phase"
+          ]
+        },
+        {
+          "path": "test/test_timeline_piano_roll_view.cpp",
+          "needles": [
+            "Piano roll shift drag emits exact continuous velocity payloads",
+            "Continuous note edits preserve identity modifiers seed and byte-exact history"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "PianoRollView's opt-in Begin/Update/End gesture stream is an installed public Timeline view API.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+              "needles": [
+                "set_continuous_gestures",
+                "GesturePhase phase"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Pointer-phase lowering is a live view integration; the resulting note commands are audited separately."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Pointer-phase lowering is a live view integration, not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Generic test input does not provide semantic sequencer authority, and Product A has no exact-instance piano-roll gesture operation.",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-piano-roll-operations"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Interactive view gesture lowering is not an offline SDK-composition capability."
+        }
+      }
+    },
+    {
+      "id": "p1-3-arranger-track-header-reorder",
+      "title": "Arranger track-header reorder gestures",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7437",
+      "owned_paths": [
+        "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+        "core/timeline_view/src/arranger_view.cpp",
+        "test/test_timeline_arranger_view.cpp"
+      ],
+      "release": {
+        "pr": 7437,
+        "accepted_head": "fe06dc74ca7950381dd1076887c1969d5f679edb",
+        "merge_sha": "f9ff4083d6d41908e7d85825a19aca1b39fe7e0c",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+          "needles": [
+            "set_track_edit_host",
+            "struct HeaderDrag"
+          ]
+        },
+        {
+          "path": "test/test_timeline_arranger_view.cpp",
+          "needles": [
+            "Arranger track-header drags reorder authored tracks for mouse and touch",
+            "Arranger track-header drop below the rows moves a track last"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "ArrangerView exposes the TrackEditIntentHost reorder seam in an installed public Timeline view header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+              "needles": [
+                "class ArrangerView",
+                "set_track_edit_host"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Track-header pointer lowering is a live ArrangerView integration; persisted MoveTrack commands are a separate document surface."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Track-header pointer lowering is a live ArrangerView integration, not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no semantic live arranger snapshot or track-reorder operation bound to an exact document instance.",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-arranger-track-operations"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Interactive arranger gesture lowering is not an offline SDK-composition capability."
+        }
+      }
+    },
+    {
+      "id": "sequencer-loop-range-editor",
+      "title": "Canonical sequencer loop-range edits",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7424",
+      "owned_paths": [
+        "core/timeline_editor/include/pulp/timeline_editor/loop_range.hpp",
+        "test/test_timebase_loop_region.cpp"
+      ],
+      "release": {
+        "pr": 7424,
+        "accepted_head": "4ae7173dfdcb3396eb12db7053f33cb7cf0ef792",
+        "merge_sha": "43112bedee9a245f1484c1c5c08f045bf214588e",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline_editor/include/pulp/timeline_editor/loop_range.hpp",
+          "needles": [
+            "loop_region_from_snapped_endpoints",
+            "with_loop_enabled"
+          ]
+        },
+        {
+          "path": "test/test_timebase_loop_region.cpp",
+          "needles": [
+            "Loop range edits canonicalize already-snapped endpoints",
+            "Loop enable edits preserve both authored bounds"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "Canonical loop construction and enable edits ship in an installed public Timeline editor header.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline_editor/include/pulp/timeline_editor/loop_range.hpp",
+              "needles": [
+                "loop_region_from_snapped_endpoints",
+                "with_loop_enabled"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The helper constructs runtime transport loop state rather than a persisted Timeline-document mutation."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The helper constructs runtime transport loop state rather than an offline MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live loop status or loop-range control operation for a sequencer transport.",
+          "dependencies": [
+            "product-a-sequencer-transport-operation"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Runtime loop-range editing is not an offline SDK-composition capability."
+        }
+      }
+    },
+    {
+      "id": "p2-3-recording-coordinator",
+      "title": "Calibrated recording coordinator",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7496",
+      "owned_paths": [
+        "core/playback/PulpPlaybackSources.cmake",
+        "core/playback/include/pulp/playback/recording_coordinator.hpp",
+        "core/playback/src/recording_coordinator.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_playback_recording_coordinator.cpp"
+      ],
+      "release": {
+        "pr": 7496,
+        "accepted_head": "aeba6ff1dc60b325b9759b08073a8cc02b9a9522",
+        "merge_sha": "59058ae2c33ae8d145c2e8dc544e87274d09dd45",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/recording_coordinator.hpp",
+          "needles": [
+            "class RecordingCoordinator",
+            "commit_take"
+          ]
+        },
+        {
+          "path": "test/test_playback_recording_coordinator.cpp",
+          "needles": [
+            "recording coordinator commits a punched loopback take at calibrated placement",
+            "recording coordinator selects Off Direct Software and Auto monitoring"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "RecordingCoordinator and its configuration, monitor, staging, and commit contracts are installed public playback APIs.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/recording_coordinator.hpp",
+              "needles": [
+                "class RecordingCoordinator",
+                "RecordingCoordinatorConfig",
+                "commit_take"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Capture, monitoring, calibrated placement, and media staging are live recording mechanics rather than an offline document command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Capture, monitoring, calibrated placement, and media staging are live recording mechanics rather than an offline MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed exact-instance record-arm, monitor-mode, capture, or commit authority for a live Timeline session.",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-recording-operations"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The installed design-time manifest does not yet describe the bounded recording-coordinator composition contract.",
+          "dependencies": [
+            "design-time-recording-coordinator-capability"
+          ],
+          "owner": "agent-capability-maintainers"
+        }
+      }
+    },
+    {
+      "id": "timeline-plugin-proof-native-sdk",
+      "title": "Native Timeline plugin SDK proof",
+      "classification": "ci_test_only",
+      "delivery_state": "released",
+      "claim_id": "historical-pr-7417",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "docs/examples/index.md",
+        "docs/examples/timeline-plugin-proof.md",
+        "docs/guides/examples.md",
+        "examples/timeline-plugin-proof/CMakeLists.txt",
+        "examples/timeline-plugin-proof/test_timeline_plugin_proof.cpp",
+        "examples/timeline-plugin-proof/timeline_plugin_proof.hpp",
+        "tools/cmake/PulpLinkFloor.cmake"
+      ],
+      "release": {
+        "pr": 7417,
+        "accepted_head": "33fea939a966d817e34d089bdb1e47d55998f7ef",
+        "merge_sha": "c74f712d40dacf2fa48b8b7f8bbd277cdc050ff2",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "examples/timeline-plugin-proof/timeline_plugin_proof.hpp",
+          "needles": [
+            "class TimelinePluginProofView",
+            "class TimelinePluginProofProcessor"
+          ]
+        },
+        {
+          "path": "examples/timeline-plugin-proof/test_timeline_plugin_proof.cpp",
+          "needles": [
+            "timeline plugin proof owns a MIDI session and two piano-roll views",
+            "timeline plugin proof state load rebinds views and rejects incompatible projects"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This repository example proves installed SDK consumption but adds no independent installed SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The loadable plugin proof exercises in-process SDK composition and adds no offline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The loadable plugin proof exercises in-process SDK composition and adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "A native plugin integration proof does not create independent Product-A runtime authority."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The example validates SDK linkage and plugin behavior rather than advertising an offline algorithm capability."
         }
       }
     }
