@@ -1,5 +1,8 @@
 name: JS packages build + test
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

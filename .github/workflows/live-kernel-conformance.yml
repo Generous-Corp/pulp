@@ -18,6 +18,9 @@
 # Additive only: does not touch the wam_* ABI or the WebCLAP deploy workflow.
 name: Live Kernel Conformance
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

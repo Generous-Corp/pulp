@@ -1,5 +1,8 @@
 name: Coverage
 
+permissions:
+  contents: read
+
 # Non-blocking coverage artifact. Informational only; no merge gate.
 # Local equivalent: scripts/run_coverage.sh.
 # Full design: planning/coverage-sanitizers-spec-2026-04-16.md

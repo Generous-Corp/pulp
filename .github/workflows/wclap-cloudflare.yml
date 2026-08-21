@@ -12,6 +12,9 @@
 # skipped and this workflow is a build+proof gate only.
 name: WebCLAP Cloudflare
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

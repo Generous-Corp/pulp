@@ -1,5 +1,8 @@
 name: macOS Cross (advisory)
 
+permissions:
+  contents: read
+
 # Advisory CI scaffold for the Linux-hosted macOS arm64 cross lane.
 #
 # The actual osxcross-based cross build runs in a private infra repo

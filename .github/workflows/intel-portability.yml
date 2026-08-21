@@ -1,5 +1,8 @@
 name: Intel portability (advisory)
 
+permissions:
+  contents: read
+
 # Tier 1 of the Intel support tiering (docs/guides/intel-support.md).
 #
 # A path-triggered, ADVISORY x86_64 build + test lane that fires only when a PR

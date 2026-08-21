@@ -20,6 +20,8 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
@@ -112,6 +114,25 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             r"(?m)^concurrency:\s*\n"
             r"\s{2}group:\s*workflow-lint-\$\{\{\s*github\.ref\s*\}\}\s*\n"
             r"\s{2}cancel-in-progress:\s*true\s*$",
+        )
+
+    def test_every_job_inherits_or_declares_token_permissions(self) -> None:
+        missing: list[str] = []
+        workflows = sorted(
+            (REPO_ROOT / ".github" / "workflows").glob("*.y*ml")
+        )
+        for path in workflows:
+            value = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if value.get("permissions") is not None:
+                continue
+            for job_name, job in value.get("jobs", {}).items():
+                if job.get("permissions") is None:
+                    missing.append(f"{path.name}:{job_name}")
+        self.assertEqual(
+            missing,
+            [],
+            "jobs inherit repository-default token permissions: "
+            + ", ".join(missing),
         )
 
     def test_lint_job_runs_on_github_ubuntu_with_checkout_and_python(self) -> None:
