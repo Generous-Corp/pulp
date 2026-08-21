@@ -364,6 +364,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
+    # Changed-surface selection remains shadow-only. This contract checks the
+    # base-owned schema-v2 policy, its fail-closed risk dispositions, mutation
+    # controls, and, on the declared macOS Debug/examples-on target, exact CTest
+    # cardinality plus every literal identity in the configured inventory.
+    add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+
     # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
     # --diag-dir contract that copies captured validator output out of the temp
     # dir before it is deleted. Runs the validators nowhere — the capture
