@@ -177,6 +177,11 @@ pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+# Bounded off-thread body-shaped excitation with independent FIR/string
+# commutation oracles and an allocation-free per-voice cursor.
+pulp_add_test_suite(pulp-test-commuted-string-excitation
+    SOURCES test_commuted_string_excitation.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-unison
     SOURCES test_signal_unison.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio-analysis)
