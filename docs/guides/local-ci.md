@@ -1270,10 +1270,19 @@ its cache-save step exactly when main is busiest. PR runs still cancel.
 
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
-`github.event.pull_request.base.sha`, a push diffs `github.event.before`. On a
-push, `origin/main` resolves to HEAD itself and the diff is always empty — so a
-docs-only merge is indistinguishable from a core merge, and the run never
-skips. A docs-only merge to main now correctly skips the whole matrix.
+`github.event.pull_request.base.sha`, a merge group diffs
+`github.event.merge_group.base_sha`, and a push diffs `github.event.before`.
+Those immutable event SHAs let the preamble use a depth-1 head checkout, fetch
+only a missing exact base object at depth 1, and compare the two trees directly.
+It must not fetch Pulp's full history merely to compute changed paths: on a
+reusable traveling runner that grew `.git` to 70 GiB and delayed a cheap
+classifier by more than 20 minutes. If the exact base is missing, malformed, or
+cannot be fetched, classification fails closed to a native build. The job has a
+10-minute outer timeout so a disconnected roaming runner cannot occupy the
+preamble indefinitely. On a push, `origin/main` resolves to HEAD itself and the
+diff is always empty — so a docs-only merge is otherwise indistinguishable from
+a core merge, and the run never skips. A docs-only merge to main now correctly
+skips the whole matrix.
 
 ## The Shipyard merge steward uses one repository-scoped writer
 

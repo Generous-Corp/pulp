@@ -206,6 +206,18 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### A changed-path preamble needs exact trees, not full repository history
+
+Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
+already supplies the immutable PR, merge-group, or push base SHA. The workflow
+checks out the exact head at depth 1, fetches only that base object when absent,
+and calls `classify_changes.py --comparison=trees`; an unavailable base fails
+closed to the native build. This matters especially on a roaming reusable Mac:
+a full-history preamble was observed entering a 70 GiB `.git` directory with
+286 packs before doing any classification. Keep the 10-minute job timeout too.
+Workflows whose actual release/audit algorithm traverses historical ranges may
+still require full history; changed-path classification does not.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
