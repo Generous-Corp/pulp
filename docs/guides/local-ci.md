@@ -1234,8 +1234,10 @@ working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
 `.shipyard/changed-surface-inventory.json` count and digest must match exactly;
 missing commands, duplicate properties, duplicate composite identities, or
-digest drift require the full suite. Raw worktree paths and CTest registration
-order are intentionally excluded from identity.
+digest drift require the full suite. The contract also pins the target and
+toolchain digests; source-head and source-tree provenance remain in the emitted
+manifest. Raw worktree paths and CTest registration order are intentionally
+excluded from identity.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the

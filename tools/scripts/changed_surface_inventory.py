@@ -337,20 +337,28 @@ def _toolchain_contract(build_dir: Path, groups: list[dict[str, Any]]) -> dict[s
     compiler = cache.get("CMAKE_CXX_COMPILER", "")
     if compiler:
         cache["CMAKE_CXX_COMPILER"] = f"external:{Path(compiler).name}"
-    external_executables = sorted(
-        {
-            group["composite"]["executable"]
-            for group in groups
-            if group["composite"]["executable"].startswith("external:")
-        }
-    )
+    external_tools: set[str] = set()
+
+    def collect_external(value: Any) -> None:
+        if isinstance(value, str):
+            external_tools.update(re.findall(r"(?:^|\s)(external:[^\s]+)", value))
+        elif isinstance(value, list):
+            for item in value:
+                collect_external(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect_external(item)
+
+    for group in groups:
+        collect_external(group["composite"])
     return {
         "cache": cache,
         "ctest_version": subprocess.run(
             ["ctest", "--version"], check=True, capture_output=True, text=True
         ).stdout.splitlines()[0],
-        "external_executables": external_executables,
+        "external_tools": sorted(external_tools),
         "machine": platform.machine(),
+        "python_version": platform.python_version(),
         "system": platform.system(),
     }
 
@@ -415,6 +423,8 @@ def validate_manifest(manifest: dict[str, Any], contract: dict[str, Any]) -> Non
         "duplicate_name_group_count",
         "duplicate_name_excess_count",
         "duplicate_composite_group_count",
+        "target_contract_digest",
+        "toolchain_digest",
         "authoritative_filter_digest",
         "inventory_digest",
     )

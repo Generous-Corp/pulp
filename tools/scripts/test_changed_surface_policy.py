@@ -170,6 +170,8 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             self.contract["authoritative_filter_digest"],
             inventory.authoritative_filter_digest(),
         )
+        self.assertRegex(self.contract["target_contract_digest"], r"^[0-9a-f]{64}$")
+        self.assertRegex(self.contract["toolchain_digest"], r"^[0-9a-f]{64}$")
         self.assertRegex(self.contract["inventory_digest"], r"^[0-9a-f]{64}$")
 
     def test_authoritative_filter_matches_validation_command(self) -> None:
