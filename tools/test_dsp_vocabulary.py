@@ -300,6 +300,15 @@ class CharacterAdjacent {
         bad += 1
     else:
         print("  ok     generic fold wording remains helper-only")
+
+    vintage_rows = [row for rows in extractor.shortlist(
+        doc, "make a vintage panel").values() for row in rows]
+    if any(row.get("direct_match") and row.get("capability_role") == "primary"
+           for row in vintage_rows):
+        print("  WRONG  generic vintage wording gained direct primary authorization")
+        bad += 1
+    else:
+        print("  ok     generic vintage wording remains helper-only")
     compact_markdown = extractor.markdown(compact)
     if "pulp::signal::osc::PhaseAccumulator<float>" in compact_markdown:
         print("  WRONG  non-template PhaseAccumulator gained <float> in prompt")
