@@ -21,7 +21,7 @@ namespace pulp::signal {
 /// allocation-free, lock-free, deterministic, and `noexcept`.
 template <typename SampleType = float> class BlitOscillatorT {
   public:
-    static_assert(std::is_floating_point_v<SampleType>);
+    static_assert(std::is_same_v<SampleType, float> || std::is_same_v<SampleType, double>);
 
     /// Set the sample rate in Hz. Failure leaves the complete prior
     /// configuration unchanged.
