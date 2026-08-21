@@ -3901,19 +3901,22 @@ with a macOS-only `ctest --exclude-regex` in `build.yml`, keep Linux/Windows
 coverage intact, and open/follow a targeted fix. Do not hide failures that
 reproduce cross-platform or that are caused by the branch being shipped.
 
-**Real-time-thread teardown hangs need a `PROCESSORS` reservation, not an
-exclude.** A test that opens the real CoreAudio device (anything constructing a
-`StandaloneApp` or calling `AudioSystem::create_device()` + `start()`) tears it
-down via `AudioOutputUnitStop` / `AudioUnitUninitialize`, which **block until
-the real-time I/O thread observes the request**. Under `ctest -j8` full-suite
-load that RT thread is CPU-starved, so teardown hangs to the 120s timeout — a
-flake that reproduces **only** in the full run on a saturated runner, never in
-isolation or any concurrent subset (so don't waste time bisecting subsets). Fix
-it at the scheduler: `pulp_add_test_suite(... PROPERTIES PROCESSORS 8)` (== the
-CI `-j`) makes ctest run the suite alone so the RT thread gets the machine.
-Prefer this over an exclude — it keeps the test enabled everywhere. (Adding a
-shared `RESOURCE_LOCK` does NOT fix it: serializing the audio tests among
-themselves still leaves the other ~8 `-j8` tests starving the RT thread.)
+**Real-time-thread teardown hangs need `RUN_SERIAL`, not an exclude or a
+capacity-shaped `PROCESSORS` assumption.** A test that opens the real CoreAudio
+device (anything constructing a `StandaloneApp` and calling `start()`, or using
+`AudioSystem::create_device()` + `start()`) tears it down via
+`AudioOutputUnitStop` / `AudioUnitUninitialize`, which **block until the
+real-time I/O thread observes the request**. Under a saturated full-suite run
+that RT thread is CPU-starved, so teardown hangs to the 120s timeout — a flake
+that reproduces **only** in the full run, never in isolation or any concurrent
+subset (so don't waste time bisecting subsets). Fix it at the scheduler:
+`pulp_add_test_suite(... PROPERTIES RUN_SERIAL TRUE)` makes CTest run the suite
+alone at every dynamically granted width. Retain an existing `PROCESSORS 8` as
+its scheduling weight, but do not mistake that historical value for isolation
+or add it to unrelated tests. Prefer this over an exclude — it keeps the test
+enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
+serializing the audio tests among themselves still leaves unrelated tests
+starving the RT thread.)
 
 The required `macos` alias deliberately needs the complete combined build
 matrix on pull-request and manual-dispatch runs. That may delay the reporter
@@ -6965,7 +6968,7 @@ run and the open `release-guard` issue, not the individual legs. Most of the
 time the answer is that it is still building and the reconciler is correctly
 doing nothing.
 
-## Build strings must take a share, not the machine
+## Build and test strings must take a share, not the machine
 
 A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
 Mac, so it must take a *share* of the host — route it through
@@ -7004,6 +7007,24 @@ VM / plain checkout) or the lease is denied (it never fails the build and never
 piles onto a saturated host). Keep new POSIX build strings routed through it;
 don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
 `local`/ssh-linux lanes.
+
+Every POSIX `test` stage uses that wrapper too. The wrapper exports
+`CTEST_PARALLEL_LEVEL` from the leased share, so a bare `ctest` command does not
+silently serialize the full suite and an explicit `-j$(nproc)` cannot consume
+the shared host. Do not add a `-j` or `--parallel` to the Shipyard test string:
+the leased environment value is authoritative, while CTest continues to honor
+`RUN_SERIAL` and `RESOURCE_LOCK` test properties. Real-CoreAudio suites use
+`RUN_SERIAL` for capacity-independent isolation; `PROCESSORS 8` alone is not
+isolation once a dedicated builder grants more than eight slots.
+
+`SIGKILL` cannot run the wrapper's release trap. That does not leave capacity
+poisoned until a timer or operator acts: tartci's next `leases acquire`
+revalidates PID, process-start, and boot identity under the store lock, reaps a
+dead/reused owner, and calculates capacity only from the survivors. It does NOT
+reap a stale heartbeat whose owner identity still matches — elapsed time is not
+authority to steal cores from live work. `tools/ci/test_governed_build.py`
+proves both halves against a private out-of-process store when tartci is
+installed; its hermetic governor cases remain unconditional.
 
 ## macOS Intel (x86_64) CI tiering
 
