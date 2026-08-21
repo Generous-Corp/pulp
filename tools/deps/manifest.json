@@ -168,7 +168,7 @@
       "name": "dr_libs",
       "category": "audio",
       "license": "Public domain (Unlicense)",
-      "version": "vendored-snapshot",
+      "version": "vendored-snapshot; dr_mp3@4d74802+0b12cb57",
       "source_kind": "vendored",
       "repository": "https://github.com/mackron/dr_libs.git",
       "upstream": { "kind": "none" },
@@ -179,7 +179,8 @@
         "external/dr_libs/dr_mp3.h",
         "external/dr_libs/dr_wav.h",
         "core/audio/CMakeLists.txt"
-      ]
+      ],
+      "notes": "dr_mp3.h originated byte-for-byte at upstream commit 4d74802a098a2abbef4d063dd211e89260521313, plus the one-line 64-bit Xing/Info frame-count fix from upstream commit 0b12cb573cde44dc2b7aead3fc35c20a9d822f78 (mackron/dr_libs#308). dr_flac.h and dr_wav.h remain at their existing vendored snapshots; this is not a broad dr_libs update."
     },
     {
       "name": "DRACO",

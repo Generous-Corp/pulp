@@ -401,6 +401,12 @@ class FreshnessCheckTests(unittest.TestCase):
             ("acme", "audio-lib"),
         )
         self.assertIsNone(fc.extract_owner_repo("https://example.com/acme/audio-lib"))
+        self.assertIsNone(
+            fc.extract_owner_repo("https://evil.example/github.com/acme/audio-lib")
+        )
+        self.assertIsNone(fc.extract_owner_repo("https://github.com/acme/audio-lib/extra"))
+        self.assertIsNone(fc.extract_owner_repo("https://github.com/acme/.git"))
+        self.assertIsNone(fc.extract_owner_repo("https://github.com/acme%2Fevil/audio-lib"))
 
     def test_run_gh_returns_json_or_none_for_failures(self) -> None:
         completed = SimpleNamespace(returncode=0, stdout='{"ok": true}')

@@ -1221,7 +1221,7 @@ TEST_CASE("a zero-width pointer box is placed, not dropped",
     CHECK(bare.count("browser_sprite_indicator_px") == 1);
 }
 
-TEST_CASE("a pointer box with no extent at all is still refused",
+TEST_CASE("a pointer box with no extent at all fails lowering",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // The other side of the same guard. A 0x0 box genuinely carries no
     // direction, so there is nothing to place and refusing is right -- this
@@ -1255,21 +1255,11 @@ TEST_CASE("a pointer box with no extent at all is still refused",
 
     const auto result = pulp::import_design::lower_browser_capture_to_ir(
         temp.root / "capture.json");
-    INFO("lowering error: " << result.error);
-    REQUIRE(result);
-
-    const pulp::view::IRNode* found = nullptr;
-    std::function<void(const pulp::view::IRNode&)> walk =
-        [&](const pulp::view::IRNode& node) {
-            const auto binding = node.attributes.find("binding");
-            if (binding != node.attributes.end() && binding->second == "empty")
-                found = &node;
-            for (const auto& child : node.children) walk(child);
-        };
-    walk(result.design_ir->root);
-    REQUIRE(found != nullptr);
-    CHECK(found->attributes.count("knob_ind_r_out") == 0);
-    CHECK(found->attributes.count("knob_ind_w") == 0);
+    CHECK_FALSE(result);
+    CHECK(result.error.find("declared knob indicator for 'empty'") !=
+          std::string::npos);
+    CHECK(result.error.find("no radial pointer geometry") !=
+          std::string::npos);
 }
 
 TEST_CASE("a pointer aimed straight up projects to a hairline, not a slab",
@@ -1728,7 +1718,7 @@ TEST_CASE("an unrotated pointer answers the same with or without its own box",
           Catch::Approx(0.1682f).margin(0.001f));
 }
 
-TEST_CASE("a rotated line keeps the guard that its footprint would defeat",
+TEST_CASE("an empty rotated indicator fails lowering despite a painted footprint",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // A marked shape with no extent on either axis carries no direction to sweep
     // along and is refused. The guard has to be read off the box the projection
@@ -1774,25 +1764,11 @@ TEST_CASE("a rotated line keeps the guard that its footprint would defeat",
 
     const auto result = pulp::import_design::lower_browser_capture_to_ir(
         temp.root / "capture.json");
-    INFO("lowering error: " << result.error);
-    REQUIRE(result);
-
-    const pulp::view::IRNode* found = nullptr;
-    std::function<void(const pulp::view::IRNode&)> walk =
-        [&](const pulp::view::IRNode& node) {
-            const auto binding = node.attributes.find("binding");
-            if (binding != node.attributes.end() && binding->second == "empty")
-                found = &node;
-            for (const auto& child : node.children) walk(child);
-        };
-    walk(result.design_ir->root);
-    REQUIRE(found != nullptr);
-
-    const auto& empty = found->attributes;
-    CHECK(empty.count("knob_ind_r_out") == 0);
-    CHECK(empty.count("knob_ind_r_in") == 0);
-    CHECK(empty.count("knob_ind_w") == 0);
-    CHECK(empty.count("browser_sprite_indicator_px") == 0);
+    CHECK_FALSE(result);
+    CHECK(result.error.find("declared knob indicator for 'empty'") !=
+          std::string::npos);
+    CHECK(result.error.find("no radial pointer geometry") !=
+          std::string::npos);
 }
 
 TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
@@ -1890,7 +1866,7 @@ TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
     CHECK(silent.count("browser_sprite_indicator_px") == 0);
 }
 
-TEST_CASE("a knob indicator with no radius to sweep is refused",
+TEST_CASE("a knob indicator with no radius to sweep fails lowering",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // A pointer centred on the dial has no radial direction, so there is no arc
     // to reproduce. Stamping one anyway yields a zero-length stroke that pivots
@@ -1925,14 +1901,11 @@ TEST_CASE("a knob indicator with no radius to sweep is refused",
 
     const auto result = pulp::import_design::lower_browser_capture_to_ir(
         temp.root / "capture.json");
-    REQUIRE(result);
-    std::function<void(const pulp::view::IRNode&)> walk =
-        [&](const pulp::view::IRNode& node) {
-            CHECK(node.attributes.count("knob_ind_r_out") == 0);
-            CHECK(node.attributes.count("browser_sprite_crop_px") == 0);
-            for (const auto& child : node.children) walk(child);
-        };
-    walk(result.design_ir->root);
+    CHECK_FALSE(result);
+    CHECK(result.error.find("declared knob indicator for 'centred'") !=
+          std::string::npos);
+    CHECK(result.error.find("no radial pointer geometry") !=
+          std::string::npos);
 }
 
 TEST_CASE("a fader indicator is handed to the control sprite pass",
