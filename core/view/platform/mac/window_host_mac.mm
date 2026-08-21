@@ -199,6 +199,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // -submitDragSample:modifiers:clickCount: for the ordering rules that
     // keep this from stranding or reordering input.
     pulp::view::PointerCoalescer _pointerCoalescer;
+    std::uint64_t _rawDragSamples;
+    std::uint64_t _coalescerFlushes;
+    std::uint64_t _deliveredDragSamples;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -585,6 +588,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)deliverDragAtPoint:(pulp::view::Point)pt
                  modifiers:(std::uint16_t)modifiers
                 clickCount:(int)clickCount {
+    PULP_TRACE_SCOPE_NAMED("state", "native_drag_dispatch");
+    PULP_TRACE_COUNTER("state", "delivered_drag_samples",
+                       ++_deliveredDragSamples);
     if (!self.rootView) return;
     auto* dragTarget = _dragTargetCapture.live_in(*self.rootView);
     if (!dragTarget) { _dragTargetCapture.reset(); return; }
@@ -635,7 +641,13 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // display-link block, and by any path that is about to hand this gesture
 // somewhere else (see mouseDragged:).
 - (void)flushCoalescedPointerInput {
-    for (const auto& s : _pointerCoalescer.flush_frame()) {
+    PULP_TRACE_SCOPE_NAMED("state", "pointer_coalescer_flush");
+    const auto pending = _pointerCoalescer.flush_frame();
+    PULP_TRACE_COUNTER("state", "pointer_coalescer_flushes",
+                       ++_coalescerFlushes);
+    PULP_TRACE_COUNTER("state", "pointer_samples_merged",
+                       _pointerCoalescer.total_merged());
+    for (const auto& s : pending) {
         [self deliverDragAtPoint:s.position
                        modifiers:s.modifiers
                       clickCount:s.click_count];
@@ -643,6 +655,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)mouseDragged:(NSEvent*)event {
+    PULP_TRACE_SCOPE_NAMED("state", "mac_mouse_dragged");
+    PULP_TRACE_COUNTER("state", "raw_drag_samples", ++_rawDragSamples);
     @try {
         try {
             // Inspector intercept — route drag-ticks to the in-canvas overlay
@@ -2691,14 +2705,26 @@ private:
                     (unsigned long long)pump_dirty_frames_);
         }
 
-        if (!gpu_surface_->begin_frame()) {
+        bool acquired = false;
+        {
+            // Drawable acquisition can block independently of paint/submit.
+            // Keep it explicit so a long frame's unaccounted parent time is
+            // not incorrectly attributed to its child paint span.
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_acquire");
+            acquired = gpu_surface_->begin_frame();
+        }
+        if (!acquired) {
             frame_fail_count_++;
             if (frame_fail_count_ <= 3)
                 fprintf(stderr, "[gpu-host] begin_frame failed (%d)\n", frame_fail_count_);
             return false;
         }
 
-        auto* canvas = skia_surface_->begin_frame();
+        canvas::Canvas* canvas = nullptr;
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "skia_begin");
+            canvas = skia_surface_->begin_frame();
+        }
         if (!canvas) {
             fprintf(stderr, "[gpu-host] skia begin_frame returned null\n");
             gpu_surface_->end_frame();
@@ -2767,14 +2793,21 @@ private:
                 pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
-        const auto outcome = skia_surface_->end_frame();  // submit Graphite recording
+        render::FrameOutcome outcome;
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");
+            outcome = skia_surface_->end_frame();  // submit Graphite recording
+        }
 
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
             captured = skia_surface_->read_current_rgba(*capture_pixels, *capture_width, *capture_height);
         }
 
-        gpu_surface_->end_frame();    // present to Metal surface
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_present");
+            gpu_surface_->end_frame();    // present to Metal surface
+        }
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);

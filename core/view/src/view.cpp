@@ -1706,6 +1706,7 @@ float View::scalar_value() const {
 }
 
 void View::request_repaint() {
+    PULP_TRACE_SCOPE_NAMED("render", "view_repaint_request");
     // A repaint request is the canonical "my content changed" signal, so it is
     // also where the subtree scene cache stales: clear this view and every
     // cached ancestor (their recordings include this view). Cheap no-op when no

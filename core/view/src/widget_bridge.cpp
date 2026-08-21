@@ -15,6 +15,7 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/virtual_list.hpp>
 #include <pulp/view/virtual_grid.hpp>
 #include <web_compat_preludes_gen.hpp>
@@ -751,6 +752,7 @@ void WidgetBridge::set_bench_counters(render::bench::PerfCounters* counters) {
 #endif
 
 void WidgetBridge::request_repaint() {
+    PULP_TRACE_SCOPE_NAMED("render", "repaint_request");
     if (repaint_callback_) repaint_callback_();
 }
 
@@ -984,6 +986,7 @@ void WidgetBridge::poll_async_results() {
 }
 
 void WidgetBridge::service_frame_callbacks() {
+    PULP_TRACE_SCOPE_NAMED("js", "frame_callback_pump");
     if (pending_runtime_settle_rounds_ > 0)
         --pending_runtime_settle_rounds_;
     // Declarative bindings first: pure C++ store→widget push, no JS crossing.
@@ -1002,6 +1005,8 @@ void WidgetBridge::service_frame_callbacks() {
         engine_.pump_message_loop();
     }
     if (!pending_frame_ids_.empty()) {
+        PULP_TRACE_SCOPE_NAMED_ARGS("js", "raf_flush", "callbacks",
+                                    pending_frame_ids_.size());
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
     }
