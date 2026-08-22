@@ -518,6 +518,31 @@ def comparison_verdict(selected_result: int, full_result: int | None) -> str:
     return "mismatched_non_graduation"
 
 
+def full_build_timing_fields(
+    selected_build_seconds: float | None,
+    incremental_full_build_seconds: float | None,
+) -> dict[str, bool | float | None]:
+    """Describe the sequential shadow build without implying an independent run."""
+
+    if incremental_full_build_seconds is None:
+        return {
+            "full_build_is_incremental_after_selected": None,
+            "full_build_incremental_duration_seconds": None,
+            "full_build_estimated_total_duration_seconds": None,
+        }
+    if selected_build_seconds is None:
+        raise SelectionExecutionError(
+            "incremental full-build timing has no preceding selected-build timing"
+        )
+    return {
+        "full_build_is_incremental_after_selected": True,
+        "full_build_incremental_duration_seconds": incremental_full_build_seconds,
+        "full_build_estimated_total_duration_seconds": (
+            selected_build_seconds + incremental_full_build_seconds
+        ),
+    }
+
+
 def fsync_directory(directory: Path) -> None:
     """Persist a newly published receipt's directory entry on POSIX."""
 
@@ -635,6 +660,9 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 full_result = full_build_result
         elif selection_receipt["schema_version"] == 2 and selected_result == 0:
             selected_result = clear_build_sentinel(build_dir)
+        full_build_timing = full_build_timing_fields(
+            selected_build_seconds, full_build_seconds
+        )
         final_identity = selected_file.stat()
         if (
             (snapshot_identity.st_dev, snapshot_identity.st_ino)
@@ -680,7 +708,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "selected_build_returncode": selected_build_result,
                     "full_duration_seconds": full_seconds,
                     "full_returncode": full_result,
-                    "full_build_duration_seconds": full_build_seconds,
+                    **full_build_timing,
                     "full_build_returncode": full_build_result,
                     "full_authoritative": compare_full,
                     "failure_coverage": failure_coverage(selected_result, full_result),

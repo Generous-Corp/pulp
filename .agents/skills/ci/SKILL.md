@@ -4368,6 +4368,10 @@ targets and executes the literal test selection, then runs the ordinary full
 build and CTest commands, returns the full path's status, and writes an
 append-only selected-vs-full timing/failure-coverage receipt. Do not
 set `authoritative` until those receipts satisfy the reviewed graduation gate.
+Because both builds share one locked warm tree, the post-selected full-build
+timer is an incremental remainder. Receipts name it that way and separately
+record the estimated total full-build duration as selected build plus remainder;
+never compare selected time against the remainder alone.
 The execution receipt binds the policy, selection, validation, workflow,
 literal-test, and literal-build-target digests for session-independent aggregation. A
 `missed_full_failure` or `selected_only_failure` is explicit non-graduation

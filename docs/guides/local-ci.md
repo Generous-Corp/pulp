@@ -1224,6 +1224,13 @@ receipt with separate selected/full build and test wall times, registration
 counts, and failure-coverage classification. Thus the full path remains
 merge-authoritative throughout the canary.
 
+The full build follows the selected-target build in the same locked warm tree,
+so its direct timer is explicitly recorded as the **incremental remainder**, not
+as an independent full-build baseline. The receipt's estimated total full-build
+duration is the selected-build duration plus that incremental remainder. Use
+that derived total for shadow speed comparisons; using the remainder alone
+would overstate the selected-build savings.
+
 Each schema-v3 selection produces an execution-receipt schema that also binds
 the policy, selection, validation, workflow, literal-test, and literal-build-
 target digests plus a durable timestamp, so a later session can

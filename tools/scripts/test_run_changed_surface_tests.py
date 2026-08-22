@@ -230,6 +230,36 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         self.assertIn("--tests-from-file", selected)
         self.assertNotIn("--tests-from-file", full)
 
+    def test_shadow_build_timing_names_remainder_and_total_estimate(self) -> None:
+        self.assertEqual(
+            runner.full_build_timing_fields(1.25, 2.75),
+            {
+                "full_build_is_incremental_after_selected": True,
+                "full_build_incremental_duration_seconds": 2.75,
+                "full_build_estimated_total_duration_seconds": 4.0,
+            },
+        )
+        self.assertEqual(
+            runner.full_build_timing_fields(1.25, None),
+            {
+                "full_build_is_incremental_after_selected": None,
+                "full_build_incremental_duration_seconds": None,
+                "full_build_estimated_total_duration_seconds": None,
+            },
+        )
+        self.assertEqual(
+            runner.full_build_timing_fields(None, None),
+            {
+                "full_build_is_incremental_after_selected": None,
+                "full_build_incremental_duration_seconds": None,
+                "full_build_estimated_total_duration_seconds": None,
+            },
+        )
+        with self.assertRaisesRegex(
+            runner.SelectionExecutionError, "no preceding selected-build timing"
+        ):
+            runner.full_build_timing_fields(None, 2.75)
+
     def test_result_receipts_are_append_only_and_require_absolute_directory(self) -> None:
         with self.assertRaisesRegex(runner.SelectionExecutionError, "must be absolute"):
             runner.write_result_receipt(Path("relative"), {"schema_version": 1})
