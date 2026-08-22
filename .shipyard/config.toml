@@ -405,6 +405,16 @@ extended_tests = [
   "Forge catalog index comparison detects add and remove drift",
 ]
 
+# The repository may describe a bounded POSIX test-stage adapter, but it cannot
+# activate it. Shipyard reads the independent machine-global
+# changed_surface_execution.mode switch, which defaults to off. The initial
+# controlled canary uses shadow_compare so this selected run is measured while
+# the ordinary full CTest corpus remains the merge-authoritative result.
+[targets.mac.changed_surface_selection.execution]
+mode = "authoritative"
+stage = "test"
+command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receipt-b64 {selection_receipt_b64} --selection-receipt-sha256 {selection_receipt_digest} --build-dir build --target mac"
+
 [cloud]
 provider   = "namespace"
 workflow   = "build"
