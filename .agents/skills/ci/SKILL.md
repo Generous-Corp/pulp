@@ -4367,6 +4367,13 @@ The initial canary uses `shadow_compare`; it executes the literal selection,
 then the ordinary full CTest command, returns the full command's status, and
 writes an append-only selected-vs-full timing/failure-coverage receipt. Do not
 set `authoritative` until those receipts satisfy the reviewed graduation gate.
+Schema-v2 receipts bind the policy, selection, validation, workflow, and
+literal-test digests for session-independent aggregation. A
+`missed_full_failure` or `selected_only_failure` is explicit non-graduation
+evidence; only a compared selected/full status match is marked
+`graduation_eligible`. More precisely, both suites must pass; two red statuses
+are `failure_overlap_unproven` until exact failure identity is reviewed.
+Receipt publication fsyncs the file and its containing directory.
 Unknown paths and
 changes to build/toolchain, public ABI, security, provenance, selector policy,
 or test topology select full. `changed-surface-policy-selftest` verifies those

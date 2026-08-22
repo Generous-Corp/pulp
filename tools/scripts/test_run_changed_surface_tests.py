@@ -170,6 +170,16 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         self.assertEqual(runner.failure_coverage(0, 1), "missed_full_failure")
         self.assertEqual(runner.failure_coverage(1, 0), "selected_only_failure")
         self.assertEqual(runner.failure_coverage(1, None), "not_compared")
+        self.assertEqual(runner.comparison_verdict(0, 0), "matched_pass")
+        self.assertEqual(
+            runner.comparison_verdict(1, 1), "failure_overlap_unproven"
+        )
+        self.assertEqual(
+            runner.comparison_verdict(0, 1), "mismatched_non_graduation"
+        )
+        self.assertEqual(
+            runner.comparison_verdict(1, 0), "mismatched_non_graduation"
+        )
         selected = runner.execution_argv(Path("/repo/build"), Path("/tmp/selected"))
         full = runner.execution_argv(Path("/repo/build"))
         self.assertIn("--tests-from-file", selected)
@@ -180,7 +190,9 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             runner.write_result_receipt(Path("relative"), {"schema_version": 1})
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            first = runner.write_result_receipt(root, {"schema_version": 1})
+            with mock.patch.object(runner.os, "fsync", wraps=runner.os.fsync) as fsync:
+                first = runner.write_result_receipt(root, {"schema_version": 1})
+                self.assertGreaterEqual(fsync.call_count, 2)
             second = runner.write_result_receipt(root, {"schema_version": 1})
             self.assertNotEqual(first, second)
             self.assertEqual(len(list(root.glob("result-*.json"))), 2)

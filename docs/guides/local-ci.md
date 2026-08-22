@@ -1222,6 +1222,16 @@ an immutable receipt with verification time, selected/full wall time,
 registration counts, and failure-coverage classification. Thus the full suite
 remains merge-authoritative throughout the canary.
 
+Each schema-v2 result also binds the policy, selection, validation, workflow,
+and literal-test digests plus a durable timestamp, so a later session can
+aggregate trials without reconstructing the originating agent. A receipt is
+`graduation_eligible` only when shadow comparison ran and both suites passed.
+`missed_full_failure` and `selected_only_failure` are explicit
+`mismatched_non_graduation` evidence. Two failures are
+`failure_overlap_unproven`, not graduation evidence, because terminal status
+alone does not prove both suites found the same failure. Receipt publication
+fsyncs both the file and containing directory.
+
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes

@@ -375,6 +375,26 @@ def failure_coverage(selected_result: int, full_result: int | None) -> str:
     return "no_failure_observed"
 
 
+def comparison_verdict(selected_result: int, full_result: int | None) -> str:
+    if full_result is None:
+        return "not_compared"
+    if selected_result == 0 and full_result == 0:
+        return "matched_pass"
+    if selected_result != 0 and full_result != 0:
+        return "failure_overlap_unproven"
+    return "mismatched_non_graduation"
+
+
+def fsync_directory(directory: Path) -> None:
+    """Persist a newly published receipt's directory entry on POSIX."""
+
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def write_result_receipt(result_dir: Path, receipt: dict[str, Any]) -> Path:
     """Append one owner-private immutable result receipt without overwriting."""
 
@@ -392,6 +412,7 @@ def write_result_receipt(result_dir: Path, receipt: dict[str, Any]) -> Path:
             result_file.write(payload)
             result_file.flush()
             os.fsync(result_file.fileno())
+        fsync_directory(result_dir)
         return path
     raise SelectionExecutionError("cannot allocate immutable result receipt")
 
@@ -452,10 +473,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
         result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
         if result_dir:
+            verdict = comparison_verdict(selected_result, full_result)
             write_result_receipt(
                 Path(result_dir),
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
+                    "recorded_at_unix_ns": time.time_ns(),
                     "repository": selection_receipt["repository"],
                     "pull_request": selection_receipt["pull_request"],
                     "target": selection_receipt["target"],
@@ -463,6 +486,15 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "head_sha": selection_receipt["head_sha"],
                     "tree_sha": selection_receipt["tree_sha"],
                     "execution_payload_sha256": args.selection_receipt_sha256,
+                    "policy_digest": selection_receipt["policy_digest"],
+                    "selection_receipt_digest": selection_receipt[
+                        "selection_receipt_digest"
+                    ],
+                    "validation_contract_digest": selection_receipt[
+                        "validation_contract_digest"
+                    ],
+                    "workflow_digest": selection_receipt["workflow_digest"],
+                    "selected_tests_digest": selection_receipt["selected_tests_digest"],
                     "selected_logical_count": len(selected_names),
                     "selected_registration_count": len(selected_tests),
                     "full_registration_count": len(full_tests),
@@ -473,6 +505,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "full_returncode": full_result,
                     "full_authoritative": compare_full,
                     "failure_coverage": failure_coverage(selected_result, full_result),
+                    "comparison_verdict": verdict,
+                    "graduation_eligible": compare_full and verdict == "matched_pass",
                 },
             )
         return full_result if full_result is not None else selected_result
