@@ -619,12 +619,18 @@ void lzw_encode(const std::vector<uint8_t>& indices,
 
 std::vector<uint8_t> GifWriter::encode_still(const DecodedRaster& raster) {
     if (raster.width == 0 || raster.height == 0) return {};
-    const std::size_t expected_size =
-        static_cast<std::size_t>(raster.width) * raster.height * 4;
+    if (raster.width > std::numeric_limits<uint16_t>::max() ||
+        raster.height > std::numeric_limits<uint16_t>::max()) {
+        return {};
+    }
+    const std::size_t pixel_count =
+        static_cast<std::size_t>(raster.width) * raster.height;
+    if (pixel_count > std::numeric_limits<std::size_t>::max() / 4u) return {};
+    const std::size_t expected_size = pixel_count * 4u;
     if (raster.rgba.size() != expected_size) return {};
 
     std::vector<std::array<uint8_t, 3>> opaque_pixels;
-    opaque_pixels.reserve(raster.width * raster.height);
+    opaque_pixels.reserve(pixel_count);
     bool has_transparent = false;
     for (std::size_t i = 0; i < expected_size; i += 4) {
         if (raster.rgba[i + 3] == 0) {
@@ -645,7 +651,7 @@ std::vector<uint8_t> GifWriter::encode_still(const DecodedRaster& raster) {
     if (has_transparent) palette.push_back({0, 0, 0});
 
     std::vector<uint8_t> indices;
-    indices.reserve(raster.width * raster.height);
+    indices.reserve(pixel_count);
     for (std::size_t i = 0; i < expected_size; i += 4) {
         if (raster.rgba[i + 3] == 0 && trans_idx >= 0) {
             indices.push_back(static_cast<uint8_t>(trans_idx));

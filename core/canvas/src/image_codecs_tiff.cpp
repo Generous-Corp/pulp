@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -150,13 +151,24 @@ std::optional<DecodedRaster> TiffReader::decode(const uint8_t* data,
     std::vector<uint32_t> strip_byte_counts;
 
     auto read_long_array = [&](const Ifd& e, std::vector<uint32_t>& out) {
-        out.resize(e.count);
-        if (e.count <= 1) {
-            out[0] = e.value_or_offset;
+        if (e.count == 0 || (e.type != kTypeShort && e.type != kTypeLong)) {
+            return false;
+        }
+        if (e.count == 1) {
+            out.resize(1);
+            out[0] = e.type == kTypeShort ? ifd_short(e, bo)
+                                          : e.value_or_offset;
             return true;
         }
-        const std::size_t bytes = e.count * (e.type == kTypeShort ? 2u : 4u);
-        if (e.value_or_offset > size || e.value_or_offset + bytes > size) return false;
+        const std::size_t element_size = e.type == kTypeShort ? 2u : 4u;
+        if (e.count > std::numeric_limits<std::size_t>::max() / element_size) {
+            return false;
+        }
+        const std::size_t bytes = static_cast<std::size_t>(e.count) * element_size;
+        if (e.value_or_offset > size || bytes > size - e.value_or_offset) {
+            return false;
+        }
+        out.resize(e.count);
         for (uint32_t i = 0; i < e.count; ++i) {
             if (e.type == kTypeShort) {
                 out[i] = bo.u16(data + e.value_or_offset + i * 2);

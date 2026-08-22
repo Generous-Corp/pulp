@@ -4,6 +4,7 @@
 #include <pulp/runtime/socket.hpp>
 #include <pulp/runtime/websocket_channel.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -36,7 +38,12 @@ using namespace std::chrono_literals;
 namespace {
 
 std::optional<std::uint16_t> bind_loopback(Socket& server, std::uint16_t start) {
-    for (std::uint16_t port = start; port < start + 400; ++port) {
+    constexpr std::uint32_t kAttempts = 400;
+    const auto end = std::min<std::uint32_t>(
+        static_cast<std::uint32_t>(start) + kAttempts,
+        static_cast<std::uint32_t>(std::numeric_limits<std::uint16_t>::max()) + 1u);
+    for (std::uint32_t candidate = start; candidate < end; ++candidate) {
+        const auto port = static_cast<std::uint16_t>(candidate);
         if (!server.bind("127.0.0.1", port)) continue;
         if (!server.listen(1)) continue;
         return port;

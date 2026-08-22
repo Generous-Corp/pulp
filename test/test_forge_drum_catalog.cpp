@@ -79,8 +79,10 @@ void inject(Fixture& fixture, pulp::state::ParamID id, float value) {
 double energy(const std::array<std::vector<float>, 2>& block) {
     double sum = 0.0;
     for (const auto& channel : block)
-        for (const float sample : channel)
-            sum += sample * sample;
+        for (const float sample : channel) {
+            const double value = sample;
+            sum += value * value;
+        }
     return sum;
 }
 

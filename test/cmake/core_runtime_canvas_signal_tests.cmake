@@ -352,7 +352,20 @@ pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysi
 pulp_add_test_suite(pulp-test-osc-dco LIBRARIES pulp::signal pulp::audio-analysis)
 # The modern wavetable tier is gated on alias rejection swept to the top of every
 # band, a click-free band-switch seam, and a zipper-free scan.
-pulp_add_test_suite(pulp-test-osc-wt LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-wt
+    LIBRARIES pulp::signal pulp::audio-analysis
+    TEST_SPEC "~[slow]")
+# The two exhaustive alias-floor proofs render and analyze complete frequency
+# sweeps.  Keep that valuable evidence in full/nightly validation, but outside
+# the required PR gate: a loaded hosted macOS runner can exceed the generic
+# 120-second hang guard even though the exact tests complete normally.  This is
+# the same explicit slow-test split used by the FDN and CharacterDelay suites.
+pulp_scaled_test_timeout(_pulp_osc_wt_slow_timeout 300)
+catch_discover_tests(pulp-test-osc-wt
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow
+    PROPERTIES TIMEOUT "${_pulp_osc_wt_slow_timeout}")
 # The lo-fi wavetable tier is a dedicated variable-clock ZOH engine, gated on the
 # pitch-tracking n·L·f0 image ladder matching the analytic sinc model, odd-
 # harmonic 8-bit grit, a reconstruction stage that kills the naive in-band fold,

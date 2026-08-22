@@ -39,7 +39,9 @@ std::vector<float> flat_ir_spectrum(uint32_t n, float re, float im) {
 }
 
 std::vector<float> ramp_input(uint32_t n, uint32_t batch) {
-    std::vector<float> in(n * 2 * batch, 0.0f);
+    std::vector<float> in(static_cast<std::size_t>(n) * 2u *
+                              static_cast<std::size_t>(batch),
+                          0.0f);
     for (uint32_t b = 0; b < batch; ++b) {
         for (uint32_t i = 0; i < n; ++i) {
             in[(b * n + i) * 2] =
