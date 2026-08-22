@@ -803,6 +803,14 @@ if(APPLE)
     file(COPY_FILE "${_daemon_test}" "${_author_parity_broker}")
     file(CHMOD "${_author_parity_broker}"
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    # ControlBrokerDaemon authorizes clients against signed sibling identities.
+    # The aggregate opens its first client connection from its own executable,
+    # so retain the matching `pulp` identity that the canonical build-tree
+    # fixture creates beside pulp-test-control-broker-daemon.
+    file(COPY_FILE "${_daemon_test}"
+        "${_author_parity_directory}/pulp")
+    file(CHMOD "${_author_parity_directory}/pulp"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
     foreach(_installed_client IN ITEMS pulp-cpp pulp-mcp)
         file(COPY_FILE "${_prefix}/bin/${_installed_client}"
             "${_author_parity_directory}/${_installed_client}")
