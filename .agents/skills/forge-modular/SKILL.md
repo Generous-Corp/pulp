@@ -541,6 +541,11 @@ book. So a unit the control cannot read is a **refusal**, while a value it
 understands but cannot reach is a **clamp with a reason** — different
 situations, reported differently.
 
+Module identity is resolved before any physical-value lookup. A name absent
+from the exact inventory is a model-contract error, not evidence that Cartog
+needs another scan. Do not measure a tag, display label, or guessed spelling;
+retry with the exact plugin/model pair listed by the inventory.
+
 Written only where it is not the identity, so at scan 5 an absent
 `displayBase` means linear and an absent `unit` means dimensionless; below 5
 it means nobody looked. Same rule `kind` lives by. Emitting the identity for
