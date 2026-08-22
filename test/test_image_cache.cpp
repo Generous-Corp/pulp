@@ -20,7 +20,8 @@ ImageDecodeFn make_fake_decoder(std::atomic<int>& decode_calls) {
         img.width = 4;
         img.height = 4;
         img.native_handle = reinterpret_cast<void*>(uri.size() + 0x1000);
-        img.bytes = img.width * img.height * 4;  // 64
+        img.bytes = static_cast<std::size_t>(img.width) *
+                    static_cast<std::size_t>(img.height) * 4u;  // 64
         return img;
     };
 }

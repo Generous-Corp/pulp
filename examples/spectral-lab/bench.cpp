@@ -32,7 +32,13 @@ double us_since(clock_t_::time_point t0) {
 double xcorr(const std::vector<float>& a, const std::vector<float>& b) {
     double sxy = 0, sxx = 0, syy = 0;
     const size_t n = std::min(a.size(), b.size());
-    for (size_t i = 0; i < n; ++i) { sxy += a[i]*b[i]; sxx += a[i]*a[i]; syy += b[i]*b[i]; }
+    for (size_t i = 0; i < n; ++i) {
+        const double ai = a[i];
+        const double bi = b[i];
+        sxy += ai * bi;
+        sxx += ai * ai;
+        syy += bi * bi;
+    }
     return sxy / std::sqrt(sxx * syy + 1e-30);
 }
 

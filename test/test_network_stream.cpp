@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <thread>
@@ -100,7 +101,12 @@ std::optional<std::uint16_t> try_bind_udp_ephemeral(Socket& socket,
 std::optional<std::uint16_t> try_bind_udp(Socket& socket,
                                           std::uint16_t start,
                                           std::string_view address = "127.0.0.1") {
-    for (std::uint16_t port = start; port < start + 120; ++port) {
+    constexpr std::uint32_t kAttempts = 120;
+    const auto end = std::min<std::uint32_t>(
+        static_cast<std::uint32_t>(start) + kAttempts,
+        static_cast<std::uint32_t>(std::numeric_limits<std::uint16_t>::max()) + 1u);
+    for (std::uint32_t candidate = start; candidate < end; ++candidate) {
+        const auto port = static_cast<std::uint16_t>(candidate);
         if (socket.bind(address, port)) return port;
     }
     return std::nullopt;

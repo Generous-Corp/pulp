@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <type_traits>
@@ -16,6 +17,16 @@
 #endif
 
 namespace pulp::signal {
+
+namespace detail {
+
+inline constexpr std::size_t fft_twiddle_index(int phase_index, int stride) noexcept {
+    const auto index = static_cast<std::size_t>(phase_index);
+    const auto step = static_cast<std::size_t>(stride);
+    return index * step;
+}
+
+} // namespace detail
 
 /// Conservative policy charge for Accelerate's opaque float FFT setup. Apple
 /// does not expose its allocation size, so admission treats the setup as one
@@ -297,7 +308,8 @@ private:
             int step = size_ / len;
             for (int i = 0; i < size_; i += len) {
                 for (int j = 0; j < half; ++j) {
-                    auto w = std::complex<SampleType>(twiddles_[j * step]);
+                    auto w = std::complex<SampleType>(
+                        twiddles_[detail::fft_twiddle_index(j, step)]);
                     auto u = data[i + j];
                     auto v = data[i + j + half] * w;
                     data[i + j] = u + v;

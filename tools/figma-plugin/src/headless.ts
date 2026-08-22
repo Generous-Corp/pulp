@@ -18,9 +18,9 @@
 //   await mcp.use_figma({
 //     fileKey,
 //     description: "headless plugin export",
-//     code: `const TARGET_NODE_ID = ${JSON.stringify(nodeId)}; ${HEADLESS_BUNDLE}`,
+//     code: `globalThis.__pulp_target_node_id = ${JSON.stringify(nodeId)}; ${HEADLESS_BUNDLE}`,
 //   });
-// The bundle reads the optional `TARGET_NODE_ID` global; if unset it
+// The bundle reads the optional `__pulp_target_node_id` global; if unset it
 // falls back to the current page selection. The result is a plain object
 // (postMessage-safe — numbers/strings/arrays only, no Uint8Array).
 
@@ -43,12 +43,16 @@ const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
   },
 };
 
-declare const TARGET_NODE_ID: string | undefined;
+declare global {
+  // Driver-owned data is kept outside the evaluated packed program so an
+  // authored node id can never become executable source text.
+  var __pulp_target_node_id: string | undefined;
+  var __pulp_faithful_vector: boolean | undefined;
+}
 // Faithful-vector lane: the default. Each top-level frame exports its own SVG
 // and renders via DesignFrameView with auto-detected interactive overlays,
-// instead of the legacy widget-recognition rebuild. The injected prelude sets
-// FAITHFUL_VECTOR = false to opt out (legacy flat tree).
-declare const FAITHFUL_VECTOR: boolean | undefined;
+// instead of the legacy widget-recognition rebuild. The driver sets
+// __pulp_faithful_vector = false to opt out (legacy flat tree).
 
 interface HeadlessAssetBundle {
   content_hash: string;
@@ -72,19 +76,20 @@ interface HeadlessResult {
 // enough. The headless caller awaits this implicitly because use_figma
 // returns the resolved Promise value.
 async function run(): Promise<HeadlessResult> {
-  // Resolve the selection. Prefer an explicit TARGET_NODE_ID (preferred for
+  // Resolve the selection. Prefer an explicit target node id (preferred for
   // agent-driven extraction — deterministic), then fall back to whatever
   // the user has selected in Figma (matches the UI plugin's behavior).
   let roots: readonly SceneNode[];
   let resolvedId: string;
 
-  if (typeof TARGET_NODE_ID === "string" && TARGET_NODE_ID.length > 0) {
-    const node = await figma.getNodeByIdAsync(TARGET_NODE_ID);
+  const targetNodeId = globalThis.__pulp_target_node_id;
+  if (typeof targetNodeId === "string" && targetNodeId.length > 0) {
+    const node = await figma.getNodeByIdAsync(targetNodeId);
     if (!node) {
-      throw new Error(`Node ${TARGET_NODE_ID} not found`);
+      throw new Error(`Node ${targetNodeId} not found`);
     }
     if (!isSceneNode(node)) {
-      throw new Error(`Node ${TARGET_NODE_ID} is type ${node.type}; expected SceneNode`);
+      throw new Error(`Node ${targetNodeId} is type ${node.type}; expected SceneNode`);
     }
     roots = [node];
     resolvedId = node.id;
@@ -98,7 +103,7 @@ async function run(): Promise<HeadlessResult> {
   }
 
   const result = await extractScene(roots as readonly SceneNode[], {
-    faithfulVector: typeof FAITHFUL_VECTOR === "undefined" ? true : FAITHFUL_VECTOR !== false,
+    faithfulVector: globalThis.__pulp_faithful_vector !== false,
   });
 
   const fileKey =

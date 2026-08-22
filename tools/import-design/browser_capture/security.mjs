@@ -152,7 +152,9 @@ export async function serveAuthorizedRoot(root, relativeEntry) {
       createReadStream(served.resolved).pipe(response);
     } catch (error) {
       response.writeHead(500);
-      response.end(String(error));
+      // This server handles authored input. Never reflect an exception: it can
+      // contain an absolute path, a loopback capability token, or a stack.
+      response.end("browser capture resource unavailable");
     }
   });
   tolerateClientSocketErrors(server);

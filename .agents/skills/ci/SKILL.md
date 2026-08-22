@@ -4393,6 +4393,15 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+The ordinary and changed-surface test stages share
+`tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
+lock is persistent by design (removing it can split lock identity under queued
+waiters), but it lives in owner-only per-user host state rather than beside the
+build directory, so exact-source verification never sees a lock artifact as a
+checkout mutation. Canonical path aliases share a lock; same-named build dirs in
+different worktrees use different full-digest identities. The absolute
+`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only.
+
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`
 events and `workflow_dispatch` because Shipyard PR validation dispatches
 the Build-and-Test workflow manually. Preserve that split: slow configure

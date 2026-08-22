@@ -37,3 +37,23 @@ test('does not strip an unrelated external JavaScript asset', () => {
   assert.equal(result.assets.length, 1);
   assert.match(result.html, /src="app"/);
 });
+
+test('parses script attributes without treating quoted markup as a tag end', () => {
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script data-note="> bait" TYPE="text/jsx">' +
+      'globalThis.node = <span title="</scriptx>">OK</span>;</script>',
+    assets: [],
+  });
+  assert.equal(result.runtime_canonicalization.jsx_scripts_compiled, 1);
+  assert.match(result.html, /type="text\/javascript"/);
+  assert.match(result.html, /React\.createElement\("span"/);
+});
+
+test('does not remove a vendor-looking src from a script with authored body', () => {
+  const react = '/** @license React react.development.js */';
+  const result = canonicalizeMaterializedRuntimeDocument({
+    html: '<script src="react">globalThis.authored = true;</script>',
+    assets: [asset('react', react)],
+  });
+  assert.match(result.html, /globalThis\.authored/);
+});
