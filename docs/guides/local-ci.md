@@ -1232,6 +1232,16 @@ aggregate trials without reconstructing the originating agent. A receipt is
 alone does not prove both suites found the same failure. Receipt publication
 fsyncs both the file and containing directory.
 
+#### Shadow canary operating invariant
+
+`changed_surface_execution.mode` is machine-global, not repository-selectable.
+In `shadow_compare`, selected tests run first, but the following full run remains
+authoritative. Its exact receipt binds the repository, pull request, base, head,
+tree, policy, selection, validation contract, workflow, and literal-test
+selection. Unknown or high-risk changes fall back to full validation. Promotion
+requires accepted same-policy shadow evidence; a green selected run, an old
+receipt, or evidence produced under a different policy cannot authorize it.
+
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
