@@ -149,7 +149,7 @@ build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-di
 # still bounded by the test's own TIMEOUT).
 # The governor exports CTEST_PARALLEL_LEVEL from the same leased host share used
 # for builds. CTest remains responsible for RUN_SERIAL and RESOURCE_LOCK.
-test      = "tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base
@@ -177,7 +177,7 @@ build     = "cmake --build build --config Release --parallel 4"
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
-test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
 
 # The exact inventory is specific to the required macOS target. Optional Linux
 # targets inherit the default recipe but register a different platform-gated
