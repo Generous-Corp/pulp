@@ -105,6 +105,13 @@ test("authorized loopback server serves an extensionless entry as HTML",
     }
   }));
 
+test("authorized server implementation never reflects exception details", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(fileURLToPath(new URL("./security.mjs", import.meta.url)), "utf8"));
+  assert.doesNotMatch(source, /response\.end\(String\(error\)\)/);
+  assert.match(source, /browser capture resource unavailable/);
+});
+
 test("authorized server assigns script MIME to extensionless dependencies",
   async () => withTempTree("extensionless-script", async (tree) => {
     const entry = path.join(tree, "index.html");
