@@ -63,6 +63,38 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn('"${CHANGED_FILE_COUNT:-0}" -ge 3000', workflow)
         self.assertIn("PR-controlled Python never", workflow)
         self.assertNotIn("          GH_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn(
+            'git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py"',
+            workflow,
+        )
+        self.assertIn('trusted_verifier_base="${BASE_SHA:-}"', workflow)
+        self.assertNotIn("mapfile", workflow)
+        self.assertEqual(
+            workflow.count("while IFS= read -r parent; do"),
+            3,
+            "the macOS-routed classifier must collect each parent list with Bash 3 syntax",
+        )
+        for name in ("group", "candidate", "cumulative"):
+            self.assertIn(f'{name}_parent_count=0', workflow)
+            self.assertIn(f'[ "${name}_parent_count" -eq ', workflow)
+            self.assertNotIn(f'${{#{name}_parents[@]}}', workflow)
+        self.assertIn(
+            '[ "${group_parents[0]}" = "${BASE_SHA:-}" ]', workflow
+        )
+        self.assertIn(
+            '[ "${cumulative_parents[0]}" = "$candidate_base" ]', workflow
+        )
+        self.assertNotIn(
+            'git show "$BASE_SHA:tools/scripts/generated_version_bump_check.py"',
+            workflow,
+        )
+        self.assertIn('--event-path "${{ github.event_path }}"', workflow)
+        self.assertIn("WebCLAP proof skipped: exact generated version-bump", workflow)
+        self.assertLess(
+            workflow.index('GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check"'),
+            workflow.index("pulls/${PR_NUMBER}/files"),
+            "the token-bearing verifier must execute only protected-base code",
+        )
         self.assertIn('*) exit "$relevance_status"', workflow)
         self.assertEqual(
             workflow.count("steps.relevance.outputs.run == 'true'"),
