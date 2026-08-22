@@ -69,6 +69,7 @@ concurrency:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 jobs:
   resolve-provider:
@@ -814,12 +815,65 @@ jobs:
             # PROTECTED BASE's verifier prove this is the release bot's exact,
             # signed, single-commit, byte-reproducible transaction. A missing
             # base script (including this feature's own landing PR), API error,
-            # stale/mixed merge group, or any tree ambiguity simply retains the
-            # ordinary full path.
+            # unknown/mixed merge-group ancestry, or any tree ambiguity simply
+            # retains the ordinary full path. A bump behind earlier queue
+            # entries qualifies only when the verifier reproduces the COMPLETE
+            # group tree as cumulative base + the generated projection.
             if [ "$native_build_required" = true ]; then
               trusted_bump_check=$(mktemp)
               trap 'rm -f "$trusted_bump_check"' EXIT
-              if git show "$base:tools/scripts/generated_version_bump_check.py" \
+              trusted_verifier_base=
+              if [ "$EVENT_NAME" = pull_request ] \
+                  && [ "$base" = "$PR_BASE_SHA" ]; then
+                # Bind the PR fast path directly to the immutable event field;
+                # never let checkout code choose which verifier receives a token.
+                trusted_verifier_base="$PR_BASE_SHA"
+              fi
+              if [ "$EVENT_NAME" = merge_group ]; then
+                # `merge_group.base_sha` is the prior speculative group when
+                # another PR is ahead of this one. Resolve the generated
+                # candidate's ORIGINAL protected-main parent without executing
+                # any code from either queue entry. Support only GitHub's exact
+                # #7771 shape: [prior cumulative group, candidate], where that
+                # prior group itself has candidate_base as its first parent.
+                trusted_verifier_base=
+                mapfile -t group_parents < <(
+                  git cat-file -p "$EVENT_HEAD_SHA" 2>/dev/null \
+                    | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                )
+                if [ "$base" = "$MERGE_GROUP_BASE_SHA" ] \
+                    && [ "${#group_parents[@]}" -eq 2 ] \
+                    && [ "${group_parents[0]}" = "$base" ]; then
+                  candidate="${group_parents[1]}"
+                  git cat-file -e "$candidate^{commit}" 2>/dev/null \
+                    || git fetch --no-tags --depth=1 origin "$candidate" \
+                    || true
+                  mapfile -t candidate_parents < <(
+                    git cat-file -p "$candidate" 2>/dev/null \
+                      | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                  )
+                  if [ "${#candidate_parents[@]}" -eq 1 ]; then
+                    candidate_base="${candidate_parents[0]}"
+                    git cat-file -e "$candidate_base^{commit}" 2>/dev/null \
+                      || git fetch --no-tags --depth=1 origin "$candidate_base" \
+                      || true
+                    if [ "$candidate_base" = "$base" ]; then
+                      trusted_verifier_base="$candidate_base"
+                    else
+                      mapfile -t cumulative_parents < <(
+                        git cat-file -p "$base" 2>/dev/null \
+                          | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                      )
+                      if [ "${#cumulative_parents[@]}" -eq 2 ] \
+                          && [ "${cumulative_parents[0]}" = "$candidate_base" ]; then
+                        trusted_verifier_base="$candidate_base"
+                      fi
+                    fi
+                  fi
+                fi
+              fi
+              if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
+                  && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
                   >"$trusted_bump_check" 2>/dev/null \
                   && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
                     --repo . \

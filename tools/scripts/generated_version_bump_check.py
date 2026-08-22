@@ -32,6 +32,20 @@ BOT_NAME = "pulp-release-bot"
 BOT_EMAIL = "25807+danielraffel@users.noreply.github.com"
 BOT_LOGIN = "danielraffel"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+TRUSTED_WRITER_ROOT = "tools/scripts"
+TRUSTED_WRITER_PATHS = (
+    "tools/scripts/version_at_land.py",
+    "tools/scripts/version_bump_apply.py",
+    "tools/scripts/version_bump_heuristics.py",
+    "tools/scripts/version_bump_surfaces.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/versioning.json",
+    # `_write_plan` executes this derived-file generator. Bind its executable
+    # to the protected base below and pin its complete local import closure.
+    "tools/scripts/pulp_tooling_disposition.py",
+    "tools/scripts/cli_sync_check.py",
+    "tools/scripts/cli_command_inventory.py",
+)
 
 
 class NotGeneratedBump(RuntimeError):
@@ -117,7 +131,7 @@ def _pull_shape(
     associated_pulls: list[Any],
     *,
     repo_name: str,
-    base: str,
+    candidate_base: str,
     candidate: str,
 ) -> None:
     if event_name == "pull_request":
@@ -142,7 +156,7 @@ def _pull_shape(
         raise NotGeneratedBump("pull-request head ref/SHA is not the fixed bump transaction")
     if head_repo.get("full_name") != repo_name:
         raise NotGeneratedBump("version-bump branch is not in the protected repository")
-    if base_ref.get("sha") != base or base_ref.get("ref") != "main":
+    if base_ref.get("sha") != candidate_base or base_ref.get("ref") != "main":
         raise NotGeneratedBump("pull-request base is not the immutable protected main SHA")
     if pull.get("commits") != 1:
         raise NotGeneratedBump("version-bump pull request does not contain exactly one commit")
@@ -152,7 +166,7 @@ def _commit_provenance(
     repo: Path,
     metadata: dict[str, Any],
     *,
-    base: str,
+    candidate_base: str,
     candidate: str,
 ) -> None:
     if metadata.get("sha") != candidate:
@@ -173,7 +187,7 @@ def _commit_provenance(
         raise NotGeneratedBump("commit author/committer email is not the release bot")
     if api_author.get("login") != BOT_LOGIN or api_committer.get("login") != BOT_LOGIN:
         raise NotGeneratedBump("verified signature is not attributed to the release-bot account")
-    if _parents(repo, candidate) != [base]:
+    if _parents(repo, candidate) != [candidate_base]:
         raise NotGeneratedBump("candidate is not a one-commit fast-forward from protected main")
 
 
@@ -184,7 +198,7 @@ def _event_commits(
     *,
     explicit_base: str,
     explicit_head: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str, str | None]:
     repository = event.get("repository") or {}
     repo_name = repository.get("full_name")
     if not isinstance(repo_name, str) or not repo_name:
@@ -198,8 +212,13 @@ def _event_commits(
             # pull_request workflows normally check out a synthetic merge commit,
             # but GITHUB_SHA is not authority for the source branch transaction.
             merge_sha = event.get("after")
-            if explicit_head not in {event.get("pull_request", {}).get("merge_commit_sha"), merge_sha}:
+            if explicit_head not in {
+                event.get("pull_request", {}).get("merge_commit_sha"),
+                merge_sha,
+            }:
                 raise NotGeneratedBump("workflow head is unrelated to the pull request event")
+        candidate_base = event_base
+        validation_head = None
     elif event_name == "merge_group":
         group = event.get("merge_group") or {}
         event_base = group.get("base_sha")
@@ -210,6 +229,20 @@ def _event_commits(
         if len(group_parents) != 2 or group_parents[0] != event_base:
             raise NotGeneratedBump("merge group is mixed, nested, or has unknown topology")
         candidate = group_parents[1]
+        _fetch_commit(repo, candidate)
+        candidate_parents = _parents(repo, candidate)
+        if len(candidate_parents) != 1:
+            raise NotGeneratedBump("generated candidate is not a single-parent commit")
+        candidate_base = candidate_parents[0]
+        _fetch_commit(repo, candidate_base)
+        if candidate_base != event_base:
+            _fetch_commit(repo, event_base)
+            cumulative_parents = _parents(repo, event_base)
+            if len(cumulative_parents) != 2 or cumulative_parents[0] != candidate_base:
+                raise NotGeneratedBump(
+                    "cumulative base is not one exact prior group on candidate protected main"
+                )
+        validation_head = explicit_head
     else:
         raise NotGeneratedBump(f"unsupported event: {event_name}")
 
@@ -217,7 +250,7 @@ def _event_commits(
         raise NotGeneratedBump("explicit commits do not match immutable event commits")
     if not SHA_RE.fullmatch(explicit_base) or not SHA_RE.fullmatch(candidate):
         raise NotGeneratedBump("event contains a malformed commit id")
-    return repo_name, candidate
+    return repo_name, candidate, candidate_base, validation_head
 
 
 def _message_plan(repo: Path, candidate: str, base: str, assignments: list[Any]) -> None:
@@ -243,7 +276,72 @@ def _candidate_version(repo: Path, module: Any, candidate: str, version_file: An
     return module._extract_version_from_text(shown.stdout, version_file)
 
 
-def _reproduce_tree(repo: Path, *, base: str, candidate: str) -> list[Any]:
+def _path_projection(
+    repo: Path,
+    *,
+    base: str,
+    observed: str,
+    edited: list[str],
+) -> None:
+    statuses = _git(
+        repo, "diff", "--name-status", "--no-renames", "-z", base, observed
+    ).stdout
+    fields = statuses.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2 != 0:
+        raise NotGeneratedBump("candidate path status stream is malformed")
+    actual_paths: list[str] = []
+    for index in range(0, len(fields), 2):
+        status, path = fields[index], fields[index + 1]
+        if status != "M" or not path:
+            raise NotGeneratedBump("candidate contains a rename/add/delete/type change")
+        actual_paths.append(path)
+    if set(actual_paths) != set(edited) or len(actual_paths) != len(set(actual_paths)):
+        raise NotGeneratedBump("candidate path set differs from trusted generated edits")
+
+
+def _assert_writer_unchanged(repo: Path, older_base: str, cumulative_base: str) -> None:
+    for path in TRUSTED_WRITER_PATHS:
+        older = _git_text(repo, "rev-parse", f"{older_base}:{path}")
+        cumulative = _git_text(repo, "rev-parse", f"{cumulative_base}:{path}")
+        if older != cumulative:
+            raise NotGeneratedBump(
+                f"trusted version writer changed ahead of the generated candidate: {path}"
+            )
+
+
+def _bind_trusted_regenerators(module: Any, worktree: Path) -> None:
+    """Make every derived-file subprocess execute from the trusted base tree."""
+    scripts = (worktree / TRUSTED_WRITER_ROOT).resolve()
+    bound: list[tuple[str, list[str]]] = []
+    for output, command in module._DERIVED_REGENERATORS:
+        if len(command) < 2 or command[0] != "python3":
+            raise NotGeneratedBump("trusted derived regenerator has an unknown command shape")
+        relative = Path(command[1])
+        if relative.as_posix() not in TRUSTED_WRITER_PATHS:
+            raise NotGeneratedBump("trusted derived regenerator is not pinned")
+        trusted_script = (worktree / relative).resolve()
+        try:
+            trusted_script.relative_to(scripts)
+        except ValueError as exc:
+            raise NotGeneratedBump(
+                "trusted derived regenerator escapes tools/scripts"
+            ) from exc
+        if not trusted_script.is_file():
+            raise NotGeneratedBump("trusted derived regenerator script is missing")
+        bound.append((output, [sys.executable, str(trusted_script), *command[2:]]))
+    module._DERIVED_REGENERATORS = bound
+
+
+def _reproduce_tree(
+    repo: Path,
+    *,
+    base: str,
+    candidate: str,
+    cumulative_base: str | None = None,
+    cumulative_head: str | None = None,
+) -> list[Any]:
     runner_temp = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
     runner_temp.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pulp-version-bump-proof-", dir=runner_temp) as holder:
@@ -256,6 +354,7 @@ def _reproduce_tree(repo: Path, *, base: str, candidate: str) -> list[Any]:
             sys.path.insert(0, str(scripts))
             version_at_land = importlib.import_module("version_at_land")
             surfaces = importlib.import_module("version_bump_surfaces")
+            _bind_trusted_regenerators(version_at_land, worktree)
             config = surfaces.load_config(scripts / "versioning.json")
             assignments: list[Any] = []
             for surface in config.surfaces:
@@ -299,22 +398,79 @@ def _reproduce_tree(repo: Path, *, base: str, candidate: str) -> list[Any]:
             actual_tree = _git_text(repo, "rev-parse", f"{candidate}^{{tree}}")
             if expected_tree != actual_tree:
                 raise NotGeneratedBump("candidate tree differs from trusted byte regeneration")
-
-            statuses = _git(repo, "diff", "--name-status", "--no-renames", "-z", base, candidate).stdout
-            fields = statuses.split("\0")
-            if fields and fields[-1] == "":
-                fields.pop()
-            if len(fields) % 2 != 0:
-                raise NotGeneratedBump("candidate path status stream is malformed")
-            actual_paths: list[str] = []
-            for index in range(0, len(fields), 2):
-                status, path = fields[index], fields[index + 1]
-                if status != "M" or not path:
-                    raise NotGeneratedBump("candidate contains a rename/add/delete/type change")
-                actual_paths.append(path)
-            if set(actual_paths) != set(edited) or len(actual_paths) != len(set(actual_paths)):
-                raise NotGeneratedBump("candidate path set differs from trusted generated edits")
+            _path_projection(repo, base=base, observed=candidate, edited=edited)
             _message_plan(repo, candidate, base, assignments)
+
+            if cumulative_head is not None:
+                if cumulative_base is None:
+                    raise NotGeneratedBump("cumulative head omitted its immutable base")
+                _assert_writer_unchanged(repo, base, cumulative_base)
+                cumulative_worktree = Path(holder) / "cumulative"
+                cumulative_added = False
+                try:
+                    _git(
+                        repo,
+                        "worktree",
+                        "add",
+                        "--detach",
+                        str(cumulative_worktree),
+                        cumulative_base,
+                    )
+                    cumulative_added = True
+                    by_name = {surface.name: surface for surface in config.surfaces}
+                    for assignment in assignments:
+                        surface = by_name.get(assignment.surface)
+                        if surface is None:
+                            raise NotGeneratedBump(
+                                f"cumulative base omitted surface {assignment.surface}"
+                            )
+                        versions = [
+                            surfaces.read_version(cumulative_worktree, vf)
+                            for vf in surface.version_files
+                        ]
+                        if any(value is None for value in versions) or set(versions) != {
+                            assignment.current
+                        }:
+                            raise NotGeneratedBump(
+                                f"cumulative base changed surface {assignment.surface}"
+                            )
+                    cumulative_edited = version_at_land._write_plan(
+                        cumulative_worktree, config, assignments
+                    )
+                    if not cumulative_edited:
+                        raise NotGeneratedBump("cumulative projection reproduced no edits")
+                    _git(
+                        cumulative_worktree,
+                        "add",
+                        "--",
+                        *dict.fromkeys(cumulative_edited),
+                    )
+                    expected_cumulative_tree = _git_text(
+                        cumulative_worktree, "write-tree"
+                    )
+                    actual_cumulative_tree = _git_text(
+                        repo, "rev-parse", f"{cumulative_head}^{{tree}}"
+                    )
+                    if expected_cumulative_tree != actual_cumulative_tree:
+                        raise NotGeneratedBump(
+                            "merge-group tree differs from the exact cumulative projection"
+                        )
+                    _path_projection(
+                        repo,
+                        base=cumulative_base,
+                        observed=cumulative_head,
+                        edited=cumulative_edited,
+                    )
+                finally:
+                    if cumulative_added:
+                        _git(
+                            repo,
+                            "worktree",
+                            "remove",
+                            "--force",
+                            str(cumulative_worktree),
+                            check=False,
+                        )
             return assignments
         finally:
             if added:
@@ -326,7 +482,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     event = _load_json(args.event_path)
     if not isinstance(event, dict):
         raise NotGeneratedBump("event payload is not an object")
-    repo_name, candidate = _event_commits(
+    repo_name, candidate, candidate_base, cumulative_head = _event_commits(
         repo,
         args.event_name,
         event,
@@ -372,11 +528,19 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         event,
         associated,
         repo_name=repo_name,
-        base=args.base,
+        candidate_base=candidate_base,
         candidate=candidate,
     )
-    _commit_provenance(repo, metadata, base=args.base, candidate=candidate)
-    assignments = _reproduce_tree(repo, base=args.base, candidate=candidate)
+    _commit_provenance(
+        repo, metadata, candidate_base=candidate_base, candidate=candidate
+    )
+    assignments = _reproduce_tree(
+        repo,
+        base=candidate_base,
+        candidate=candidate,
+        cumulative_base=args.base if cumulative_head is not None else None,
+        cumulative_head=cumulative_head,
+    )
     return {
         "generated_version_bump": True,
         "base": args.base,

@@ -6761,10 +6761,15 @@ Key facts:
   `tools/scripts/generated_version_bump_check.py` proves one signed bot commit,
   exact current-main parentage, the fixed branch/title/marker, one associated
   PR, and a candidate tree byte-identical to rerunning the protected base's
-  version-at-land writer (including derived projections). Any missing script,
-  API/signature error, stale base, extra byte, or mixed/unknown merge group
-  retains the full native path. The verifier's own PR therefore cannot approve
-  itself.
+  version-at-land writer (including derived projections). A candidate behind
+  exactly one prior queue entry qualifies only in the proven #7771 shape: its
+  original protected base is the prior group's first parent, the writer and its
+  derived generator's complete local executable dependency closure did not
+  change, trusted derived generators are executed from that original base, and
+  the complete merge-group tree is exactly cumulative base plus the regenerated
+  version projection. Any missing script, API/signature error, nested/unknown
+  topology, writer drift, extra byte, or ambiguous association retains the full
+  native path. The verifier's own PR therefore cannot approve itself.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
   `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
   and add a case to `test_classify_changes.py`. Never widen the

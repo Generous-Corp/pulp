@@ -191,6 +191,18 @@ class WorkflowWiringTests(unittest.TestCase):
             "\n  build:\n", 1
         )[0]
         self.assertIn(
+            'git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py"',
+            classify_job,
+        )
+        self.assertIn('trusted_verifier_base="$PR_BASE_SHA"', classify_job)
+        self.assertIn('[ "$base" = "$PR_BASE_SHA" ]', classify_job)
+        self.assertIn('[ "$base" = "$MERGE_GROUP_BASE_SHA" ]', classify_job)
+        self.assertIn('[ "${group_parents[0]}" = "$base" ]', classify_job)
+        self.assertIn(
+            '[ "${cumulative_parents[0]}" = "$candidate_base" ]',
+            classify_job,
+        )
+        self.assertNotIn(
             'git show "$base:tools/scripts/generated_version_bump_check.py"',
             classify_job,
         )

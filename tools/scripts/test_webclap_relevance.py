@@ -64,6 +64,17 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn("PR-controlled Python never", workflow)
         self.assertNotIn("          GH_TOKEN: ${{ github.token }}", workflow)
         self.assertIn(
+            'git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py"',
+            workflow,
+        )
+        self.assertIn('trusted_verifier_base="${BASE_SHA:-}"', workflow)
+        self.assertIn(
+            '[ "${group_parents[0]}" = "${BASE_SHA:-}" ]', workflow
+        )
+        self.assertIn(
+            '[ "${cumulative_parents[0]}" = "$candidate_base" ]', workflow
+        )
+        self.assertNotIn(
             'git show "$BASE_SHA:tools/scripts/generated_version_bump_check.py"',
             workflow,
         )

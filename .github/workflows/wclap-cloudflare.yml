@@ -14,6 +14,7 @@ name: WebCLAP Cloudflare
 
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
@@ -81,9 +82,54 @@ jobs:
           # this is the release bot's exact signed/reproducible transaction.
           # Any lookup, topology, provenance, or regeneration ambiguity falls
           # through to the existing full relevance decision.
-          if [[ "${BASE_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]] \
-              && git fetch --no-tags --depth=1 origin "$BASE_SHA" \
-              && git show "$BASE_SHA:tools/scripts/generated_version_bump_check.py" \
+          trusted_verifier_base="${BASE_SHA:-}"
+          if [[ "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+              || git fetch --no-tags --depth=1 origin "$BASE_SHA" \
+              || true
+          fi
+          if [ "${{ github.event_name }}" = merge_group ]; then
+            # A cumulative base is speculative, so never execute its verifier.
+            # Resolve only the exact #7771 topology to the candidate's original
+            # protected-main parent; every other shape keeps the full proof.
+            trusted_verifier_base=
+            mapfile -t group_parents < <(
+              git cat-file -p "$GITHUB_SHA" 2>/dev/null \
+                | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+            )
+            if [ "${#group_parents[@]}" -eq 2 ] \
+                && [ "${group_parents[0]}" = "${BASE_SHA:-}" ]; then
+              candidate="${group_parents[1]}"
+              git cat-file -e "$candidate^{commit}" 2>/dev/null \
+                || git fetch --no-tags --depth=1 origin "$candidate" \
+                || true
+              mapfile -t candidate_parents < <(
+                git cat-file -p "$candidate" 2>/dev/null \
+                  | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+              )
+              if [ "${#candidate_parents[@]}" -eq 1 ]; then
+                candidate_base="${candidate_parents[0]}"
+                git cat-file -e "$candidate_base^{commit}" 2>/dev/null \
+                  || git fetch --no-tags --depth=1 origin "$candidate_base" \
+                  || true
+                if [ "$candidate_base" = "${BASE_SHA:-}" ]; then
+                  trusted_verifier_base="$candidate_base"
+                else
+                  mapfile -t cumulative_parents < <(
+                    git cat-file -p "$BASE_SHA" 2>/dev/null \
+                      | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                  )
+                  if [ "${#cumulative_parents[@]}" -eq 2 ] \
+                      && [ "${cumulative_parents[0]}" = "$candidate_base" ]; then
+                    trusted_verifier_base="$candidate_base"
+                  fi
+                fi
+              fi
+            fi
+          fi
+          if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
+              && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+              && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
                 >"$trusted_bump_check" 2>/dev/null \
               && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
                 --repo . \
