@@ -794,7 +794,10 @@ if(APPLE)
     # inject deterministic explicit consent. Keep its trusted client identities
     # in this test's private fixture instead of overwriting canonical build-tree
     # outputs that parallel CTest workers may be executing or rebuilding.
-    set(_author_parity_directory "${_fixture_root}/installed-author-parity")
+    # Keep the isolated clients one level below the staged SDK prefix so their
+    # installed @executable_path/../lib RPATH still resolves the staged runtime
+    # closure (notably libwgpu_native.dylib).
+    set(_author_parity_directory "${_prefix}/installed-author-parity")
     file(MAKE_DIRECTORY "${_author_parity_directory}")
     file(CHMOD "${_author_parity_directory}"
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
