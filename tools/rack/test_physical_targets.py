@@ -156,13 +156,42 @@ def test_physical_and_structural_errors_arrive_in_one_retry() -> int:
     return bad
 
 
+def test_unknown_model_fails_before_measurement_lookup() -> int:
+    inv = inventory()
+    patch = {"modules": [{"id": 1, "plugin": "Fundamental",
+                           "model": "Oscillator", "pos": [0, 0],
+                           "params": [{"id": 0, "physical": 440.0,
+                                       "unit": "Hz"}]}], "cables": []}
+    before = copy.deepcopy(patch)
+    _, errs = P.prepare_and_lint(patch, inv)
+    bad = check(any("has no model 'Oscillator'" in error for error in errs),
+                "an unknown model is rejected by its exact identity", str(errs))
+    bad += check(not any("measured parameter" in error for error in errs),
+                 "an unknown model never asks for a Cartog measurement",
+                 str(errs))
+    bad += check(patch == before,
+                 "identity refusal leaves every physical target untouched")
+
+    known = {"modules": [{"id": 1, "plugin": "Fundamental",
+                            "model": "VCO", "pos": [0, 0],
+                            "params": [{"id": 99, "physical": 440.0,
+                                        "unit": "Hz"}]}], "cables": []}
+    _, control_errs = P.prepare_and_lint(known, inv)
+    bad += check(any("no measured param 99" in error
+                     for error in control_errs),
+                 "the same measurement lookup reaches a known model",
+                 str(control_errs))
+    return bad
+
+
 def main() -> int:
     bad = 0
     for fn in (test_real_differing_unit_is_written_as_a_knob_position,
                test_refusals_are_atomic,
                test_cello_rate_uses_our_manifest_shape_and_round_trips,
                test_inventory_tells_the_model_the_physical_form,
-               test_physical_and_structural_errors_arrive_in_one_retry):
+               test_physical_and_structural_errors_arrive_in_one_retry,
+               test_unknown_model_fails_before_measurement_lookup):
         print(f"{fn.__name__}:")
         bad += fn()
     print("\n" + ("all good" if bad == 0 else f"FAILED ({bad})"))

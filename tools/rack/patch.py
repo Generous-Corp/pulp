@@ -1873,6 +1873,25 @@ def lint_why(patch: dict, inv: dict, why: dict | None) -> list[str]:
     return problems
 
 
+def module_identity_errors(patch: dict, inv: dict) -> list[str]:
+    """Report exact plugin/model identities that are absent from inventory."""
+    errs: list[str] = []
+    for module in patch.get("modules") or []:
+        plugin, model = module.get("plugin"), module.get("model")
+        if not isinstance(plugin, str) or not isinstance(model, str):
+            continue
+        installed = inv.get(plugin)
+        if installed is None:
+            errs.append(f"plugin '{plugin}' is not installed — "
+                        "the module will load as an empty placeholder")
+            continue
+        modules = installed.get("modules", {})
+        if model not in modules:
+            errs.append(f"'{plugin}' has no model '{model}' "
+                        f"(has: {', '.join(sorted(modules)[:6])}…)")
+    return errs
+
+
 def place_physical_targets(patch: dict, inv: dict) -> list[str]:
     """Replace model-written physical targets with Rack knob positions.
 
@@ -1890,10 +1909,12 @@ def place_physical_targets(patch: dict, inv: dict) -> list[str]:
     import param_units
 
     pending: list[tuple[dict, object, float]] = []
-    errs: list[str] = []
+    errs: list[str] = module_identity_errors(patch, inv)
     for mod in (patch.get("modules") or []):
         plugin, model = mod.get("plugin"), mod.get("model")
         entry = inv.get(plugin, {}).get("modules", {}).get(model)
+        if entry is None:
+            continue
         seen_param_ids: set[object] = set()
         for target in (mod.get("params") or []):
             param_id = target.get("id")
@@ -1926,10 +1947,6 @@ def place_physical_targets(patch: dict, inv: dict) -> list[str]:
             if not isinstance(unit, str) or not unit.strip():
                 errs.append(f"{plugin}/{model} param {target.get('id')} needs "
                             "the physical target's unit")
-                continue
-            if entry is None:
-                errs.append(f"{plugin}/{model} has no measured parameter map "
-                            "for physical placement")
                 continue
             measured = next((q for q in (entry.get("params") or [])
                              if q.get("id") == target.get("id")), None)
@@ -2109,7 +2126,7 @@ def prepare_and_lint(patch: dict, inv: dict,
     materialize_module_state(
         patch, inv, compiled_state_baseline=base_patch)
     patch = reflow(patch, inv)
-    return patch, physical_errs + lint(patch, inv)
+    return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
 
 def _numbered_step(name: str) -> bool:
@@ -2256,6 +2273,7 @@ def lint(patch: dict, inv: dict) -> list[str]:
     errs: list[str] = identity_type_errors(patch)
     if errs:
         return errs
+    errs.extend(module_identity_errors(patch, inv))
     mods = patch.get("modules", [])
     ids = [m.get("id") for m in mods]
 
@@ -2291,14 +2309,6 @@ def lint(patch: dict, inv: dict) -> list[str]:
                 f"silently drops the others")
 
     for m in mods:
-        plug = inv.get(m.get("plugin"))
-        if plug is None:
-            errs.append(f"plugin '{m.get('plugin')}' is not installed — "
-                        f"the module will load as an empty placeholder")
-            continue
-        if m.get("model") not in plug["modules"]:
-            errs.append(f"'{m['plugin']}' has no model '{m.get('model')}' "
-                        f"(has: {', '.join(sorted(plug['modules'])[:6])}…)")
         if not isinstance(m.get("pos"), list) or len(m.get("pos", [])) != 2:
             errs.append(f"module {m.get('id')} has no valid pos [x, y]")
 
