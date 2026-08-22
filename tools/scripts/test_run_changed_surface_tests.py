@@ -164,6 +164,27 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         ):
             self.assertEqual(runner.require_ctest_version(), (3, 29))
 
+    def test_shadow_comparison_keeps_full_authoritative_and_classifies_coverage(self) -> None:
+        self.assertEqual(runner.failure_coverage(0, 0), "no_failure_observed")
+        self.assertEqual(runner.failure_coverage(1, 1), "failure_observed_by_selected")
+        self.assertEqual(runner.failure_coverage(0, 1), "missed_full_failure")
+        self.assertEqual(runner.failure_coverage(1, 0), "selected_only_failure")
+        self.assertEqual(runner.failure_coverage(1, None), "not_compared")
+        selected = runner.execution_argv(Path("/repo/build"), Path("/tmp/selected"))
+        full = runner.execution_argv(Path("/repo/build"))
+        self.assertIn("--tests-from-file", selected)
+        self.assertNotIn("--tests-from-file", full)
+
+    def test_result_receipts_are_append_only_and_require_absolute_directory(self) -> None:
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "must be absolute"):
+            runner.write_result_receipt(Path("relative"), {"schema_version": 1})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = runner.write_result_receipt(root, {"schema_version": 1})
+            second = runner.write_result_receipt(root, {"schema_version": 1})
+            self.assertNotEqual(first, second)
+            self.assertEqual(len(list(root.glob("result-*.json"))), 2)
+
     def test_live_cmake_configuration_must_match_every_policy_flag(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)

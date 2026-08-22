@@ -4356,12 +4356,18 @@ GitHub UI on slow CI runs.
 
 ## PR test selection
 
-Pulp's base-owned `[targets.mac.changed_surface_selection]` declaration is a
-**shadow planner only**. Schema v2 records a mandatory kernel, complete literal
+Pulp's base-owned `[targets.mac.changed_surface_selection]` declaration records
+a mandatory kernel, complete literal
 tests for one narrowly reviewed CLI projection family, medium-risk extended
-neighbors, and known full-required surfaces. The existing full
-`[validation.default]` suite remains authoritative; do not turn a shadow receipt
-into a skip, merge gate, or reusable execution receipt. Unknown paths and
+neighbors, and known full-required surfaces. Its protected-base execution
+template cannot activate itself: Shipyard reads
+`changed_surface_execution.mode` from the independent machine-global config,
+where missing or `off` preserves the ordinary full test stage byte-for-byte.
+The initial canary uses `shadow_compare`; it executes the literal selection,
+then the ordinary full CTest command, returns the full command's status, and
+writes an append-only selected-vs-full timing/failure-coverage receipt. Do not
+set `authoritative` until those receipts satisfy the reviewed graduation gate.
+Unknown paths and
 changes to build/toolchain, public ABI, security, provenance, selector policy,
 or test topology select full. `changed-surface-policy-selftest` verifies those
 dispositions with negative mutations and, on the declared macOS

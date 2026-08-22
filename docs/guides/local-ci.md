@@ -1208,14 +1208,19 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
-### Changed-surface risk selection (shadow mode)
+### Changed-surface risk selection (controlled canary)
 
 The required macOS target also declares a schema-v2
 `changed_surface_selection` policy. It classifies an exact diff into mandatory,
-affected, extended, or full validation and records the selected test set, but
-it does not yet reduce the authoritative `[validation.default]` run. This
-shadow period lets maintainers compare selected receipts with the full suite
-before changing a merge gate.
+affected, extended, or full validation and records the selected test set. A
+protected-base execution template may replace only the POSIX local `test`
+stage, but repository config cannot enable it. Shipyard reads the separate
+machine-global `changed_surface_execution.mode` switch, whose absent/default
+value is `off`. The controlled `shadow_compare` mode runs selected tests first,
+then the unchanged full CTest corpus, returns the full corpus status, and emits
+an immutable receipt with verification time, selected/full wall time,
+registration counts, and failure-coverage classification. Thus the full suite
+remains merge-authoritative throughout the canary.
 
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,

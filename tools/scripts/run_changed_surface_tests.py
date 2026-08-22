@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 from typing import Any, Sequence
@@ -340,10 +341,10 @@ def validate_selection(
         )
 
 
-def execution_argv(build_dir: Path, selected_file: Path) -> list[str]:
+def execution_argv(build_dir: Path, selected_file: Path | None = None) -> list[str]:
     """Return the exact shell-free governed CTest argv."""
 
-    return [
+    command = [
         str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"),
         "ctest",
         "--test-dir",
@@ -355,15 +356,50 @@ def execution_argv(build_dir: Path, selected_file: Path) -> list[str]:
         EXCLUDE_NAME,
         "--label-exclude",
         EXCLUDE_LABEL,
-        "--tests-from-file",
-        str(selected_file),
         "--no-tests=error",
     ]
+    if selected_file is not None:
+        command.extend(["--tests-from-file", str(selected_file)])
+    return command
+
+
+def failure_coverage(selected_result: int, full_result: int | None) -> str:
+    if full_result is None:
+        return "not_compared"
+    if selected_result != 0 and full_result != 0:
+        return "failure_observed_by_selected"
+    if selected_result == 0 and full_result != 0:
+        return "missed_full_failure"
+    if selected_result != 0 and full_result == 0:
+        return "selected_only_failure"
+    return "no_failure_observed"
+
+
+def write_result_receipt(result_dir: Path, receipt: dict[str, Any]) -> Path:
+    """Append one owner-private immutable result receipt without overwriting."""
+
+    if not result_dir.is_absolute():
+        raise SelectionExecutionError("result receipt directory must be absolute")
+    result_dir.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    for sequence in range(100):
+        path = result_dir / f"result-{time.time_ns()}-{os.getpid()}-{sequence}.json"
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+        except FileExistsError:
+            continue
+        with os.fdopen(descriptor, "wb") as result_file:
+            result_file.write(payload)
+            result_file.flush()
+            os.fsync(result_file.fileno())
+        return path
+    raise SelectionExecutionError("cannot allocate immutable result receipt")
 
 
 def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     """Verify and execute one selection while the build tree is exclusive."""
 
+    verification_started = time.monotonic()
     config_path = args.config.resolve(strict=True)
     contract_path = args.inventory_contract.resolve(strict=True)
     selected_names, selected_payload, selection_receipt = decode_selection_receipt(
@@ -394,7 +430,19 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             contract=contract,
             target=args.target,
         )
-        completed = subprocess.run(execution_argv(build_dir, selected_file), shell=False)
+        verification_seconds = time.monotonic() - verification_started
+        selected_started = time.monotonic()
+        selected_result = subprocess.run(
+            execution_argv(build_dir, selected_file), shell=False
+        ).returncode
+        selected_seconds = time.monotonic() - selected_started
+        compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
+        full_result: int | None = None
+        full_seconds: float | None = None
+        if compare_full:
+            full_started = time.monotonic()
+            full_result = subprocess.run(execution_argv(build_dir), shell=False).returncode
+            full_seconds = time.monotonic() - full_started
         final_identity = selected_file.stat()
         if (
             (snapshot_identity.st_dev, snapshot_identity.st_ino)
@@ -402,7 +450,32 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             or selected_file.read_bytes() != selected_payload
         ):
             raise SelectionExecutionError("private selected-tests snapshot changed during execution")
-        return completed.returncode
+        result_dir = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
+        if result_dir:
+            write_result_receipt(
+                Path(result_dir),
+                {
+                    "schema_version": 1,
+                    "repository": selection_receipt["repository"],
+                    "pull_request": selection_receipt["pull_request"],
+                    "target": selection_receipt["target"],
+                    "base_sha": selection_receipt["base_sha"],
+                    "head_sha": selection_receipt["head_sha"],
+                    "tree_sha": selection_receipt["tree_sha"],
+                    "execution_payload_sha256": args.selection_receipt_sha256,
+                    "selected_logical_count": len(selected_names),
+                    "selected_registration_count": len(selected_tests),
+                    "full_registration_count": len(full_tests),
+                    "verification_duration_seconds": verification_seconds,
+                    "selected_duration_seconds": selected_seconds,
+                    "selected_returncode": selected_result,
+                    "full_duration_seconds": full_seconds,
+                    "full_returncode": full_result,
+                    "full_authoritative": compare_full,
+                    "failure_coverage": failure_coverage(selected_result, full_result),
+                },
+            )
+        return full_result if full_result is not None else selected_result
 
 
 def run(args: argparse.Namespace) -> int:
