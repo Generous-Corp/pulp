@@ -37,18 +37,28 @@ def lock_root() -> Path:
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
-            return Path(local_app_data) / "Pulp" / "build-dir-locks"
-        return Path.home() / "AppData" / "Local" / "Pulp" / "build-dir-locks"
+            return Path(local_app_data) / "Pulp" / "State" / "build-dir-locks"
+        return (
+            Path.home()
+            / "AppData"
+            / "Local"
+            / "Pulp"
+            / "State"
+            / "build-dir-locks"
+        )
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "Pulp" / "build-dir-locks"
+        return (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "Pulp"
+            / "build-dir-locks"
+        )
 
-    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if runtime_dir and Path(runtime_dir).is_absolute():
-        return Path(runtime_dir) / "pulp" / "build-dir-locks"
-    cache_home = os.environ.get("XDG_CACHE_HOME")
-    if cache_home and Path(cache_home).is_absolute():
-        return Path(cache_home) / "pulp" / "build-dir-locks"
-    return Path.home() / ".cache" / "pulp" / "build-dir-locks"
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home and Path(state_home).is_absolute():
+        return Path(state_home) / "pulp" / "build-dir-locks"
+    return Path.home() / ".local" / "state" / "pulp" / "build-dir-locks"
 
 
 def _ensure_lock_root(root: Path) -> None:

@@ -1272,9 +1272,9 @@ full canonical build path is hashed into the filename and independently bound
 inside the locked file; aliases converge, while equally named build directories
 in separate worktrees stay independent. Lock files intentionally remain after
 unlock so queued waiters keep one inode. Tests may set the trusted, absolute
-`PULP_BUILD_DIR_LOCK_ROOT` override; production uses the platform's per-user
-cache/runtime location with owner-only permissions (or the user's inherited
-profile ACL on Windows).
+`PULP_BUILD_DIR_LOCK_ROOT` override; production uses durable per-user
+application state with owner-only permissions (or the user's inherited profile
+ACL on Windows), rather than an OS-purgeable cache or runtime directory.
 
 ## Cache-warming runs on `main`
 
