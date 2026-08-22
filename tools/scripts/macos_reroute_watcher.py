@@ -231,20 +231,33 @@ def _macos_job_targets_cloud(run_id: int) -> bool:
     macOS job hasn't been dispatched yet (resolve-provider still running) —
     we don't know its target yet."""
     try:
-        labels_str = _gh([
+        labels_json = _gh([
             f"repos/{REPO}/actions/runs/{run_id}/jobs",
             "--jq",
-            '[.jobs[] | select(.name | startswith("macOS")) | .labels] '
-            '| flatten | join(",")',
+            '[.jobs[] | select(.name == "macos" or (.name | startswith("macOS"))) '
+            '| .labels]',
         ])
-    except subprocess.SubprocessError:
+    except (subprocess.SubprocessError, json.JSONDecodeError):
         return False
-    if not labels_str:
+    if not labels_json:
         return False
-    if "self-hosted" in labels_str:
-        return False  # already on local; nothing to reroute
+    try:
+        job_labels = json.loads(labels_json)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(job_labels, list):
+        return False
     cloud_markers = ("macos-15", "nscloud-", "namespace-profile-")
-    return any(marker in labels_str for marker in cloud_markers)
+    return any(
+        isinstance(labels, list)
+        and "self-hosted" not in labels
+        and any(
+            isinstance(label, str)
+            and any(marker in label for marker in cloud_markers)
+            for label in labels
+        )
+        for labels in job_labels
+    )
 
 
 def reroute_to_local(pr_number: int) -> bool:

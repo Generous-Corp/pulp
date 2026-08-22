@@ -112,6 +112,17 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+For native pull requests, Shipyard `workflow_dispatch` validation, and merge
+groups, the macOS matrix child publishes the literal required `macos` context
+directly. It must not wait on the combined matrix: Linux and Windows are
+advisory during the macOS-focused product phase and may continue after queue
+admission. The `macos` and `macos-merge-group` bootstrap jobs own the required
+name only for an intentional native skip or a fail-closed provider/classifier
+failure; their inactive names end in `-unused`.
+`tools/scripts/test_required_macos_alias.py` and
+`test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
+whose `needs` contains the combined `build` job.
+
 ### An advisory check that names a main-breaking defect is worse than none
 
 `api-contracts.yml` runs the public-header doc-contract pass on its own
@@ -686,28 +697,31 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
-## A red `macos` or `linux` alias does not mean tests failed
+## A red advisory alias does not necessarily mean tests failed
 
-`macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
-The required `macos` alias reports after the build matrix is terminal; it does
-not poll while the native build runs. Alias jobs run no build and produce no
-build output of their own — a `linux` alias log is about 48 lines, and it says
-so outright:
+`linux` and `windows` are **alias checks**: jobs that mirror real advisory
+lanes. Native `macos` is not an alias; the macOS matrix child owns that required
+context directly so advisory work cannot delay it. The macOS bootstrap jobs run
+only for intentional native skips or fail-closed routing/classification errors.
+Alias jobs run no build and produce no build output of their own — a `linux`
+alias log is about 48 lines, and it says so outright:
 
 ```
 Linux leg conclusion: cancelled
 Linux leg cancelled — failing linux alias (advisory only; not required)
 ```
 
-**The alias exits non-zero on anything not green — including `CANCELLED`.** So a
-cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
+**An advisory alias exits non-zero on anything not green — including
+`CANCELLED`.** So a cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
 interrupted produces a red alias beside its own `CANCELLED` entry in the same
 check list. Reading that as a second, independent failure is the trap; it is one
 event reported twice.
 
-Before treating either alias as a real break, fetch **the underlying leg's job**
-(`Linux (x64) [github-hosted]`, the macOS build job) or the alias's own short
-log. Do not infer from the alias name alone.
+Before treating an advisory alias as a real break, fetch **the underlying leg's
+job** (`Linux (x64) [github-hosted]`, for example) or the alias's own short log.
+Do not infer from the alias name alone. A red direct `macos` context is the real
+required macOS job (except the explicitly named bootstrap path) and must be
+triaged as such.
 
 Two more things that mislead here:
 
@@ -1717,18 +1731,14 @@ bisectable.
   (or run from a context with no `GIT_DIR`), and never assume `-C` alone
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
-- The required `macos` aliases in `.github/workflows/build.yml` depend on the
-  terminal build matrix, then query only the current run's paginated latest jobs
-  for exactly one macOS matrix leg. Only conclusion `success` is green;
-  missing, duplicate, null, skipped, cancelled, failed, and unknown outcomes
-  fail closed. Keep three short retries for jobs-API transport failures only;
-  malformed JSON and invalid cardinality are verdict failures, not reasons to
-  resume build polling. PR/dispatch runs retain the combined matrix, so advisory
-  legs may delay the reporter but `needs.build.result` must never determine it.
-  The merge-group report uses the short-lived preamble pool and preserves the
-  stable required context name. These two reporters intentionally use bare
-  `gh api --paginate` and decode the concatenated JSON object stream; do not add
-  `--slurp`, because older preamble images reject that newer flag.
+- The required `macos` context in `.github/workflows/build.yml` is published
+  directly by the native macOS matrix child for pull requests, Shipyard manual
+  dispatches, and merge groups. It must not depend on the combined build matrix
+  or a jobs-API reporter: advisory Linux and Windows work may continue without
+  delaying queue admission. Event-specific bootstrap jobs own `macos` only for
+  an intentional native skip or a fail-closed provider/classifier failure;
+  inactive bootstraps use an `-unused` name so they cannot collide with or
+  satisfy branch protection.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
@@ -3685,12 +3695,13 @@ have passed; one comparing the exact expected string caught it immediately.
 Config-language defects are usually invisible as defects, which is exactly when
 a stricter-than-necessary assertion earns its keep.
 
-**Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
-is indistinguishable from a real test failure at PR level — so read the leg, not
-just the alias. And when a remedy stops working, re-verify the remedy still does
-what it did when you first observed it, rather than adding conditions around it:
-"re-running re-routes" was observed twice, generalised, then applied through
-`--failed` where it silently does not hold.
+**Diagnostic order.** A cancelled native macOS leg fails the direct required
+`macos` context and is indistinguishable from a real test failure at PR level,
+so read the job log and conclusion. A red bootstrap context instead means
+routing or classification failed closed. And when a remedy stops working,
+re-verify the remedy still does what it did when you first observed it, rather
+than adding conditions around it: "re-running re-routes" was observed twice,
+generalised, then applied through `--failed` where it silently does not hold.
 
 **The authority for "why did CI route this way" is the workflow file, not the
 API.** The API shows outcomes; the workflow states the rule.
@@ -3930,17 +3941,17 @@ enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
 serializing the audio tests among themselves still leaves unrelated tests
 starving the RT thread.)
 
-The required `macos` alias deliberately needs the complete combined build
-matrix on pull-request and manual-dispatch runs. That may delay the reporter
-behind advisory Linux/Windows work, but it removes the false-timeout race where
-a queued macOS leg had not started before a fixed polling window expired. The
-reporter queries the terminal run and derives its verdict only from exactly one
-macOS job's conclusion; advisory failures must never contaminate it through
-`needs.build.result`. Merge groups retain a macOS-only matrix, so their dedicated
-alias reports promptly after the owned leg completes.
+The required `macos` context comes directly from the native macOS matrix child
+on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore
+becomes terminal as soon as the owned macOS leg does, without waiting for the
+combined matrix or polling the jobs API. A small event-specific bootstrap owns
+the same name only when routing/classification fails closed or classification
+proves the native build is unnecessary; inactive bootstrap jobs use an
+`-unused` name so they cannot satisfy or collide with the required context.
+Advisory Linux/Windows work may continue without delaying queue admission.
 
-**Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
-alias reports its failure promptly, a *flaky* failure on the required leg wedges
+**Flaky required-leg wedge + the rerun lock (recovery).** Even when the direct
+`macos` job reports its failure promptly, a *flaky* failure on the required leg wedges
 auto-merge: the PR sits `mergeStateStatus: BLOCKED`, and `ghapp run rerun <run>
 --failed` refuses with **"cannot be rerun; This workflow is already running"**
 for as long as an advisory leg (Windows x64 / Coverage) keeps the run
@@ -5055,8 +5066,9 @@ Then proceed with the `ship` workflow below.
 macOS uses the self-hosted fast-gate runner class declared in
 `tools/scripts/runner_topology.json`. Namespace is not a
 default PR-validation backend after the 2026-05-20 cost cutover. The
-required branch-protection check on `main` is the `macos` alias job —
-that name MUST NOT be renamed.
+required branch-protection check on `main` is the literal `macos` context
+published by the native matrix child (or the event-specific bootstrap when the
+native child is absent). That name MUST NOT be renamed.
 
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
@@ -5080,7 +5092,7 @@ have the bundled Skia archive available.
 
 Before pushing ANY branch whose CI touches a macOS leg
 (`Build and Test`, `Sanitizer Tests`, `Coverage`, `Visual Harness`,
-`Release-path PR gate`, `macos-15`, the `macos` alias, etc.):
+`Release-path PR gate`, `macos-15`, the direct `macos` context, etc.):
 
 ```bash
 git fetch origin main
@@ -5126,8 +5138,10 @@ That keeps your SHA + queue position, only re-fires the failed legs.
 
 ### Display-name vs runner-name gotcha
 
-The macOS matrix job display name includes a provider suffix, but branch
-protection gates on the stable `macos` alias job. Do NOT rename the alias
+For PR, Shipyard manual-dispatch, and merge-group native work, the macOS matrix
+job itself has the literal display name `macos`; branch protection gates on
+that direct context. Bootstrap jobs use the same name only when the native job
+is absent and an `-unused` name otherwise. Do not rename either ownership path
 while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
