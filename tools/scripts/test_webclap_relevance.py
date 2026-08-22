@@ -63,6 +63,17 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn('"${CHANGED_FILE_COUNT:-0}" -ge 3000', workflow)
         self.assertIn("PR-controlled Python never", workflow)
         self.assertNotIn("          GH_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn(
+            'git show "$BASE_SHA:tools/scripts/generated_version_bump_check.py"',
+            workflow,
+        )
+        self.assertIn('--event-path "${{ github.event_path }}"', workflow)
+        self.assertIn("WebCLAP proof skipped: exact generated version-bump", workflow)
+        self.assertLess(
+            workflow.index('GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check"'),
+            workflow.index("pulls/${PR_NUMBER}/files"),
+            "the token-bearing verifier must execute only protected-base code",
+        )
         self.assertIn('*) exit "$relevance_status"', workflow)
         self.assertEqual(
             workflow.count("steps.relevance.outputs.run == 'true'"),

@@ -186,6 +186,25 @@ class WorkflowWiringTests(unittest.TestCase):
             "github.event.pull_request.base.sha || 'origin/main'", self.text
         )
 
+    def test_generated_bump_override_executes_only_protected_base_code(self) -> None:
+        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
+            "\n  build:\n", 1
+        )[0]
+        self.assertIn(
+            'git show "$base:tools/scripts/generated_version_bump_check.py"',
+            classify_job,
+        )
+        self.assertIn(
+            'GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check"',
+            classify_job,
+        )
+        self.assertNotIn("          GH_TOKEN: ${{ github.token }}", classify_job)
+        self.assertIn("native_build_required=false", classify_job)
+        self.assertIn(
+            'echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"',
+            classify_job,
+        )
+
     def test_windows_functional_matrix_uses_the_stable_runtime_image(self) -> None:
         self.assertIn(
             '"--github-hosted-label", "windows-2022"', self.text

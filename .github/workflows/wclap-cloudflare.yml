@@ -72,7 +72,29 @@ jobs:
           set -euo pipefail
           changed_files="$(mktemp)"
           trusted_classifier="$(mktemp)"
-          trap 'rm -f "$changed_files" "$trusted_classifier"' EXIT
+          trusted_bump_check="$(mktemp)"
+          trap 'rm -f "$changed_files" "$trusted_classifier" "$trusted_bump_check"' EXIT
+
+          # A version-only generated bump changes top-level CMake metadata, so
+          # the ordinary path classifier correctly considers it WebCLAP-
+          # relevant. First ask the PROTECTED BASE's shared verifier whether
+          # this is the release bot's exact signed/reproducible transaction.
+          # Any lookup, topology, provenance, or regeneration ambiguity falls
+          # through to the existing full relevance decision.
+          if [[ "${BASE_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]] \
+              && git fetch --no-tags --depth=1 origin "$BASE_SHA" \
+              && git show "$BASE_SHA:tools/scripts/generated_version_bump_check.py" \
+                >"$trusted_bump_check" 2>/dev/null \
+              && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+                --repo . \
+                --event-name "${{ github.event_name }}" \
+                --event-path "${{ github.event_path }}" \
+                --base "$BASE_SHA" \
+                --head "${{ github.sha }}"; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "WebCLAP proof skipped: exact generated version-bump transaction."
+            exit 0
+          fi
 
           case "${{ github.event_name }}" in
             pull_request)
