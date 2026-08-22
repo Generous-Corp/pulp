@@ -142,10 +142,12 @@ struct ProbeModule : rack::engine::Module {
             std::fclose(f);
         }
         if (FILE* f = std::fopen((base + ".json").c_str(), "w")) {
+            const std::size_t frame_count =
+                filled / static_cast<std::size_t>(kInputs);
             std::fprintf(f,
                          "{\"sampleRate\": %s, \"channels\": %d, "
                          "\"frames\": %zu}\n",
-                         num(rate).c_str(), kInputs, filled / kInputs);
+                         num(rate).c_str(), kInputs, frame_count);
             std::fclose(f);
         }
         INFO("forge: probe wrote %zu frames at %s Hz",
