@@ -29,10 +29,169 @@ INVENTORY_DOMAIN = b"pulp-ctest-inventory-v1\0"
 DIGEST_DOMAIN = b"pulp-changed-surface-contract-v1\0"
 EXCLUDED_NAME_REGEX = "AudioWorkgroup"
 EXCLUDED_LABEL_REGEX = "validation|slow|performance|bench|quality-lab"
+NOT_BUILT_PLACEHOLDER = re.compile(
+    r"^(?P<target>[A-Za-z0-9_.+:-]+)_NOT_BUILT-(?P<suffix>[0-9a-f]{7,64})$"
+)
 
 
 class InventoryError(ValueError):
     """The inventory cannot safely authorize bounded selection."""
+
+
+def split_proven_unbuilt_placeholders(
+    tests: Iterable[dict[str, Any]], build_dir: Path
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate only provenance-backed commandless CTest registrations.
+
+    ``catch_discover_tests`` registers a commandless ``*_NOT_BUILT-*`` test
+    until its producer target has run.  A name match alone is not authority:
+    require CTest's exact one-property shape and the exact generated include
+    file in that working directory.  Every other missing or malformed command
+    remains an inventory error.
+    """
+
+    build_root = build_dir.resolve(strict=True)
+    ready: list[dict[str, Any]] = []
+    placeholders: list[dict[str, Any]] = []
+    cmake_artifacts: set[Path] | None = None
+    ctest_files: list[str] | None = None
+    for test in tests:
+        command = test.get("command")
+        if (
+            isinstance(command, list)
+            and command
+            and all(isinstance(token, str) for token in command)
+        ):
+            ready.append(test)
+            continue
+        name = test.get("name")
+        match = (
+            NOT_BUILT_PLACEHOLDER.fullmatch(name) if isinstance(name, str) else None
+        )
+        properties = test.get("properties")
+        if match is not None and set(test) == {"name", "properties"}:
+            if not isinstance(properties, list) or len(properties) != 1:
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                )
+            working_property = properties[0]
+            if (
+                not isinstance(working_property, dict)
+                or set(working_property) != {"name", "value"}
+                or working_property.get("name") != "WORKING_DIRECTORY"
+                or not isinstance(working_property.get("value"), str)
+            ):
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                )
+            try:
+                working_dir = Path(working_property["value"]).resolve(strict=True)
+            except OSError as error:
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                ) from error
+            if not working_dir.is_relative_to(build_root):
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                )
+            stem = f"{match.group('target')}-{match.group('suffix')}"
+            include_path = working_dir / f"{stem}_include.cmake"
+            tests_path = working_dir / f"{stem}_tests.cmake"
+            expected = (
+                f'if(EXISTS "{tests_path}")\n'
+                f'  include("{tests_path}")\n'
+                "else()\n"
+                f"  add_test({name} {name})\n"
+                "endif()\n"
+            )
+            try:
+                include_text = include_path.read_text(encoding="utf-8", errors="strict")
+            except OSError as error:
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                ) from error
+            if tests_path.exists() or include_text != expected:
+                raise InventoryError(
+                    f"CTest registration {name!r} has no unambiguous command"
+                )
+            placeholders.append(test)
+            continue
+
+        # Plain add_test registrations also lose their command in CTest's JSON
+        # until the CMake-produced executable exists.  Prove this second shape
+        # against both generated CTestTestfile syntax and the exact codemodel.
+        if (
+            not isinstance(name, str)
+            or set(test) != {"backtrace", "name", "properties"}
+            or not isinstance(test.get("backtrace"), int)
+        ):
+            raise InventoryError(
+                f"CTest registration {name!r} has no unambiguous command"
+            )
+        property_records = _property_records(test)
+        working = [
+            record["value"]
+            for record in property_records
+            if record["name"] == "WORKING_DIRECTORY"
+        ]
+        if len(working) != 1 or not isinstance(working[0], str):
+            raise InventoryError(
+                f"CTest registration {name!r} has no unambiguous command"
+            )
+        if cmake_artifacts is None:
+            cmake_artifacts = _cmake_artifact_paths(build_root)
+            ctest_files = [
+                path.read_text(encoding="utf-8", errors="strict")
+                for path in build_root.rglob("CTestTestfile.cmake")
+            ]
+        pattern = re.compile(
+            r"^add_test\(\[=\["
+            + re.escape(name)
+            + r"\]=\] \"(?P<executable>[^\"\n]+)\"(?: .*)?\)$",
+            re.MULTILINE,
+        )
+        matches = [
+            executable
+            for contents in ctest_files or []
+            for executable in pattern.findall(contents)
+        ]
+        if len(matches) != 1:
+            raise InventoryError(f"CTest registration {name!r} has no unambiguous command")
+        executable = Path(matches[0]).resolve()
+        if executable.exists() or executable not in cmake_artifacts:
+            raise InventoryError(f"CTest registration {name!r} has no unambiguous command")
+        placeholders.append(test)
+    return ready, placeholders
+
+
+def _cmake_artifact_paths(build_root: Path) -> set[Path]:
+    reply = build_root / ".cmake" / "api" / "v1" / "reply"
+    indexes = sorted(reply.glob("index-*.json"))
+    if len(indexes) != 1:
+        raise InventoryError("CMake codemodel cannot prove commandless registrations")
+    try:
+        index = json.loads(indexes[0].read_text(encoding="utf-8"))
+        codemodel = json.loads(
+            (reply / index["reply"]["codemodel-v2"]["jsonFile"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        configurations = codemodel["configurations"]
+        if not isinstance(configurations, list) or len(configurations) != 1:
+            raise KeyError("configurations")
+        references = configurations[0]["targets"]
+        artifacts: set[Path] = set()
+        for reference in references:
+            target = json.loads(
+                (reply / reference["jsonFile"]).read_text(encoding="utf-8")
+            )
+            for artifact in target.get("artifacts", []):
+                artifacts.add((build_root / artifact["path"]).resolve())
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise InventoryError(
+            "CMake codemodel cannot prove commandless registrations"
+        ) from error
+    return artifacts
 
 
 def _unicode_key(value: str) -> bytes:

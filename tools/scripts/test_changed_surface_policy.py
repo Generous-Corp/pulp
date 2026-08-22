@@ -9,6 +9,7 @@ import fnmatch
 import json
 import os
 import sys
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -260,6 +261,92 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             inventory.inventory_groups(
                 [fixture("relative", "bin/test")], self.source_root, self.build_dir
             )
+
+    def test_only_exact_generated_not_built_placeholders_are_separable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            name = "pulp-test-example_NOT_BUILT-b12d07c"
+            tests_path = build / "pulp-test-example-b12d07c_tests.cmake"
+            include_path = build / "pulp-test-example-b12d07c_include.cmake"
+            include_path.write_text(
+                f'if(EXISTS "{tests_path}")\n'
+                f'  include("{tests_path}")\n'
+                "else()\n"
+                f"  add_test({name} {name})\n"
+                "endif()\n",
+                encoding="utf-8",
+            )
+            placeholder = {
+                "name": name,
+                "properties": [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}
+                ],
+            }
+            ready, placeholders = inventory.split_proven_unbuilt_placeholders(
+                [fixture("ready", str(build / "ready")), placeholder], build
+            )
+            self.assertEqual([test["name"] for test in ready], ["ready"])
+            self.assertEqual(placeholders, [placeholder])
+
+            include_path.write_text("# attacker-controlled lookalike\n", encoding="utf-8")
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                inventory.split_proven_unbuilt_placeholders([placeholder], build)
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                inventory.split_proven_unbuilt_placeholders(
+                    [{"name": name, "properties": []}], build
+                )
+
+    def test_commandless_direct_test_requires_ctestfile_and_codemodel_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            reply = build / ".cmake" / "api" / "v1" / "reply"
+            reply.mkdir(parents=True)
+            (reply / "index-exact.json").write_text(
+                json.dumps(
+                    {"reply": {"codemodel-v2": {"jsonFile": "codemodel.json"}}}
+                ),
+                encoding="utf-8",
+            )
+            (reply / "codemodel.json").write_text(
+                json.dumps(
+                    {
+                        "configurations": [
+                            {"targets": [{"jsonFile": "target.json"}]}
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reply / "target.json").write_text(
+                json.dumps(
+                    {"name": "pulp-test-direct", "artifacts": [{"path": "direct"}]}
+                ),
+                encoding="utf-8",
+            )
+            (build / "CTestTestfile.cmake").write_text(
+                f'add_test([=[direct-test]=] "{build / "direct"}")\n',
+                encoding="utf-8",
+            )
+            placeholder = {
+                "backtrace": 1,
+                "name": "direct-test",
+                "properties": [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}
+                ],
+            }
+            ready, placeholders = inventory.split_proven_unbuilt_placeholders(
+                [placeholder], build
+            )
+            self.assertEqual(ready, [])
+            self.assertEqual(placeholders, [placeholder])
+
+            forged = copy.deepcopy(placeholder)
+            forged["name"] = "other-test"
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                inventory.split_proven_unbuilt_placeholders([forged], build)
+            del placeholder["backtrace"]
+            with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
+                inventory.split_proven_unbuilt_placeholders([placeholder], build)
 
     def test_property_order_is_not_registration_identity(self) -> None:
         properties = [
