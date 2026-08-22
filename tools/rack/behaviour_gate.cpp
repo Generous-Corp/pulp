@@ -152,7 +152,7 @@ float stimulus(const char* role, int i, float quiet_v) {
 
 /// Drive the module for a while and record every output.
 std::vector<Trace> run(rack::engine::Module& m, float in_v, bool clock_inputs,
-                       int muted_input = -1) {
+                       int muted_input = -1, bool connect_inputs = true) {
     rack::engine::Module::ProcessArgs args;
     args.sampleRate = kSr;
     args.sampleTime = 1.f / kSr;
@@ -161,6 +161,10 @@ std::vector<Trace> run(rack::engine::Module& m, float in_v, bool clock_inputs,
     std::vector<Trace> st(m.getNumOutputs());
     for (int i = 0; i < kWarm + kRun; ++i) {
         for (int p = 0; p < m.getNumInputs(); ++p) {
+            if (!connect_inputs) {
+                m.inputs[p].channels = 0;
+                continue;
+            }
             const float v = p == muted_input ? 0.f : clock_inputs
                           ? stimulus(forge_input_role(p), i, in_v) : in_v;
             // Assign `channels` directly. Port::setChannels() returns early
@@ -224,7 +228,7 @@ int main() {
         // controls on self-running generators get a fair measurement.
         rack::engine::Module* quiet_baseline = forge_make_module();
         reset_params(*quiet_baseline);
-        auto quiet_base = run(*quiet_baseline, 0.f, false);
+        auto quiet_base = run(*quiet_baseline, 0.f, false, -1, false);
         delete quiet_baseline;
         delete m;
         if (!measurable)
@@ -246,7 +250,7 @@ int main() {
             reset_params(*quiet_probe);
             quiet_probe->params[p].setValue(
                 (std::fabs(hi - dv) > std::fabs(dv - lo)) ? hi : lo);
-            auto quiet_moved = run(*quiet_probe, 0.f, false);
+            auto quiet_moved = run(*quiet_probe, 0.f, false, -1, false);
 
             // Sample-wise, so a change of frequency, phase or timing counts
             // as an effect just as much as a change of level.

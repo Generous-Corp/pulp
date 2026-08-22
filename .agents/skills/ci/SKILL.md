@@ -4398,6 +4398,17 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+When a change deliberately adds or removes CTest registrations, refresh the
+inventory contract in the same commit: update
+`.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
+count comment in `.shipyard/config.toml`, the pinned-count assertions in
+`tools/scripts/test_changed_surface_policy.py`, and the current inventory
+counts in `docs/guides/local-ci.md`. Derive the digest from the configured
+build's canonical inventory, then run
+`python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
+Otherwise the full suite can finish almost entirely green and fail only at the
+inventory self-test, forcing a needless second admission cycle.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
