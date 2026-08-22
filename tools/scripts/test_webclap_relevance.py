@@ -68,6 +68,16 @@ class WebclapRelevanceTests(unittest.TestCase):
             workflow,
         )
         self.assertIn('trusted_verifier_base="${BASE_SHA:-}"', workflow)
+        self.assertNotIn("mapfile", workflow)
+        self.assertEqual(
+            workflow.count("while IFS= read -r parent; do"),
+            3,
+            "the macOS-routed classifier must collect each parent list with Bash 3 syntax",
+        )
+        for name in ("group", "candidate", "cumulative"):
+            self.assertIn(f'{name}_parent_count=0', workflow)
+            self.assertIn(f'[ "${name}_parent_count" -eq ', workflow)
+            self.assertNotIn(f'${{#{name}_parents[@]}}', workflow)
         self.assertIn(
             '[ "${group_parents[0]}" = "${BASE_SHA:-}" ]', workflow
         )

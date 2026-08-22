@@ -197,6 +197,16 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn('trusted_verifier_base="$PR_BASE_SHA"', classify_job)
         self.assertIn('[ "$base" = "$PR_BASE_SHA" ]', classify_job)
         self.assertIn('[ "$base" = "$MERGE_GROUP_BASE_SHA" ]', classify_job)
+        self.assertNotIn("mapfile", classify_job)
+        self.assertEqual(
+            classify_job.count("while IFS= read -r parent; do"),
+            3,
+            "the macOS-routed classifier must collect each parent list with Bash 3 syntax",
+        )
+        for name in ("group", "candidate", "cumulative"):
+            self.assertIn(f'{name}_parent_count=0', classify_job)
+            self.assertIn(f'[ "${name}_parent_count" -eq ', classify_job)
+            self.assertNotIn(f'${{#{name}_parents[@]}}', classify_job)
         self.assertIn('[ "${group_parents[0]}" = "$base" ]', classify_job)
         self.assertIn(
             '[ "${cumulative_parents[0]}" = "$candidate_base" ]',

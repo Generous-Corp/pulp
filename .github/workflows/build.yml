@@ -837,22 +837,32 @@ jobs:
                 # #7771 shape: [prior cumulative group, candidate], where that
                 # prior group itself has candidate_base as its first parent.
                 trusted_verifier_base=
-                mapfile -t group_parents < <(
+                group_parents=()
+                group_parent_count=0
+                while IFS= read -r parent; do
+                  group_parents+=("$parent")
+                  group_parent_count=$((group_parent_count + 1))
+                done < <(
                   git cat-file -p "$EVENT_HEAD_SHA" 2>/dev/null \
                     | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
                 )
                 if [ "$base" = "$MERGE_GROUP_BASE_SHA" ] \
-                    && [ "${#group_parents[@]}" -eq 2 ] \
+                    && [ "$group_parent_count" -eq 2 ] \
                     && [ "${group_parents[0]}" = "$base" ]; then
                   candidate="${group_parents[1]}"
                   git cat-file -e "$candidate^{commit}" 2>/dev/null \
                     || git fetch --no-tags --depth=1 origin "$candidate" \
                     || true
-                  mapfile -t candidate_parents < <(
+                  candidate_parents=()
+                  candidate_parent_count=0
+                  while IFS= read -r parent; do
+                    candidate_parents+=("$parent")
+                    candidate_parent_count=$((candidate_parent_count + 1))
+                  done < <(
                     git cat-file -p "$candidate" 2>/dev/null \
                       | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
                   )
-                  if [ "${#candidate_parents[@]}" -eq 1 ]; then
+                  if [ "$candidate_parent_count" -eq 1 ]; then
                     candidate_base="${candidate_parents[0]}"
                     git cat-file -e "$candidate_base^{commit}" 2>/dev/null \
                       || git fetch --no-tags --depth=1 origin "$candidate_base" \
@@ -860,11 +870,16 @@ jobs:
                     if [ "$candidate_base" = "$base" ]; then
                       trusted_verifier_base="$candidate_base"
                     else
-                      mapfile -t cumulative_parents < <(
+                      cumulative_parents=()
+                      cumulative_parent_count=0
+                      while IFS= read -r parent; do
+                        cumulative_parents+=("$parent")
+                        cumulative_parent_count=$((cumulative_parent_count + 1))
+                      done < <(
                         git cat-file -p "$base" 2>/dev/null \
                           | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
                       )
-                      if [ "${#cumulative_parents[@]}" -eq 2 ] \
+                      if [ "$cumulative_parent_count" -eq 2 ] \
                           && [ "${cumulative_parents[0]}" = "$candidate_base" ]; then
                         trusted_verifier_base="$candidate_base"
                       fi
