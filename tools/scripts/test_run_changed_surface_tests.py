@@ -316,6 +316,55 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             target="mac",
         )
 
+    def test_shadow_defers_only_proven_unbuilt_inventory_until_full_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "source"
+            build = root / "build"
+            source.mkdir()
+            build.mkdir()
+            name = "pulp-test-later_NOT_BUILT-b12d07c"
+            tests_path = build / "pulp-test-later-b12d07c_tests.cmake"
+            (build / "pulp-test-later-b12d07c_include.cmake").write_text(
+                f'if(EXISTS "{tests_path}")\n'
+                f'  include("{tests_path}")\n'
+                "else()\n"
+                f"  add_test({name} {name})\n"
+                "endif()\n",
+                encoding="utf-8",
+            )
+            smoke = fixture("smoke", str(build / "smoke"))
+            core = fixture("core", str(build / "core"))
+            neighbor = fixture("neighbor", str(build / "neighbor"))
+            placeholder = {
+                "name": name,
+                "properties": [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}
+                ],
+            }
+            self.assertEqual(
+                runner.validate_deferred_shadow_selection(
+                    selected_names=["smoke", "core"],
+                    full_tests=[smoke, core, neighbor, placeholder],
+                    selected_tests=[smoke, core],
+                    source_root=source,
+                    build_dir=build,
+                    policy=policy(),
+                ),
+                1,
+            )
+            with self.assertRaisesRegex(
+                runner.SelectionExecutionError, "differs from the reviewed"
+            ):
+                runner.validate_deferred_shadow_selection(
+                    selected_names=["smoke", "core"],
+                    full_tests=[smoke, core, neighbor, placeholder],
+                    selected_tests=[smoke],
+                    source_root=source,
+                    build_dir=build,
+                    policy=policy(),
+                )
+
     def test_missing_baseline_undeclared_name_and_expansion_mismatch_refuse(self) -> None:
         source = Path("/repo")
         build = Path("/repo/build")
