@@ -97,6 +97,21 @@ def toml_json_value(table: str, key: str):
 def shipyard_ctest_contract_errors(command: str) -> list[str]:
     argv = shlex.split(command)
     errors = []
+    lock_prefix = ["python3", "tools/ci/build_dir_lock.py"]
+    if argv[:2] == lock_prefix:
+        try:
+            separator = argv.index("--", 2)
+        except ValueError:
+            errors.append("build-directory lock wrapper has no command separator")
+            separator = len(argv)
+        lock_args = argv[2:separator]
+        if (
+            len(lock_args) != 2
+            or lock_args[0] != "--build-dir"
+            or not lock_args[1]
+        ):
+            errors.append("build-directory lock wrapper has an invalid build directory")
+        argv = argv[separator + 1 :]
     if argv[:2] != ["tools/ci/governed-build.sh", "ctest"]:
         errors.append("CTest is not routed through the host-share governor")
     if any(
@@ -297,6 +312,18 @@ class ShipyardTopologyContractTests(unittest.TestCase):
         default = toml_table(config, "validation.default")
         command = toml_json_value(default, "test")
 
+        self.assertEqual(
+            shlex.split(command)[:7],
+            [
+                "python3",
+                "tools/ci/build_dir_lock.py",
+                "--build-dir",
+                "build",
+                "--",
+                "tools/ci/governed-build.sh",
+                "ctest",
+            ],
+        )
         self.assertEqual(shipyard_ctest_contract_errors(command), [])
         for preserved in (
             "--repeat until-pass:2",
@@ -324,9 +351,25 @@ class ShipyardTopologyContractTests(unittest.TestCase):
             "tools/ci/governed-build.sh ctest --test-dir build-jobs",
             "tools/ci/governed-build.sh ctest --test-dir build "
             '--label-exclude "slow|parallel"',
+            "python3 tools/ci/build_dir_lock.py --build-dir build -- "
+            "tools/ci/governed-build.sh ctest --test-dir build",
         ):
             with self.subTest(command=command):
                 self.assertEqual(shipyard_ctest_contract_errors(command), [])
+
+    def test_shipyard_ctest_contract_requires_lock_outside_the_governor(self) -> None:
+        for command in (
+            "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest "
+            "--test-dir build",
+            "python3 tools/ci/build_dir_lock.py -- tools/ci/governed-build.sh "
+            "ctest --test-dir build",
+            "python3 tools/ci/build_dir_lock.py --build-dir build "
+            "tools/ci/governed-build.sh ctest --test-dir build",
+            "tools/ci/governed-build.sh python3 tools/ci/build_dir_lock.py "
+            "--build-dir build -- ctest --test-dir build",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(shipyard_ctest_contract_errors(command))
 
     def test_shipyard_ctest_contract_rejects_every_explicit_parallel_form(self) -> None:
         suffix = "--test-dir build --output-on-failure"
