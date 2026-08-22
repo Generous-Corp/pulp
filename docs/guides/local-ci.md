@@ -1210,20 +1210,30 @@ To opt out for an individual run, pass `--pipeline default` explicitly.
 
 ### Changed-surface risk selection (controlled canary)
 
-The required macOS target also declares a schema-v2
+The required macOS target also declares a schema-v3
 `changed_surface_selection` policy. It classifies an exact diff into mandatory,
-affected, extended, or full validation and records the selected test set. A
-protected-base execution template may replace only the POSIX local `test`
-stage, but repository config cannot enable it. Shipyard reads the separate
+affected, extended, or full validation and records both the selected test set
+and its reviewed CMake producer targets. A protected-base execution template
+may atomically replace the POSIX local `build` and `test` stages, but repository
+config cannot enable it. Shipyard reads the separate
 machine-global `changed_surface_execution.mode` switch, whose absent/default
-value is `off`. The controlled `shadow_compare` mode runs selected tests first,
-then the unchanged full CTest corpus, returns the full corpus status, and emits
-an immutable receipt with verification time, selected/full wall time,
-registration counts, and failure-coverage classification. Thus the full suite
-remains merge-authoritative throughout the canary.
+value is `off`. The controlled `shadow_compare` mode builds only the declared
+producer targets and runs selected tests first, then runs the unchanged full
+build and CTest corpus, returns the full path's status, and emits an immutable
+receipt with separate selected/full build and test wall times, registration
+counts, and failure-coverage classification. Thus the full path remains
+merge-authoritative throughout the canary.
 
-Each schema-v2 result also binds the policy, selection, validation, workflow,
-and literal-test digests plus a durable timestamp, so a later session can
+The full build follows the selected-target build in the same locked warm tree,
+so its direct timer is explicitly recorded as the **incremental remainder**, not
+as an independent full-build baseline. The receipt's estimated total full-build
+duration is the selected-build duration plus that incremental remainder. Use
+that derived total for shadow speed comparisons; using the remainder alone
+would overstate the selected-build savings.
+
+Each schema-v3 selection produces an execution-receipt schema that also binds
+the policy, selection, validation, workflow, literal-test, and literal-build-
+target digests plus a durable timestamp, so a later session can
 aggregate trials without reconstructing the originating agent. A receipt is
 `graduation_eligible` only when shadow comparison ran and both suites passed.
 `missed_full_failure` and `selected_only_failure` are explicit
@@ -1264,7 +1274,7 @@ selected receipts agree with full validation, plus a separately reviewed
 policy change. Tests remain in the repository and continue to run in full for
 unknown/high-risk work, main, nightly, release, and audit surfaces.
 
-Ordinary and changed-surface test stages serialize access to the same canonical
+Ordinary and changed-surface build-and-test stages serialize access to the same canonical
 build directory through `tools/ci/build_dir_lock.py`. Its persistent lock file
 lives in per-user host state, not beside `build/`, so acquiring the lock cannot
 dirty the exact source checkout that changed-surface execution verifies. The

@@ -486,12 +486,19 @@ guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
 macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
 and asset metadata should move together.
 
-The current v0.100.0 floor also hardens unattended fleet updates under stripped
-non-login SSH environments. Machine-global command auth and executable paths
-are explicit, exact-tag downloads are staged and verified before replacement,
-and a daemon refresh occurs only after the installed version is proven. Keep
-the workflow `SHIPYARD_VERSION` and `tools/shipyard.toml` in lockstep; the pin
-gate rejects drift.
+Pulp tracks the latest verified public Shipyard release by default while still
+recording an immutable exact tag. Automation should propose the newest release;
+hold an older pin only for a documented incompatibility with an owner and exit
+condition. Never replace the tag with a moving branch or `latest` URL: exact
+pins keep checkouts reproducible and let the fleet prove binary parity.
+
+The current v0.110.0 pin retains hardened unattended fleet updates under
+stripped non-login SSH environments and adds schema-v3 selected build-and-test
+transactions. Machine-global command auth and executable paths are explicit,
+exact-tag downloads are staged and verified before replacement, and a daemon
+refresh occurs only after the installed version is proven. Keep the workflow
+`SHIPYARD_VERSION` and `tools/shipyard.toml` in lockstep; the pin gate rejects
+drift.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 

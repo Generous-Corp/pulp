@@ -183,7 +183,7 @@ test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --tes
 # targets inherit the default recipe but register a different platform-gated
 # CTest inventory, so they must not validate against the macOS cardinality.
 [validation.default.overrides.macos]
-configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
+configure = "tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
@@ -315,7 +315,7 @@ timeout_secs = 14400
 # automatic PR-validation failover while the repo variables are unset.
 
 [targets.mac.changed_surface_selection]
-schema_version = 2
+schema_version = 3
 # Exact current-main registration count. CTest permits duplicate display names,
 # so this is deliberately not the unique-name count. The canonical multiset
 # contract in changed-surface-inventory.json pins all 20,727 registrations.
@@ -332,6 +332,7 @@ baseline_tests = [
   "cli-help",
   "changed-surface-policy-selftest",
 ]
+baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
 baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
 
 # Known global build, toolchain, ABI, security, provenance, packaging, and
@@ -398,6 +399,7 @@ tests = [
   "cli-dsp-help-flag",
   "cli-dsp-unknown-subcommand",
 ]
+build_targets = ["pulp-cli", "pulp-test-forge-catalog-index"]
 supported_build_types = ["debug", "release"]
 risk_class = "medium"
 extended_tests = [
@@ -412,7 +414,7 @@ extended_tests = [
 # the ordinary full CTest corpus remains the merge-authoritative result.
 [targets.mac.changed_surface_selection.execution]
 mode = "authoritative"
-stage = "test"
+stage = "build_and_test"
 command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receipt-b64 {selection_receipt_b64} --selection-receipt-sha256 {selection_receipt_digest} --build-dir build --target mac"
 
 [cloud]
