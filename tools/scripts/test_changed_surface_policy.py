@@ -82,20 +82,22 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.source_root = Path("/repo")
         self.build_dir = Path("/repo/build")
 
-    def test_schema_v2_is_shadow_safe_and_literal(self) -> None:
-        self.assertEqual(self.policy["schema_version"], 2)
+    def test_schema_v3_is_shadow_safe_and_binds_literal_build_targets(self) -> None:
+        self.assertEqual(self.policy["schema_version"], 3)
         self.assertEqual(self.policy["build_type"], "debug")
         self.assertGreater(self.policy["full_test_count"], 20_000)
         self.assertEqual(
             self.policy["full_test_count"], self.contract["registration_count"]
         )
         self.assertTrue(self.policy["baseline_tests"])
+        self.assertTrue(self.policy["baseline_build_targets"])
         self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
         self.assertTrue(self.policy["families"])
         self.assertNotIn("**", self.policy.get("baseline_only_paths", []))
         for family in self.policy["families"]:
             self.assertIn(family["risk_class"], {"low", "medium", "high"})
             self.assertTrue(family["tests"])
+            self.assertTrue(family["build_targets"])
             self.assertTrue(family["paths"])
             if family["risk_class"] == "medium":
                 self.assertTrue(family.get("extended_tests"))
@@ -106,6 +108,7 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertIn("ctest --test-dir build", full_test)
         self.assertNotIn("changed-surface", full_test)
         self.assertNotIn("selected", full_test)
+        self.assertEqual(self.policy["execution"]["stage"], "build_and_test")
         self.assertFalse(
             {"authoritative", "execute", "merge_gate", "shadow_only"}
             & self.policy.keys()

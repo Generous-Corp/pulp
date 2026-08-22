@@ -68,7 +68,7 @@ def parse_literal_selection(payload: bytes) -> list[str]:
 
 def decode_selection_receipt(
     encoded: str, expected_sha256: str
-) -> tuple[list[str], bytes, dict[str, Any]]:
+) -> tuple[list[str], bytes, list[str], bytes, dict[str, Any]]:
     """Authenticate and parse Shipyard's exact-identity selection receipt."""
 
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
@@ -106,9 +106,11 @@ def decode_selection_receipt(
         "selected_tests_digest",
         "selected_tests",
     }
+    if isinstance(receipt, dict) and receipt.get("schema_version") == 2:
+        required.update({"selected_build_targets_digest", "selected_build_targets"})
     if not isinstance(receipt, dict) or set(receipt) != required:
         raise SelectionExecutionError("selection receipt has an unexpected schema")
-    if receipt["schema_version"] != 1:
+    if receipt["schema_version"] not in (1, 2):
         raise SelectionExecutionError("selection receipt schema version is unsupported")
     if not isinstance(receipt["pull_request"], int) or receipt["pull_request"] <= 0:
         raise SelectionExecutionError("selection receipt PR identity is invalid")
@@ -140,7 +142,30 @@ def decode_selection_receipt(
     names = parse_literal_selection(literal_payload)
     if hashlib.sha256(literal_payload).hexdigest() != receipt["selected_tests_digest"]:
         raise SelectionExecutionError("selection receipt literal-test digest mismatch")
-    return names, literal_payload, receipt
+    build_targets: list[str] = []
+    build_target_payload = b""
+    if receipt["schema_version"] == 2:
+        build_targets_value = receipt["selected_build_targets"]
+        if not isinstance(build_targets_value, list) or not all(
+            isinstance(target, str) for target in build_targets_value
+        ):
+            raise SelectionExecutionError("selection receipt build targets are invalid")
+        build_target_payload = "".join(
+            f"{target}\n" for target in build_targets_value
+        ).encode("utf-8")
+        build_targets = parse_literal_selection(build_target_payload)
+        if not build_targets or any(
+            target.startswith("-")
+            or re.fullmatch(r"[A-Za-z0-9_.:+-]+", target) is None
+            for target in build_targets
+        ):
+            raise SelectionExecutionError("selection receipt build target is not canonical")
+        digest = receipt["selected_build_targets_digest"]
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SelectionExecutionError("selection receipt build-target digest is invalid")
+        if hashlib.sha256(build_target_payload).hexdigest() != digest:
+            raise SelectionExecutionError("selection receipt build-target digest mismatch")
+    return names, literal_payload, build_targets, build_target_payload, receipt
 
 
 def git_value(*args: str) -> str:
@@ -341,6 +366,91 @@ def validate_selection(
         )
 
 
+def cmake_artifact_targets(build_dir: Path) -> tuple[set[str], dict[Path, str]]:
+    """Read the configure-produced CMake File API target/artifact projection."""
+
+    reply = build_dir / ".cmake" / "api" / "v1" / "reply"
+    indexes = sorted(reply.glob("index-*.json"))
+    if len(indexes) != 1:
+        raise SelectionExecutionError(
+            f"CMake File API must contain one exact index, found {len(indexes)}"
+        )
+    try:
+        index = json.loads(indexes[0].read_text(encoding="utf-8"))
+        codemodel_name = index["reply"]["codemodel-v2"]["jsonFile"]
+        codemodel = json.loads((reply / codemodel_name).read_text(encoding="utf-8"))
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise SelectionExecutionError(f"CMake File API codemodel is unavailable: {error}") from error
+    configurations = codemodel.get("configurations")
+    if not isinstance(configurations, list) or len(configurations) != 1:
+        raise SelectionExecutionError("CMake File API must contain one build configuration")
+    target_names: set[str] = set()
+    artifacts: dict[Path, str] = {}
+    targets = configurations[0].get("targets")
+    if not isinstance(targets, list):
+        raise SelectionExecutionError("CMake File API codemodel has no target list")
+    for reference in targets:
+        try:
+            target = json.loads((reply / reference["jsonFile"]).read_text(encoding="utf-8"))
+            name = target["name"]
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise SelectionExecutionError(f"CMake File API target is invalid: {error}") from error
+        if not isinstance(name, str) or not name:
+            raise SelectionExecutionError("CMake File API target has no canonical name")
+        target_names.add(name)
+        for artifact in target.get("artifacts", []):
+            path = artifact.get("path") if isinstance(artifact, dict) else None
+            if not isinstance(path, str) or not path:
+                continue
+            resolved = (build_dir / path).resolve()
+            prior = artifacts.get(resolved)
+            if prior is not None and prior != name:
+                raise SelectionExecutionError(
+                    f"CMake artifact {resolved} is produced by multiple targets"
+                )
+            artifacts[resolved] = name
+    return target_names, artifacts
+
+
+def validate_build_target_projection(
+    *,
+    build_dir: Path,
+    selected_tests: list[dict[str, Any]],
+    selected_build_targets: Sequence[str],
+) -> None:
+    """Prove selected native test commands are materialized by selected targets."""
+
+    if not selected_build_targets:
+        raise SelectionExecutionError("selected build execution has no producer targets")
+    target_names, artifacts = cmake_artifact_targets(build_dir)
+    missing_targets = sorted(set(selected_build_targets) - target_names)
+    if missing_targets:
+        raise SelectionExecutionError(
+            f"selected CMake targets are absent from the codemodel: {missing_targets}"
+        )
+    selected = set(selected_build_targets)
+    build_root = build_dir.resolve()
+    for test in selected_tests:
+        command = test.get("command")
+        if not isinstance(command, list) or not command or not isinstance(command[0], str):
+            raise SelectionExecutionError("selected CTest command is malformed")
+        executable = Path(command[0])
+        if not executable.is_absolute():
+            continue
+        resolved = executable.resolve()
+        if not resolved.is_relative_to(build_root):
+            continue
+        producer = artifacts.get(resolved)
+        if producer is None:
+            raise SelectionExecutionError(
+                f"selected native CTest executable has no CMake producer: {resolved}"
+            )
+        if producer not in selected:
+            raise SelectionExecutionError(
+                f"selected native CTest executable requires undeclared target {producer}"
+            )
+
+
 def execution_argv(build_dir: Path, selected_file: Path | None = None) -> list[str]:
     """Return the exact shell-free governed CTest argv."""
 
@@ -361,6 +471,29 @@ def execution_argv(build_dir: Path, selected_file: Path | None = None) -> list[s
     if selected_file is not None:
         command.extend(["--tests-from-file", str(selected_file)])
     return command
+
+
+def build_argv(build_dir: Path, targets: Sequence[str] = ()) -> list[str]:
+    command = [
+        str(REPO_ROOT / "tools" / "ci" / "governed-build.sh"),
+        "cmake",
+        "--build",
+        str(build_dir),
+    ]
+    if targets:
+        command.extend(["--target", *targets])
+    return command
+
+
+def clear_build_sentinel(build_dir: Path) -> int:
+    return subprocess.run(
+        [
+            str(REPO_ROOT / "tools" / "ci" / "build-dir-sentinel.sh"),
+            "clear",
+            str(build_dir),
+        ],
+        shell=False,
+    ).returncode
 
 
 def failure_coverage(selected_result: int, full_result: int | None) -> str:
@@ -423,9 +556,13 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     verification_started = time.monotonic()
     config_path = args.config.resolve(strict=True)
     contract_path = args.inventory_contract.resolve(strict=True)
-    selected_names, selected_payload, selection_receipt = decode_selection_receipt(
-        args.selection_receipt_b64, args.selection_receipt_sha256
-    )
+    (
+        selected_names,
+        selected_payload,
+        selected_build_targets,
+        _selected_build_target_payload,
+        selection_receipt,
+    ) = decode_selection_receipt(args.selection_receipt_b64, args.selection_receipt_sha256)
     validate_receipt_identity(selection_receipt, args.target)
     require_ctest_version()
     policy = load_policy(config_path, args.target)
@@ -451,19 +588,53 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             contract=contract,
             target=args.target,
         )
+        if selection_receipt["schema_version"] == 2:
+            validate_build_target_projection(
+                build_dir=build_dir,
+                selected_tests=selected_tests,
+                selected_build_targets=selected_build_targets,
+            )
         verification_seconds = time.monotonic() - verification_started
-        selected_started = time.monotonic()
-        selected_result = subprocess.run(
-            execution_argv(build_dir, selected_file), shell=False
-        ).returncode
-        selected_seconds = time.monotonic() - selected_started
+        selected_build_result: int | None = None
+        selected_build_seconds: float | None = None
+        if selection_receipt["schema_version"] == 2:
+            selected_build_started = time.monotonic()
+            selected_build_result = subprocess.run(
+                build_argv(build_dir, selected_build_targets), shell=False
+            ).returncode
+            selected_build_seconds = time.monotonic() - selected_build_started
+        selected_seconds = 0.0
+        if selected_build_result in (None, 0):
+            selected_started = time.monotonic()
+            selected_result = subprocess.run(
+                execution_argv(build_dir, selected_file), shell=False
+            ).returncode
+            selected_seconds = time.monotonic() - selected_started
+        else:
+            selected_result = selected_build_result
         compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
+        full_build_result: int | None = None
+        full_build_seconds: float | None = None
         full_result: int | None = None
         full_seconds: float | None = None
         if compare_full:
-            full_started = time.monotonic()
-            full_result = subprocess.run(execution_argv(build_dir), shell=False).returncode
-            full_seconds = time.monotonic() - full_started
+            if selection_receipt["schema_version"] == 2:
+                full_build_started = time.monotonic()
+                full_build_result = subprocess.run(build_argv(build_dir), shell=False).returncode
+                full_build_seconds = time.monotonic() - full_build_started
+                if full_build_result == 0:
+                    full_build_result = clear_build_sentinel(build_dir)
+            full_seconds = 0.0
+            if full_build_result in (None, 0):
+                full_started = time.monotonic()
+                full_result = subprocess.run(
+                    execution_argv(build_dir), shell=False
+                ).returncode
+                full_seconds = time.monotonic() - full_started
+            else:
+                full_result = full_build_result
+        elif selection_receipt["schema_version"] == 2 and selected_result == 0:
+            selected_result = clear_build_sentinel(build_dir)
         final_identity = selected_file.stat()
         if (
             (snapshot_identity.st_dev, snapshot_identity.st_ino)
@@ -501,8 +672,16 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "verification_duration_seconds": verification_seconds,
                     "selected_duration_seconds": selected_seconds,
                     "selected_returncode": selected_result,
+                    "selected_build_targets_digest": selection_receipt.get(
+                        "selected_build_targets_digest"
+                    ),
+                    "selected_build_target_count": len(selected_build_targets),
+                    "selected_build_duration_seconds": selected_build_seconds,
+                    "selected_build_returncode": selected_build_result,
                     "full_duration_seconds": full_seconds,
                     "full_returncode": full_result,
+                    "full_build_duration_seconds": full_build_seconds,
+                    "full_build_returncode": full_build_result,
                     "full_authoritative": compare_full,
                     "failure_coverage": failure_coverage(selected_result, full_result),
                     "comparison_verdict": verdict,

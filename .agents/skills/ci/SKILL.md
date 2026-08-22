@@ -4356,19 +4356,20 @@ GitHub UI on slow CI runs.
 
 ## PR test selection
 
-Pulp's base-owned `[targets.mac.changed_surface_selection]` declaration records
-a mandatory kernel, complete literal
-tests for one narrowly reviewed CLI projection family, medium-risk extended
+Pulp's base-owned schema-v3 `[targets.mac.changed_surface_selection]`
+declaration records a mandatory kernel, complete literal tests and their
+reviewed CMake producer targets for one narrowly reviewed CLI projection family, medium-risk extended
 neighbors, and known full-required surfaces. Its protected-base execution
 template cannot activate itself: Shipyard reads
 `changed_surface_execution.mode` from the independent machine-global config,
 where missing or `off` preserves the ordinary full test stage byte-for-byte.
-The initial canary uses `shadow_compare`; it executes the literal selection,
-then the ordinary full CTest command, returns the full command's status, and
-writes an append-only selected-vs-full timing/failure-coverage receipt. Do not
+The initial canary uses `shadow_compare`; it builds only the selected producer
+targets and executes the literal test selection, then runs the ordinary full
+build and CTest commands, returns the full path's status, and writes an
+append-only selected-vs-full timing/failure-coverage receipt. Do not
 set `authoritative` until those receipts satisfy the reviewed graduation gate.
-Schema-v2 receipts bind the policy, selection, validation, workflow, and
-literal-test digests for session-independent aggregation. A
+The execution receipt binds the policy, selection, validation, workflow,
+literal-test, and literal-build-target digests for session-independent aggregation. A
 `missed_full_failure` or `selected_only_failure` is explicit non-graduation
 evidence; only a compared selected/full status match is marked
 `graduation_eligible`. More precisely, both suites must pass; two red statuses
@@ -4388,7 +4389,7 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
-The ordinary and changed-surface test stages share
+The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
 waiters), but it lives in owner-only per-user host state rather than beside the

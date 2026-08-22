@@ -64,11 +64,14 @@ def manifest_contract(tests: list[dict], source_root: Path, build_dir: Path) -> 
     }
 
 
-def selection_receipt(selected_tests: list[str] | None = None) -> dict:
+def selection_receipt(
+    selected_tests: list[str] | None = None,
+    selected_build_targets: list[str] | None = None,
+) -> dict:
     names = selected_tests or ["smoke", "core"]
     literal = "".join(f"{name}\n" for name in names).encode("utf-8")
-    return {
-        "schema_version": 1,
+    receipt = {
+        "schema_version": 1 if selected_build_targets is None else 2,
         "repository": "Generous-Corp/pulp",
         "pull_request": 42,
         "target": "mac",
@@ -82,6 +85,19 @@ def selection_receipt(selected_tests: list[str] | None = None) -> dict:
         "selected_tests_digest": hashlib.sha256(literal).hexdigest(),
         "selected_tests": names,
     }
+    if selected_build_targets is not None:
+        target_payload = "".join(
+            f"{target}\n" for target in selected_build_targets
+        ).encode("utf-8")
+        receipt.update(
+            {
+                "selected_build_targets_digest": hashlib.sha256(
+                    target_payload
+                ).hexdigest(),
+                "selected_build_targets": selected_build_targets,
+            }
+        )
+    return receipt
 
 
 def encode_receipt(receipt: dict) -> tuple[str, str]:
@@ -104,9 +120,13 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
     def test_literal_payload_requires_authenticated_identity_and_unique_lines(self) -> None:
         receipt = selection_receipt()
         encoded, digest = encode_receipt(receipt)
-        names, literal, decoded = runner.decode_selection_receipt(encoded, digest)
+        names, literal, targets, target_literal, decoded = runner.decode_selection_receipt(
+            encoded, digest
+        )
         self.assertEqual(names, ["smoke", "core"])
         self.assertEqual(literal, b"smoke\ncore\n")
+        self.assertEqual(targets, [])
+        self.assertEqual(target_literal, b"")
         self.assertEqual(decoded, receipt)
         malformed = (["smoke", ""], ["smoke", "smoke"], ["bad\rname"])
         for candidate in malformed:
@@ -123,6 +143,31 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         oversized_encoded, oversized_digest = encode_receipt(oversized_receipt)
         with self.assertRaisesRegex(runner.SelectionExecutionError, "safe execution limit"):
             runner.decode_selection_receipt(oversized_encoded, oversized_digest)
+
+    def test_schema_v2_receipt_binds_canonical_build_targets(self) -> None:
+        receipt = selection_receipt(selected_build_targets=["pulp-cli", "pulp_tests"])
+        encoded, digest = encode_receipt(receipt)
+        names, literal, targets, target_literal, decoded = runner.decode_selection_receipt(
+            encoded, digest
+        )
+        self.assertEqual(names, ["smoke", "core"])
+        self.assertEqual(literal, b"smoke\ncore\n")
+        self.assertEqual(targets, ["pulp-cli", "pulp_tests"])
+        self.assertEqual(target_literal, b"pulp-cli\npulp_tests\n")
+        self.assertEqual(decoded, receipt)
+
+        for invalid_targets in ([], ["--clean-first"], ["bad target"], ["pulp-cli", "pulp-cli"]):
+            with self.subTest(targets=invalid_targets):
+                candidate = selection_receipt(selected_build_targets=invalid_targets)
+                candidate_encoded, candidate_digest = encode_receipt(candidate)
+                with self.assertRaises(runner.SelectionExecutionError):
+                    runner.decode_selection_receipt(candidate_encoded, candidate_digest)
+
+        tampered = selection_receipt(selected_build_targets=["pulp-cli"])
+        tampered["selected_build_targets_digest"] = "0" * 64
+        tampered_encoded, tampered_digest = encode_receipt(tampered)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "digest mismatch"):
+            runner.decode_selection_receipt(tampered_encoded, tampered_digest)
 
     def test_receipt_identity_matches_clean_checkout(self) -> None:
         receipt = selection_receipt()
@@ -341,6 +386,70 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         self.assertIn("--no-tests=error", argv)
         self.assertNotIn("-R", argv)
         self.assertNotIn("--tests-regex", argv)
+
+    def test_cmake_codemodel_proves_each_selected_test_producer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            reply = build / ".cmake" / "api" / "v1" / "reply"
+            reply.mkdir(parents=True)
+            (reply / "index-exact.json").write_text(
+                json.dumps(
+                    {"reply": {"codemodel-v2": {"jsonFile": "codemodel.json"}}}
+                ),
+                encoding="utf-8",
+            )
+            (reply / "codemodel.json").write_text(
+                json.dumps(
+                    {
+                        "configurations": [
+                            {
+                                "targets": [
+                                    {"jsonFile": "target-cli.json"},
+                                    {"jsonFile": "target-tests.json"},
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reply / "target-cli.json").write_text(
+                json.dumps(
+                    {"name": "pulp-cli", "artifacts": [{"path": "bin/pulp"}]}
+                ),
+                encoding="utf-8",
+            )
+            (reply / "target-tests.json").write_text(
+                json.dumps(
+                    {
+                        "name": "pulp-test-build-check",
+                        "artifacts": [{"path": "bin/pulp-tests"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            selected_tests = [fixture("smoke", str(build / "bin" / "pulp-tests"))]
+            runner.validate_build_target_projection(
+                build_dir=build,
+                selected_tests=selected_tests,
+                selected_build_targets=["pulp-test-build-check"],
+            )
+            with self.assertRaisesRegex(
+                runner.SelectionExecutionError, "undeclared target"
+            ):
+                runner.validate_build_target_projection(
+                    build_dir=build,
+                    selected_tests=selected_tests,
+                    selected_build_targets=["pulp-cli"],
+                )
+            with self.assertRaisesRegex(
+                runner.SelectionExecutionError, "absent from the codemodel"
+            ):
+                runner.validate_build_target_projection(
+                    build_dir=build,
+                    selected_tests=selected_tests,
+                    selected_build_targets=["does-not-exist"],
+                )
 
     def test_build_directory_lock_covers_verification_and_execution(self) -> None:
         args = mock.Mock()
