@@ -967,6 +967,19 @@ Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-respons
 Change one line in a copy, replay both, and the control/test differ by exactly
 that line.
 
+Generated source is normalized before compilation. When it uses a class from
+the curated module-DSP registry without an owning public header in the
+normalizer-owned prefix, `toolchain_headers.py` prepends that header and retains
+the normalized source. Replay the saved response before spending a repair call;
+a missing known include is deterministic toolchain work, not a model question.
+
+The inert-control gate uses two probes deliberately. The driven probe connects
+role-aware inputs, while the normalled/internal probe sets every input's channel
+count to zero. Supplying quiet zero volts while leaving `channels=1` is still a
+connected Rack cable and bypasses internal clocks and other normalled sources.
+Keep `test_clock_behaviour_gate.py`'s normalled-clock control green whenever the
+probe wiring changes.
+
 The module gate is a consumer of Pulp's public signal headers, so it must also
 inherit the platform link requirements exported by `pulp::signal`. On macOS
 that includes Accelerate for vDSP-backed FFT users. A gate compile or link

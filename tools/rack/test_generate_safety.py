@@ -198,6 +198,55 @@ class ExclusiveMakerSafety(unittest.TestCase):
 
 
 class ToolchainHeaderClosureSafety(unittest.TestCase):
+    def test_curated_symbol_completes_its_public_header_without_model_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            registry = root / "tools/rack/knowledge/module/dsp-primitives.json"
+            registry.parent.mkdir(parents=True)
+            registry.write_text(json.dumps({"capabilities": [{
+                "class": "HystereticTriggerDetectT",
+                "include": "trigger.hpp",
+            }]}))
+            source = (
+                '#include "plugin.hpp"\n\n'
+                'pulp::signal::HystereticTriggerDetectT<float> edge;\n')
+
+            completed, added = generate.toolchain_headers.complete_known_public_headers(
+                str(root), source)
+
+            self.assertEqual(["pulp/signal/trigger.hpp"], added)
+            self.assertIn("#include <pulp/signal/trigger.hpp>\n", completed)
+            self.assertEqual(1, completed.count("pulp/signal/trigger.hpp"))
+
+            unchanged, duplicate = generate.toolchain_headers.complete_known_public_headers(
+                str(root), completed)
+            self.assertEqual([], duplicate)
+            self.assertEqual(completed, unchanged)
+
+            commented_include = (
+                '/*\n#include <pulp/signal/trigger.hpp>\n*/\n'
+                'pulp::signal::HystereticTriggerDetectT<float> edge;\n')
+            completed, added = generate.toolchain_headers.complete_known_public_headers(
+                str(root), commented_include)
+            self.assertEqual(["pulp/signal/trigger.hpp"], added)
+            self.assertTrue(completed.startswith(
+                "#include <pulp/signal/trigger.hpp>\n\n"))
+
+            later_include = (
+                'pulp::signal::HystereticTriggerDetectT<float> edge;\n'
+                '#if OPTIONAL_HEADER\n'
+                '#include <pulp/signal/trigger.hpp>\n'
+                '#endif\n')
+            completed, added = generate.toolchain_headers.complete_known_public_headers(
+                str(root), later_include)
+            self.assertEqual(["pulp/signal/trigger.hpp"], added)
+            self.assertTrue(completed.startswith(
+                "#include <pulp/signal/trigger.hpp>\n\n"))
+            unchanged, duplicate = generate.toolchain_headers.complete_known_public_headers(
+                str(root), completed)
+            self.assertEqual([], duplicate)
+            self.assertEqual(completed, unchanged)
+
     def test_curated_dsp_transitive_headers_must_ship_before_provider_use(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
