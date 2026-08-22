@@ -1264,6 +1264,18 @@ selected receipts agree with full validation, plus a separately reviewed
 policy change. Tests remain in the repository and continue to run in full for
 unknown/high-risk work, main, nightly, release, and audit surfaces.
 
+Ordinary and changed-surface test stages serialize access to the same canonical
+build directory through `tools/ci/build_dir_lock.py`. Its persistent lock file
+lives in per-user host state, not beside `build/`, so acquiring the lock cannot
+dirty the exact source checkout that changed-surface execution verifies. The
+full canonical build path is hashed into the filename and independently bound
+inside the locked file; aliases converge, while equally named build directories
+in separate worktrees stay independent. Lock files intentionally remain after
+unlock so queued waiters keep one inode. Tests may set the trusted, absolute
+`PULP_BUILD_DIR_LOCK_ROOT` override; production uses the platform's per-user
+cache/runtime location with owner-only permissions (or the user's inherited
+profile ACL on Windows).
+
 ## Cache-warming runs on `main`
 
 `build.yml` triggers on `push: branches: [main]` in addition to
