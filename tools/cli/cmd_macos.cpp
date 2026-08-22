@@ -17,27 +17,32 @@
 //       current branch's PR if no --pr). Prints which runner pool the most
 //       recent macOS dispatch landed on and its status.
 //
-// Both subcommands are thin gh-API shells. The real work is in
+// Both subcommands are thin gh-API clients. The real work is in
 // build-macos.yml — this file just owns the operator UX.
 
 #include "cli_common.hpp"
+#include "json_writer.hpp"
 
-#include <cstdio>
+#include <pulp/platform/child_process.hpp>
+
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#  define popen  _popen
-#  define pclose _pclose
-#endif
-
 namespace {
 
 const std::string kBuildMacosWorkflow = "build-macos.yml";
 const std::string kRepo = "Generous-Corp/pulp";
+
+bool is_pr_number(const std::string& value) {
+    return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isdigit(c) != 0;
+    });
+}
 
 void print_macos_usage() {
     std::cout << "pulp macos — per-PR macOS-runner retargeting\n\n";
@@ -55,21 +60,10 @@ void print_macos_usage() {
     std::cout << "See .github/workflows/build-macos.yml for the underlying workflow.\n";
 }
 
-std::string capture(const std::string& cmd) {
-    std::string out;
-#if defined(_WIN32)
-    FILE* p = _popen(cmd.c_str(), "r");
-#else
-    FILE* p = popen(cmd.c_str(), "r");
-#endif
-    if (!p) return out;
-    char buf[1024];
-    while (fgets(buf, sizeof(buf), p)) out += buf;
-#if defined(_WIN32)
-    _pclose(p);
-#else
-    pclose(p);
-#endif
+std::string capture(const std::string& command, const std::vector<std::string>& args) {
+    auto result = pulp::platform::exec(command, args);
+    if (result.exit_code != 0) return {};
+    auto out = std::move(result.stdout_output);
     // Trim trailing whitespace.
     while (!out.empty() && (out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) {
         out.pop_back();
@@ -78,9 +72,8 @@ std::string capture(const std::string& cmd) {
 }
 
 std::optional<std::string> pr_head_ref(const std::string& pr_number) {
-    std::string cmd = "gh api repos/" + kRepo + "/pulls/" + pr_number +
-                      " --jq .head.ref 2>/dev/null";
-    auto out = capture(cmd);
+    auto out = capture("gh", {"api", "repos/" + kRepo + "/pulls/" + pr_number,
+                              "--jq", ".head.ref"});
     if (out.empty()) return std::nullopt;
     return out;
 }
@@ -99,13 +92,14 @@ int cancel_in_flight_macos(const std::string& pr_number) {
         head_ref = *opt;
     }
 
-    std::string list_cmd =
-        "gh api \"repos/" + kRepo + "/actions/runs?event=pull_request&per_page=100\" "
-        "--jq '.workflow_runs[] | select(.head_branch == \"" + head_ref + "\") "
+    const auto query =
+        ".workflow_runs[] | select(.head_branch == " + pulp::cli::json_string(head_ref) + ") "
         "| select(.name == \"Build and Test\" or .name == \"Build and Test (macOS retarget)\") "
-        "| select(.status == \"queued\" or .status == \"in_progress\") | .id'";
+        "| select(.status == \"queued\" or .status == \"in_progress\") | .id";
 
-    auto raw_ids = capture(list_cmd);
+    auto raw_ids = capture("gh", {"api", "repos/" + kRepo +
+                                  "/actions/runs?event=pull_request&per_page=100",
+                                  "--jq", query});
     if (raw_ids.empty()) {
         std::cout << "pulp macos: no in-flight macOS-bearing runs to cancel for PR #"
                   << pr_number << "\n";
@@ -117,10 +111,9 @@ int cancel_in_flight_macos(const std::string& pr_number) {
     int cancelled = 0;
     while (std::getline(stream, id)) {
         if (id.empty()) continue;
-        std::string cancel_cmd =
-            "gh api -X POST repos/" + kRepo + "/actions/runs/" + id +
-            "/cancel >/dev/null 2>&1";
-        if (std::system(cancel_cmd.c_str()) == 0) {
+        auto cancel = pulp::platform::exec(
+            "gh", {"api", "-X", "POST", "repos/" + kRepo + "/actions/runs/" + id + "/cancel"});
+        if (cancel.exit_code == 0) {
             std::cout << "pulp macos: cancelled run " << id << "\n";
             ++cancelled;
         } else {
@@ -140,13 +133,10 @@ int dispatch_retarget(const std::string& pr_number, const std::string& runner) {
     }
     const auto& head_ref = *head_ref_opt;
 
-    std::string cmd = "gh workflow run " + kBuildMacosWorkflow +
-                      " --repo " + kRepo +
-                      " --ref " + shell_quote(head_ref) +
-                      " --field runner=" + shell_quote(runner) +
-                      " --field target_ref=" + shell_quote(head_ref);
-
-    int rc = run(cmd);
+    int rc = pulp::platform::exec(
+        "gh", {"workflow", "run", kBuildMacosWorkflow, "--repo", kRepo,
+               "--ref", head_ref, "--field", "runner=" + runner,
+               "--field", "target_ref=" + head_ref}).exit_code;
     if (rc != 0) {
         std::cerr << "pulp macos: workflow dispatch failed (exit " << rc << ")\n";
         return rc;
@@ -182,6 +172,10 @@ int run_retarget(const std::vector<std::string>& args) {
         std::cerr << "Usage: pulp macos retarget --pr <N> --to <local|namespace|github-hosted>\n";
         return 1;
     }
+    if (!is_pr_number(pr_number)) {
+        std::cerr << "pulp macos retarget: --pr must be a positive integer\n";
+        return 2;
+    }
     if (runner != "local" && runner != "namespace" && runner != "github-hosted") {
         std::cerr << "pulp macos retarget: --to must be one of: local, namespace, github-hosted\n";
         return 1;
@@ -208,38 +202,44 @@ int run_status(const std::vector<std::string>& args) {
     }
     if (pr_number.empty()) {
         // Try to resolve from current branch.
-        auto branch = capture("git rev-parse --abbrev-ref HEAD 2>/dev/null");
+        auto branch = capture("git", {"rev-parse", "--abbrev-ref", "HEAD"});
         if (branch.empty()) {
             std::cerr << "pulp macos status: --pr required (current branch unknown)\n";
             return 1;
         }
-        std::string lookup =
-            "gh api \"repos/" + kRepo + "/pulls?head=danielraffel:" + branch +
-            "&state=open&per_page=1\" --jq '.[0].number // empty' 2>/dev/null";
-        pr_number = capture(lookup);
+        pr_number = capture("gh", {"api", "repos/" + kRepo +
+                                    "/pulls?head=danielraffel:" + branch +
+                                    "&state=open&per_page=1",
+                                    "--jq", ".[0].number // empty"});
         if (pr_number.empty()) {
             std::cerr << "pulp macos status: no open PR found for branch '"
                       << branch << "'; pass --pr explicitly\n";
             return 1;
         }
     }
+    if (!is_pr_number(pr_number)) {
+        std::cerr << "pulp macos status: --pr must be a positive integer\n";
+        return 2;
+    }
 
-    std::string head_cmd =
-        "gh api \"repos/" + kRepo + "/pulls/" + pr_number + "\" --jq .head.sha 2>/dev/null";
-    auto sha = capture(head_cmd);
+    auto sha = capture("gh", {"api", "repos/" + kRepo + "/pulls/" + pr_number,
+                              "--jq", ".head.sha"});
     if (sha.empty()) {
         std::cerr << "pulp macos status: cannot resolve head SHA for PR #" << pr_number << "\n";
         return 1;
     }
 
-    std::string lookup =
-        "gh api \"repos/" + kRepo + "/commits/" + sha + "/check-runs?per_page=100\" "
-        "--jq '[.check_runs[] | select(.name == \"macos\")] "
-        "| sort_by(.started_at) | reverse | .[0] "
-        "| {name, status, conclusion, html_url}'";
+    const std::string query = "[.check_runs[] | select(.name == \"macos\")] "
+                              "| sort_by(.started_at) | reverse | .[0] "
+                              "| {name, status, conclusion, html_url}";
 
     std::cout << "PR #" << pr_number << " — latest `macos` check:\n";
-    return run(lookup);
+    auto result = pulp::platform::exec(
+        "gh", {"api", "repos/" + kRepo + "/commits/" + sha + "/check-runs?per_page=100",
+               "--jq", query});
+    std::cout << result.stdout_output;
+    std::cerr << result.stderr_output;
+    return result.exit_code;
 }
 
 }  // namespace
