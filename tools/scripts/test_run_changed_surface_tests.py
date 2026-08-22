@@ -316,6 +316,270 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             target="mac",
         )
 
+    def test_shadow_defers_only_proven_unbuilt_inventory_until_full_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "source"
+            build = root / "build"
+            source.mkdir()
+            build.mkdir()
+            name = "pulp-test-later_NOT_BUILT-b12d07c"
+            tests_path = build / "pulp-test-later-b12d07c_tests.cmake"
+            (build / "pulp-test-later-b12d07c_include.cmake").write_text(
+                f'if(EXISTS "{tests_path}")\n'
+                f'  include("{tests_path}")\n'
+                "else()\n"
+                f"  add_test({name} {name})\n"
+                "endif()\n",
+                encoding="utf-8",
+            )
+            smoke = fixture("smoke", str(build / "smoke"))
+            core = fixture("core", str(build / "core"))
+            neighbor = fixture("neighbor", str(build / "neighbor"))
+            placeholder = {
+                "name": name,
+                "properties": [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}
+                ],
+            }
+            self.assertEqual(
+                runner.validate_deferred_shadow_selection(
+                    selected_names=["smoke", "core"],
+                    full_tests=[smoke, core, neighbor, placeholder],
+                    selected_tests=[smoke, core],
+                    source_root=source,
+                    build_dir=build,
+                    policy=policy(),
+                ),
+                1,
+            )
+            with self.assertRaisesRegex(
+                runner.SelectionExecutionError, "differs from the reviewed"
+            ):
+                runner.validate_deferred_shadow_selection(
+                    selected_names=["smoke", "core"],
+                    full_tests=[smoke, core, neighbor, placeholder],
+                    selected_tests=[smoke],
+                    source_root=source,
+                    build_dir=build,
+                    policy=policy(),
+                )
+
+    def test_fully_hydrated_selected_build_uses_exact_inventory_validation(self) -> None:
+        selected = [fixture("smoke"), fixture("core")]
+        with (
+            mock.patch.object(
+                runner.inventory,
+                "split_proven_unbuilt_placeholders",
+                return_value=(selected, []),
+            ),
+            mock.patch.object(runner, "validate_selection") as validate_exact,
+            mock.patch.object(
+                runner, "validate_deferred_shadow_selection"
+            ) as validate_deferred,
+            mock.patch.object(
+                runner, "validate_build_target_projection"
+            ) as validate_projection,
+        ):
+            runner.validate_after_selected_build(
+                selected_names=["smoke", "core"],
+                full_tests=selected,
+                selected_tests=selected,
+                source_root=Path("/repo"),
+                build_dir=Path("/repo/build"),
+                policy=policy(),
+                contract={"inventory_digest": "exact"},
+                target="mac",
+                selected_build_targets=["pulp-test-build-check"],
+            )
+        validate_exact.assert_called_once()
+        validate_deferred.assert_not_called()
+        validate_projection.assert_called_once()
+
+    def test_schema_v1_cold_inventory_remains_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            build.mkdir()
+            config = root / "config.toml"
+            contract = root / "contract.json"
+            config.write_text("# mocked\n", encoding="utf-8")
+            contract.write_text("{}\n", encoding="utf-8")
+            args = mock.Mock(
+                config=config,
+                inventory_contract=contract,
+                selection_receipt_b64="encoded",
+                selection_receipt_sha256="0" * 64,
+                target="mac",
+            )
+            receipt = selection_receipt()
+            selected = [fixture("smoke"), fixture("core")]
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "decode_selection_receipt",
+                    return_value=(
+                        ["smoke", "core"],
+                        b"smoke\ncore\n",
+                        [],
+                        b"",
+                        receipt,
+                    ),
+                ),
+                mock.patch.object(runner, "validate_receipt_identity"),
+                mock.patch.object(runner, "require_ctest_version"),
+                mock.patch.object(runner, "load_policy", return_value=policy()),
+                mock.patch.object(
+                    runner.inventory,
+                    "source_root_for_build",
+                    return_value=runner.REPO_ROOT,
+                ),
+                mock.patch.object(runner, "validate_build_configuration"),
+                mock.patch.object(runner, "ctest_json", return_value=selected),
+                mock.patch.object(
+                    runner,
+                    "validate_selection",
+                    side_effect=inventory.InventoryError(
+                        "has no unambiguous command"
+                    ),
+                ),
+                mock.patch.object(
+                    runner.inventory, "split_proven_unbuilt_placeholders"
+                ) as split_placeholders,
+                mock.patch.object(runner.subprocess, "run") as execute,
+            ):
+                with self.assertRaisesRegex(
+                    inventory.InventoryError, "unambiguous command"
+                ):
+                    runner.run_locked(args, build)
+            split_placeholders.assert_not_called()
+            execute.assert_not_called()
+
+    def test_cold_shadow_runs_selected_leg_before_authoritative_full_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            build.mkdir()
+            config = root / "config.toml"
+            contract = root / "contract.json"
+            config.write_text("# mocked\n", encoding="utf-8")
+            contract.write_text("{}\n", encoding="utf-8")
+            args = mock.Mock(
+                config=config,
+                inventory_contract=contract,
+                selection_receipt_b64="encoded",
+                selection_receipt_sha256="0" * 64,
+                target="mac",
+            )
+            selected_names = ["smoke", "core"]
+            selected_payload = b"smoke\ncore\n"
+            receipt = selection_receipt(
+                selected_build_targets=["pulp-test-build-check"]
+            )
+            placeholder = {"name": "later"}
+            selected_tests = [fixture("smoke"), fixture("core")]
+            hydrated_tests = [*selected_tests, fixture("neighbor")]
+            ctest_results = iter(
+                [
+                    [*selected_tests, placeholder],
+                    selected_tests,
+                    [*selected_tests, placeholder],
+                    selected_tests,
+                    hydrated_tests,
+                    selected_tests,
+                ]
+            )
+            inventory_splits = iter(
+                [
+                    (selected_tests, [placeholder]),
+                    (selected_tests, [placeholder]),
+                    (hydrated_tests, []),
+                ]
+            )
+            commands: list[list[str]] = []
+
+            def run_command(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "decode_selection_receipt",
+                    return_value=(
+                        selected_names,
+                        selected_payload,
+                        ["pulp-test-build-check"],
+                        b"pulp-test-build-check\n",
+                        receipt,
+                    ),
+                ),
+                mock.patch.object(runner, "validate_receipt_identity"),
+                mock.patch.object(runner, "require_ctest_version"),
+                mock.patch.object(runner, "load_policy", return_value=policy()),
+                mock.patch.object(
+                    runner.inventory,
+                    "source_root_for_build",
+                    return_value=runner.REPO_ROOT,
+                ),
+                mock.patch.object(runner, "validate_build_configuration"),
+                mock.patch.object(
+                    runner,
+                    "ctest_json",
+                    side_effect=lambda *_: next(ctest_results),
+                ),
+                mock.patch.object(
+                    runner,
+                    "validate_selection",
+                    side_effect=[inventory.InventoryError("has no unambiguous command"), None],
+                ),
+                mock.patch.object(
+                    runner.inventory,
+                    "split_proven_unbuilt_placeholders",
+                    side_effect=lambda *_: next(inventory_splits),
+                ),
+                mock.patch.object(runner, "validate_build_target_projection"),
+                mock.patch.object(
+                    runner,
+                    "validate_deferred_shadow_selection",
+                    return_value=1,
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=run_command),
+                mock.patch.object(runner, "clear_build_sentinel", return_value=0),
+            ):
+                self.assertEqual(runner.run_locked(args, build), 0)
+
+            self.assertEqual(
+                [
+                    "selected-build",
+                    "selected-test",
+                    "full-build",
+                    "full-test",
+                ],
+                [
+                    (
+                        "selected-build"
+                        if "cmake" in command and "--target" in command
+                        else "full-build"
+                        if "cmake" in command
+                        else "selected-test"
+                        if "--tests-from-file" in command
+                        else "full-test"
+                    )
+                    for command in commands
+                ],
+            )
+
     def test_missing_baseline_undeclared_name_and_expansion_mismatch_refuse(self) -> None:
         source = Path("/repo")
         build = Path("/repo/build")
