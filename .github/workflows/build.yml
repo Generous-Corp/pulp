@@ -1180,7 +1180,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+            --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" \
+            --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
 
       # ── Tier-0 Intel canary (docs/guides/intel-support.md) ────────────────
       # Cheap cross-arch (x86_64) portability early-warning that rides inside

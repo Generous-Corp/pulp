@@ -47,11 +47,6 @@ host = "~/.cache/pulp-ci/ccache"
 mode = "rw"
 
 [[mounts]]
-name = "skia"
-host = "~/.cache/pulp-ci/skia-build"
-mode = "ro"
-
-[[mounts]]
 name = "fetchcontent"
-host = "~/.cache/pulp-ci/fetchcontent-src"
-mode = "rw"
+host = "~/Library/Caches/Pulp/fetchcontent-src"
+mode = "ro"

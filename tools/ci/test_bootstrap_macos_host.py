@@ -55,18 +55,28 @@ class ScriptContractTests(unittest.TestCase):
         r = _run("--definitely-not-a-real-flag")
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
-    def test_runner_env_enables_ccache_depend_mode(self) -> None:
-        # The per-runner GitHub Actions service .env still sets depend mode; the
-        # build.yml job env overrides it to the safe combo (CCACHE_NODEPEND) for
-        # the matrix build steps. This pins that the .env template is unchanged.
+    def test_runner_env_disables_ccache_depend_mode(self) -> None:
+        # Host registration must be safe before any workflow-level override.
         body = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("CCACHE_DEPEND=true", body)
+        self.assertIn("CCACHE_NODEPEND=true", body)
+        self.assertIn("CCACHE_COMPILERCHECK=content", body)
+        self.assertNotIn("CCACHE_DEPEND=true", body)
         self.assertIn("CCACHE_SLOPPINESS=time_macros,pch_defines", body)
+
+    def test_runner_env_uses_canonical_fetchcontent_source_root(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$FETCHCONTENT_SOURCE_ROOT", body)
+        self.assertNotIn("FETCHCONTENT_BASE_DIR=$FETCHCONTENT_SOURCE_ROOT", body)
+        self.assertIn("$HOME/Library/Caches/Pulp/fetchcontent-src", body)
+
+    def test_runner_env_persists_resolved_skia_cache_root(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("PULP_SKIA_CACHE_ROOT=$SKIA_CACHE_ROOT", body)
 
     def _tune_ccache_body(self) -> str:
         # Isolate the tune_ccache() function so assertions about the SHARED
         # ccache.conf can't be satisfied by an unrelated line (e.g. the runner
-        # .env's CCACHE_DEPEND in register_runners).
+        # .env's CCACHE_NODEPEND in register_runners).
         body = SCRIPT.read_text(encoding="utf-8")
         start = body.index("tune_ccache() {")
         end = body.index("\n}", start)
@@ -97,6 +107,12 @@ class ScriptContractTests(unittest.TestCase):
         # Cap raised so a 100+-worktree host stops evicting a warm cache.
         body = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("PULP_CCACHE_MAX_SIZE:-200G", body)
+
+    def test_skia_bootstrap_uses_only_manifest_keyed_cache(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('--cache-root "$SKIA_CACHE_ROOT"', body)
+        self.assertNotIn("cache/skia-build", body)
+        self.assertNotIn('rsync -a "$REPO_ROOT/external/skia-build/"', body)
 
 
 class BrewfileTests(unittest.TestCase):

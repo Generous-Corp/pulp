@@ -108,6 +108,15 @@ Skia/Dawn, V8, or both may be consumed independently.
    universal slice or rebuild rather than publishing a false minimum-OS claim.
 9. Re-bake CI goldens when either prebuilt pin changes, then ship only after required CI
    and cross-platform asset coverage are green.
+10. Exercise the shared-cache publication path with
+    `--cache-lock-timeout`: a pin-stale or cold cache must be populated only by
+    the lock owner in a private sibling staging directory, then renamed into an
+    immutable platform-plus-asset-SHA generation. A waiter must recheck the
+    winner's exact stamp plus platform library before it skips downloading, and
+    a pin bump must preserve the prior generation for bound consumers. Never
+    seed the canonical cache by rsyncing a checkout merely because
+    `external/skia-build/build` exists. Keep release x64/universal destinations
+    isolated from the host arm64 cache.
 
 ## Common traps
 

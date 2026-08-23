@@ -159,10 +159,11 @@ endif()
 # headers-only Skia, so a fresh worktree (or a reconfigure that re-runs
 # detection) silently disables Skia and any render/install ships CG-only. When
 # GPU is requested, SKIA_DIR is unset, and the local external/skia-build has no
-# built libs, fetch the manifest-pinned Skia into ~/.cache/pulp/skia-build
-# (shared across all checkouts on this machine — one download serves every
-# worktree) and point SKIA_DIR at it. Idempotent: the fetch script skips the
-# download when the pinned asset is already unpacked. Disable with
+# built libs, resolve the manifest-pinned immutable generation beneath
+# ~/.cache/pulp/skia/ (shared across all checkouts on this machine — one
+# download serves every worktree) and point SKIA_DIR at it. Idempotent: the
+# fetch script skips the download when the pinned asset is already unpacked.
+# `PULP_SKIA_CACHE_KEYING=0` restores the legacy mutable destination. Disable with
 # -DPULP_SKIA_AUTOFETCH=OFF (release/CI lanes that manage Skia explicitly, or
 # offline builds that intend a CG-only fallback). Desktop only (Android/iOS
 # Skia comes from their own build scripts / bundled libs).
@@ -176,11 +177,10 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
     # hardcoded darwin-arm64 (with its "the only published mac asset" comment)
     # was both false and wrong for an Intel/universal target.
     #
-    # Each slice's libskia.a flattens to the SAME on-disk path
-    # (build/mac-gpu/lib/Release/libskia.a), so the caches MUST be per-slice —
-    # one shared cache dir would silently reuse a wrong-arch archive after an
-    # arch switch (the universal zip's internal layout is byte-identical to
-    # arm64's). Suffix the cache dir per slice: skia-build{,-x64,-universal}.
+    # Each slice's libskia.a flattens to the SAME relative on-disk path. The
+    # fetcher therefore keys immutable generations by matrix platform plus the
+    # manifest asset SHA. The suffix below exists only for the explicit legacy
+    # mutable-cache rollback path.
     set(_pulp_skia_plat "")
     set(_pulp_skia_cache_suffix "")
     if(APPLE)
@@ -237,23 +237,70 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         set(_pulp_skia_slice_glob "*-gpu")
     endif()
 
+    set(_pulp_skia_keying "$ENV{PULP_SKIA_CACHE_KEYING}")
+    if(_pulp_skia_keying STREQUAL "")
+        set(_pulp_skia_keying "1")
+    endif()
     file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
-    if(NOT _pulp_local_skia)
-        if(DEFINED ENV{PULP_SKIA_CACHE})
-            set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
+    # In keyed mode, accept a checkout-local bundle only when the canonical
+    # validator proves its exact manifest stamp plus materialized Skia/Dawn
+    # archives. This preserves explicit release-path fetches while excluding a
+    # stale retained worktree tree. Explicit SKIA_DIR remains authoritative;
+    # keying=0 restores the legacy existence-only preference.
+    if(_pulp_local_skia AND _pulp_skia_plat AND _pulp_skia_keying STREQUAL "1")
+        find_program(_pulp_local_skia_python NAMES python3 python)
+        if(_pulp_local_skia_python)
+            execute_process(
+                COMMAND ${_pulp_local_skia_python} tools/scripts/fetch_skia_for_release.py
+                        ${_pulp_skia_plat} --dest "${PULP_ROOT_DIR}/external/skia-build"
+                        --validate-only
+                WORKING_DIRECTORY ${PULP_ROOT_DIR}
+                RESULT_VARIABLE _pulp_local_skia_valid)
         else()
-            set(_pulp_skia_cache "$ENV{HOME}/.cache/pulp/skia-build${_pulp_skia_cache_suffix}")
+            set(_pulp_local_skia_valid 1)
         endif()
-        file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
-        if(NOT _pulp_cache_skia)
-            find_program(_pulp_python3 NAMES python3 python)
-            if(_pulp_skia_plat AND _pulp_python3)
-                message(STATUS "Skia: auto-provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; one-time, shared)")
-                execute_process(
-                    COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
-                            ${_pulp_skia_plat} --dest "${_pulp_skia_cache}"
-                    WORKING_DIRECTORY ${PULP_ROOT_DIR})
+        if(NOT _pulp_local_skia_valid EQUAL 0)
+            set(_pulp_local_skia "")
+        endif()
+    endif()
+    # Windows has no published Skia prebuilt in the release manifest. Preserve
+    # its existing local-only fallback instead of asking the shared-cache
+    # resolver to resolve an empty platform name.
+    if(NOT _pulp_local_skia AND _pulp_skia_plat)
+        include(${PULP_ROOT_DIR}/tools/cmake/PulpSkiaCache.cmake)
+        pulp_resolve_skia_cache(
+            "${_pulp_skia_plat}" "${_pulp_skia_cache_suffix}"
+            _pulp_skia_cache _pulp_skia_fetch_args)
+        if(_pulp_skia_keying STREQUAL "1" AND NOT _pulp_skia_cache)
+            message(FATAL_ERROR
+                "Skia: keyed cache resolution failed; refusing unvalidated "
+                "external/skia-build fallback")
+        endif()
+        set(_pulp_cache_skia "")
+        find_program(_pulp_python3 NAMES python3 python)
+        if(_pulp_skia_plat AND _pulp_python3 AND _pulp_skia_cache)
+            # The fetcher is also the complete-generation validator: a lone
+            # libskia.a is insufficient when its stamp or Dawn archive is
+            # absent, corrupt, empty, or an LFS pointer. A valid warm generation
+            # returns immediately without downloading.
+            message(STATUS "Skia: validating/provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; shared)")
+            execute_process(
+                COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
+                        ${_pulp_skia_plat} ${_pulp_skia_fetch_args}
+                WORKING_DIRECTORY ${PULP_ROOT_DIR}
+                RESULT_VARIABLE _pulp_skia_fetch_result)
+            if(_pulp_skia_fetch_result EQUAL 0)
                 file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+            else()
+                if(_pulp_skia_keying STREQUAL "1")
+                    message(FATAL_ERROR
+                        "Skia: pinned cache generation validation/provisioning "
+                        "failed; refusing unvalidated external/skia-build fallback")
+                else()
+                    message(WARNING
+                        "Skia: legacy cache validation/provisioning failed; "
+                        "continuing without shared Skia")
+                endif()
             endif()
         endif()
         if(_pulp_cache_skia)

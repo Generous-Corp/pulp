@@ -18,6 +18,8 @@ set -euo pipefail
 # ── configuration ───────────────────────────────────────────────────────────
 PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.5}"   # Xcode 26.5 (17F42)
 CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
+FETCHCONTENT_SOURCE_ROOT="${PULP_SHARED_FETCHCONTENT_SOURCE_DIR:-$HOME/Library/Caches/Pulp/fetchcontent-src}"
+SKIA_CACHE_ROOT="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
 CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-200G}"
 REPO_SLUG="${PULP_REPO_SLUG:-Generous-Corp/pulp}"
 RUNNER_LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build}"
@@ -86,9 +88,10 @@ install_deps() {
 # ── shared cache + workspace layout ──────────────────────────────────────────
 make_layout() {
   step "Cache layout ($CI_ROOT)"
-  for d in cache/skia-build cache/fetchcontent-src cache/ccache tmp; do
+  for d in cache/ccache tmp; do
     do_ mkdir -p "$CI_ROOT/$d"
   done
+  do_ mkdir -p "$FETCHCONTENT_SOURCE_ROOT" "$SKIA_CACHE_ROOT"
   ok "$CI_ROOT layout present"
 }
 
@@ -146,33 +149,21 @@ tune_ccache() {
 # ── Skia ─────────────────────────────────────────────────────────────────────
 verify_skia() {
   step "Skia prebuilt binaries"
-  # FindSkia.cmake needs the real static lib here; the LFS-declared Skia
-  # binaries are not committed, so a fresh checkout has only an LFS
-  # pointer. An LFS pointer file begins with "version https://git-lfs".
-  local lib="$REPO_ROOT/external/skia-build/build/mac-gpu/lib/Release/libskia.a"
-  local have=0
-  if [ -f "$lib" ] && ! head -c 64 "$lib" 2>/dev/null | grep -qa "git-lfs"; then
-    have=1
-    ok "real Skia present ($lib)"
+  # Provision and validate the manifest-keyed generation directly. The fetcher
+  # verifies its stamp plus materialized Skia and Dawn archives and is a cheap
+  # no-op when that complete generation is already warm.
+  if [ "$CHECK_ONLY" = 1 ]; then
+    note "would validate: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 --cache-root $SKIA_CACHE_ROOT"
+    return
   fi
-  if [ "$have" = 0 ]; then
-    note "Skia missing or LFS-pointer-only — fetching the pinned release asset"
-    if [ "$CHECK_ONLY" = 1 ]; then
-      note "would run: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64"
-      return
-    fi
-    ( cd "$REPO_ROOT" && python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 ) \
-      || die "fetch_skia_for_release.py failed — cannot provision Skia for a GPU-capable host"
-    if [ -f "$lib" ] && ! head -c 64 "$lib" 2>/dev/null | grep -qa "git-lfs"; then
-      ok "Skia fetched + validated"
-    else
-      die "Skia fetch ran but $lib is still missing/pointer — a GPU build would fail"
-    fi
-  fi
-  # Retain a real copy in the shared cache for fast re-provisioning.
-  if [ -z "$(ls -A "$CI_ROOT/cache/skia-build" 2>/dev/null || true)" ]; then
-    do_ rsync -a "$REPO_ROOT/external/skia-build/" "$CI_ROOT/cache/skia-build/"
-  fi
+  ( cd "$REPO_ROOT" && python3 tools/scripts/fetch_skia_for_release.py \
+      darwin-arm64 --cache-root "$SKIA_CACHE_ROOT" ) \
+    || die "cannot provision the pinned complete Skia/Dawn cache generation"
+  local generation
+  generation="$(cd "$REPO_ROOT" && python3 tools/scripts/fetch_skia_for_release.py \
+    darwin-arm64 --cache-root "$SKIA_CACHE_ROOT" --print-cache-dest)" \
+    || die "cannot resolve the provisioned Skia cache generation"
+  ok "pinned Skia/Dawn generation validated ($generation)"
 }
 
 # ── Shipyard ─────────────────────────────────────────────────────────────────
@@ -230,11 +221,13 @@ CCACHE_DIR=$CI_ROOT/cache/ccache
 CCACHE_MAXSIZE=$CCACHE_MAX_SIZE
 CCACHE_BASEDIR=$work
 CCACHE_NOHASHDIR=true
-CCACHE_DEPEND=true
+CCACHE_NODEPEND=true
+CCACHE_COMPILERCHECK=content
 CCACHE_SLOPPINESS=time_macros,pch_defines
 CMAKE_BUILD_PARALLEL_LEVEL=$per
 CTEST_PARALLEL_LEVEL=$per
-FETCHCONTENT_BASE_DIR=$CI_ROOT/cache/fetchcontent-src
+PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$FETCHCONTENT_SOURCE_ROOT
+PULP_SKIA_CACHE_ROOT=$SKIA_CACHE_ROOT
 ENV"
     if [ "$CHECK_ONLY" = 1 ]; then
       note "would register $name and install the launchd service"
