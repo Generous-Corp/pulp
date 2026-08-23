@@ -15,6 +15,51 @@ def _includes_in(path: str) -> list[str]:
         return _PULP_INCLUDE.findall(source.read())
 
 
+def _completed_prefix_headers(source: str) -> set[str]:
+    headers: set[str] = set()
+    for line in source.splitlines():
+        include = _PULP_INCLUDE.match(line)
+        if include:
+            headers.add(include.group(1))
+            continue
+        if not line.strip() and headers:
+            continue
+        break
+    return headers
+
+
+def complete_known_public_headers(root: str, source: str) -> tuple[str, list[str]]:
+    """Add public headers for curated Pulp symbols used by generated source."""
+    registry = os.path.join(root, "tools", "rack", "knowledge", "module",
+                            "dsp-primitives.json")
+    try:
+        with open(registry, encoding="utf-8") as stream:
+            capabilities = json.load(stream).get("capabilities", [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return source, []
+
+    completed = _completed_prefix_headers(source)
+    required: set[str] = set()
+    for row in capabilities:
+        symbol = row.get("class")
+        include = row.get("include")
+        if not isinstance(symbol, str) or not isinstance(include, str):
+            continue
+        header = include if include.startswith("pulp/") else f"pulp/signal/{include}"
+        use = re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?:\b|\s*<)", source)
+        if use is None:
+            continue
+        if header not in completed:
+            required.add(header)
+
+    added = sorted(required)
+    if not added:
+        return source, []
+    block = "".join(f"#include <{header}>\n" for header in added)
+    return block + "\n" + source, added
+
+
 def missing_public_header_dependencies(
         root: str, components: list[str]) -> list[str]:
     """Return missing Pulp headers reachable by module sources or DSP APIs.

@@ -1016,6 +1016,13 @@ def _main(argv, resources: contextlib.ExitStack):
             continue
         log("explicit request contract verified")
 
+        dsp, completed_headers = toolchain_headers.complete_known_public_headers(
+            ROOT, dsp)
+        if completed_headers:
+            log("completed known Pulp headers: " + ", ".join(completed_headers))
+            retain_attempt_text(attempt_dir, attempt + 1,
+                                "normalized-source", dsp)
+
         try:
             _write_generated_module(mod, dsp)
         except (ExistingModuleSlug, InvalidModuleSlug) as e:

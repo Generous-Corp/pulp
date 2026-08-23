@@ -1263,7 +1263,7 @@ macOS Debug configuration, which enables
 that platform-specific cardinality.
 
 CTest display names are not identities: the authoritative target currently has
-20,727 registrations but only 20,668 unique names. The inventory validator
+20,729 registrations but only 20,670 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -1347,6 +1347,39 @@ preamble indefinitely. On a push, `origin/main` resolves to HEAD itself and the
 diff is always empty — so a docs-only merge is otherwise indistinguishable from
 a core merge, and the run never skips. A docs-only merge to main now correctly
 skips the whole matrix.
+
+One semantic fast path sits above that path classifier. A same-repository
+`release/version-bump` pull request may skip the native matrix and the required
+WebCLAP proof only when the protected base's
+`tools/scripts/generated_version_bump_check.py` verifies one open pull request,
+one signed release-bot commit whose parent is an immutable protected-main base,
+the fixed branch/title/message marker, and a candidate tree byte-identical to
+rerunning that protected base's version-at-land writer. The verifier resolves a
+merge-group candidate through exactly one associated pull and then fetches the
+detailed pull record. A bump queued behind exactly one earlier entry may still
+qualify in GitHub's observed #7771 topology: the event group must have exactly
+`[prior cumulative group, generated candidate]` as its parents, the candidate
+must have one original protected-main parent, and that SHA must be the prior
+group's first parent. The verifier is loaded from that immutable original
+parent, never from the speculative cumulative group. The writer and its
+derived generator's complete local executable dependency closure must be
+byte-identical across the range, every derived-file subprocess is rebound to
+the protected copy, and the complete event tree must equal the cumulative base
+plus only the regenerated version projection. Multiple candidate associations,
+nested/unknown topology, writer drift, missing protected code, GitHub API or
+signature errors, pagination ambiguity, or any additional byte retains ordinary
+validation. Version/skill enforcement and both Vellum gates still run, and
+pushes to main, releases, scheduled work, and manual dispatches retain their
+normal validation.
+
+The current provenance boundary is GitHub's valid SSH-signature record plus the
+`danielraffel` signer/account and exact release-bot author/committer identity.
+The repository does not yet contain an authoritative public key or fingerprint
+for `RELEASE_BOT_SSH_SIGNING_KEY`, so the verifier must not invent one from a
+single historical commit. If the dedicated key (rather than Daniel's GitHub
+signing identity) becomes a distinct authorization boundary, first publish its
+public fingerprint on protected main and then pin the embedded SSH signature
+key to that reviewed value.
 
 ## The Shipyard merge steward uses one repository-scoped writer
 

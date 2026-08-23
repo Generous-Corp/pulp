@@ -366,6 +366,98 @@ def validate_selection(
         )
 
 
+def validate_deferred_shadow_selection(
+    *,
+    selected_names: Sequence[str],
+    full_tests: list[dict[str, Any]],
+    selected_tests: list[dict[str, Any]],
+    source_root: Path,
+    build_dir: Path,
+    policy: dict[str, Any],
+) -> int:
+    """Validate the runnable subset while exact inventory awaits a full build.
+
+    This path is shadow-only.  The authoritative full build must replace every
+    provenance-backed Catch2 placeholder, after which ``validate_selection``
+    performs the ordinary exact contract comparison before full tests run.
+    """
+
+    baseline = policy.get("baseline_tests")
+    if not isinstance(baseline, list) or not set(baseline).issubset(selected_names):
+        raise SelectionExecutionError("selected-tests file omits the mandatory baseline")
+    undeclared = sorted(set(selected_names) - declared_literal_tests(policy))
+    if undeclared:
+        raise SelectionExecutionError(f"selection contains undeclared names: {undeclared}")
+    ready_tests, placeholders = inventory.split_proven_unbuilt_placeholders(
+        full_tests, build_dir
+    )
+    if not placeholders:
+        raise SelectionExecutionError("deferred inventory validation has no placeholders")
+    selected_groups = inventory.inventory_groups(selected_tests, source_root, build_dir)
+    ready_groups = inventory.inventory_groups(ready_tests, source_root, build_dir)
+    selected_counts = {
+        group["fingerprint"]: group["multiplicity"] for group in selected_groups
+    }
+    ready_counts = {group["fingerprint"]: group["multiplicity"] for group in ready_groups}
+    if any(
+        count > ready_counts.get(fingerprint, 0)
+        for fingerprint, count in selected_counts.items()
+    ):
+        raise SelectionExecutionError(
+            "CTest --tests-from-file expansion is not a subset of runnable registrations"
+        )
+    observed_names = {group["composite"]["name"] for group in selected_groups}
+    if observed_names != set(selected_names):
+        raise SelectionExecutionError(
+            "CTest --tests-from-file expansion differs from the reviewed literal selection"
+        )
+    return len(placeholders)
+
+
+def validate_after_selected_build(
+    *,
+    selected_names: Sequence[str],
+    full_tests: list[dict[str, Any]],
+    selected_tests: list[dict[str, Any]],
+    source_root: Path,
+    build_dir: Path,
+    policy: dict[str, Any],
+    contract: dict[str, Any],
+    target: str,
+    selected_build_targets: Sequence[str],
+) -> None:
+    """Validate the refreshed inventory at its strongest available level."""
+
+    _, placeholders = inventory.split_proven_unbuilt_placeholders(
+        full_tests, build_dir
+    )
+    if placeholders:
+        validate_deferred_shadow_selection(
+            selected_names=selected_names,
+            full_tests=full_tests,
+            selected_tests=selected_tests,
+            source_root=source_root,
+            build_dir=build_dir,
+            policy=policy,
+        )
+    else:
+        validate_selection(
+            selected_names=selected_names,
+            full_tests=full_tests,
+            selected_tests=selected_tests,
+            source_root=source_root,
+            build_dir=build_dir,
+            policy=policy,
+            contract=contract,
+            target=target,
+        )
+    validate_build_target_projection(
+        build_dir=build_dir,
+        selected_tests=selected_tests,
+        selected_build_targets=selected_build_targets,
+    )
+
+
 def cmake_artifact_targets(build_dir: Path) -> tuple[set[str], dict[Path, str]]:
     """Read the configure-produced CMake File API target/artifact projection."""
 
@@ -598,22 +690,47 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             f"build source root {source_root} does not match checkout {REPO_ROOT.resolve()}"
         )
     validate_build_configuration(build_dir, policy)
+    compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
         snapshot_identity = selected_file.stat()
         full_tests = ctest_json(build_dir)
         selected_tests = ctest_json(build_dir, selected_file)
-        validate_selection(
-            selected_names=selected_names,
-            full_tests=full_tests,
-            selected_tests=selected_tests,
-            source_root=source_root,
-            build_dir=build_dir,
-            policy=policy,
-            contract=contract,
-            target=args.target,
-        )
-        if selection_receipt["schema_version"] == 2:
+        prebuild_unbuilt_placeholder_count = 0
+        try:
+            validate_selection(
+                selected_names=selected_names,
+                full_tests=full_tests,
+                selected_tests=selected_tests,
+                source_root=source_root,
+                build_dir=build_dir,
+                policy=policy,
+                contract=contract,
+                target=args.target,
+            )
+        except inventory.InventoryError as error:
+            if (
+                not compare_full
+                or selection_receipt["schema_version"] != 2
+                or "has no unambiguous command" not in str(error)
+            ):
+                raise
+            _, placeholders = inventory.split_proven_unbuilt_placeholders(
+                full_tests, build_dir
+            )
+            if not placeholders:
+                raise
+            prebuild_unbuilt_placeholder_count = len(placeholders)
+            if selection_receipt["schema_version"] == 2:
+                validate_build_target_projection(
+                    build_dir=build_dir,
+                    selected_tests=[],
+                    selected_build_targets=selected_build_targets,
+                )
+        if (
+            selection_receipt["schema_version"] == 2
+            and not prebuild_unbuilt_placeholder_count
+        ):
             validate_build_target_projection(
                 build_dir=build_dir,
                 selected_tests=selected_tests,
@@ -628,6 +745,22 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 build_argv(build_dir, selected_build_targets), shell=False
             ).returncode
             selected_build_seconds = time.monotonic() - selected_build_started
+        if selected_build_result in (None, 0) and prebuild_unbuilt_placeholder_count:
+            deferred_verification_started = time.monotonic()
+            full_tests = ctest_json(build_dir)
+            selected_tests = ctest_json(build_dir, selected_file)
+            validate_after_selected_build(
+                selected_names=selected_names,
+                full_tests=full_tests,
+                selected_tests=selected_tests,
+                source_root=source_root,
+                build_dir=build_dir,
+                policy=policy,
+                contract=contract,
+                target=args.target,
+                selected_build_targets=selected_build_targets,
+            )
+            verification_seconds += time.monotonic() - deferred_verification_started
         selected_seconds = 0.0
         if selected_build_result in (None, 0):
             selected_started = time.monotonic()
@@ -637,7 +770,6 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             selected_seconds = time.monotonic() - selected_started
         else:
             selected_result = selected_build_result
-        compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
         full_build_result: int | None = None
         full_build_seconds: float | None = None
         full_result: int | None = None
@@ -649,6 +781,32 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 full_build_seconds = time.monotonic() - full_build_started
                 if full_build_result == 0:
                     full_build_result = clear_build_sentinel(build_dir)
+                if full_build_result == 0 and prebuild_unbuilt_placeholder_count:
+                    # The selected leg runs first from its provenance-backed
+                    # runnable subset.  The authoritative full build must then
+                    # hydrate every deferred registration before the ordinary
+                    # exact-inventory check and full test execution.
+                    full_tests = ctest_json(build_dir)
+                    selected_tests = ctest_json(build_dir, selected_file)
+                    _, remaining_placeholders = (
+                        inventory.split_proven_unbuilt_placeholders(
+                            full_tests, build_dir
+                        )
+                    )
+                    if remaining_placeholders:
+                        raise SelectionExecutionError(
+                            "full build left provenance-backed CTest placeholders unresolved"
+                        )
+                    validate_selection(
+                        selected_names=selected_names,
+                        full_tests=full_tests,
+                        selected_tests=selected_tests,
+                        source_root=source_root,
+                        build_dir=build_dir,
+                        policy=policy,
+                        contract=contract,
+                        target=args.target,
+                    )
             full_seconds = 0.0
             if full_build_result in (None, 0):
                 full_started = time.monotonic()
@@ -697,6 +855,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "selected_logical_count": len(selected_names),
                     "selected_registration_count": len(selected_tests),
                     "full_registration_count": len(full_tests),
+                    "prebuild_unbuilt_placeholder_count": (
+                        prebuild_unbuilt_placeholder_count
+                    ),
+                    "inventory_validation_deferred_until_full_build": bool(
+                        prebuild_unbuilt_placeholder_count
+                    ),
                     "verification_duration_seconds": verification_seconds,
                     "selected_duration_seconds": selected_seconds,
                     "selected_returncode": selected_result,

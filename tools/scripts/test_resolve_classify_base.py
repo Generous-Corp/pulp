@@ -186,6 +186,47 @@ class WorkflowWiringTests(unittest.TestCase):
             "github.event.pull_request.base.sha || 'origin/main'", self.text
         )
 
+    def test_generated_bump_override_executes_only_protected_base_code(self) -> None:
+        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
+            "\n  build:\n", 1
+        )[0]
+        self.assertIn(
+            'git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py"',
+            classify_job,
+        )
+        self.assertIn('trusted_verifier_base="$PR_BASE_SHA"', classify_job)
+        self.assertIn('[ "$base" = "$PR_BASE_SHA" ]', classify_job)
+        self.assertIn('[ "$base" = "$MERGE_GROUP_BASE_SHA" ]', classify_job)
+        self.assertNotIn("mapfile", classify_job)
+        self.assertEqual(
+            classify_job.count("while IFS= read -r parent; do"),
+            3,
+            "the macOS-routed classifier must collect each parent list with Bash 3 syntax",
+        )
+        for name in ("group", "candidate", "cumulative"):
+            self.assertIn(f'{name}_parent_count=0', classify_job)
+            self.assertIn(f'[ "${name}_parent_count" -eq ', classify_job)
+            self.assertNotIn(f'${{#{name}_parents[@]}}', classify_job)
+        self.assertIn('[ "${group_parents[0]}" = "$base" ]', classify_job)
+        self.assertIn(
+            '[ "${cumulative_parents[0]}" = "$candidate_base" ]',
+            classify_job,
+        )
+        self.assertNotIn(
+            'git show "$base:tools/scripts/generated_version_bump_check.py"',
+            classify_job,
+        )
+        self.assertIn(
+            'GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check"',
+            classify_job,
+        )
+        self.assertNotIn("          GH_TOKEN: ${{ github.token }}", classify_job)
+        self.assertIn("native_build_required=false", classify_job)
+        self.assertIn(
+            'echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"',
+            classify_job,
+        )
+
     def test_windows_functional_matrix_uses_the_stable_runtime_image(self) -> None:
         self.assertIn(
             '"--github-hosted-label", "windows-2022"', self.text

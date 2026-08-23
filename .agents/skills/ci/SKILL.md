@@ -1416,7 +1416,12 @@ bisectable.
   unrelated queued group can take the same fast path without dropping the
   required context. A missing base, failed fetch/diff, or workflow/classifier
   self-change still runs the full proof. Never expose `GH_TOKEN` to the
-  PR-controlled checkout while resolving relevance.
+  PR-controlled checkout while resolving relevance. The same protected-base
+  generated-version-bump verifier runs before ordinary WebCLAP relevance. It
+  may fast-green an exact release-bot bump because only version scalars changed;
+  branch names, labels, commit subjects, or path lists alone are never
+  sufficient. The verifier itself is trusted code and is the only process in
+  that decision path that receives `GH_TOKEN`.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
   `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
@@ -4393,6 +4398,17 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+When a change deliberately adds or removes CTest registrations, refresh the
+inventory contract in the same commit: update
+`.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
+count comment in `.shipyard/config.toml`, the pinned-count assertions in
+`tools/scripts/test_changed_surface_policy.py`, and the current inventory
+counts in `docs/guides/local-ci.md`. Derive the digest from the configured
+build's canonical inventory, then run
+`python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
+Otherwise the full suite can finish almost entirely green and fail only at the
+inventory self-test, forcing a needless second admission cycle.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
@@ -6763,6 +6779,22 @@ Key facts:
 - The alias jobs are **fail-closed on a `classify`-job failure**: if
   `needs.classify.result != 'success'` the `macos` gate fails RED
   rather than trusting an unwritten/empty `native_build_required`.
+- A release-bot-generated `release/version-bump` PR is the one narrowly
+  permitted semantic exception to the path allowlist. Root `CMakeLists.txt`
+  and plugin JSON still classify as native first; the workflow may override
+  that result only when the protected base's
+  `tools/scripts/generated_version_bump_check.py` proves one signed bot commit,
+  exact current-main parentage, the fixed branch/title/marker, one associated
+  PR, and a candidate tree byte-identical to rerunning the protected base's
+  version-at-land writer (including derived projections). A candidate behind
+  exactly one prior queue entry qualifies only in the proven #7771 shape: its
+  original protected base is the prior group's first parent, the writer and its
+  derived generator's complete local executable dependency closure did not
+  change, trusted derived generators are executed from that original base, and
+  the complete merge-group tree is exactly cumulative base plus the regenerated
+  version projection. Any missing script, API/signature error, nested/unknown
+  topology, writer drift, extra byte, or ambiguous association retains the full
+  native path. The verifier's own PR therefore cannot approve itself.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
   `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
   and add a case to `test_classify_changes.py`. Never widen the

@@ -14,6 +14,7 @@ name: WebCLAP Cloudflare
 
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
@@ -72,7 +73,89 @@ jobs:
           set -euo pipefail
           changed_files="$(mktemp)"
           trusted_classifier="$(mktemp)"
-          trap 'rm -f "$changed_files" "$trusted_classifier"' EXIT
+          trusted_bump_check="$(mktemp)"
+          trap 'rm -f "$changed_files" "$trusted_classifier" "$trusted_bump_check"' EXIT
+
+          # A version-only generated bump changes top-level CMake metadata, so
+          # the ordinary path classifier correctly considers it WebCLAP-
+          # relevant. First ask the PROTECTED BASE's shared verifier whether
+          # this is the release bot's exact signed/reproducible transaction.
+          # Any lookup, topology, provenance, or regeneration ambiguity falls
+          # through to the existing full relevance decision.
+          trusted_verifier_base="${BASE_SHA:-}"
+          if [[ "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+              || git fetch --no-tags --depth=1 origin "$BASE_SHA" \
+              || true
+          fi
+          if [ "${{ github.event_name }}" = merge_group ]; then
+            # A cumulative base is speculative, so never execute its verifier.
+            # Resolve only the exact #7771 topology to the candidate's original
+            # protected-main parent; every other shape keeps the full proof.
+            trusted_verifier_base=
+            group_parents=()
+            group_parent_count=0
+            while IFS= read -r parent; do
+              group_parents+=("$parent")
+              group_parent_count=$((group_parent_count + 1))
+            done < <(
+              git cat-file -p "$GITHUB_SHA" 2>/dev/null \
+                | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+            )
+            if [ "$group_parent_count" -eq 2 ] \
+                && [ "${group_parents[0]}" = "${BASE_SHA:-}" ]; then
+              candidate="${group_parents[1]}"
+              git cat-file -e "$candidate^{commit}" 2>/dev/null \
+                || git fetch --no-tags --depth=1 origin "$candidate" \
+                || true
+              candidate_parents=()
+              candidate_parent_count=0
+              while IFS= read -r parent; do
+                candidate_parents+=("$parent")
+                candidate_parent_count=$((candidate_parent_count + 1))
+              done < <(
+                git cat-file -p "$candidate" 2>/dev/null \
+                  | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+              )
+              if [ "$candidate_parent_count" -eq 1 ]; then
+                candidate_base="${candidate_parents[0]}"
+                git cat-file -e "$candidate_base^{commit}" 2>/dev/null \
+                  || git fetch --no-tags --depth=1 origin "$candidate_base" \
+                  || true
+                if [ "$candidate_base" = "${BASE_SHA:-}" ]; then
+                  trusted_verifier_base="$candidate_base"
+                else
+                  cumulative_parents=()
+                  cumulative_parent_count=0
+                  while IFS= read -r parent; do
+                    cumulative_parents+=("$parent")
+                    cumulative_parent_count=$((cumulative_parent_count + 1))
+                  done < <(
+                    git cat-file -p "$BASE_SHA" 2>/dev/null \
+                      | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                  )
+                  if [ "$cumulative_parent_count" -eq 2 ] \
+                      && [ "${cumulative_parents[0]}" = "$candidate_base" ]; then
+                    trusted_verifier_base="$candidate_base"
+                  fi
+                fi
+              fi
+            fi
+          fi
+          if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
+              && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+              && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
+                >"$trusted_bump_check" 2>/dev/null \
+              && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+                --repo . \
+                --event-name "${{ github.event_name }}" \
+                --event-path "${{ github.event_path }}" \
+                --base "$BASE_SHA" \
+                --head "${{ github.sha }}"; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "WebCLAP proof skipped: exact generated version-bump transaction."
+            exit 0
+          fi
 
           case "${{ github.event_name }}" in
             pull_request)

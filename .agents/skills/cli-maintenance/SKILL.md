@@ -2766,6 +2766,13 @@ Plain `exec()` is still correct for commands whose output *is* the whole result.
 
 ## CLI shared primitives: one home each
 
+- **External command arguments:** GitHub/API output and CLI arguments must cross
+  process boundaries as an argv vector through `pulp::platform::ChildProcess`
+  or `pulp::platform::exec`; never concatenate them into a string passed to
+  `system()`/`popen()`. This is load-bearing for `pulp pr`, `pulp macos`, and
+  `pulp overflow`, where branch names and repository variable values are remote
+  data. `pulp doctor --fix` executes only a small allowlist of single-command
+  remediation argv; multiline or shell-composed guidance remains manual.
 - **JSON escaping:** use `tools/cli/json_writer.hpp` (`json_escape` / `json_string`). It is
   header-only so standalone test targets need no link change. There were 17 hand-rolled
   copies, several of which did not escape control bytes; do not add an 18th.
