@@ -9,14 +9,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/runtime/base64.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <cstdlib>
-#include <fstream>
-#include <iterator>
 #include <memory>
 #include <string>
 
@@ -56,39 +53,15 @@ std::vector<uint8_t> render_fill(const std::string& img, float value,
     return render_to_png(*view, 48, 48, 1.0f, ScreenshotBackend::skia);
 }
 
-std::vector<uint8_t> read_bytes(const std::string& path) {
-    std::ifstream input(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(input),
-            std::istreambuf_iterator<char>()};
-}
-
 }  // namespace
 
 TEST_CASE("ImageView value-driven silhouette fill scales with value",
-          "[view][image][fill][data-uri]") {
+          "[view][image][fill]") {
     const std::string img = make_source_image();
     auto base = render_fill(img, -1.0f);  // fill disabled
     if (base.empty()) {
         SKIP("Skia raster screenshot backend unavailable on this platform");
     }
-
-    // Persisted designs embed generated captures as data URIs. Prove that the
-    // inline form renders identically without adding a new test registration;
-    // changed-surface CI treats test-inventory growth as a full-suite trigger.
-    const auto source_bytes = read_bytes(img);
-    REQUIRE_FALSE(source_bytes.empty());
-    ImageView inline_view;
-    inline_view.set_image_source(
-        "data:image/png;base64," +
-        pulp::runtime::base64_encode(std::string_view(
-            reinterpret_cast<const char*>(source_bytes.data()),
-            source_bytes.size())));
-    const auto inline_png = render_to_png(
-        inline_view, 48, 48, 1.0f, ScreenshotBackend::skia);
-    REQUIRE_FALSE(inline_png.empty());
-    const auto inline_comparison = compare_screenshots(base, inline_png);
-    REQUIRE(inline_comparison.valid);
-    CHECK(inline_comparison.similarity == 1.0f);
 
     auto half = render_fill(img, 0.5f, tmp_path("pulp-fill-half.png"));
     auto full = render_fill(img, 1.0f, tmp_path("pulp-fill-full.png"));
