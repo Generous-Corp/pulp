@@ -967,6 +967,15 @@ Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-respons
 Change one line in a copy, replay both, and the control/test differ by exactly
 that line.
 
+The role-aware probe must also make separate CV jacks independently observable.
+Do not drive every `Cv` input with the same 0..5 V square: a signal edge and its
+rise/fall modulation then move together and can pin an exponential time law at
+an endpoint, falsely reporting a working knob or jack as inert. Keep generic CV
+stimuli bipolar, centred on zero, and phase-separated by input index; do not
+assume input zero is the signal. `test_inert_input_cause.py` includes a real-gate
+slew fixture for this exact failure class. When it trips on a paid response,
+retain and replay that response before changing the prompt or calling a model.
+
 Generated source is normalized before compilation. When it uses a class from
 the curated module-DSP registry without an owning public header in the
 normalizer-owned prefix, `toolchain_headers.py` prepends that header and retains

@@ -81,6 +81,44 @@ DEAD_EVERYWHERE = GATED_BY_DEFAULT.replace(
 ).replace("GatedFixture", "DeadFixture").replace("modelGated", "modelDead") \
  .replace('"Gated"', '"Dead"')
 
+# A reduced version of the exact M5 failure: a slew input plus rise/fall CVs.
+# When every CV jack receives the same 0..5 V square, the modulation jacks are
+# correlated with the signal edge and saturate the time law. The gate then
+# rejects a working Rise knob and Fall CV as inert. Independently phased,
+# bipolar CVs make every control and jack observable.
+SLEW_WITH_TIME_CVS = r'''
+#include <rack.hpp>
+#include <algorithm>
+#include <cmath>
+struct SlewFixture final : rack::engine::Module {
+    enum { RISE, FALL, PARAMS };
+    enum { IN, RISE_CV, FALL_CV, INPUTS };
+    enum { OUT, OUTPUTS };
+    float current = 0.f;
+    SlewFixture() {
+        config(PARAMS, INPUTS, OUTPUTS, 0);
+        configParam(RISE, -3.f, 1.f, -1.f, "Rise time");
+        configParam(FALL, -3.f, 1.f, -1.f, "Fall time");
+        configInput(IN, "Input");
+        configInput(RISE_CV, "Rise CV");
+        configInput(FALL_CV, "Fall CV");
+        configOutput(OUT, "Output");
+    }
+    void process(const ProcessArgs& args) override {
+        const float target = inputs[IN].getVoltage();
+        const bool rising = target > current;
+        const float cv = inputs[rising ? RISE_CV : FALL_CV].getVoltage();
+        const float knob = params[rising ? RISE : FALL].getValue();
+        const float seconds = std::pow(10.f, std::clamp(knob + cv, -3.f, 1.f));
+        const float step = 10.f * args.sampleTime / seconds;
+        current += std::clamp(target - current, -step, step);
+        outputs[OUT].setVoltage(current);
+    }
+};
+rack::plugin::Model* modelSlew =
+    rack::createModel<SlewFixture, rack::app::ModuleWidget>("Slew");
+'''
+
 HINT = "params moved off their defaults"
 
 
@@ -89,13 +127,20 @@ class InertInputCause(unittest.TestCase):
         if not SDK or not (SDK / "libRack.dylib").is_file():
             raise unittest.SkipTest(f"Rack SDK unavailable at {SDK!s}")
 
-    def run_gate(self, fixture_src: str, symbol: str) -> str:
+    def run_gate(self, fixture_src: str, symbol: str,
+                 all_inputs_are_cv: bool = False) -> str:
         """Compile one fixture against the real gate and return its output."""
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = pathlib.Path(tmp)
             fixture = tmpdir / "fixture.cpp"
             shim = tmpdir / "shim.cpp"
             fixture.write_text(fixture_src)
+            input_role = (
+                'const char* forge_input_role(int) { return "Cv"; }\n'
+                if all_inputs_are_cv else
+                'const char* forge_input_role(int i) '
+                '{ return i == 0 ? "Audio" : "Cv"; }\n'
+            )
             shim.write_text(
                 "#include <rack.hpp>\n"
                 f"extern rack::plugin::Model* {symbol};\n"
@@ -110,8 +155,7 @@ class InertInputCause(unittest.TestCase):
                 "int forge_rate_param() { return -1; }\n"
                 "int forge_width_param() { return -1; }\n"
                 "int forge_reset_input() { return -1; }\n"
-                'const char* forge_input_role(int i) '
-                '{ return i == 0 ? "Audio" : "Cv"; }\n'
+                + input_role +
                 'const char* forge_output_role(int) { return "Audio"; }\n')
             binary = tmpdir / "gate"
             build = subprocess.run(
@@ -145,6 +189,13 @@ class InertInputCause(unittest.TestCase):
                          "moving the params cannot rescue a jack that is dead "
                          "at every position, so the hint must stay silent:\n"
                          + out[-1500:])
+
+    def test_time_cvs_are_independent_of_the_slew_signal(self) -> None:
+        out = self.run_gate(SLEW_WITH_TIME_CVS, "modelSlew",
+                            all_inputs_are_cv=True)
+        self.assertIn("gate passed: 0 failure(s)", out, out[-2000:])
+        self.assertNotIn("inert knob", out, out[-2000:])
+        self.assertNotIn("changes no output", out, out[-2000:])
 
 
 if __name__ == "__main__":
