@@ -3,6 +3,7 @@
 
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/asset_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
@@ -117,10 +118,33 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // dimensions; if the backend can't measure (no decode primitive on this
     // platform) fall back to the stretch-to-bounds path (= object-fit: fill).
     float img_w = 0.0f, img_h = 0.0f;
-    bool has_intrinsic =
-        !fs_path.empty() &&
-        canvas.measure_image_from_file(fs_path, img_w, img_h) &&
-        img_w > 0.0f && img_h > 0.0f;
+    const bool is_inline_image = path_.starts_with("data:image/");
+    if (is_inline_image && cached_data_.empty()) {
+        auto decoded = AssetManager::instance().load_image_from_data_uri(path_);
+        if (decoded.valid()) cached_data_ = std::move(decoded.pixels);
+    }
+    const bool valid_inline_png = [&] {
+        static constexpr uint8_t kPngSignature[] = {
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        if (cached_data_.size() < 24 ||
+            !std::equal(std::begin(kPngSignature), std::end(kPngSignature),
+                        cached_data_.begin()))
+            return false;
+        const auto read_be32 = [&](std::size_t offset) {
+            return (static_cast<uint32_t>(cached_data_[offset]) << 24) |
+                   (static_cast<uint32_t>(cached_data_[offset + 1]) << 16) |
+                   (static_cast<uint32_t>(cached_data_[offset + 2]) << 8) |
+                   static_cast<uint32_t>(cached_data_[offset + 3]);
+        };
+        img_w = static_cast<float>(read_be32(16));
+        img_h = static_cast<float>(read_be32(20));
+        return img_w > 0.0f && img_h > 0.0f;
+    }();
+    const bool has_intrinsic =
+        (is_inline_image && valid_inline_png) ||
+        (!is_inline_image && !fs_path.empty() &&
+         canvas.measure_image_from_file(fs_path, img_w, img_h) &&
+         img_w > 0.0f && img_h > 0.0f);
 
     struct FitRect { float x, y, width, height; };
     auto compute_fit = [&]() -> std::pair<FitRect, FitRect> {
@@ -278,13 +302,26 @@ void ImageView::paint(canvas::Canvas& canvas) {
         if (src.x != 0.0f || src.y != 0.0f ||
             std::abs(src.width  - img_w) > 0.001f ||
             std::abs(src.height - img_h) > 0.001f) {
-            drawn = canvas.draw_image_from_file_rect(
-                fs_path,
-                src.x, src.y, src.width, src.height,
-                dst.x, dst.y, dst.width, dst.height);
+            if (is_inline_image) {
+                drawn = canvas.draw_image_from_data_rect(
+                    cached_data_.data(), cached_data_.size(),
+                    src.x, src.y, src.width, src.height,
+                    dst.x, dst.y, dst.width, dst.height);
+            } else {
+                drawn = canvas.draw_image_from_file_rect(
+                    fs_path,
+                    src.x, src.y, src.width, src.height,
+                    dst.x, dst.y, dst.width, dst.height);
+            }
         } else {
-            drawn = canvas.draw_image_from_file(
-                fs_path, dst.x, dst.y, dst.width, dst.height);
+            if (is_inline_image) {
+                drawn = canvas.draw_image_from_data(
+                    cached_data_.data(), cached_data_.size(),
+                    dst.x, dst.y, dst.width, dst.height);
+            } else {
+                drawn = canvas.draw_image_from_file(
+                    fs_path, dst.x, dst.y, dst.width, dst.height);
+            }
         }
         if (drawn) {
             loaded_ = true;
