@@ -545,7 +545,10 @@ jobs:
         # design-tool example therefore needs the pinned, verified Skia bundle.
         if: matrix.os == 'macos'
         shell: bash
-        run: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+        run: >-
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
+          --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
 
       - name: Run coverage suite
         id: coverage-suite

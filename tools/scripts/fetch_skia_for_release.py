@@ -15,6 +15,13 @@ CoreGraphics CPU path.
 
 Usage:
     python3 tools/scripts/fetch_skia_for_release.py <matrix-platform>
+    python3 tools/scripts/fetch_skia_for_release.py <matrix-platform> \
+        --cache-root ~/.cache/pulp/skia --cache-lock-timeout 300
+
+`--cache-root` is the host/worktree mode: it resolves an immutable
+`<platform>-<asset-sha256>` generation, downloads into private sibling staging,
+and atomically renames the validated generation into place. Release workflows
+continue to use the default or explicit `--dest` mode for isolated matrix trees.
 
 Where `<matrix-platform>` is one of the release-cli.yml matrix values:
     darwin-arm64, darwin-x64, darwin-universal, linux-x64, linux-arm64,
@@ -56,14 +63,22 @@ arranged manually.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import json
+import math
 import os
+import re
+import shutil
+import socket
 import sys
+import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 # Matrix platform (release-cli.yml) → manifest release_assets key.
 # Matrix uses `darwin-*` and `windows-*`; manifest uses `mac-*` and `win-*`.
@@ -93,6 +108,190 @@ _IOS_PRESERVE_ARCH_SUBDIR = {
     "ios-device-arm64",
     "ios-simulator-arm64-x86_64",
 }
+
+# Each main() invocation owns only the unique archives it creates. This keeps
+# recursive keyed-cache publication and concurrent processes isolated while
+# guaranteeing cleanup from one outer finally on every return or exception.
+_ACTIVE_ARCHIVES: ContextVar[list[Path] | None] = ContextVar(
+    "skia_active_archives", default=None
+)
+
+
+@contextmanager
+def cache_lock(dest_root: str, timeout_secs: float):
+    """Serialize publication into one cache root with bounded stale recovery."""
+    dest = Path(dest_root).absolute()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lock_dir = dest.parent / f".{dest.name}.fetch.lock"
+    owner_path = lock_dir / "owner.json"
+    deadline = time.monotonic() + timeout_secs
+    owner = {"pid": os.getpid(), "host": socket.gethostname(), "dest": str(dest)}
+    while True:
+        try:
+            lock_dir.mkdir()
+            try:
+                owner_path.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
+            except OSError:
+                lock_dir.rmdir()
+                raise
+            break
+        except FileExistsError:
+            stale = False
+            try:
+                current = json.loads(owner_path.read_text(encoding="utf-8"))
+                if current.get("host") == socket.gethostname():
+                    try:
+                        os.kill(int(current["pid"]), 0)
+                    except ProcessLookupError:
+                        stale = True
+                    except PermissionError:
+                        # A live owner under another uid is still live.
+                        pass
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                # The owner may still be writing. Only treat an unreadable lock
+                # as stale after the entire bounded wait has elapsed.
+                stale = time.monotonic() >= deadline
+            if stale:
+                try:
+                    owner_path.unlink(missing_ok=True)
+                    lock_dir.rmdir()
+                    continue
+                except OSError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"timed out after {timeout_secs:g}s waiting for Skia cache lock {lock_dir}"
+                )
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        try:
+            owner_path.unlink(missing_ok=True)
+            lock_dir.rmdir()
+        except OSError as error:
+            print(f"WARNING: could not release Skia cache lock {lock_dir}: {error}", file=sys.stderr)
+
+
+def manifest_asset(matrix_platform: str) -> tuple[str, dict[str, str] | None]:
+    """Return the manifest key and exact release asset for one matrix platform."""
+    manifest_key = MATRIX_TO_MANIFEST[matrix_platform]
+    manifest_path = Path("tools/deps/manifest.json")
+    if not manifest_path.is_file():
+        raise ValueError(f"{manifest_path} not found (run from repo root)")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    skia_entry = next(
+        (entry for entry in manifest.get("dependencies", [])
+         if isinstance(entry, dict) and entry.get("name", "").lower() == "skia"),
+        None,
+    )
+    if skia_entry is None:
+        raise ValueError("no 'Skia' dependency entry in manifest.json")
+    return manifest_key, skia_entry.get("determinism", {}).get("release_assets", {}).get(manifest_key)
+
+
+def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> Path:
+    """Immutable cache generation selected by platform and exact asset identity."""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", asset_sha):
+        raise ValueError("cache asset SHA-256 must contain exactly 64 hexadecimal characters")
+    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}"
+
+
+def cache_generation_valid(dest: Path, matrix_platform: str, expected_sha: str) -> bool:
+    stamp = dest / ".skia-asset-sha256"
+    try:
+        return (cache_generation_materialized(dest, matrix_platform) and stamp.is_file()
+                and stamp.read_text(encoding="utf-8").strip() == expected_sha)
+    except OSError:
+        return False
+
+
+def cache_generation_materialized(dest: Path, matrix_platform: str) -> bool:
+    expected_lib = expected_library_path(matrix_platform, str(dest))
+    expected_dawn = expected_dawn_library_path(matrix_platform, str(dest))
+    required = [expected_lib] + ([] if expected_dawn is None else [expected_dawn])
+    return all(_materialized_archive(path) for path in required)
+
+
+def _materialized_archive(path: Path) -> bool:
+    """Reject absent/empty archives and Git LFS pointer placeholders."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    with path.open("rb") as archive:
+        return not archive.read(128).startswith(
+            b"version https://git-lfs.github.com/spec/v1"
+        )
+
+
+def _archive_member_target(dest: Path, member_name: str) -> Path:
+    """Resolve one ZIP member beneath dest or reject path traversal."""
+    posix_name = member_name.replace("\\", "/")
+    relative = PurePosixPath(posix_name)
+    if (not posix_name or relative.is_absolute() or ".." in relative.parts
+            or PureWindowsPath(member_name).is_absolute()):
+        raise ValueError(f"unsafe archive member path: {member_name!r}")
+    target = dest.joinpath(*relative.parts)
+    dest_resolved = dest.resolve()
+    target_resolved = target.resolve(strict=False)
+    try:
+        target_resolved.relative_to(dest_resolved)
+    except ValueError as error:
+        raise ValueError(f"archive member escapes destination: {member_name!r}") from error
+    return target
+
+
+def publish_keyed_cache(matrix_platform: str, cache_root: str,
+                        timeout_secs: float, expected_sha: str) -> int:
+    """Build privately, validate, then atomically publish one immutable generation."""
+    dest = keyed_cache_dest(cache_root, matrix_platform, expected_sha)
+    try:
+        with cache_lock(str(dest), timeout_secs):
+            if cache_generation_valid(dest, matrix_platform, expected_sha):
+                print(f"OK: immutable Skia cache generation ready at {dest}")
+                return 0
+            if dest.exists():
+                print(
+                    f"ERROR: immutable Skia cache generation exists but is invalid: {dest}; "
+                    "refusing in-place mutation while consumers may be bound to it",
+                    file=sys.stderr,
+                )
+                return 1
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            stage = Path(tempfile.mkdtemp(prefix=f".{dest.name}.staging-", dir=dest.parent))
+            try:
+                baked = os.environ.pop("PULP_USE_BAKED_SKIA", None)
+                inherited_skia = os.environ.pop("SKIA_DIR", None)
+                try:
+                    rc = main([sys.argv[0], matrix_platform, "--dest", str(stage)])
+                finally:
+                    if baked is not None:
+                        os.environ["PULP_USE_BAKED_SKIA"] = baked
+                    if inherited_skia is not None:
+                        os.environ["SKIA_DIR"] = inherited_skia
+                if rc != 0 or not cache_generation_valid(stage, matrix_platform, expected_sha):
+                    print("ERROR: private Skia cache staging failed validation", file=sys.stderr)
+                    return 1
+                # Same-parent rename is the publication boundary. Readers see
+                # either no generation or the complete, validated generation.
+                try:
+                    stage.rename(dest)
+                except FileExistsError:
+                    if cache_generation_valid(dest, matrix_platform, expected_sha):
+                        print(f"OK: concurrent publisher completed immutable cache at {dest}")
+                        return 0
+                    print(
+                        f"ERROR: publication destination appeared invalid during rename: {dest}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(f"OK: atomically published immutable Skia cache at {dest}")
+                return 0
+            finally:
+                if stage.exists():
+                    shutil.rmtree(stage)
+    except TimeoutError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
 
 # Expected on-disk relative library path under external/skia-build/.
 # Matches the layout produced by skia-builder release zips and probed by
@@ -137,6 +336,16 @@ def expected_library_path(matrix_platform: str, dest_root: str = "external/skia-
     return Path(*parts)
 
 
+def expected_dawn_library_path(
+    matrix_platform: str, dest_root: str = "external/skia-build"
+) -> Path | None:
+    if matrix_platform == "wasm":
+        return None
+    skia = expected_library_path(matrix_platform, dest_root)
+    dawn_name = "dawn_combined.lib" if matrix_platform.startswith("windows") else "libdawn_combined.a"
+    return skia.with_name(dawn_name)
+
+
 def _version_doc_has_asset_digest(
     version_path: Path, asset_name: str, expected_sha: str
 ) -> bool:
@@ -150,9 +359,12 @@ def _version_doc_has_asset_digest(
     return any(asset_name in line and expected_sha in line.lower() for line in lines)
 
 
-def main(argv: list[str]) -> int:
+def _main(argv: list[str]) -> int:
     dest_root = "external/skia-build"
     args = argv[1:]
+    cache_root = None
+    print_cache_dest = False
+    validate_only = False
     if "--dest" in args:
         di = args.index("--dest")
         if di + 1 >= len(args):
@@ -160,10 +372,80 @@ def main(argv: list[str]) -> int:
             return 2
         dest_root = args[di + 1]
         del args[di:di + 2]
+    if "--cache-root" in args:
+        ci = args.index("--cache-root")
+        if ci + 1 >= len(args):
+            print(f"usage: {argv[0]} <matrix-platform> [--cache-root DIR]", file=sys.stderr)
+            return 2
+        cache_root = args[ci + 1]
+        del args[ci:ci + 2]
+    if "--print-cache-dest" in args:
+        print_cache_dest = True
+        args.remove("--print-cache-dest")
+    if "--validate-only" in args:
+        validate_only = True
+        args.remove("--validate-only")
+    if cache_root is not None and "--dest" in argv:
+        print("ERROR: --cache-root and --dest are mutually exclusive", file=sys.stderr)
+        return 2
+    lock_timeout = None
+    if "--cache-lock-timeout" in args:
+        li = args.index("--cache-lock-timeout")
+        if li + 1 >= len(args):
+            print(f"usage: {argv[0]} <matrix-platform> [--dest DIR] [--cache-lock-timeout SECS]", file=sys.stderr)
+            return 2
+        try:
+            lock_timeout = float(args[li + 1])
+        except ValueError:
+            print("ERROR: --cache-lock-timeout must be numeric", file=sys.stderr)
+            return 2
+        del args[li:li + 2]
+        if not math.isfinite(lock_timeout) or lock_timeout <= 0:
+            print("ERROR: --cache-lock-timeout must be finite and positive", file=sys.stderr)
+            return 2
     if len(args) != 1:
         print(f"usage: {argv[0]} <matrix-platform> [--dest DIR]", file=sys.stderr)
         return 2
     matrix_platform = args[0]
+
+    if validate_only and cache_root is not None:
+        print("ERROR: --validate-only requires an explicit --dest", file=sys.stderr)
+        return 2
+
+    if cache_root is not None:
+        if matrix_platform not in MATRIX_TO_MANIFEST:
+            print(f"ERROR: keyed cache requires a known platform: {matrix_platform}", file=sys.stderr)
+            return 2
+        try:
+            _, keyed_asset = manifest_asset(matrix_platform)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        if keyed_asset is None:
+            print(f"ERROR: keyed cache has no asset for {matrix_platform}", file=sys.stderr)
+            return 1
+        try:
+            resolved = keyed_cache_dest(cache_root, matrix_platform, keyed_asset["sha256"])
+        except (KeyError, ValueError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        if print_cache_dest:
+            print(resolved)
+            return 0
+        return publish_keyed_cache(
+            matrix_platform, cache_root, lock_timeout or 300.0, keyed_asset["sha256"]
+        )
+
+    if lock_timeout is not None:
+        try:
+            with cache_lock(dest_root, lock_timeout):
+                # Re-enter without the lock option. The current cache is
+                # rechecked only after ownership is acquired, so a waiter sees
+                # the first publisher's exact stamp/library and skips download.
+                return main([argv[0], matrix_platform, "--dest", dest_root])
+        except TimeoutError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
 
     if matrix_platform not in MATRIX_TO_MANIFEST:
         print(
@@ -173,27 +455,11 @@ def main(argv: list[str]) -> int:
         )
         return 0
 
-    manifest_key = MATRIX_TO_MANIFEST[matrix_platform]
-    manifest_path = Path("tools/deps/manifest.json")
-    if not manifest_path.is_file():
-        print(f"ERROR: {manifest_path} not found (run from repo root)", file=sys.stderr)
+    try:
+        manifest_key, asset = manifest_asset(matrix_platform)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    skia_entry = None
-    for entry in manifest.get("dependencies", []):
-        if isinstance(entry, dict) and entry.get("name", "").lower() == "skia":
-            skia_entry = entry
-            break
-    if skia_entry is None:
-        print("ERROR: no 'Skia' dependency entry in manifest.json", file=sys.stderr)
-        return 1
-
-    assets = (
-        skia_entry.get("determinism", {})
-        .get("release_assets", {})
-    )
-    asset = assets.get(manifest_key)
     if asset is None:
         # Not every release-cli matrix platform has a published skia-builder
         # asset. windows-* is not currently published — those platforms
@@ -211,6 +477,17 @@ def main(argv: list[str]) -> int:
     expected_sha = asset["sha256"]
     expected_lib = expected_library_path(matrix_platform, dest_root)
 
+    if validate_only:
+        if cache_generation_valid(Path(dest_root), matrix_platform, expected_sha):
+            print(f"OK: complete pinned Skia/Dawn generation validated at {dest_root}")
+            return 0
+        print(
+            f"ERROR: {dest_root} is not a complete materialized generation for "
+            f"{matrix_platform} sha256 {expected_sha}",
+            file=sys.stderr,
+        )
+        return 1
+
     print(f"Skia fetch: matrix={matrix_platform}, manifest={manifest_key}")
     print(f"  url: {url}")
     print(f"  sha256: {expected_sha}")
@@ -227,13 +504,11 @@ def main(argv: list[str]) -> int:
     baked_dir = os.environ.get("SKIA_DIR", "").strip()
     if os.environ.get("PULP_USE_BAKED_SKIA") and baked_dir:
         baked_root = Path(baked_dir)
-        baked_lib = baked_root / expected_lib.relative_to(dest_root)
-        baked_stamp = baked_root / ".skia-asset-sha256"
-        if (baked_lib.is_file() and baked_stamp.is_file()
-                and baked_stamp.read_text(encoding="utf-8").strip() == expected_sha):
+        if cache_generation_valid(baked_root, matrix_platform, expected_sha):
             print(
                 f"OK: using baked Skia at {baked_dir} "
-                f"(sha256 {expected_sha} matches pin); skipping fetch "
+                f"(complete Skia/Dawn generation matches sha256 {expected_sha}); "
+                "skipping fetch "
                 f"(PULP_USE_BAKED_SKIA)"
             )
             return 0
@@ -254,12 +529,9 @@ def main(argv: list[str]) -> int:
     # stamp no longer matches, and the asset is re-fetched.
     stamp_path = Path(dest_root) / ".skia-asset-sha256"
     if expected_lib.is_file():
-        if (
-            stamp_path.is_file()
-            and stamp_path.read_text(encoding="utf-8").strip() == expected_sha
-        ):
+        if cache_generation_valid(Path(dest_root), matrix_platform, expected_sha):
             print(
-                f"OK: Skia already unpacked from the pinned asset "
+                f"OK: complete Skia/Dawn generation already unpacked from the pinned asset "
                 f"(sha256 {expected_sha}); skipping download"
             )
             return 0
@@ -271,7 +543,8 @@ def main(argv: list[str]) -> int:
         else:
             asset_name = Path(urllib.parse.urlparse(url).path).name
             version_path = Path(dest_root) / "VERSION.md"
-            if _version_doc_has_asset_digest(version_path, asset_name, expected_sha):
+            if (cache_generation_materialized(Path(dest_root), matrix_platform)
+                    and _version_doc_has_asset_digest(version_path, asset_name, expected_sha)):
                 stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
                 print(
                     "OK: Skia already present and VERSION.md records the "
@@ -280,7 +553,13 @@ def main(argv: list[str]) -> int:
                 )
                 return 0
 
-    zip_path = Path("skia-release-asset.zip")
+    zip_fd, zip_name = tempfile.mkstemp(prefix=".skia-release-asset-", suffix=".zip", dir=".")
+    os.close(zip_fd)
+    zip_path = Path(zip_name)
+    archives = _ACTIVE_ARCHIVES.get()
+    if archives is None:
+        raise RuntimeError("Skia archive created outside the main() cleanup scope")
+    archives.append(zip_path)
     print(f"Downloading -> {zip_path}")
     with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
         # 1 MiB chunks; skia zips are ~250-500 MiB
@@ -320,8 +599,15 @@ def main(argv: list[str]) -> int:
     # member whose target already exists. Create directories with exist_ok and
     # overwrite files so unpacking over a warm/cached checkout succeeds.
     with zipfile.ZipFile(zip_path) as zf:
-        for member in zf.infolist():
-            target = dest / member.filename
+        try:
+            validated_members = [
+                (member, _archive_member_target(dest, member.filename))
+                for member in zf.infolist()
+            ]
+        except ValueError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        for member, target in validated_members:
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -332,9 +618,6 @@ def main(argv: list[str]) -> int:
                     if not chunk:
                         break
                     out.write(chunk)
-
-    # Free the ~hundreds-of-MiB download once unpacked.
-    zip_path.unlink(missing_ok=True)
 
     # Normalize skia-builder chrome/m144+ layout (pulp #1962).
     #
@@ -384,13 +667,13 @@ def main(argv: list[str]) -> int:
                     # Non-empty (e.g. obj/ subfolder) — leave in place.
                     pass
 
-    # Sanity check: the expected library MUST be on disk now. If not, the
-    # zip layout drifted from FindSkia.cmake's expectations and the SDK
-    # build will silently fall back to no-Skia again — exactly the bug
-    # this script exists to prevent.
-    if not expected_lib.is_file():
+    # Sanity check the complete generation, not merely libskia. A missing,
+    # empty, or LFS-placeholder Dawn archive is equally unusable and must not
+    # receive a valid pin stamp.
+    if not cache_generation_materialized(dest, matrix_platform):
         print(
-            f"ERROR: expected library not found at {expected_lib} after unpack",
+            f"ERROR: expected materialized Skia/Dawn archives not found under "
+            f"{dest_root} after unpack",
             file=sys.stderr,
         )
         # Help the human debug.
@@ -406,6 +689,18 @@ def main(argv: list[str]) -> int:
 
     print(f"OK: {expected_lib} present ({expected_lib.stat().st_size:,} bytes)")
     return 0
+
+
+def main(argv: list[str]) -> int:
+    """Run one fetch and unlink only its exact private archives on every exit."""
+    archives: list[Path] = []
+    token = _ACTIVE_ARCHIVES.set(archives)
+    try:
+        return _main(argv)
+    finally:
+        for archive in archives:
+            archive.unlink(missing_ok=True)
+        _ACTIVE_ARCHIVES.reset(token)
 
 
 if __name__ == "__main__":

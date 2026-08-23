@@ -351,6 +351,21 @@ if [ -f "$ROOT/tools/scripts/test_worktree_lineage.sh" ]; then
     fi
 fi
 
+# ── 7a-quater. immutable shared-cache tests ────────────────────────────────
+if [ -f "$ROOT/tools/scripts/test_skia_cross_process_cache.py" ]; then
+    echo "" >&2
+    echo "▸ immutable shared-cache tests" >&2
+    if ! "$PYTHON" "$ROOT/tools/scripts/test_setup_shared_skia.py" >/dev/null 2>&1 ||
+       ! "$PYTHON" "$ROOT/tools/scripts/test_skia_cross_process_cache.py" >/dev/null 2>&1 ||
+       ! "$PYTHON" "$ROOT/tools/ci/test_pulp_worktree_cache_env.py" >/dev/null 2>&1 ||
+       ! "$PYTHON" "$ROOT/tools/ci/test_cache_routing_contract.py" >/dev/null 2>&1; then
+        echo "  immutable shared-cache tests: failing — run the four focused Python tests for details." >&2
+        fail=1
+    else
+        echo "  immutable shared-cache tests: ok" >&2
+    fi
+fi
+
 # ── 7b. manifest-mirror drift (tooling-consumed pin mirrors) ────────────────
 # Global invariant — the Skia/V8 pin data is hand-mirrored into files that
 # tooling actually trusts: external/skia-build/VERSION.md's digest table is a

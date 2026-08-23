@@ -330,6 +330,10 @@ jobs:
           # them late and by symptom.
           python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_setup_shared_skia.py
+          python3 tools/scripts/test_skia_cross_process_cache.py
+          python3 tools/ci/test_pulp_worktree_cache_env.py
+          python3 tools/ci/test_cache_routing_contract.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_required_macos_alias.py
           python3 tools/scripts/test_preamble_python_stable_cwd.py

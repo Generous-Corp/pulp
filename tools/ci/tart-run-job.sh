@@ -35,6 +35,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 
 GOLDEN=""; SRC=""; VM=""; DISK=""; BUILD_TYPE="Release"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
+FETCHCONTENT_SOURCE_ROOT="${PULP_SHARED_FETCHCONTENT_SOURCE_DIR:-$HOME/Library/Caches/Pulp/fetchcontent-src}"
 CTEST_ARGS="--output-on-failure --exclude-regex AudioWorkgroup --label-exclude slow"
 KEEP=0
 
@@ -61,7 +62,7 @@ SRC="$(cd "$SRC" && pwd)"
 # A unique-but-deterministic-per-invocation name. Caller can pass --vm; default
 # uses the parent shell PID (no Date.now/rand needed and unique enough per run).
 VM="${VM:-job-$$}"
-mkdir -p "$CACHE_ROOT"/{ccache,skia-build,fetchcontent-src}
+mkdir -p "$CACHE_ROOT"/{ccache,skia-build} "$FETCHCONTENT_SOURCE_ROOT"
 
 cleanup(){
   [ "$KEEP" = 1 ] && { note "--keep: leaving $VM (delete with: tart delete $VM)"; return; }
@@ -77,11 +78,11 @@ note "cloning $GOLDEN → $VM (CoW)"
 tart clone "$GOLDEN" "$VM"
 if [ -n "$DISK" ]; then tart set "$VM" --disk-size "$DISK"; note "disk → ${DISK}G (guest-agent grows APFS on boot)"; fi
 
-note "booting with host mounts (src ro, ccache/fetchcontent rw); Skia is baked into the golden"
+note "booting with host mounts (src/fetchcontent ro, ccache rw); Skia is baked into the golden"
 tart run --no-graphics \
   --dir="src:$SRC:ro" \
   --dir="ccache:$CACHE_ROOT/ccache" \
-  --dir="fetchcontent:$CACHE_ROOT/fetchcontent-src" \
+  --dir="fetchcontent:$FETCHCONTENT_SOURCE_ROOT:ro" \
   "$VM" >/dev/null 2>&1 & RPID=$!
 
 # Wait for IP + ssh.
@@ -103,7 +104,8 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 SHARED="/Volumes/My Shared Files"
 ln -sfn "$SHARED/src" "$HOME/src"
 ln -sfn "$SHARED/ccache" "$HOME/ccache"
-ln -sfn "$SHARED/fetchcontent" "$HOME/fetchcontent"
+mkdir -p "$HOME/Library/Caches/Pulp/fetchcontent-src"
+rsync -a "$SHARED/fetchcontent/" "$HOME/Library/Caches/Pulp/fetchcontent-src/"
 
 export CCACHE_DIR="$HOME/ccache"
 export CCACHE_TEMPDIR="$HOME/.ccache-tmp"        # IN-GUEST — never on the virtio-fs mount
@@ -111,11 +113,13 @@ mkdir -p "$CCACHE_TEMPDIR"
 export CCACHE_BASEDIR="$HOME/src"
 export CCACHE_NOHASHDIR=true
 export CCACHE_SLOPPINESS=time_macros,pch_defines
-export CCACHE_DEPEND=true
+export CCACHE_NODEPEND=true
+export CCACHE_COMPILERCHECK=content
+unset CCACHE_DEPEND
 # Skia is baked into the pulp-build-base golden at ~/pulp-skia-build (Tier 2).
 # FindSkia.cmake wants the dir CONTAINING build/, not .../build/mac-gpu.
 export SKIA_DIR="$HOME/pulp-skia-build"
-export FETCHCONTENT_BASE_DIR="$HOME/fetchcontent"
+export PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$HOME/Library/Caches/Pulp/fetchcontent-src"
 
 ccache --zero-stats >/dev/null 2>&1 || true
 BUILD="$HOME/build"

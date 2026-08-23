@@ -78,6 +78,24 @@ A host that runs 100+ worktrees off one `.git` against one shared ccache is **co
 
 These live in the versioned scripts so hosts converge, not just in one host's live config: `tools/ci/bootstrap-macos-host.sh` `tune_ccache()` writes them into the shared `$CCACHE_DIR/ccache.conf` (base_dir derived from the CI work root, never a hardcoded home), and `tools/ci/pulp-worktree.sh` `cache_env()` emits `CCACHE_NODEPEND=true` + `CCACHE_COMPILERCHECK=content` for the shipyard/worktree lane. `.github/workflows/build.yml` forces the same combo via job env for the GH-runner lane. Never turn depend mode back on for speed.
 
+### Shared Skia cache publication
+
+Host worktrees select an immutable Skia/Dawn cache generation beneath
+`${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}`. The generation directory is
+keyed by platform plus the manifest asset SHA-256; `SKIA_DIR` points at that
+generation root, not its parent or nested `build/mac-gpu` directory. Never
+rsync or symlink an arbitrary checkout's `external/skia-build` into the cache:
+directory existence does not prove materialized LFS content, asset digest,
+platform slice, or the complete Skia/Dawn library pair.
+
+`setup.sh --ci` and `tools/ci/pulp-worktree.sh new` use the canonical
+`fetch_skia_for_release.py` validator with a bounded cache-specific lock.
+Simultaneous cold worktrees publish through private sibling staging directories;
+a pin rotation creates a new generation while existing consumers retain their
+old immutable path. Recovery switches are explicit:
+`PULP_SKIA_CACHE_KEYING=0` and `PULP_WORKTREE_SKIP_SKIA_FETCH=1`; neither is a
+fleet default.
+
 ## GPU works in the guest (no hybrid lane needed)
 Apple Virtualization provides Metal in the guest **even with `--no-graphics`**. Verified: `pulp-screenshot --backend skia` renders a real Skia/Metal PNG, `nm pulp-ui-preview | grep MacGpuWindowHost` = present. So the full mac lane (build + GPU + tests) runs in-VM.
 
