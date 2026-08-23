@@ -164,9 +164,9 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
     def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
         self.assertEqual(self.contract["schema_version"], 1)
-        self.assertEqual(self.contract["registration_count"], 20_729)
-        self.assertEqual(self.contract["unique_name_count"], 20_670)
-        self.assertEqual(self.contract["unique_composite_count"], 20_729)
+        self.assertEqual(self.contract["registration_count"], 20_731)
+        self.assertEqual(self.contract["unique_name_count"], 20_672)
+        self.assertEqual(self.contract["unique_composite_count"], 20_731)
         self.assertEqual(self.contract["duplicate_name_group_count"], 55)
         self.assertEqual(self.contract["duplicate_name_excess_count"], 59)
         self.assertEqual(self.contract["duplicate_composite_group_count"], 0)
@@ -294,6 +294,71 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             with self.assertRaisesRegex(inventory.InventoryError, "unambiguous command"):
                 inventory.split_proven_unbuilt_placeholders(
                     [{"name": name, "properties": []}], build
+                )
+
+    def test_deferred_selftest_requires_full_compare_and_runnable_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            name = "mandatory_NOT_BUILT-b12d07c"
+            tests_path = build / "mandatory-b12d07c_tests.cmake"
+            (build / "mandatory-b12d07c_include.cmake").write_text(
+                f'if(EXISTS "{tests_path}")\n'
+                f'  include("{tests_path}")\n'
+                "else()\n"
+                f"  add_test({name} {name})\n"
+                "endif()\n",
+                encoding="utf-8",
+            )
+            placeholder = {
+                "name": name,
+                "properties": [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}
+                ],
+            }
+            runnable = fixture("mandatory", str(build / "mandatory"))
+            policy = {"baseline_tests": ["mandatory"]}
+
+            with self.assertRaisesRegex(
+                inventory.InventoryError, "require a shadow full comparison"
+            ):
+                validate_ctest_inventory_records(
+                    [runnable, placeholder],
+                    build,
+                    build,
+                    policy,
+                    {},
+                    allow_deferred=False,
+                )
+
+            self.assertIsNone(
+                validate_ctest_inventory_records(
+                    [runnable, placeholder],
+                    build,
+                    build,
+                    policy,
+                    {},
+                    allow_deferred=True,
+                )
+            )
+            with self.assertRaisesRegex(
+                inventory.InventoryError, "mandatory baseline tests are not runnable"
+            ):
+                validate_ctest_inventory_records(
+                    [placeholder],
+                    build,
+                    build,
+                    policy,
+                    {},
+                    allow_deferred=True,
+                )
+            with self.assertRaisesRegex(inventory.InventoryError, "ambiguous"):
+                validate_ctest_inventory_records(
+                    [runnable, copy.deepcopy(runnable), placeholder],
+                    build,
+                    build,
+                    policy,
+                    {},
+                    allow_deferred=True,
                 )
 
     def test_commandless_direct_test_requires_ctestfile_and_codemodel_provenance(self) -> None:
@@ -468,16 +533,55 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             inventory.expand_literal_selection(manifest, ["one", "one"])
 
 
-def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
-    policy = load_policy()
-    source_root = inventory.source_root_for_build(build_dir)
+def validate_ctest_inventory_records(
+    tests: list[dict],
+    source_root: Path,
+    build_dir: Path,
+    policy: dict,
+    contract: dict,
+    *,
+    allow_deferred: bool,
+) -> dict | None:
+    ready_tests, placeholders = inventory.split_proven_unbuilt_placeholders(
+        tests, build_dir
+    )
+    if placeholders:
+        if not allow_deferred:
+            raise inventory.InventoryError(
+                "proven NOT_BUILT registrations require a shadow full comparison"
+            )
+        baseline = policy.get("baseline_tests")
+        if not isinstance(baseline, list) or not all(
+            isinstance(name, str) and name for name in baseline
+        ):
+            raise inventory.InventoryError("policy has no valid mandatory baseline")
+        ready_groups = inventory.inventory_groups(
+            ready_tests, source_root, Path(os.path.abspath(build_dir))
+        )
+        ready_names = {group["composite"]["name"] for group in ready_groups}
+        missing = sorted(set(baseline) - ready_names)
+        if missing:
+            raise inventory.InventoryError(
+                f"mandatory baseline tests are not runnable: {missing}"
+            )
+        inventory.expand_literal_selection(
+            {
+                "groups": ready_groups,
+                "duplicate_composite_group_count": sum(
+                    group["multiplicity"] > 1 for group in ready_groups
+                ),
+            },
+            baseline,
+        )
+        return None
+
     manifest = inventory.build_manifest(
-        inventory.load_ctest_json(build_dir),
+        ready_tests,
         source_root,
         Path(os.path.abspath(build_dir)),
         policy,
     )
-    inventory.validate_manifest(manifest, load_inventory_contract())
+    inventory.validate_manifest(manifest, contract)
     missing = sorted(
         literal_tests(policy)
         - {group["composite"]["name"] for group in manifest["groups"]}
@@ -487,6 +591,24 @@ def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = Non
             f"policy names tests absent from CTest inventory: {missing}"
         )
     inventory.expand_literal_selection(manifest, literal_tests(policy))
+    return manifest
+
+
+def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
+    policy = load_policy()
+    source_root = inventory.source_root_for_build(build_dir)
+    manifest = validate_ctest_inventory_records(
+        inventory.load_ctest_json(build_dir),
+        source_root,
+        Path(os.path.abspath(build_dir)),
+        policy,
+        load_inventory_contract(),
+        allow_deferred=os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1",
+    )
+    if manifest is None and manifest_output is not None:
+        raise inventory.InventoryError(
+            "cannot write an inventory manifest from deferred registrations"
+        )
     if manifest_output is not None:
         manifest_output.write_bytes(inventory.canonical_json(manifest) + b"\n")
 

@@ -4398,6 +4398,13 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+The selected-target leg can temporarily expose provenance-backed Catch2
+`*_NOT_BUILT-*` registrations. The mandatory self-test may defer its exact
+multiset check only when `SHIPYARD_CHANGED_SURFACE_COMPARE_FULL=1` proves the
+full leg follows, and every mandatory baseline name must already resolve to a
+real runnable registration. The hydrated full leg still requires zero
+placeholders and the exact protected inventory before full CTest execution.
+
 When a change deliberately adds or removes CTest registrations, refresh the
 inventory contract in the same commit: update
 `.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and

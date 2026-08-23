@@ -1253,7 +1253,7 @@ macOS Debug configuration, which enables
 that platform-specific cardinality.
 
 CTest display names are not identities: the authoritative target currently has
-20,729 registrations but only 20,670 unique names. The inventory validator
+20,731 registrations but only 20,672 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -1267,6 +1267,13 @@ portable basename in the registration fingerprint while the toolchain digest
 binds their raw and resolved paths plus a bounded content digest, so same-named
 tools remain distinguishable. Raw worktree paths and CTest registration order
 are intentionally excluded from portable identity.
+
+The selected-target leg can temporarily expose provenance-backed Catch2
+`*_NOT_BUILT-*` registrations. Its mandatory policy self-test defers the exact
+multiset check only when `SHIPYARD_CHANGED_SURFACE_COMPARE_FULL=1` proves the
+full leg follows, and every mandatory baseline name must already resolve to a
+real runnable registration. The hydrated full leg still requires zero
+placeholders and the exact protected inventory before full CTest execution.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the
