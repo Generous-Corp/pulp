@@ -321,7 +321,7 @@ schema_version = 3
 # contract in changed-surface-inventory.json pins all 20,729 registrations.
 # Test-topology changes force a full-suite decision. This remains shadow-only:
 # [validation.default] is still the authoritative execution.
-full_test_count = 20729
+full_test_count = 20731
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [
