@@ -1253,7 +1253,7 @@ macOS Debug configuration, which enables
 that platform-specific cardinality.
 
 CTest display names are not identities: the authoritative target currently has
-20,729 registrations but only 20,670 unique names. The inventory validator
+20,732 registrations but only 20,673 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
