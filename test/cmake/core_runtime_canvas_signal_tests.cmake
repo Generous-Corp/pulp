@@ -482,10 +482,14 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
-# Like apply-config above, this validation-tier suite opens the real output
-# device before exercising its probe wiring.
+# One case opens the real output device before exercising its probe wiring;
+# keep only that tagged case in the validation tier.  The in-memory capture
+# ring case remains in ordinary PR coverage.
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
     LIBRARIES pulp::standalone pulp::view
+    TEST_SPEC "~[hardware]" PROPERTIES PROCESSORS 8)
+catch_discover_tests(pulp-test-standalone-audio-inspector
+    TEST_SPEC "[hardware]"
     PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
 # Headless screenshot capture state machine
 pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone

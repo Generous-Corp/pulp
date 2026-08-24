@@ -177,7 +177,7 @@ build     = "cmake --build build --config Release --parallel 4"
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
-test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude \"slow|validation\""
 
 # The exact inventory is specific to the required macOS target. Optional Linux
 # targets inherit the default recipe but register a different platform-gated

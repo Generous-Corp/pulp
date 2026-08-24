@@ -77,7 +77,7 @@ struct StereoBlock {
 }  // namespace
 
 TEST_CASE("StandaloneApp wires its output probe into the Audio Inspector window",
-          "[format][standalone][audio-inspector][audio-harness]") {
+          "[format][standalone][audio-inspector][audio-harness][hardware]") {
     StandaloneApp app(&make_silent_proc);
 
     StandaloneConfig cfg;
