@@ -237,6 +237,41 @@ def module_state_rules(overrides_path: str | None = None) -> dict:
     return rules
 
 
+def fresh_generation_refusal(
+        plugin: str, model: str, inv: dict,
+        rules: dict | None = None) -> str | None:
+    """Why an exact installed module version cannot be authored from scratch."""
+    rules = module_state_rules() if rules is None else rules
+    rule = rules.get(f"{plugin}/{model}") or {}
+    if rule.get("plugin_version") != (inv.get(plugin) or {}).get("version"):
+        return None
+    contract = rule.get("fresh_generation")
+    if not isinstance(contract, dict) or contract.get("status") != "unsupported":
+        return None
+    reason = contract.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise RuntimeError(
+            f"{plugin}/{model} has an unsupported fresh-generation contract "
+            "without an actionable reason")
+    return reason.strip()
+
+
+def fresh_generation_errors(
+        selected: set[tuple[str, str]], inv: dict) -> list[str]:
+    """Actionable refusals for explicitly requested unsupported modules."""
+    errors = []
+    rules = module_state_rules()
+    for plugin, model in sorted(selected):
+        reason = fresh_generation_refusal(plugin, model, inv, rules)
+        if reason:
+            errors.append(
+                f"cannot freshly generate {plugin}/{model} for installed "
+                f"plugin version {(inv.get(plugin) or {}).get('version')}: "
+                f"{reason}. Choose another installed module or provide a "
+                "validated existing patch to refine. Nothing was sent to the model.")
+    return errors
+
+
 def closed_module_idiom_contract(
         closed: set[tuple[str, str]], idiom_slug: str | None,
         inv: dict) -> str | None:
@@ -2702,18 +2737,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONTRACT = os.path.join(HERE, "prompt", "patch_contract.md")
 
 
-def render_inventory(inv: dict, prefer: str | None = None) -> str:
+def render_inventory(
+        inv: dict, prefer: str | None = None,
+        fresh_generation: bool = True) -> str:
     """The inventory as the model sees it, ports included where known."""
     out = []
     state_rules = module_state_rules()
     order = sorted(inv, key=lambda s: (s != prefer, s))
     for pslug in order:
         p = inv[pslug]
+        modules = [
+            (mslug, module)
+            for mslug, module in sorted(p["modules"].items())
+            if not fresh_generation or
+            fresh_generation_refusal(pslug, mslug, inv, state_rules) is None
+        ]
+        if not modules:
+            continue
         head = f"### {pslug} — {p['name']}"
         if prefer and pslug == prefer:
             head += "   ← the user's own modules; prefer these when they fit"
         out.append(head)
-        for mslug, m in sorted(p["modules"].items()):
+        for mslug, m in modules:
             line = f"- `{mslug}` {m['name']}"
             if m.get("description"):
                 line += f" — {m['description']}"
@@ -2881,6 +2926,7 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
              "The multi-jack roles below need more than a broad module tag. "
              "Use only their listed choices: each matches the exact installed "
              "jack map and every independent lane."]
+    state_rules = module_state_rules()
     if read.primary.slug == "acid-voice":
         import capability_lessons                         # noqa: PLC0415
         lessons = capability_lessons.load()
@@ -2963,6 +3009,9 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
         for plugin, package in inv.items():
             for model, module in (package.get("modules") or {}).items():
                 if allowed is not None and (plugin, model) not in allowed:
+                    continue
+                if fresh_generation_refusal(
+                        plugin, model, inv, state_rules) is not None:
                     continue
                 if idiom_check._module_matches(role, module, roles) and \
                         fits(module, required):
@@ -6913,6 +6962,11 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     import subprocess
     editable_base = refinement_model_base(base_patch, inv) \
         if base_patch is not None else None
+    named = exact_named_module_selection(prompt, inv)
+    if base_patch is None:
+        generation_errors = fresh_generation_errors(named, inv)
+        if generation_errors:
+            raise SystemExit("\n".join(generation_errors))
     mentions = brand_mentions(prompt, catalog())
     inventory_errors = exclusive_maker_inventory_errors(inv, mentions)
     if inventory_errors:
@@ -6943,7 +6997,6 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     midx = module_index()
     maker_mentions = brand_mentions(prompt, catalogue)
     tag_references = intent_context.resolve_tag_references(prompt, inv, midx)
-    named = exact_named_module_selection(prompt, inv)
     closed_named = closed_named_module_selection(prompt, named)
     module_idiom_contract = closed_module_idiom_contract(
         closed_named, claimed.slug if claimed.gating else None, inv)
@@ -6994,7 +7047,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         model_inventory = inventory_subset(inv, selected) if selected else inv
     with open(CONTRACT, encoding="utf-8") as source:
         contract = source.read().replace(
-            "<!--INVENTORY-->", render_inventory(model_inventory, prefer))
+            "<!--INVENTORY-->", render_inventory(
+                model_inventory, prefer, fresh_generation=base_patch is None))
     if module_idiom_contract is None:
         vocabulary = patch_vocabulary.for_prompt(prompt, idioms) \
             if claimed.slug else patch_vocabulary.render(idioms, prompt)

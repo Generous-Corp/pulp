@@ -177,7 +177,7 @@ build     = "cmake --build build --config Release --parallel 4"
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
-test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude \"slow|validation\""
 
 # The exact inventory is specific to the required macOS target. Optional Linux
 # targets inherit the default recipe but register a different platform-gated
@@ -318,10 +318,10 @@ timeout_secs = 14400
 schema_version = 3
 # Exact current-main registration count. CTest permits duplicate display names,
 # so this is deliberately not the unique-name count. The canonical multiset
-# contract in changed-surface-inventory.json pins all 20,729 registrations.
+# contract in changed-surface-inventory.json pins all 20,727 registrations.
 # Test-topology changes force a full-suite decision. This remains shadow-only:
 # [validation.default] is still the authoritative execution.
-full_test_count = 20731
+full_test_count = 20727
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [

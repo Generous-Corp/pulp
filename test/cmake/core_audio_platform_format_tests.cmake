@@ -34,7 +34,13 @@ pulp_add_test_suite(pulp-test-impulse-response LIBRARIES pulp::audio pulp::signa
 # weighted cost without assuming the runner is still exactly `-j8`.
 # (Root-cause fix replacing the build.yml exclude.)
 pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
-    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
+    TEST_SPEC "~[hardware]"
+    PROPERTIES PROCESSORS 8)
+catch_discover_tests(pulp-test-audio
+    TEST_SPEC "[hardware]"
+    TEST_PREFIX "hardware::"
+    LABELS "audio;hardware;validation"
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE TIMEOUT 120)
 
 pulp_add_test_suite(pulp-test-system-volume LIBRARIES pulp::audio)
 

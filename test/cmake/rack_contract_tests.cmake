@@ -25,6 +25,13 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 60)
 
+    add_test(NAME rack-generation-eligibility
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generation_eligibility.py)
+    set_tests_properties(rack-generation-eligibility PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
     # What the gate SAYS when an input reads as inert, which decides whether a
     # generation can act on the failure or only observe it. Compiles two
     # fixtures against the real Rack SDK and runs the real gate, so it skips

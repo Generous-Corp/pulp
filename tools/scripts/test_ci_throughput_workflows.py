@@ -43,6 +43,10 @@ WEIGHTED_CORE_AUDIO_SERIAL_SUITES = {
     "pulp-test-standalone-apply-config",
     "pulp-test-standalone-audio-inspector",
 }
+SPLIT_CORE_AUDIO_SERIAL_SUITES = {
+    "pulp-test-audio",
+    "pulp-test-standalone-audio-inspector",
+}
 NON_DEVICE_WEIGHTED_SUITES = (
     "pulp-test-standalone-editor-chrome",
     "pulp-test-standalone-audio-capture-wav",
@@ -133,6 +137,24 @@ def pulp_test_suite_call(text: str, name: str) -> str:
     if match is None:
         raise AssertionError(f"missing pulp_add_test_suite registration for {name}")
     return match.group(0)
+
+
+def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
+    calls = re.findall(
+        rf"catch_discover_tests\(\s*{re.escape(name)}\b.*?\)",
+        text,
+        re.S,
+    )
+    matches = [
+        call
+        for call in calls
+        if re.search(rf'\bTEST_SPEC\s+"{re.escape(test_spec)}"', call)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one catch_discover_tests registration for {name} {test_spec}"
+        )
+    return matches[0]
 
 
 class ExamplesValidationWorkflowTests(unittest.TestCase):
@@ -425,6 +447,68 @@ class ShipyardTopologyContractTests(unittest.TestCase):
 
 
 class CTestIsolationContractTests(unittest.TestCase):
+    def test_real_dmg_creators_share_only_the_hdiutil_resource_lock(self) -> None:
+        manifests = (
+            (ROOT / "test" / "cmake" / "cli_tests.cmake",
+             "pulp-test-cli-shellout", False),
+            (ROOT / "test" / "cmake" / "cli_tests.cmake",
+             "pulp-test-cli-ship-shellout", False),
+            (ROOT / "test" / "cmake" / "format_reload_tests.cmake",
+             "pulp-test-codesign", True),
+        )
+        for manifest, target, ordinary_uses_helper in manifests:
+            text = manifest.read_text(encoding="utf-8")
+            with self.subTest(manifest=manifest.name, target=target):
+                if ordinary_uses_helper:
+                    ordinary = pulp_test_suite_call(text, target)
+                else:
+                    ordinary = catch_test_suite_call(text, target, "~[hdiutil]")
+                self.assertRegex(ordinary, r'\bTEST_SPEC\s+"~\[hdiutil\]"')
+                guarded = catch_test_suite_call(text, target, "[hdiutil]")
+                self.assertNotIn("RESOURCE_LOCK", ordinary)
+                self.assertRegex(
+                    guarded, r"\bRESOURCE_LOCK\s+pulp_hdiutil\b"
+                )
+                self.assertNotIn("RUN_SERIAL", guarded)
+
+        tagged_cases = (
+            (ROOT / "test" / "test_cli_shellout.cpp",
+             "pulp ship share requires inspector acknowledgements before dry run"),
+            (ROOT / "test" / "test_cli_ship_shellout.cpp",
+             "pulp ship release --dmg builds the disk image and refuses to notarize it unsigned"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "create_dmg produces a file from valid source"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "a failed dmg build hands back what hdiutil said"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "create_dmg fails when the source is missing"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "codesign failure paths leave requested outputs absent"),
+        )
+        for source, case_name in tagged_cases:
+            text = source.read_text(encoding="utf-8")
+            with self.subTest(source=source.name, case=case_name):
+                case = re.search(
+                    rf'TEST_CASE(?:_METHOD)?\([^{{]*?{re.escape(case_name)}'
+                    rf'[^{{]*?\)\s*\{{',
+                    text,
+                    re.S,
+                )
+                self.assertIsNotNone(case)
+                self.assertIn("[hdiutil]", case.group(0))
+
+        codesign = (ROOT / "test" / "test_codesign.cpp").read_text(
+            encoding="utf-8"
+        )
+        parser_case = re.search(
+            r'TEST_CASE\([^\{]*?a busy hdiutil failure names the unmount '
+            r'dissenter; other failures do not[^\{]*?\)\s*\{',
+            codesign,
+            re.S,
+        )
+        self.assertIsNotNone(parser_case)
+        self.assertNotIn("[hdiutil]", parser_case.group(0))
+
     def test_every_processors_eight_registration_is_classified(self) -> None:
         expected = (
             WEIGHTED_CORE_AUDIO_SERIAL_SUITES
@@ -451,7 +535,10 @@ class CTestIsolationContractTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             for name in names:
                 with self.subTest(path=path.name, suite=name):
-                    call = pulp_test_suite_call(text, name)
+                    if name in SPLIT_CORE_AUDIO_SERIAL_SUITES:
+                        call = catch_test_suite_call(text, name, "[hardware]")
+                    else:
+                        call = pulp_test_suite_call(text, name)
                     self.assertRegex(call, r"\bRUN_SERIAL\s+TRUE\b")
                     if name in WEIGHTED_CORE_AUDIO_SERIAL_SUITES:
                         self.assertRegex(call, r"\bPROCESSORS\s+8\b")
@@ -466,6 +553,18 @@ class CTestIsolationContractTests(unittest.TestCase):
                 call = pulp_test_suite_call(text, name)
                 self.assertRegex(call, r"\bPROCESSORS\s+8\b")
                 self.assertNotRegex(call, r"\bRUN_SERIAL\b")
+
+    def test_split_hardware_suites_leave_ordinary_cases_non_serial(self) -> None:
+        for path, names in CORE_AUDIO_SERIAL_SUITES.items():
+            text = path.read_text(encoding="utf-8")
+            for name in names:
+                if name not in SPLIT_CORE_AUDIO_SERIAL_SUITES:
+                    continue
+                with self.subTest(path=path.name, suite=name):
+                    call = pulp_test_suite_call(text, name)
+                    self.assertRegex(call, r'\bTEST_SPEC\s+"~\[hardware\]"')
+                    self.assertRegex(call, r"\bPROCESSORS\s+8\b")
+                    self.assertNotRegex(call, r"\bRUN_SERIAL\b")
 
     def test_unrelated_quality_weight_is_not_globally_serialized(self) -> None:
         quality = (ROOT / "test" / "cmake" / "quality_tests.cmake").read_text(

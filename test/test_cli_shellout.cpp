@@ -3238,7 +3238,7 @@ TEST_CASE("pulp ship check android ignores standalone inspector manifests",
 }
 
 TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
-          "[cli][shellout][ship][inspect]") {
+          "[cli][shellout][ship][inspect][hdiutil]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
         return;

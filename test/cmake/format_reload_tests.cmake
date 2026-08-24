@@ -282,7 +282,14 @@ pulp_add_test_suite(pulp-test-android-package LIBRARIES pulp::ship)
 pulp_add_test_suite(pulp-test-v3-gaps LIBRARIES pulp::signal pulp::midi pulp::audio pulp::format pulp::runtime)
 
 # Codesign tests
-if(WIN32)
+if(APPLE)
+    pulp_add_test_suite(pulp-test-codesign
+        LIBRARIES pulp::ship
+        TEST_SPEC "~[hdiutil]")
+    catch_discover_tests(pulp-test-codesign
+        TEST_SPEC "[hdiutil]"
+        PROPERTIES RESOURCE_LOCK pulp_hdiutil)
+elseif(WIN32)
     pulp_add_test_suite(pulp-test-codesign
         LIBRARIES pulp::ship
         LABELS "windows-pr-quarantine")

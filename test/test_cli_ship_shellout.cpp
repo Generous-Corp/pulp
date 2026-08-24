@@ -1414,7 +1414,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release --dmg builds the disk image and refuses to notarize it unsigned",
-                 "[cli][shellout][ship][release][oneoff]") {
+                 "[cli][shellout][ship][release][oneoff][hdiutil]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("release-dmg-notarize", true);
     // A standalone .app under build/Standalone is packaged to a .dmg by the
