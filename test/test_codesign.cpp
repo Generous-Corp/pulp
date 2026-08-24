@@ -141,7 +141,7 @@ TEST_CASE("default_audio_entitlements returns valid plist", "[ship][codesign]") 
 #endif
 }
 
-TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign]") {
+TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign][hdiutil]") {
 #ifdef __APPLE__
     auto root_template = (fs::temp_directory_path() / "pulp-dmg-test-XXXXXX").string();
     REQUIRE(mkdtemp(root_template.data()) != nullptr);
@@ -183,7 +183,8 @@ TEST_CASE("a busy hdiutil failure names the unmount dissenter; other failures do
     CHECK(disk_image_failure_hint("").empty());
 }
 
-TEST_CASE("a failed dmg build hands back what hdiutil said", "[ship][codesign]") {
+TEST_CASE("a failed dmg build hands back what hdiutil said",
+          "[ship][codesign][hdiutil]") {
     // hdiutil's output used to be redirected to /dev/null, so every DMG failure
     // reached the user as a bare `false`. Whatever hdiutil prints, the caller gets.
     ScopedTempDir temp("pulp-dmg-missing-src");
@@ -195,7 +196,8 @@ TEST_CASE("a failed dmg build hands back what hdiutil said", "[ship][codesign]")
     CHECK(error.find("hdiutil") != std::string::npos);
 }
 
-TEST_CASE("create_dmg fails when the source is missing", "[ship][codesign]") {
+TEST_CASE("create_dmg fails when the source is missing",
+          "[ship][codesign][hdiutil]") {
     ScopedTempDir temp("pulp-dmg-missing-src");
     CHECK_FALSE(create_dmg((temp.path / "not-here").string(),
                            (temp.path / "out.dmg").string(), "PulpTest"));
@@ -228,7 +230,7 @@ TEST_CASE("codesign reports unsigned regular files without identity metadata",
 }
 
 TEST_CASE("codesign failure paths leave requested outputs absent",
-          "[ship][codesign]") {
+          "[ship][codesign][hdiutil]") {
     ScopedTempDir temp("pulp-codesign-failures");
     const auto pkg = temp.path / "missing.pkg";
     const auto signed_pkg = temp.path / "missing-signed.pkg";

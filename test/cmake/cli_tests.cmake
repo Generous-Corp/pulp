@@ -190,7 +190,14 @@ endif()
 if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
-catch_discover_tests(pulp-test-cli-shellout)
+if(APPLE)
+    catch_discover_tests(pulp-test-cli-shellout TEST_SPEC "~[hdiutil]")
+    catch_discover_tests(pulp-test-cli-shellout
+        TEST_SPEC "[hdiutil]"
+        PROPERTIES RESOURCE_LOCK pulp_hdiutil)
+else()
+    catch_discover_tests(pulp-test-cli-shellout)
+endif()
 if(TARGET pulp::inspect-client)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
@@ -363,7 +370,18 @@ target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2:
 if(TARGET pulp-cli)
     add_dependencies(pulp-test-cli-ship-shellout pulp-cli)
 endif()
-catch_discover_tests(pulp-test-cli-ship-shellout)
+# hdiutil attaches temporary disk images through a machine-wide service. Keep
+# the one real-image case parallel with ordinary CLI tests, but not with another
+# real-image creator: under ctest -j8 that collision has stretched a 17-second
+# case past its 90-second child-process deadline.
+if(APPLE)
+    catch_discover_tests(pulp-test-cli-ship-shellout TEST_SPEC "~[hdiutil]")
+    catch_discover_tests(pulp-test-cli-ship-shellout
+        TEST_SPEC "[hdiutil]"
+        PROPERTIES RESOURCE_LOCK pulp_hdiutil)
+else()
+    catch_discover_tests(pulp-test-cli-ship-shellout)
+endif()
 
 # Ship-time PULP_TRACING guard. Pure header-only scanner (ship_tracing_guard.hpp);
 # unit-tested against fixtures since the default/coverage config cannot build a

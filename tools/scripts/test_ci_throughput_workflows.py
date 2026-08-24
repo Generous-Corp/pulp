@@ -447,6 +447,68 @@ class ShipyardTopologyContractTests(unittest.TestCase):
 
 
 class CTestIsolationContractTests(unittest.TestCase):
+    def test_real_dmg_creators_share_only_the_hdiutil_resource_lock(self) -> None:
+        manifests = (
+            (ROOT / "test" / "cmake" / "cli_tests.cmake",
+             "pulp-test-cli-shellout", False),
+            (ROOT / "test" / "cmake" / "cli_tests.cmake",
+             "pulp-test-cli-ship-shellout", False),
+            (ROOT / "test" / "cmake" / "format_reload_tests.cmake",
+             "pulp-test-codesign", True),
+        )
+        for manifest, target, ordinary_uses_helper in manifests:
+            text = manifest.read_text(encoding="utf-8")
+            with self.subTest(manifest=manifest.name, target=target):
+                if ordinary_uses_helper:
+                    ordinary = pulp_test_suite_call(text, target)
+                else:
+                    ordinary = catch_test_suite_call(text, target, "~[hdiutil]")
+                self.assertRegex(ordinary, r'\bTEST_SPEC\s+"~\[hdiutil\]"')
+                guarded = catch_test_suite_call(text, target, "[hdiutil]")
+                self.assertNotIn("RESOURCE_LOCK", ordinary)
+                self.assertRegex(
+                    guarded, r"\bRESOURCE_LOCK\s+pulp_hdiutil\b"
+                )
+                self.assertNotIn("RUN_SERIAL", guarded)
+
+        tagged_cases = (
+            (ROOT / "test" / "test_cli_shellout.cpp",
+             "pulp ship share requires inspector acknowledgements before dry run"),
+            (ROOT / "test" / "test_cli_ship_shellout.cpp",
+             "pulp ship release --dmg builds the disk image and refuses to notarize it unsigned"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "create_dmg produces a file from valid source"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "a failed dmg build hands back what hdiutil said"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "create_dmg fails when the source is missing"),
+            (ROOT / "test" / "test_codesign.cpp",
+             "codesign failure paths leave requested outputs absent"),
+        )
+        for source, case_name in tagged_cases:
+            text = source.read_text(encoding="utf-8")
+            with self.subTest(source=source.name, case=case_name):
+                case = re.search(
+                    rf'TEST_CASE(?:_METHOD)?\([^{{]*?{re.escape(case_name)}'
+                    rf'[^{{]*?\)\s*\{{',
+                    text,
+                    re.S,
+                )
+                self.assertIsNotNone(case)
+                self.assertIn("[hdiutil]", case.group(0))
+
+        codesign = (ROOT / "test" / "test_codesign.cpp").read_text(
+            encoding="utf-8"
+        )
+        parser_case = re.search(
+            r'TEST_CASE\([^\{]*?a busy hdiutil failure names the unmount '
+            r'dissenter; other failures do not[^\{]*?\)\s*\{',
+            codesign,
+            re.S,
+        )
+        self.assertIsNotNone(parser_case)
+        self.assertNotIn("[hdiutil]", parser_case.group(0))
+
     def test_every_processors_eight_registration_is_classified(self) -> None:
         expected = (
             WEIGHTED_CORE_AUDIO_SERIAL_SUITES
