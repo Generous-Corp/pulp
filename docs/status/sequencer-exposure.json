@@ -945,7 +945,6 @@
         {
           "path": ".github/workflows/version-skill-check.yml",
           "needles": [
-            "permissions:\n  contents: read",
             "Sequencer exposure ledger",
             "sequencer_exposure_check.py --base"
           ]
