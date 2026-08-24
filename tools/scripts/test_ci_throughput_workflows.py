@@ -43,6 +43,10 @@ WEIGHTED_CORE_AUDIO_SERIAL_SUITES = {
     "pulp-test-standalone-apply-config",
     "pulp-test-standalone-audio-inspector",
 }
+SPLIT_CORE_AUDIO_SERIAL_SUITES = {
+    "pulp-test-audio",
+    "pulp-test-standalone-audio-inspector",
+}
 NON_DEVICE_WEIGHTED_SUITES = (
     "pulp-test-standalone-editor-chrome",
     "pulp-test-standalone-audio-capture-wav",
@@ -133,6 +137,24 @@ def pulp_test_suite_call(text: str, name: str) -> str:
     if match is None:
         raise AssertionError(f"missing pulp_add_test_suite registration for {name}")
     return match.group(0)
+
+
+def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
+    calls = re.findall(
+        rf"catch_discover_tests\(\s*{re.escape(name)}\b.*?\)",
+        text,
+        re.S,
+    )
+    matches = [
+        call
+        for call in calls
+        if re.search(rf'\bTEST_SPEC\s+"{re.escape(test_spec)}"', call)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one catch_discover_tests registration for {name} {test_spec}"
+        )
+    return matches[0]
 
 
 class ExamplesValidationWorkflowTests(unittest.TestCase):
@@ -451,7 +473,10 @@ class CTestIsolationContractTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             for name in names:
                 with self.subTest(path=path.name, suite=name):
-                    call = pulp_test_suite_call(text, name)
+                    if name in SPLIT_CORE_AUDIO_SERIAL_SUITES:
+                        call = catch_test_suite_call(text, name, "[hardware]")
+                    else:
+                        call = pulp_test_suite_call(text, name)
                     self.assertRegex(call, r"\bRUN_SERIAL\s+TRUE\b")
                     if name in WEIGHTED_CORE_AUDIO_SERIAL_SUITES:
                         self.assertRegex(call, r"\bPROCESSORS\s+8\b")
@@ -466,6 +491,18 @@ class CTestIsolationContractTests(unittest.TestCase):
                 call = pulp_test_suite_call(text, name)
                 self.assertRegex(call, r"\bPROCESSORS\s+8\b")
                 self.assertNotRegex(call, r"\bRUN_SERIAL\b")
+
+    def test_split_hardware_suites_leave_ordinary_cases_non_serial(self) -> None:
+        for path, names in CORE_AUDIO_SERIAL_SUITES.items():
+            text = path.read_text(encoding="utf-8")
+            for name in names:
+                if name not in SPLIT_CORE_AUDIO_SERIAL_SUITES:
+                    continue
+                with self.subTest(path=path.name, suite=name):
+                    call = pulp_test_suite_call(text, name)
+                    self.assertRegex(call, r'\bTEST_SPEC\s+"~\[hardware\]"')
+                    self.assertRegex(call, r"\bPROCESSORS\s+8\b")
+                    self.assertNotRegex(call, r"\bRUN_SERIAL\b")
 
     def test_unrelated_quality_weight_is_not_globally_serialized(self) -> None:
         quality = (ROOT / "test" / "cmake" / "quality_tests.cmake").read_text(

@@ -35,7 +35,7 @@ pulp_add_test_suite(pulp-test-impulse-response LIBRARIES pulp::audio pulp::signa
 # (Root-cause fix replacing the build.yml exclude.)
 pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
     TEST_SPEC "~[hardware]"
-    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
+    PROPERTIES PROCESSORS 8)
 catch_discover_tests(pulp-test-audio
     TEST_SPEC "[hardware]"
     TEST_PREFIX "hardware::"
