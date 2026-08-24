@@ -249,6 +249,19 @@ a suite that measures nothing goes green. It caught one on its first run.
 
 ## What the model knows about a module
 
+### Installed does not mean authorable from a fresh patch
+
+Some Rack modules depend on opaque state stored in a saved patch that cannot be
+reconstructed from the public parameter and port inventory. Record these as an
+exact plugin-version `fresh_generation = unsupported` contract in
+`tools/rack/module-state-overrides.json`. Fresh generation must hide them from
+the model and refuse an explicit request before resolving or calling a provider;
+refining an existing validated patch may still describe and retain them. Never
+carry an exclusion to a different plugin version without fresh evidence. This
+is why `PathSet-Infinity/WarpDrive` 2.1.0 is excluded: a newly authored instance
+is silent without its opaque coil, LFO, and envelope sequences even though the
+module is installed and its ordinary Rack metadata looks sufficient.
+
 Before a module-generation request can reach a model, it must select at least
 one direct primary DSP capability from
 `tools/rack/knowledge/module/dsp-primitives.json`. The installed public

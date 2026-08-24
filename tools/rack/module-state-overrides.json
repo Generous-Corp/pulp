@@ -15,6 +15,13 @@
       }
     ]
   },
+  "PathSet-Infinity/WarpDrive": {
+    "plugin_version": "2.1.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "requires opaque persisted coil, LFO, and envelope sequences, and no exact admitted authoring compiler exists"
+    }
+  },
   "TwinSlide/TwinSlide": {
     "plugin_version": "2.1.6",
     "source_revision": "c6d2dcd1dc54f20857d10d878efd70d14c43bdb4",
