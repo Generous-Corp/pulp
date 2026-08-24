@@ -1,5 +1,8 @@
 name: Install consumer smoke
 
+permissions:
+  contents: read
+
 # Catches the class of bug where in-tree builds work but installed-SDK
 # consumers break - for example, an
 # `include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)`

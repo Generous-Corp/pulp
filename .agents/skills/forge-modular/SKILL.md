@@ -249,6 +249,21 @@ a suite that measures nothing goes green. It caught one on its first run.
 
 ## What the model knows about a module
 
+Before a module-generation request can reach a model, it must select at least
+one direct primary DSP capability from
+`tools/rack/knowledge/module/dsp-primitives.json`. The installed public
+capability manifest is necessary but not sufficient: a type can be exported by
+the SDK and still be unavailable to Forge when this curated projection omits
+it. The intentional symptom is `this request matches only generic module
+helpers and no direct DSP capability`; no provider request has started.
+
+When adding an SDK primitive that Forge should author directly, add a narrow
+primary row with unambiguous intent terms and a focused
+`tools/test_dsp_vocabulary.py` positive. Also retain helper-only and generic
+lookalike negatives so ordinary words do not accidentally authorize a model
+request. Diagnose this projection first; do not retry the GUI or spend another
+model call on the same prompt.
+
 `render_inventory()` in `patch.py` is the catalogue the model receives. It
 carries ports AND params (name, range, default). It did not carry params for a
 long time, and the model wrote values blindly — which is how a kick drum came
@@ -525,6 +540,11 @@ clamps to 1.0, and yields a filter wide open in a patch claiming to follow the
 book. So a unit the control cannot read is a **refusal**, while a value it
 understands but cannot reach is a **clamp with a reason** — different
 situations, reported differently.
+
+Module identity is resolved before any physical-value lookup. A name absent
+from the exact inventory is a model-contract error, not evidence that Cartog
+needs another scan. Do not measure a tag, display label, or guessed spelling;
+retry with the exact plugin/model pair listed by the inventory.
 
 Written only where it is not the identity, so at scan 5 an absent
 `displayBase` means linear and an absent `unit` means dimensionless; below 5
@@ -946,6 +966,35 @@ python3 tools/rack/generate.py --response-file <saved-response> "<prompt>"
 Saved responses live at `$TMPDIR/forge-module-attempts-*/attempt01-model-response.txt`.
 Change one line in a copy, replay both, and the control/test differ by exactly
 that line.
+
+The role-aware probe must also make separate CV jacks independently observable.
+Do not drive every `Cv` input with the same 0..5 V square: a signal edge and its
+rise/fall modulation then move together and can pin an exponential time law at
+an endpoint, falsely reporting a working knob or jack as inert. Keep generic CV
+stimuli bipolar, centred on zero, and phase-separated by input index; do not
+assume input zero is the signal. `test_inert_input_cause.py` includes a real-gate
+slew fixture for this exact failure class. When it trips on a paid response,
+retain and replay that response before changing the prompt or calling a model.
+
+Generated source is normalized before compilation. When it uses a class from
+the curated module-DSP registry without an owning public header in the
+normalizer-owned prefix, `toolchain_headers.py` prepends that header and retains
+the normalized source. Replay the saved response before spending a repair call;
+a missing known include is deterministic toolchain work, not a model question.
+
+The inert-control gate uses two probes deliberately. The driven probe connects
+role-aware inputs, while the normalled/internal probe sets every input's channel
+count to zero. Supplying quiet zero volts while leaving `channels=1` is still a
+connected Rack cable and bypasses internal clocks and other normalled sources.
+Keep `test_clock_behaviour_gate.py`'s normalled-clock control green whenever the
+probe wiring changes.
+
+The module gate is a consumer of Pulp's public signal headers, so it must also
+inherit the platform link requirements exported by `pulp::signal`. On macOS
+that includes Accelerate for vDSP-backed FFT users. A gate compile or link
+failure means the harness is unavailable; stop immediately, retain its exact
+diagnostic, and spend no model retry. Only a successfully built gate can reject
+generated DSP and provide actionable retry context.
 
 **Generation writes into the pack**, so never run it inside a checkout you are
 using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and

@@ -13,6 +13,10 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETUP_SH="$REPO_ROOT/setup.sh"
 
+# Keep fixture-owned cache roots authoritative when this test runs on a host
+# whose provider exports the machine-local shared cache into every job.
+unset PULP_SHARED_FETCHCONTENT_SOURCE_DIR
+
 # Ignore the developer's git config: a global tag.forceSignAnnotated or
 # commit.gpgsign would break fixture creation, and a fixture that fails to
 # build silently is worse than one that fails loudly (a missing tag makes the

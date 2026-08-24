@@ -55,12 +55,8 @@ async function buildCode() {
 // dist/headless.packed.js: a self-extracting stub (fflate inflate — already a
 // runtime dependency — plus a small base64 decoder) that decompresses the
 // deflated+base64'd raw bundle into `globalThis.__pulp_packed_src`. The driver
-// (scripts/run-headless.mjs) then `eval`s prelude + decompressed source as ONE
-// program, so `const TARGET_NODE_ID` / `FAITHFUL_VECTOR` are in the same
-// program scope as the bundle — identical program text to the old raw payload.
-// `eval` is available in Figma's plugin sandbox, but code eval'd there does
-// NOT see the caller's lexical scope (both verified empirically via live
-// `use_figma` probes, 2026-07 — hence prelude-inside-eval, not scope-chain).
+// (scripts/run-headless.mjs) assigns driver inputs as data-only global
+// properties, then evaluates only the decompressed, build-owned source.
 async function buildHeadless() {
   const rawPath = path.join(root, "dist", "headless.js");
   const packedPath = path.join(root, "dist", "headless.packed.js");
@@ -88,8 +84,7 @@ async function buildHeadless() {
 
   // Size guard on the PACKED artifact — the thing that must actually fit the
   // `use_figma` cap. Reserve ~1 KB for what run-headless.mjs appends: the
-  // eval(prelude + source) line (prelude carries TARGET_NODE_ID /
-  // FAITHFUL_VECTOR) and the trailing `return await`.
+  // data assignments, trusted-source eval, cleanup, and trailing return.
   const LIMIT = 50000;
   const RESERVE = 1024;
   if (packed.length > LIMIT - RESERVE) {
@@ -110,7 +105,7 @@ async function buildHeadless() {
 // `globalThis.__pulp_packed_src` to the decompressed source. The stub bundles
 // fflate's inflateSync + strFromU8 and a bit-accumulator base64 decoder (the
 // sandbox has no atob). Executing the source is the DRIVER's job
-// (run-headless.mjs) — it evals prelude + __pulp_packed_src as one program.
+// (run-headless.mjs), which evaluates only __pulp_packed_src.
 // Exported so tooling can pack arbitrary programs through the exact shipped
 // pipeline (e.g. sandbox smoke payloads).
 export async function packHeadless(raw) {

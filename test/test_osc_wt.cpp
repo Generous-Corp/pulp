@@ -261,7 +261,7 @@ TEST_CASE("OSC-WT alias floor is proven by negative and positive control",
 // ── THE ENTRY CRITERION: alias rejection swept to the top of every band ─────
 
 TEST_CASE("OSC-WT worst alias swept to the top of every band",
-          "[signal][osc][wt]") {
+          "[signal][osc][wt][slow]") {
     WtOscillator osc = make_saw_osc();
     REQUIRE(osc.band_count() > 2);
 
@@ -299,7 +299,7 @@ TEST_CASE("OSC-WT worst alias swept to the top of every band",
 // decision holds under the top-of-band stress: there is no physical in-band alias
 // for the band switch to be blamed for.
 TEST_CASE("OSC-WT worst-case alias is detection-floor-limited, not a fixed spur",
-          "[signal][osc][wt]") {
+          "[signal][osc][wt][slow]") {
     WtOscillator osc = make_saw_osc();
     const double f0 = sweep_worst(osc).overall_f0; // the sweep's own worst point.
     REQUIRE(f0 > 0.0);

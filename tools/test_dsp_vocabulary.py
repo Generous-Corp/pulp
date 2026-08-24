@@ -250,6 +250,65 @@ class CharacterAdjacent {
                row.get("capability_role") == "primary" for row in vca_rows):
         print("  WRONG  VCA request omitted its exact primary primitive")
         bad += 1
+
+    dub_rows = [row for rows in extractor.shortlist(
+        doc, "make a dub echo").values() for row in rows]
+    dub_primaries = {
+        (row.get("capability"), row.get("qualified_name"))
+        for row in dub_rows
+        if row.get("direct_match") and row.get("capability_role") == "primary"
+    }
+    expected_dub = {
+        ("delay-line", "pulp::signal::DelayLineT"),
+        ("character-delay", "pulp::signal::CharacterDelayT"),
+    }
+    if not expected_dub <= dub_primaries:
+        print(f"  WRONG  dub echo omitted direct delay primitives: {dub_primaries}")
+        bad += 1
+    else:
+        print("  ok     dub echo selects direct DelayLineT and CharacterDelayT primitives")
+
+    wavefolder_rows = [row for rows in extractor.shortlist(
+        doc, "6HP wavefolder").values() for row in rows]
+    if not any(row.get("capability") == "multistage-wavefolder" and
+               row.get("qualified_name") == "pulp::signal::MultistageWavefolderT" and
+               row.get("capability_role") == "primary" and
+               row.get("direct_match") for row in wavefolder_rows):
+        print("  WRONG  default wavefolder prompt omitted its direct primary primitive")
+        bad += 1
+    else:
+        print("  ok     default wavefolder prompt selects MultistageWavefolderT directly")
+
+    helper_only_rows = [row for rows in extractor.shortlist(
+        doc, "remove DC from signal").values() for row in rows]
+    if not any(row.get("capability") == "dc-blocker" and row.get("direct_match")
+               for row in helper_only_rows):
+        print("  WRONG  helper-only negative did not exercise the DC blocker")
+        bad += 1
+    elif any(row.get("direct_match") and row.get("capability_role") == "primary"
+             for row in helper_only_rows):
+        print("  WRONG  helper-only request gained direct primary authorization")
+        bad += 1
+    else:
+        print("  ok     helper-only DSP remains fail-closed without a primary")
+
+    lookalike_rows = [row for rows in extractor.shortlist(
+        doc, "fold a paper panel").values() for row in rows]
+    if any(row.get("direct_match") and row.get("capability_role") == "primary"
+           for row in lookalike_rows):
+        print("  WRONG  generic fold wording gained direct primary authorization")
+        bad += 1
+    else:
+        print("  ok     generic fold wording remains helper-only")
+
+    vintage_rows = [row for rows in extractor.shortlist(
+        doc, "make a vintage panel").values() for row in rows]
+    if any(row.get("direct_match") and row.get("capability_role") == "primary"
+           for row in vintage_rows):
+        print("  WRONG  generic vintage wording gained direct primary authorization")
+        bad += 1
+    else:
+        print("  ok     generic vintage wording remains helper-only")
     compact_markdown = extractor.markdown(compact)
     if "pulp::signal::osc::PhaseAccumulator<float>" in compact_markdown:
         print("  WRONG  non-template PhaseAccumulator gained <float> in prompt")

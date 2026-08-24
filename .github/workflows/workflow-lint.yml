@@ -43,6 +43,8 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
+      - 'tools/scripts/generated_version_bump_check.py'
+      - 'tools/scripts/test_generated_version_bump_check.py'
       - 'tools/scripts/release_product_matrix.json'
       - 'CMakeLists.txt'
       - '**/CMakeLists.txt'
@@ -124,6 +126,8 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
+      - 'tools/scripts/generated_version_bump_check.py'
+      - 'tools/scripts/test_generated_version_bump_check.py'
       - 'tools/scripts/release_product_matrix.json'
       - 'CMakeLists.txt'
       - '**/CMakeLists.txt'
@@ -259,6 +263,7 @@ jobs:
           python3 tools/scripts/test_verify_control_shipping_native_evidence.py
           python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py
+          python3 tools/scripts/test_generated_version_bump_check.py
 
       - name: Workflow lint regression contract
         shell: bash
@@ -325,6 +330,10 @@ jobs:
           # them late and by symptom.
           python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_setup_shared_skia.py
+          python3 tools/scripts/test_skia_cross_process_cache.py
+          python3 tools/ci/test_pulp_worktree_cache_env.py
+          python3 tools/ci/test_cache_routing_contract.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_required_macos_alias.py
           python3 tools/scripts/test_preamble_python_stable_cwd.py

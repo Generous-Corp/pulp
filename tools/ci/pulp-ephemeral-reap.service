@@ -1,0 +1,10 @@
+[Unit]
+Description=Recover provably orphaned Pulp ephemeral runners
+Documentation=https://github.com/Generous-Corp/pulp/blob/main/docs/guides/local-ci.md
+After=network-online.target pve-guests.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pulp-ephemeral-reap.sh --yes
+User=root

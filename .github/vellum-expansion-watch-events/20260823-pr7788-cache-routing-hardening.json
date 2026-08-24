@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260823-pr7788-cache-routing-hardening",
+  "created_at": "2026-08-23T08:07:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned CI integration hardening for canonical host-local dependency caches and manifest-keyed Skia/Dawn validation. The change alters runner, release, and dependency-routing infrastructure only; it adds no generic rendering implementation and changes neither Vellum source authority nor any transferred implementation boundary.",
+  "tests": [
+    "test_fetch_skia_for_release.py (54 cases)",
+    "test_skia_cross_process_cache.py (10 cases)",
+    "test_setup_shared_skia.py (5 cases)",
+    "test_cache_routing_contract.py (4 cases)",
+    "test_bootstrap_macos_host.py (19 cases)",
+    "test_pulp_worktree_cache_env.py (13 cases)",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

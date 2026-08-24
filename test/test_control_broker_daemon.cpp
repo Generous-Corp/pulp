@@ -195,6 +195,34 @@ struct DaemonRoot {
     }
 };
 
+bool isolated_author_parity_fixture(const std::filesystem::path& broker,
+                                    const std::filesystem::path& parity_root,
+                                    const std::filesystem::path& shared_test_root,
+                                    const std::filesystem::path& cli,
+                                    const std::filesystem::path& mcp) {
+    const auto aggregate_directory = std::filesystem::weakly_canonical(broker).parent_path();
+    return std::filesystem::weakly_canonical(parity_root) == aggregate_directory &&
+           std::filesystem::weakly_canonical(shared_test_root) != aggregate_directory &&
+           std::filesystem::weakly_canonical(cli).parent_path() == aggregate_directory &&
+           std::filesystem::weakly_canonical(mcp).parent_path() == aggregate_directory;
+}
+
+TEST_CASE("installed author parity clients use an isolated broker fixture",
+          "[inspect][control][daemon][installed-author-fixture]") {
+    DaemonRoot root;
+    const auto parity = root.path / "installed-author-parity";
+    const auto shared = root.path / "shared-build-test";
+    REQUIRE(std::filesystem::create_directory(parity));
+    REQUIRE(std::filesystem::create_directory(shared));
+    const auto broker = parity / "pulp-control-broker";
+    const auto cli = parity / "pulp-cpp";
+    const auto mcp = parity / "pulp-mcp";
+    CHECK(isolated_author_parity_fixture(broker, parity, shared, cli, mcp));
+    CHECK_FALSE(isolated_author_parity_fixture(broker, shared, shared, cli, mcp));
+    CHECK_FALSE(isolated_author_parity_fixture(broker, parity, shared,
+                                               shared / "pulp-cpp", mcp));
+}
+
 ControlOperationBinding operation_binding() {
     ControlOperationBinding binding;
     static_cast<ControlAuthorityBinding&>(binding) = {
@@ -1404,8 +1432,17 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
 
         const auto* cli_environment = std::getenv("PULP_CONTROL_AUTHOR_CLI");
         const auto* mcp_environment = std::getenv("PULP_CONTROL_AUTHOR_MCP");
+        const auto* parity_root_environment =
+            std::getenv("PULP_CONTROL_AUTHOR_PARITY_ROOT");
+        const auto* shared_test_root_environment =
+            std::getenv("PULP_CONTROL_AUTHOR_SHARED_TEST_ROOT");
         REQUIRE(cli_environment);
         REQUIRE(mcp_environment);
+        REQUIRE(parity_root_environment);
+        REQUIRE(shared_test_root_environment);
+        REQUIRE(isolated_author_parity_fixture(
+            current_executable(), parity_root_environment,
+            shared_test_root_environment, cli_environment, mcp_environment));
         const auto cli_read = run_installed_client(
             cli_environment, root.runtime,
             {"control", "call", "--instance", instance_id, "dev.pulp.state/read@1",

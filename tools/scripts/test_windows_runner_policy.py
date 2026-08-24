@@ -449,10 +449,11 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("Windows omitted by operator request", body)
 
     def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
-        """The terminal required alias must leave classifiers runnable.
+        """The skip/failure bootstrap must leave classifiers runnable.
 
-        The reporter starts after the matrix is terminal, but a dedicated alias
-        pool still keeps report traffic independent of preamble capacity.
+        Native PRs report directly from the macOS matrix child. The bootstrap
+        uses a dedicated alias pool so fail-closed/skip reporting cannot consume
+        preamble capacity.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
@@ -464,19 +465,20 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
 
     def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
-        """Advisory results may delay but cannot determine required macOS."""
+        """Advisory results neither delay nor determine required macOS."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
-        self.assertIn("github.event_name != 'merge_group'", condition)
+        self.assertIn("github.event_name == 'pull_request'", condition)
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertIn("native_build_required != 'true'", condition)
         self.assertEqual(
-            self.workflow["jobs"]["macos"]["needs"], ["build", "classify"]
+            self.workflow["jobs"]["macos"]["needs"],
+            ["resolve-provider", "classify"],
         )
-        self.assertNotIn(
-            "needs.build.result",
-            "\n".join(
-                step.get("run", "")
-                for step in self.workflow["jobs"]["macos"]["steps"]
-            ),
-        )
+        self.assertNotIn("build", self.workflow["jobs"]["macos"]["needs"])
+        self.assertNotIn("gh api", "\n".join(
+            step.get("run", "")
+            for step in self.workflow["jobs"]["macos"]["steps"]
+        ))
 
         pr_alias = self.workflow["jobs"]["macos"]
         self.assertIn("macos-pr-unused", pr_alias["name"])
@@ -493,6 +495,8 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("resolve-provider.result != 'success'", merge_condition)
 
         build_name = self.workflow["jobs"]["build"]["name"]
+        self.assertIn("github.event_name == 'pull_request'", build_name)
+        self.assertIn("github.event_name == 'workflow_dispatch'", build_name)
         self.assertIn("github.event_name == 'merge_group'", build_name)
         self.assertIn("matrix.key == 'macos'", build_name)
         self.assertIn("'macos'", build_name)

@@ -1,5 +1,8 @@
 name: Plugin Validation
 
+permissions:
+  contents: read
+
 on:
   # Uncomment to re-enable cloud CI on pull requests:
   # pull_request:

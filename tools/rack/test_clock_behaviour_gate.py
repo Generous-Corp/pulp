@@ -86,6 +86,51 @@ int forge_width_param() { return 1; }
 int forge_reset_input() { return 1; }
 '''
 
+NORMALLED_CLOCK_FIXTURE = r'''
+#include <rack.hpp>
+#include <cmath>
+
+struct NormalledClockFixture final : rack::engine::Module {
+    enum { RATE, PARAMS };
+    enum { CLOCK_INPUT, INPUTS };
+    enum { HELD, OUTPUTS };
+    double phase = 0.0;
+    float held = 0.f;
+
+    NormalledClockFixture() {
+        config(PARAMS, INPUTS, OUTPUTS, 0);
+        configParam(RATE, -2.f, 4.f, 0.f, "Internal clock rate");
+        configInput(CLOCK_INPUT, "Clock");
+        configOutput(HELD, "Held noise");
+    }
+
+    void process(const ProcessArgs& args) override {
+        const double previous = phase;
+        phase += std::exp2(params[RATE].getValue()) * args.sampleTime;
+        phase -= std::floor(phase);
+        const bool internal_edge = phase < previous;
+        const bool external_edge = inputs[CLOCK_INPUT].isConnected() &&
+            inputs[CLOCK_INPUT].getVoltage() >= 5.f;
+        if (inputs[CLOCK_INPUT].isConnected() ? external_edge : internal_edge)
+            held = float((args.frame % 17) - 8) * 0.4f;
+        outputs[HELD].setVoltage(held);
+    }
+};
+
+rack::engine::Module* forge_make_module() { return new NormalledClockFixture; }
+const char* forge_module_slug() { return "NORMALLEDCLOCK"; }
+bool forge_module_is_generator() { return true; }
+const char* forge_input_role(int) { return "Clock"; }
+const char* forge_output_role(int) { return "Cv"; }
+const char* forge_output_name(int) { return "Held"; }
+bool forge_require_clock_contract() { return false; }
+int forge_clock_output() { return -1; }
+int forge_phase_output() { return -1; }
+int forge_rate_param() { return -1; }
+int forge_width_param() { return -1; }
+int forge_reset_input() { return -1; }
+'''
+
 
 class ClockBehaviourGate(unittest.TestCase):
     @classmethod
@@ -93,11 +138,12 @@ class ClockBehaviourGate(unittest.TestCase):
         if not (SDK / "libRack.dylib").is_file():
             raise unittest.SkipTest(f"Rack SDK unavailable at {SDK}")
 
-    def run_fixture(self, define: str | None = None) -> subprocess.CompletedProcess:
+    def run_fixture(self, define: str | None = None,
+                    fixture_source: str = FIXTURE) -> subprocess.CompletedProcess:
         with tempfile.TemporaryDirectory() as root:
             root = pathlib.Path(root)
             fixture = root / "fixture.cpp"
-            fixture.write_text(FIXTURE)
+            fixture.write_text(fixture_source)
             executable = root / "gate"
             command = [
                 "clang++", "-std=c++20", "-O1", "-o", str(executable),
@@ -141,6 +187,11 @@ class ClockBehaviourGate(unittest.TestCase):
         result = self.run_fixture("IGNORE_RATE_CV")
         self.assertNotEqual(0, result.returncode)
         self.assertIn("input 0 changes no output", result.stdout)
+
+    def test_internal_rate_is_measured_with_normalled_clock_disconnected(self) -> None:
+        result = self.run_fixture(fixture_source=NORMALLED_CLOCK_FIXTURE)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("param 'Internal clock rate' affects the output", result.stdout)
 
 
 if __name__ == "__main__":

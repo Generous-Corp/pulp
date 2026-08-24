@@ -74,7 +74,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+            --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" \
+            --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
 
       - name: Configure (full tree — examples ON, tests ON)
         # Deliberately NO -DPULP_BUILD_EXAMPLES=OFF: the whole point of

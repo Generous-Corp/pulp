@@ -11,7 +11,14 @@ pulp_add_test_suite(pulp-test-character-delay
         test_character_delay_controls.cpp
         test_character_delay_physical.cpp
     LIBRARIES pulp::signal pulp::native-components pulp::runtime ${CMAKE_DL_LIBS}
+    TEST_SPEC "~[slow]"
     TIMEOUT 900)
+pulp_scaled_test_timeout(_pulp_character_delay_slow_timeout 900)
+catch_discover_tests(pulp-test-character-delay
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow
+    PROPERTIES TIMEOUT "${_pulp_character_delay_slow_timeout}")
 target_sources(pulp-test-character-delay PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
     $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)

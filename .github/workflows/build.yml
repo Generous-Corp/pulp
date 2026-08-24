@@ -69,6 +69,7 @@ concurrency:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 jobs:
   resolve-provider:
@@ -330,7 +331,7 @@ jobs:
                               "--jq",
                               (
                                   f'[.jobs[] '
-                                  f'| select(.name | startswith("macOS")) '
+                                  f'| select(.name == "macos" or (.name | startswith("macOS"))) '
                                   f'| select(.status == "in_progress") '
                                   f'| select((.labels // []) '
                                   f'| index({json.dumps(local_label)})) '
@@ -765,12 +766,16 @@ jobs:
     # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
     # required-gate preamble off the saturated GitHub-hosted pool when opted in.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 10
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          # Classification needs two immutable trees, not Pulp's entire
+          # history. Full history made a traveling runner fetch into a 70 GiB
+          # .git directory before this cheap preamble could report.
+          fetch-depth: 1
           lfs: false
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
@@ -781,10 +786,126 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_HEAD_SHA: ${{ github.sha }}
+          EVENT_PATH: ${{ github.event_path }}
         run: |
           set -euo pipefail
           base="$(python3 tools/scripts/resolve_classify_base.py)"
-          python3 tools/scripts/classify_changes.py --mode=diff --base "$base"
+          native_build_required=true
+          if [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              # A failed bounded fetch is not a failed gate: the classifier
+              # cannot resolve the tree and safely requests the native build.
+              git fetch --no-tags --depth=1 origin "$base" || true
+            fi
+            classification=$(
+              env GITHUB_OUTPUT='' python3 tools/scripts/classify_changes.py \
+                --mode=diff --comparison=trees --base "$base" --json
+            )
+            native_build_required=$(
+              python3 -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
+                <<<"$classification"
+            )
+
+            # The fixed release/version-bump branch changes version-bearing
+            # CMake/JSON files, so a path-only classifier must conservatively
+            # request the native matrix. Before allocating it, let the
+            # PROTECTED BASE's verifier prove this is the release bot's exact,
+            # signed, single-commit, byte-reproducible transaction. A missing
+            # base script (including this feature's own landing PR), API error,
+            # unknown/mixed merge-group ancestry, or any tree ambiguity simply
+            # retains the ordinary full path. A bump behind earlier queue
+            # entries qualifies only when the verifier reproduces the COMPLETE
+            # group tree as cumulative base + the generated projection.
+            if [ "$native_build_required" = true ]; then
+              trusted_bump_check=$(mktemp)
+              trap 'rm -f "$trusted_bump_check"' EXIT
+              trusted_verifier_base=
+              if [ "$EVENT_NAME" = pull_request ] \
+                  && [ "$base" = "$PR_BASE_SHA" ]; then
+                # Bind the PR fast path directly to the immutable event field;
+                # never let checkout code choose which verifier receives a token.
+                trusted_verifier_base="$PR_BASE_SHA"
+              fi
+              if [ "$EVENT_NAME" = merge_group ]; then
+                # `merge_group.base_sha` is the prior speculative group when
+                # another PR is ahead of this one. Resolve the generated
+                # candidate's ORIGINAL protected-main parent without executing
+                # any code from either queue entry. Support only GitHub's exact
+                # #7771 shape: [prior cumulative group, candidate], where that
+                # prior group itself has candidate_base as its first parent.
+                trusted_verifier_base=
+                group_parents=()
+                group_parent_count=0
+                while IFS= read -r parent; do
+                  group_parents+=("$parent")
+                  group_parent_count=$((group_parent_count + 1))
+                done < <(
+                  git cat-file -p "$EVENT_HEAD_SHA" 2>/dev/null \
+                    | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                )
+                if [ "$base" = "$MERGE_GROUP_BASE_SHA" ] \
+                    && [ "$group_parent_count" -eq 2 ] \
+                    && [ "${group_parents[0]}" = "$base" ]; then
+                  candidate="${group_parents[1]}"
+                  git cat-file -e "$candidate^{commit}" 2>/dev/null \
+                    || git fetch --no-tags --depth=1 origin "$candidate" \
+                    || true
+                  candidate_parents=()
+                  candidate_parent_count=0
+                  while IFS= read -r parent; do
+                    candidate_parents+=("$parent")
+                    candidate_parent_count=$((candidate_parent_count + 1))
+                  done < <(
+                    git cat-file -p "$candidate" 2>/dev/null \
+                      | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                  )
+                  if [ "$candidate_parent_count" -eq 1 ]; then
+                    candidate_base="${candidate_parents[0]}"
+                    git cat-file -e "$candidate_base^{commit}" 2>/dev/null \
+                      || git fetch --no-tags --depth=1 origin "$candidate_base" \
+                      || true
+                    if [ "$candidate_base" = "$base" ]; then
+                      trusted_verifier_base="$candidate_base"
+                    else
+                      cumulative_parents=()
+                      cumulative_parent_count=0
+                      while IFS= read -r parent; do
+                        cumulative_parents+=("$parent")
+                        cumulative_parent_count=$((cumulative_parent_count + 1))
+                      done < <(
+                        git cat-file -p "$base" 2>/dev/null \
+                          | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
+                      )
+                      if [ "$cumulative_parent_count" -eq 2 ] \
+                          && [ "${cumulative_parents[0]}" = "$candidate_base" ]; then
+                        trusted_verifier_base="$candidate_base"
+                      fi
+                    fi
+                  fi
+                fi
+              fi
+              if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
+                  && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
+                  >"$trusted_bump_check" 2>/dev/null \
+                  && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+                    --repo . \
+                    --event-name "$EVENT_NAME" \
+                    --event-path "$EVENT_PATH" \
+                    --base "$base" \
+                    --head "$EVENT_HEAD_SHA"; then
+                native_build_required=false
+                echo "Exact generated version bump: native build matrix skipped."
+              fi
+            fi
+          else
+            # Never trust a retained remote-tracking ref in a reusable shallow
+            # checkout. No immutable event base means the optimization is off.
+            env GITHUB_OUTPUT='' python3 tools/scripts/classify_changes.py --mode=files
+          fi
+          echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [resolve-provider, classify]
@@ -797,12 +918,13 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    # A merge-group macOS leg owns the required `macos` context directly. A
-    # separate reporter cannot depend on one matrix child, so making it depend
-    # on `build` delays the required context until advisory Linux is terminal.
-    # PR/dispatch legs retain their descriptive names and use the reporter
-    # below, while every non-macOS merge-group leg remains non-required.
-    name: ${{ github.event_name == 'merge_group' && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
+    # The macOS child owns the required `macos` context directly on PR heads,
+    # Shipyard workflow dispatches, and merge groups. A reporter cannot depend
+    # on one matrix child, so
+    # waiting for the combined `build` job would let advisory Linux delay queue
+    # admission even after macOS passed. Non-macOS children keep descriptive,
+    # non-required names and may finish asynchronously.
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group') && matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -1058,7 +1180,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+            --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" \
+            --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
 
       # ── Tier-0 Intel canary (docs/guides/intel-support.md) ────────────────
       # Cheap cross-arch (x86_64) portability early-warning that rides inside
@@ -1608,112 +1732,40 @@ jobs:
         run: cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
-  # Stable required `macos` alias. Each event-specific reporter starts only
-  # after its build matrix is terminal, then reads the exact macOS leg from
-  # this workflow run. PR/dispatch runs retain the combined matrix, so advisory
-  # legs may delay the reporter but cannot determine its result. merge_group
-  # retains a separate reporter with the same displayed required-check name.
+  # Stable required `macos` context. Native PR and merge-group builds publish
+  # it directly from the macOS matrix child, independently of advisory Linux or
+  # Windows. The bootstrap jobs below own the name only when native work was
+  # intentionally skipped or trusted routing/classification failed.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
-  # On a skip-safe PR (classify said no native
-  # build) it reports a fast green from Ubuntu without touching the macOS
-  # runner. On a code PR it mirrors the macOS matrix leg's conclusion.
-  # Fail-closed: if the `classify` job itself did not succeed, the
-  # native_build_required output is untrusted — this gate fails RED rather
-  # than letting a PR merge on an unverified classification.
+  # On a skip-safe PR or Shipyard workflow dispatch this reports a fast green
+  # without touching a macOS runner. On native work the direct matrix child
+  # owns `macos`; this inactive bootstrap is renamed so it cannot satisfy or
+  # collide with that context. Routing/classification uncertainty remains
+  # fail-closed.
   macos:
-    # A skipped job still emits its displayed check name. Give the inactive
-    # merge-group copy a non-required name so it cannot satisfy `macos` early.
-    name: ${{ github.event_name == 'merge_group' && 'macos-pr-unused' || 'macos' }}
-    needs: [build, classify]
-    # This job performs one terminal jobs-API read after the combined matrix.
-    # Default to hosted Linux; a dedicated alias pool can be selected explicitly
-    # without borrowing preamble capacity.
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
+    needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    # Push runs are cache-warming only — no gate to report, and the macOS
-    # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
+    if: >-
+      always()
+      && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && (needs.resolve-provider.result != 'success'
+          || needs.classify.result != 'success'
+          || needs.classify.outputs.native_build_required != 'true')
     steps:
-      - name: macOS leg outcome (required)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: macOS PR/dispatch bootstrap (required when native leg is absent)
         run: |
           set -euo pipefail
-          classify_result="${{ needs.classify.result }}"
-          if [ "$classify_result" != "success" ]; then
-            echo "classify job did not succeed (result=$classify_result) — failing macos gate closed (required)"
+          if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
+            echo "provider resolution did not succeed — failing macos gate closed"
             exit 1
           fi
-          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
-            echo "Skip-safe PR — no C++/Swift build input changed. macos gate ✓ (no native build)"
-            exit 0
-          fi
-          jobs_json="$(mktemp)"
-          jobs_err="$(mktemp)"
-          trap 'rm -f "$jobs_json" "$jobs_err"' EXIT
-          api_ok=false
-          for attempt in 1 2 3; do
-            if gh api --paginate \
-              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
-              >"$jobs_json" 2>"$jobs_err"; then
-              api_ok=true
-              break
-            fi
-            echo "Jobs API request failed (transport attempt $attempt/3)."
-            cat "$jobs_err"
-            if [ "$attempt" -lt 3 ]; then
-              sleep "$attempt"
-            fi
-          done
-          if [ "$api_ok" != "true" ]; then
-            echo "Jobs API remained unavailable — failing macos gate closed (required)"
+          if [ "${{ needs.classify.result }}" != "success" ]; then
+            echo "classify did not succeed — failing macos gate closed"
             exit 1
           fi
-          # The checkout may live on /Volumes/Workshop. Python stdin mode
-          # resolves cwd before executing this parser, so use system /tmp.
-          conclusion=$(
-            cd /tmp
-            python3 - "$jobs_json" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              payload = handle.read()
-          decoder = json.JSONDecoder()
-          pages = []
-          offset = 0
-          while offset < len(payload):
-              while offset < len(payload) and payload[offset].isspace():
-                  offset += 1
-              if offset == len(payload):
-                  break
-              page, offset = decoder.raw_decode(payload, offset)
-              pages.append(page)
-          if not pages or not all(isinstance(page, dict) for page in pages):
-              raise SystemExit("jobs API response did not contain object pages")
-          matches = [
-              job
-              for page in pages
-              if isinstance(page, dict)
-              for job in page.get("jobs", [])
-              if isinstance(job, dict)
-              and job.get("name", "").startswith("macOS")
-          ]
-          if len(matches) != 1:
-              raise SystemExit(
-                  f"expected exactly one macOS matrix leg, found {len(matches)}"
-              )
-          conclusion = matches[0].get("conclusion")
-          print(conclusion if isinstance(conclusion, str) else "")
-          PY
-          )
-          echo "macOS leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "macOS leg green — macos gate ✓"
-            exit 0
-          fi
-          echo "macOS leg ${conclusion:-not found} — failing macos gate (required)"
-          exit 1
+          echo "Skip-safe PR/dispatch — macos gate ✓ (native matrix intentionally omitted)"
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This

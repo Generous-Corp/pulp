@@ -37,6 +37,9 @@ mechanism — anything we did not explicitly reason about runs the build.
 
 Modes:
   --mode=diff --base <ref>   diff `<ref>...HEAD` for the changed-file set
+  --mode=diff --comparison=trees --base <ref>
+                             diff the exact `<ref>` and `HEAD` trees without
+                             requiring their intervening history
   --mode=files <path> ...    classify an explicit file list (tests + CI)
 
 Output:
@@ -106,15 +109,25 @@ def native_build_required(files: list[str]) -> bool:
     return not all(is_skip_safe(f) for f in files)
 
 
-def _changed_files_from_diff(base: str) -> list[str] | None:
-    """Return changed files for `<base>...HEAD`, or None if git fails."""
+def _changed_files_from_diff(
+    base: str, *, comparison: str = "merge-base"
+) -> list[str] | None:
+    """Return changed files for the requested exact comparison.
+
+    ``merge-base`` preserves the historical local-caller contract. ``trees``
+    compares the two exact commit trees and is appropriate when CI already
+    received an immutable event-pinned base SHA. It lets a shallow checkout
+    remain shallow instead of downloading the repository's full history merely
+    to rediscover a base GitHub already supplied.
+    """
     # `--no-renames`: with rename detection on, a rename such as
     # `core/x.cpp -> docs/x.md` collapses to only the new path and would
     # wrongly classify skip-safe. Disabling it reports the rename as a
     # delete of the old path + an add of the new — so `core/x.cpp`
     # surfaces and forces the native build (fail-closed).
+    separator = "..." if comparison == "merge-base" else ".."
     proc = subprocess.run(
-        ["git", "diff", "--no-renames", "--name-only", f"{base}...HEAD"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}{separator}HEAD"],
         capture_output=True,
         text=True,
         check=False,
@@ -140,6 +153,12 @@ def main(argv: list[str]) -> int:
         help="for --mode=diff, the base ref (default origin/main)",
     )
     parser.add_argument(
+        "--comparison",
+        choices=("merge-base", "trees"),
+        default="merge-base",
+        help="for --mode=diff, compare from a merge base or two exact trees",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="print a JSON object to stdout"
     )
     parser.add_argument("files", nargs="*", help="for --mode=files, the file list")
@@ -148,7 +167,7 @@ def main(argv: list[str]) -> int:
     if args.mode == "files":
         files: list[str] | None = args.files
     else:
-        files = _changed_files_from_diff(args.base)
+        files = _changed_files_from_diff(args.base, comparison=args.comparison)
 
     # Fail-closed: a None (git error) is treated as "unknown" -> build.
     if files is None:

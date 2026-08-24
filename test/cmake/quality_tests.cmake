@@ -29,6 +29,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
+    # The rederive self-test deliberately rewrites the manifest script's two
+    # generated counters before restoring them. Keep readers from observing
+    # that temporary state while retaining parallelism for unrelated tests.
+    set_tests_properties(
+        agent-capability-manifest-check
+        agent-capability-manifest-selftest
+        agent-capability-rederive-selftest
+        PROPERTIES RESOURCE_LOCK agent-capability-manifest-source)
     add_test(NAME agent-capability-sdk-handoff-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_capability_handoff.py")
@@ -89,6 +97,8 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
+    set_tests_properties(agent-capability-installed-sdk PROPERTIES
+        RESOURCE_LOCK agent-capability-manifest-source)
     unset(_pulp_agent_capability_installed_args)
     unset(_pulp_agent_capability_instrumentation_compile_flags)
     unset(_pulp_agent_capability_instrumentation_link_flags)
@@ -318,6 +328,8 @@ if(Python3_Interpreter_FOUND)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
+        add_test(NAME proxmox-ephemeral-linux-reaper-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_reap_linux.py")
         add_test(NAME proxmox-ci-host-network-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_configure_proxmox_ci_network.py")
     endif()
@@ -353,6 +365,21 @@ if(Python3_Interpreter_FOUND)
     # the AGENTS.md + CLAUDE.md pointers.
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
+
+    # Changed-surface selection remains shadow-only. Python 3.11 is required
+    # for stdlib tomllib. Ordinary developer configurations run the static
+    # policy contract only; the exact inventory check is explicitly enabled by
+    # Shipyard's declared target so a different optional feature set cannot be
+    # mistaken for inventory drift.
+    if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+        set(_changed_surface_policy_args)
+        if(PULP_CHANGED_SURFACE_INVENTORY_TARGET)
+            list(APPEND _changed_surface_policy_args --build-dir "${CMAKE_BINARY_DIR}")
+        endif()
+        add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
+            ${_changed_surface_policy_args})
+    endif()
 
     # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
     # --diag-dir contract that copies captured validator output out of the temp

@@ -29,7 +29,13 @@ bool gpu_available() {
 double xcorr(const std::vector<float>& a, const std::vector<float>& b) {
     double sxy = 0, sxx = 0, syy = 0;
     const size_t n = std::min(a.size(), b.size());
-    for (size_t i = 0; i < n; ++i) { sxy += a[i]*b[i]; sxx += a[i]*a[i]; syy += b[i]*b[i]; }
+    for (size_t i = 0; i < n; ++i) {
+        const double ai = a[i];
+        const double bi = b[i];
+        sxy += ai * bi;
+        sxx += ai * ai;
+        syy += bi * bi;
+    }
     return sxy / std::sqrt(sxx * syy + 1e-30);
 }
 
@@ -48,6 +54,14 @@ double rms(const float* x, uint32_t n) {
 }
 
 }  // namespace
+
+TEST_CASE("cross-correlation widens samples before multiplication", "[spectral]") {
+    const float large = std::numeric_limits<float>::max() / 4.0f;
+    const std::vector<float> values{large, large};
+    const double correlation = xcorr(values, values);
+    REQUIRE(std::isfinite(correlation));
+    REQUIRE(std::abs(correlation - 1.0) < 1e-12);
+}
 
 TEST_CASE("circular_box_blur matches direct summation within float tolerance",
           "[spectral]") {

@@ -12,7 +12,7 @@
     "typecheck:ui": "tsc -p src/ui.tsconfig.json",
     "typecheck:headless": "tsc -p src/headless.tsconfig.json",
     "typecheck": "npm run typecheck:code && npm run typecheck:ui && npm run typecheck:headless",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs && node scripts/headless-payload.test.mjs"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.115.0",

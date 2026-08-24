@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically recover orphaned Pulp ephemeral runners
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

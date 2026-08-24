@@ -33,6 +33,7 @@
 #endif
 
 #include <pulp/runtime/system.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <choc/text/choc_StringUtilities.h>
 #include <choc/text/choc_Files.h>
 
@@ -360,14 +361,8 @@ fs::path user_home_dir() {
 }
 
 std::string find_executable_in_path(const std::string& name) {
-#ifdef _WIN32
-    auto output = exec_output("where " + shell_quote(name) + " 2>nul");
-#else
-    auto output = exec_output("command -v " + shell_quote(name) + " 2>/dev/null");
-#endif
-    if (output.empty()) return {};
-    auto newline = output.find_first_of("\r\n");
-    return newline == std::string::npos ? output : output.substr(0, newline);
+    auto path = pulp::platform::find_on_path(name);
+    return path ? path->string() : std::string{};
 }
 
 fs::path find_project_root_from(fs::path dir) {
@@ -864,7 +859,11 @@ std::string run_aax_validator_command(const fs::path& validator_root,
     script << "quit\n";
 
     auto script_path = write_temp_text_file("pulp-aaxval", script.str());
+#ifdef _WIN32
+    auto command = "cd /d " + shell_quote(tool_dir)
+#else
     auto command = "cd " + shell_quote(tool_dir)
+#endif
                  + " && " + shell_quote(dsh)
                  + " < " + shell_quote(script_path)
                  + " 2>&1";

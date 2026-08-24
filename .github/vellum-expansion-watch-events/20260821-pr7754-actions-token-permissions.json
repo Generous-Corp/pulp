@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260821-pr7754-actions-token-permissions",
+  "created_at": "2026-08-21T15:25:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record least-privilege GitHub Actions token defaults on watched CI and release workflows. The changes set contents: read at workflow scope while preserving explicit narrower job-level write grants; no design output, render backend, package contents, release artifacts, publication behavior, or implementation authority changes.",
+  "tests": [
+    "python3 tools/scripts/test_workflow_lint.py",
+    "python3 tools/scripts/test_workflow_build_dirs.py",
+    "python3 tools/scripts/sequencer_exposure_check.py --base origin/main",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "python3 tools/scripts/test_vellum_expansion_watch_check.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

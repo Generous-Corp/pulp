@@ -370,6 +370,9 @@ file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <string>
 #include <thread>
 
+static_assert(__cplusplus >= 202002L,
+              "installed Standalone consumer must compile as C++20");
+
 class InstalledParityInputNode final : public pulp::view::View {
  public:
   void paint(pulp::canvas::Canvas& canvas) override {
@@ -420,6 +423,8 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
       }
     });
   }
+
+  ~InstalledStandaloneProcessor() override = default;
 
   pulp::format::PluginDescriptor descriptor() const override {
     return {.name = "Installed Control Standalone",
@@ -786,25 +791,43 @@ if(APPLE)
             "Installed production broker did not launch/register the author host (${_author_process_result})\n${_author_process_output}\n${_author_process_error}")
     endif()
     # The aggregate embeds the production daemon implementation so it can
-    # inject deterministic explicit consent. Mirror the installed process E2E:
-    # retain its signed bytes at the exact broker slot that the installed
-    # CLI/MCP independently resolve and authenticate.
+    # inject deterministic explicit consent. Keep its trusted client identities
+    # in this test's private fixture instead of overwriting canonical build-tree
+    # outputs that parallel CTest workers may be executing or rebuilding.
+    # Keep the isolated clients one level below the staged SDK prefix so their
+    # installed @executable_path/../lib RPATH still resolves the staged runtime
+    # closure (notably libwgpu_native.dylib).
+    set(_author_parity_directory "${_prefix}/installed-author-parity")
+    file(MAKE_DIRECTORY "${_author_parity_directory}")
+    file(CHMOD "${_author_parity_directory}"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    set(_author_parity_broker
+        "${_author_parity_directory}/pulp-control-broker")
+    file(COPY_FILE "${_daemon_test}" "${_author_parity_broker}")
+    file(CHMOD "${_author_parity_broker}"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    # ControlBrokerDaemon authorizes clients against signed sibling identities.
+    # The aggregate opens its first client connection from its own executable,
+    # so retain the matching `pulp` identity that the canonical build-tree
+    # fixture creates beside pulp-test-control-broker-daemon.
     file(COPY_FILE "${_daemon_test}"
-        "${_prefix}/libexec/pulp/pulp-control-broker")
-    file(CHMOD "${_prefix}/libexec/pulp/pulp-control-broker"
+        "${_author_parity_directory}/pulp")
+    file(CHMOD "${_author_parity_directory}/pulp"
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
     foreach(_installed_client IN ITEMS pulp-cpp pulp-mcp)
         file(COPY_FILE "${_prefix}/bin/${_installed_client}"
-            "${PULP_BUILD_DIR}/test/${_installed_client}")
-        file(CHMOD "${PULP_BUILD_DIR}/test/${_installed_client}"
+            "${_author_parity_directory}/${_installed_client}")
+        file(CHMOD "${_author_parity_directory}/${_installed_client}"
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
     endforeach()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
             "PULP_CONTROL_AUTHOR_HOST=${_author_host_directory}/host"
-            "PULP_CONTROL_AUTHOR_CLI=${_prefix}/bin/pulp-cpp"
-            "PULP_CONTROL_AUTHOR_MCP=${_prefix}/bin/pulp-mcp"
-            "${_daemon_test}" "[installed-author-full-parity]"
+            "PULP_CONTROL_AUTHOR_PARITY_ROOT=${_author_parity_directory}"
+            "PULP_CONTROL_AUTHOR_SHARED_TEST_ROOT=${PULP_BUILD_DIR}/test"
+            "PULP_CONTROL_AUTHOR_CLI=${_author_parity_directory}/pulp-cpp"
+            "PULP_CONTROL_AUTHOR_MCP=${_author_parity_directory}/pulp-mcp"
+            "${_author_parity_broker}" "[installed-author-full-parity]"
         RESULT_VARIABLE _author_state_result
         OUTPUT_VARIABLE _author_state_output
         ERROR_VARIABLE _author_state_error)

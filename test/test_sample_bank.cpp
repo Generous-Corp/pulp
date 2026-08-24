@@ -1,23 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "reload_test_support.hpp"
+
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 
 namespace {
 
 struct TempDirectory {
-    std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
-        ("pulp-sample-bank-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    TempDirectory() {
-        std::filesystem::create_directories(path);
-    }
+    std::filesystem::path path = pulp::test::unique_tmp_dir("pulp-sample-bank-");
     ~TempDirectory() {
         std::error_code error;
         std::filesystem::remove_all(path, error);

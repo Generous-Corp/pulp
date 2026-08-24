@@ -230,6 +230,13 @@ are rejected without a verified organization group.
 Install the supervisor, role wrappers, verifier, units, and network helper
 before enabling either protected role:
 
+The scheduled reaper deliberately does **not** read the long-lived runner token.
+Before enabling its timer, install Shipyard's GitHub App helper at the exact
+root-owned, non-symlink, non-group/world-writable path
+`/usr/local/bin/ghapp`. The token-file mode below remains supported by the pool
+supervisor, but it is not a reaper authentication fallback; if the helper is
+missing or insecure, recovery exits before inspecting or changing any VM.
+
 ```sh
 apt-get update
 apt-get install -y gh
@@ -241,12 +248,16 @@ install -o root -g root -m 0755 tools/ci/proxmox-pr-safe-ephemeral-runner-linux.
   /usr/local/sbin/pulp-pr-safe-ephemeral-runner.sh
 install -o root -g root -m 0755 tools/ci/configure-proxmox-ci-network.sh \
   /usr/local/sbin/configure-proxmox-ci-network
+install -o root -g root -m 0755 tools/ci/proxmox-ephemeral-reap-linux.sh \
+  /usr/local/sbin/pulp-ephemeral-reap.sh
 install -d -o root -g root -m 0755 /usr/local/lib/pulp
 install -o root -g root -m 0755 tools/ci/verify_linux_runner_group.py \
   /usr/local/lib/pulp/verify_linux_runner_group.py
 install -o root -g root -m 0644 tools/ci/pulp-trusted-ephemeral-pool@.service \
   tools/ci/pulp-pr-safe-ephemeral-pool@.service \
-  tools/ci/proxmox-ephemeral-pool@.service /etc/systemd/system/
+  tools/ci/proxmox-ephemeral-pool@.service \
+  tools/ci/pulp-ephemeral-reap.service \
+  tools/ci/pulp-ephemeral-reap.timer /etc/systemd/system/
 ```
 
 Create separate root-owned role environments; never share one:
@@ -277,9 +288,22 @@ before registration.
 /usr/local/sbin/configure-proxmox-ci-network --apply
 /usr/local/sbin/configure-proxmox-ci-network --verify
 systemctl daemon-reload
+systemctl enable --now pulp-ephemeral-reap.timer
 systemctl enable --now pulp-trusted-ephemeral-pool@1.service
 systemctl enable --now pulp-pr-safe-ephemeral-pool@1.service
 ```
+Before enabling the timer on a host that already has clones in the managed
+VMID range, run the reaper in report-only mode and classify each reported
+legacy generation. The reaper will never mutate a pre-upgrade clone whose
+Proxmox description lacks the updated supervisor's exact
+`pulp-runner-scope=...` provenance, because the old supervisor did not persist
+whether `--keep` was requested. Preserve an intentionally retained clone by
+creating its root-owned mode-0600 generation marker under
+`/var/lib/pulp/ephemeral-runner-keep`; only after proving a legacy clone is
+disposable may an operator add its exact repository or organization recovery
+scope to the Proxmox description. Newly allocated clones carry that scope by
+construction, so scheduled recovery is automatic after the migration boundary.
+
 `--apply` and `--verify` both assert a **default-deny egress policy** per
 isolated bridge, not merely that the bridge exists. MASQUERADE is address
 translation, not filtering: with NAT alone and Proxmox's stock
@@ -410,6 +434,26 @@ exactly one job, and the clone is destroyed. Nothing accumulates, so nothing nee
 cleaning — and the cache a job inherits cannot be poisoned by the job before it.
 This closes the reused-build-dir class outright, which matters because `build.yml`
 sets `clean: false` on self-hosted runners.
+
+The supervisor publishes a root-owned per-generation lease while it owns a
+clone. `pulp-ephemeral-reap.timer` is the crash-recovery backstop: after one
+hour it considers only an ownerless Pulp slot, then requires the exact GitHub
+registration to be idle, one `Runner.Listener --jitconfig`, no worker or
+configuration process, and an empty `_work`. Execution first replaces all
+routing labels with a shutdown fence, proves the idle state twice, stops and
+deregisters the runner, and rechecks the unchanged VM config under the VMID
+allocation lock before destroy. Missing, duplicate, unreachable, busy, or
+otherwise ambiguous evidence always preserves the VM. Run
+`pulp-ephemeral-reap.sh` without arguments for a non-mutating report.
+After a controller reboot leaves an `onboot=0` clone stopped, recovery accepts
+only its one exact generation-bound GitHub registration in `offline` and
+`busy=false` state, deregisters that exact ID under the same VMID lock, and
+then destroys the clone. Online, busy, duplicate, or unreadable stopped-clone
+registrations remain preserved.
+An operator's explicit `--keep` disposition is generation-bound under
+`/var/lib/pulp/ephemeral-runner-keep`, so it survives a host reboot; a newly
+allocated generation clears only the old marker for its own VMID while holding
+the allocation lock.
 
 Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
 what provisions the next clone. Add a slot by enabling `@3` — but check the governor
@@ -992,14 +1036,26 @@ It is tiered:
   wired but placing nothing yet. See the tartci runbook's Orchard section.
 
 The **mac local lane** is the one that historically escaped the CLI: Shipyard's
-`local` backend runs the `.shipyard/config.toml` build string directly on the
-host and does not pass through the `pulp` CLI. Every build stage in that config
-— `default`, `parser`, **and** `smoke` — is therefore wrapped by
-`tools/ci/governed-build.sh`, which acquires a tartci build lease sized from the
-host profile, exports the granted `-j`, runs the build as a child process, and
-releases the lease on exit. When tartci is absent (a build VM or a plain
-checkout) or the lease is denied (host saturated), it falls back to the Tier-0
-bound — it never fails the build and never piles onto a saturated host. (The
+`local` backend runs `.shipyard/config.toml` commands directly on the host and
+does not pass through the `pulp` CLI. Every build stage in that config —
+`default`, `parser`, **and** `smoke` — and all POSIX CTest stages are therefore
+wrapped by `tools/ci/governed-build.sh`. It acquires a tartci build lease sized
+from the host profile, exports the granted CMake and CTest parallelism, runs the
+workload as a child process, and releases the lease on exit. CTest applies that
+bounded share while still honoring each test's `RUN_SERIAL` and `RESOURCE_LOCK`
+properties. Suites that open the real CoreAudio device use `RUN_SERIAL`; their
+`PROCESSORS 8` value is a timing weight, not an assumption that the dynamically
+granted share is always eight. When tartci is absent (a build VM or a plain
+checkout), the wrapper uses the Tier-0 bound. A lease denial retries at reported
+free capacity, then uses the conservative floor if capacity disappears; it
+never fails the workload or piles onto a saturated host.
+
+An uncatchable `SIGKILL` cannot run the wrapper's release trap. Recovery is
+still bounded without weakening admission: tartci's next `leases acquire`
+revalidates each owner's PID, process start time, and host boot identity under
+the store lock, removes dead/reused owners, and only then calculates available
+capacity. A stale heartbeat with a still-matching live owner is reported but
+retained; elapsed time alone never steals capacity from live work. (The
 `smoke` lane previously used a raw `--parallel $(getconf _NPROCESSORS_ONLN)` and
 so ran whole-machine on the shared Mac while the required gate validated
 alongside it; it now takes a governed share like the other lanes.) The
@@ -1152,6 +1208,84 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+### Changed-surface risk selection (controlled canary)
+
+The required macOS target also declares a schema-v3
+`changed_surface_selection` policy. It classifies an exact diff into mandatory,
+affected, extended, or full validation and records both the selected test set
+and its reviewed CMake producer targets. A protected-base execution template
+may atomically replace the POSIX local `build` and `test` stages, but repository
+config cannot enable it. Shipyard reads the separate
+machine-global `changed_surface_execution.mode` switch, whose absent/default
+value is `off`. The controlled `shadow_compare` mode builds only the declared
+producer targets and runs selected tests first, then runs the unchanged full
+build and CTest corpus, returns the full path's status, and emits an immutable
+receipt with separate selected/full build and test wall times, registration
+counts, and failure-coverage classification. Thus the full path remains
+merge-authoritative throughout the canary.
+
+The full build follows the selected-target build in the same locked warm tree,
+so its direct timer is explicitly recorded as the **incremental remainder**, not
+as an independent full-build baseline. The receipt's estimated total full-build
+duration is the selected-build duration plus that incremental remainder. Use
+that derived total for shadow speed comparisons; using the remainder alone
+would overstate the selected-build savings.
+
+Each schema-v3 selection produces an execution-receipt schema that also binds
+the policy, selection, validation, workflow, literal-test, and literal-build-
+target digests plus a durable timestamp, so a later session can
+aggregate trials without reconstructing the originating agent. A receipt is
+`graduation_eligible` only when shadow comparison ran and both suites passed.
+`missed_full_failure` and `selected_only_failure` are explicit
+`mismatched_non_graduation` evidence. Two failures are
+`failure_overlap_unproven`, not graduation evidence, because terminal status
+alone does not prove both suites found the same failure. Receipt publication
+fsyncs both the file and containing directory.
+
+The mandatory kernel always runs, including the selector's own
+`changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
+security, provenance, packaging, dependency, policy, and test-topology changes
+require the full suite; unknown paths fail safely to full as well. The first
+bounded family covers only Forge/DSP catalog projection commands, with explicit
+affected and extended tests. The declared inventory is tied to the required
+macOS Debug configuration, which enables
+`PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
+that platform-specific cardinality.
+
+CTest display names are not identities: the authoritative target currently has
+20,729 registrations but only 20,670 unique names. The inventory validator
+therefore fingerprints a canonical `{name, executable, argv,
+working_directory, properties}` composite and treats the suite as a multiset.
+Literal selection expands every composite with the requested name. The pinned
+`.shipyard/changed-surface-inventory.json` count and digest must match exactly;
+missing commands, duplicate properties, duplicate composite identities, or
+digest drift require the full suite. The contract also pins stable target
+semantics. Source-head, source-tree, and toolchain provenance remain in the
+emitted manifest for comparison, but otherwise-valid Python or CTest patch
+updates are not repository-contract failures. External executables use a
+portable basename in the registration fingerprint while the toolchain digest
+binds their raw and resolved paths plus a bounded content digest, so same-named
+tools remain distinguishable. Raw worktree paths and CTest registration order
+are intentionally excluded from portable identity.
+
+Do not promote selection from shadow to authoritative based on a few green
+runs. Graduation requires per-risk-class comparison evidence showing that the
+selected receipts agree with full validation, plus a separately reviewed
+policy change. Tests remain in the repository and continue to run in full for
+unknown/high-risk work, main, nightly, release, and audit surfaces.
+
+Ordinary and changed-surface build-and-test stages serialize access to the same canonical
+build directory through `tools/ci/build_dir_lock.py`. Its persistent lock file
+lives in per-user host state, not beside `build/`, so acquiring the lock cannot
+dirty the exact source checkout that changed-surface execution verifies. The
+full canonical build path is hashed into the filename and independently bound
+inside the locked file; aliases converge, while equally named build directories
+in separate worktrees stay independent. Lock files intentionally remain after
+unlock so queued waiters keep one inode. Tests may set the trusted, absolute
+`PULP_BUILD_DIR_LOCK_ROOT` override; production uses durable per-user
+application state with owner-only permissions (or the user's inherited profile
+ACL on Windows), rather than an OS-purgeable cache or runtime directory.
+
 ## Cache-warming runs on `main`
 
 `build.yml` triggers on `push: branches: [main]` in addition to
@@ -1173,7 +1307,7 @@ Each trigger runs a deliberately different slice of the matrix:
 | Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
 | Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
 | `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
-| required `macos` alias | yes | yes, after the macOS build completes | no |
+| required direct `macos` context | yes | yes | no |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
 The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
@@ -1190,10 +1324,52 @@ its cache-save step exactly when main is busiest. PR runs still cancel.
 
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
-`github.event.pull_request.base.sha`, a push diffs `github.event.before`. On a
-push, `origin/main` resolves to HEAD itself and the diff is always empty — so a
-docs-only merge is indistinguishable from a core merge, and the run never
-skips. A docs-only merge to main now correctly skips the whole matrix.
+`github.event.pull_request.base.sha`, a merge group diffs
+`github.event.merge_group.base_sha`, and a push diffs `github.event.before`.
+Those immutable event SHAs let the preamble use a depth-1 head checkout, fetch
+only a missing exact base object at depth 1, and compare the two trees directly.
+It must not fetch Pulp's full history merely to compute changed paths: on a
+reusable traveling runner that grew `.git` to 70 GiB and delayed a cheap
+classifier by more than 20 minutes. If the exact base is missing, malformed, or
+cannot be fetched, classification fails closed to a native build. The job has a
+10-minute outer timeout so a disconnected roaming runner cannot occupy the
+preamble indefinitely. On a push, `origin/main` resolves to HEAD itself and the
+diff is always empty — so a docs-only merge is otherwise indistinguishable from
+a core merge, and the run never skips. A docs-only merge to main now correctly
+skips the whole matrix.
+
+One semantic fast path sits above that path classifier. A same-repository
+`release/version-bump` pull request may skip the native matrix and the required
+WebCLAP proof only when the protected base's
+`tools/scripts/generated_version_bump_check.py` verifies one open pull request,
+one signed release-bot commit whose parent is an immutable protected-main base,
+the fixed branch/title/message marker, and a candidate tree byte-identical to
+rerunning that protected base's version-at-land writer. The verifier resolves a
+merge-group candidate through exactly one associated pull and then fetches the
+detailed pull record. A bump queued behind exactly one earlier entry may still
+qualify in GitHub's observed #7771 topology: the event group must have exactly
+`[prior cumulative group, generated candidate]` as its parents, the candidate
+must have one original protected-main parent, and that SHA must be the prior
+group's first parent. The verifier is loaded from that immutable original
+parent, never from the speculative cumulative group. The writer and its
+derived generator's complete local executable dependency closure must be
+byte-identical across the range, every derived-file subprocess is rebound to
+the protected copy, and the complete event tree must equal the cumulative base
+plus only the regenerated version projection. Multiple candidate associations,
+nested/unknown topology, writer drift, missing protected code, GitHub API or
+signature errors, pagination ambiguity, or any additional byte retains ordinary
+validation. Version/skill enforcement and both Vellum gates still run, and
+pushes to main, releases, scheduled work, and manual dispatches retain their
+normal validation.
+
+The current provenance boundary is GitHub's valid SSH-signature record plus the
+`danielraffel` signer/account and exact release-bot author/committer identity.
+The repository does not yet contain an authoritative public key or fingerprint
+for `RELEASE_BOT_SSH_SIGNING_KEY`, so the verifier must not invent one from a
+single historical commit. If the dedicated key (rather than Daniel's GitHub
+signing identity) becomes a distinct authorization boundary, first publish its
+public fingerprint on protected main and then pin the embedded SSH signature
+key to that reviewed value.
 
 ## The Shipyard merge steward uses one repository-scoped writer
 
@@ -1261,56 +1437,25 @@ branch when a Windows-touching change needs proof before merge.
 Windows are absent on `merge_group`, Windows remains reachable through
 `workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## The required macOS alias reports after the native matrix is terminal
+## The native macOS job publishes the required context directly
 
-Branch protection requires the stable `macos` alias so local/overflow provider
-changes cannot rename the gate. Both event-specific reporters depend on the
-terminal build matrix, then query the current workflow run's paginated jobs API
-and require exactly one `macOS ...` matrix leg with conclusion `success`.
-Missing, duplicate, null, skipped, cancelled, failed, and unknown conclusions
-all fail closed. The query is retried three times only for transport failure;
-there is no fixed-duration build poll that can expire before a queued macOS leg
-starts.
+Branch protection requires the literal `macos` context. On pull requests,
+Shipyard manual dispatches, and merge groups, the native macOS matrix child
+publishes that context directly. It becomes terminal with the macOS work and
+does not wait for the combined matrix, a reporter runner, or the jobs API.
+Advisory Linux and Windows legs may therefore continue after queue admission.
 
-The reporters use `gh api --paginate` and decode its concatenated JSON object
-stream directly. Keep that compatibility boundary: some preamble images support
-pagination but do not provide the newer `--slurp` flag. The parser still reads
-every page and rejects an empty response or any non-object page.
-
-Pull-request and manual-dispatch runs retain the combined build matrix. Advisory
-Linux or Windows work can therefore delay when the reporter starts, but neither
-`needs.build.result` nor an advisory leg's conclusion determines the required
-macOS verdict. On `merge_group`, the matrix contains only the real self-hosted
-macOS leg, and the dedicated merge-group reporter retains the same stable
-`macos` check name.
-
-An alias is the **last job in the run**: it waits for the matrix leg and reports
-the outcome. Starve it of a runner and it never starts, so the *run* never
-reaches a terminal state. A run that never terminates holds its `concurrency`
-group, and `build.yml` sets `cancel-in-progress` on that group — so the next
-push's run sits at status `pending` with **zero jobs** and never dispatches. The
-pull request is then wedged: no checks, no failure, nothing to re-run. It
-survives further pushes and clears only by cancelling the older run by hand.
-
-The tell is a `Build and Test` run whose `status` is `pending` and whose `jobs`
-array is **empty**, while the sibling workflows from the same trigger dispatched
-normally. If you hit it:
-
-```bash
-# find the older, non-terminal run on the same ref and cancel it
-ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel
-```
-
-Reporter runner isolation still matters: the PR/dispatch reporter uses the
-dedicated alias selector, while merge-group and advisory reporters use the
-preamble selector so no bare hosted-runner dependency can hold a run open.
-`tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
-through the toggle and that none is pinned to a bare `ubuntu-latest`.
+Event-specific bootstrap jobs own `macos` only when classification intentionally
+omits native work or provider/classifier resolution fails closed. When a native
+matrix child exists, the corresponding bootstrap is inactive and uses an
+`-unused` display name so it cannot collide with or satisfy branch protection.
+`tools/scripts/test_required_macos_alias.py` and
+`tools/scripts/test_windows_runner_policy.py` pin both ownership paths.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
-stdin script, so a wedged checkout volume can freeze the routing probe or a
-terminal `macos` jobs-response parser even though the API response is available.
+stdin script, so a wedged checkout volume can freeze the routing probe even
+though the API response is available.
 `RUNNER_TEMP` is not a safe boundary here: on self-hosted Studios it can also
 live below `/Volumes/Workshop`. Those three helpers first `cd /tmp` (`/private/tmp`
 on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
@@ -2176,9 +2321,9 @@ YAML:
   `workflow_dispatch`. Only the `validation` label is excluded — every
   `slow`-labelled test runs before code lands on the release lane.
 
-Both paths satisfy the branch-protection-required `macos` /
-advisory `linux` / advisory `windows` alias gates because the alias
-jobs read each matrix leg's outcome via the GitHub API.
+Both paths satisfy the branch-protection-required direct `macos` context and
+the advisory `linux` / `windows` aliases. The macOS matrix child reports its
+own result; only the advisory aliases read matrix outcomes.
 
 ### iOS library compile gate
 

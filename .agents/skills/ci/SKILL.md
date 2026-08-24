@@ -112,6 +112,17 @@ participates in `all`.
 
 ## Test lanes — what gates the required `macos` check
 
+For native pull requests, Shipyard `workflow_dispatch` validation, and merge
+groups, the macOS matrix child publishes the literal required `macos` context
+directly. It must not wait on the combined matrix: Linux and Windows are
+advisory during the macOS-focused product phase and may continue after queue
+admission. The `macos` and `macos-merge-group` bootstrap jobs own the required
+name only for an intentional native skip or a fail-closed provider/classifier
+failure; their inactive names end in `-unused`.
+`tools/scripts/test_required_macos_alias.py` and
+`test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
+whose `needs` contains the combined `build` job.
+
 ### An advisory check that names a main-breaking defect is worse than none
 
 `api-contracts.yml` runs the public-header doc-contract pass on its own
@@ -205,6 +216,18 @@ to slip past. It executes in three places with different force:
 them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
+
+### A changed-path preamble needs exact trees, not full repository history
+
+Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
+already supplies the immutable PR, merge-group, or push base SHA. The workflow
+checks out the exact head at depth 1, fetches only that base object when absent,
+and calls `classify_changes.py --comparison=trees`; an unavailable base fails
+closed to the native build. This matters especially on a roaming reusable Mac:
+a full-history preamble was observed entering a 70 GiB `.git` directory with
+286 packs before doing any classification. Keep the 10-minute job timeout too.
+Workflows whose actual release/audit algorithm traverses historical ranges may
+still require full history; changed-path classification does not.
 
 ### Browser-source fidelity is a required dependency, not a skip
 
@@ -674,28 +697,31 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
-## A red `macos` or `linux` alias does not mean tests failed
+## A red advisory alias does not necessarily mean tests failed
 
-`macos` and `linux` are **alias checks**: jobs that mirror a real lane's outcome.
-The required `macos` alias reports after the build matrix is terminal; it does
-not poll while the native build runs. Alias jobs run no build and produce no
-build output of their own — a `linux` alias log is about 48 lines, and it says
-so outright:
+`linux` and `windows` are **alias checks**: jobs that mirror real advisory
+lanes. Native `macos` is not an alias; the macOS matrix child owns that required
+context directly so advisory work cannot delay it. The macOS bootstrap jobs run
+only for intentional native skips or fail-closed routing/classification errors.
+Alias jobs run no build and produce no build output of their own — a `linux`
+alias log is about 48 lines, and it says so outright:
 
 ```
 Linux leg conclusion: cancelled
 Linux leg cancelled — failing linux alias (advisory only; not required)
 ```
 
-**The alias exits non-zero on anything not green — including `CANCELLED`.** So a
-cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
+**An advisory alias exits non-zero on anything not green — including
+`CANCELLED`.** So a cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
 interrupted produces a red alias beside its own `CANCELLED` entry in the same
 check list. Reading that as a second, independent failure is the trap; it is one
 event reported twice.
 
-Before treating either alias as a real break, fetch **the underlying leg's job**
-(`Linux (x64) [github-hosted]`, the macOS build job) or the alias's own short
-log. Do not infer from the alias name alone.
+Before treating an advisory alias as a real break, fetch **the underlying leg's
+job** (`Linux (x64) [github-hosted]`, for example) or the alias's own short log.
+Do not infer from the alias name alone. A red direct `macos` context is the real
+required macOS job (except the explicitly named bootstrap path) and must be
+triaged as such.
 
 Two more things that mislead here:
 
@@ -1390,7 +1416,12 @@ bisectable.
   unrelated queued group can take the same fast path without dropping the
   required context. A missing base, failed fetch/diff, or workflow/classifier
   self-change still runs the full proof. Never expose `GH_TOKEN` to the
-  PR-controlled checkout while resolving relevance.
+  PR-controlled checkout while resolving relevance. The same protected-base
+  generated-version-bump verifier runs before ordinary WebCLAP relevance. It
+  may fast-green an exact release-bot bump because only version scalars changed;
+  branch names, labels, commit subjects, or path lists alone are never
+  sufficient. The verifier itself is trusted code and is the only process in
+  that decision path that receives `GH_TOKEN`.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
   `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
@@ -1705,18 +1736,14 @@ bisectable.
   (or run from a context with no `GIT_DIR`), and never assume `-C` alone
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
-- The required `macos` aliases in `.github/workflows/build.yml` depend on the
-  terminal build matrix, then query only the current run's paginated latest jobs
-  for exactly one macOS matrix leg. Only conclusion `success` is green;
-  missing, duplicate, null, skipped, cancelled, failed, and unknown outcomes
-  fail closed. Keep three short retries for jobs-API transport failures only;
-  malformed JSON and invalid cardinality are verdict failures, not reasons to
-  resume build polling. PR/dispatch runs retain the combined matrix, so advisory
-  legs may delay the reporter but `needs.build.result` must never determine it.
-  The merge-group report uses the short-lived preamble pool and preserves the
-  stable required context name. These two reporters intentionally use bare
-  `gh api --paginate` and decode the concatenated JSON object stream; do not add
-  `--slurp`, because older preamble images reject that newer flag.
+- The required `macos` context in `.github/workflows/build.yml` is published
+  directly by the native macOS matrix child for pull requests, Shipyard manual
+  dispatches, and merge groups. It must not depend on the combined build matrix
+  or a jobs-API reporter: advisory Linux and Windows work may continue without
+  delaying queue admission. Event-specific bootstrap jobs own `macos` only for
+  an intentional native skip or a fail-closed provider/classifier failure;
+  inactive bootstraps use an `-unused` name so they cannot collide with or
+  satisfy branch protection.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
   `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
   `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
@@ -3673,12 +3700,13 @@ have passed; one comparing the exact expected string caught it immediately.
 Config-language defects are usually invisible as defects, which is exactly when
 a stricter-than-necessary assertion earns its keep.
 
-**Diagnostic order.** A cancelled leg fails the required `macos` alias closed and
-is indistinguishable from a real test failure at PR level — so read the leg, not
-just the alias. And when a remedy stops working, re-verify the remedy still does
-what it did when you first observed it, rather than adding conditions around it:
-"re-running re-routes" was observed twice, generalised, then applied through
-`--failed` where it silently does not hold.
+**Diagnostic order.** A cancelled native macOS leg fails the direct required
+`macos` context and is indistinguishable from a real test failure at PR level,
+so read the job log and conclusion. A red bootstrap context instead means
+routing or classification failed closed. And when a remedy stops working,
+re-verify the remedy still does what it did when you first observed it, rather
+than adding conditions around it: "re-running re-routes" was observed twice,
+generalised, then applied through `--failed` where it silently does not hold.
 
 **The authority for "why did CI route this way" is the workflow file, not the
 API.** The API shows outcomes; the workflow states the rule.
@@ -3901,31 +3929,34 @@ with a macOS-only `ctest --exclude-regex` in `build.yml`, keep Linux/Windows
 coverage intact, and open/follow a targeted fix. Do not hide failures that
 reproduce cross-platform or that are caused by the branch being shipped.
 
-**Real-time-thread teardown hangs need a `PROCESSORS` reservation, not an
-exclude.** A test that opens the real CoreAudio device (anything constructing a
-`StandaloneApp` or calling `AudioSystem::create_device()` + `start()`) tears it
-down via `AudioOutputUnitStop` / `AudioUnitUninitialize`, which **block until
-the real-time I/O thread observes the request**. Under `ctest -j8` full-suite
-load that RT thread is CPU-starved, so teardown hangs to the 120s timeout — a
-flake that reproduces **only** in the full run on a saturated runner, never in
-isolation or any concurrent subset (so don't waste time bisecting subsets). Fix
-it at the scheduler: `pulp_add_test_suite(... PROPERTIES PROCESSORS 8)` (== the
-CI `-j`) makes ctest run the suite alone so the RT thread gets the machine.
-Prefer this over an exclude — it keeps the test enabled everywhere. (Adding a
-shared `RESOURCE_LOCK` does NOT fix it: serializing the audio tests among
-themselves still leaves the other ~8 `-j8` tests starving the RT thread.)
+**Real-time-thread teardown hangs need `RUN_SERIAL`, not an exclude or a
+capacity-shaped `PROCESSORS` assumption.** A test that opens the real CoreAudio
+device (anything constructing a `StandaloneApp` and calling `start()`, or using
+`AudioSystem::create_device()` + `start()`) tears it down via
+`AudioOutputUnitStop` / `AudioUnitUninitialize`, which **block until the
+real-time I/O thread observes the request**. Under a saturated full-suite run
+that RT thread is CPU-starved, so teardown hangs to the 120s timeout — a flake
+that reproduces **only** in the full run, never in isolation or any concurrent
+subset (so don't waste time bisecting subsets). Fix it at the scheduler:
+`pulp_add_test_suite(... PROPERTIES RUN_SERIAL TRUE)` makes CTest run the suite
+alone at every dynamically granted width. Retain an existing `PROCESSORS 8` as
+its scheduling weight, but do not mistake that historical value for isolation
+or add it to unrelated tests. Prefer this over an exclude — it keeps the test
+enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
+serializing the audio tests among themselves still leaves unrelated tests
+starving the RT thread.)
 
-The required `macos` alias deliberately needs the complete combined build
-matrix on pull-request and manual-dispatch runs. That may delay the reporter
-behind advisory Linux/Windows work, but it removes the false-timeout race where
-a queued macOS leg had not started before a fixed polling window expired. The
-reporter queries the terminal run and derives its verdict only from exactly one
-macOS job's conclusion; advisory failures must never contaminate it through
-`needs.build.result`. Merge groups retain a macOS-only matrix, so their dedicated
-alias reports promptly after the owned leg completes.
+The required `macos` context comes directly from the native macOS matrix child
+on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore
+becomes terminal as soon as the owned macOS leg does, without waiting for the
+combined matrix or polling the jobs API. A small event-specific bootstrap owns
+the same name only when routing/classification fails closed or classification
+proves the native build is unnecessary; inactive bootstrap jobs use an
+`-unused` name so they cannot satisfy or collide with the required context.
+Advisory Linux/Windows work may continue without delaying queue admission.
 
-**Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
-alias reports its failure promptly, a *flaky* failure on the required leg wedges
+**Flaky required-leg wedge + the rerun lock (recovery).** Even when the direct
+`macos` job reports its failure promptly, a *flaky* failure on the required leg wedges
 auto-merge: the PR sits `mergeStateStatus: BLOCKED`, and `ghapp run rerun <run>
 --failed` refuses with **"cannot be rerun; This workflow is already running"**
 for as long as an advisory leg (Windows x64 / Coverage) keeps the run
@@ -4329,6 +4360,63 @@ JSON modes carry the diagnostics. Lets you chain
 GitHub UI on slow CI runs.
 
 ## PR test selection
+
+Pulp's base-owned schema-v3 `[targets.mac.changed_surface_selection]`
+declaration records a mandatory kernel, complete literal tests and their
+reviewed CMake producer targets for one narrowly reviewed CLI projection family, medium-risk extended
+neighbors, and known full-required surfaces. Its protected-base execution
+template cannot activate itself: Shipyard reads
+`changed_surface_execution.mode` from the independent machine-global config,
+where missing or `off` preserves the ordinary full test stage byte-for-byte.
+The initial canary uses `shadow_compare`; it builds only the selected producer
+targets and executes the literal test selection, then runs the ordinary full
+build and CTest commands, returns the full path's status, and writes an
+append-only selected-vs-full timing/failure-coverage receipt. Do not
+set `authoritative` until those receipts satisfy the reviewed graduation gate.
+Because both builds share one locked warm tree, the post-selected full-build
+timer is an incremental remainder. Receipts name it that way and separately
+record the estimated total full-build duration as selected build plus remainder;
+never compare selected time against the remainder alone.
+The execution receipt binds the policy, selection, validation, workflow,
+literal-test, and literal-build-target digests for session-independent aggregation. A
+`missed_full_failure` or `selected_only_failure` is explicit non-graduation
+evidence; only a compared selected/full status match is marked
+`graduation_eligible`. More precisely, both suites must pass; two red statuses
+are `failure_overlap_unproven` until exact failure identity is reviewed.
+Receipt publication fsyncs the file and its containing directory.
+Unknown paths and
+changes to build/toolchain, public ABI, security, provenance, selector policy,
+or test topology select full. `changed-surface-policy-selftest` verifies those
+dispositions with negative mutations and, on the declared macOS
+Debug/examples-on target, checks every authoritative CTest registration rather
+than collapsing duplicate display names. The canonical composite binds name,
+anchored executable and arguments, working directory, and every CTest property;
+the inventory is an order-independent multiset with a pinned count and digest.
+Literal selection expands all composites that share a requested name. Missing
+commands, duplicate properties or composites, and digest drift fail closed to
+the full suite. The selector self-test itself is in the mandatory kernel. Add
+broader mappings only after shadow
+receipts show they contain the relevant full-suite failures.
+
+When a change deliberately adds or removes CTest registrations, refresh the
+inventory contract in the same commit: update
+`.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
+count comment in `.shipyard/config.toml`, the pinned-count assertions in
+`tools/scripts/test_changed_surface_policy.py`, and the current inventory
+counts in `docs/guides/local-ci.md`. Derive the digest from the configured
+build's canonical inventory, then run
+`python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
+Otherwise the full suite can finish almost entirely green and fail only at the
+inventory self-test, forcing a needless second admission cycle.
+
+The ordinary and changed-surface build-and-test stages share
+`tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
+lock is persistent by design (removing it can split lock identity under queued
+waiters), but it lives in owner-only per-user host state rather than beside the
+build directory, so exact-source verification never sees a lock artifact as a
+checkout mutation. Canonical path aliases share a lock; same-named build dirs in
+different worktrees use different full-digest identities. The absolute
+`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only.
 
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`
 events and `workflow_dispatch` because Shipyard PR validation dispatches
@@ -5021,8 +5109,9 @@ Then proceed with the `ship` workflow below.
 macOS uses the self-hosted fast-gate runner class declared in
 `tools/scripts/runner_topology.json`. Namespace is not a
 default PR-validation backend after the 2026-05-20 cost cutover. The
-required branch-protection check on `main` is the `macos` alias job —
-that name MUST NOT be renamed.
+required branch-protection check on `main` is the literal `macos` context
+published by the native matrix child (or the event-specific bootstrap when the
+native child is absent). That name MUST NOT be renamed.
 
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
@@ -5046,7 +5135,7 @@ have the bundled Skia archive available.
 
 Before pushing ANY branch whose CI touches a macOS leg
 (`Build and Test`, `Sanitizer Tests`, `Coverage`, `Visual Harness`,
-`Release-path PR gate`, `macos-15`, the `macos` alias, etc.):
+`Release-path PR gate`, `macos-15`, the direct `macos` context, etc.):
 
 ```bash
 git fetch origin main
@@ -5092,8 +5181,10 @@ That keeps your SHA + queue position, only re-fires the failed legs.
 
 ### Display-name vs runner-name gotcha
 
-The macOS matrix job display name includes a provider suffix, but branch
-protection gates on the stable `macos` alias job. Do NOT rename the alias
+For PR, Shipyard manual-dispatch, and merge-group native work, the macOS matrix
+job itself has the literal display name `macos`; branch protection gates on
+that direct context. Bootstrap jobs use the same name only when the native job
+is absent and an `-unused` name otherwise. Do not rename either ownership path
 while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
@@ -6688,6 +6779,22 @@ Key facts:
 - The alias jobs are **fail-closed on a `classify`-job failure**: if
   `needs.classify.result != 'success'` the `macos` gate fails RED
   rather than trusting an unwritten/empty `native_build_required`.
+- A release-bot-generated `release/version-bump` PR is the one narrowly
+  permitted semantic exception to the path allowlist. Root `CMakeLists.txt`
+  and plugin JSON still classify as native first; the workflow may override
+  that result only when the protected base's
+  `tools/scripts/generated_version_bump_check.py` proves one signed bot commit,
+  exact current-main parentage, the fixed branch/title/marker, one associated
+  PR, and a candidate tree byte-identical to rerunning the protected base's
+  version-at-land writer (including derived projections). A candidate behind
+  exactly one prior queue entry qualifies only in the proven #7771 shape: its
+  original protected base is the prior group's first parent, the writer and its
+  derived generator's complete local executable dependency closure did not
+  change, trusted derived generators are executed from that original base, and
+  the complete merge-group tree is exactly cumulative base plus the regenerated
+  version projection. Any missing script, API/signature error, nested/unknown
+  topology, writer drift, extra byte, or ambiguous association retains the full
+  native path. The verifier's own PR therefore cannot approve itself.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
   `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
   and add a case to `test_classify_changes.py`. Never widen the
@@ -6965,7 +7072,7 @@ run and the open `release-guard` issue, not the individual legs. Most of the
 time the answer is that it is still building and the reconciler is correctly
 doing nothing.
 
-## Build strings must take a share, not the machine
+## Build and test strings must take a share, not the machine
 
 A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
 Mac, so it must take a *share* of the host — route it through
@@ -7004,6 +7111,24 @@ VM / plain checkout) or the lease is denied (it never fails the build and never
 piles onto a saturated host). Keep new POSIX build strings routed through it;
 don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
 `local`/ssh-linux lanes.
+
+Every POSIX `test` stage uses that wrapper too. The wrapper exports
+`CTEST_PARALLEL_LEVEL` from the leased share, so a bare `ctest` command does not
+silently serialize the full suite and an explicit `-j$(nproc)` cannot consume
+the shared host. Do not add a `-j` or `--parallel` to the Shipyard test string:
+the leased environment value is authoritative, while CTest continues to honor
+`RUN_SERIAL` and `RESOURCE_LOCK` test properties. Real-CoreAudio suites use
+`RUN_SERIAL` for capacity-independent isolation; `PROCESSORS 8` alone is not
+isolation once a dedicated builder grants more than eight slots.
+
+`SIGKILL` cannot run the wrapper's release trap. That does not leave capacity
+poisoned until a timer or operator acts: tartci's next `leases acquire`
+revalidates PID, process-start, and boot identity under the store lock, reaps a
+dead/reused owner, and calculates capacity only from the survivors. It does NOT
+reap a stale heartbeat whose owner identity still matches — elapsed time is not
+authority to steal cores from live work. `tools/ci/test_governed_build.py`
+proves both halves against a private out-of-process store when tartci is
+installed; its hermetic governor cases remain unconditional.
 
 ## macOS Intel (x86_64) CI tiering
 

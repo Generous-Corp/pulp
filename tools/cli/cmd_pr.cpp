@@ -37,8 +37,10 @@
 
 #include "cli_common.hpp"
 
+#include <pulp/platform/child_process.hpp>
+
+#include <cerrno>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -46,23 +48,12 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
-#  include <sys/wait.h>
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
 #else
-// Windows MSVC ships POSIX-named shims under leading-underscore names:
-// _popen / _pclose live in <stdio.h>. Map the POSIX spellings onto them
-// so the TU below compiles unchanged on both toolchains. This was the
-// root cause of every release-cli.yml run v0.4.0..v0.13.0 failing on
-// the CLI windows-x64 and CLI windows-arm64 jobs.
-#  include <stdio.h>
-#  define popen  _popen
-#  define pclose _pclose
-#  ifndef WIFEXITED
-#    define WIFEXITED(status)   (true)
-#  endif
-#  ifndef WEXITSTATUS
-#    define WEXITSTATUS(status) (status)
-#  endif
+#  include <sys/wait.h>
+#  include <unistd.h>
 #endif
 
 namespace {
@@ -75,44 +66,114 @@ struct CommandResult {
     std::string stderr_text;
 };
 
-// Run a command, capture stdout+stderr separately. Uses popen piped
-// through /bin/sh so PATH resolution is consistent with an interactive
-// shell. stderr goes through a temp-file hack since popen only exposes
-// stdout; acceptable here because pulp pr is main-thread, not perf-sensitive.
-CommandResult run_capture(const std::string& cmd) {
-    // Redirect stderr to a marker delimiter we strip later.
-    // Simpler: merge 2>&1 and annotate. Callers who need them separate
-    // can parse by heuristics; we keep it combined.
-    CommandResult out{0, {}, {}};
-    std::string full = cmd + " 2>&1";
-    FILE* pipe = popen(full.c_str(), "r");
-    if (!pipe) {
-        out.exit_code = -1;
-        out.stderr_text = "popen failed";
-        return out;
+#if defined(_WIN32)
+HANDLE inheritable_stdio_handle(DWORD std_handle, DWORD null_access) {
+    const auto source = GetStdHandle(std_handle);
+    HANDLE inherited = INVALID_HANDLE_VALUE;
+    if (source != nullptr && source != INVALID_HANDLE_VALUE &&
+        DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &inherited,
+                        0, TRUE, DUPLICATE_SAME_ACCESS)) {
+        return inherited;
     }
-    char buf[4096];
-    while (std::fgets(buf, sizeof(buf), pipe)) {
-        out.stdout_text += buf;
-    }
-    int st = pclose(pipe);
-    // pclose returns the wait(2)-style status on success, -1 on error.
-    if (st == -1) {
-        out.exit_code = -1;
-    } else if (WIFEXITED(st)) {
-        out.exit_code = WEXITSTATUS(st);
-    } else {
-        out.exit_code = 1;
-    }
-    return out;
+    SECURITY_ATTRIBUTES security{};
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+    return CreateFileA("NUL", null_access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+#endif
+
+CommandResult run_capture(const std::string& command,
+                          const std::vector<std::string>& args,
+                          const fs::path& working_directory = {}) {
+    pulp::platform::ProcessOptions options;
+    if (!working_directory.empty()) options.working_directory = working_directory.string();
+    auto result = pulp::platform::ChildProcess::run(command, args, options);
+    return {result.exit_code, std::move(result.stdout_output), std::move(result.stderr_output)};
 }
 
-int run_passthrough(const std::string& cmd) {
-    // Stream child output directly to the user's terminal.
-    int st = std::system(cmd.c_str());
-    if (st == -1) return -1;
-    if (WIFEXITED(st)) return WEXITSTATUS(st);
-    return 1;
+int run_inheriting_stdio(const fs::path& binary,
+                         const std::vector<std::string>& args,
+                         const fs::path& working_directory) {
+#if defined(_WIN32)
+    auto resolved = binary;
+    if (!binary.has_parent_path()) {
+        auto found = pulp::platform::find_on_path(binary.string());
+        if (!found) return 127;
+        resolved = *found;
+    }
+    std::string command_line = shell_quote(resolved);
+    for (const auto& arg : args) command_line += " " + shell_quote(arg);
+
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = inheritable_stdio_handle(STD_INPUT_HANDLE, GENERIC_READ);
+    startup.hStdOutput = inheritable_stdio_handle(STD_OUTPUT_HANDLE, GENERIC_WRITE);
+    startup.hStdError = inheritable_stdio_handle(STD_ERROR_HANDLE, GENERIC_WRITE);
+    const auto valid_handle = [](HANDLE handle) {
+        return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+    };
+    const auto close_stdio = [&] {
+        if (valid_handle(startup.hStdInput)) CloseHandle(startup.hStdInput);
+        if (valid_handle(startup.hStdOutput)) CloseHandle(startup.hStdOutput);
+        if (valid_handle(startup.hStdError)) CloseHandle(startup.hStdError);
+    };
+    if (!valid_handle(startup.hStdInput) || !valid_handle(startup.hStdOutput) ||
+        !valid_handle(startup.hStdError)) {
+        close_stdio();
+        return 127;
+    }
+
+    PROCESS_INFORMATION process{};
+    const auto executable = resolved.string();
+    const auto cwd = working_directory.empty() ? std::string{} : working_directory.string();
+    if (!CreateProcessA(executable.c_str(), command_line.data(), nullptr, nullptr,
+                        TRUE, 0, nullptr, cwd.empty() ? nullptr : cwd.c_str(),
+                        &startup, &process)) {
+        close_stdio();
+        return 127;
+    }
+    close_stdio();
+    CloseHandle(process.hThread);
+    if (WaitForSingleObject(process.hProcess, INFINITE) == WAIT_FAILED) {
+        CloseHandle(process.hProcess);
+        return 1;
+    }
+    DWORD exit_code = 1;
+    if (!GetExitCodeProcess(process.hProcess, &exit_code)) exit_code = 1;
+    CloseHandle(process.hProcess);
+    return static_cast<int>(exit_code);
+#else
+    const auto executable = binary.string();
+    std::vector<std::string> owned{executable};
+    owned.insert(owned.end(), args.begin(), args.end());
+    std::vector<char*> argv;
+    argv.reserve(owned.size() + 1);
+    for (auto& arg : owned) argv.push_back(arg.data());
+    argv.push_back(nullptr);
+
+    const auto pid = ::fork();
+    if (pid < 0) return 127;
+    if (pid == 0) {
+        if (!working_directory.empty() && ::chdir(working_directory.c_str()) != 0)
+            _exit(127);
+        ::execvp(executable.c_str(), argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    while (::waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        return 1;
+    }
+    return decode_system_status(status);
+#endif
+}
+
+int run_passthrough(const std::string& command,
+                    const std::vector<std::string>& args,
+                    const fs::path& working_directory = {}) {
+    return run_inheriting_stdio(command, args, working_directory);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -128,40 +189,40 @@ static std::string trim(const std::string& s) {
 }
 
 std::string current_branch(const fs::path& root) {
-    auto r = run_capture("git -C '" + root.string() + "' rev-parse --abbrev-ref HEAD");
+    auto r = run_capture("git", {"-C", root.string(), "rev-parse", "--abbrev-ref", "HEAD"});
     if (r.exit_code != 0) return {};
     return trim(r.stdout_text);
 }
 
 bool has_clean_worktree(const fs::path& root) {
-    auto r = run_capture("git -C '" + root.string() + "' status --porcelain");
+    auto r = run_capture("git", {"-C", root.string(), "status", "--porcelain"});
     return r.exit_code == 0 && trim(r.stdout_text).empty();
 }
 
 bool push_upstream(const fs::path& root, const std::string& branch) {
     std::cout << color::dim() << "Pushing " << branch << " to origin..." << color::reset() << "\n";
-    return run_passthrough("git -C '" + root.string() + "' push -u origin " + branch) == 0;
+    return run_passthrough("git", {"-C", root.string(), "push", "-u", "origin", branch}) == 0;
 }
 
 // ── Subcommand steps ────────────────────────────────────────────────────
 
 int step_skill_sync(const fs::path& root, const std::string& base) {
     std::cout << color::bold() << "▸ Skill-sync check" << color::reset() << "\n";
-    std::string cmd = "python3 '" + (root / "tools/scripts/skill_sync_check.py").string()
-                    + "' --base '" + base + "' --mode=report";
-    return run_passthrough(cmd);
+    return run_passthrough("python3",
+                           {(root / "tools/scripts/skill_sync_check.py").string(),
+                            "--base", base, "--mode=report"}, root);
 }
 
 int step_version_bump(const fs::path& root, const std::string& base) {
     std::cout << color::bold() << "▸ Version-bump apply" << color::reset() << "\n";
-    std::string cmd = "python3 '" + (root / "tools/scripts/version_bump_check.py").string()
-                    + "' --base '" + base + "' --mode=apply";
-    return run_passthrough(cmd);
+    return run_passthrough("python3",
+                           {(root / "tools/scripts/version_bump_check.py").string(),
+                            "--base", base, "--mode=apply"}, root);
 }
 
 int step_commit_bumps(const fs::path& root) {
     // Only emit a commit if the apply step actually staged changes.
-    auto staged = run_capture("git -C '" + root.string() + "' diff --cached --name-only");
+    auto staged = run_capture("git", {"-C", root.string(), "diff", "--cached", "--name-only"});
     if (trim(staged.stdout_text).empty()) {
         std::cout << color::dim() << "▸ No version bump required — skipping chore commit." << color::reset() << "\n";
         return 0;
@@ -179,17 +240,13 @@ int step_commit_bumps(const fs::path& root) {
         msg << "  - " << t << "\n";
     }
 
-    std::string cmd = "git -C '" + root.string() + "' -c commit.gpgsign=false commit -m \""
-                    + msg.str() + "\"";
-    // Escape any embedded newlines for the shell — use a here-doc via env var.
-    // Simpler: write to a temp file.
     fs::path tmp = fs::temp_directory_path() / "pulp-pr-commit-msg.txt";
     {
         std::ofstream f(tmp);
         f << msg.str();
     }
-    cmd = "git -C '" + root.string() + "' -c commit.gpgsign=false commit -F '" + tmp.string() + "'";
-    int rc = run_passthrough(cmd);
+    int rc = run_passthrough("git", {"-C", root.string(), "-c", "commit.gpgsign=false",
+                                     "commit", "-F", tmp.string()});
     fs::remove(tmp);
     return rc;
 }
@@ -201,23 +258,22 @@ int step_gh_pr_create(const fs::path& root, const std::string& title, const std:
         std::ofstream f(tmp);
         f << body;
     }
-    std::string cmd = "cd '" + root.string() + "' && gh pr create --title '" + title
-                    + "' --body-file '" + tmp.string() + "'";
-    int rc = run_passthrough(cmd);
+    int rc = run_passthrough("gh", {"pr", "create", "--title", title,
+                                    "--body-file", tmp.string()}, root);
     fs::remove(tmp);
     return rc;
 }
 
 int step_shipyard_ship(const fs::path& root) {
     std::cout << color::bold() << "▸ Invoking shipyard ship" << color::reset() << "\n";
-    return run_passthrough("cd '" + root.string() + "' && shipyard ship");
+    return run_passthrough("shipyard", {"ship"}, root);
 }
 
 // ── Body/title generation ───────────────────────────────────────────────
 
 std::string default_pr_title(const fs::path& root) {
     // Use the tip commit's subject by default.
-    auto r = run_capture("git -C '" + root.string() + "' log -1 --format=%s HEAD");
+    auto r = run_capture("git", {"-C", root.string(), "log", "-1", "--format=%s", "HEAD"});
     auto s = trim(r.stdout_text);
     if (s.empty()) s = "Update";
     return s;
@@ -420,14 +476,9 @@ int print_manual_workflow_plan(const std::vector<std::string>& args) {
 
 int exec_shipyard_pr(const std::string& shipyard_bin,
                      const std::vector<std::string>& args) {
-    std::ostringstream cmd;
-    cmd << shell_quote(shipyard_bin) << " pr";
-    for (const auto& a : args) {
-        cmd << " " << shell_quote(a);
-    }
-    // run_passthrough streams stdio through the shell so the user sees
-    // shipyard's colored output live.
-    return run_passthrough(cmd.str());
+    std::vector<std::string> forwarded{"pr"};
+    forwarded.insert(forwarded.end(), args.begin(), args.end());
+    return run_passthrough(shipyard_bin, forwarded);
 }
 
 // Exact-equality guard. Returns 0 (pass) or 2 (fail + printed error).
@@ -586,7 +637,8 @@ int cmd_pr(const std::vector<std::string>& args) {
     // — but surfacing the trap here means the user finds out before they
     // wonder why the post-merge GitHub Release never appeared.
     {
-        auto repo = ::trim(run_capture("gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null").stdout_text);
+        auto repo = ::trim(run_capture(
+            "gh", {"repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"}).stdout_text);
         if (!repo.empty() && repo.find('/') != std::string::npos) {
             // Probe without --jq so we can distinguish "gh errored" (empty
             // stdout) from "repo has zero secrets" (non-empty JSON, no
@@ -596,7 +648,7 @@ int cmd_pr(const std::vector<std::string>& args) {
             // where the user needs it most. --paginate also handles repos
             // with many secrets where the token might be on page 2+.
             auto raw = run_capture(
-                "gh api 'repos/" + repo + "/actions/secrets' --paginate 2>/dev/null"
+                "gh", {"api", "repos/" + repo + "/actions/secrets", "--paginate"}
             ).stdout_text;
             bool gh_call_succeeded = !raw.empty();
             bool present = raw.find("\"name\":\"RELEASE_BOT_TOKEN\"") != std::string::npos
@@ -623,10 +675,12 @@ int cmd_pr(const std::vector<std::string>& args) {
     }
 
     // Capture output for the PR body.
-    auto bump_out = run_capture("python3 '" + (root / "tools/scripts/version_bump_check.py").string()
-                                 + "' --base '" + opt.base + "' --mode=report");
-    auto skill_out = run_capture("python3 '" + (root / "tools/scripts/skill_sync_check.py").string()
-                                 + "' --base '" + opt.base + "' --mode=report");
+    auto bump_out = run_capture("python3",
+                                {(root / "tools/scripts/version_bump_check.py").string(),
+                                 "--base", opt.base, "--mode=report"}, root);
+    auto skill_out = run_capture("python3",
+                                 {(root / "tools/scripts/skill_sync_check.py").string(),
+                                  "--base", opt.base, "--mode=report"}, root);
 
     // Step 2: apply version bumps in place.
     if (int rc = step_version_bump(root, opt.base); rc != 0) {

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -404,6 +405,17 @@ class ModelCallFailed(SystemExit):
         self.response = response
 
 
+class BehaviourGateUnavailable(RuntimeError):
+    """The generated module cannot be judged because the gate is broken."""
+
+
+@dataclasses.dataclass(frozen=True)
+class BehaviourGateResult:
+    ok: bool
+    output: str
+    failure_kind: str | None = None
+
+
 def ask_model(prompt: str, retry_context: str | None = None) -> str:
     with open(CONTRACT) as f:
         contract = f.read()
@@ -558,6 +570,64 @@ def _includes():
             [f"-I{os.path.join(ROOT, d, 'include')}" for d in INCLUDES])
 
 
+def _signal_platform_link_args() -> list[str]:
+    """Link requirements exported by Pulp's public signal target."""
+    if sys.platform == "darwin":
+        return ["-framework", "Accelerate"]
+    return []
+
+
+def preflight_behaviour_gate() -> None:
+    """Prove the gate and Pulp's signal link contract before a model call."""
+    with tempfile.TemporaryDirectory() as tmp:
+        shim = os.path.join(tmp, "preflight_shim.cpp")
+        with open(shim, "w", encoding="utf-8") as source:
+            source.write('''#include <rack.hpp>
+#include <pulp/signal/fft.hpp>
+
+rack::engine::Module* forge_make_module() {
+    static pulp::signal::FftT<double> link_probe(8);
+    (void)link_probe;
+    return new rack::engine::Module;
+}
+const char* forge_module_slug() { return "PREFLIGHT"; }
+bool forge_module_is_generator() { return false; }
+bool forge_require_clock_contract() { return false; }
+int forge_clock_output() { return -1; }
+int forge_phase_output() { return -1; }
+int forge_rate_param() { return -1; }
+int forge_width_param() { return -1; }
+int forge_reset_input() { return -1; }
+const char* forge_input_role(int) { return "Cv"; }
+const char* forge_output_role(int) { return "Cv"; }
+const char* forge_output_name(int) { return ""; }
+''')
+        exe = os.path.join(tmp, "gate-preflight")
+        result = subprocess.run(
+            ["clang++", "-std=c++20", "-O1", "-o", exe,
+             os.path.join(HERE, "behaviour_gate.cpp"), shim,
+             *_includes(), "-DARCH_MAC",
+             os.path.join(SDK, "libRack.dylib"),
+             *_signal_platform_link_args()],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            raise BehaviourGateUnavailable(
+                "the behavioural gate could not be built before generation:\n" +
+                result.stderr)
+        env = dict(os.environ, DYLD_LIBRARY_PATH=SDK)
+        try:
+            result = subprocess.run(
+                [exe], capture_output=True, text=True, timeout=30, env=env)
+        except subprocess.TimeoutExpired:
+            raise BehaviourGateUnavailable(
+                "the behavioural gate preflight hung before generation") from None
+        if result.returncode != 0:
+            output = result.stdout + result.stderr
+            raise BehaviourGateUnavailable(
+                "the behavioural gate could not run before generation:\n" +
+                output)
+
+
 def compile_all(tmp):
     """Compile every module source. Returns (ok, lib-or-error, objects)."""
     inc = _includes()
@@ -576,7 +646,9 @@ def compile_all(tmp):
         return False, "\n".join(errs), []
     lib = os.path.join(tmp, "plugin.dylib")
     r = subprocess.run(["clang++", "-shared", "-o", lib, *objs,
-                        "-undefined", "dynamic_lookup"], capture_output=True, text=True)
+                        "-undefined", "dynamic_lookup",
+                        *_signal_platform_link_args()],
+                       capture_output=True, text=True)
     if r.returncode != 0:
         return False, r.stderr, []
     # The entry point must be exported, or Rack's dlsym returns null and the
@@ -597,7 +669,7 @@ GENERATOR_TAGS = {
 
 
 def run_behaviour_gate(tmp, slug, mod, objs, prompt=""):
-    """Drive the module's real process() and measure it. Returns (ok, output).
+    """Drive the module's real process() and return a structured verdict.
 
     Compiling only proves the C++ parses. It says nothing about whether a knob
     reaches the audio, whether an output is finite, or whether the voltages are
@@ -657,27 +729,40 @@ const char* forge_output_name(int i) {{
 ''')
 
     exe = os.path.join(tmp, "gate")
-    r = subprocess.run(
-        ["clang++", "-std=c++20", "-O1", "-o", exe,
-         os.path.join(HERE, "behaviour_gate.cpp"), shim, *objs,
-         *_includes(), "-DARCH_MAC",
-         os.path.join(SDK, "libRack.dylib")],
-        capture_output=True, text=True)
-    if r.returncode != 0:
-        os.remove(shim)
-        return False, "the behavioural gate could not be built:\n" + r.stderr
-
     try:
+        r = subprocess.run(
+            ["clang++", "-std=c++20", "-O1", "-o", exe,
+             os.path.join(HERE, "behaviour_gate.cpp"), shim, *objs,
+             *_includes(), "-DARCH_MAC",
+             os.path.join(SDK, "libRack.dylib"),
+             *_signal_platform_link_args()],
+            capture_output=True, text=True)
+        if r.returncode != 0:
+            return BehaviourGateResult(
+                False,
+                "the generated module could not be linked into the "
+                "behavioural gate:\n" + r.stderr,
+                "generated-link")
+
         # libRack.dylib's install name is a bare filename, not @rpath-relative,
         # so a link-time rpath cannot resolve it -- the loader needs the search
         # path at run time.
         env = dict(os.environ, DYLD_LIBRARY_PATH=SDK)
         r = subprocess.run([exe], capture_output=True, text=True,
                            timeout=120, env=env)
-        return r.returncode == 0, r.stdout + r.stderr
+        output = r.stdout + r.stderr
+        if r.returncode != 0:
+            output = (f"FAIL  behavioural gate process exited with status "
+                      f"{r.returncode}\n" + output)
+        return BehaviourGateResult(
+            r.returncode == 0, output,
+            None if r.returncode == 0 else "generated-runtime")
     except subprocess.TimeoutExpired:
-        return False, ("the module hung: process() did not return within 120 s, "
-                       "which usually means an unbounded loop in the audio path")
+        return BehaviourGateResult(
+            False,
+            "the module hung: process() did not return within 120 s, which "
+            "usually means an unbounded loop in the audio path",
+            "generated-timeout")
     finally:
         os.remove(shim)
 
@@ -828,6 +913,13 @@ def _main(argv, resources: contextlib.ExitStack):
     global SDK
     SDK = resolve_sdk(log)
 
+    try:
+        preflight_behaviour_gate()
+    except BehaviourGateUnavailable as exc:
+        raise SystemExit(
+            "behavioural gate infrastructure failure; no model call was "
+            "made:\n" + str(exc)) from None
+
     # One generation at a time. Every run rewrites the same module pack and
     # restores it from a snapshot on failure, so two at once interleave their
     # edits and each restores over the other's work -- silently, with both
@@ -924,6 +1016,13 @@ def _main(argv, resources: contextlib.ExitStack):
             continue
         log("explicit request contract verified")
 
+        dsp, completed_headers = toolchain_headers.complete_known_public_headers(
+            ROOT, dsp)
+        if completed_headers:
+            log("completed known Pulp headers: " + ", ".join(completed_headers))
+            retain_attempt_text(attempt_dir, attempt + 1,
+                                "normalized-source", dsp)
+
         try:
             _write_generated_module(mod, dsp)
         except (ExistingModuleSlug, InvalidModuleSlug) as e:
@@ -963,16 +1062,15 @@ def _main(argv, resources: contextlib.ExitStack):
                 continue
             log("compiled")
 
-            ok, gate_out = run_behaviour_gate(tmp, slug, mod, objs, a.prompt)
-            if not ok:
+            gate_result = run_behaviour_gate(
+                tmp, slug, mod, objs, a.prompt)
+            gate_out = gate_result.output
+            if not gate_result.ok:
+                retained = retain_attempt_text(
+                    attempt_dir, attempt + 1, "behavioural-gate", gate_out)
                 log("behavioural gate failed:")
-                # Two different failures print through here and only one of
-                # them says "FAIL". A gate that could not be COMPILED reported
-                # its heading and then filtered every compiler error out of
-                # its own explanation, so the run showed a bare colon and
-                # three minutes later gave up for no stated reason.
-                if "could not be built" in gate_out:
-                    log("    the gate itself did not compile:")
+                if gate_result.failure_kind == "generated-link":
+                    log("    generated module did not link into the gate:")
                     # The TAIL, not the lines containing "error:". A link
                     # failure's one error line is "linker command failed",
                     # which says nothing at all; the symbol that could not be
@@ -984,8 +1082,14 @@ def _main(argv, resources: contextlib.ExitStack):
                     for line in gate_out.strip().split("\n"):
                         if "FAIL" in line or "could not be built" in line:
                             log("    " + line.strip()[:150])
-                ctx = ("The module compiled, but driving its process() showed "
-                       "it does not behave correctly:\n" + gate_out)
+                log(f"retained gate report → {retained}")
+                if gate_result.failure_kind == "generated-link":
+                    ctx = ("The module sources compiled, but the generated "
+                           "objects did not link into the runtime gate:\n" +
+                           gate_out)
+                else:
+                    ctx = ("The module compiled, but driving its process() "
+                           "showed it does not behave correctly:\n" + gate_out)
                 if not a.keep_on_fail:
                     restore()
                 continue

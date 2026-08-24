@@ -56,7 +56,28 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.92.1 (current pin) — keeps v0.90.2's atomic PR handoff and v0.91.1's bounded
+# v0.110.0 (current pin) — adds schema-v3 changed-surface execution, binding
+#   selected tests to their exact producer build targets and replacing build +
+#   test only as one authenticated transaction. `--resume-from test` cannot
+#   skip that producer build: Shipyard performs one read-only protected-base
+#   preflight and refuses an eligible schema-v3 transaction before activation.
+#   Schema-v2 or ineligible plans keep the original ordinary test stage. The
+#   first rollout remains machine-global `shadow_compare`, so selected work is
+#   measured before the unchanged full path supplies merge authority.
+#
+# v0.100.0 (earlier pin) — isolates durable queue and execution state by
+#   repository identity so unrelated Pulp and Forge work can progress in
+#   separate governed lanes. It retains v0.98.0's schema-v2 shadow selection
+#   with mandatory/affected/extended/full risk tiers while keeping full
+#   validation authoritative. It also carries v0.97's durable daemon-owned
+#   execution and repository-scoped state, plus v0.92.1's bounded recovery
+#   behavior below. v0.100.0 additionally makes unattended updates and governed
+#   fleet rollout deterministic under stripped non-login SSH environments:
+#   command auth and executable paths are explicit, downloads are staged and
+#   verified before replacement, and daemons refresh only after exact-version
+#   verification.
+#
+# v0.92.1 (earlier pin) — keeps v0.90.2's atomic PR handoff and v0.91.1's bounded
 #   in-process recovery for transient GitHub token-helper/network preparation
 #   failures in `shipyard wait`. A brief App-token acquisition outage no longer
 #   drops a long-lived landing monitor; permanent auth/configuration failures
@@ -136,7 +157,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.92.1"
+version = "v0.110.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

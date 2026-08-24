@@ -147,7 +147,9 @@ build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-di
 # single timing-flake self-heals instead of reddening the required `macos` gate
 # and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is
 # still bounded by the test's own TIMEOUT).
-test      = "ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
+# The governor exports CTEST_PARALLEL_LEVEL from the same leased host share used
+# for builds. CTest remains responsible for RUN_SERIAL and RESOURCE_LOCK.
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base
@@ -165,6 +167,7 @@ test      = "ctest --test-dir build --output-on-failure --repeat until-pass:2 --
 #                     under SSH + cross-compile emulation overhead)
 [validation.default.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+
 # --parallel is capped at 4 to limit MSBuild parallelism. Unlimited
 # parallelism causes LNK1104 (cannot open file) on ARM64 Windows because
 # concurrent x64-emulated link steps create file contention that Windows'
@@ -174,7 +177,13 @@ build     = "cmake --build build --config Release --parallel 4"
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
-test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+
+# The exact inventory is specific to the required macOS target. Optional Linux
+# targets inherit the default recipe but register a different platform-gated
+# CTest inventory, so they must not validate against the macOS cardinality.
+[validation.default.overrides.macos]
+configure = "tools/ci/build-dir-sentinel.sh guard build 'mkdir -p build/.cmake/api/v1/query && : > build/.cmake/api/v1/query/codemodel-v2 && ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
@@ -212,7 +221,7 @@ stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF'"
 build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
-test      = "ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
+test      = "tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
 
 [validation.parser.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
@@ -276,6 +285,7 @@ build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCOD
 backend  = "local"
 platform = "macos-arm64"
 workflow = "build"
+validation_build_type = "debug"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
 # git history for context.
 #
@@ -303,6 +313,109 @@ timeout_secs = 14400
 # Namespace remains available only for explicit operator-dispatched cloud
 # runs. It is not the default mac target and should not be used as
 # automatic PR-validation failover while the repo variables are unset.
+
+[targets.mac.changed_surface_selection]
+schema_version = 3
+# Exact current-main registration count. CTest permits duplicate display names,
+# so this is deliberately not the unique-name count. The canonical multiset
+# contract in changed-surface-inventory.json pins all 20,729 registrations.
+# Test-topology changes force a full-suite decision. This remains shadow-only:
+# [validation.default] is still the authoritative execution.
+full_test_count = 20731
+build_type = "debug"
+build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
+baseline_tests = [
+  "build-check",
+  "decisions-contract-validate",
+  "cmake-sdk-provenance-contract",
+  "agent-hook-paths",
+  "cli-help",
+  "changed-surface-policy-selftest",
+]
+baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
+baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
+
+# Known global build, toolchain, ABI, security, provenance, packaging, and
+# dependency surfaces are ineligible for bounded execution. Unknown paths also
+# fall back to full in Shipyard.
+full_required_paths = [
+  "CMakeLists.txt",
+  "**/CMakeLists.txt",
+  "cmake/**",
+  "tools/cmake/**",
+  "tools/ci/**",
+  ".github/**",
+  ".agents/contract.toml",
+  ".shipyard/**",
+  "tools/shipyard.toml",
+  "setup.sh",
+  "setup.ps1",
+  "core/**/include/**",
+  "include/**",
+  "inspect/include/**",
+  "ship/**",
+  "security/**",
+  "apple/**",
+  "tools/scripts/*release*",
+  "tools/scripts/*checksum*",
+  "tools/scripts/*sign*",
+  "tools/scripts/*provenance*",
+  "tools/rack/provenance_check.py",
+  "tools/local-ci/provenance*.py",
+  "tools/import-design/browser_capture/security*",
+  "examples/web-demos/tools/local-http-security*",
+  "packages/**/package.json",
+  "packages/**/package-lock.json",
+]
+policy_paths = [
+  ".shipyard/changed-surface-inventory.json",
+  "tools/scripts/changed_surface_inventory.py",
+  "tools/scripts/test_changed_surface_policy.py",
+  ".agents/skills/ci/SKILL.md",
+]
+test_topology_paths = [
+  "CMakeLists.txt",
+  "**/CMakeLists.txt",
+  "test/**",
+  "tools/scripts/test_*.py",
+]
+
+# Start with one narrow command-projection family. Broader core mappings stay
+# unknown and therefore select full until shadow evidence supports graduation.
+[[targets.mac.changed_surface_selection.families]]
+name = "forge-dsp-catalog-projection"
+paths = ["tools/cli/cmd_forge.cpp", "tools/cli/cmd_dsp.cpp"]
+tests = [
+  "cli-forge-catalog-json",
+  "cli-forge-catalog-check",
+  "cli-forge-help",
+  "cli-forge-help-flag",
+  "cli-forge-unknown-subcommand",
+  "cli-forge-catalog-write",
+  "cli-dsp-capabilities-check",
+  "cli-dsp-capabilities-json",
+  "cli-dsp-capabilities-write",
+  "cli-dsp-help",
+  "cli-dsp-help-flag",
+  "cli-dsp-unknown-subcommand",
+]
+build_targets = ["pulp-cli", "pulp-test-forge-catalog-index"]
+supported_build_types = ["debug", "release"]
+risk_class = "medium"
+extended_tests = [
+  "Forge catalog index covers every catalog header",
+  "Forge catalog index comparison detects add and remove drift",
+]
+
+# The repository may describe a bounded POSIX test-stage adapter, but it cannot
+# activate it. Shipyard reads the independent machine-global
+# changed_surface_execution.mode switch, which defaults to off. The initial
+# controlled canary uses shadow_compare so this selected run is measured while
+# the ordinary full CTest corpus remains the merge-authoritative result.
+[targets.mac.changed_surface_selection.execution]
+mode = "authoritative"
+stage = "build_and_test"
+command = "python3 tools/scripts/run_changed_surface_tests.py --selection-receipt-b64 {selection_receipt_b64} --selection-receipt-sha256 {selection_receipt_digest} --build-dir build --target mac"
 
 [cloud]
 provider   = "namespace"

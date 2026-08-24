@@ -8,6 +8,7 @@
 #   ./setup.sh --deps-only  # Bootstrap dependencies without configuring/building
 #   ./setup.sh --non-interactive # Never prompt or install system packages
 #   ./setup.sh --dry-run    # Show what would be done without doing it
+#   ./setup.sh --print-skia-ci-dest # Resolve the exact CI cache generation
 
 set -e
 
@@ -18,6 +19,7 @@ DRY_RUN=false
 CI_MODE=false
 DEPS_ONLY=false
 NON_INTERACTIVE=false
+PRINT_SKIA_CI_DEST=false
 ERRORS=0
 
 for arg in "$@"; do
@@ -26,6 +28,7 @@ for arg in "$@"; do
         --ci)      CI_MODE=true ;;
         --deps-only) DEPS_ONLY=true ;;
         --non-interactive) NON_INTERACTIVE=true ;;
+        --print-skia-ci-dest) PRINT_SKIA_CI_DEST=true ;;
         --help|-h)
             echo "Usage: ./setup.sh [--ci] [--deps-only] [--non-interactive] [--dry-run]"
             echo ""
@@ -34,6 +37,7 @@ for arg in "$@"; do
             echo "  --deps-only Bootstrap external dependencies and stop before configure/build"
             echo "  --non-interactive Never prompt or install missing system packages"
             echo "  --dry-run   Show what would be done without doing it"
+            echo "  --print-skia-ci-dest Print the manifest-selected CI Skia cache and exit"
             exit 0
             ;;
     esac
@@ -132,6 +136,23 @@ skia_has_lfs_pointer() {
     [ -f "$candidate" ] || return 1
     head -1 "$candidate" 2>/dev/null | grep -q "version https://git-lfs"
 }
+
+resolve_skia_ci_dest() {
+    if [ "${PULP_SETUP_SKIA_PER_WORKTREE:-0}" = 1 ]; then
+        printf '%s\n' "$REPO_ROOT/external/skia-build"
+    elif [ "${PULP_SKIA_CACHE_KEYING:-1}" = 1 ]; then
+        local cache_root="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
+        (cd "$REPO_ROOT" && python3 tools/scripts/fetch_skia_for_release.py \
+            darwin-arm64 --cache-root "$cache_root" --print-cache-dest)
+    else
+        printf '%s\n' "${PULP_SKIA_CACHE:-$HOME/.cache/pulp/skia-build}"
+    fi
+}
+
+if $PRINT_SKIA_CI_DEST; then
+    resolve_skia_ci_dest
+    exit 0
+fi
 
 fetchcontent_cache_root() {
     if [ -n "${PULP_SHARED_FETCHCONTENT_SOURCE_DIR:-}" ]; then
@@ -834,27 +855,58 @@ fi
 
 step "Checking git-lfs files"
 
-# In CI on Apple Silicon, provision the pinned prebuilt Skia so GPU/examples
-# builds (the PULP_HAS_SKIA configure gate, e.g. examples/design-tool) succeed.
-# The LFS-declared Skia binaries are NOT committed, so a fresh shipyard/local-CI
-# worktree has only headers/pointers and `-DPULP_BUILD_EXAMPLES=ON` configure
-# hard-fails (examples/design-tool/CMakeLists.txt). GitHub Actions provisions
-# Skia the same way (build.yml's "Fetch prebuilt Skia (macOS)" step). The fetch
-# script is idempotent (sha-stamps the unpacked asset and skips when the
-# manifest pin matches), so it is safe to run on every CI setup.
+# In CI on Apple Silicon, provision the pinned prebuilt Skia into the shared,
+# pin-validated cache used by PulpDependencies.cmake.  A tracked worktree has a
+# headers-only external/skia-build directory, so downloading the same 1+ GiB
+# slice into every worktree wasted disk and made cleanup unsafe.  The fetcher
+# validates both the exact manifest digest and the expected library before it
+# accepts a cache hit.  Release x64/universal jobs remain isolated because they
+# call fetch_skia_for_release.py directly with their matrix-specific slice.
 if $CI_MODE && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     step "Provisioning prebuilt Skia (CI macOS arm64)"
-    if dry "python3 tools/scripts/fetch_skia_for_release.py darwin-arm64"; then
+    if [ "${PULP_USE_BAKED_SKIA:-0}" = 1 ] && [ -n "${SKIA_DIR:-}" ]; then
+        # Tart goldens already carry the pinned materialized Skia/Dawn bundle.
+        # Validate that durable image asset in place; do not populate an
+        # ephemeral keyed cache the configure will not consume.
+        SKIA_CI_DEST="$SKIA_DIR"
+        SKIA_FETCH_ARGS=(--dest "$SKIA_CI_DEST")
+    else
+        SKIA_CI_DEST="$(resolve_skia_ci_dest)"
+    fi
+    if [ "${PULP_USE_BAKED_SKIA:-0}" = 1 ] && [ -n "${SKIA_DIR:-}" ]; then
+        : # SKIA_FETCH_ARGS selected above.
+    elif [ "${PULP_SETUP_SKIA_PER_WORKTREE:-0}" = 1 ]; then
+        SKIA_FETCH_ARGS=(--dest "$SKIA_CI_DEST")
+        warn "PULP_SETUP_SKIA_PER_WORKTREE=1: using legacy per-worktree Skia destination"
+    elif [ "${PULP_SKIA_CACHE_KEYING:-1}" = 1 ]; then
+        SKIA_CACHE_ROOT="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
+        SKIA_FETCH_ARGS=(--cache-root "$SKIA_CACHE_ROOT")
+    else
+        SKIA_CI_DEST="${PULP_SKIA_CACHE:-$HOME/.cache/pulp/skia-build}"
+        SKIA_FETCH_ARGS=(--dest "$SKIA_CI_DEST")
+        warn "PULP_SKIA_CACHE_KEYING=0: legacy mutable-cache rollback is active"
+    fi
+    SKIA_LOCK_ARGS=()
+    if [ "${PULP_SKIA_CACHE_KEYING:-1}" = 1 ] || [ "${PULP_SKIA_CACHE_LOCKING:-1}" = 1 ]; then
+        SKIA_LOCK_ARGS=(--cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}")
+    else
+        warn "PULP_SKIA_CACHE_LOCKING=0: shared-cache serialization rollback is active"
+    fi
+    if dry "python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 ${SKIA_FETCH_ARGS[*]} ${SKIA_LOCK_ARGS[*]}"; then
         :
-    elif python3 "$REPO_ROOT/tools/scripts/fetch_skia_for_release.py" darwin-arm64; then
-        info "Skia provisioned (pinned asset from tools/deps/manifest.json)"
+    elif (cd "$REPO_ROOT" && python3 tools/scripts/fetch_skia_for_release.py \
+            darwin-arm64 "${SKIA_FETCH_ARGS[@]}" "${SKIA_LOCK_ARGS[@]}"); then
+        info "Skia provisioned at $SKIA_CI_DEST (pinned asset from tools/deps/manifest.json)"
+        # The destination has just passed the exact pin plus materialized
+        # Skia/Dawn validation (whether baked, keyed, or legacy).
+        export SKIA_DIR="$SKIA_CI_DEST"
     else
         warn "Skia fetch failed; GPU/examples build may fail the PULP_HAS_SKIA gate"
     fi
 fi
 
 # Check if Skia files are actual binaries or just LFS pointers
-SKIA_CHECK="$REPO_ROOT/external/skia-build"
+SKIA_CHECK="${SKIA_CI_DEST:-$REPO_ROOT/external/skia-build}"
 if [ -d "$SKIA_CHECK" ]; then
     if skia_has_lfs_pointer "$SKIA_CHECK"; then
         warn "Skia files are LFS pointers (not actual binaries)"

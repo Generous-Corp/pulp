@@ -1,5 +1,8 @@
 name: Docs Consistency
 
+permissions:
+  contents: read
+
 on:
   # Issues #273 + #289: run on every PR so doc drift is caught before
   # merge. The CLAUDE.md "Docs Maintenance Rule" already required this

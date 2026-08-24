@@ -17,6 +17,9 @@
 # (see #6087) — that is the actual fix.
 name: Non-Skia build guard
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

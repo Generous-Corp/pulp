@@ -189,6 +189,48 @@ TEST_CASE("TiffWriter rejects mismatched buffer sizes",
     REQUIRE(encoded.empty());
 }
 
+TEST_CASE("GifWriter rejects dimensions outside the GIF wire format",
+          "[image-codecs][gif][security]") {
+    DecodedRaster oversized;
+    oversized.width = uint32_t{1} << 31;
+    oversized.height = uint32_t{1} << 31;
+
+    // These dimensions previously wrapped the reserve count before widening.
+    // They also cannot be represented by GIF's 16-bit logical screen fields.
+    REQUIRE(GifWriter::encode_still(oversized).empty());
+}
+
+TEST_CASE("TiffReader rejects an empty strip-offset array",
+          "[image-codecs][tiff][security]") {
+    // Little-endian TIFF with one StripOffsets IFD entry whose count is zero.
+    // The count is attacker-controlled and must be rejected before resizing
+    // or indexing the destination array.
+    const std::vector<uint8_t> tiff{
+        'I', 'I', 42, 0, 8, 0, 0, 0,
+        1, 0,
+        0x11, 0x01, 4, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+    };
+    REQUIRE_FALSE(TiffReader::decode(tiff.data(), tiff.size()).has_value());
+}
+
+TEST_CASE("TiffReader rejects an oversized strip-offset array before resize",
+          "[image-codecs][tiff][security]") {
+    // The declared LONG array cannot fit in this input. Its element count must
+    // be widened and bounds-checked before it reaches vector::resize().
+    const std::vector<uint8_t> tiff{
+        'I', 'I', 42, 0, 8, 0, 0, 0,
+        1, 0,
+        0x11, 0x01, 4, 0,
+        0xff, 0xff, 0xff, 0xff,
+        8, 0, 0, 0,
+        0, 0, 0, 0,
+    };
+    REQUIRE_FALSE(TiffReader::decode(tiff.data(), tiff.size()).has_value());
+}
+
 // Regression coverage: big-endian inline TIFF SHORT values were read as low 16
 // bits of value_or_offset, which returns 0 in MM files (where SHORT is
 // left-justified in the 4-byte slot). This caused valid big-endian baseline

@@ -94,11 +94,15 @@ exit 0
 SH
 chmod +x "$hbstub"
 
-# A build long enough to span several heartbeat intervals.
+# A build long enough to span several heartbeat intervals with scheduling
+# margin.  A two-second child sits exactly on the second one-second heartbeat
+# boundary, so a loaded runner can legitimately finish it after one refresh.
+# Four seconds keeps the behavioral assertion (repeated refreshes) while making
+# the fixture insensitive to that boundary race.
 slow="$tmp/slow.sh"
 cat >"$slow" <<'SH'
 #!/usr/bin/env bash
-sleep 2
+sleep 4
 echo "jobs=${CMAKE_BUILD_PARALLEL_LEVEL:-unset}"
 SH
 chmod +x "$slow"

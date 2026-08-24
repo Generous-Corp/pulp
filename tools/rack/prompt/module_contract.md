@@ -209,6 +209,7 @@ plumbing, but **not** as substitutes for the signal processing below.
 
 ```cpp
 // Reading a clock or gate input — persistent member state, never a local bool.
+#include <pulp/signal/trigger.hpp>
 // Member declaration:
 pulp::signal::HystereticTriggerDetectT<float> edge_;
 // Constructor or onSampleRateChange setup:

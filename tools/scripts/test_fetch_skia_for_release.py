@@ -25,6 +25,7 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -40,6 +41,14 @@ spec.loader.exec_module(fetch_skia)
 
 def _make_zip(zip_path: pathlib.Path, members: dict[str, bytes]) -> str:
     """Build a zip with the given member→bytes mapping and return its sha256."""
+    members = dict(members)
+    # Successful native release fixtures model the complete Skia/Dawn bundle.
+    # Individual corruption tests construct incomplete destinations directly.
+    for name in tuple(members):
+        if name.endswith("/libskia.a"):
+            members.setdefault(name.rsplit("/", 1)[0] + "/libdawn_combined.a", b"dawn")
+        elif name.endswith("/skia.lib"):
+            members.setdefault(name.rsplit("/", 1)[0] + "/dawn_combined.lib", b"dawn")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
         for name, data in members.items():
             zf.writestr(name, data)
@@ -134,6 +143,220 @@ class ExpectedLibraryPath(unittest.TestCase):
             fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64", "--dest"]),
             2,
         )
+
+    def test_main_rejects_nonpositive_lock_timeout(self):
+        self.assertEqual(fetch_skia.main([
+            "fetch_skia_for_release.py", "darwin-arm64",
+            "--cache-lock-timeout", "0",
+        ]), 2)
+
+    def test_main_rejects_nan_and_infinite_lock_timeout(self):
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                self.assertEqual(fetch_skia.main([
+                    "fetch_skia_for_release.py", "darwin-arm64",
+                    "--cache-lock-timeout", value,
+                ]), 2)
+
+
+class CachePublicationLock(unittest.TestCase):
+    def test_live_owner_times_out_bounded(self):
+        with _in_tempdir() as td:
+            dest = td / "cache" / "skia-build"
+            with fetch_skia.cache_lock(str(dest), 1):
+                with self.assertRaises(TimeoutError):
+                    with fetch_skia.cache_lock(str(dest), 0.05):
+                        pass
+
+    def test_dead_same_host_owner_is_recovered(self):
+        with _in_tempdir() as td:
+            dest = td / "cache" / "skia-build"
+            lock = dest.parent / ".skia-build.fetch.lock"
+            lock.mkdir(parents=True)
+            (lock / "owner.json").write_text(json.dumps({
+                "pid": 999_999_999,
+                "host": fetch_skia.socket.gethostname(),
+                "dest": str(dest),
+            }))
+            with fetch_skia.cache_lock(str(dest), 1):
+                self.assertTrue(lock.is_dir())
+            self.assertFalse(lock.exists())
+
+    def test_waiter_rechecks_published_stamp_and_skips_download(self):
+        with _in_tempdir() as td:
+            source = td / "skia.zip"
+            sha = _make_zip(
+                source, {
+                    "build/mac-gpu/lib/Release/libskia.a": b"shared",
+                    "build/mac-gpu/lib/Release/libdawn_combined.a": b"dawn",
+                }
+            )
+            _write_manifest(td, f"file://{source.as_posix()}", sha, "mac-arm64")
+            argv = ["fetch", "darwin-arm64", "--dest", str(td / "shared"),
+                    "--cache-lock-timeout", "1"]
+            self.assertEqual(fetch_skia.main(argv), 0)
+            source.unlink()
+            self.assertEqual(fetch_skia.main(argv), 0)
+
+
+class ImmutableKeyedCache(unittest.TestCase):
+    def _asset(self, root: pathlib.Path, payload: bytes) -> tuple[pathlib.Path, str]:
+        source = root / f"skia-{payload.decode()}.zip"
+        sha = _make_zip(
+            source, {
+                "build/mac-gpu/lib/Release/libskia.a": payload,
+                "build/mac-gpu/lib/Release/libdawn_combined.a": b"dawn-" + payload,
+            }
+        )
+        _write_manifest(root, f"file://{source.as_posix()}", sha, "mac-arm64")
+        return source, sha
+
+    def test_platform_and_asset_sha_select_immutable_generation(self):
+        a = fetch_skia.keyed_cache_dest("/cache", "darwin-arm64", "a" * 64)
+        b = fetch_skia.keyed_cache_dest("/cache", "darwin-arm64", "b" * 64)
+        c = fetch_skia.keyed_cache_dest("/cache", "linux-x64", "a" * 64)
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(a, c)
+
+    def test_private_stage_is_atomically_published_and_removed(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"v1")
+            root = td / "cache"
+            rc = fetch_skia.main(["fetch", "darwin-arm64", "--cache-root", str(root),
+                                  "--cache-lock-timeout", "1"])
+            self.assertEqual(rc, 0)
+            dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            self.assertEqual(list(root.glob(".*.staging-*")), [])
+
+    def test_pin_rotation_retains_old_generation_and_publishes_new(self):
+        with _in_tempdir() as td:
+            _, sha1 = self._asset(td, b"v1")
+            root = td / "cache"
+            argv = ["fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1"]
+            self.assertEqual(fetch_skia.main(argv), 0)
+            old = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha1)
+            _, sha2 = self._asset(td, b"v2")
+            self.assertEqual(fetch_skia.main(argv), 0)
+            new = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha2)
+            self.assertTrue(old.is_dir())
+            self.assertTrue(new.is_dir())
+            self.assertEqual(
+                (old / "build/mac-gpu/lib/Release/libskia.a").read_bytes(), b"v1"
+            )
+            self.assertEqual(
+                (new / "build/mac-gpu/lib/Release/libskia.a").read_bytes(), b"v2"
+            )
+
+    def test_two_cold_publishers_converge_on_one_complete_generation(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"concurrent")
+            root = td / "cache"
+            argv = [sys.executable, str(SCRIPT), "darwin-arm64", "--cache-root",
+                    str(root), "--cache-lock-timeout", "5"]
+            first = subprocess.Popen(argv, cwd=td, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+            second = subprocess.Popen(argv, cwd=td, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True)
+            first_out, first_err = first.communicate(timeout=10)
+            second_out, second_err = second.communicate(timeout=10)
+            self.assertEqual(first.returncode, 0, first_err + first_out)
+            self.assertEqual(second.returncode, 0, second_err + second_out)
+            dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            self.assertEqual(len([p for p in root.iterdir() if not p.name.startswith(".")]), 1)
+
+    def test_invalid_existing_immutable_generation_is_not_mutated(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"valid")
+            root = td / "cache"
+            dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+            dest.mkdir(parents=True)
+            sentinel = dest / "do-not-mutate"
+            sentinel.write_text("retained")
+            rc = fetch_skia.main(["fetch", "darwin-arm64", "--cache-root", str(root),
+                                  "--cache-lock-timeout", "1"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(sentinel.read_text(), "retained")
+
+    def test_generation_rejects_missing_dawn_archive(self):
+        with _in_tempdir() as td:
+            sha = "a" * 64
+            dest = fetch_skia.keyed_cache_dest(str(td), "darwin-arm64", sha)
+            lib = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            lib.parent.mkdir(parents=True)
+            lib.write_bytes(b"skia")
+            (dest / ".skia-asset-sha256").write_text(sha)
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
+    def test_direct_warm_hit_rejects_missing_dawn_and_repairs(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"repair")
+            dest = td / "baked"
+            skia = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            skia.parent.mkdir(parents=True)
+            skia.write_bytes(b"skia-only")
+            (dest / ".skia-asset-sha256").write_text(sha)
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]), 0
+            )
+            self.assertTrue(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+
+    def test_archive_path_traversal_is_rejected_before_writing(self):
+        with _in_tempdir() as td:
+            source = td / "malicious.zip"
+            sha = _make_zip(
+                source,
+                {
+                    "build/mac-gpu/lib/Release/libskia.a": b"skia",
+                    "../../outside-cache": b"escaped",
+                },
+            )
+            _write_manifest(td, f"file://{source.as_posix()}", sha, "mac-arm64")
+            rc = fetch_skia.main(
+                ["fetch", "darwin-arm64", "--dest", str(td / "cache")]
+            )
+            self.assertEqual(rc, 1)
+            self.assertFalse((td / "outside-cache").exists())
+
+    def test_validate_only_accepts_complete_and_rejects_partial_destination(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"validated")
+            dest = td / "release-bundle"
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]), 0
+            )
+            self.assertEqual(
+                fetch_skia.main(
+                    ["fetch", "darwin-arm64", "--dest", str(dest), "--validate-only"]
+                ),
+                0,
+            )
+            dawn = fetch_skia.expected_dawn_library_path("darwin-arm64", str(dest))
+            assert dawn is not None
+            dawn.unlink()
+            self.assertEqual(
+                fetch_skia.main(
+                    ["fetch", "darwin-arm64", "--dest", str(dest), "--validate-only"]
+                ),
+                1,
+            )
+
+    def test_generation_rejects_lfs_pointer_archive(self):
+        with _in_tempdir() as td:
+            sha = "b" * 64
+            dest = fetch_skia.keyed_cache_dest(str(td), "darwin-arm64", sha)
+            skia = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            dawn = fetch_skia.expected_dawn_library_path("darwin-arm64", str(dest))
+            skia.parent.mkdir(parents=True)
+            skia.write_text("version https://git-lfs.github.com/spec/v1\n")
+            assert dawn is not None
+            dawn.write_bytes(b"dawn")
+            (dest / ".skia-asset-sha256").write_text(sha)
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
 
     def test_ios_device_arm64_keeps_arch_subdir(self):
         # Device + simulator zips share build/ios-gpu/, so the arch subdir
@@ -505,7 +728,9 @@ class MissingLibFails(unittest.TestCase):
                 )
 
         self.assertEqual(rc, 1)
-        self.assertIn("expected library not found", err.getvalue())
+        self.assertIn(
+            "expected materialized Skia/Dawn archives not found", err.getvalue()
+        )
         self.assertIn("README.txt", err.getvalue())
 
 
@@ -527,6 +752,61 @@ class Sha256MismatchFails(unittest.TestCase):
                 ["fetch_skia_for_release.py", "darwin-arm64"]
             )
             self.assertEqual(rc, 1, "sha256 mismatch must fail")
+
+
+class PrivateArchiveCleanup(unittest.TestCase):
+    def assert_no_private_archive(self, root: pathlib.Path) -> None:
+        self.assertEqual(list(root.glob(".skia-release-asset-*.zip")), [])
+
+    def test_network_failure_unlinks_unique_archive(self):
+        with _in_tempdir() as td:
+            _write_manifest(td, "https://example.invalid/skia.zip", "0" * 64,
+                            "mac-arm64")
+            with mock.patch.object(fetch_skia.urllib.request, "urlopen",
+                                   side_effect=OSError("network dropped")):
+                with self.assertRaisesRegex(OSError, "network dropped"):
+                    fetch_skia.main(["fetch", "darwin-arm64"])
+            self.assert_no_private_archive(td)
+
+    def test_invalid_zip_unlinks_unique_archive(self):
+        with _in_tempdir() as td:
+            source = td / "not-a-zip.bin"
+            source.write_bytes(b"not a zip")
+            sha = hashlib.sha256(source.read_bytes()).hexdigest()
+            _write_manifest(td, f"file://{source.as_posix()}", sha, "mac-arm64")
+            with self.assertRaises(zipfile.BadZipFile):
+                fetch_skia.main(["fetch", "darwin-arm64"])
+            self.assert_no_private_archive(td)
+
+    def test_extraction_failure_unlinks_unique_archive(self):
+        with _in_tempdir() as td:
+            source = td / "skia.zip"
+            sha = _make_zip(
+                source, {"build/mac-gpu/lib/Release/libskia.a": b"skia"}
+            )
+            _write_manifest(td, f"file://{source.as_posix()}", sha, "mac-arm64")
+            original_open = zipfile.ZipFile.open
+
+            def fail_member_open(self, name, *args, **kwargs):
+                if not isinstance(name, str):
+                    raise OSError("extract failed")
+                return original_open(self, name, *args, **kwargs)
+
+            with mock.patch.object(fetch_skia.zipfile.ZipFile, "open",
+                                   new=fail_member_open):
+                with self.assertRaisesRegex(OSError, "extract failed"):
+                    fetch_skia.main(["fetch", "darwin-arm64"])
+            self.assert_no_private_archive(td)
+
+    def test_late_validation_failure_unlinks_unique_archive(self):
+        with _in_tempdir() as td:
+            source = td / "skia.zip"
+            sha = _make_zip(
+                source, {"build/mac-gpu/lib/Release/README.txt": b"no library"}
+            )
+            _write_manifest(td, f"file://{source.as_posix()}", sha, "mac-arm64")
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 1)
+            self.assert_no_private_archive(td)
 
 
 class IdempotencyStamp(unittest.TestCase):
@@ -653,6 +933,8 @@ class IdempotencyStamp(unittest.TestCase):
             lib = td / fetch_skia.expected_library_path("darwin-arm64")
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b"legacy-cache")
+            dawn = td / fetch_skia.expected_dawn_library_path("darwin-arm64")
+            dawn.write_bytes(b"legacy-dawn-cache")
             version = td / "external/skia-build/VERSION.md"
             version.write_text(
                 "\n".join(

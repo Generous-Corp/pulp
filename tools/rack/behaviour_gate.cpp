@@ -120,7 +120,7 @@ void pass(const std::string& m) { std::printf("  ok    %s\n", m.c_str()); }
 /// both report knobs as inert that work perfectly in Rack. Driving each jack
 /// as what it actually is costs nothing and removes that whole class of false
 /// failure.
-float stimulus(const char* role, int i, float quiet_v) {
+float stimulus(const char* role, int i, int input_index) {
     const std::string r = role ? role : "Cv";
     if (r == "Clock")
         // Fast enough that a sequencer visits every step several times over.
@@ -146,13 +146,22 @@ float stimulus(const char* role, int i, float quiet_v) {
     // input never moves, so its rise and fall knobs are reported inert while
     // working perfectly in Rack. ~0.37 s halves: long enough for a slow slew
     // to finish, short enough that the probe sees many edges.
-    const float swing = ((i / 16384) % 2) ? 2.5f : -2.5f;
-    return quiet_v + swing;            // Cv and anything unrecognised
+    // Give each CV jack a different quarter-cycle phase, centred on zero.
+    // Driving the signal input and every modulation input with the exact same
+    // 0..5 V square makes their edges perfectly correlated
+    // and pins exponential modulation laws at an endpoint. A slew limiter can
+    // then see its rise CV saturated on every rising signal edge, so moving the
+    // corresponding knob cannot change the trace even though it is wired.
+    // Every jack still receives a useful bipolar volt, without assuming that
+    // input zero is the signal and every later CV is modulation; manifests do
+    // not require that ordering.
+    const int phased_sample = i + input_index * 4096;
+    return ((phased_sample / 16384) % 2) ? 1.0f : -1.0f;
 }
 
 /// Drive the module for a while and record every output.
 std::vector<Trace> run(rack::engine::Module& m, float in_v, bool clock_inputs,
-                       int muted_input = -1) {
+                       int muted_input = -1, bool connect_inputs = true) {
     rack::engine::Module::ProcessArgs args;
     args.sampleRate = kSr;
     args.sampleTime = 1.f / kSr;
@@ -161,8 +170,12 @@ std::vector<Trace> run(rack::engine::Module& m, float in_v, bool clock_inputs,
     std::vector<Trace> st(m.getNumOutputs());
     for (int i = 0; i < kWarm + kRun; ++i) {
         for (int p = 0; p < m.getNumInputs(); ++p) {
+            if (!connect_inputs) {
+                m.inputs[p].channels = 0;
+                continue;
+            }
             const float v = p == muted_input ? 0.f : clock_inputs
-                          ? stimulus(forge_input_role(p), i, in_v) : in_v;
+                          ? stimulus(forge_input_role(p), i, p) : in_v;
             // Assign `channels` directly. Port::setChannels() returns early
             // when channels == 0, because a disconnected port must stay
             // disconnected -- only the engine marks a port live when a cable
@@ -224,7 +237,7 @@ int main() {
         // controls on self-running generators get a fair measurement.
         rack::engine::Module* quiet_baseline = forge_make_module();
         reset_params(*quiet_baseline);
-        auto quiet_base = run(*quiet_baseline, 0.f, false);
+        auto quiet_base = run(*quiet_baseline, 0.f, false, -1, false);
         delete quiet_baseline;
         delete m;
         if (!measurable)
@@ -246,7 +259,7 @@ int main() {
             reset_params(*quiet_probe);
             quiet_probe->params[p].setValue(
                 (std::fabs(hi - dv) > std::fabs(dv - lo)) ? hi : lo);
-            auto quiet_moved = run(*quiet_probe, 0.f, false);
+            auto quiet_moved = run(*quiet_probe, 0.f, false, -1, false);
 
             // Sample-wise, so a change of frequency, phase or timing counts
             // as an effect just as much as a change of level.
