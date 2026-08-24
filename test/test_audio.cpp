@@ -989,7 +989,7 @@ TEST_CASE("CoreAudio default output device", "[audio][coreaudio]") {
     REQUIRE(info.max_output_channels > 0);
 }
 
-TEST_CASE("CoreAudio render sine wave", "[audio][coreaudio]") {
+TEST_CASE("CoreAudio render sine wave", "[audio][coreaudio][hardware][validation]") {
     auto system = create_audio_system();
     auto info = require_coreaudio_default_output(*system);
     auto device = system->create_device();
@@ -1039,7 +1039,7 @@ TEST_CASE("CoreAudio render sine wave", "[audio][coreaudio]") {
 }
 
 TEST_CASE("CoreAudio output-only open falls back to DefaultOutput when HAL device binding fails",
-          "[audio][coreaudio][standalone]") {
+          "[audio][coreaudio][standalone][hardware][validation]") {
     auto system = create_audio_system();
     auto info = require_coreaudio_default_output(*system);
 

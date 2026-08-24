@@ -465,10 +465,12 @@ pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 # This suite calls StandaloneApp::start(), which opens and starts the real audio
-# device. RUN_SERIAL preserves the device/RT teardown isolation contract at any
-# dynamically granted CTest width; PROCESSORS remains its weighted cost.
+# device. Keep real-hardware acceptance in the validation tier: virtual/default
+# devices can block inside AudioComponentInstanceNew before Pulp receives a
+# recoverable open failure. RUN_SERIAL preserves device/RT teardown isolation
+# when that tier is requested; PROCESSORS remains its weighted cost.
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
-    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
 # Screenshot-only launches skip the audio backend; the device lifecycle is
 # asserted through an injected fake system, so this one opens no real device
 # and needs no PROCESSORS reservation.
@@ -480,10 +482,11 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
-# Like apply-config above, this suite calls StandaloneApp::start() and opens the
-# real output device before exercising its probe wiring.
+# Like apply-config above, this validation-tier suite opens the real output
+# device before exercising its probe wiring.
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
-    LIBRARIES pulp::standalone pulp::view PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE)
+    LIBRARIES pulp::standalone pulp::view
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
 # Headless screenshot capture state machine
 pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)

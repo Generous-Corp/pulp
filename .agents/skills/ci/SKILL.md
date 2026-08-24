@@ -4398,6 +4398,14 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+Tests that open a real host audio device belong to the explicit
+`hardware;validation` tier, not the ordinary PR lane. On macOS, a virtual or
+unavailable default CoreAudio route can block inside
+`AudioComponentInstanceNew` before Pulp receives a recoverable open failure.
+Keep these tests registered and runnable for hardware acceptance, main,
+release, or audit work; exclude them from default PR CTest selection rather
+than deleting them or weakening their assertions.
+
 When a change deliberately adds or removes CTest registrations, refresh the
 inventory contract in the same commit: update
 `.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
