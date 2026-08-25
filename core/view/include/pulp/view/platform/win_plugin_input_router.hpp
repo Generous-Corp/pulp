@@ -151,6 +151,8 @@ public:
             // Outside presses must dismiss this editor's generalized overlay
             // even when a gesture recognizer consumes the press below.
             const auto overlay_press = route_press_to_active_overlay(root, pt);
+            if (overlay_press.routing == OverlayPressRouting::routed)
+                drag_target_.set(overlay_press.target);
             MouseEvent gesture_event;
             gesture_event.position = pt;
             gesture_event.window_position = pt;
@@ -159,21 +161,23 @@ public:
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
             if (yield_to_gesture(gesture_event)) {
+                drag_target_.reset();
                 // A synchronous gesture callback may have terminalized this
                 // bracket. Capture only for the still-current claimed session.
                 if (accepts_original()) host_.input_capture_pointer();
                 return;
             }
-            if (!accepts_original()) return;
+            if (!accepts_original()) {
+                drag_target_.reset();
+                return;
+            }
 
             // Consult the generalized overlay slot before the regular hit
             // test, so a React / imported-design popover both receives clicks
             // aimed at it and is dismissed by a click outside it. This host
             // previously handled only the native ComboBox mechanism below,
             // which left such a popover open forever.
-            if (overlay_press.routing == OverlayPressRouting::routed)
-                drag_target_.set(overlay_press.target);
-            else
+            if (overlay_press.routing != OverlayPressRouting::routed)
                 drag_target_.set(root.hit_test(pt));
             View* drag_target = drag_target_.live_in(root);
             if (button == MouseButton::left)

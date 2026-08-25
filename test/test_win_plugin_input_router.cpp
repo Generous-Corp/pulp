@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/platform/win_plugin_input_router.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/text_editor.hpp>
 
@@ -94,6 +95,15 @@ public:
     std::vector<MouseButton> presses;
     int downs = 0, ups = 0, cancels = 0, cancelled_events = 0, drags = 0;
     std::function<void()> on_down_cb;
+};
+
+class ClaimOnPressRecognizer final : public GestureRecognizer {
+protected:
+    void on_pointer_event(const MouseEvent& event,
+                          const GestureContext&) override {
+        if (event.phase == MousePhase::press)
+            transition_to(GestureState::began);
+    }
 };
 
 /// Root + one hit-testable probe child, the shape almost every case needs.
@@ -189,6 +199,31 @@ TEST_CASE("a target removed during native focus transfer is not dereferenced",
 
     CHECK_FALSE(router.gesture_active());
     CHECK_FALSE(router.has_captured_target());
+}
+
+TEST_CASE("a gesture callback may retire a routed overlay target safely",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<ProbeView>();
+    auto* overlay = owned.get();
+    overlay->set_bounds({0, 0, 200, 200});
+    auto recognizer = std::make_unique<ClaimOnPressRecognizer>();
+    recognizer->on_began = [&](GestureRecognizer&) {
+        auto retired = root.remove_child(overlay);
+        retired.reset();
+    };
+    overlay->add_gesture_recognizer(std::move(recognizer));
+    root.add_child(std::move(owned));
+    overlay->claim_overlay();
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({10, 10}, MouseButton::left, 0);
+
+    REQUIRE_FALSE(router.gesture_active());
+    REQUIRE_FALSE(router.has_captured_target());
+    REQUIRE(host.count("capture") == 0);
 }
 
 TEST_CASE("a second button closes the first bracket rather than overwriting it",

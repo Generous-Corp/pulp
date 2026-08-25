@@ -46,6 +46,7 @@ SOURCE_SUFFIXES = {".mm", ".cpp", ".hpp", ".h"}
 # call-shaped so a file that merely names it in an #include comment — and
 # delegates its actual press routing elsewhere — is correctly out of scope.
 COMBO_MARKER = "notify_global_click("
+COMBO_PATTERN = re.compile(r"\bnotify_global_click\s*\(")
 
 # Mechanism (B): any consultation of the generalized overlay slot. A host may
 # either call the shared portable verb or hand-roll the equivalent check, so
@@ -61,6 +62,10 @@ OVERLAY_PATTERNS = (
 def without_comments(text: str) -> str:
     """Remove C/C++ comments so prose cannot satisfy a wiring obligation."""
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
+
+
+def matching_lines(text: str, pattern: re.Pattern[str]) -> list[int]:
+    return [index for index, line in enumerate(text.splitlines()) if pattern.search(line)]
 
 
 def repo_root() -> Path:
@@ -90,10 +95,24 @@ def main() -> int:
         except OSError:
             continue
         executable_text = without_comments(text)
-        if COMBO_MARKER not in executable_text:
+        combo_lines = matching_lines(executable_text, COMBO_PATTERN)
+        if not combo_lines:
             continue
         checked += 1
-        if not any(pattern.search(executable_text) for pattern in OVERLAY_PATTERNS):
+        overlay_lines = [
+            line
+            for pattern in OVERLAY_PATTERNS
+            for line in matching_lines(executable_text, pattern)
+        ]
+        # Both mechanisms belong to the same press handler. A bounded line
+        # distance rejects an unrelated ESC-key dismissal elsewhere in a large
+        # host file while allowing the small amount of host-specific routing
+        # between popup handling and the regular hit test.
+        paired = all(
+            any(abs(combo_line - overlay_line) <= 120 for overlay_line in overlay_lines)
+            for combo_line in combo_lines
+        )
+        if not paired:
             offenders.append(path)
 
     if checked == 0:
