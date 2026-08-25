@@ -61,10 +61,20 @@ class RunnerPolicyFixture(unittest.TestCase):
             }),
             encoding="utf-8",
         )
+        (self.runner / ".fleet-runner-package.json").write_text(
+            json.dumps({
+                "runner_sha256": self.key["runner_sha256"],
+                "runner_version": self.key["runner_version"],
+            }),
+            encoding="utf-8",
+        )
         executable(
             self.runner / "bin" / "Runner.Listener",
             "#!/bin/sh\nprintf '2.335.1\\n'\n",
         )
+        executable(self.runner / "externals/node20/bin/node", "#!/bin/sh\nexit 0\n")
+        executable(self.runner / "config.sh", "#!/bin/sh\nexit 0\n")
+        executable(self.runner / "run.sh", "#!/bin/sh\nexit 0\n")
         rustup_home, cargo_home = F._runner_private_paths(self.runner)
         rustup_home.mkdir(parents=True, exist_ok=True)
         cargo_home.mkdir(parents=True, exist_ok=True)
@@ -144,6 +154,57 @@ class RunnerPolicyFixture(unittest.TestCase):
         self.assertIn("active Runner.Worker", detail)
         self.assertEqual((self.runner / ".runner").read_bytes(), original)
 
+    def test_apply_restores_both_runtime_configs_when_second_publish_fails(self) -> None:
+        self._write_runner(disable_update=False)
+        originals = {
+            path: path.read_bytes()
+            for path in (self.runner / ".runner", self.runner / ".runner_migrated")
+        }
+        real_atomic_write = F._atomic_write
+
+        def fail_migrated(path, text):
+            if Path(path).name == ".runner_migrated":
+                raise OSError("injected second-config failure")
+            return real_atomic_write(path, text)
+
+        def process_present(_runner_dir: Path, process_name: str):
+            return False if process_name in ("Runner.Worker", "Runner.Listener") else None
+
+        with mock.patch.object(F, "_runner_process_present", side_effect=process_present), \
+             mock.patch.object(F, "_ensure_runner_rust"), \
+             mock.patch.object(F, "_atomic_write", side_effect=fail_migrated):
+            outcome, detail = F.apply_actions_runner_policy(self.key, F.Probe(F.DRIFT))
+        self.assertEqual(outcome, "failed")
+        self.assertIn("injected second-config failure", detail)
+        self.assertEqual(
+            {
+                path: path.read_bytes()
+                for path in (self.runner / ".runner", self.runner / ".runner_migrated")
+            },
+            originals,
+        )
+
+    def test_missing_package_marker_forces_reinstall_even_when_listener_version_matches(self) -> None:
+        (self.runner / ".fleet-runner-package.json").unlink()
+
+        def process_present(runner_dir: Path, process_name: str):
+            if process_name == "Runner.Worker":
+                return False
+            state = runner_dir / "service-state"
+            return state.exists() and state.read_text().strip() == "start"
+
+        with mock.patch.object(F, "_runner_process_present", side_effect=process_present), \
+             mock.patch.object(F, "_install_runner_package", return_value=None) as install, \
+             mock.patch.object(F, "_ensure_runner_rust"):
+            outcome, detail = F.apply_actions_runner_policy(self.key, F.Probe(F.DRIFT))
+        self.assertEqual(outcome, "fixed", detail)
+        install.assert_called_once_with(
+            self.runner, self.key["runner_version"], self.key["runner_sha256"],
+        )
+        self.assertTrue(F._runner_package_marker_matches(
+            self.runner, self.key["runner_version"], self.key["runner_sha256"],
+        ))
+
     def test_migrated_runtime_config_without_update_pin_is_drift(self) -> None:
         migrated_path = self.runner / ".runner_migrated"
         migrated = json.loads(migrated_path.read_text(encoding="utf-8"))
@@ -209,7 +270,39 @@ class RunnerPolicyFixture(unittest.TestCase):
         member.linkname = "inside/target"
         self.assertFalse(F._archive_link_escapes(member))
 
+    def test_runner_archive_rejects_member_under_symlink_ancestor(self) -> None:
+        ancestor = tarfile.TarInfo("a")
+        ancestor.type = tarfile.SYMTYPE
+        ancestor.linkname = "."
+        nested = tarfile.TarInfo("a/b/link")
+        nested.type = tarfile.SYMTYPE
+        nested.linkname = "../../outside"
+        with self.assertRaisesRegex(RuntimeError, "symlink ancestor"):
+            F._validate_runner_archive_members([ancestor, nested])
+
+    def test_unversioned_runner_layout_rolls_back_every_package_entry(self) -> None:
+        old_listener = (self.runner / "bin/Runner.Listener").read_bytes()
+        old_run = (self.runner / "run.sh").read_bytes()
+        archive = self.home / "unversioned-runner.tar.gz"
+        source = self.home / "unversioned-package"
+        executable(source / "bin/Runner.Listener", "#!/bin/sh\nprintf 'new\n'\n")
+        executable(source / "externals/node20/bin/node", "#!/bin/sh\nprintf 'new-node\n'\n")
+        executable(source / "run.sh", "#!/bin/sh\nprintf 'new-root\n'\n")
+        with tarfile.open(archive, "w:gz") as tf:
+            for path in source.iterdir():
+                tf.add(path, arcname=path.name)
+        with tarfile.open(archive, "r:gz") as tf:
+            publication = F._extract_runner_package(tf, self.runner, "2.335.1")
+        self.assertEqual(
+            subprocess.check_output([self.runner / "bin/Runner.Listener"], text=True).strip(),
+            "new",
+        )
+        publication.rollback()
+        self.assertEqual((self.runner / "bin/Runner.Listener").read_bytes(), old_listener)
+        self.assertEqual((self.runner / "run.sh").read_bytes(), old_run)
+
     def test_versioned_runner_layout_switches_links_without_writing_old_tree(self) -> None:
+        executable(self.runner / "run.sh", "#!/bin/sh\nprintf 'old-root\n'\n")
         for name in ("bin", "externals"):
             old = self.runner / f"{name}.2.336.0"
             old.mkdir()
@@ -223,12 +316,14 @@ class RunnerPolicyFixture(unittest.TestCase):
         source = self.home / "package"
         executable(source / "bin" / "Runner.Listener", "#!/bin/sh\nprintf '2.335.1\\n'\n")
         executable(source / "externals" / "node", "#!/bin/sh\nexit 0\n")
+        executable(source / "run.sh", "#!/bin/sh\nprintf 'new-root\n'\n")
         with tarfile.open(archive, "w:gz") as tf:
             tf.add(source / "bin", arcname="bin")
             tf.add(source / "externals", arcname="externals")
+            tf.add(source / "run.sh", arcname="run.sh")
 
         with tarfile.open(archive, "r:gz") as tf:
-            F._extract_runner_package(tf, self.runner, "2.335.1")
+            publication = F._extract_runner_package(tf, self.runner, "2.335.1")
 
         self.assertEqual((self.runner / "bin.2.336.0/sentinel").read_text(), "old")
         self.assertEqual((self.runner / "externals.2.336.0/sentinel").read_text(), "old")
@@ -243,6 +338,157 @@ class RunnerPolicyFixture(unittest.TestCase):
             subprocess.check_output([self.runner / "bin/Runner.Listener"], text=True).strip(),
             "2.335.1",
         )
+        self.assertEqual(
+            subprocess.check_output([self.runner / "run.sh"], text=True).strip(),
+            "new-root",
+        )
+        publication.commit()
+
+    def test_versioned_runner_layout_rollback_restores_links_and_replaced_trees(self) -> None:
+        executable(self.runner / "run.sh", "#!/bin/sh\nprintf 'old-root\n'\n")
+        for name in ("bin", "externals"):
+            old = self.runner / f"{name}.2.336.0"
+            old.mkdir()
+            (old / "sentinel").write_text("live-old", encoding="utf-8")
+            replaced = self.runner / f"{name}.2.335.1"
+            replaced.mkdir()
+            (replaced / "sentinel").write_text("preexisting", encoding="utf-8")
+            plain = self.runner / name
+            if plain.exists():
+                shutil.rmtree(plain)
+            plain.symlink_to(old, target_is_directory=True)
+
+        archive = self.home / "runner-rollback.tar.gz"
+        source = self.home / "rollback-package"
+        executable(source / "bin" / "Runner.Listener", "#!/bin/sh\nprintf 'new\n'\n")
+        executable(source / "externals" / "node", "#!/bin/sh\nexit 0\n")
+        executable(source / "run.sh", "#!/bin/sh\nprintf 'new-root\n'\n")
+        with tarfile.open(archive, "w:gz") as tf:
+            tf.add(source / "bin", arcname="bin")
+            tf.add(source / "externals", arcname="externals")
+            tf.add(source / "run.sh", arcname="run.sh")
+
+        with tarfile.open(archive, "r:gz") as tf:
+            publication = F._extract_runner_package(tf, self.runner, "2.335.1")
+        publication.rollback()
+
+        for name in ("bin", "externals"):
+            self.assertEqual(
+                (self.runner / name).resolve(),
+                (self.runner / f"{name}.2.336.0").resolve(),
+            )
+            self.assertEqual(
+                (self.runner / f"{name}.2.335.1/sentinel").read_text(),
+                "preexisting",
+            )
+            self.assertFalse(list(self.runner.glob(f".{name}.*.fleet-backup-*")))
+        self.assertEqual(
+            subprocess.check_output([self.runner / "run.sh"], text=True).strip(),
+            "old-root",
+        )
+
+    def test_package_rollback_restores_backup_before_new_tree_publishes(self) -> None:
+        old = self.runner / "bin.old"
+        target = self.runner / "bin.new"
+        backup = self.runner / ".bin.new.fleet-backup-test"
+        old.mkdir()
+        backup.mkdir()
+        (backup / "sentinel").write_text("preexisting", encoding="utf-8")
+        plain = self.runner / "bin"
+        shutil.rmtree(plain)
+        plain.symlink_to(old, target_is_directory=True)
+        publication = F._RunnerPackagePublication(
+            self.runner, {"bin": old}, {"bin": target}, {"bin": backup}, set()
+        )
+        publication.rollback()
+        self.assertEqual(plain.resolve(), old.resolve())
+        self.assertEqual((target / "sentinel").read_text(), "preexisting")
+
+    def test_package_rollback_does_not_delete_a_still_linked_new_tree(self) -> None:
+        old_targets = {}
+        targets = {}
+        for name in ("bin", "externals"):
+            old = self.runner / f"{name}.old"
+            new = self.runner / f"{name}.new"
+            old.mkdir()
+            new.mkdir()
+            link = self.runner / name
+            if link.exists():
+                shutil.rmtree(link)
+            link.symlink_to(new, target_is_directory=True)
+            old_targets[name] = old
+            targets[name] = new
+        publication = F._RunnerPackagePublication(
+            self.runner, old_targets, targets, {}, {"bin", "externals"}
+        )
+        real_replace = os.replace
+
+        def fail_bin_link_restore(source, destination):
+            if Path(destination) == self.runner / "bin":
+                raise OSError("injected link rollback failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(F.os, "replace", side_effect=fail_bin_link_restore):
+            with self.assertRaisesRegex(RuntimeError, "restore bin link"):
+                publication.rollback()
+        self.assertTrue((self.runner / "bin.new").is_dir())
+        self.assertEqual((self.runner / "bin").resolve(), (self.runner / "bin.new").resolve())
+
+    def test_policy_file_transaction_restores_every_original_byte(self) -> None:
+        paths = [self.runner / ".runner", self.runner / ".runner_migrated", self.runner / ".env"]
+        originals = {path: path.read_bytes() for path in paths}
+        tx = F._RunnerFileTransaction()
+        for path in paths:
+            tx.snapshot(path)
+            F._atomic_write(path, "changed\n")
+        tx.rollback()
+        self.assertEqual({path: path.read_bytes() for path in paths}, originals)
+
+    def test_incomplete_rollback_keeps_original_listener_stopped(self) -> None:
+        file_tx = mock.Mock()
+        file_tx.rollback.side_effect = RuntimeError("injected restore failure")
+        with mock.patch.object(F, "_runner_process_present", return_value=False), \
+             mock.patch.object(F, "_run_checked") as run_checked:
+            errors = F._rollback_runner_policy(
+                [self.runner], [self.runner], file_tx, [],
+            )
+        self.assertIn("policy-file rollback", "; ".join(errors))
+        run_checked.assert_not_called()
+
+    def test_rollback_rechecks_worker_after_listener_stops(self) -> None:
+        file_tx = mock.Mock()
+        worker_observations = iter((False, True))
+
+        def process_present(_runner_dir: Path, process_name: str):
+            if process_name == "Runner.Worker":
+                return next(worker_observations)
+            return True
+
+        with mock.patch.object(F, "_runner_process_present", side_effect=process_present), \
+             mock.patch.object(F, "_run_checked"), \
+             mock.patch.object(F, "_wait_runner_process", return_value=True):
+            errors = F._rollback_runner_policy(
+                [self.runner], [self.runner], file_tx, [],
+            )
+        self.assertIn("Runner.Worker appeared", "; ".join(errors))
+        file_tx.rollback.assert_not_called()
+
+    def test_package_layout_requires_root_scripts_and_externals_runtime(self) -> None:
+        shutil.rmtree(self.runner / "externals")
+        (self.runner / "run.sh").unlink()
+        findings = F._runner_package_layout_findings(self.runner)
+        self.assertTrue(any("run.sh" in finding for finding in findings))
+        self.assertTrue(any("Node runtime" in finding for finding in findings))
+
+    def test_successful_rollback_requires_restored_listener_to_converge(self) -> None:
+        file_tx = mock.Mock()
+        with mock.patch.object(F, "_runner_process_present", return_value=False), \
+             mock.patch.object(F, "_run_checked"), \
+             mock.patch.object(F, "_wait_runner_process", return_value=False):
+            errors = F._rollback_runner_policy(
+                [self.runner], [self.runner], file_tx, [],
+            )
+        self.assertIn("restored listener did not start", "; ".join(errors))
 
 
 if __name__ == "__main__":
