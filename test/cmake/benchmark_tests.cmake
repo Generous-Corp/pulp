@@ -55,6 +55,18 @@ if(PULP_BENCHMARK)
     add_executable(pulp-fast-exp2-benchmark test_fast_exp2_benchmark.cpp)
     target_link_libraries(pulp-fast-exp2-benchmark PRIVATE pulp::signal)
 
+    # Advisory Release-only evidence for cycle-domain trigonometry. An optional
+    # local candidate header lets maintainers evaluate material that is not
+    # licensed for redistribution without putting it in the source tree.
+    add_executable(pulp-fast-trig-benchmark test_fast_trig_benchmark.cpp)
+    target_link_libraries(pulp-fast-trig-benchmark PRIVATE pulp::signal)
+    set(PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER "" CACHE FILEPATH
+        "Local-only fast-trig benchmark candidate header")
+    if(PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER)
+        target_compile_definitions(pulp-fast-trig-benchmark PRIVATE
+            PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER="${PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER}")
+    endif()
+
     pulp_add_test_suite(pulp-test-osc-bench
         LIBRARIES pulp::signal
         INCLUDE_DIRS ${choc_SOURCE_DIR}
