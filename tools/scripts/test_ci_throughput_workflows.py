@@ -196,12 +196,27 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
         build = named_step(macos_job, "Build all examples")["run"]
         self.assertIn(
             "tools/ci/governed-build.sh cmake --build build "
-            "--target pulp-examples-all",
+            "--target pulp-example-validation-all",
             build,
         )
         self.assertIn("df -h .", build)
         self.assertIn("GITHUB_STEP_SUMMARY", build)
         self.assertIn("trap finish EXIT", build)
+
+    def test_example_validation_aggregate_keeps_registered_tool_prerequisites(self) -> None:
+        root_cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("add_custom_target(pulp-example-validation-all)", root_cmake)
+        self.assertIn(
+            "add_dependencies(pulp-example-validation-all pulp-examples-all)",
+            root_cmake,
+        )
+        for target in (
+            "pulp-cli",
+            "PulpGain_CLAP",
+            "PulpTone_CLAP",
+            "pulp-sync-soak-capture",
+        ):
+            self.assertIn(target, root_cmake)
 
     def test_macos_job_verifies_configured_validator_inventory(self) -> None:
         step = named_step(self.jobs["validate"], "Verify validator inventory")

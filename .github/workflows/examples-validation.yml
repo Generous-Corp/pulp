@@ -162,7 +162,7 @@ jobs:
             exit "$status"
           }
           trap finish EXIT
-          tools/ci/governed-build.sh cmake --build build --target pulp-examples-all
+          tools/ci/governed-build.sh cmake --build build --target pulp-example-validation-all
       - name: Run example validators (ctest -L validation)
         shell: bash
         run: |
