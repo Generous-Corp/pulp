@@ -406,7 +406,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             with self.subTest(detail=detail):
                 rc, posted, error = _run_reporter(detail=detail)
                 self.assertEqual(rc, 1)
-                self.assertFalse(posted)
+                self.assertTrue(posted)
                 self.assertIn("identity changed", error)
 
     def test_target_ref_resolves_one_open_pr_when_number_is_omitted(self) -> None:
@@ -521,7 +521,14 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertIn("live_head", text)
         self.assertIn("live_base_repository", text)
         self.assertIn("live_head_repository", text)
+        self.assertIn("publish_failure_on_exit", script)
+        self.assertIn("trap publish_failure_on_exit EXIT", script)
         self.assertIn('[ "$conclusion" = success ] || exit 1', script)
+        cleanup = next(
+            step for step in workflow["jobs"]["build-test"]["steps"]
+            if step.get("name") == "Remove untrusted writable state"
+        )["run"]
+        self.assertIn("sudo /bin/rm -rf", cleanup)
 
     def test_only_trusted_jobs_receive_elevated_permissions(self) -> None:
         jobs = _workflow()["jobs"]

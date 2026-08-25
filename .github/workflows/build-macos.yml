@@ -446,7 +446,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$PULP_EPHEMERAL_ROOT" in
-            "$RUNNER_TEMP"/pulp-retarget-*) rm -rf -- "$PULP_EPHEMERAL_ROOT" ;;
+            "$RUNNER_TEMP"/pulp-retarget-*) sudo /bin/rm -rf -- "$PULP_EPHEMERAL_ROOT" ;;
             *) echo "refusing unsafe retarget cleanup path" >&2; exit 1 ;;
           esac
 
@@ -479,6 +479,24 @@ jobs:
             esac
             [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
           done
+          case "$CHECK_RUN_ID" in
+            ''|*[!0-9]* ) echo "invalid pending check run id" >&2; exit 1 ;;
+          esac
+          terminal_published=false
+          publish_failure_on_exit() {
+            if [ "$terminal_published" = false ]; then
+              gh api --method PATCH \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" \
+                --raw-field status=completed \
+                --raw-field conclusion=failure \
+                --raw-field details_url="$DETAILS_URL" \
+                --raw-field 'output[title]=macOS retarget rejected' \
+                --raw-field 'output[summary]=Exact-head retarget identity or controller validation failed.' \
+                >/dev/null 2>&1 || true
+            fi
+          }
+          trap publish_failure_on_exit EXIT
           live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_PR")"
           live_state="$(printf '%s' "$live_pr" | jq -r .state)"
           live_base="$(printf '%s' "$live_pr" | jq -r .base.sha)"
@@ -497,9 +515,6 @@ jobs:
             echo "PR #$EXPECTED_PR identity changed during retarget; suppressing stale status" >&2
             exit 1
           fi
-          case "$CHECK_RUN_ID" in
-            ''|*[!0-9]* ) echo "invalid pending check run id" >&2; exit 1 ;;
-          esac
           case "$BUILD_RESULT" in
             success) conclusion=success ;;
             *) conclusion=failure ;;
@@ -512,4 +527,5 @@ jobs:
             --raw-field details_url="$DETAILS_URL" \
             --raw-field 'output[title]=macOS retarget complete' \
             --raw-field "output[summary]=Exact-head retarget build: $BUILD_RESULT"
+          terminal_published=true
           [ "$conclusion" = success ] || exit 1
