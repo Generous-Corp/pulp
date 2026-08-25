@@ -161,6 +161,12 @@ pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)
 # linked for the include path only.
 pulp_add_test_suite(pulp-test-device-quotas LIBRARIES pulp::format)
 
+# Where a generation job runs, given what the device can carry. Sits beside the
+# quota table because both are policy over the same capability vocabulary: the
+# quota table says how much is granted at a rung, this says where the work goes.
+# Header-only over pulp::format — linked for the include path only.
+pulp_add_test_suite(pulp-test-generation-routing LIBRARIES pulp::format)
+
 # Standalone host render-path RT-safety guard. Drives the extracted
 # StandaloneApp::render_audio_block() seam for one steady-state block under
 # ScopedRtProcessProbe. Links the RT interposition trap TU + sets
