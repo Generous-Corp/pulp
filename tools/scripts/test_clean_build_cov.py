@@ -29,8 +29,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "tools" / "scripts" / "clean_build_cov.sh"
 
 
-def run(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+def run(
+    root: pathlib.Path,
+    *args: str,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     env = dict(os.environ, PULP_WORKTREES_ROOT=str(root))
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         ["bash", str(SCRIPT), *args],
         capture_output=True, text=True, env=env,
@@ -86,9 +92,8 @@ class CleanBuildCovTests(unittest.TestCase):
             root = pathlib.Path(td)
             make_layout(root)
             active = root / "wt-a" / "build-cov"
-            # A long-lived process whose command line carries a build-tool name
-            # (so the script's pgrep catches it) AND the coverage dir path (so it
-            # matches that dir) stands in for an in-flight `cmake --build
+            # A long-lived process whose complete command line carries the
+            # coverage dir path stands in for an in-flight `cmake --build
             # <wt>/build-cov`. A padded-argv Python sleeper keeps it alive.
             proc = subprocess.Popen(
                 ["python3", "-c", "import time; time.sleep(30)", "cmake", str(active)]
@@ -104,6 +109,27 @@ class CleanBuildCovTests(unittest.TestCase):
             finally:
                 proc.terminate()
                 proc.wait()
+
+    def test_unreadable_process_list_removes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            make_layout(root)
+            shim = root / "shim"
+            shim.mkdir()
+            fake_ps = shim / "ps"
+            fake_ps.write_text("#!/bin/sh\necho partial-output\nexit 1\n")
+            fake_ps.chmod(0o755)
+
+            res = run(
+                root,
+                "--yes",
+                env_extra={"PATH": f"{shim}:{os.environ['PATH']}"},
+            )
+
+            self.assertEqual(res.returncode, 3, res.stdout + res.stderr)
+            self.assertIn("could not read complete process command lines", res.stderr)
+            self.assertTrue((root / "wt-a" / "build-cov").is_dir())
+            self.assertTrue((root / "wt-b" / "build-coverage").is_dir())
 
     def test_unknown_arg_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as td:

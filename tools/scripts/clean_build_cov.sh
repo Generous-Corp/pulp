@@ -51,8 +51,15 @@ fi
 # coverage run isn't corrupted mid-flight. A build process's command line
 # carries the absolute path of the dir it builds (e.g. -B <wt>/build-cov,
 # --test-dir <wt>/build-cov, or an -o <wt>/build-cov/... object path), so we
-# match coverage dirs against the active command lines directly.
-active_cmolines="$(pgrep -fl 'cmake|ctest|ninja|clang|cc1|c\+\+' 2>/dev/null || true)"
+# match coverage dirs against complete active command lines directly. Do not
+# use `pgrep -fl`: on Linux `-l` prints only the executable name even when `-f`
+# matched the full argv, which can turn a live build into a false idle result.
+# An unreadable process list is unknown, never evidence that deletion is safe.
+if ! active_cmolines="$(ps -e -ww -o args= 2>/dev/null)" || \
+        [[ -z "${active_cmolines}" ]]; then
+    echo "clean_build_cov: could not read complete process command lines; nothing removed" >&2
+    exit 3
+fi
 
 is_active() {
     # $1 = absolute coverage dir. Active if any build command line mentions it.
