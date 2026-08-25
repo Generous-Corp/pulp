@@ -123,13 +123,14 @@ function delay(milliseconds) {
 }
 
 // The width correction grows the viewport so content the viewport centres is
-// re-centred inside it. Two layouts survive it, and only one of them has a
-// width that would help: content anchored left of the origin never moves at
-// any width, while a layout whose own width tracks the viewport moves the very
+// re-centred inside it. Three cases can survive it, and only one has a width
+// that would help: content anchored left of the origin never moves; raw bounds
+// from a descendant clipped by an overflow ancestor may describe no painted
+// pixels at all; and a layout whose own width tracks the viewport moves the
 // edge the correction was chasing and can still resolve at an authored width.
-// Naming a width as the sole remedy sent callers of the first kind round a
-// loop that could not terminate, so report the measurement and both causes
-// rather than asserting the one that happens to carry a fix.
+// Naming a width as the sole remedy sent callers of the first two kinds round
+// a loop that could not terminate, so report every known cause rather than
+// asserting the one that happens to carry a fix.
 function negativeLeftOverflowError(left, pinnedWidth) {
   const attempt = pinnedWidth === undefined
     ? "one bounded viewport correction"
@@ -140,8 +141,9 @@ function negativeLeftOverflowError(left, pinnedWidth) {
     : `The layout does not resolve at ${pinnedWidth}px; another --width may ` +
       "still resolve it, but no width recovers anchored content.";
   const error = new Error(
-    `content still begins at x=${left}px after ${attempt}. Either something ` +
-    "anchors content left of the document origin (an absolutely positioned " +
+    `content still begins at x=${left}px after ${attempt}. The extent may ` +
+    "include a descendant whose overflow-hidden ancestor clips those pixels, " +
+    "or something anchors content left of the document origin (an absolutely positioned " +
     "element at a negative left, position: fixed, or a negative margin on " +
     "<html>), which no viewport width moves, or the layout's own width " +
     `tracks the viewport, so widening chases itself. ${remedy}`);

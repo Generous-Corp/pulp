@@ -38,7 +38,9 @@ mutually exclusive, and `provenance.viewport.width_pinned` records which
 decided the capture. No width recovers content anchored left of the document
 origin (an absolutely positioned element at a negative left, `position: fixed`,
 or a negative margin on `<html>`), and a capture refused for that reason says
-so rather than naming a flag that cannot help. The supported `pulp
+so rather than naming a flag that cannot help. Raw bounds from a descendant
+clipped by an overflow-hidden ancestor are another non-width cause and are
+named explicitly rather than misdiagnosed as responsive layout. The supported `pulp
 import-design` entry point maps an explicit `--render-size WxH` to this pinned
 width; its default viewport remains an automatically correctable initial width.
 

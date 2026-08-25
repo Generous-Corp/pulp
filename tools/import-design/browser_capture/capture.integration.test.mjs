@@ -1667,6 +1667,8 @@ test("an unreachable left overflow names its cause, not a phantom flag",
         assert.ok(error.stderr.includes("capture-negative-overflow"));
         assert.ok(error.stderr.includes("x=-40px"));
         assert.ok(error.stderr.includes(
+          "overflow-hidden ancestor clips those pixels"));
+        assert.ok(error.stderr.includes(
           "anchors content left of the document origin"));
         assert.ok(error.stderr.includes("position: fixed"));
         assert.equal(error.stderr.includes("pass an explicit --width"), false);
