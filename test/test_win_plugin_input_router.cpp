@@ -106,6 +106,19 @@ protected:
     }
 };
 
+class CallbackClaimRecognizer final : public GestureRecognizer {
+public:
+    std::function<void()> callback;
+
+protected:
+    void on_pointer_event(const MouseEvent& event,
+                          const GestureContext&) override {
+        if (event.phase != MousePhase::press) return;
+        transition_to(GestureState::began);
+        if (callback) callback();
+    }
+};
+
 /// Root + one hit-testable probe child, the shape almost every case needs.
 struct Fixture {
     View root;
@@ -224,6 +237,73 @@ TEST_CASE("a gesture callback may retire a routed overlay target safely",
     REQUIRE_FALSE(router.gesture_active());
     REQUIRE_FALSE(router.has_captured_target());
     REQUIRE(host.count("capture") == 0);
+}
+
+TEST_CASE("a stale gesture callback frame preserves its replacement press",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto first_owned = std::make_unique<ProbeView>();
+    auto* first = first_owned.get();
+    first->set_bounds({0, 0, 100, 100});
+    auto second_owned = std::make_unique<ProbeView>();
+    auto* second = second_owned.get();
+    second->set_bounds({100, 0, 100, 100});
+    root.add_child(std::move(first_owned));
+    root.add_child(std::move(second_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    auto recognizer = std::make_unique<CallbackClaimRecognizer>();
+    auto* recognizer_ptr = recognizer.get();
+    recognizer->callback = [&] {
+        recognizer_ptr->callback = {};
+        router.on_mouse_down({150, 50}, MouseButton::left, 0);
+    };
+    first->add_gesture_recognizer(std::move(recognizer));
+
+    router.on_mouse_down({50, 50}, MouseButton::left, 0);
+
+    REQUIRE(router.gesture_active());
+    REQUIRE(router.captured_target() == second);
+    REQUIRE(second->downs == 1);
+}
+
+TEST_CASE("a right click routes its context menu to the active overlay",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    // The claiming wrapper is small; its overflow-visible child paints over
+    // a later sibling outside that wrapper because claimed overlays have their
+    // own paint pass. A regular root hit-test follows tree order and resolves
+    // the later sibling, while overlay-aware routing resolves the painted
+    // child.
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100, 100, 20, 20});
+    overlay->set_overflow(View::Overflow::visible);
+    auto popup_owned = std::make_unique<ProbeView>();
+    auto* popup = popup_owned.get();
+    popup->set_bounds({-80, -80, 60, 60});
+    int overlay_menus = 0;
+    popup->on_context_menu = [&](Point) { ++overlay_menus; };
+    overlay->add_child(std::move(popup_owned));
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    auto under_owned = std::make_unique<ProbeView>();
+    auto* under = under_owned.get();
+    under->set_bounds({0, 0, 200, 200});
+    int under_menus = 0;
+    under->on_context_menu = [&](Point) { ++under_menus; };
+    root.add_child(std::move(under_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({50, 50}, MouseButton::right, 0);
+
+    REQUIRE(overlay_menus == 1);
+    REQUIRE(under_menus == 0);
 }
 
 TEST_CASE("a second button closes the first bracket rather than overwriting it",

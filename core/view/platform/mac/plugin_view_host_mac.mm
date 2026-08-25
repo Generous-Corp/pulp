@@ -275,6 +275,23 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
         if (overlay_press.routing == pulp::view::OverlayPressRouting::routed) {
             drag_target->set(overlay_press.target);
             pulp::view::ComboBox::notify_global_click(drag_target->live_in(*root));
+            // Match the ordinary plug-in press path: native IME teardown must
+            // happen before focus transfer. The callback may synchronously
+            // rebuild the overlay, so resolve through the root-owned overlay
+            // slot again instead of retaining the pre-callback target.
+            if (auto* te = dynamic_cast<pulp::view::TextEditor*>(
+                    pulp_focus_under_root(root));
+                te && te->has_marked_text()) {
+                pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
+                const auto refreshed = pulp::view::route_press_to_active_overlay(
+                    *root, pt);
+                if (refreshed.routing !=
+                    pulp::view::OverlayPressRouting::routed) {
+                    drag_target->reset();
+                    return;
+                }
+                drag_target->set(refreshed.target);
+            }
             auto* target = drag_target->live_in(*root);
             if (!target || !pulp::view::transfer_input_focus(*root, target)) {
                 drag_target->reset();

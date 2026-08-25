@@ -161,16 +161,12 @@ public:
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
             if (yield_to_gesture(gesture_event)) {
-                drag_target_.reset();
                 // A synchronous gesture callback may have terminalized this
                 // bracket. Capture only for the still-current claimed session.
                 if (accepts_original()) host_.input_capture_pointer();
                 return;
             }
-            if (!accepts_original()) {
-                drag_target_.reset();
-                return;
-            }
+            if (!accepts_original()) return;
 
             // Consult the generalized overlay slot before the regular hit
             // test, so a React / imported-design popover both receives clicks
@@ -214,7 +210,8 @@ public:
             // callback may have synchronously cancelled/replaced the session.
             if (!accepts_original()) return;
             if (!target_alive) drag_target_.reset();
-            if (button == MouseButton::right) dispatch_context_menu(root, pt);
+            if (button == MouseButton::right)
+                dispatch_context_menu(root, drag_target_.live_in(root), pt);
             if (!accepts_original()) return;
             host_.input_request_repaint();
         } catch (const std::exception& e) {

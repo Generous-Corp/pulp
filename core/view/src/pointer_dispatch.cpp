@@ -44,7 +44,10 @@ Point point_to_local(Point root_pos, View* target, View* root) {
 }
 
 bool dispatch_context_menu(View& root, Point root_pos) {
-    View* target = root.hit_test(root_pos);
+    return dispatch_context_menu(root, root.hit_test(root_pos), root_pos);
+}
+
+bool dispatch_context_menu(View& root, View* target, Point root_pos) {
     if (!target || !target->on_context_menu) return false;
     auto callback = target->on_context_menu;
     callback(point_to_local(root_pos, target, &root));

@@ -35,6 +35,11 @@ void dispatch_dom_pointer_event(View& root, View* target,
 /// Only the hit view is consulted — the callback does not bubble to ancestors.
 bool dispatch_context_menu(View& root, Point root_pos);
 
+/// Route a context menu to an already-resolved pointer target. Platform hosts
+/// that perform overlay-aware hit testing must use this overload so the
+/// context-menu channel cannot fall through to a sibling beneath the overlay.
+bool dispatch_context_menu(View& root, View* target, Point root_pos);
+
 /// Feed one pointer event to `root`'s gesture arbiter and report whether the
 /// host must now YIELD — i.e. whether a recognizer actually took the pointer,
 /// so the host skips its own delivery for this event.

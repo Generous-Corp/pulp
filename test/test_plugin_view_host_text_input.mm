@@ -437,6 +437,70 @@ TEST_CASE("PluginViewHost (mac CPU) — host focus loss cancels active IME marke
     }
 }
 
+TEST_CASE("PluginViewHost (mac CPU) — overlay press cancels active IME before "
+          "focus transfer",
+          "[plugin-view-host][text-input][ime][overlay][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted overlay IME test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 180, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+
+        auto overlay_owned = std::make_unique<RecordingMouseView>();
+        auto* overlay = overlay_owned.get();
+        overlay->set_bounds({240, 20, 120, 100});
+        root.add_child(std::move(overlay_owned));
+        overlay->claim_overlay();
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        [pulp_view setMarkedText:[NSString stringWithUTF8String:kNi]
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->has_marked_text());
+
+        DiscardMarkedTextSpy discard_spy;
+        REQUIRE(discard_spy.active);
+        // PulpPluginView is unflipped, so Cocoa y=130 maps to root y=70.
+        [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(300, 130))];
+
+        REQUIRE(discard_spy.count() >= 1);
+        REQUIRE_FALSE(editor->has_marked_text());
+        REQUIRE(overlay->mouse_downs == 1);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 TEST_CASE("PluginViewHost (mac CPU) — host focus loss survives IME cancellation "
           "that unmounts the editor",
           "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
