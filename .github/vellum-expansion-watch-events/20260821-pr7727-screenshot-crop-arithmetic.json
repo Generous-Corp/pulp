@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260821-pr7727-screenshot-crop-arithmetic",
+  "created_at": "2026-08-21T02:13:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the existing Pulp-owned screenshot-crop arithmetic hardening across the render and visual-proof watch families. The immutable capture-primitives change event remains the authority declaration; this append-only watch receipt changes no source ownership, routing projection, capture behavior, or visual acceptance threshold.",
+  "tests": [
+    "pulp-test-screenshot-compare (23 cases, 105 assertions)",
+    "python3 tools/scripts/vellum_freeze_check.py --base <origin/main> --head <HEAD>",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <origin/main> --head <HEAD>",
+    "pulp-vellum-change-routing projection validation"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
