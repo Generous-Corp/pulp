@@ -376,7 +376,7 @@ policy_paths = [
 test_topology_paths = [
   "CMakeLists.txt",
   "**/CMakeLists.txt",
-  "test/**",
+  "test/cmake/**",
   "tools/scripts/test_*.py",
 ]
 
@@ -406,6 +406,65 @@ extended_tests = [
   "Forge catalog index covers every catalog header",
   "Forge catalog index comparison detects add and remove drift",
 ]
+
+[[targets.mac.changed_surface_selection.families]]
+name = "child-process-test-source-only"
+paths = ["test/test_child_process.cpp"]
+tests = [
+  "exec captures stdout",
+  "exec captures non-zero exit code",
+  "exec respects timeout",
+  "line callback fires per line",
+  "line callback exceptions cancel the child during wait",
+  "line callback failure preserves the other output stream during cancellation",
+  "line callback exceptions cancel a child during input-channel setup",
+  "cancel terminates process",
+  "process_id is available and stable after wait",
+  "find_on_path finds known binary",
+  "find_on_path returns nullopt for missing binary",
+  "exec with a binary that does not exist reports failure",
+  "exec captures empty-stdout cleanly",
+  "find_on_path returns nullopt for nonexistent",
+  "run with empty command fails gracefully",
+  "stderr is captured separately",
+  "wait and read before start return default results",
+  "disabled stream capture discards stdout stderr and callbacks",
+  "read_available_output drains stdout while process is running",
+  "read_available_output is empty when stdout capture is disabled",
+  "run honors working directory",
+  "output capture respects max byte limits",
+  "zero max output bytes drains without capturing lines",
+  "stderr line callback fires independently",
+  "line callback buffers partial stdout without trailing newline",
+  "line callback buffers partial stderr without trailing newline",
+  "move assignment transfers a running child process",
+  "move constructor transfers a running child process",
+  "wait is idempotent after process completion",
+  "start after observed completion waits previous child without cancellation state",
+  "cancel after natural exit reports completed process result",
+  "process reuse clears timeout state from prior run",
+  "process reuse clears cancellation state from prior run",
+  "start cancels a running child before launching replacement",
+  "failed restart after completion does not retain stale child state",
+  "argv arguments preserve empty strings spaces and punctuation",
+  "line callback emits empty lines and preserves order",
+  "line callback joins a line split across drain passes",
+  "line callback honors output cap before later complete lines",
+  "read_available_output drains stdout without losing stderr result",
+  "timeout preserves output emitted before termination",
+  "wait preserves output after is_running observes fast exit",
+  "ChildProcess destructor cancels a still-running POSIX child",
+  "ChildProcess move construction transfers a running POSIX child",
+  "ChildProcess move assignment transfers a running POSIX child",
+  "cancel escalates when a POSIX child ignores SIGTERM",
+  "timeout escalates when a POSIX child ignores SIGTERM",
+  "starting a POSIX replacement cancels a still-running child",
+  "starting a POSIX replacement drains a previously observed exit",
+  "POSIX wait consumes cached fast-exit status after polling",
+]
+build_targets = ["pulp-test-child-process"]
+supported_build_types = ["debug", "release"]
+risk_class = "low"
 
 # The repository may describe a bounded POSIX test-stage adapter, but it cannot
 # activate it. Shipyard reads the independent machine-global
