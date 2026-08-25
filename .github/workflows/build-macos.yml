@@ -107,7 +107,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
-          TARGET_REF: ${{ inputs.target_ref || github.ref_name }}
+          TARGET_REF: ${{ inputs.target_ref }}
           WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -115,13 +115,12 @@ jobs:
             echo "retarget workflow must be dispatched from protected main, not '$WORKFLOW_REF'" >&2
             exit 1
           fi
-          if [ -z "$TARGET_REF" ]; then
-            echo "target_ref is required to resolve an exact pull request" >&2
-            exit 1
-          fi
-
           number="$INPUT_PR_NUMBER"
           if [ -z "$number" ]; then
+            if [ -z "$TARGET_REF" ]; then
+              echo "target_ref is required when pr_number is omitted" >&2
+              exit 1
+            fi
             matches="$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
               -f state=open \
               -f base=main \
@@ -148,6 +147,9 @@ jobs:
           head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
           head_repository="$(printf '%s' "$pr_json" | jq -r .head.repo.full_name)"
           head_ref="$(printf '%s' "$pr_json" | jq -r .head.ref)"
+          if [ -z "$TARGET_REF" ]; then
+            TARGET_REF="$head_ref"
+          fi
           if [ "$state" != "open" ]; then
             echo "PR #$number is $state; refusing to retarget a closed PR" >&2
             exit 1
@@ -306,6 +308,7 @@ jobs:
             PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
             PULP_SKIA_CACHE_ROOT="$PULP_SKIA_CACHE_ROOT" \
             PULP_DESIGN_BROWSER="${PULP_DESIGN_BROWSER:-}" \
+            PULP_EXPECTED_BASE="${PULP_EXPECTED_BASE:-}" \
             PULP_EXPECTED_HEAD="${PULP_EXPECTED_HEAD:-}" \
             "$@"
           RUNNER
@@ -400,6 +403,7 @@ jobs:
 
       - name: Export exact head into the untrusted account
         env:
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
         shell: bash
         run: |
@@ -409,14 +413,17 @@ jobs:
             exit 1
           }
           # shellcheck disable=SC2016
-          PULP_EXPECTED_HEAD="$EXPECTED_HEAD" \
+          PULP_EXPECTED_BASE="$EXPECTED_BASE" PULP_EXPECTED_HEAD="$EXPECTED_HEAD" \
           "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
             set -euo pipefail
             export GIT_LFS_SKIP_SMUDGE=1
             git clone --shared --no-checkout "$PULP_TRUSTED_CHECKOUT" "$PULP_UNTRUSTED_SOURCE"
             git -C "$PULP_UNTRUSTED_SOURCE" remote set-url origin \
               "https://github.com/Generous-Corp/pulp.git"
+            git -C "$PULP_UNTRUSTED_SOURCE" update-ref \
+              refs/remotes/origin/main "$PULP_EXPECTED_BASE"
             git -C "$PULP_UNTRUSTED_SOURCE" checkout --detach "$PULP_EXPECTED_HEAD"
+            test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse refs/remotes/origin/main)" = "$PULP_EXPECTED_BASE"
             test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse HEAD)" = "$PULP_EXPECTED_HEAD"
           '
 

@@ -107,6 +107,7 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         "PULP_EPHEMERAL_ROOT", "PULP_BUILD_DIR",
         "PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_SKIA_CACHE_ROOT",
         "PULP_UNTRUSTED_SOURCE", "PULP_UNTRUSTED_RUNNER",
+        "PULP_EXPECTED_BASE", "refs/remotes/origin/main",
         "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "PULP_USE_CCACHE=OFF",
     ):
         if isolated not in build_text:
@@ -162,6 +163,24 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     ):
         if secret in init:
             raise AssertionError(f"untrusted wrapper passes protected variable {secret}")
+    export = next(
+        step for step in build["steps"]
+        if step.get("name") == "Export exact head into the untrusted account"
+    )
+    export_text = json.dumps(export, sort_keys=True)
+    for marker in (
+        "needs.resolve-runner.outputs.base_sha",
+        "PULP_EXPECTED_BASE",
+    ):
+        if marker not in export_text:
+            raise AssertionError(f"isolated clone lost protected base marker {marker}")
+    export_script = " ".join(export.get("run", "").split()).replace("\\ ", "")
+    for marker in (
+        "update-ref refs/remotes/origin/main",
+        "rev-parse refs/remotes/origin/main",
+    ):
+        if marker not in export_script:
+            raise AssertionError(f"isolated clone lost protected base marker {marker}")
     pr_command_steps = {
         "Bootstrap repository dependencies", "Configure", "Build", "Test",
     }
@@ -284,6 +303,7 @@ def _run_reporter(*, detail: dict[str, object] | None = None,
             "EXPECTED_HEAD": expected_head,
             "EXPECTED_HEAD_REF": expected_head_ref,
             "CHECK_RUN_ID": "12345",
+            "CHECK_EXTERNAL_ID": "retarget-1-1",
             "BUILD_RESULT": "success",
             "DETAILS_URL": "https://example.invalid/run/1",
             "GH_TOKEN": "test-token",
@@ -416,6 +436,18 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         rc, output, _ = _run(explicit="")
         self.assertEqual(rc, 0)
         self.assertEqual(output["number"], "7723")
+
+    def test_explicit_pr_uses_api_head_ref_when_target_ref_is_omitted(self) -> None:
+        rc, output, _ = _run(target_ref="")
+        self.assertEqual(rc, 0)
+        self.assertEqual(output["number"], "7723")
+        self.assertEqual(output["head_ref"], "repair/security-7723")
+
+    def test_target_ref_is_required_when_pr_number_is_omitted(self) -> None:
+        rc, output, error = _run(explicit="", target_ref="")
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, {})
+        self.assertIn("target_ref is required when pr_number is omitted", error)
 
     def test_target_ref_must_resolve_exactly_one_pr(self) -> None:
         for matches in ([], [_pr(number=1), _pr(number=2)]):
@@ -613,6 +645,13 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                     step for step in doc["jobs"]["build-test"]["steps"]
                     if step.get("name") == "Bootstrap repository dependencies"
                 ).update({"run": "./setup.sh --ci --deps-only"}),
+            ),
+            (
+                "isolated clone loses the immutable main base",
+                lambda doc: next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Export exact head into the untrusted account"
+                ).update({"run": "git clone --shared --no-checkout trusted untrusted"}),
             ),
         ]
         for label, mutate in cases:
