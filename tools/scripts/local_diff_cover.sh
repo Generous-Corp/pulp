@@ -28,6 +28,7 @@
 #   1 — diff coverage below threshold, or a hard error during the run
 #   2 — missing required dependency (clear remediation message)
 #   3 — not enough free disk space to run the coverage build (nothing built)
+#  10 — preflight-only mode found potentially coverable lines (caller should run)
 #
 # Design (mirrors CI):
 #   1. Read threshold + filters from coverage_config.json.
@@ -242,6 +243,124 @@ require_free_disk() {
     return 3
 }
 
+# Return 0 only when the exact merge-base-to-working-tree diff is proven to
+# contain no potentially coverable C/C++ production lines. Return non-zero for
+# coverable input and for every uncertainty: the caller then runs the existing
+# coverage build. This is deliberately conservative. Renames, copies, deletions,
+# type changes, binary diffs, missing refs, and parser failures all keep the gate
+# on; a suffix is the only positive evidence used to classify text as definitely
+# outside the native coverage surface.
+diff_cover_has_no_coverable_lines() {
+    local compare_branch="$1"
+    python3 - "${REPO_ROOT}" "${compare_branch}" <<'PY'
+import pathlib
+import subprocess
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+compare_branch = sys.argv[2]
+coverable_suffixes = {
+    ".c", ".cc", ".cpp", ".cxx", ".m", ".mm",
+    ".h", ".hh", ".hpp", ".hxx", ".inc", ".inl", ".ipp", ".tpp",
+    ".ixx", ".cppm",
+}
+known_non_native_suffixes = {
+    ".css", ".html", ".js", ".json", ".md", ".mjs", ".py", ".rst",
+    ".sh", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
+}
+known_non_native_paths = {
+    ".githooks/pre-push",
+}
+
+
+def git(*args: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+
+
+def potentially_coverable(path: str) -> bool:
+    lowered = path.lower()
+    suffixes = pathlib.PurePosixPath(lowered).suffixes
+    return any(suffix in coverable_suffixes for suffix in suffixes)
+
+
+def definitely_non_native(path: str) -> bool:
+    if path in known_non_native_paths:
+        return True
+    suffixes = pathlib.PurePosixPath(path.lower()).suffixes
+    return bool(suffixes) and suffixes[-1] in known_non_native_suffixes
+
+
+try:
+    merge_base = git("merge-base", compare_branch, "HEAD").decode().strip()
+    if not merge_base:
+        raise RuntimeError("empty merge base")
+
+    # Inspect each layer independently. A net merge-base-to-working-tree diff
+    # is unsafe here: an unstaged restoration can cancel a native change that
+    # remains committed in the HEAD being pushed. Independent layers can only
+    # add reasons to retain coverage; they can never erase one another.
+    layers = (
+        ("committed", (merge_base, "HEAD")),
+        ("staged", ("--cached", "HEAD")),
+        ("unstaged", ()),
+    )
+    for layer, diff_args in layers:
+        raw = git(
+            "diff", "--name-status", "-z", "--find-renames", "--find-copies",
+            *diff_args, "--",
+        ).split(b"\0")
+        if raw and raw[-1] == b"":
+            raw.pop()
+
+        i = 0
+        while i < len(raw):
+            status = raw[i].decode("ascii", "strict")
+            i += 1
+            kind = status[:1]
+            if kind not in {"A", "M"}:
+                print(
+                    f"[local_diff_cover] preflight: {layer} {status} change is "
+                    "not safely classifiable; retaining native coverage",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            if i >= len(raw):
+                raise RuntimeError(f"truncated {layer} name-status record")
+            path = raw[i].decode("utf-8", "surrogateescape")
+            i += 1
+            if potentially_coverable(path):
+                print(
+                    f"[local_diff_cover] preflight: potentially coverable native "
+                    f"change in {layer} path {path}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            if not definitely_non_native(path):
+                print(
+                    f"[local_diff_cover] preflight: unknown or extensionless "
+                    f"{layer} path {path}; retaining native coverage",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+
+    raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception as exc:
+    print(
+        f"[local_diff_cover] preflight: could not prove the diff is outside "
+        f"native coverage ({exc}); retaining native coverage",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
 # Let tests source the helpers above without running a coverage build.
 if [ "${PULP_DIFF_COVER_LIB_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
@@ -279,11 +398,86 @@ if [ ! -f "${CONFIG_JSON}" ]; then
 fi
 
 THRESHOLD="$(read_config_value diff_coverage_fail_under)"
-COMPARE_BRANCH="$(read_config_value compare_branch)"
+COMPARE_BRANCH="${PULP_DIFF_COVER_COMPARE_BRANCH:-$(read_config_value compare_branch)}"
+COMPARE_BRANCH_DISPLAY="${COMPARE_BRANCH}"
 
 if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
     echo "[local_diff_cover] invalid diff_coverage_fail_under in ${CONFIG_JSON}: '${THRESHOLD}'" >&2
     exit 1
+fi
+
+# Refresh and then pin a remote compare ref before it is allowed to authorize a
+# skip. A stale origin/main can otherwise erase a native revert from the diff.
+# Network failure is conservative: retain coverage rather than trust stale
+# local state. Local refs need no network and are still pinned against movement
+# between this classification and diff-cover itself.
+COMPARE_REF_READY=1
+compare_ref_full="$(git rev-parse --symbolic-full-name "${COMPARE_BRANCH}" 2>/dev/null || true)"
+compare_remote=""
+remote_branch=""
+case "${compare_ref_full}" in
+    refs/remotes/*/*)
+        compare_remote="${compare_ref_full#refs/remotes/}"
+        compare_remote="${compare_remote%%/*}"
+        remote_branch="${compare_ref_full#refs/remotes/${compare_remote}/}"
+        ;;
+    "")
+        # Only unresolved shorthand may be interpreted as <remote>/<branch>.
+        # A resolved refs/heads/upstream/topic is a local branch even when a
+        # remote named "upstream" also exists.
+        case "${COMPARE_BRANCH}" in
+            refs/remotes/*/*)
+                compare_remote="${COMPARE_BRANCH#refs/remotes/}"
+                compare_remote="${compare_remote%%/*}"
+                remote_branch="${COMPARE_BRANCH#refs/remotes/${compare_remote}/}"
+                ;;
+            */*)
+                compare_remote_candidate="${COMPARE_BRANCH%%/*}"
+                if git remote get-url "${compare_remote_candidate}" >/dev/null 2>&1; then
+                    compare_remote="${compare_remote_candidate}"
+                    remote_branch="${COMPARE_BRANCH#${compare_remote}/}"
+                fi
+                ;;
+        esac
+        ;;
+esac
+if [ -n "${compare_remote}" ]; then
+    if [ -z "${remote_branch}" ] || ! git fetch --no-tags --quiet "${compare_remote}" \
+        "+refs/heads/${remote_branch}:refs/remotes/${compare_remote}/${remote_branch}" 2>/dev/null; then
+        echo "[local_diff_cover] WARN: could not refresh ${COMPARE_BRANCH}; retaining coverage" >&2
+        COMPARE_REF_READY=0
+    fi
+fi
+if [ "${COMPARE_REF_READY}" = "1" ]; then
+    if pinned_compare_branch="$(git rev-parse --verify "${COMPARE_BRANCH}^{commit}" 2>/dev/null)"; then
+        COMPARE_BRANCH="${pinned_compare_branch}"
+    else
+        echo "[local_diff_cover] WARN: could not resolve ${COMPARE_BRANCH_DISPLAY}; retaining coverage" >&2
+        COMPARE_REF_READY=0
+    fi
+fi
+unset compare_ref_full compare_remote compare_remote_candidate remote_branch pinned_compare_branch
+
+if [ "${COMPARE_REF_READY}" != "1" ]; then
+    if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
+        # Exit 10 means the caller must retain the normal coverage gate.
+        exit 10
+    fi
+    echo "[local_diff_cover] ERROR: fresh compare authority is unavailable; refusing stale coverage" >&2
+    exit 4
+fi
+
+# This proof runs before disk/dependency checks, locking, configuring, or
+# compiling. A policy/test/config-only diff therefore exits in milliseconds
+# after the one freshness check needed to make that skip authoritative.
+# Pre-push uses preflight-only mode to avoid printing its long-build banner when
+# this script already knows no native coverage can be attributed.
+if [ "${COMPARE_REF_READY}" = "1" ] && diff_cover_has_no_coverable_lines "${COMPARE_BRANCH}"; then
+    echo "[local_diff_cover] skipped: exact diff has no potentially coverable C/C++ lines" >&2
+    exit 0
+fi
+if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
+    exit 10
 fi
 
 # Disk precondition, ahead of the dependency preflight, the fetch, the lock and
@@ -352,15 +546,6 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "  pip install --user 'diff-cover>=9'" >&2
     echo "  # clang/llvm-cov/llvm-profdata: ship with Xcode (macOS) or apt install clang llvm (Linux)" >&2
     exit 2
-fi
-
-# ── Ensure compare branch is fetched ────────────────────────────────────────
-# diff-cover needs origin/main reachable for the merge-base. Fetch
-# silently — the user might be offline; degrade to whatever's local.
-if [[ "${COMPARE_BRANCH}" == origin/* ]]; then
-    remote_branch="${COMPARE_BRANCH#origin/}"
-    git fetch --no-tags --quiet origin "${remote_branch}" 2>/dev/null || \
-        echo "[local_diff_cover] WARN: could not fetch ${COMPARE_BRANCH}; using local copy" >&2
 fi
 
 # ── Build coverage ──────────────────────────────────────────────────────────

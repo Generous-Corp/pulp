@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,9 +38,126 @@ def main() -> int:
     if 'cat "$gate_log" >&2 || true' not in helper_source:
         print("FAIL: diagnostic replay can override gate status", file=sys.stderr)
         return 1
-    if 'run_gate_captured bash "$DIFF_COVER_SH"' not in prepush_source:
+    captured_diff_cover = any(
+        line.strip().startswith("if ! run_gate_captured ")
+        and 'bash "$DIFF_COVER_SH"' in line
+        and line.strip().endswith("; then")
+        for line in prepush_source.splitlines()
+    )
+    if not captured_diff_cover:
         print("FAIL: slow diff-cover output bypasses gate capture", file=sys.stderr)
         return 1
+    if 'changed=$(git diff --name-only "$BASE...HEAD"' in prepush_source:
+        print("FAIL: stale outer diff filter can bypass compare-ref refresh", file=sys.stderr)
+        return 1
+
+    # The hook validates checked-out HEAD. Git may ask it to push another local
+    # ref, so prove the pushed-ref contract fails closed before any source gate
+    # can accidentally authorize the wrong commit.
+    with tempfile.TemporaryDirectory(prefix="pulp-prepush-refs-") as temp:
+        repo = Path(temp)
+        (repo / ".githooks" / "lib").mkdir(parents=True)
+        shutil.copy2(GATE_OUTPUT_HELPER, repo / ".githooks" / "lib" / "gate-output.sh")
+
+        def git(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ("git", *args),
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+        git("init", "-q")
+        git("config", "user.name", "Pulp Pre-push Test")
+        git("config", "user.email", "prepush-test@example.invalid")
+        (repo / "fixture.txt").write_text("first\n", encoding="utf-8")
+        git("add", "fixture.txt")
+        git("commit", "-qm", "first")
+        prior = git("rev-parse", "HEAD").stdout.strip()
+        (repo / "fixture.txt").write_text("second\n", encoding="utf-8")
+        git("commit", "-qam", "second")
+        head = git("rev-parse", "HEAD").stdout.strip()
+        zeros = "0" * 40
+
+        def run_hook(update_records: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ("bash", str(PREPUSH)),
+                cwd=repo,
+                input=update_records,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+                env={**os.environ, "PULP_SKIP_PR_BATCH_ADVICE": "1"},
+            )
+
+        exact = run_hook(f"refs/heads/main {head} refs/heads/main {prior}\n")
+        if exact.returncode != 0:
+            print("FAIL: exact checked-out HEAD push was refused", file=sys.stderr)
+            return 1
+
+        mismatched = run_hook(
+            f"refs/heads/prior {prior} refs/heads/prior {zeros}\n"
+        )
+        if mismatched.returncode == 0 or "check out that branch" not in mismatched.stderr:
+            print("FAIL: non-HEAD branch push did not fail closed", file=sys.stderr)
+            return 1
+
+        multi_ref = run_hook(
+            f"refs/heads/main {head} refs/heads/main {prior}\n"
+            f"refs/heads/prior {prior} refs/heads/prior {zeros}\n"
+        )
+        if multi_ref.returncode == 0:
+            print("FAIL: mixed-commit multi-ref push did not fail closed", file=sys.stderr)
+            return 1
+
+        tag_only = run_hook(
+            f"refs/tags/v-test {prior} refs/tags/v-test {zeros}\n"
+        )
+        if tag_only.returncode != 0:
+            print("FAIL: tag-only push was refused", file=sys.stderr)
+            return 1
+
+        notes_only = run_hook(
+            f"refs/notes/commits {prior} refs/notes/commits {zeros}\n"
+        )
+        if notes_only.returncode != 0:
+            print("FAIL: notes-only push was refused", file=sys.stderr)
+            return 1
+
+        deletion = run_hook(
+            f"(delete) {zeros} refs/heads/old {prior}\n"
+        )
+        if deletion.returncode != 0:
+            print("FAIL: branch deletion was refused", file=sys.stderr)
+            return 1
+
+        custom_exact = run_hook(
+            f"refs/heads/main {head} refs/review/topic {zeros}\n"
+        )
+        if custom_exact.returncode != 0:
+            print("FAIL: exact-HEAD custom source ref was refused", file=sys.stderr)
+            return 1
+
+        custom_mismatched = run_hook(
+            f"refs/heads/prior {prior} refs/review/topic {zeros}\n"
+        )
+        if custom_mismatched.returncode == 0 or "check out that branch" not in custom_mismatched.stderr:
+            print("FAIL: non-HEAD custom source ref did not fail closed", file=sys.stderr)
+            return 1
+
+        truncated = run_hook(f"refs/heads/main {head}\n")
+        if truncated.returncode == 0 or "malformed pushed-ref record" not in truncated.stderr:
+            print("FAIL: truncated pushed-ref input did not fail closed", file=sys.stderr)
+            return 1
+
+        extra_field = run_hook(
+            f"refs/heads/main {head} refs/heads/main {prior} unexpected\n"
+        )
+        if extra_field.returncode == 0 or "malformed pushed-ref record" not in extra_field.stderr:
+            print("FAIL: pushed-ref input with extra fields did not fail closed", file=sys.stderr)
+            return 1
 
     read_fd, write_fd = os.pipe()
     try:
