@@ -1755,7 +1755,7 @@ pulp macos retarget --pr 1910 --to github-hosted
 pulp macos status --pr 1910
 ```
 
-`pulp macos retarget` cancels any in-flight macOS-bearing workflow_run for the PR and fires a fresh `build-macos.yml` dispatch on the chosen runner. Branch protection's required `macos` check is satisfied by whichever workflow most recently produced that check name, so retargeting supersedes the previous macOS leg **without re-running Linux/Windows**.
+`pulp macos retarget` cancels any in-flight macOS-bearing workflow_run for the PR and fires a fresh `build-macos.yml` dispatch on the chosen runner. A status-write-only reporter publishes the result onto the resolved exact PR head, so branch protection can accept the newest `macos` check **without re-running Linux/Windows**.
 
 `build-macos.yml` is independent of `build.yml`'s matrix — they share check names but not workflow_runs. The matrix workflow continues running Linux/Windows as usual; only the macOS leg is replaced.
 
@@ -1766,12 +1766,17 @@ claiming a macOS runner, that trusted control path resolves one open internal
 PR, validates that PR still targets `Generous-Corp/pulp:main`, and pins both its
 exact head and the immutable base SHA recorded on the PR. The build runner first
 checks out the trusted workflow SHA with Git credentials disabled, then fetches,
-verifies, and detaches to the exact PR head. Capability-history checks compare
-against the event-pinned base, not newer live `main`; the native merge queue
-validates the eventual combined tree separately. Keep these contracts mirrored:
-a provider reroute must not turn the required gate into a full benchmark lane,
-run PR-authored control code, validate a different commit pair, or depend on
-stale runner checkout history.
+verifies, and detaches to the exact PR head. That build job has only
+contents-read permission, no Actions/Namespace cache action, no persistent
+ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
+teardown. The status-write token exists only in the final reporter, which never
+checks out or executes PR code and revalidates that the PR remains open at the
+same exact head before posting. Capability-history checks compare against the
+event-pinned base, not newer live `main`; the native merge queue validates the
+eventual combined tree separately. Keep these contracts mirrored: a provider
+reroute must not turn the required gate into a full benchmark lane, expose
+protected cache/write authority to PR code, validate a different commit pair,
+or depend on stale runner checkout history.
 
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 
@@ -1790,7 +1795,7 @@ Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 1. Is the local Mac runner idle? (process-based detection via `ps`; no admin token needed.)
 2. Is there a queued Build-and-Test workflow_run whose macOS job has `macos-15` (or `nscloud-*` / `namespace-profile-*`) labels — i.e., dispatched to cloud but not yet picked up?
 
-When both conditions hold, the watcher invokes `pulp macos retarget --pr N --to local` to cancel the cloud dispatch and rerun on local with warm caches. A 5-minute flap-guard prevents repeatedly bouncing the same PR.
+When both conditions hold, the watcher invokes `pulp macos retarget --pr N --to local` to cancel the cloud dispatch and rerun on local. The security-hardened retarget lane deliberately uses run-unique caches rather than the host's warm persistent caches. A 5-minute flap-guard prevents repeatedly bouncing the same PR.
 
 **Install (one-time per host):**
 

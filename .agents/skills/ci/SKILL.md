@@ -4053,16 +4053,22 @@ Linux/Windows too — wasted compute when they already passed.
 
 `build-macos.yml` is a standalone workflow (introduced in pulp task
 #20) that runs JUST the macOS build/test on a chosen runner pool.
-Branch protection's required `macos` check accepts the latest
-same-named check from either workflow, so `build-macos.yml`'s `macos`
-job supersedes the matrix's `macos` job when fresher.
+Branch protection's required `macos` check accepts the latest same-named check
+on the exact PR head. Because a trusted-main `workflow_dispatch` is attached to
+the main SHA, `build-macos.yml` uses a separate status-write-only reporter to
+publish the terminal result onto the API-pinned PR head. The reporter never
+checks out or executes PR code.
 
 It must remain semantically identical to the required macOS gate: resolve an
 open internal PR from the workflow definition on protected `main`, check out
 trusted control code with credentials disabled, then fetch and detach to the
-PR's exact head SHA and immutable base SHA for capability-history checks. It
-also installs the same pinned and checksum-verified Chrome used by `build.yml`
-and excludes
+PR's exact head SHA and immutable base SHA for capability-history checks. The
+untrusted build job has only contents-read permission, no Actions/Namespace
+cache action, no persistent build/dependency cache path, and no ccache; all
+writable state is unique to the run and removed at teardown. The reporter
+revalidates that the PR is still open at the same head before posting. It also installs
+the same pinned and checksum-verified Chrome used by `build.yml` inside that
+ephemeral root and excludes
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the
 provider; it must not turn required CI into a full benchmark lane, compare a
 behind PR against newer live `main`, or depend on a warm runner's stale refs.

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
@@ -43,6 +44,53 @@ def _resolver_script() -> str:
     if step is None:
         raise AssertionError("build-macos.yml lost the exact PR resolver")
     return step["run"]
+
+
+def _workflow() -> dict[str, object]:
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - environment-dependent
+        raise unittest.SkipTest("PyYAML not installed")
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _job_text(job_name: str) -> str:
+    document = _workflow()
+    return json.dumps(document["jobs"][job_name], sort_keys=True)
+
+
+def _assert_trust_boundary(workflow: dict[str, object]) -> None:
+    jobs = workflow["jobs"]
+    build = jobs["build-test"]
+    reporter = jobs["publish-macos-status"]
+    build_text = json.dumps(build, sort_keys=True)
+    reporter_text = json.dumps(reporter, sort_keys=True)
+
+    if workflow.get("permissions") != {}:
+        raise AssertionError("workflow permissions must default-deny")
+    if build.get("permissions") != {"contents": "read"}:
+        raise AssertionError("untrusted build may receive contents-read only")
+    for forbidden in (
+        "actions/cache", "nscloud-cache-action", "statuses: write",
+        "GH_TOKEN", "github.token", "~/Library/Caches",
+    ):
+        if forbidden in build_text:
+            raise AssertionError(f"untrusted build exposes {forbidden}")
+    for isolated in (
+        "PULP_EPHEMERAL_ROOT", "PULP_BUILD_DIR",
+        "PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_SKIA_CACHE_ROOT",
+        "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "PULP_USE_CCACHE=OFF",
+    ):
+        if isolated not in build_text:
+            raise AssertionError(f"untrusted build lost isolation marker {isolated}")
+    if reporter.get("permissions") != {
+        "pull-requests": "read", "statuses": "write"
+    }:
+        raise AssertionError("reporter permissions drifted")
+    if "actions/checkout" in reporter_text:
+        raise AssertionError("privileged reporter must never check out source")
+    if "needs.resolve-runner.outputs.head_sha" not in reporter_text:
+        raise AssertionError("reporter must use trusted resolver head")
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
@@ -158,9 +206,109 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
 
     def test_cli_dispatches_the_trusted_workflow_with_explicit_pr_identity(self) -> None:
         source = MACOS_COMMAND.read_text(encoding="utf-8")
-        self.assertIn('" --ref main"', source)
-        self.assertIn('" --field pr_number=" + shell_quote(pr_number)', source)
-        self.assertNotIn('" --ref " + shell_quote(head_ref)', source)
+        self.assertIn('"--ref", "main"', source)
+        self.assertIn('"--field", "pr_number=" + pr_number', source)
+        self.assertNotIn('"--ref", head_ref', source)
+
+    def test_untrusted_build_has_no_persistent_cache_or_privileged_token(self) -> None:
+        workflow = _workflow()
+        _assert_trust_boundary(workflow)
+        build = workflow["jobs"]["build-test"]
+        text = _job_text("build-test")
+        for forbidden in (
+            "actions/cache", "nscloud-cache-action", "statuses: write",
+            "GH_TOKEN", "github.token", "~/Library/Caches",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, text)
+        for isolated in (
+            "PULP_EPHEMERAL_ROOT", "PULP_BUILD_DIR",
+            "PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_SKIA_CACHE_ROOT",
+            "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "PULP_USE_CCACHE=OFF",
+        ):
+            with self.subTest(isolated=isolated):
+                self.assertIn(isolated, text)
+        checkout = next(
+            step for step in build["steps"]
+            if step.get("uses") == "actions/checkout@v5"
+        )
+        self.assertEqual(checkout["with"]["clean"], True)
+        self.assertEqual(checkout["with"]["persist-credentials"], False)
+
+    def test_privileged_reporter_never_checks_out_or_executes_pr_code(self) -> None:
+        workflow = _workflow()
+        reporter = workflow["jobs"]["publish-macos-status"]
+        self.assertEqual(
+            reporter["permissions"],
+            {"pull-requests": "read", "statuses": "write"},
+        )
+        self.assertEqual(reporter["needs"], ["resolve-runner", "build-test"])
+        text = _job_text("publish-macos-status")
+        script = reporter["steps"][0]["run"]
+        self.assertNotIn("actions/checkout", text)
+        self.assertNotIn("EXPECTED_BASE", text)
+        self.assertIn("needs.resolve-runner.outputs.head_sha", text)
+        self.assertIn("needs.build-test.result", text)
+        self.assertIn("statuses/$EXPECTED_HEAD", text)
+        self.assertIn("--raw-field context=macos", text)
+        self.assertIn("live_head", text)
+        self.assertIn('[ "$state" = success ] || exit 1', script)
+
+    def test_only_trusted_jobs_receive_elevated_permissions(self) -> None:
+        jobs = _workflow()["jobs"]
+        self.assertEqual(
+            jobs["resolve-runner"]["permissions"],
+            {"contents": "read", "pull-requests": "read"},
+        )
+        self.assertEqual(jobs["build-test"]["permissions"], {"contents": "read"})
+        self.assertEqual(
+            jobs["publish-macos-status"]["permissions"],
+            {"pull-requests": "read", "statuses": "write"},
+        )
+
+    def test_hostile_trust_boundary_mutations_are_rejected(self) -> None:
+        cases: list[tuple[str, callable]] = [
+            (
+                "cache action in untrusted build",
+                lambda doc: doc["jobs"]["build-test"]["steps"].append(
+                    {"uses": "actions/cache/restore@v4"}
+                ),
+            ),
+            (
+                "checks write in untrusted build",
+                lambda doc: doc["jobs"]["build-test"].update(
+                    {"permissions": {"contents": "read", "statuses": "write"}}
+                ),
+            ),
+            (
+                "token exposed to untrusted build",
+                lambda doc: doc["jobs"]["build-test"].setdefault("env", {}).update(
+                    {"GH_TOKEN": "${{ github.token }}"}
+                ),
+            ),
+            (
+                "privileged reporter checks out source",
+                lambda doc: doc["jobs"]["publish-macos-status"]["steps"].insert(
+                    0, {"uses": "actions/checkout@v5"}
+                ),
+            ),
+        ]
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                document = copy.deepcopy(_workflow())
+                mutate(document)
+                with self.assertRaises(AssertionError):
+                    _assert_trust_boundary(document)
+
+    def test_pinned_chrome_is_checksum_verified_inside_ephemeral_root(self) -> None:
+        text = _job_text("build-test")
+        self.assertIn("151.0.7922.47", text)
+        self.assertIn(
+            "9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee",
+            text,
+        )
+        self.assertIn("$PULP_EPHEMERAL_ROOT/chrome-for-testing", text)
+        self.assertIn("Chrome archive SHA-256 mismatch", text)
 
 
 if __name__ == "__main__":

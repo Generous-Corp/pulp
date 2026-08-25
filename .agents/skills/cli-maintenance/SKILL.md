@@ -1443,14 +1443,18 @@ target_ref=<pr-head> --field runner=<choice>`. The workflow definition must
 come from protected `main`: running PR-authored workflow control on a manual
 dispatch can poison persistent CI state before the exact PR checks execute.
 The trusted workflow validates the open internal PR's repository, base, ref,
-and immutable SHAs before fetching and detaching to its head.
+and immutable SHAs before fetching and detaching to its head. The build job has
+no cache writer or elevated token and uses only run-unique writable paths; a
+separate status-write-only job publishes the result onto the exact PR head
+without checking out or executing it.
 
 Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
 flag): the `build.yml` matrix couples Linux/Windows/macOS into one
 workflow_run. Rerunning macOS via that matrix re-runs Linux/Windows too.
-`build-macos.yml` is independent — it produces its own `macos`-named
-check that supersedes the matrix's `macos` check by recency. Branch
-protection's required-check name stays one stable token.
+`build-macos.yml` is independent — its trusted reporter produces a
+`macos`-named check on the resolved exact PR head that supersedes the matrix's
+same-named check by recency. Branch protection's required-check name stays one
+stable token.
 
 `pulp macos status --pr N` reads the latest `macos` check from the GitHub
 check-runs API for the PR's head SHA. Useful for confirming a retarget

@@ -177,11 +177,20 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text.index("- name: Test"),
         )
         chrome_step = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"
-        self.assertEqual(
-            workflow_named_step(BUILD_MACOS_WORKFLOW, "build-test", chrome_step),
-            workflow_named_step(BUILD_WORKFLOW, "build", chrome_step),
-            "retarget must use the exact verified Chrome install from build.yml",
-        )
+        retarget_chrome = workflow_named_step(
+            BUILD_MACOS_WORKFLOW, "build-test", chrome_step
+        )["run"]
+        required_chrome = workflow_named_step(BUILD_WORKFLOW, "build", chrome_step)
+        required_chrome = required_chrome["run"]
+        for pinned_value in (
+            "151.0.7922.47",
+            "9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee",
+            "Chrome archive SHA-256 mismatch",
+        ):
+            with self.subTest(pinned_value=pinned_value):
+                self.assertIn(pinned_value, retarget_chrome)
+                self.assertIn(pinned_value, required_chrome)
+        self.assertIn("$PULP_EPHEMERAL_ROOT", retarget_chrome)
 
     def test_installed_control_consumer_requests_cxx20(self) -> None:
         text = CONTROL_SDK_CONSUMER.read_text(encoding="utf-8")
