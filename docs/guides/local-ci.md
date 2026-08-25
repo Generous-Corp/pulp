@@ -1733,17 +1733,18 @@ pulp overflow threshold 1
 
 `pulp overflow disable` writes the `local-only` sentinel; deleting the variable
 would restore the hosted default. It does not cancel in-flight cloud runs. To
-force a currently-routed-to-cloud PR back to local,
-use `pulp macos retarget --pr N --to local` (see "Per-PR macOS retargeting"
-below).
+The protected-main retarget workflow does not currently move a PR back to the
+local pool; see the fail-closed boundary below.
 
 ## Per-PR macOS retargeting (`pulp macos`)
 
-For the case where automatic overflow picked the "wrong" pool — e.g. you want to push a specific PR to Namespace for paid-fast turnaround, or pull a queued GH-hosted job back to the local Mac because local just freed up — use the **`build-macos.yml`** workflow + the **`pulp macos`** CLI:
+For the case where automatic overflow picked the "wrong" cloud pool — e.g. you
+want to push a specific PR to Namespace for paid-fast turnaround or move it to
+GitHub-hosted — use the **`build-macos.yml`** workflow + the **`pulp macos`** CLI:
 
 ```bash
-# Switch PR's macOS leg to the local self-hosted Mac, freeing the GH-hosted slot:
-pulp macos retarget --pr 1910 --to local
+# Local is intentionally refused until the two-account Tart class is proven:
+pulp macos retarget --pr 1910 --to local  # fails closed
 
 # Pay to skip the queue (Namespace billable, fast parallel):
 pulp macos retarget --pr 1910 --to namespace
@@ -1769,13 +1770,22 @@ checks out the trusted workflow SHA with Git credentials disabled, then fetches,
 verifies, and detaches to the exact PR head. That build job has only
 contents-read permission, no Actions/Namespace cache action, no persistent
 ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
-teardown. The checks-write token exists only in the pending/final controller
+teardown. Because a protected-main Actions job also carries implicit runtime
+cache credentials, every PR-controlled setup/CMake/build/test command executes
+as the separate `nobody` uid through an empty, explicit environment. The PR
+source is a disposable isolated clone owned by that uid; no `ACTIONS_*`,
+`GITHUB_*`, token, credential, or Actions command-file variable crosses the
+account boundary. The checks-write token exists only in the pending/final controller
 jobs, which never check out or execute PR code and revalidate the complete PR identity (open
 state, base repository/ref/SHA, and head repository/ref/SHA) before posting.
-The local selector must exactly match the `pulp-gate-fast` clean-per-job JIT
-Tart class; an unset or generic self-hosted selector fails closed instead of
-executing input-selected code in a persistent runner account. Namespace must
-likewise resolve to a Namespace-hosted selector. Capability-history checks compare against the
+The local route always fails closed: today's JIT Tart guest is disposable, but
+its Actions runner and PR code share the administrative guest account, so PR
+code could still reach protected-main runtime/cache credentials during the job.
+Re-enable local retarget only after a separate hardened two-account image/class
+proves that the runner-controller account is unreachable from the build account.
+Namespace must
+likewise equal the approved `namespace-profile-generouscorp-macos` selector.
+Capability-history checks compare against the
 event-pinned base, not newer live `main`; the native merge queue validates the
 eventual combined tree separately. Keep these contracts mirrored: a provider
 reroute must not turn the required gate into a full benchmark lane, expose
@@ -1787,7 +1797,8 @@ Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 | Input | Default | Effect |
 |-------|---------|--------|
 | `pr_number` | inferred from `target_ref` | Identifies the open internal PR and its immutable base/head pair |
-| `runner` | `local` | Routes to `PULP_LOCAL_MACOS_RUNS_ON_JSON` |
+| `runner` | `github-hosted` | Routes to `"macos-15"` |
+| `runner=local` | — | Fails closed pending a proven two-account Tart runner class |
 | `runner=namespace` | — | Routes to `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` |
 | `runner=github-hosted` | — | Routes to `"macos-15"` (free GH-hosted) |
 | `target_ref` | (workflow's ref name) | Exact internal PR head branch to validate and build |
@@ -1799,7 +1810,9 @@ Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 1. Is the local Mac runner idle? (process-based detection via `ps`; no admin token needed.)
 2. Is there a queued Build-and-Test workflow_run whose macOS job has `macos-15` (or `nscloud-*` / `namespace-profile-*`) labels — i.e., dispatched to cloud but not yet picked up?
 
-When both conditions hold, the watcher invokes `pulp macos retarget --pr N --to local` to cancel the cloud dispatch and rerun on local. The security-hardened retarget lane deliberately uses run-unique caches rather than the host's warm persistent caches. A 5-minute flap-guard prevents repeatedly bouncing the same PR.
+The watcher remains installed-capable but its local handoff is intentionally
+inert while local retarget is fail-closed. Do not enable it as an automatic
+reroute authority until the two-account Tart prerequisite above is proven.
 
 **Install (one-time per host):**
 

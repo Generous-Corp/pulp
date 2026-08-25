@@ -181,6 +181,12 @@ int run_retarget(const std::vector<std::string>& args) {
         std::cerr << "pulp macos retarget: --to must be one of: local, namespace, github-hosted\n";
         return 1;
     }
+    if (runner == "local") {
+        std::cerr << "pulp macos retarget: local is fail-closed until the "
+                     "two-account Tart runner class is proven; use "
+                     "github-hosted or namespace\n";
+        return 1;
+    }
 
     int rc = cancel_in_flight_macos(pr_number);
     if (rc != 0) return rc;

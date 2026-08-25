@@ -4066,12 +4066,18 @@ trusted control code with credentials disabled, then fetch and detach to the
 PR's exact head SHA and immutable base SHA for capability-history checks. The
 untrusted build job has only contents-read permission, no Actions/Namespace
 cache action, no persistent build/dependency cache path, and no ccache; all
-writable state is unique to the run and removed at teardown. The reporter
+writable state is unique to the run and removed at teardown. All PR-controlled
+setup/CMake/build/test commands run as the separate `nobody` uid under `env -i`
+from a disposable isolated clone. Do not pass Actions runtime/cache variables,
+GitHub variables, tokens, credentials, or command-file paths across that account
+boundary. The reporter
 revalidates the complete open PR identity (base and head repository/ref/SHA)
-before posting. The local route fails closed unless its trusted repo variable
-is exactly the `pulp-gate-fast` clean-per-job JIT Tart selector; never replace
-that check with a generic self-hosted fallback. Namespace similarly accepts
-only its hosted selector. It also installs
+before posting. The local route is fail-closed even for the current
+`pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the
+main-scoped runtime/cache token while runner and PR code share the guest admin
+account. Re-enable it only with a separately proven two-account Tart class.
+Namespace accepts
+only the exact approved `namespace-profile-generouscorp-macos` selector. It also installs
 the same pinned and checksum-verified Chrome used by `build.yml` inside that
 ephemeral root and excludes
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the
@@ -4088,7 +4094,7 @@ It only enlarges the test binaries, never shipped plugins.
 
 ```bash
 # Move a PR's macOS leg to a different runner, without touching Linux/Windows:
-pulp macos retarget --pr <N> --to <local|namespace|github-hosted>
+pulp macos retarget --pr <N> --to <namespace|github-hosted>
 
 # See where the latest macOS check landed and its state:
 pulp macos status --pr <N>
@@ -4100,8 +4106,7 @@ PR (from both `build.yml` and `build-macos.yml`), then fires a fresh
 
 **When this is the right tool:**
 
-- Local Mac just freed up and a PR is sitting queued on GH-hosted →
-  `pulp macos retarget --pr N --to local` claws it back to local.
+- Local is deliberately unavailable until the two-account Tart class is proven.
 - One critical PR needs to skip the queue → `--to namespace` (billable).
 - A PR's macOS leg flaked on local; retry on GH-hosted → `--to github-hosted`.
 
@@ -4119,10 +4124,9 @@ GH Actions runner; the launchd template at
 `tools/launchd/pulp-macos-reroute-watcher.plist.template` documents
 the setup steps.
 
-Polling cadence: 30s. When there is **free macOS capacity** AND a BAT
-run's macOS job has cloud labels (`macos-15` or `nscloud-*` /
-`namespace-profile-*`) AND hasn't started yet, the watcher invokes
-`pulp macos retarget --pr N --to local`.
+The watcher is not an active reroute authority while local retarget is
+fail-closed. Preserve its state, but do not enable its local handoff until the
+two-account Tart prerequisite is proven.
 
 **Capacity is VM-slot-aware (#3299).** "Free capacity" is no longer a
 single runner's busy/idle — it's `free_macos_slots(hosts)`, the sum of

@@ -27,7 +27,7 @@ on:
       runner:
         description: "Where to run the macOS build/test"
         required: true
-        default: local
+        default: github-hosted
         type: choice
         options:
           - local
@@ -70,17 +70,13 @@ jobs:
           set -euo pipefail
           case "$RUNNER_CHOICE" in
             local)
-              # This label set is the reviewed one-job JIT Tart class. A
-              # generic self-hosted selector is not an acceptable fallback:
-              # PR code must never execute in a persistent runner account.
-              EXPECTED_LOCAL='["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'
-              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-}"
-              if [ -z "$SELECTOR" ] || ! jq -e --argjson expected "$EXPECTED_LOCAL" \
-                'type == "array" and length == ($expected | length) and sort == ($expected | sort)' \
-                <<<"$SELECTOR" >/dev/null; then
-                echo "::error::local retarget requires the exact disposable pulp-gate-fast JIT selector." >&2
-                exit 1
-              fi
+              # The current JIT Tart guest is disposable, but its Actions
+              # runner and PR code still share the guest's administrative
+              # account. That cannot protect protected-main runtime/cache
+              # credentials during the job. Local retarget stays fail-closed
+              # until a separately proven two-account Tart class exists.
+              echo "::error::local retarget is disabled pending a hardened two-account Tart runner class." >&2
+              exit 1
               ;;
             namespace)
               if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
@@ -266,8 +262,42 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/pulp-retarget-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$root"
+          cat > "$root/run-untrusted" <<'RUNNER'
+          #!/bin/bash
+          set -euo pipefail
+          # The Actions runner owns protected-main runtime/cache credentials.
+          # PR code runs as another uid with an empty, explicit environment, so
+          # it cannot read the runner process environment or receive any
+          # ACTIONS_*, GITHUB_*, token, credential, or command-file variable.
+          exec sudo -u nobody /usr/bin/env -i \
+            HOME="$PULP_UNTRUSTED_HOME" \
+            TMPDIR="$PULP_UNTRUSTED_TMPDIR" \
+            PATH="$PULP_TRUSTED_PATH" \
+            CI=1 \
+            PULP_BUILD_DIR="$PULP_BUILD_DIR" \
+            PULP_TRUSTED_CHECKOUT="$PULP_TRUSTED_CHECKOUT" \
+            PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
+            PULP_SKIA_CACHE_ROOT="$PULP_SKIA_CACHE_ROOT" \
+            PULP_DESIGN_BROWSER="${PULP_DESIGN_BROWSER:-}" \
+            PULP_EXPECTED_HEAD="${PULP_EXPECTED_HEAD:-}" \
+            HTTP_PROXY="${HTTP_PROXY:-}" HTTPS_PROXY="${HTTPS_PROXY:-}" \
+            NO_PROXY="${NO_PROXY:-}" SSL_CERT_FILE="${SSL_CERT_FILE:-}" \
+            "$@"
+          RUNNER
+          chmod 0555 "$root/run-untrusted"
+          mkdir -p "$root/source" "$root/build" "$root/fetchcontent" \
+            "$root/skia" "$root/home" "$root/tmp"
+          sudo chown -R nobody "$root/source" "$root/build" \
+            "$root/fetchcontent" "$root/skia" "$root/home" "$root/tmp"
           {
             echo "PULP_EPHEMERAL_ROOT=$root"
+            echo "PULP_UNTRUSTED_SOURCE=$root/source"
+            echo "PULP_UNTRUSTED_HOME=$root/home"
+            echo "PULP_UNTRUSTED_TMPDIR=$root/tmp"
+            echo "PULP_UNTRUSTED_RUNNER=$root/run-untrusted"
+            echo "PULP_TRUSTED_CHECKOUT=$GITHUB_WORKSPACE"
+            echo "PULP_TRUSTED_PATH=$PATH"
             echo "PULP_BUILD_DIR=$root/build"
             echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/fetchcontent"
             echo "PULP_SKIA_CACHE_ROOT=$root/skia"
@@ -321,9 +351,6 @@ jobs:
       # PR, not whichever commits reached main while a recovery waited. The
       # merge queue validates the combined tree against current main later.
 
-      - name: Bootstrap repository dependencies
-        run: ./setup.sh --ci --deps-only
-
       # Keep browser-source fidelity identical to build.yml's required macOS
       # lane. The VM images intentionally do not carry mutable system Chrome.
       - name: Install pinned Chrome for browser-source fidelity (macOS ARM64)
@@ -347,24 +374,71 @@ jobs:
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
 
-      - name: Configure
+      - name: Export exact head into the untrusted account
+        env:
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+        shell: bash
         run: |
           set -euo pipefail
-          # PULP_LOTTIE=ON exercises the opt-in skottie render path (bundled in
-          # the Skia toolchain from chrome/m151 onward, which ships SkJSON +
-          # skresources). The try-link auto-disables if a Skia bundle can't link
-          # skottie, so this can never break the build; it only gives the Lottie
-          # render + playback tests real coverage. Affects test binaries only —
-          # shipped plugins default PULP_LOTTIE OFF.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" ] || {
+            echo "refusing to export a non-pinned source tree" >&2
+            exit 1
+          }
+          # shellcheck disable=SC2016
+          PULP_EXPECTED_HEAD="$EXPECTED_HEAD" \
+          "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
+            set -euo pipefail
+            export GIT_LFS_SKIP_SMUDGE=1
+            git clone --shared --no-checkout "$PULP_TRUSTED_CHECKOUT" "$PULP_UNTRUSTED_SOURCE"
+            git -C "$PULP_UNTRUSTED_SOURCE" remote set-url origin \
+              "https://github.com/Generous-Corp/pulp.git"
+            git -C "$PULP_UNTRUSTED_SOURCE" checkout --detach "$PULP_EXPECTED_HEAD"
+            test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse HEAD)" = "$PULP_EXPECTED_HEAD"
+          '
+
+      - name: Prove protected runtime credentials are absent from PR execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016
+          "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
+            test "$(id -un)" = nobody
+            while IFS= read -r name; do
+              case "$name" in
+                ACTIONS_*|GITHUB_*|GH_*|*_TOKEN|*_CREDENTIAL*)
+                  echo "protected credential variable leaked: $name" >&2
+                  exit 1
+                  ;;
+              esac
+            done < <(env | cut -d= -f1)
+          '
+
+      - name: Bootstrap repository dependencies
+        run: |
+          "$PULP_UNTRUSTED_RUNNER" \
+            "$PULP_UNTRUSTED_SOURCE/setup.sh" --ci --deps-only
+
+      - name: Configure
+        run: |
+          # PULP_LOTTIE=ON exercises the opt-in skottie render path. The
+          # try-link auto-disables if the verified bundle cannot link it.
+          "$PULP_UNTRUSTED_RUNNER" cmake \
+            -S "$PULP_UNTRUSTED_SOURCE" -B "$PULP_BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF
 
       - name: Build
-        run: cmake --build "$PULP_BUILD_DIR" --config Release
+        run: |
+          "$PULP_UNTRUSTED_RUNNER" cmake --build "$PULP_BUILD_DIR" --config Release
 
       - name: Test
         # Mirror build.yml's required macOS selection. Retarget is another
         # provider for the same gate, not a full/nightly benchmark lane.
-        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        run: |
+          "$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
+            --output-on-failure --repeat until-pass:2 -C Release \
+            -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 \
+            --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Remove untrusted writable state
         if: always()

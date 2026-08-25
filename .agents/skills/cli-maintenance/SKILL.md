@@ -1448,9 +1448,12 @@ no cache writer or elevated token and uses only run-unique writable paths;
 checks-write-only controller jobs create one pending exact-head check before
 execution and complete it afterward, without checking out or executing PR code,
 after revalidating the complete base/head
-repository, ref, and SHA identity. The local route accepts only the exact
-`pulp-gate-fast` disposable JIT Tart selector; missing or generic self-hosted
-labels fail closed. Namespace likewise accepts only a Namespace-hosted selector.
+repository, ref, and SHA identity. The local route always fails closed until a
+separately proven two-account Tart class prevents PR code from reaching the
+guest's Actions runner account. Namespace accepts only its exact approved profile.
+Inside the build job, every PR-controlled command runs as the separate `nobody`
+uid under an empty allowlisted environment, so protected-main Actions runtime
+cache credentials and command-file paths never reach PR code.
 
 Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
 flag): the `build.yml` matrix couples Linux/Windows/macOS into one

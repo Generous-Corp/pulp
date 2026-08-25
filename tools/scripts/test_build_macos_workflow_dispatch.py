@@ -106,6 +106,7 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     for isolated in (
         "PULP_EPHEMERAL_ROOT", "PULP_BUILD_DIR",
         "PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_SKIA_CACHE_ROOT",
+        "PULP_UNTRUSTED_SOURCE", "PULP_UNTRUSTED_RUNNER",
         "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "PULP_USE_CCACHE=OFF",
     ):
         if isolated not in build_text:
@@ -140,9 +141,36 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         if identity not in reporter_text or identity not in pending_text:
             raise AssertionError(f"controller lost PR identity check {identity}")
     resolver_text = json.dumps(jobs["resolve-runner"], sort_keys=True)
-    for marker in ("pulp-gate-fast", "EXPECTED_LOCAL", "namespace-"):
+    for marker in ("local retarget is disabled", "two-account Tart", "namespace-"):
         if marker not in resolver_text:
             raise AssertionError(f"runner resolver lost isolation marker {marker}")
+    init = next(
+        step for step in build["steps"]
+        if step.get("name") == "Initialize isolated retarget paths"
+    )["run"]
+    for marker in (
+        "exec sudo -u nobody /usr/bin/env -i",
+        'HOME="$PULP_UNTRUSTED_HOME"',
+        'TMPDIR="$PULP_UNTRUSTED_TMPDIR"',
+    ):
+        if marker not in init:
+            raise AssertionError(f"untrusted account wrapper lost {marker}")
+    for secret in (
+        "ACTIONS_RUNTIME_TOKEN=", "ACTIONS_CACHE_URL=",
+        "ACTIONS_RESULTS_URL=", "GITHUB_TOKEN=", "GH_TOKEN=",
+        "GITHUB_ENV=", "GITHUB_PATH=",
+    ):
+        if secret in init:
+            raise AssertionError(f"untrusted wrapper passes protected variable {secret}")
+    pr_command_steps = {
+        "Bootstrap repository dependencies", "Configure", "Build", "Test",
+    }
+    for step in build["steps"]:
+        script = step.get("run", "")
+        if step.get("name") in pr_command_steps and '"$PULP_UNTRUSTED_RUNNER"' not in script:
+            raise AssertionError(
+                f"PR-controlled command bypasses untrusted wrapper in {step.get('name')}"
+            )
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
@@ -195,7 +223,7 @@ def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
         return process.returncode, parsed, process.stderr
 
 
-def _run_runner(*, choice: str = "local",
+def _run_runner(*, choice: str = "github-hosted",
                 local: str = '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]',
                 namespace: str = '"namespace-profile-generouscorp-macos"',
                 ) -> tuple[int, dict[str, str], str]:
@@ -317,23 +345,17 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             "head_ref": "repair/security-7723",
         })
 
-    def test_local_route_requires_exact_disposable_jit_selector(self) -> None:
-        rc, output, _ = _run_runner()
-        self.assertEqual(rc, 0)
-        self.assertEqual(output["route"], "local")
-        hostile = (
-            '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]',
-            '["self-hosted","sanitizer"]',
-            '"macos-15"',
-            "",
-            "not-json",
+    def test_local_route_fails_closed_even_for_current_jit_selector(self) -> None:
+        selectors = (
+            '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]',
+            '["self-hosted","sanitizer"]', '"macos-15"', "", "not-json",
         )
-        for selector in hostile:
+        for selector in selectors:
             with self.subTest(selector=selector):
-                rc, output, error = _run_runner(local=selector)
+                rc, output, error = _run_runner(choice="local", local=selector)
                 self.assertEqual(rc, 1)
                 self.assertEqual(output, {})
-                self.assertIn("disposable pulp-gate-fast JIT selector", error)
+                self.assertIn("two-account Tart runner class", error)
 
     def test_namespace_route_cannot_be_redirected_to_self_hosted(self) -> None:
         rc, output, _ = _run_runner(choice="namespace")
@@ -445,6 +467,10 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertIn('"--ref", "main"', source)
         self.assertIn('"--field", "pr_number=" + pr_number', source)
         self.assertNotIn('"--ref", head_ref', source)
+        refusal = source.index('if (runner == "local")')
+        cancellation = source.index("cancel_in_flight_macos(pr_number)", refusal)
+        self.assertLess(refusal, cancellation)
+        self.assertIn("two-account Tart runner class is proven", source)
 
     def test_untrusted_build_has_no_persistent_cache_or_privileged_token(self) -> None:
         workflow = _workflow()
@@ -460,6 +486,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         for isolated in (
             "PULP_EPHEMERAL_ROOT", "PULP_BUILD_DIR",
             "PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_SKIA_CACHE_ROOT",
+            "PULP_UNTRUSTED_SOURCE", "PULP_UNTRUSTED_RUNNER",
             "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "PULP_USE_CCACHE=OFF",
         ):
             with self.subTest(isolated=isolated):
@@ -555,10 +582,24 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                 ),
             ),
             (
-                "local route accepts generic persistent runner labels",
+                "local route stops failing closed",
                 lambda doc: doc["jobs"]["resolve-runner"]["steps"][0].update(
-                    {"run": "echo runs_on_json='[\"self-hosted\"]' >> $GITHUB_OUTPUT"}
+                    {"run": "echo runs_on_json='[\"self-hosted\"]' >> $GITHUB_OUTPUT; echo 'local retarget is disabled two-account Tart'"}
                 ),
+            ),
+            (
+                "PR code inherits protected runner environment",
+                lambda doc: next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Initialize isolated retarget paths"
+                ).update({"run": "exec sudo -u nobody env"}),
+            ),
+            (
+                "PR setup bypasses untrusted account wrapper",
+                lambda doc: next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Bootstrap repository dependencies"
+                ).update({"run": "./setup.sh --ci --deps-only"}),
             ),
         ]
         for label, mutate in cases:
