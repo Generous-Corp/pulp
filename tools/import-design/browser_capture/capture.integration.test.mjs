@@ -18,6 +18,10 @@ import { inflateSync } from "node:zlib";
 
 const execute = promisify(execFile);
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function runCapture(script, browser, input, root, output, width, height) {
   await execute(process.execPath, [
     script, "capture", "--browser", browser, "--input", input,
@@ -96,6 +100,13 @@ function rgbaPixel(png, x, y) {
   if (bytesPerPixel === 3) channels.push(255);
   return channels;
 }
+
+test("escapeRegExp preserves arbitrary text as a literal pattern", () => {
+  const literal = "version\\with.*+?^${}()|[]characters";
+  const pattern = new RegExp(`^${escapeRegExp(literal)}$`);
+  assert.match(literal, pattern);
+  assert.doesNotMatch(`${literal}suffix`, pattern);
+});
 
 async function installedBrowser() {
   const candidates = [
@@ -502,7 +513,7 @@ test("real browser capture freezes a canvas animation and names its browser",
       assert.match(
         run.stderr,
         new RegExp(`\\[browser-capture\\] browser=[^/]+/${
-          envelope.provenance.browser.version.replace(/\./g, "\\.")} `));
+          escapeRegExp(envelope.provenance.browser.version)} `));
       const snapshot = JSON.parse(
         await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
       const document = snapshot.documents[0];
