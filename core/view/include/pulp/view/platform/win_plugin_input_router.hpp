@@ -151,6 +151,10 @@ public:
             // Outside presses must dismiss this editor's generalized overlay
             // even when a gesture recognizer consumes the press below.
             const auto overlay_press = route_press_to_active_overlay(root, pt);
+            // Outside-dismiss callbacks are arbitrary application code and may
+            // synchronously replace the pointer bracket. A stale outer frame
+            // must not feed its press into the replacement's gesture session.
+            if (!accepts_original()) return;
             if (overlay_press.routing == OverlayPressRouting::routed)
                 drag_target_.set(overlay_press.target);
             MouseEvent gesture_event;
@@ -160,7 +164,13 @@ public:
             gesture_event.modifiers = modifiers;
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
-            if (yield_to_gesture(gesture_event)) {
+            // Claimed overlays paint in a separate top layer, so the ordinary
+            // gesture arbiter's root hit-test can resolve a later sibling
+            // underneath. Match the standalone/mac overlay path: deliver the
+            // resolved overlay press directly rather than offering it to an
+            // unrelated underlay recognizer.
+            if (overlay_press.routing != OverlayPressRouting::routed &&
+                yield_to_gesture(gesture_event)) {
                 // A synchronous gesture callback may have terminalized this
                 // bracket. Capture only for the still-current claimed session.
                 if (accepts_original()) host_.input_capture_pointer();

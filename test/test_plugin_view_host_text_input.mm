@@ -61,6 +61,18 @@ NSEvent* make_left_mouse_down(NSPoint loc) {
                              pressure:1.0];
 }
 
+NSEvent* make_right_mouse_down(NSPoint loc) {
+    return [NSEvent mouseEventWithType:NSEventTypeRightMouseDown
+                              location:loc
+                         modifierFlags:0
+                             timestamp:0
+                          windowNumber:0
+                               context:nil
+                           eventNumber:0
+                            clickCount:1
+                              pressure:1.0];
+}
+
 int g_discard_marked_text_count = 0;
 IMP g_original_discard_marked_text = nullptr;
 
@@ -494,6 +506,55 @@ TEST_CASE("PluginViewHost (mac CPU) — overlay press cancels active IME before 
         REQUIRE(discard_spy.count() >= 1);
         REQUIRE_FALSE(editor->has_marked_text());
         REQUIRE(overlay->mouse_downs == 1);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overlay",
+          "[plugin-view-host][context-menu][overlay][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted overlay context-menu test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto overlay_owned = std::make_unique<RecordingMouseView>();
+        auto* overlay = overlay_owned.get();
+        overlay->set_bounds({0, 0, 400, 200});
+        int overlay_menus = 0;
+        overlay->on_context_menu = [&](pulp::view::Point) { ++overlay_menus; };
+        root.add_child(std::move(overlay_owned));
+        overlay->claim_overlay();
+
+        auto under_owned = std::make_unique<RecordingMouseView>();
+        auto* under = under_owned.get();
+        under->set_bounds({0, 0, 400, 200});
+        int under_menus = 0;
+        under->on_context_menu = [&](pulp::view::Point) { ++under_menus; };
+        root.add_child(std::move(under_owned));
+
+        [pulp_view rightMouseDown:make_right_mouse_down(NSMakePoint(200, 100))];
+        REQUIRE(overlay_menus == 1);
+        REQUIRE(under_menus == 0);
 
         host->detach();
         host.reset();

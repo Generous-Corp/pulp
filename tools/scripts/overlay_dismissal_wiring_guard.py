@@ -59,13 +59,128 @@ OVERLAY_PATTERNS = (
 )
 
 
-def without_comments(text: str) -> str:
-    """Remove C/C++ comments so prose cannot satisfy a wiring obligation."""
-    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
+def executable_shape(text: str) -> str:
+    """Blank comments and literals while preserving offsets and newlines."""
+    chars = list(text)
+    i = 0
+    state = "code"
+    quote = ""
+    while i < len(chars):
+        c = chars[i]
+        nxt = chars[i + 1] if i + 1 < len(chars) else ""
+        if state == "code":
+            if c == "/" and nxt == "/":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                state = "line_comment"
+                continue
+            if c == "/" and nxt == "*":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                state = "block_comment"
+                continue
+            if c in {'"', "'"}:
+                quote = c
+                chars[i] = " "
+                i += 1
+                state = "literal"
+                continue
+        elif state == "line_comment":
+            if c == "\n":
+                state = "code"
+            else:
+                chars[i] = " "
+            i += 1
+            continue
+        elif state == "block_comment":
+            if c == "*" and nxt == "/":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                state = "code"
+                continue
+            if c != "\n":
+                chars[i] = " "
+            i += 1
+            continue
+        else:
+            if c == "\\" and i + 1 < len(chars):
+                chars[i] = " "
+                if chars[i + 1] != "\n":
+                    chars[i + 1] = " "
+                i += 2
+                continue
+            if c == quote:
+                chars[i] = " "
+                i += 1
+                state = "code"
+                continue
+            if c != "\n":
+                chars[i] = " "
+            i += 1
+            continue
+        i += 1
+    return "".join(chars)
 
 
 def matching_lines(text: str, pattern: re.Pattern[str]) -> list[int]:
     return [index for index, line in enumerate(text.splitlines()) if pattern.search(line)]
+
+
+def matching_offsets(text: str, pattern: re.Pattern[str]) -> list[int]:
+    return [match.start() for match in pattern.finditer(text)]
+
+
+def function_bodies(text: str) -> list[tuple[int, int]]:
+    """Return brace ranges whose declaration prefix looks callable."""
+    stack: list[int] = []
+    ranges: list[tuple[int, int]] = []
+    for index, char in enumerate(text):
+        if char == "{":
+            stack.append(index)
+        elif char == "}" and stack:
+            start = stack.pop()
+            delimiter = max(text.rfind(";", 0, start),
+                            text.rfind("{", 0, start),
+                            text.rfind("}", 0, start))
+            prefix = text[delimiter + 1:start].strip()
+            if ")" in prefix:
+                ranges.append((start, index))
+    return ranges
+
+
+def mechanisms_share_body(text: str) -> bool:
+    executable = executable_shape(text)
+    combos = matching_offsets(executable, COMBO_PATTERN)
+    overlays = [
+        offset
+        for pattern in OVERLAY_PATTERNS
+        for offset in matching_offsets(executable, pattern)
+    ]
+    bodies = function_bodies(executable)
+    return bool(combos) and all(
+        any(
+            start < combo < end and
+            any(start < overlay < end for overlay in overlays)
+            for start, end in bodies
+        )
+        for combo in combos
+    )
+
+
+def self_test() -> bool:
+    valid = """
+    void press() {
+        ComboBox::notify_global_click(target);
+        route_press_to_active_overlay(root, pt);
+    }
+    """
+    unrelated = """
+    void press() { ComboBox::notify_global_click(target); }
+    void escape() { View::dismiss_active_overlay(); }
+    const char* decoy = "route_press_to_active_overlay(root, pt)";
+    /* route_press_to_active_overlay(root, pt); */
+    """
+    return mechanisms_share_body(valid) and not mechanisms_share_body(unrelated)
 
 
 def repo_root() -> Path:
@@ -86,6 +201,12 @@ def host_sources(root: Path) -> list[Path]:
 
 def main() -> int:
     root = repo_root()
+    if not self_test():
+        print(
+            "overlay-dismissal-wiring: FAIL - structural guard self-test failed",
+            file=sys.stderr,
+        )
+        return 1
     offenders: list[Path] = []
     checked = 0
 
@@ -94,24 +215,16 @@ def main() -> int:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        executable_text = without_comments(text)
+        executable_text = executable_shape(text)
         combo_lines = matching_lines(executable_text, COMBO_PATTERN)
         if not combo_lines:
             continue
         checked += 1
-        overlay_lines = [
-            line
-            for pattern in OVERLAY_PATTERNS
-            for line in matching_lines(executable_text, pattern)
-        ]
-        # Both mechanisms belong to the same press handler. A bounded line
-        # distance rejects an unrelated ESC-key dismissal elsewhere in a large
-        # host file while allowing the small amount of host-specific routing
-        # between popup handling and the regular hit test.
-        paired = all(
-            any(abs(combo_line - overlay_line) <= 120 for overlay_line in overlay_lines)
-            for combo_line in combo_lines
-        )
+        # Both mechanisms must occur inside one callable body. This rejects an
+        # unrelated ESC handler, namespace-level token, comment, or string;
+        # nested lambdas remain valid because their enclosing press handler is
+        # also a callable brace range.
+        paired = mechanisms_share_body(text)
         if not paired:
             offenders.append(path)
 

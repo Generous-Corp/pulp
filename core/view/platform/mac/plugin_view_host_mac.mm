@@ -999,7 +999,14 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
   @try {
     try {
         if (!self.rootView) { [super rightMouseDown:event]; return; }
-        if (pulp::view::dispatch_context_menu(*self.rootView, [self localPoint:event]))
+        const auto point = [self localPoint:event];
+        const auto overlay_press = pulp::view::route_press_to_active_overlay(
+            *self.rootView, point);
+        auto* target = overlay_press.routing ==
+                               pulp::view::OverlayPressRouting::routed
+                           ? overlay_press.target
+                           : self.rootView->hit_test(point);
+        if (pulp::view::dispatch_context_menu(*self.rootView, target, point))
             [self setNeedsDisplay:YES];
         else
             [super rightMouseDown:event];  // let the host show its own menu

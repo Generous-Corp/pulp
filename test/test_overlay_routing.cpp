@@ -107,6 +107,29 @@ TEST_CASE("View destructor releases the overlay slot [issue-1148]",
     REQUIRE(View::active_overlay_ == nullptr);
 }
 
+TEST_CASE("removing and destroying an overlay clears its former root slot",
+          "[view][overlay][lifetime]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0, 0, 200, 200});
+    auto sibling = std::make_unique<TestView>();
+    sibling->set_bounds({100, 100, 50, 50});
+    root.add_child(std::move(sibling));
+    auto owned = std::make_unique<TestView>();
+    auto* overlay = owned.get();
+    overlay->set_bounds({0, 0, 100, 100});
+    root.add_child(std::move(owned));
+    overlay->claim_overlay();
+    REQUIRE(root.existing_interaction()->active_overlay == overlay);
+
+    auto retired = root.remove_child(overlay);
+    retired.reset();
+
+    REQUIRE(root.existing_interaction()->active_overlay == nullptr);
+    REQUIRE(route_press_to_active_overlay(root, {10, 10}).routing ==
+            pulp::view::OverlayPressRouting::no_overlay);
+}
+
 TEST_CASE("View::overlay_contains uses absolute window coords [issue-1148]",
           "[view][overlay]") {
     OverlayGuard g;
