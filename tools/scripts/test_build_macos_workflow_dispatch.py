@@ -392,10 +392,14 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             "head_ref": "repair/security-7723",
         })
 
-    def test_concurrency_is_scoped_to_explicit_pr_before_optional_ref(self) -> None:
+    def test_concurrency_uses_the_required_canonical_pr_ref(self) -> None:
         self.assertEqual(
             _workflow()["concurrency"]["group"],
-            "build-macos-${{ inputs.pr_number || inputs.target_ref || github.ref }}",
+            "build-macos-${{ inputs.target_ref }}",
+        )
+        self.assertEqual(
+            _workflow()[True]["workflow_dispatch"]["inputs"]["target_ref"]["required"],
+            True,
         )
 
     def test_local_route_fails_closed_even_for_current_jit_selector(self) -> None:
@@ -508,17 +512,11 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(output["number"], "7723")
 
-    def test_explicit_pr_uses_api_head_ref_when_target_ref_is_omitted(self) -> None:
-        rc, output, _ = _run(target_ref="")
-        self.assertEqual(rc, 0)
-        self.assertEqual(output["number"], "7723")
-        self.assertEqual(output["head_ref"], "repair/security-7723")
-
-    def test_target_ref_is_required_when_pr_number_is_omitted(self) -> None:
-        rc, output, error = _run(explicit="", target_ref="")
+    def test_target_ref_is_required_for_every_dispatch_form(self) -> None:
+        rc, output, error = _run(target_ref="")
         self.assertEqual(rc, 1)
         self.assertEqual(output, {})
-        self.assertIn("target_ref is required when pr_number is omitted", error)
+        self.assertIn("target_ref is required to resolve an exact pull request", error)
 
     def test_target_ref_must_resolve_exactly_one_pr(self) -> None:
         for matches in ([], [_pr(number=1), _pr(number=2)]):
