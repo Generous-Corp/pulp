@@ -142,9 +142,27 @@ jobs:
           set -euo pipefail
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
             -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
-      - name: Build
+      - name: Verify validator inventory
         shell: bash
-        run: tools/ci/governed-build.sh cmake --build build
+        run: python3 tools/scripts/verify_example_validation_inventory.py --build-dir build
+      - name: Build all examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== free disk before example build ==="
+          df -h .
+          started="$(date +%s)"
+          finish() {
+            status="$?"
+            trap - EXIT
+            elapsed="$(( $(date +%s) - started ))"
+            echo "Example aggregate build: ${elapsed}s (status ${status})" >> "$GITHUB_STEP_SUMMARY"
+            echo "=== free disk after example build ==="
+            df -h .
+            exit "$status"
+          }
+          trap finish EXIT
+          tools/ci/governed-build.sh cmake --build build --target pulp-examples-all
       - name: Run example validators (ctest -L validation)
         shell: bash
         run: |
