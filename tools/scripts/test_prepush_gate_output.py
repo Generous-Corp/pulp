@@ -109,6 +109,34 @@ def main() -> int:
             print("FAIL: mixed-commit multi-ref push did not fail closed", file=sys.stderr)
             return 1
 
+        tag_only = run_hook(
+            f"refs/tags/v-test {prior} refs/tags/v-test {zeros}\n"
+        )
+        if tag_only.returncode != 0:
+            print("FAIL: tag-only push was refused", file=sys.stderr)
+            return 1
+
+        deletion = run_hook(
+            f"(delete) {zeros} refs/heads/old {prior}\n"
+        )
+        if deletion.returncode != 0:
+            print("FAIL: branch deletion was refused", file=sys.stderr)
+            return 1
+
+        custom_exact = run_hook(
+            f"refs/heads/main {head} refs/review/topic {zeros}\n"
+        )
+        if custom_exact.returncode != 0:
+            print("FAIL: exact-HEAD custom source ref was refused", file=sys.stderr)
+            return 1
+
+        custom_mismatched = run_hook(
+            f"refs/heads/prior {prior} refs/review/topic {zeros}\n"
+        )
+        if custom_mismatched.returncode == 0 or "check out that branch" not in custom_mismatched.stderr:
+            print("FAIL: non-HEAD custom source ref did not fail closed", file=sys.stderr)
+            return 1
+
         truncated = run_hook(f"refs/heads/main {head}\n")
         if truncated.returncode == 0 or "malformed pushed-ref record" not in truncated.stderr:
             print("FAIL: truncated pushed-ref input did not fail closed", file=sys.stderr)

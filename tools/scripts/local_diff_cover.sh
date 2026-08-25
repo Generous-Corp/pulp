@@ -399,17 +399,42 @@ fi
 
 THRESHOLD="$(read_config_value diff_coverage_fail_under)"
 COMPARE_BRANCH="${PULP_DIFF_COVER_COMPARE_BRANCH:-$(read_config_value compare_branch)}"
+COMPARE_BRANCH_DISPLAY="${COMPARE_BRANCH}"
 
 if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
     echo "[local_diff_cover] invalid diff_coverage_fail_under in ${CONFIG_JSON}: '${THRESHOLD}'" >&2
     exit 1
 fi
 
-# This proof runs before disk/dependency checks, fetching, locking, configuring,
-# or compiling. A policy/test/config-only diff therefore exits in milliseconds.
+# Refresh and then pin a remote compare ref before it is allowed to authorize a
+# skip. A stale origin/main can otherwise erase a native revert from the diff.
+# Network failure is conservative: retain coverage rather than trust stale
+# local state. Local refs need no network and are still pinned against movement
+# between this classification and diff-cover itself.
+COMPARE_REF_READY=1
+if [[ "${COMPARE_BRANCH}" == origin/* ]]; then
+    remote_branch="${COMPARE_BRANCH#origin/}"
+    if ! git fetch --no-tags --quiet origin \
+        "+refs/heads/${remote_branch}:refs/remotes/origin/${remote_branch}" 2>/dev/null; then
+        echo "[local_diff_cover] WARN: could not refresh ${COMPARE_BRANCH}; retaining coverage" >&2
+        COMPARE_REF_READY=0
+    fi
+fi
+if [ "${COMPARE_REF_READY}" = "1" ]; then
+    if pinned_compare_branch="$(git rev-parse --verify "${COMPARE_BRANCH}^{commit}" 2>/dev/null)"; then
+        COMPARE_BRANCH="${pinned_compare_branch}"
+    else
+        echo "[local_diff_cover] WARN: could not resolve ${COMPARE_BRANCH_DISPLAY}; retaining coverage" >&2
+        COMPARE_REF_READY=0
+    fi
+fi
+
+# This proof runs before disk/dependency checks, locking, configuring, or
+# compiling. A policy/test/config-only diff therefore exits in milliseconds
+# after the one freshness check needed to make that skip authoritative.
 # Pre-push uses preflight-only mode to avoid printing its long-build banner when
 # this script already knows no native coverage can be attributed.
-if diff_cover_has_no_coverable_lines "${COMPARE_BRANCH}"; then
+if [ "${COMPARE_REF_READY}" = "1" ] && diff_cover_has_no_coverable_lines "${COMPARE_BRANCH}"; then
     echo "[local_diff_cover] skipped: exact diff has no potentially coverable C/C++ lines" >&2
     exit 0
 fi
@@ -483,15 +508,6 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "  pip install --user 'diff-cover>=9'" >&2
     echo "  # clang/llvm-cov/llvm-profdata: ship with Xcode (macOS) or apt install clang llvm (Linux)" >&2
     exit 2
-fi
-
-# ── Ensure compare branch is fetched ────────────────────────────────────────
-# diff-cover needs origin/main reachable for the merge-base. Fetch
-# silently — the user might be offline; degrade to whatever's local.
-if [[ "${COMPARE_BRANCH}" == origin/* ]]; then
-    remote_branch="${COMPARE_BRANCH#origin/}"
-    git fetch --no-tags --quiet origin "${remote_branch}" 2>/dev/null || \
-        echo "[local_diff_cover] WARN: could not fetch ${COMPARE_BRANCH}; using local copy" >&2
 fi
 
 # ── Build coverage ──────────────────────────────────────────────────────────

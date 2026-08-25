@@ -732,6 +732,63 @@ class NativeDiffPreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
         self.assertIn("committed path core/existing.cpp", result.stderr)
 
+    def test_remote_compare_ref_is_refreshed_before_skip(self) -> None:
+        native = self.root / "core" / "existing.cpp"
+        native.parent.mkdir(parents=True)
+        native.write_text("int value() { return 1; }\n")
+        subprocess.run(["git", "add", "core/existing.cpp"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "native A"], cwd=self.root, check=True)
+        commit_a = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        remote = self.root.parent / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=self.root, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=self.root, check=True)
+
+        native.write_text("int value() { return 2; }\n")
+        subprocess.run(["git", "commit", "-qam", "native B"], cwd=self.root, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=self.root, check=True)
+        subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=self.root, check=True)
+        native.write_text("int value() { return 1; }\n")
+        (self.root / "tools" / "scripts" / "policy.py").write_text("VALUE = 2\n")
+        subprocess.run(["git", "commit", "-qam", "revert native plus policy"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", commit_a],
+            cwd=self.root, check=True,
+        )
+
+        result = _run_script(
+            self.root,
+            {
+                "PULP_DIFF_COVER_COMPARE_BRANCH": "origin/main",
+                "PULP_DIFF_COVER_PREFLIGHT_ONLY": "1",
+            },
+        )
+        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+
+    def test_failed_remote_refresh_conservatively_retains_coverage(self) -> None:
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(self.root / "missing-origin.git")],
+            cwd=self.root, check=True,
+        )
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+            cwd=self.root, check=True,
+        )
+        (self.root / "tools" / "scripts" / "policy.py").write_text("VALUE = 2\n")
+        result = _run_script(
+            self.root,
+            {
+                "PULP_DIFF_COVER_COMPARE_BRANCH": "origin/main",
+                "PULP_DIFF_COVER_PREFLIGHT_ONLY": "1",
+            },
+        )
+        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+        self.assertIn("retaining coverage", result.stderr)
+
     def test_mutation_misclassifying_cpp_makes_the_negative_control_fail(self) -> None:
         native = self.root / "core" / "new.cpp"
         native.parent.mkdir(parents=True)

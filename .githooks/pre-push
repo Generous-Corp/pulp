@@ -177,11 +177,20 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
             echo "✗ pre-push: malformed pushed-ref record; expected exactly four fields." >&2
             exit 1
         fi
+        [ "${_prepush_local_sha:-}" != "$_prepush_zero_sha" ] || continue
         case "$_prepush_remote_ref" in
-            refs/heads/*)
-                [ "${_prepush_local_sha:-}" != "$_prepush_zero_sha" ] || continue
+            refs/tags/*)
+                # Tags do not change a source branch and are not authorized by
+                # this checkout's source gates.
+                continue
+                ;;
+            *)
+                # Branches and every other source-bearing namespace must name
+                # the exact checked-out commit. Git hosts may use refs/review,
+                # refs/for, or another custom namespace; treating those like
+                # tags would let an unvalidated tree bypass the gates.
                 if [ -z "$_prepush_head_sha" ] || [ "$_prepush_local_sha" != "$_prepush_head_sha" ]; then
-                    echo "✗ pre-push: branch update $_prepush_remote_ref names $_prepush_local_sha," >&2
+                    echo "✗ pre-push: source update $_prepush_remote_ref names $_prepush_local_sha," >&2
                     echo "  but this checkout is at ${_prepush_head_sha:-unknown}. The gates validate" >&2
                     echo "  checked-out HEAD; check out that branch and push it separately." >&2
                     exit 1
