@@ -28,6 +28,7 @@
 #   1 — diff coverage below threshold, or a hard error during the run
 #   2 — missing required dependency (clear remediation message)
 #   3 — not enough free disk space to run the coverage build (nothing built)
+#  10 — preflight-only mode found potentially coverable lines (caller should run)
 #
 # Design (mirrors CI):
 #   1. Read threshold + filters from coverage_config.json.
@@ -242,6 +243,124 @@ require_free_disk() {
     return 3
 }
 
+# Return 0 only when the exact merge-base-to-working-tree diff is proven to
+# contain no potentially coverable C/C++ production lines. Return non-zero for
+# coverable input and for every uncertainty: the caller then runs the existing
+# coverage build. This is deliberately conservative. Renames, copies, deletions,
+# type changes, binary diffs, missing refs, and parser failures all keep the gate
+# on; a suffix is the only positive evidence used to classify text as definitely
+# outside the native coverage surface.
+diff_cover_has_no_coverable_lines() {
+    local compare_branch="$1"
+    python3 - "${REPO_ROOT}" "${compare_branch}" <<'PY'
+import pathlib
+import subprocess
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+compare_branch = sys.argv[2]
+coverable_suffixes = {
+    ".c", ".cc", ".cpp", ".cxx", ".m", ".mm",
+    ".h", ".hh", ".hpp", ".hxx", ".inc", ".inl", ".ipp", ".tpp",
+    ".ixx", ".cppm",
+}
+known_non_native_suffixes = {
+    ".css", ".html", ".js", ".json", ".md", ".mjs", ".py", ".rst",
+    ".sh", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
+}
+known_non_native_paths = {
+    ".githooks/pre-push",
+}
+
+
+def git(*args: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+
+
+def potentially_coverable(path: str) -> bool:
+    lowered = path.lower()
+    suffixes = pathlib.PurePosixPath(lowered).suffixes
+    return any(suffix in coverable_suffixes for suffix in suffixes)
+
+
+def definitely_non_native(path: str) -> bool:
+    if path in known_non_native_paths:
+        return True
+    suffixes = pathlib.PurePosixPath(path.lower()).suffixes
+    return bool(suffixes) and suffixes[-1] in known_non_native_suffixes
+
+
+try:
+    merge_base = git("merge-base", compare_branch, "HEAD").decode().strip()
+    if not merge_base:
+        raise RuntimeError("empty merge base")
+
+    # Inspect each layer independently. A net merge-base-to-working-tree diff
+    # is unsafe here: an unstaged restoration can cancel a native change that
+    # remains committed in the HEAD being pushed. Independent layers can only
+    # add reasons to retain coverage; they can never erase one another.
+    layers = (
+        ("committed", (merge_base, "HEAD")),
+        ("staged", ("--cached", "HEAD")),
+        ("unstaged", ()),
+    )
+    for layer, diff_args in layers:
+        raw = git(
+            "diff", "--name-status", "-z", "--find-renames", "--find-copies",
+            *diff_args, "--",
+        ).split(b"\0")
+        if raw and raw[-1] == b"":
+            raw.pop()
+
+        i = 0
+        while i < len(raw):
+            status = raw[i].decode("ascii", "strict")
+            i += 1
+            kind = status[:1]
+            if kind not in {"A", "M"}:
+                print(
+                    f"[local_diff_cover] preflight: {layer} {status} change is "
+                    "not safely classifiable; retaining native coverage",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            if i >= len(raw):
+                raise RuntimeError(f"truncated {layer} name-status record")
+            path = raw[i].decode("utf-8", "surrogateescape")
+            i += 1
+            if potentially_coverable(path):
+                print(
+                    f"[local_diff_cover] preflight: potentially coverable native "
+                    f"change in {layer} path {path}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            if not definitely_non_native(path):
+                print(
+                    f"[local_diff_cover] preflight: unknown or extensionless "
+                    f"{layer} path {path}; retaining native coverage",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+
+    raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception as exc:
+    print(
+        f"[local_diff_cover] preflight: could not prove the diff is outside "
+        f"native coverage ({exc}); retaining native coverage",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
 # Let tests source the helpers above without running a coverage build.
 if [ "${PULP_DIFF_COVER_LIB_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
@@ -279,11 +398,23 @@ if [ ! -f "${CONFIG_JSON}" ]; then
 fi
 
 THRESHOLD="$(read_config_value diff_coverage_fail_under)"
-COMPARE_BRANCH="$(read_config_value compare_branch)"
+COMPARE_BRANCH="${PULP_DIFF_COVER_COMPARE_BRANCH:-$(read_config_value compare_branch)}"
 
 if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
     echo "[local_diff_cover] invalid diff_coverage_fail_under in ${CONFIG_JSON}: '${THRESHOLD}'" >&2
     exit 1
+fi
+
+# This proof runs before disk/dependency checks, fetching, locking, configuring,
+# or compiling. A policy/test/config-only diff therefore exits in milliseconds.
+# Pre-push uses preflight-only mode to avoid printing its long-build banner when
+# this script already knows no native coverage can be attributed.
+if diff_cover_has_no_coverable_lines "${COMPARE_BRANCH}"; then
+    echo "[local_diff_cover] skipped: exact diff has no potentially coverable C/C++ lines" >&2
+    exit 0
+fi
+if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
+    exit 10
 fi
 
 # Disk precondition, ahead of the dependency preflight, the fetch, the lock and
