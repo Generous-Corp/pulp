@@ -28,8 +28,8 @@ class RecoveryWorkerCanaryWorkflowTests(unittest.TestCase):
         self.assertIn("inputs.expected_head", group)
         self.assertEqual(self.doc["concurrency"]["cancel-in-progress"], "false")
 
-    def test_unique_m5_disposable_label_is_not_a_generic_fleet_selector(self) -> None:
-        labels = self.doc["jobs"]["m5-disposable-proof"]["runs-on"]
+    def test_pool_label_allows_host_failover_without_widening_the_runner_class(self) -> None:
+        labels = self.doc["jobs"]["pooled-disposable-proof"]["runs-on"]
         self.assertEqual(
             labels,
             [
@@ -37,7 +37,7 @@ class RecoveryWorkerCanaryWorkflowTests(unittest.TestCase):
                 "macOS",
                 "ARM64",
                 "pulp-build-vm",
-                "shipyard-recovery-canary-m5-20260814",
+                "shipyard-recovery-pool",
             ],
         )
 
