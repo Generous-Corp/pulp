@@ -4066,7 +4066,11 @@ PR's exact head SHA and immutable base SHA for capability-history checks. The
 untrusted build job has only contents-read permission, no Actions/Namespace
 cache action, no persistent build/dependency cache path, and no ccache; all
 writable state is unique to the run and removed at teardown. The reporter
-revalidates that the PR is still open at the same head before posting. It also installs
+revalidates the complete open PR identity (base and head repository/ref/SHA)
+before posting. The local route fails closed unless its trusted repo variable
+is exactly the `pulp-gate-fast` clean-per-job JIT Tart selector; never replace
+that check with a generic self-hosted fallback. Namespace similarly accepts
+only its hosted selector. It also installs
 the same pinned and checksum-verified Chrome used by `build.yml` inside that
 ephemeral root and excludes
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the

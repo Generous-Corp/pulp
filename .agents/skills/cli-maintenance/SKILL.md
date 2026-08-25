@@ -1446,7 +1446,10 @@ The trusted workflow validates the open internal PR's repository, base, ref,
 and immutable SHAs before fetching and detaching to its head. The build job has
 no cache writer or elevated token and uses only run-unique writable paths; a
 separate status-write-only job publishes the result onto the exact PR head
-without checking out or executing it.
+without checking out or executing it, after revalidating the complete base/head
+repository, ref, and SHA identity. The local route accepts only the exact
+`pulp-gate-fast` disposable JIT Tart selector; missing or generic self-hosted
+labels fail closed. Namespace likewise accepts only a Namespace-hosted selector.
 
 Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
 flag): the `build.yml` matrix couples Linux/Windows/macOS into one

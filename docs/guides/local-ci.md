@@ -1770,8 +1770,12 @@ verifies, and detaches to the exact PR head. That build job has only
 contents-read permission, no Actions/Namespace cache action, no persistent
 ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
 teardown. The status-write token exists only in the final reporter, which never
-checks out or executes PR code and revalidates that the PR remains open at the
-same exact head before posting. Capability-history checks compare against the
+checks out or executes PR code and revalidates the complete PR identity (open
+state, base repository/ref/SHA, and head repository/ref/SHA) before posting.
+The local selector must exactly match the `pulp-gate-fast` clean-per-job JIT
+Tart class; an unset or generic self-hosted selector fails closed instead of
+executing input-selected code in a persistent runner account. Namespace must
+likewise resolve to a Namespace-hosted selector. Capability-history checks compare against the
 event-pinned base, not newer live `main`; the native merge queue validates the
 eventual combined tree separately. Keep these contracts mirrored: a provider
 reroute must not turn the required gate into a full benchmark lane, expose

@@ -58,6 +58,7 @@ jobs:
       pr_number: ${{ steps.pr.outputs.number }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
     steps:
       - id: resolve
         env:
@@ -68,7 +69,17 @@ jobs:
           set -euo pipefail
           case "$RUNNER_CHOICE" in
             local)
-              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-[\"self-hosted\",\"sanitizer\"]}"
+              # This label set is the reviewed one-job JIT Tart class. A
+              # generic self-hosted selector is not an acceptable fallback:
+              # PR code must never execute in a persistent runner account.
+              EXPECTED_LOCAL='["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'
+              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-}"
+              if [ -z "$SELECTOR" ] || ! jq -e --argjson expected "$EXPECTED_LOCAL" \
+                'type == "array" and length == ($expected | length) and sort == ($expected | sort)' \
+                <<<"$SELECTOR" >/dev/null; then
+                echo "::error::local retarget requires the exact disposable pulp-gate-fast JIT selector." >&2
+                exit 1
+              fi
               ;;
             namespace)
               if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
@@ -76,6 +87,11 @@ jobs:
                 exit 1
               fi
               SELECTOR="$NAMESPACE_MACOS_RUNS_ON_JSON"
+              if ! jq -e 'type == "string" and startswith("namespace-")' \
+                <<<"$SELECTOR" >/dev/null; then
+                echo "::error::namespace retarget requires a Namespace-hosted selector, not self-hosted labels." >&2
+                exit 1
+              fi
               ;;
             github-hosted)
               SELECTOR='"macos-15"'
@@ -161,6 +177,7 @@ jobs:
             echo "number=$number"
             echo "base_sha=$base"
             echo "head_sha=$head"
+            echo "head_ref=$head_ref"
           } >> "$GITHUB_OUTPUT"
           echo "retargeting PR #$number: base=$base head=$head ref=$head_ref" >&2
 
@@ -312,20 +329,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_PR: ${{ needs.resolve-runner.outputs.pr_number }}
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
           BUILD_RESULT: ${{ needs.build-test.result }}
           DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          case "$EXPECTED_HEAD" in
-            ''|*[!0-9a-f]* ) echo "invalid resolved PR head" >&2; exit 1 ;;
-          esac
-          [ "${#EXPECTED_HEAD}" -eq 40 ] || { echo "resolved PR head is not full length" >&2; exit 1; }
+          for sha in "$EXPECTED_BASE" "$EXPECTED_HEAD"; do
+            case "$sha" in
+              ''|*[!0-9a-f]* ) echo "invalid resolved PR base/head" >&2; exit 1 ;;
+            esac
+            [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
+          done
           live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_PR")"
           live_state="$(printf '%s' "$live_pr" | jq -r .state)"
+          live_base="$(printf '%s' "$live_pr" | jq -r .base.sha)"
+          live_base_repository="$(printf '%s' "$live_pr" | jq -r .base.repo.full_name)"
+          live_base_ref="$(printf '%s' "$live_pr" | jq -r .base.ref)"
           live_head="$(printf '%s' "$live_pr" | jq -r .head.sha)"
-          if [ "$live_state" != open ] || [ "$live_head" != "$EXPECTED_HEAD" ]; then
-            echo "PR #$EXPECTED_PR moved or closed during retarget; suppressing stale status" >&2
+          live_head_repository="$(printf '%s' "$live_pr" | jq -r .head.repo.full_name)"
+          live_head_ref="$(printf '%s' "$live_pr" | jq -r .head.ref)"
+          if [ "$live_state" != open ] || \
+             [ "$live_base" != "$EXPECTED_BASE" ] || \
+             [ "$live_base_repository" != "$GITHUB_REPOSITORY" ] || \
+             [ "$live_base_ref" != main ] || \
+             [ "$live_head" != "$EXPECTED_HEAD" ] || \
+             [ "$live_head_repository" != "$GITHUB_REPOSITORY" ] || \
+             [ "$live_head_ref" != "$EXPECTED_HEAD_REF" ]; then
+            echo "PR #$EXPECTED_PR identity changed during retarget; suppressing stale status" >&2
             exit 1
           fi
           case "$BUILD_RESULT" in

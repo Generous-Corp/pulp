@@ -46,6 +46,23 @@ def _resolver_script() -> str:
     return step["run"]
 
 
+def _runner_script() -> str:
+    document = _workflow()
+    steps = document["jobs"]["resolve-runner"]["steps"]
+    step = next((item for item in steps if item.get("id") == "resolve"), None)
+    if step is None:
+        raise AssertionError("build-macos.yml lost the trusted runner resolver")
+    return step["run"]
+
+
+def _reporter_script() -> str:
+    document = _workflow()
+    steps = document["jobs"]["publish-macos-status"]["steps"]
+    if len(steps) != 1:
+        raise AssertionError("status reporter must remain a single trusted step")
+    return steps[0]["run"]
+
+
 def _workflow() -> dict[str, object]:
     try:
         import yaml
@@ -91,6 +108,18 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         raise AssertionError("privileged reporter must never check out source")
     if "needs.resolve-runner.outputs.head_sha" not in reporter_text:
         raise AssertionError("reporter must use trusted resolver head")
+    for identity in (
+        "needs.resolve-runner.outputs.base_sha",
+        "needs.resolve-runner.outputs.head_ref",
+        "live_base_repository", "live_base_ref",
+        "live_head_repository", "live_head_ref",
+    ):
+        if identity not in reporter_text:
+            raise AssertionError(f"reporter lost PR identity check {identity}")
+    resolver_text = json.dumps(jobs["resolve-runner"], sort_keys=True)
+    for marker in ("pulp-gate-fast", "EXPECTED_LOCAL", "namespace-"):
+        if marker not in resolver_text:
+            raise AssertionError(f"runner resolver lost isolation marker {marker}")
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
@@ -143,13 +172,140 @@ def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
         return process.returncode, parsed, process.stderr
 
 
+def _run_runner(*, choice: str = "local",
+                local: str = '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]',
+                namespace: str = '"namespace-profile-generouscorp-macos"',
+                ) -> tuple[int, dict[str, str], str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        output = root / "output"
+        output.write_text("", encoding="utf-8")
+        env = os.environ.copy()
+        env.update({
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_CHOICE": choice,
+            "LOCAL_MACOS_RUNS_ON_JSON": local,
+            "NAMESPACE_MACOS_RUNS_ON_JSON": namespace,
+        })
+        process = subprocess.run(
+            ["bash", "-c", _runner_script()], cwd=root, env=env,
+            capture_output=True, text=True,
+        )
+        parsed = dict(
+            line.split("=", 1) for line in output.read_text().splitlines()
+            if "=" in line
+        )
+        return process.returncode, parsed, process.stderr
+
+
+def _run_reporter(*, detail: dict[str, object] | None = None,
+                  expected_base: str = BASE_SHA,
+                  expected_head: str = HEAD_SHA,
+                  expected_head_ref: str = "repair/security-7723",
+                  ) -> tuple[int, bool, str]:
+    detail = detail if detail is not None else _pr()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        fixture = root / "detail.json"
+        fixture.write_text(json.dumps(detail), encoding="utf-8")
+        posted = root / "posted"
+        fake_gh = fake_bin / "gh"
+        fake_gh.write_text(
+            "#!/bin/sh\n"
+            "case \" $* \" in\n"
+            "  *\" --method POST \"*) printf '%s\\n' \"$*\" > \"$POSTED\" ;;\n"
+            "  *) cat \"$FIXTURE\" ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(0o755)
+        env = os.environ.copy()
+        env.update({
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "FIXTURE": str(fixture),
+            "POSTED": str(posted),
+            "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+            "EXPECTED_PR": "7723",
+            "EXPECTED_BASE": expected_base,
+            "EXPECTED_HEAD": expected_head,
+            "EXPECTED_HEAD_REF": expected_head_ref,
+            "BUILD_RESULT": "success",
+            "DETAILS_URL": "https://example.invalid/run/1",
+            "GH_TOKEN": "test-token",
+        })
+        process = subprocess.run(
+            ["bash", "-c", _reporter_script()], cwd=root, env=env,
+            capture_output=True, text=True,
+        )
+        return process.returncode, posted.exists(), process.stderr
+
+
 class BuildMacosWorkflowDispatchTests(unittest.TestCase):
     def test_explicit_pr_pins_exact_event_base_and_head(self) -> None:
         rc, output, _ = _run()
         self.assertEqual(rc, 0)
         self.assertEqual(output, {
             "number": "7723", "base_sha": BASE_SHA, "head_sha": HEAD_SHA,
+            "head_ref": "repair/security-7723",
         })
+
+    def test_local_route_requires_exact_disposable_jit_selector(self) -> None:
+        rc, output, _ = _run_runner()
+        self.assertEqual(rc, 0)
+        self.assertEqual(output["route"], "local")
+        hostile = (
+            '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]',
+            '["self-hosted","sanitizer"]',
+            '"macos-15"',
+            "",
+            "not-json",
+        )
+        for selector in hostile:
+            with self.subTest(selector=selector):
+                rc, output, error = _run_runner(local=selector)
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, {})
+                self.assertIn("disposable pulp-gate-fast JIT selector", error)
+
+    def test_namespace_route_cannot_be_redirected_to_self_hosted(self) -> None:
+        rc, output, _ = _run_runner(choice="namespace")
+        self.assertEqual(rc, 0)
+        self.assertEqual(output["route"], "namespace")
+        for selector in (
+            '["self-hosted","macOS"]', '"macos-15"', "", "not-json"
+        ):
+            with self.subTest(selector=selector):
+                rc, output, error = _run_runner(
+                    choice="namespace", namespace=selector,
+                )
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, {})
+                self.assertTrue(
+                    "Namespace-hosted selector" in error
+                    or "is not set" in error
+                )
+
+    def test_reporter_posts_only_for_unchanged_complete_pr_identity(self) -> None:
+        rc, posted, _ = _run_reporter()
+        self.assertEqual(rc, 0)
+        self.assertTrue(posted)
+        hostile = (
+            _pr(state="closed"),
+            _pr(base_sha="c" * 40),
+            _pr(base_repo="attacker/pulp"),
+            _pr(base_ref="develop"),
+            _pr(head_sha="d" * 40),
+            _pr(head_repo="attacker/pulp"),
+            _pr(head_ref="replacement"),
+        )
+        for detail in hostile:
+            with self.subTest(detail=detail):
+                rc, posted, error = _run_reporter(detail=detail)
+                self.assertEqual(rc, 1)
+                self.assertFalse(posted)
+                self.assertIn("identity changed", error)
 
     def test_target_ref_resolves_one_open_pr_when_number_is_omitted(self) -> None:
         rc, output, _ = _run(explicit="")
@@ -246,12 +402,15 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         text = _job_text("publish-macos-status")
         script = reporter["steps"][0]["run"]
         self.assertNotIn("actions/checkout", text)
-        self.assertNotIn("EXPECTED_BASE", text)
+        self.assertIn("EXPECTED_BASE", text)
+        self.assertIn("EXPECTED_HEAD_REF", text)
         self.assertIn("needs.resolve-runner.outputs.head_sha", text)
         self.assertIn("needs.build-test.result", text)
         self.assertIn("statuses/$EXPECTED_HEAD", text)
         self.assertIn("--raw-field context=macos", text)
         self.assertIn("live_head", text)
+        self.assertIn("live_base_repository", text)
+        self.assertIn("live_head_repository", text)
         self.assertIn('[ "$state" = success ] || exit 1', script)
 
     def test_only_trusted_jobs_receive_elevated_permissions(self) -> None:
@@ -290,6 +449,22 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                 "privileged reporter checks out source",
                 lambda doc: doc["jobs"]["publish-macos-status"]["steps"].insert(
                     0, {"uses": "actions/checkout@v5"}
+                ),
+            ),
+            (
+                "privileged reporter stops checking the immutable base",
+                lambda doc: doc["jobs"]["publish-macos-status"]["steps"][0].update(
+                    {"env": {
+                        key: value for key, value in
+                        doc["jobs"]["publish-macos-status"]["steps"][0]["env"].items()
+                        if key != "EXPECTED_BASE"
+                    }}
+                ),
+            ),
+            (
+                "local route accepts generic persistent runner labels",
+                lambda doc: doc["jobs"]["resolve-runner"]["steps"][0].update(
+                    {"run": "echo runs_on_json='[\"self-hosted\"]' >> $GITHUB_OUTPUT"}
                 ),
             ),
         ]
