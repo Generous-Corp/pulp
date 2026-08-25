@@ -13,6 +13,8 @@ import sys
 import tempfile
 import unittest
 
+import verify_example_validation_inventory as validator_inventory
+
 try:
     import yaml
 except ImportError:  # Required macOS CTest runners do not install PyYAML.
@@ -21,6 +23,7 @@ except ImportError:  # Required macOS CTest runners do not install PyYAML.
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "examples-validation.yml"
+EXAMPLES_CMAKE = ROOT / "examples" / "CMakeLists.txt"
 SANITIZERS = ROOT / ".github" / "workflows" / "sanitizers.yml"
 ANDROID = ROOT / ".github" / "workflows" / "android.yml"
 TOPOLOGY = ROOT / "tools" / "scripts" / "runner_topology.json"
@@ -188,6 +191,54 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             named_step(linux_job, "Build all examples")["run"],
         )
 
+    def test_macos_job_builds_only_the_full_examples_aggregate(self) -> None:
+        macos_job = self.jobs["validate"]
+        build = named_step(macos_job, "Build all examples")["run"]
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build "
+            "--target pulp-example-validation-all",
+            build,
+        )
+        self.assertIn("df -h .", build)
+        self.assertIn("GITHUB_STEP_SUMMARY", build)
+        self.assertIn("trap finish EXIT", build)
+
+    def test_example_validation_aggregate_keeps_registered_tool_prerequisites(self) -> None:
+        root_cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("add_custom_target(pulp-example-validation-all)", root_cmake)
+        self.assertIn(
+            "add_dependencies(pulp-example-validation-all pulp-examples-all)",
+            root_cmake,
+        )
+        for target in (
+            "pulp-cli",
+            "PulpGain_CLAP",
+            "PulpTone_CLAP",
+            "pulp-sync-soak-capture",
+        ):
+            self.assertIn(target, root_cmake)
+
+    def test_macos_job_verifies_configured_validator_inventory(self) -> None:
+        step = named_step(self.jobs["validate"], "Verify validator inventory")
+        self.assertEqual(
+            step["run"],
+            "python3 tools/scripts/verify_example_validation_inventory.py "
+            "--build-dir build",
+        )
+
+    def test_example_aggregate_preserves_macos_auv3_embedding(self) -> None:
+        cmake = EXAMPLES_CMAKE.read_text(encoding="utf-8")
+        self.assertIn("TYPES UTILITY", cmake)
+        self.assertIn(
+            'list(FILTER pulp_example_utility_targets INCLUDE REGEX "_AUv3Host_Embed$")',
+            cmake,
+        )
+        self.assertIn(
+            "list(APPEND pulp_example_targets ${pulp_example_utility_targets})",
+            cmake,
+        )
+
+
     def test_private_example_selectors_are_dispatch_only(self) -> None:
         resolver = next(
             step
@@ -255,6 +306,35 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
             'classifier="tools/scripts/example_validation_paths.py"',
             step_script(changes),
         )
+
+
+class ExampleValidatorInventoryTests(unittest.TestCase):
+    def test_enabled_formats_require_their_validators(self) -> None:
+        cache = "PULP_HAS_CLAP:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=ON\n"
+        inventory = {
+            "tests": [
+                {"name": "clap-dlopen-PulpGain"},
+                {"name": "auval-PulpGain"},
+            ]
+        }
+        self.assertEqual(
+            validator_inventory.missing_expected_tests(cache, inventory), []
+        )
+
+    def test_missing_enabled_validator_fails_closed(self) -> None:
+        cache = "PULP_HAS_CLAP:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=ON\n"
+        inventory = {"tests": [{"name": "clap-dlopen-PulpGain"}]}
+        self.assertEqual(
+            validator_inventory.missing_expected_tests(cache, inventory),
+            ["auval-PulpGain"],
+        )
+
+    def test_disabled_format_does_not_require_a_validator(self) -> None:
+        cache = "PULP_HAS_CLAP:INTERNAL=FALSE\nPULP_HAS_AUSDK:INTERNAL=OFF\n"
+        self.assertEqual(
+            validator_inventory.missing_expected_tests(cache, {"tests": []}), []
+        )
+
 
 class SanitizerCadenceTests(unittest.TestCase):
     @classmethod

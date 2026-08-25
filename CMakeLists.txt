@@ -685,6 +685,25 @@ endif()
 # ── Examples ────────────────────────────────────────────────────────────────
 if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
     add_subdirectory(examples)
+
+    # The example-validation workflow runs the configured validation label after
+    # building the example aggregate. A few validation registrations exercise
+    # small top-level tools rather than example-owned targets; keep those exact
+    # prerequisites without falling back to the root default build.
+    if(TARGET pulp-examples-all)
+        add_custom_target(pulp-example-validation-all)
+        add_dependencies(pulp-example-validation-all pulp-examples-all)
+        foreach(_pulp_example_validation_target IN ITEMS
+                pulp-cli
+                PulpGain_CLAP
+                PulpTone_CLAP
+                pulp-sync-soak-capture)
+            if(TARGET ${_pulp_example_validation_target})
+                add_dependencies(pulp-example-validation-all
+                    ${_pulp_example_validation_target})
+            endif()
+        endforeach()
+    endif()
 endif()
 
 if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
