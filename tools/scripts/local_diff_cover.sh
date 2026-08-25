@@ -412,10 +412,26 @@ fi
 # local state. Local refs need no network and are still pinned against movement
 # between this classification and diff-cover itself.
 COMPARE_REF_READY=1
-if [[ "${COMPARE_BRANCH}" == origin/* ]]; then
-    remote_branch="${COMPARE_BRANCH#origin/}"
-    if ! git fetch --no-tags --quiet origin \
-        "+refs/heads/${remote_branch}:refs/remotes/origin/${remote_branch}" 2>/dev/null; then
+compare_ref_full="$(git rev-parse --symbolic-full-name "${COMPARE_BRANCH}" 2>/dev/null || true)"
+compare_remote=""
+remote_branch=""
+case "${compare_ref_full:-${COMPARE_BRANCH}}" in
+    refs/remotes/*/*)
+        compare_remote="${compare_ref_full#refs/remotes/}"
+        compare_remote="${compare_remote%%/*}"
+        remote_branch="${compare_ref_full#refs/remotes/${compare_remote}/}"
+        ;;
+    */*)
+        compare_remote_candidate="${COMPARE_BRANCH%%/*}"
+        if git remote get-url "${compare_remote_candidate}" >/dev/null 2>&1; then
+            compare_remote="${compare_remote_candidate}"
+            remote_branch="${COMPARE_BRANCH#${compare_remote}/}"
+        fi
+        ;;
+esac
+if [ -n "${compare_remote}" ]; then
+    if [ -z "${remote_branch}" ] || ! git fetch --no-tags --quiet "${compare_remote}" \
+        "+refs/heads/${remote_branch}:refs/remotes/${compare_remote}/${remote_branch}" 2>/dev/null; then
         echo "[local_diff_cover] WARN: could not refresh ${COMPARE_BRANCH}; retaining coverage" >&2
         COMPARE_REF_READY=0
     fi
@@ -428,6 +444,7 @@ if [ "${COMPARE_REF_READY}" = "1" ]; then
         COMPARE_REF_READY=0
     fi
 fi
+unset compare_ref_full compare_remote compare_remote_candidate remote_branch pinned_compare_branch
 
 if [ "${COMPARE_REF_READY}" != "1" ]; then
     if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then

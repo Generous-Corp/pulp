@@ -742,29 +742,30 @@ class NativeDiffPreflightTests(unittest.TestCase):
 
         remote = self.root.parent / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-        subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=self.root, check=True)
-        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=self.root, check=True)
+        subprocess.run(["git", "remote", "add", "upstream", str(remote)], cwd=self.root, check=True)
+        subprocess.run(["git", "push", "-q", "upstream", "HEAD:main"], cwd=self.root, check=True)
 
         native.write_text("int value() { return 2; }\n")
         subprocess.run(["git", "commit", "-qam", "native B"], cwd=self.root, check=True)
-        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=self.root, check=True)
+        subprocess.run(["git", "push", "-q", "upstream", "HEAD:main"], cwd=self.root, check=True)
         subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=self.root, check=True)
         native.write_text("int value() { return 1; }\n")
         (self.root / "tools" / "scripts" / "policy.py").write_text("VALUE = 2\n")
         subprocess.run(["git", "commit", "-qam", "revert native plus policy"], cwd=self.root, check=True)
-        subprocess.run(
-            ["git", "update-ref", "refs/remotes/origin/main", commit_a],
-            cwd=self.root, check=True,
-        )
-
-        result = _run_script(
-            self.root,
-            {
-                "PULP_DIFF_COVER_COMPARE_BRANCH": "origin/main",
-                "PULP_DIFF_COVER_PREFLIGHT_ONLY": "1",
-            },
-        )
-        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+        for compare_ref in ("upstream/main", "refs/remotes/upstream/main"):
+            with self.subTest(compare_ref=compare_ref):
+                subprocess.run(
+                    ["git", "update-ref", "refs/remotes/upstream/main", commit_a],
+                    cwd=self.root, check=True,
+                )
+                result = _run_script(
+                    self.root,
+                    {
+                        "PULP_DIFF_COVER_COMPARE_BRANCH": compare_ref,
+                        "PULP_DIFF_COVER_PREFLIGHT_ONLY": "1",
+                    },
+                )
+                self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
 
     def test_failed_remote_refresh_conservatively_retains_coverage(self) -> None:
         subprocess.run(
