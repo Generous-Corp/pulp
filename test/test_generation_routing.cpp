@@ -29,6 +29,16 @@ constexpr std::array<GenerationHostContext, 2> kContexts{GenerationHostContext::
 constexpr std::array<GenerationConnectivity, 2> kConnectivity{GenerationConnectivity::Online,
                                                               GenerationConnectivity::Offline};
 
+constexpr GenerationRoute kExpectedProposalRoutes[kDeviceCapabilityTierCount]
+                                                  [kThermalStateCount] = {
+    {GenerationRoute::Server, GenerationRoute::Server, GenerationRoute::Server,
+     GenerationRoute::QueueForLater},
+    {GenerationRoute::Server, GenerationRoute::Server, GenerationRoute::Server,
+     GenerationRoute::QueueForLater},
+    {GenerationRoute::OnDevice, GenerationRoute::Server, GenerationRoute::Server,
+     GenerationRoute::QueueForLater},
+};
+
 // Distance from the device, ascending. The two monotonicity properties are
 // statements about this ordering, so naming it once keeps them readable.
 constexpr int distance(GenerationRoute route) noexcept {
@@ -63,16 +73,10 @@ TEST_CASE("each capability tier routes each job class per the declared policy ta
     const auto solo = GenerationHostContext::Standalone;
     const auto proposal = GenerationJobClass::ProposalGeneration;
 
-    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Nominal, proposal, solo,
-                             online) == GenerationRoute::OnDevice);
-    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Fair, proposal, solo,
-                             online) == GenerationRoute::Server);
-    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Critical, proposal, solo,
-                             online) == GenerationRoute::QueueForLater);
-    REQUIRE(generation_route(DeviceCapabilityTier::Standard, ThermalState::Nominal, proposal, solo,
-                             online) == GenerationRoute::Server);
-    REQUIRE(generation_route(DeviceCapabilityTier::Constrained, ThermalState::Nominal, proposal,
-                             solo, online) == GenerationRoute::Server);
+    for (std::size_t tier = 0; tier < kDeviceCapabilityTierCount; ++tier)
+        for (std::size_t thermal = 0; thermal < kThermalStateCount; ++thermal)
+            REQUIRE(generation_route(kTiers[tier], kThermals[thermal], proposal, solo, online) ==
+                    kExpectedProposalRoutes[tier][thermal]);
 
     // Constrained is review-and-perform with no local realtime, so no
     // temperature makes it a place to run inference.
@@ -171,6 +175,11 @@ TEST_CASE("an out of ladder value holds the job rather than running it",
     // A device we cannot characterize is not a device to spend inference on.
     const auto bogus_tier = static_cast<DeviceCapabilityTier>(kDeviceCapabilityTierCount + 7);
     const auto bogus_thermal = static_cast<ThermalState>(kThermalStateCount + 7);
+    const auto bogus_job = static_cast<GenerationJobClass>(kGenerationJobClassCount + 7);
+    const auto bogus_context =
+        static_cast<GenerationHostContext>(kGenerationHostContextCount + 7);
+    const auto bogus_connectivity =
+        static_cast<GenerationConnectivity>(kGenerationConnectivityCount + 7);
 
     REQUIRE(generation_route(bogus_tier, ThermalState::Nominal,
                              GenerationJobClass::ProposalGeneration,
@@ -180,4 +189,14 @@ TEST_CASE("an out of ladder value holds the job rather than running it",
                              GenerationJobClass::ProposalGeneration,
                              GenerationHostContext::Standalone,
                              GenerationConnectivity::Online) == GenerationRoute::QueueForLater);
+    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Nominal, bogus_job,
+                             GenerationHostContext::Standalone,
+                             GenerationConnectivity::Online) == GenerationRoute::QueueForLater);
+    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Nominal,
+                             GenerationJobClass::ProposalGeneration, bogus_context,
+                             GenerationConnectivity::Online) == GenerationRoute::QueueForLater);
+    REQUIRE(generation_route(DeviceCapabilityTier::Full, ThermalState::Nominal,
+                             GenerationJobClass::ProposalGeneration,
+                             GenerationHostContext::Standalone, bogus_connectivity) ==
+            GenerationRoute::QueueForLater);
 }

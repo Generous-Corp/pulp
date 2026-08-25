@@ -73,11 +73,15 @@ enum class GenerationHostContext : std::uint8_t {
     AudioUnitV3 = 1,
 };
 
+inline constexpr std::size_t kGenerationHostContextCount = 2;
+
 /// Whether the device can reach a server right now.
 enum class GenerationConnectivity : std::uint8_t {
     Online = 0,
     Offline = 1,
 };
+
+inline constexpr std::size_t kGenerationConnectivityCount = 2;
 
 namespace detail {
 
@@ -123,6 +127,22 @@ inline constexpr GenerationRoute
 generation_route(platform::DeviceCapabilityTier tier, platform::ThermalState thermal,
                  GenerationJobClass job, GenerationHostContext context,
                  GenerationConnectivity connectivity) noexcept {
+    const auto tier_index = static_cast<std::size_t>(tier);
+    const auto thermal_index = static_cast<std::size_t>(thermal);
+    const auto job_index = static_cast<std::size_t>(job);
+    const auto context_index = static_cast<std::size_t>(context);
+    const auto connectivity_index = static_cast<std::size_t>(connectivity);
+    if (tier_index >= platform::kDeviceCapabilityTierCount ||
+        thermal_index >= platform::kThermalStateCount ||
+        job_index >= kGenerationJobClassCount ||
+        context_index >= kGenerationHostContextCount ||
+        connectivity_index >= kGenerationConnectivityCount) {
+        // No unrecognized discriminator may select local or server work. This
+        // also makes extending any vocabulary fail closed until the routing
+        // policy explicitly adopts the new value.
+        return GenerationRoute::QueueForLater;
+    }
+
     // Playing an existing artifact and rendering a receipt are local work that
     // needs no server and must survive every degradation. Answering them first
     // keeps them out of reach of the connectivity and thermal rules below.
@@ -137,15 +157,6 @@ generation_route(platform::DeviceCapabilityTier tier, platform::ThermalState the
                            thermal == platform::ThermalState::Nominal &&
                            context == GenerationHostContext::Standalone;
         return local ? GenerationRoute::OnDevice : GenerationRoute::QueueForLater;
-    }
-
-    const auto tier_index = static_cast<std::size_t>(tier);
-    const auto thermal_index = static_cast<std::size_t>(thermal);
-    if (tier_index >= platform::kDeviceCapabilityTierCount ||
-        thermal_index >= platform::kThermalStateCount) {
-        // An out-of-ladder value is not a reason to run inference on a device
-        // we cannot characterize; hold the job instead.
-        return GenerationRoute::QueueForLater;
     }
 
     const auto route = detail::kProposalRouteTable[tier_index][thermal_index];
