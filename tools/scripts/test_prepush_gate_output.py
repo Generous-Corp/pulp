@@ -37,7 +37,13 @@ def main() -> int:
     if 'cat "$gate_log" >&2 || true' not in helper_source:
         print("FAIL: diagnostic replay can override gate status", file=sys.stderr)
         return 1
-    if 'run_gate_captured bash "$DIFF_COVER_SH"' not in prepush_source:
+    captured_diff_cover = any(
+        line.strip().startswith("if ! run_gate_captured ")
+        and 'bash "$DIFF_COVER_SH"' in line
+        and line.strip().endswith("; then")
+        for line in prepush_source.splitlines()
+    )
+    if not captured_diff_cover:
         print("FAIL: slow diff-cover output bypasses gate capture", file=sys.stderr)
         return 1
 
