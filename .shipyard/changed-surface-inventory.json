@@ -3,13 +3,13 @@
   "schema_version": 1,
   "repository": "Generous-Corp/pulp",
   "target": "mac",
-  "registration_count": 20727,
-  "unique_name_count": 20668,
-  "unique_composite_count": 20727,
+  "registration_count": 20728,
+  "unique_name_count": 20669,
+  "unique_composite_count": 20728,
   "duplicate_name_group_count": 55,
   "duplicate_name_excess_count": 59,
   "duplicate_composite_group_count": 0,
   "target_contract_digest": "427a056080f1746a82fedb5e608f11b81b8cd820181f61e2338e41edbce2c5b8",
   "authoritative_filter_digest": "8a057d5da65242f88672b2fe96b0f6ccae7b270c99f58922d40b5c3376b95255",
-  "inventory_digest": "14d2222583e016b302931d2496bc52e24f6f6c233a624b0f94f0537931331609"
+  "inventory_digest": "256f0b4d20c1c2cf5a47c350209ba084f94386ac15be5735335109ef4646b0de"
 }
