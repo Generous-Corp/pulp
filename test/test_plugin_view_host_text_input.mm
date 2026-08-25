@@ -562,6 +562,96 @@ TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overla
     }
 }
 
+TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overlay",
+          "[plugin-view-host][context-menu][overlay][mac][gpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — GPU overlay context-menu test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = true;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_view_with_class_name(
+            window.contentView, @"PulpGpuPluginView");
+        REQUIRE(pulp_view != nil);
+
+        auto overlay_owned = std::make_unique<RecordingMouseView>();
+        auto* overlay = overlay_owned.get();
+        overlay->set_bounds({0, 0, 400, 200});
+        int overlay_menus = 0;
+        overlay->on_context_menu = [&](pulp::view::Point) { ++overlay_menus; };
+        root.add_child(std::move(overlay_owned));
+        overlay->claim_overlay();
+
+        auto under_owned = std::make_unique<RecordingMouseView>();
+        auto* under = under_owned.get();
+        under->set_bounds({0, 0, 400, 200});
+        int under_menus = 0;
+        under->on_context_menu = [&](pulp::view::Point) { ++under_menus; };
+        root.add_child(std::move(under_owned));
+
+        [pulp_view rightMouseDown:make_right_mouse_down(NSMakePoint(200, 100))];
+        REQUIRE(overlay_menus == 1);
+        REQUIRE(under_menus == 0);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — outside right click repaints dismissal",
+          "[plugin-view-host][context-menu][overlay][dismiss][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — overlay dismissal repaint test skipped.");
+            return;
+        }
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto overlay_owned = std::make_unique<RecordingMouseView>();
+        auto* overlay = overlay_owned.get();
+        overlay->set_bounds({0, 0, 40, 40});
+        root.add_child(std::move(overlay_owned));
+        overlay->claim_overlay();
+        [pulp_view setNeedsDisplay:NO];
+
+        [pulp_view rightMouseDown:make_right_mouse_down(NSMakePoint(200, 100))];
+        REQUIRE(root.existing_interaction()->active_overlay == nullptr);
+        REQUIRE(pulp_view.needsDisplay == YES);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 TEST_CASE("PluginViewHost (mac CPU) — host focus loss survives IME cancellation "
           "that unmounts the editor",
           "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {

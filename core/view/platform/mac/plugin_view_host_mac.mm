@@ -366,6 +366,26 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
   }
 }
 
+struct PulpPluginContextPressResult {
+    bool handled = false;
+    bool overlay_dismissed = false;
+};
+
+PulpPluginContextPressResult pulp_plugin_context_press(
+    pulp::view::View* root, pulp::view::Point point) {
+    if (!root) return {};
+    const auto overlay_press = pulp::view::route_press_to_active_overlay(
+        *root, point);
+    auto* target = overlay_press.routing ==
+                           pulp::view::OverlayPressRouting::routed
+                       ? overlay_press.target
+                       : root->hit_test(point);
+    return {
+        pulp::view::dispatch_context_menu(*root, target, point),
+        overlay_press.routing == pulp::view::OverlayPressRouting::dismissed,
+    };
+}
+
 // `event` supplies the modifier flags and click count the drag carries. They
 // used to be dropped on the floor: the drag phase was delivered on the legacy
 // `on_mouse_drag(Point)` channel ONLY, so a view could read Shift/Cmd on press
@@ -999,16 +1019,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
   @try {
     try {
         if (!self.rootView) { [super rightMouseDown:event]; return; }
-        const auto point = [self localPoint:event];
-        const auto overlay_press = pulp::view::route_press_to_active_overlay(
-            *self.rootView, point);
-        auto* target = overlay_press.routing ==
-                               pulp::view::OverlayPressRouting::routed
-                           ? overlay_press.target
-                           : self.rootView->hit_test(point);
-        if (pulp::view::dispatch_context_menu(*self.rootView, target, point))
+        const auto result = pulp_plugin_context_press(
+            self.rootView, [self localPoint:event]);
+        if (result.handled || result.overlay_dismissed)
             [self setNeedsDisplay:YES];
-        else
+        if (!result.handled)
             [super rightMouseDown:event];  // let the host show its own menu
     } catch (const std::exception& e) {
         std::cerr << "PulpPluginView rightMouseDown error: " << e.what() << "\n";
@@ -1729,6 +1744,26 @@ private:
     pulp_plugin_mouse_down(self, self.rootView, event, [self localPoint:event], &_dragTarget);
     if (self.rootView) self.rootView->request_repaint();
     [self syncKeyFocus];
+}
+- (void)rightMouseDown:(NSEvent*)event {
+  @try {
+    try {
+        if (!self.rootView) { [super rightMouseDown:event]; return; }
+        const auto result = pulp_plugin_context_press(
+            self.rootView, [self localPoint:event]);
+        if (result.handled || result.overlay_dismissed)
+            self.rootView->request_repaint();
+        if (!result.handled)
+            [super rightMouseDown:event];
+    } catch (const std::exception& e) {
+        std::cerr << "PulpGpuPluginView rightMouseDown error: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "PulpGpuPluginView rightMouseDown error: unknown exception\n";
+    }
+  } @catch (NSException* exception) {
+    std::cerr << "PulpGpuPluginView rightMouseDown NSException: "
+              << [[exception name] UTF8String] << "\n";
+  }
 }
 - (void)mouseDragged:(NSEvent*)event {
     pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);
