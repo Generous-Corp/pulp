@@ -21,6 +21,59 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / ".shipyard" / "config.toml"
 INVENTORY_CONTRACT_PATH = REPO_ROOT / ".shipyard" / "changed-surface-inventory.json"
 
+CHILD_PROCESS_TESTS = [
+    "exec captures stdout",
+    "exec captures non-zero exit code",
+    "exec respects timeout",
+    "line callback fires per line",
+    "line callback exceptions cancel the child during wait",
+    "line callback failure preserves the other output stream during cancellation",
+    "line callback exceptions cancel a child during input-channel setup",
+    "cancel terminates process",
+    "process_id is available and stable after wait",
+    "find_on_path finds known binary",
+    "find_on_path returns nullopt for missing binary",
+    "exec with a binary that does not exist reports failure",
+    "exec captures empty-stdout cleanly",
+    "find_on_path returns nullopt for nonexistent",
+    "run with empty command fails gracefully",
+    "stderr is captured separately",
+    "wait and read before start return default results",
+    "disabled stream capture discards stdout stderr and callbacks",
+    "read_available_output drains stdout while process is running",
+    "read_available_output is empty when stdout capture is disabled",
+    "run honors working directory",
+    "output capture respects max byte limits",
+    "zero max output bytes drains without capturing lines",
+    "stderr line callback fires independently",
+    "line callback buffers partial stdout without trailing newline",
+    "line callback buffers partial stderr without trailing newline",
+    "move assignment transfers a running child process",
+    "move constructor transfers a running child process",
+    "wait is idempotent after process completion",
+    "start after observed completion waits previous child without cancellation state",
+    "cancel after natural exit reports completed process result",
+    "process reuse clears timeout state from prior run",
+    "process reuse clears cancellation state from prior run",
+    "start cancels a running child before launching replacement",
+    "failed restart after completion does not retain stale child state",
+    "argv arguments preserve empty strings spaces and punctuation",
+    "line callback emits empty lines and preserves order",
+    "line callback joins a line split across drain passes",
+    "line callback honors output cap before later complete lines",
+    "read_available_output drains stdout without losing stderr result",
+    "timeout preserves output emitted before termination",
+    "wait preserves output after is_running observes fast exit",
+    "ChildProcess destructor cancels a still-running POSIX child",
+    "ChildProcess move construction transfers a running POSIX child",
+    "ChildProcess move assignment transfers a running POSIX child",
+    "cancel escalates when a POSIX child ignores SIGTERM",
+    "timeout escalates when a POSIX child ignores SIGTERM",
+    "starting a POSIX replacement cancels a still-running child",
+    "starting a POSIX replacement drains a previously observed exit",
+    "POSIX wait consumes cached fast-exit status after polling",
+]
+
 
 def load_config() -> dict:
     with CONFIG_PATH.open("rb") as config_file:
@@ -59,6 +112,22 @@ def literal_tests(policy: dict) -> set[str]:
         tests.update(family["tests"])
         tests.update(family.get("extended_tests", []))
     return tests
+
+
+def selected_build_targets(policy: dict, family_name: str) -> set[str]:
+    targets = set(policy["baseline_build_targets"])
+    family = next(f for f in policy["families"] if f["name"] == family_name)
+    targets.update(family["build_targets"])
+    return targets
+
+
+def selection_mode(policy: dict, paths: list[str]) -> str:
+    dispositions = {disposition(policy, path) for path in paths}
+    if dispositions <= {"mandatory"}:
+        return "mandatory"
+    if dispositions <= {"mandatory", "bounded"} and "bounded" in dispositions:
+        return "bounded"
+    return "full"
 
 
 def fixture(
@@ -161,6 +230,77 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(disposition(self.policy, "tools/cli/cmd_forge.cpp"), "bounded")
         self.assertEqual(disposition(self.policy, "tools/cli/cmd_misc.cpp"), "unknown_full")
         self.assertEqual(disposition(self.policy, "tools/cli/new_command.cpp"), "unknown_full")
+
+    def test_child_process_family_is_exact_and_deduplicates_mandatory_work(self) -> None:
+        family = next(
+            family
+            for family in self.policy["families"]
+            if family["name"] == "child-process-test-source-only"
+        )
+        self.assertEqual(family["paths"], ["test/test_child_process.cpp"])
+        self.assertEqual(family["tests"], CHILD_PROCESS_TESTS)
+        self.assertEqual(len(family["tests"]), 50)
+        self.assertEqual(family["build_targets"], ["pulp-test-child-process"])
+        self.assertEqual(family["supported_build_types"], ["debug", "release"])
+        self.assertEqual(family["risk_class"], "low")
+
+        selected_tests = set(self.policy["baseline_tests"]) | set(family["tests"])
+        self.assertEqual(len(selected_tests), 56)
+        self.assertEqual(
+            selected_build_targets(self.policy, family["name"]),
+            {"pulp-test-build-check", "pulp-cli", "pulp-test-child-process"},
+        )
+
+    def test_child_process_family_keeps_neighboring_surfaces_full(self) -> None:
+        expected = {
+            "test/test_child_process.cpp": "bounded",
+            "test/test_child_process_standard_input.cpp": "unknown_full",
+            "test/fixtures/child_process_input_fixture.cpp": "unknown_full",
+            "test/test_runtime_utils.cpp": "unknown_full",
+            "core/platform/src/child_process.cpp": "unknown_full",
+            "core/platform/include/pulp/platform/child_process.hpp": "full_required",
+        }
+        for path, reason in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), reason)
+
+        self.assertEqual(
+            selection_mode(
+                self.policy,
+                ["test/test_child_process.cpp", "test/test_runtime_utils.cpp"],
+            ),
+            "full",
+        )
+
+    def test_test_topology_is_narrow_and_precedes_family_matching(self) -> None:
+        topology_paths = {
+            "CMakeLists.txt",
+            "test/CMakeLists.txt",
+            "test/cmake/native_component_tests.cmake",
+            "tools/scripts/test_runner_topology_check.py",
+        }
+        for path in topology_paths:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "test_topology")
+
+        self.assertNotIn("test/**", self.policy["test_topology_paths"])
+        self.assertIn("test/cmake/**", self.policy["test_topology_paths"])
+        self.assertEqual(
+            disposition(self.policy, "tools/scripts/test_changed_surface_policy.py"),
+            "selector_policy",
+        )
+
+        mutated = copy.deepcopy(self.policy)
+        child_family = next(
+            family
+            for family in mutated["families"]
+            if family["name"] == "child-process-test-source-only"
+        )
+        child_family["paths"].append("test/cmake/native_component_tests.cmake")
+        self.assertEqual(
+            disposition(mutated, "test/cmake/native_component_tests.cmake"),
+            "test_topology",
+        )
 
     def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
         self.assertEqual(self.contract["schema_version"], 1)
