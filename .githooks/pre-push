@@ -48,7 +48,10 @@ fi
 # those records before any gate subprocess can consume them: every source gate
 # below validates the checked-out HEAD, so a branch update that names another
 # commit must be refused rather than accidentally authorizing the wrong tree.
-PREPUSH_UPDATE_RECORDS="$(cat)"
+if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
+    echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
+    exit 1
+fi
 
 # Agent/tool subprocesses can inherit nonblocking stdout/stderr pipes. Python's
 # text streams turn a transient EAGAIN on those pipes into BlockingIOError,
@@ -164,8 +167,16 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
     _prepush_source_update_mode="no-source"
     _prepush_head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
     _prepush_zero_sha="0000000000000000000000000000000000000000"
-    while read -r _prepush_local_ref _prepush_local_sha _prepush_remote_ref _prepush_remote_sha; do
-        [ -n "${_prepush_remote_ref:-}" ] || continue
+    while read -r _prepush_local_ref _prepush_local_sha _prepush_remote_ref _prepush_remote_sha _prepush_extra; do
+        if [ -z "${_prepush_local_ref:-}${_prepush_local_sha:-}${_prepush_remote_ref:-}${_prepush_remote_sha:-}${_prepush_extra:-}" ]; then
+            continue
+        fi
+        if [ -z "${_prepush_local_ref:-}" ] || [ -z "${_prepush_local_sha:-}" ] || \
+           [ -z "${_prepush_remote_ref:-}" ] || [ -z "${_prepush_remote_sha:-}" ] || \
+           [ -n "${_prepush_extra:-}" ]; then
+            echo "✗ pre-push: malformed pushed-ref record; expected exactly four fields." >&2
+            exit 1
+        fi
         case "$_prepush_remote_ref" in
             refs/heads/*)
                 [ "${_prepush_local_sha:-}" != "$_prepush_zero_sha" ] || continue
@@ -182,7 +193,8 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
 $PREPUSH_UPDATE_RECORDS
 EOF
     unset _prepush_head_sha _prepush_zero_sha _prepush_local_ref \
-          _prepush_local_sha _prepush_remote_ref _prepush_remote_sha
+          _prepush_local_sha _prepush_remote_ref _prepush_remote_sha \
+          _prepush_extra
 fi
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then

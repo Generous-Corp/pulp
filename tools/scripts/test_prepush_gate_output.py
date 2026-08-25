@@ -109,6 +109,18 @@ def main() -> int:
             print("FAIL: mixed-commit multi-ref push did not fail closed", file=sys.stderr)
             return 1
 
+        truncated = run_hook(f"refs/heads/main {head}\n")
+        if truncated.returncode == 0 or "malformed pushed-ref record" not in truncated.stderr:
+            print("FAIL: truncated pushed-ref input did not fail closed", file=sys.stderr)
+            return 1
+
+        extra_field = run_hook(
+            f"refs/heads/main {head} refs/heads/main {prior} unexpected\n"
+        )
+        if extra_field.returncode == 0 or "malformed pushed-ref record" not in extra_field.stderr:
+            print("FAIL: pushed-ref input with extra fields did not fail closed", file=sys.stderr)
+            return 1
+
     read_fd, write_fd = os.pipe()
     try:
         fill_nonblocking_pipe(write_fd)
