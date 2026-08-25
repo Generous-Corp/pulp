@@ -61,14 +61,24 @@ std::pair<canvas::Color, bool> parse_skin_color(const std::string& value) {
 void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
-    // setImageSource(id, path) - set image file path. Relative paths resolve
-    // against the bridge's script base dir when one is set (self-contained
-    // import artifacts reference `assets/<file>` next to their ui.js).
+    // setImageSource(id, source) - set an image URI or file path. Relative
+    // paths resolve against the bridge's script base dir when one is set
+    // (self-contained import artifacts reference `assets/<file>` next to
+    // their ui.js). Persisted captures use data: URIs and must not be routed
+    // through set_image_path(), which would prepend file:// and turn the
+    // encoded pixels into placeholder text.
     register_bridge_function(api, "setImageSource", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto path = self.resolve_script_relative(args.get<std::string>(1, ""));
-        if (auto* img = dynamic_cast<ImageView*>(self.widget(id)))
-            img->set_image_path(path);
+        auto source = args.get<std::string>(1, "");
+        if (auto* img = dynamic_cast<ImageView*>(self.widget(id))) {
+            const bool is_supported_uri =
+                source.rfind("data:image/", 0) == 0 || source.rfind("file://", 0) == 0 ||
+                source.rfind("resource:", 0) == 0 || source.rfind("memory:", 0) == 0;
+            if (is_supported_uri)
+                img->set_image_source(source);
+            else
+                img->set_image_path(self.resolve_script_relative(source));
+        }
         return choc::value::Value();
     });
 

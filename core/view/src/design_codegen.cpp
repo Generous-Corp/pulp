@@ -2122,7 +2122,6 @@ static void emit_js_image_node(const NativeEmit& e) {
                             *opts.fidelity_report);
     ss << "\n";
 }
-
 // Text terminal: createLabel plus type, color, run and wrap styling.
 static void emit_js_text_node(const NativeEmit& e) {
     auto& ss = e.ss;
@@ -3078,7 +3077,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // IR untouched; the web-compat arm (which does not own the dropped-shape
         // fall-through) is intentionally not affected.
         DesignIR native_ir = prepare_native_design_ir(ir);
-
+        materialize_manifest_image_uris(native_ir.root, native_ir.asset_manifest);
         // Resolve widget kinds through the SHARED recognition resolver — the
         // same pass the cpp and Swift emitters run — so this default JS lane
         // classifies from one source of truth instead of re-deriving it inline.
@@ -3113,6 +3112,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // Web-compat DOM API
         DesignIR web_ir = ir;
         lower_faithful_captures_in_place(web_ir.root);
+        materialize_manifest_image_uris(web_ir.root, web_ir.asset_manifest);
         int var_counter = 0;
         generate_node(ss, web_ir.root, opts, 0, var_counter, "");
         ss << "document.body.appendChild(" << opts.root_variable << ");\n";

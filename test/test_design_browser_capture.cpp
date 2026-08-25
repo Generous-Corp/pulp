@@ -62,6 +62,67 @@ TEST_CASE("faithful_capture lowers to the captured image in JS and baked C++",
     REQUIRE(cpp.source.find("Knob") == std::string::npos);
 }
 
+TEST_CASE("faithful_capture JS uses persisted manifest bytes without a scratch path",
+          "[view][import][codegen][faithful-capture][assets]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 780.0f;
+    ir.root.style.height = 496.0f;
+    // Browser-import provenance may put the capture's stable asset identity on
+    // the wrapper too. It must not reclassify that wrapper as an image and
+    // discard the live controls layered beside its captured backdrop.
+    ir.root.attributes["asset_ref"] = "reference:browser";
+
+    IRNode capture;
+    capture.type = "frame";
+    capture.render_mode = NodeRenderMode::faithful_capture;
+    capture.capture_asset_id = "reference:browser";
+    capture.style.width = 780.0f;
+    capture.style.height = 496.0f;
+    ir.root.children.push_back(capture);
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Rate";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 64.0f;
+    knob.style.height = 64.0f;
+    ir.root.children.push_back(knob);
+
+    IRAssetRef asset;
+    asset.asset_id = "reference:browser";
+    asset.original_uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto native_js = generate_pulp_js(ir);
+    REQUIRE(native_js.find("createImage(") != std::string::npos);
+    REQUIRE(native_js.find("setImageSource(") != std::string::npos);
+    REQUIRE(native_js.find("createKnob(") != std::string::npos);
+    REQUIRE(native_js.find(asset.original_uri) != std::string::npos);
+    REQUIRE(native_js.find("file://") == std::string::npos);
+
+    CodeGenOptions web_options;
+    web_options.mode = CodeGenMode::web_compat;
+    const auto web_js = generate_pulp_js(ir, web_options);
+    REQUIRE(web_js.find("document.createElement('img')") != std::string::npos);
+    REQUIRE(web_js.find("document.createElement('knob')") != std::string::npos);
+    REQUIRE(web_js.find(".src = '") != std::string::npos);
+    REQUIRE(web_js.find(asset.original_uri) != std::string::npos);
+
+    asset.original_uri = "https://example.invalid/capture.png";
+    ir.asset_manifest.assets.clear();
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto unresolved_native_js = generate_pulp_js(ir);
+    REQUIRE(unresolved_native_js.find("setImageSource(") == std::string::npos);
+    REQUIRE(unresolved_native_js.find(asset.original_uri) == std::string::npos);
+
+    const auto unresolved_web_js = generate_pulp_js(ir, web_options);
+    REQUIRE(unresolved_web_js.find(".src = '") == std::string::npos);
+    REQUIRE(unresolved_web_js.find(asset.original_uri) == std::string::npos);
+}
+
 TEST_CASE("browser capture wire contract rejects unknown or incomplete render modes",
           "[view][import][ir-v1][faithful-capture]") {
     try {

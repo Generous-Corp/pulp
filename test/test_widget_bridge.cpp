@@ -6169,6 +6169,14 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
+    SECTION("persisted data URI remains an image source") {
+        const std::string source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+        bridge.load_script("createImage('img', ''); setImageSource('img', '" + source + "');");
+        auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_source() == source);
+    }
+
     SECTION("relative path that exists under the base resolves absolute") {
         bridge.set_script_base_dir(base);
         bridge.load_script(R"(

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260825-pr7794-persisted-capture-js-assets",
+  "created_at": "2026-08-25T06:21:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned persisted DesignIR compatibility that resolves manifest-backed faithful-capture image identities into self-contained JS image sources and preserves supported data URIs in WidgetBridge. This repair keeps agent-authored Chromium pixels portable in native plugin views; it changes neither Vellum source authority nor any transferred implementation boundary.",
+  "tests": [
+    "pulp-test-design-import [assets] (12 cases, 164 assertions)",
+    "pulp-test-widget-bridge script-relative asset path contract (1 case, 15 assertions)",
+    "exact frozen Forge Sequencer DesignIR renders authored Skia pixels at 780x496",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
