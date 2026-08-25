@@ -141,13 +141,22 @@ public:
             // This host owns one capture bracket. Close a prior button before
             // accepting a chord mate instead of overwriting its target.
             if (session_.active()) cancel_gesture();
+            last_point_ = pt;
+            View& root = host_.input_root();
+            // Native ComboBox menus are paint-only overlays. They have first
+            // refusal, matching the macOS host: consulting the generalized
+            // overlay first could dismiss it (and run arbitrary callbacks)
+            // before a click visibly inside this independent popup arrives.
+            if (button == MouseButton::left &&
+                route_press_to_open_combo(root, pt, modifiers)) {
+                host_.input_request_repaint();
+                return;
+            }
             if (!session_.begin(button)) return;
             generation = session_.generation();
             const auto accepts_original = [this, generation, button] {
                 return session_.accepts(generation, button);
             };
-            last_point_ = pt;
-            View& root = host_.input_root();
             // Outside presses must dismiss this editor's generalized overlay
             // even when a gesture recognizer consumes the press below.
             const auto overlay_press = route_press_to_active_overlay(root, pt);
@@ -480,6 +489,26 @@ public:
     }
 
 private:
+    static bool route_press_to_open_combo(View& root, Point pt,
+                                          std::uint16_t modifiers) {
+        auto* combo = ComboBox::active_popup_in(root);
+        if (!combo) return false;
+        float x = 0, y = 0, width = 0, height = 0;
+        if (!combo->dropdown_window_rect(x, y, width, height) ||
+            pt.x < x || pt.x > x + width ||
+            pt.y < y || pt.y > y + height)
+            return false;
+        MouseEvent event;
+        event.position = point_to_local(pt, combo, &root);
+        event.window_position = pt;
+        event.button = MouseButton::left;
+        event.modifiers = modifiers;
+        event.is_down = true;
+        event.phase = MousePhase::press;
+        combo->on_mouse_event(event);
+        return true;
+    }
+
     /// Offer a press/drag to the gesture arbiter. Returns whether the arbiter
     /// took the event, in which case raw delivery is suppressed for it.
     bool yield_to_gesture(const MouseEvent& event) {

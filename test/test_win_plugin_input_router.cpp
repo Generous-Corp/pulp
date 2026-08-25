@@ -348,6 +348,43 @@ TEST_CASE("an overlay dismissal callback may replace the pointer bracket",
     REQUIRE(replacement->downs == 1);
 }
 
+TEST_CASE("an open ComboBox has priority over an independent active overlay",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 240, 200});
+    auto combo_owned = std::make_unique<ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({0, 0, 140, 28});
+    combo->set_items({"One", "Two", "Three"});
+    combo->set_selected(0);
+    root.add_child(std::move(combo_owned));
+    MouseEvent open;
+    open.position = {70, 14};
+    open.window_position = {70, 14};
+    open.button = MouseButton::left;
+    open.is_down = true;
+    open.phase = MousePhase::press;
+    combo->on_mouse_event(open);
+    REQUIRE(combo->is_open());
+
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({180, 150, 20, 20});
+    int dismissals = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissals; };
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({70, 54}, MouseButton::left, 0);
+
+    REQUIRE(combo->selected() == 1);
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(root.existing_interaction()->active_overlay == overlay);
+    REQUIRE(dismissals == 0);
+}
+
 TEST_CASE("a second button closes the first bracket rather than overwriting it",
           "[win-input-router][wah-6]") {
     // Chorded buttons: this host owns ONE capture bracket. The first target
