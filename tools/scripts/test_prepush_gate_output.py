@@ -47,6 +47,9 @@ def main() -> int:
     if not captured_diff_cover:
         print("FAIL: slow diff-cover output bypasses gate capture", file=sys.stderr)
         return 1
+    if 'changed=$(git diff --name-only "$BASE...HEAD"' in prepush_source:
+        print("FAIL: stale outer diff filter can bypass compare-ref refresh", file=sys.stderr)
+        return 1
 
     # The hook validates checked-out HEAD. Git may ask it to push another local
     # ref, so prove the pushed-ref contract fails closed before any source gate

@@ -620,13 +620,10 @@ class NativeDiffPreflightTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.root = _worktree_with_config(pathlib.Path(self._td.name), "wt", 999_999)
-        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.root, check=True)
-        subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=self.root, check=True)
-        subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.root, check=True)
         (self.root / "tools" / "scripts" / "policy.py").write_text("VALUE = 1\n")
         subprocess.run(["git", "add", "."], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "-qm", "base"], cwd=self.root, check=True)
-        subprocess.run(["git", "branch", "base"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -717,7 +714,7 @@ class NativeDiffPreflightTests(unittest.TestCase):
 
     def test_unstaged_restore_cannot_hide_committed_native_change(self) -> None:
         native = self.root / "core" / "existing.cpp"
-        native.parent.mkdir(parents=True)
+        native.parent.mkdir(parents=True, exist_ok=True)
         native.write_text("int value() { return 1; }\n")
         subprocess.run(["git", "add", "core/existing.cpp"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "-qm", "add native base"], cwd=self.root, check=True)
@@ -734,7 +731,7 @@ class NativeDiffPreflightTests(unittest.TestCase):
 
     def test_remote_compare_ref_is_refreshed_before_skip(self) -> None:
         native = self.root / "core" / "existing.cpp"
-        native.parent.mkdir(parents=True)
+        native.parent.mkdir(parents=True, exist_ok=True)
         native.write_text("int value() { return 1; }\n")
         subprocess.run(["git", "add", "core/existing.cpp"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "-qm", "native A"], cwd=self.root, check=True)
@@ -789,9 +786,16 @@ class NativeDiffPreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
         self.assertIn("retaining coverage", result.stderr)
 
+        full_result = _run_script(
+            self.root,
+            {"PULP_DIFF_COVER_COMPARE_BRANCH": "origin/main"},
+        )
+        self.assertEqual(full_result.returncode, 4, full_result.stdout + full_result.stderr)
+        self.assertIn("refusing stale coverage", full_result.stderr)
+
     def test_mutation_misclassifying_cpp_makes_the_negative_control_fail(self) -> None:
         native = self.root / "core" / "new.cpp"
-        native.parent.mkdir(parents=True)
+        native.parent.mkdir(parents=True, exist_ok=True)
         native.write_text("int covered() { return 1; }\n")
         subprocess.run(["git", "add", "-N", "core/new.cpp"], cwd=self.root, check=True)
         script = self.root / "tools" / "scripts" / "local_diff_cover.sh"
@@ -1259,9 +1263,23 @@ def _worktree_with_config(tmp: pathlib.Path, name: str,
     root = _fake_worktree(tmp, name)
     (root / "tools" / "scripts" / "coverage_config.json").write_text(json.dumps({
         "diff_coverage_fail_under": 75,
-        "compare_branch": "origin/main",
+        "compare_branch": "base",
         "min_free_disk_gib": min_free_gib,
     }))
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+    (root / ".fixture-base").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture base"], cwd=root, check=True)
+    subprocess.run(["git", "branch", "base"], cwd=root, check=True)
+    # Keep full-script fixtures on the coverage-retained path so their disk,
+    # dependency, and build-stage assertions are not short-circuited by the
+    # non-native preflight that other tests exercise explicitly.
+    native = root / "core" / "fixture.cpp"
+    native.parent.mkdir(parents=True)
+    native.write_text("int fixture() { return 1; }\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", "core/fixture.cpp"], cwd=root, check=True)
     return root
 
 

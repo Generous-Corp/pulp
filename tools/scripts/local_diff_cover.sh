@@ -429,6 +429,15 @@ if [ "${COMPARE_REF_READY}" = "1" ]; then
     fi
 fi
 
+if [ "${COMPARE_REF_READY}" != "1" ]; then
+    if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
+        # Exit 10 means the caller must retain the normal coverage gate.
+        exit 10
+    fi
+    echo "[local_diff_cover] ERROR: fresh compare authority is unavailable; refusing stale coverage" >&2
+    exit 4
+fi
+
 # This proof runs before disk/dependency checks, locking, configuring, or
 # compiling. A policy/test/config-only diff therefore exits in milliseconds
 # after the one freshness check needed to make that skip authoritative.

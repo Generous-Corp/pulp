@@ -531,20 +531,18 @@ DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
 if [ "$_prepush_source_update_mode" = "no-source" ]; then
     echo "[pre-push] diff coverage skipped: push carries no branch source update." >&2
 elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
-    if changed=$(git diff --name-only "$BASE...HEAD" 2>/dev/null); then
-        if echo "$changed" | grep -qE '^(core/|tools/cli/|tools/scripts/)'; then
-            # Ask the coverage script whether this exact diff can contain native
-            # lines before announcing or starting a build. Exit 0 means the
-            # script proved it can skip; exit 10 means retain the gate. Any
-            # unexpected preflight result fails closed into the normal run.
-            PULP_DIFF_COVER_PREFLIGHT_ONLY=1 \
-                PULP_DIFF_COVER_COMPARE_BRANCH="$BASE" \
-                bash "$DIFF_COVER_SH" >/dev/null 2>&1
-            _diff_cover_preflight_rc=$?
-            if [ "$_diff_cover_preflight_rc" -eq 0 ]; then
-                echo "[pre-push] diff coverage skipped: exact diff has no potentially coverable C/C++ lines." >&2
-            else
-                # LOUD banner + heartbeat: this step runs a full local configure +
+    # The coverage script owns both compare-ref freshness and changed-surface
+    # classification. An outer git-diff filter here would use an unpinned,
+    # potentially stale origin/main and could skip the script before it gets a
+    # chance to refresh the authority.
+    PULP_DIFF_COVER_PREFLIGHT_ONLY=1 \
+        PULP_DIFF_COVER_COMPARE_BRANCH="$BASE" \
+        bash "$DIFF_COVER_SH" >/dev/null 2>&1
+    _diff_cover_preflight_rc=$?
+    if [ "$_diff_cover_preflight_rc" -eq 0 ]; then
+        echo "[pre-push] diff coverage skipped: exact diff has no potentially coverable C/C++ lines." >&2
+    else
+        # LOUD banner + heartbeat: this step runs a full local configure +
             # compile, which can take several MINUTES with little output. That
             # silence is a BUILD, NOT a network/SSH hang — the #1 mistake here is
             # killing a "stuck push" that is actually this build. The heartbeat
@@ -572,8 +570,6 @@ elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
             fi
             kill "$_hb_pid" 2>/dev/null || true
             wait "$_hb_pid" 2>/dev/null || true
-            fi
-        fi
     fi
 fi
 
