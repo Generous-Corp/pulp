@@ -287,11 +287,19 @@ def test_protected_automatic_workflows_use_restricted_linux_selector() -> None:
         assert "runs-on: >-" in text, workflow
         expression = text.split("runs-on: >-", 1)[1].split("\n    steps:", 1)[0]
         assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" in expression, workflow
-        assert "github.event_name == 'workflow_dispatch'" in expression, workflow
-        assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in expression, workflow
-        assert expression.index("github.event_name == 'workflow_dispatch'") < expression.index(
-            "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
-        ), workflow
+        if workflow == VELLUM_WORKFLOW:
+            # Manual recovery has actions:write and therefore runs in its own
+            # hosted controller job without checking out PR code. Only
+            # automatic restricted-context validation reaches this selector.
+            assert "github.event_name == 'workflow_dispatch'" not in expression, workflow
+            assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" not in expression, workflow
+            assert "rerun-pr-context" in text, workflow
+        else:
+            assert "github.event_name == 'workflow_dispatch'" in expression, workflow
+            assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in expression, workflow
+            assert expression.index("github.event_name == 'workflow_dispatch'") < expression.index(
+                "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON"
+            ), workflow
 
 
 def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
@@ -344,7 +352,11 @@ def test_json_selector_fallbacks_stay_json_quoted() -> None:
     parse and takes the required gate down with it, so the hosted fallbacks
     must be written as the quoted JSON string `'"ubuntu-latest"'`.
     """
-    for name in ("version-skill-check.yml", "vellum-freeze-check.yml"):
+    expected_fallbacks = {
+        "version-skill-check.yml": 3,
+        "vellum-freeze-check.yml": 2,
+    }
+    for name, expected_count in expected_fallbacks.items():
         text = (BUILD_WORKFLOW.parent / name).read_text(encoding="utf-8")
         block = re.search(r"runs-on: >-\n(.*?\n)\s*(?:name:|steps:)", text, re.S)
         assert block, f"{name}: could not locate the runs-on block"
@@ -354,7 +366,7 @@ def test_json_selector_fallbacks_stay_json_quoted() -> None:
             f"{name}: bare 'ubuntu-latest' fallback inside fromJSON would fail "
             "to parse; use the JSON-quoted form"
         )
-        assert body.count("'\"ubuntu-latest\"'") >= 3, (
+        assert body.count("'\"ubuntu-latest\"'") >= expected_count, (
             f"{name}: every branch must carry a JSON-quoted hosted fallback"
         )
 
