@@ -27,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 SELF_HOSTED = '["self-hosted","macOS","ARM64","pulp-build"]'
 OVERFLOW = '["self-hosted","macOS","ARM64","pulp-build-m5"]'
+MERGE_GROUP_LABEL = "pulp-build-merge-group"
+PR_HEAD_LABEL = "pulp-build-pr-head"
 
 
 def _resolver_source() -> str:
@@ -109,11 +111,22 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
     def test_same_repo_pr_still_uses_the_self_hosted_macs(self):
         # The control. Without it, a resolver that routed *everything* to
         # github-hosted would satisfy every assertion above.
-        self.assertIn("self-hosted", _macos_runs_on("Generous-Corp/pulp"))
+        got = _macos_runs_on("Generous-Corp/pulp")
+        self.assertIn("self-hosted", got)
+        self.assertIn(PR_HEAD_LABEL, got)
+        self.assertNotIn(MERGE_GROUP_LABEL, got)
+
+    def test_merge_group_uses_the_higher_priority_event_class(self):
+        got = _macos_runs_on(None, event="merge_group")
+        self.assertIn("self-hosted", got)
+        self.assertIn(MERGE_GROUP_LABEL, got)
+        self.assertNotIn(PR_HEAD_LABEL, got)
 
     def test_non_pull_request_events_are_untouched(self):
         got = _macos_runs_on(None, event="workflow_dispatch")
         self.assertIn("self-hosted", got)
+        self.assertNotIn(MERGE_GROUP_LABEL, got)
+        self.assertNotIn(PR_HEAD_LABEL, got)
 
 
 if __name__ == "__main__":
