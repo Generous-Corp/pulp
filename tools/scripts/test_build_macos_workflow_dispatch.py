@@ -392,6 +392,12 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             "head_ref": "repair/security-7723",
         })
 
+    def test_concurrency_is_scoped_to_explicit_pr_before_optional_ref(self) -> None:
+        self.assertEqual(
+            _workflow()["concurrency"]["group"],
+            "build-macos-${{ inputs.pr_number || inputs.target_ref || github.ref }}",
+        )
+
     def test_local_route_fails_closed_even_for_current_jit_selector(self) -> None:
         selectors = (
             '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]',
