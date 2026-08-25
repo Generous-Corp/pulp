@@ -492,10 +492,14 @@ jobs:
               macos_route = "local (default)"
               chosen_macos_selector = local_macos_selector
 
-          # Event classes are separate GitHub assignment domains. A runner
-          # registered for PR-head work cannot claim merge-queue work, even if
-          # the PR job was queued first. The repo variable remains the dynamic
-          # eligibility/base selector; this only adds the event class after the
+          # Event classes are separate GitHub assignment domains. Replace the
+          # legacy shared gate label instead of merely appending the event
+          # class: GitHub matches a job when all of its labels are a subset of
+          # the runner's labels, so a merge-group runner that also advertises
+          # `pulp-gate-fast` can otherwise still steal an older PR-head job
+          # which requires only the shared label. The repo variable remains
+          # the dynamic eligibility/base selector; this makes the required
+          # event label the exclusive assignment discriminator after the
           # existing fork, operator, capacity, and overflow decisions finish.
           # Hosted selectors and workflow_dispatch retain their old shape.
           event_class_label = {
@@ -512,6 +516,11 @@ jobs:
                   and "self-hosted" in parsed_macos_selector
                   and event_class_label not in parsed_macos_selector
               ):
+                  parsed_macos_selector = [
+                      label
+                      for label in parsed_macos_selector
+                      if label != "pulp-gate-fast"
+                  ]
                   parsed_macos_selector.append(event_class_label)
                   chosen_macos_selector = json.dumps(
                       parsed_macos_selector, separators=(",", ":")

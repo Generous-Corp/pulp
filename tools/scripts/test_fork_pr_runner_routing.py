@@ -25,8 +25,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
-SELF_HOSTED = '["self-hosted","macOS","ARM64","pulp-build"]'
-OVERFLOW = '["self-hosted","macOS","ARM64","pulp-build-m5"]'
+LEGACY_SHARED_LABEL = "pulp-gate-fast"
+SELF_HOSTED = (
+    '["self-hosted","macOS","ARM64","pulp-build",'
+    f'"{LEGACY_SHARED_LABEL}"]'
+)
+OVERFLOW = (
+    '["self-hosted","macOS","ARM64","pulp-build-m5",'
+    f'"{LEGACY_SHARED_LABEL}"]'
+)
 MERGE_GROUP_LABEL = "pulp-build-merge-group"
 PR_HEAD_LABEL = "pulp-build-pr-head"
 
@@ -115,12 +122,14 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
         self.assertIn("self-hosted", got)
         self.assertIn(PR_HEAD_LABEL, got)
         self.assertNotIn(MERGE_GROUP_LABEL, got)
+        self.assertNotIn(LEGACY_SHARED_LABEL, got)
 
     def test_merge_group_uses_the_higher_priority_event_class(self):
         got = _macos_runs_on(None, event="merge_group")
         self.assertIn("self-hosted", got)
         self.assertIn(MERGE_GROUP_LABEL, got)
         self.assertNotIn(PR_HEAD_LABEL, got)
+        self.assertNotIn(LEGACY_SHARED_LABEL, got)
 
     def test_non_pull_request_events_are_untouched(self):
         got = _macos_runs_on(None, event="workflow_dispatch")
