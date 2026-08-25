@@ -5505,7 +5505,9 @@ for a responsive shell whose own width changes at a breakpoint the single
 bounded correction lands inside. **No width recovers content anchored left of
 the document origin** (an absolutely positioned element at a negative `left`,
 `position: fixed`, or a negative margin on `<html>`); reach for `--width` only
-when the layout's own width tracks the viewport.
+when the layout's own width tracks the viewport. Through the supported `pulp
+import-design` entry point, an explicit `--render-size WxH` supplies this pinned
+width; the default render size continues to seed the automatic correction.
 
 ## The value arc belongs to the WIDGET, and a blank knob in the capture is correct
 

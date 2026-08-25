@@ -10,10 +10,11 @@
     "design-output-and-packaging",
     "design-source-ingest"
   ],
-  "rationale": "Record parsing the browser capture's --width option, which existed only inside the error string that advertised it, so the one remedy a negative-overflow refusal named could not be followed. A pinned width authors the page at a width the caller knows the layout resolves at and skips the automatic correction, and the refusal now reports the measurement and both layouts that survive that correction instead of naming a flag that cannot move anchored content. Watch-only: no capture, import, or rendering authority is transferred, and every existing invocation keeps its behaviour because the launcher passes --initial-width and never --width.",
+  "rationale": "Record parsing the browser capture's --width option, which existed only inside the error string that advertised it, so the one remedy a negative-overflow refusal named could not be followed. A pinned width authors the page at a width the caller knows the layout resolves at and skips the automatic correction, and the refusal now reports the measurement and both layouts that survive that correction instead of naming a flag that cannot move anchored content. The supported importer maps an explicit --render-size to the pin while default captures retain automatic correction. Watch-only: no capture, import, or rendering authority is transferred.",
   "tests": [
     "an explicit --width resolves a layout the bounded correction cannot",
     "an unreachable left overflow names its cause, not a phantom flag",
+    "the supported browser-import launcher forwards an explicit render width as --width",
     "vellum-expansion-watch"
   ],
   "disposition": "watch-only-no-authority",

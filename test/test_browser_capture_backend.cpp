@@ -806,6 +806,7 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     TempTree tree("argv");
     const auto script = tree.write("capture script ' $().mjs", "// fixture");
     auto request = fixture_request(tree, script);
+    request.pinned_width = 1440;
     const auto interactions = tree.write(
         "interaction plan ' $().json",
         R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
@@ -833,6 +834,9 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     CHECK(contains_line(args, output.string()));
     CHECK(contains_line(args, "Fixture Chromium"));
     CHECK(contains_line(args, "123.4.5.6"));
+    CHECK(contains_line(args, "--width"));
+    CHECK(contains_line(args, "1440"));
+    CHECK_FALSE(contains_line(args, "--initial-width"));
     CHECK(contains_line(args, "--interactions"));
     CHECK(contains_line(args, interactions.string()));
     CHECK(contains_line(args, "--allow-network"));
