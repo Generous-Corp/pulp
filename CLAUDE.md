@@ -1489,6 +1489,40 @@ debug the diff. The floor is `min_free_disk_gib` in
 that a from-scratch build fits). Override per run with
 `PULP_DIFF_COVER_MIN_FREE_GIB=<gib>`; `0` disables the check.
 
+**Reclaiming worktree build dirs.** The far larger consumer is `build/` — one
+per worktree, 10-40 GB apiece, across hundreds of registered worktrees. Nothing
+reaps them: "remove the worktree after landing" depends on remembering, and
+most agent sessions end without a tidy closeout. `clean_worktree_builds.sh`
+removes a worktree's `build/` and nothing else — never the worktree, never
+source, never uncommitted work, so the worst case is a rebuild:
+
+```bash
+tools/scripts/clean_worktree_builds.sh            # dry-run: list + total reclaimable
+tools/scripts/clean_worktree_builds.sh --verbose  # also explain every skip
+tools/scripts/clean_worktree_builds.sh --yes      # delete
+```
+
+It only considers directories `git worktree list` reports for this repository,
+and deletes only when **all five** hold: the exact head is a strict ancestor of
+current `origin/main`; the shared lineage registry records that exact head as
+merged with a PR URL; the build has been idle beyond
+`PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
+process names, has its cwd in, or holds an open file under the worktree; and the
+physical path/common Git directory re-pass a fresh registry check at deletion
+time. Removal first renames `build/` from an already-opened physical worktree
+directory, so replacement-path races cannot redirect it. A deleted
+remote branch is not completion evidence: unique, active, unclassified, or
+stale-lineage work is preserved automatically. The mutable gates are checked
+again immediately before removal. If `origin` or process state is unavailable,
+or full Git history cannot be established, it removes nothing (exit 3). The
+main checkout is never reaped. `PULP_WORKTREES_ROOT`
+narrows the sweep and is echoed in the header, because that variable is often
+already exported and silently halves the totals. Tested by
+`tools/scripts/test_clean_worktree_builds.py`.
+
+Scheduling either reaper is deliberately not wired up here — whether a machine
+runs one on a timer is an operator decision.
+
 ### Pre-Push Gates Check
 
 `tools/scripts/gates.sh` is the on-demand runner for the cheap

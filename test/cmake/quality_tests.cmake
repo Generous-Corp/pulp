@@ -468,6 +468,24 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_local_diff_cover
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
+
+        # The two build-directory reapers. Both DELETE directories, so their
+        # gates are the thing under test: each builds a throwaway git
+        # repository with real worktrees in every state its gate
+        # distinguishes, and asserts what survives as hard as what goes.
+        # Fixture-only; nothing outside the temporary directory is reachable.
+        # clean_build_cov.sh's suite existed but was registered nowhere, so it
+        # had never run in CI — a reaper whose guard nothing exercises is the
+        # dangerous kind.
+        add_test(NAME clean-build-cov-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_build_cov
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
+
+        add_test(NAME clean-worktree-builds-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
     endif()
     # Tool registry: docs/status/tools.yaml must stay valid (every path and
     # invocation resolves) AND complete (every committed entry point under the
