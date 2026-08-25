@@ -4062,8 +4062,10 @@ PR code.
 
 It must remain semantically identical to the required macOS gate: resolve an
 open internal PR from the workflow definition on protected `main`, check out
-trusted control code with credentials disabled, then fetch and detach to the
-PR's exact head SHA and immutable base SHA for capability-history checks. The
+trusted control code with credentials disabled, then fetch and verify the PR's
+exact head SHA and immutable base SHA without materializing PR-controlled files.
+The first PR checkout occurs only in the clone owned by `nobody`; this keeps
+PR-selected Git filters and LFS endpoints out of the trusted environment. The
 untrusted build job has only contents-read permission, no Actions/Namespace
 cache action, no persistent build/dependency cache path, and no ccache; all
 writable state is unique to the run and removed at teardown. All PR-controlled

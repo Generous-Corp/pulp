@@ -187,6 +187,14 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     ):
         if marker not in export_script:
             raise AssertionError(f"isolated clone lost protected base marker {marker}")
+    trusted_steps = " ".join(
+        step.get("run", "") for step in build["steps"]
+        if step.get("name") != "Export exact head into the untrusted account"
+    )
+    if 'git checkout --detach "$EXPECTED_HEAD"' in trusted_steps:
+        raise AssertionError("trusted runner must not materialize the PR head")
+    if "refs/remotes/pulp-retarget/head" not in trusted_steps:
+        raise AssertionError("trusted runner lost exact PR object verification")
     pr_command_steps = {
         "Bootstrap repository dependencies", "Configure", "Build", "Test",
     }

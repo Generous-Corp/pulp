@@ -1766,8 +1766,9 @@ workflow definition from protected `main`, never from the PR branch. Before
 claiming a macOS runner, that trusted control path resolves one open internal
 PR, validates that PR still targets `Generous-Corp/pulp:main`, and pins both its
 exact head and the immutable base SHA recorded on the PR. The build runner first
-checks out the trusted workflow SHA with Git credentials disabled, then fetches,
-verifies, and detaches to the exact PR head. That build job has only
+checks out the trusted workflow SHA with Git credentials disabled, then fetches
+and verifies the exact PR objects without materializing them. The first PR-head
+checkout happens only after the isolated clone belongs to `nobody`. That build job has only
 contents-read permission, no Actions/Namespace cache action, no persistent
 ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
 teardown. Because a protected-main Actions job also carries implicit runtime

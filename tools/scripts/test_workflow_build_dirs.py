@@ -153,7 +153,11 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn('if [ "$WORKFLOW_REF" != "main" ]', text)
         self.assertIn("ref: ${{ github.sha }}", text)
         self.assertIn("persist-credentials: false", text)
-        self.assertIn("- name: Checkout exact pull request head", text)
+        self.assertIn("- name: Verify exact pull request head object", text)
+        trusted_prefix = text.split(
+            "- name: Export exact head into the untrusted account", 1
+        )[0]
+        self.assertNotIn('git checkout --detach "$EXPECTED_HEAD"', trusted_prefix)
         self.assertIn("- name: Fetch protected capability base", text)
         self.assertIn(
             '"+$EXPECTED_BASE:refs/remotes/origin/main"',
@@ -170,10 +174,10 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("--repeat until-pass:2", text)
         self.assertLess(
             text.index("- name: Fetch protected capability base"),
-            text.index("- name: Checkout exact pull request head"),
+            text.index("- name: Verify exact pull request head object"),
         )
         self.assertLess(
-            text.index("- name: Checkout exact pull request head"),
+            text.index("- name: Verify exact pull request head object"),
             text.index("- name: Test"),
         )
         chrome_step = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"

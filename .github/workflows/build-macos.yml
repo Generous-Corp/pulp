@@ -374,9 +374,12 @@ jobs:
             exit 1
           fi
 
-      # Switch from the trusted workflow/control checkout to the exact head
-      # only after the API-pinned PR pair has been fetched and verified.
-      - name: Checkout exact pull request head
+      # Keep the trusted worktree on protected control code. Verify only the
+      # fetched object here; the first materialization of PR-controlled files
+      # happens later under the isolated nobody account, so .gitattributes and
+      # .lfsconfig cannot invoke filters or network activity with protected
+      # runner credentials.
+      - name: Verify exact pull request head object
         env:
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
         shell: bash
@@ -388,12 +391,6 @@ jobs:
             echo "expected=$EXPECTED_HEAD actual=$actual_head" >&2
             exit 1
           fi
-          git checkout --detach "$EXPECTED_HEAD"
-          git clean -ffdx
-          [ "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" ] || {
-            echo "retarget checkout drifted from the resolved PR head" >&2
-            exit 1
-          }
 
       # Capability history is relative to the immutable base recorded on the
       # PR, not whichever commits reached main while a recovery waited. The
@@ -429,8 +426,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [ "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" ] || {
-            echo "refusing to export a non-pinned source tree" >&2
+          [ "$(git rev-parse refs/remotes/pulp-retarget/head)" = "$EXPECTED_HEAD" ] || {
+            echo "refusing to export a non-pinned source object" >&2
             exit 1
           }
           # Clone while still under the trusted runner uid, but with local
