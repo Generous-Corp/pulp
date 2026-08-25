@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The Vellum gates must recover or resolve PR refs without widening trust.
 
-Both gates post or gate a REQUIRED check, and both expose `workflow_dispatch`
-so a cancelled run can be recovered without pushing a commit. The ordinary
-freeze check may execute PR code, so its dispatch path must only re-run an
-existing exact-head pull_request-context run; it must never execute caller-
-selected code in the trusted default-branch context.
+Both gates post or gate a REQUIRED check, and both can recover a cancelled run
+without pushing a commit. The ordinary freeze check may execute PR code, so it
+must expose only `pull_request` and `merge_group`. Its separate hosted recovery
+workflow may expose only `workflow_dispatch`, may not check out or execute code,
+and may only re-run an existing exact-head pull_request-context run.
 
 So this extracts the resolve step from each workflow and runs it, with `gh` and
 `git` faked. Re-implementing the branch here would pass forever after the
@@ -237,12 +237,12 @@ class FreezeCheckResolve(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out, {"base": "MB", "head": "MH", "source_head": "MH"})
 
-    def test_validation_job_never_handles_dispatch(self):
+    def test_validation_workflow_has_only_untrusted_validation_events(self):
         doc = _workflow("vellum-freeze-check.yml")
-        self.assertEqual(
-            doc["jobs"]["freeze-check"]["if"],
-            "github.event_name != 'workflow_dispatch'",
-        )
+        on = doc.get(True) or doc.get("on")
+        self.assertEqual(set(on), {"pull_request", "merge_group"})
+        self.assertNotIn("if", doc["jobs"]["freeze-check"])
+        self.assertEqual(doc["jobs"]["freeze-check"]["name"], "Vellum freeze")
 
 
 def _workflow(name: str) -> dict:
@@ -255,7 +255,7 @@ def _workflow(name: str) -> dict:
 
 class FreezeCheckDispatchRecovery(unittest.TestCase):
     def script(self) -> str:
-        doc = _workflow("vellum-freeze-check.yml")
+        doc = _workflow("vellum-freeze-recovery.yml")
         steps = doc["jobs"]["rerun-pr-context"]["steps"]
         return next(step["run"] for step in steps if "run" in step)
 
@@ -306,20 +306,34 @@ class FreezeCheckDispatchRecovery(unittest.TestCase):
                 self.assertFalse(any("/rerun" in call for call in calls), calls)
 
     def test_dispatch_job_cannot_checkout_or_execute_pr_code(self):
-        doc = _workflow("vellum-freeze-check.yml")
+        doc = _workflow("vellum-freeze-recovery.yml")
         job = doc["jobs"]["rerun-pr-context"]
         self.assertEqual(_dispatch_safety_errors(job), [])
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+
+    def test_recovery_serializes_one_pr_without_cancelling_active_work(self):
+        doc = _workflow("vellum-freeze-recovery.yml")
         self.assertEqual(
-            job["if"],
-            "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+            doc["concurrency"]["group"],
+            "vellum-freeze-recovery-${{ inputs.pr_number }}",
         )
+        self.assertIs(doc["concurrency"]["cancel-in-progress"], False)
 
     def test_security_contract_detects_checkout_mutation(self):
-        doc = _workflow("vellum-freeze-check.yml")
+        doc = _workflow("vellum-freeze-recovery.yml")
         mutated = copy.deepcopy(doc["jobs"]["rerun-pr-context"])
         mutated["steps"].insert(0, {"uses": "actions/checkout@v4"})
         self.assertIn(
             "dispatch controller must not check out code",
+            _dispatch_safety_errors(mutated),
+        )
+
+    def test_security_contract_detects_untrusted_command_mutation(self):
+        doc = _workflow("vellum-freeze-recovery.yml")
+        mutated = copy.deepcopy(doc["jobs"]["rerun-pr-context"])
+        mutated["steps"][0]["run"] += "\nbash -c '${{ inputs.pr_number }}'\n"
+        self.assertIn(
+            "dispatch controller must not interpolate inputs into commands",
             _dispatch_safety_errors(mutated),
         )
 
@@ -333,26 +347,35 @@ def _dispatch_safety_errors(job: dict) -> list[str]:
     serialized = str(job)
     if "actions/checkout" in serialized or "refs/pull/" in serialized:
         errors.append("dispatch controller must not check out code")
+    steps = job.get("steps", [])
+    if len(steps) != 1 or any("uses" in step for step in steps):
+        errors.append("dispatch controller must contain one local controller step")
+    run = "\n".join(str(step.get("run", "")) for step in steps)
+    if "${{" in run:
+        errors.append("dispatch controller must not interpolate inputs into commands")
+    if any(token in run for token in ("curl ", "wget ", "eval ", "bash -c", "git ")):
+        errors.append("dispatch controller must not fetch or execute untrusted code")
     if "actions/runs/$run_id/rerun" not in serialized:
         errors.append("dispatch controller must recover the restricted PR run")
     return errors
 
 
 class DispatchIsDeclared(unittest.TestCase):
-    def test_both_required_gates_can_be_rerun_by_hand(self):
-        try:
-            import yaml
-        except ImportError:  # pragma: no cover
-            raise unittest.SkipTest("PyYAML not installed")
-        for name in ("vellum-trusted-gate.yml", "vellum-freeze-check.yml"):
-            doc = yaml.safe_load((WORKFLOWS / name).read_text())
-            on = doc.get(True) or doc.get("on")
-            self.assertIn(
-                "workflow_dispatch", on,
-                f"{name} posts a required check; without workflow_dispatch a "
-                "wedged run can only be recovered by pushing a commit",
-            )
-            self.assertIn("pr_number", on["workflow_dispatch"]["inputs"])
+    def test_recovery_and_validation_triggers_are_disjoint(self):
+        validation = _workflow("vellum-freeze-check.yml")
+        recovery = _workflow("vellum-freeze-recovery.yml")
+        validation_on = validation.get(True) or validation.get("on")
+        recovery_on = recovery.get(True) or recovery.get("on")
+        self.assertEqual(set(validation_on), {"pull_request", "merge_group"})
+        self.assertEqual(set(recovery_on), {"workflow_dispatch"})
+        self.assertTrue(set(validation_on).isdisjoint(recovery_on))
+        self.assertIn("pr_number", recovery_on["workflow_dispatch"]["inputs"])
+
+    def test_trusted_gate_still_has_its_own_manual_dispatch(self):
+        trusted = _workflow("vellum-trusted-gate.yml")
+        on = trusted.get(True) or trusted.get("on")
+        self.assertIn("workflow_dispatch", on)
+        self.assertIn("pr_number", on["workflow_dispatch"]["inputs"])
 
 
 class TrustedGateScheduling(unittest.TestCase):
