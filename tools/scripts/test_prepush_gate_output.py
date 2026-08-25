@@ -119,6 +119,13 @@ def main() -> int:
             print("FAIL: tag-only push was refused", file=sys.stderr)
             return 1
 
+        notes_only = run_hook(
+            f"refs/notes/commits {prior} refs/notes/commits {zeros}\n"
+        )
+        if notes_only.returncode != 0:
+            print("FAIL: notes-only push was refused", file=sys.stderr)
+            return 1
+
         deletion = run_hook(
             f"(delete) {zeros} refs/heads/old {prior}\n"
         )

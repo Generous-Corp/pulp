@@ -767,6 +767,31 @@ class NativeDiffPreflightTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
 
+    def test_resolved_local_slash_branch_is_not_reinterpreted_as_remote(self) -> None:
+        remote = self.root.parent / "upstream.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run(
+            ["git", "remote", "add", "upstream", str(remote)],
+            cwd=self.root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "branch", "upstream/localbase", "HEAD"],
+            cwd=self.root,
+            check=True,
+        )
+        (self.root / "tools" / "scripts" / "policy.py").write_text("VALUE = 2\n")
+
+        result = _run_script(
+            self.root,
+            {
+                "PULP_DIFF_COVER_COMPARE_BRANCH": "upstream/localbase",
+                "PULP_DIFF_COVER_PREFLIGHT_ONLY": "1",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("could not refresh", result.stderr)
+
     def test_failed_remote_refresh_conservatively_retains_coverage(self) -> None:
         subprocess.run(
             ["git", "remote", "add", "origin", str(self.root / "missing-origin.git")],

@@ -415,18 +415,30 @@ COMPARE_REF_READY=1
 compare_ref_full="$(git rev-parse --symbolic-full-name "${COMPARE_BRANCH}" 2>/dev/null || true)"
 compare_remote=""
 remote_branch=""
-case "${compare_ref_full:-${COMPARE_BRANCH}}" in
+case "${compare_ref_full}" in
     refs/remotes/*/*)
         compare_remote="${compare_ref_full#refs/remotes/}"
         compare_remote="${compare_remote%%/*}"
         remote_branch="${compare_ref_full#refs/remotes/${compare_remote}/}"
         ;;
-    */*)
-        compare_remote_candidate="${COMPARE_BRANCH%%/*}"
-        if git remote get-url "${compare_remote_candidate}" >/dev/null 2>&1; then
-            compare_remote="${compare_remote_candidate}"
-            remote_branch="${COMPARE_BRANCH#${compare_remote}/}"
-        fi
+    "")
+        # Only unresolved shorthand may be interpreted as <remote>/<branch>.
+        # A resolved refs/heads/upstream/topic is a local branch even when a
+        # remote named "upstream" also exists.
+        case "${COMPARE_BRANCH}" in
+            refs/remotes/*/*)
+                compare_remote="${COMPARE_BRANCH#refs/remotes/}"
+                compare_remote="${compare_remote%%/*}"
+                remote_branch="${COMPARE_BRANCH#refs/remotes/${compare_remote}/}"
+                ;;
+            */*)
+                compare_remote_candidate="${COMPARE_BRANCH%%/*}"
+                if git remote get-url "${compare_remote_candidate}" >/dev/null 2>&1; then
+                    compare_remote="${compare_remote_candidate}"
+                    remote_branch="${COMPARE_BRANCH#${compare_remote}/}"
+                fi
+                ;;
+        esac
         ;;
 esac
 if [ -n "${compare_remote}" ]; then

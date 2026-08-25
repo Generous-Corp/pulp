@@ -179,9 +179,9 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
         fi
         [ "${_prepush_local_sha:-}" != "$_prepush_zero_sha" ] || continue
         case "$_prepush_remote_ref" in
-            refs/tags/*)
-                # Tags do not change a source branch and are not authorized by
-                # this checkout's source gates.
+            refs/tags/*|refs/notes/*)
+                # Tags and Git notes are metadata rather than source updates;
+                # this checkout's source gates do not authorize their object.
                 continue
                 ;;
             *)
