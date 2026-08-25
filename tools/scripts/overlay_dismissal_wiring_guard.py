@@ -30,6 +30,7 @@ Exit codes:
 from __future__ import annotations
 
 import sys
+import re
 from pathlib import Path
 
 # Hosts live under these roots; any source file below them is in scope.
@@ -49,12 +50,17 @@ COMBO_MARKER = "notify_global_click("
 # Mechanism (B): any consultation of the generalized overlay slot. A host may
 # either call the shared portable verb or hand-roll the equivalent check, so
 # accept any of these rather than mandating one spelling.
-OVERLAY_MARKERS = (
-    "route_press_to_active_overlay",
-    "dismiss_active_overlay",
-    "active_overlay_",
-    "overlay_contains",
+OVERLAY_PATTERNS = (
+    re.compile(r"\broute_press_to_active_overlay\s*\("),
+    re.compile(r"\bdismiss_active_overlay\s*\("),
+    re.compile(r"\bactive_overlay_\b"),
+    re.compile(r"\boverlay_contains\s*\("),
 )
+
+
+def without_comments(text: str) -> str:
+    """Remove C/C++ comments so prose cannot satisfy a wiring obligation."""
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
 def repo_root() -> Path:
@@ -83,10 +89,11 @@ def main() -> int:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if COMBO_MARKER not in text:
+        executable_text = without_comments(text)
+        if COMBO_MARKER not in executable_text:
             continue
         checked += 1
-        if not any(marker in text for marker in OVERLAY_MARKERS):
+        if not any(pattern.search(executable_text) for pattern in OVERLAY_PATTERNS):
             offenders.append(path)
 
     if checked == 0:

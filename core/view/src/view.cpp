@@ -1155,6 +1155,17 @@ void View::dismiss_active_overlay() {
     }
 }
 
+void View::dismiss_active_overlay(View& scope) {
+    RootInteractionState* state = scope.existing_interaction();
+    View* victim = state ? state->active_overlay : nullptr;
+    if (!victim) return;
+    state->active_overlay = nullptr;
+    if (active_overlay_ == victim) active_overlay_ = nullptr;
+    if (victim->on_overlay_dismissed) {
+        victim->on_overlay_dismissed();
+    }
+}
+
 // Recursively expand a child's painted-bounds contribution
 // up through any `overflow:visible` descendants. Returns the bounding
 // rect (in window coords) of `v` and every transitive descendant whose

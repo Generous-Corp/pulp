@@ -1307,6 +1307,9 @@ public:
     /// the ESC keypath and the outside-click path. No-op if nothing claimed the
     /// slot.
     static void dismiss_active_overlay();
+    /// Root-scoped dismiss path for hosted editors. Acts only on `scope`'s
+    /// interaction slot so one editor cannot dismiss another editor's overlay.
+    static void dismiss_active_overlay(View& scope);
     /// Fired when the active overlay is dismissed via a framework
     /// auto-dismissal path (ESC / outside-click). Not fired for
     /// `release_overlay()` (JSX unmount / destructor). The bridge uses this to

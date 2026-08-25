@@ -667,12 +667,13 @@ void deliver_gesture_handoff(View& root, View* target, Point root_pt,
 }
 
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
-    auto* overlay = View::active_overlay_;
+    auto* state = root.existing_interaction();
+    auto* overlay = state ? state->active_overlay : nullptr;
     if (!overlay) return {};
 
-    // An overlay claimed from a different window's tree must not swallow or
-    // survive this window's press, so a foreign holder takes the dismiss path
-    // exactly as an outside click does.
+    // The root-owned slot guarantees this overlay belongs to this editor. Keep
+    // the tree check as a stale-slot safety guard: a detached holder is treated
+    // like an outside press and dismissed only from this root's slot.
     if (still_in_tree(overlay, &root) && overlay->overlay_contains(root_pt)) {
         // Hit-test inside the overlay's own subtree so nested buttons and
         // labels still receive the press. Only route when this resolves to a
@@ -689,7 +690,7 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     // dismiss_active_overlay() rather than the bare release_overlay() so React
     // state can flip setOpen(false) via on_overlay_dismissed; a bare release
     // leaves the component believing it is still open.
-    View::dismiss_active_overlay();
+    View::dismiss_active_overlay(root);
     return {OverlayPressRouting::dismissed, nullptr};
 }
 

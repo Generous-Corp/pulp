@@ -534,19 +534,23 @@ TEST_CASE("route_press_to_active_overlay: guards rejecting the point do not "
     REQUIRE(View::active_overlay_ == overlay);
 }
 
-TEST_CASE("route_press_to_active_overlay: an overlay from another tree is "
-          "dismissed, not routed", "[view][overlay][pointer]") {
+TEST_CASE("route_press_to_active_overlay: another tree's overlay is isolated",
+          "[view][overlay][pointer]") {
     OverlayGuard g;
     TestView root;
     root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
-    // Claimed by a view that is not under `root` — a second window's popover.
-    TestView foreign;
-    foreign.set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
-    foreign.claim_overlay();
+    TestView other_root;
+    other_root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto foreign_owned = std::make_unique<TestView>();
+    auto* foreign = foreign_owned.get();
+    foreign->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    other_root.add_child(std::move(foreign_owned));
+    foreign->claim_overlay();
 
     const auto press = pulp::view::route_press_to_active_overlay(
         root, {150.0f, 150.0f});
 
-    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
-    REQUIRE(View::active_overlay_ == nullptr);
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::no_overlay);
+    REQUIRE(View::active_overlay_ == foreign);
+    REQUIRE(other_root.interaction().active_overlay == foreign);
 }

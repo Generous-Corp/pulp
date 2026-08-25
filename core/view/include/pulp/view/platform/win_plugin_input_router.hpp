@@ -147,6 +147,10 @@ public:
                 return session_.accepts(generation, button);
             };
             last_point_ = pt;
+            View& root = host_.input_root();
+            // Outside presses must dismiss this editor's generalized overlay
+            // even when a gesture recognizer consumes the press below.
+            const auto overlay_press = route_press_to_active_overlay(root, pt);
             MouseEvent gesture_event;
             gesture_event.position = pt;
             gesture_event.window_position = pt;
@@ -162,13 +166,11 @@ public:
             }
             if (!accepts_original()) return;
 
-            View& root = host_.input_root();
             // Consult the generalized overlay slot before the regular hit
             // test, so a React / imported-design popover both receives clicks
             // aimed at it and is dismissed by a click outside it. This host
             // previously handled only the native ComboBox mechanism below,
             // which left such a popover open forever.
-            const auto overlay_press = route_press_to_active_overlay(root, pt);
             if (overlay_press.routing == OverlayPressRouting::routed)
                 drag_target_.set(overlay_press.target);
             else
