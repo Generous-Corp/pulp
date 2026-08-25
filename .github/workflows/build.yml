@@ -1316,8 +1316,27 @@ jobs:
         shell: bash
         run: |
           if [ "${RUNNER_OS}" = "macOS" ]; then
+            # The gate reports "not applicable here" with exit 77, the autotools
+            # skip convention. 77 is still nonzero and this step runs under
+            # `bash -e`, so calling it bare turns every skip into a failure of the
+            # REQUIRED macos check — and aborts before `cmake --build`, so the
+            # build the check exists to run never happens either. The skip is
+            # reachable in practice, not theoretical: the gate needs the
+            # iphonesimulator and iphoneos SDKs, and tart-provision.sh
+            # deliberately trims simulator payload from the golden image.
+            # Distinguish skip from failure; a real gate failure must still red
+            # the check.
+            set +e
             bash test/cmake/test_ios_compile_gate.sh \
               "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
+            ios_gate_rc=$?
+            set -e
+            if [ "$ios_gate_rc" = 77 ]; then
+              echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
+            elif [ "$ios_gate_rc" != 0 ]; then
+              echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
+              exit "$ios_gate_rc"
+            fi
           fi
           # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro
           # VM without claiming an entire shared Studio host. Keep this literal:

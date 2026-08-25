@@ -67,6 +67,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_ios_gate_skip_contract.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/shipyard_provenance_label_plan.py'
       - 'tools/scripts/test_shipyard_provenance_label_plan.py'
@@ -150,6 +151,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_ios_gate_skip_contract.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/shipyard_provenance_label_plan.py'
       - 'tools/scripts/test_shipyard_provenance_label_plan.py'
@@ -270,6 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_shipyard_merge_steward_workflow.py
           python3 tools/scripts/test_shipyard_provenance_label_plan.py
