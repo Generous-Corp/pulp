@@ -1,0 +1,79 @@
+name: Reconcile macOS retarget check
+
+# A custom exact-head check is not automatically terminalized when its source
+# workflow is cancelled. This protected, source-free workflow owns that narrow
+# recovery path. The retarget uploads immutable identity before creating the
+# pending check, so no PR-controlled job can select the SHA or check run here.
+on:
+  workflow_run:
+    workflows: ["Build and Test (macOS retarget)"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: write
+    steps:
+      - name: Terminalize an orphaned exact-head check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          artifact_name="macos-retarget-check-${SOURCE_RUN_ID}-${SOURCE_RUN_ATTEMPT}"
+          artifact_id="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?name=$artifact_name" \
+            --jq '.artifacts | if length == 1 then .[0].id else empty end')"
+          # No artifact means the source workflow ended before a pending check
+          # could be created; there is nothing for this reconciler to own.
+          [ -n "$artifact_id" ] || exit 0
+
+          archive="$RUNNER_TEMP/check-owner.zip"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$archive"
+          identity="$(unzip -p "$archive" check-owner.json)"
+          schema="$(jq -r .schema <<<"$identity")"
+          repository="$(jq -r .repository <<<"$identity")"
+          head_sha="$(jq -r .head_sha <<<"$identity")"
+          external_id="$(jq -r .external_id <<<"$identity")"
+          [ "$schema" = 1 ] && [ "$repository" = "$GITHUB_REPOSITORY" ] || {
+            echo "invalid retarget recovery identity" >&2
+            exit 1
+          }
+          case "$head_sha" in
+            ''|*[!0-9a-f]*) echo "invalid recovery head SHA" >&2; exit 1 ;;
+          esac
+          [ "${#head_sha}" -eq 40 ] || { echo "invalid recovery head length" >&2; exit 1; }
+          expected_external="retarget-${SOURCE_RUN_ID}-${SOURCE_RUN_ATTEMPT}"
+          [ "$external_id" = "$expected_external" ] || {
+            echo "recovery external ID does not match source run" >&2
+            exit 1
+          }
+
+          check="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$head_sha/check-runs?check_name=macos&filter=all&per_page=100" \
+            | jq -c --arg external "$external_id" \
+              '[.check_runs[] | select(.external_id == $external)] | if length == 1 then .[0] else empty end')"
+          [ -n "$check" ] || exit 0
+          [ "$(jq -r .status <<<"$check")" != completed ] || exit 0
+          check_id="$(jq -r .id <<<"$check")"
+          case "$check_id" in
+            ''|*[!0-9]*) echo "invalid recovery check id" >&2; exit 1 ;;
+          esac
+          case "$SOURCE_CONCLUSION" in
+            cancelled) conclusion=cancelled ;;
+            *) conclusion=failure ;;
+          esac
+          gh api --method PATCH \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/check-runs/$check_id" \
+            --raw-field status=completed \
+            --raw-field conclusion="$conclusion" \
+            --raw-field 'output[title]=macOS retarget did not complete' \
+            --raw-field 'output[summary]=The protected recovery controller terminalized an orphaned exact-head check.'

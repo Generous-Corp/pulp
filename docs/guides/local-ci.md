@@ -1773,12 +1773,17 @@ ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
 teardown. Because a protected-main Actions job also carries implicit runtime
 cache credentials, every PR-controlled setup/CMake/build/test command executes
 as the separate `nobody` uid through an empty, explicit environment. The PR
-source is a disposable isolated clone owned by that uid; no `ACTIONS_*`,
+source is a disposable, non-hardlinked clone created by trusted control before
+ownership transfers to that uid; no `ACTIONS_*`,
 `GITHUB_*`, token, credential, or Actions command-file variable crosses the
 account boundary. Proxy variables are omitted too because proxy URLs may carry
 userinfo credentials. The checks-write token exists only in the pending/final controller
 jobs, which never check out or execute PR code and revalidate the complete PR identity (open
 state, base repository/ref/SHA, and head repository/ref/SHA) before posting.
+Before the pending check is created, the trusted controller uploads an immutable
+one-day recovery identity. A separate source-free `workflow_run` reconciler on
+protected `main` uses that identity to terminalize the exact check if cancellation
+prevents the normal completer from running; it never checks out PR code.
 The local route always fails closed: today's JIT Tart guest is disposable, but
 its Actions runner and PR code share the administrative guest account, so PR
 code could still reach protected-main runtime/cache credentials during the job.

@@ -13,6 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-macos.yml"
+RECONCILER = REPO_ROOT / ".github" / "workflows" / "build-macos-reconcile.yml"
 MACOS_COMMAND = REPO_ROOT / "tools" / "cli" / "cmd_macos.cpp"
 BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
@@ -66,9 +67,10 @@ def _reporter_script() -> str:
 def _pending_script() -> str:
     document = _workflow()
     steps = document["jobs"]["publish-macos-pending"]["steps"]
-    if len(steps) != 1:
-        raise AssertionError("pending publisher must remain a single trusted step")
-    return steps[0]["run"]
+    step = next((item for item in steps if item.get("id") == "publish"), None)
+    if step is None:
+        raise AssertionError("build-macos.yml lost the pending check publisher")
+    return step["run"]
 
 
 def _workflow() -> dict[str, object]:
@@ -176,6 +178,10 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
             raise AssertionError(f"isolated clone lost protected base marker {marker}")
     export_script = " ".join(export.get("run", "").split()).replace("\\ ", "")
     for marker in (
+        "refs/heads/pulp-retarget-export-base",
+        "refs/heads/pulp-retarget-export-head",
+        "git clone --no-local --no-checkout",
+        "sudo chown -R nobody",
         "update-ref refs/remotes/origin/main",
         "rev-parse refs/remotes/origin/main",
     ):
@@ -190,6 +196,26 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
             raise AssertionError(
                 f"PR-controlled command bypasses untrusted wrapper in {step.get('name')}"
             )
+
+
+def _assert_reconciler(document: dict[str, object]) -> None:
+    if document.get("permissions") != {}:
+        raise AssertionError("reconciler permissions must default-deny")
+    trigger = document.get("on", document.get(True, {}))
+    if "workflow_run" not in trigger:
+        raise AssertionError("reconciler lost workflow_run completion trigger")
+    reconcile = document["jobs"]["reconcile"]
+    if reconcile.get("permissions") != {"actions": "read", "checks": "write"}:
+        raise AssertionError("reconciler permissions drifted")
+    text = json.dumps(document)
+    if "actions/checkout" in text:
+        raise AssertionError("reconciler must never check out source")
+    for marker in (
+        "macos-retarget-check-", "check-owner.json", "external_id",
+        "check-runs?check_name=macos", "status=completed",
+    ):
+        if marker not in text:
+            raise AssertionError(f"reconciler lost ownership marker {marker}")
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
@@ -411,6 +437,45 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertIn("external_id", pending)
         self.assertIn("terminalize_orphan_on_exit", pending)
         self.assertIn("checks", pending)
+
+    def test_protected_reconciler_owns_cancelled_pending_checks(self) -> None:
+        import yaml
+        document = yaml.safe_load(RECONCILER.read_text(encoding="utf-8"))
+        _assert_reconciler(document)
+        pending = _job_text("publish-macos-pending")
+        upload = pending.index("actions/upload-artifact@v4")
+        create = pending.index("--raw-field name=macos")
+        self.assertLess(upload, create)
+
+    def test_hostile_reconciler_mutations_are_rejected(self) -> None:
+        import yaml
+        source = yaml.safe_load(RECONCILER.read_text(encoding="utf-8"))
+        cases: list[tuple[str, callable]] = [
+            (
+                "reconciler checks out source",
+                lambda doc: doc["jobs"]["reconcile"]["steps"].insert(
+                    0, {"uses": "actions/checkout@v5"}
+                ),
+            ),
+            (
+                "reconciler loses checks permission",
+                lambda doc: doc["jobs"]["reconcile"].update(
+                    {"permissions": {"actions": "read"}}
+                ),
+            ),
+            (
+                "reconciler accepts an input-selected check",
+                lambda doc: doc["jobs"]["reconcile"]["steps"][0].update(
+                    {"run": "gh api repos/$GITHUB_REPOSITORY/check-runs/123"}
+                ),
+            ),
+        ]
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                document = copy.deepcopy(source)
+                mutate(document)
+                with self.assertRaises(AssertionError):
+                    _assert_reconciler(document)
 
     def test_reporter_posts_only_for_unchanged_complete_pr_identity(self) -> None:
         rc, posted, _ = _run_reporter()

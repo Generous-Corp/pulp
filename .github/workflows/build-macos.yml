@@ -34,7 +34,7 @@ on:
           - namespace
           - github-hosted
       target_ref:
-        description: "Branch / ref to run against (default: workflow ref)"
+        description: "Expected PR branch/ref (derived from PR number when omitted)"
         required: false
         default: ""
         type: string
@@ -191,6 +191,34 @@ jobs:
     outputs:
       check_run_id: ${{ steps.publish.outputs.check_run_id }}
     steps:
+      - name: Prepare cancellation-recovery identity
+        id: recovery
+        env:
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          recovery_dir="$RUNNER_TEMP/macos-retarget-check-owner"
+          mkdir -p "$recovery_dir"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg head_sha "$EXPECTED_HEAD" \
+            --arg external_id "$CHECK_EXTERNAL_ID" \
+            '{schema: 1, repository: $repository, head_sha: $head_sha, external_id: $external_id}' \
+            > "$recovery_dir/check-owner.json"
+          echo "path=$recovery_dir/check-owner.json" >> "$GITHUB_OUTPUT"
+
+      # Upload before creating the pending check. Once the check exists, the
+      # protected workflow_run reconciler therefore has immutable ownership
+      # metadata even if this workflow is cancelled between jobs.
+      - name: Publish cancellation-recovery identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-retarget-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.recovery.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Publish exact-head pending macos check
         id: publish
         env:
@@ -227,27 +255,24 @@ jobs:
             echo "PR #$EXPECTED_PR identity changed before retarget; refusing pending check" >&2
             exit 1
           }
-          handoff_ready=false
           terminalize_orphan_on_exit() {
-            if [ "$handoff_ready" = false ]; then
-              for delay in 1 2 4; do
-                orphan_id="$(gh api \
-                  "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
-                  2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
-                  '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
-                if [ -n "$orphan_id" ] && gh api --method PATCH \
-                  -H 'Accept: application/vnd.github+json' \
-                  "repos/$GITHUB_REPOSITORY/check-runs/$orphan_id" \
-                  --raw-field status=completed --raw-field conclusion=failure \
-                  --raw-field details_url="$DETAILS_URL" \
-                  --raw-field 'output[title]=macOS retarget controller failed' \
-                  --raw-field 'output[summary]=Pending check publication did not complete cleanly.' \
-                  >/dev/null 2>&1; then
-                  return
-                fi
-                sleep "$delay"
-              done
-            fi
+            for delay in 1 2 4; do
+              orphan_id="$(gh api \
+                "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
+                2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
+                '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
+              if [ -n "$orphan_id" ] && gh api --method PATCH \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/check-runs/$orphan_id" \
+                --raw-field status=completed --raw-field conclusion=failure \
+                --raw-field details_url="$DETAILS_URL" \
+                --raw-field 'output[title]=macOS retarget controller failed' \
+                --raw-field 'output[summary]=Pending check publication did not complete cleanly.' \
+                >/dev/null 2>&1; then
+                return
+              fi
+              sleep "$delay"
+            done
           }
           trap terminalize_orphan_on_exit EXIT
           check_run_id="$(gh api --method POST \
@@ -265,7 +290,7 @@ jobs:
             ''|*[!0-9]* ) echo "invalid check run id" >&2; exit 1 ;;
           esac
           echo "check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
-          handoff_ready=true
+          trap - EXIT
 
   build-test:
     needs: [resolve-runner, publish-macos-pending]
@@ -412,16 +437,25 @@ jobs:
             echo "refusing to export a non-pinned source tree" >&2
             exit 1
           }
+          # Clone while still under the trusted runner uid, but with local
+          # hardlinks disabled and credentials already removed by checkout.
+          # No PR command executes here. Ownership transfers only after the
+          # exact base/head refs have been reconstructed and verified.
+          git update-ref refs/heads/pulp-retarget-export-base "$EXPECTED_BASE"
+          git update-ref refs/heads/pulp-retarget-export-head "$EXPECTED_HEAD"
+          sudo /bin/rm -rf -- "$PULP_UNTRUSTED_SOURCE"
+          git clone --no-local --no-checkout "$PULP_TRUSTED_CHECKOUT" "$PULP_UNTRUSTED_SOURCE"
+          git -C "$PULP_UNTRUSTED_SOURCE" remote set-url origin \
+            "https://github.com/Generous-Corp/pulp.git"
+          git -C "$PULP_UNTRUSTED_SOURCE" update-ref \
+            refs/remotes/origin/main "$EXPECTED_BASE"
+          test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse refs/remotes/origin/main)" = "$EXPECTED_BASE"
+          test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse "$EXPECTED_HEAD")" = "$EXPECTED_HEAD"
+          sudo chown -R nobody "$PULP_UNTRUSTED_SOURCE"
           # shellcheck disable=SC2016
           PULP_EXPECTED_BASE="$EXPECTED_BASE" PULP_EXPECTED_HEAD="$EXPECTED_HEAD" \
           "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
             set -euo pipefail
-            export GIT_LFS_SKIP_SMUDGE=1
-            git clone --shared --no-checkout "$PULP_TRUSTED_CHECKOUT" "$PULP_UNTRUSTED_SOURCE"
-            git -C "$PULP_UNTRUSTED_SOURCE" remote set-url origin \
-              "https://github.com/Generous-Corp/pulp.git"
-            git -C "$PULP_UNTRUSTED_SOURCE" update-ref \
-              refs/remotes/origin/main "$PULP_EXPECTED_BASE"
             git -C "$PULP_UNTRUSTED_SOURCE" checkout --detach "$PULP_EXPECTED_HEAD"
             test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse refs/remotes/origin/main)" = "$PULP_EXPECTED_BASE"
             test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse HEAD)" = "$PULP_EXPECTED_HEAD"

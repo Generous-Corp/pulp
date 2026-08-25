@@ -4068,12 +4068,16 @@ untrusted build job has only contents-read permission, no Actions/Namespace
 cache action, no persistent build/dependency cache path, and no ccache; all
 writable state is unique to the run and removed at teardown. All PR-controlled
 setup/CMake/build/test commands run as the separate `nobody` uid under `env -i`
-from a disposable isolated clone. Do not pass Actions runtime/cache variables,
+from a disposable non-hardlinked clone created by trusted control before its
+ownership transfers to `nobody`. Do not pass Actions runtime/cache variables,
 GitHub variables, tokens, credentials, or command-file paths across that account
 boundary; do not forward proxy URLs because they may contain userinfo
 credentials. The reporter
 revalidates the complete open PR identity (base and head repository/ref/SHA)
-before posting. The local route is fail-closed even for the current
+before posting. Immutable recovery identity must be uploaded before the pending
+check exists; the protected source-free `workflow_run` reconciler terminalizes
+that exact check if cancellation skips the normal reporter. The local route is
+fail-closed even for the current
 `pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the
 main-scoped runtime/cache token while runner and PR code share the guest admin
 account. Re-enable it only with a separately proven two-account Tart class.
