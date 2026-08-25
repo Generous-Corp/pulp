@@ -288,12 +288,11 @@ def test_protected_automatic_workflows_use_restricted_linux_selector() -> None:
         expression = text.split("runs-on: >-", 1)[1].split("\n    steps:", 1)[0]
         assert "vars.PULP_AUTO_LINUX_RUNS_ON_JSON" in expression, workflow
         if workflow == VELLUM_WORKFLOW:
-            # Manual recovery has actions:write and therefore runs in its own
-            # hosted controller job without checking out PR code. Only
-            # automatic restricted-context validation reaches this selector.
+            # Manual recovery lives in a separate workflow. Only automatic
+            # restricted-context validation reaches this selector.
             assert "github.event_name == 'workflow_dispatch'" not in expression, workflow
             assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" not in expression, workflow
-            assert "rerun-pr-context" in text, workflow
+            assert "rerun-pr-context" not in text, workflow
         else:
             assert "github.event_name == 'workflow_dispatch'" in expression, workflow
             assert "vars.PULP_LOCAL_LINUX_RUNS_ON_JSON" in expression, workflow

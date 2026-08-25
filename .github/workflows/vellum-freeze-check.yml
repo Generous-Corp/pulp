@@ -3,88 +3,17 @@ name: Vellum freeze
 on:
   pull_request:
   merge_group:
-  # Manual recovery. This check is REQUIRED, and without a dispatch trigger the
-  # only way to recover a cancelled run is to push a commit purely to fire
-  # `synchronize` — which rewrites the very history under review. The dispatch
-  # job never checks out or executes PR code: it re-runs an existing exact-head
-  # pull_request-context run, preserving that event's restricted trust scope.
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request number to evaluate
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  rerun-pr-context:
-    name: Re-run exact PR context
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Re-run the exact restricted PR run
-        env:
-          DISPATCH_PR: ${{ inputs.pr_number }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if ! [[ "$DISPATCH_PR" =~ ^[1-9][0-9]*$ ]]; then
-            echo "pr_number must be a positive integer" >&2
-            exit 1
-          fi
-
-          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR")"
-          state="$(printf '%s' "$pr_json" | jq -r .state)"
-          base_repo="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
-          base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
-          base_head="$(printf '%s' "$pr_json" | jq -r .base.sha)"
-          source_head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
-          if [ "$state" != "open" ]; then
-            echo "PR #$DISPATCH_PR is $state; only an open PR can be recovered" >&2
-            exit 1
-          fi
-          if [ "$base_repo" != "$GITHUB_REPOSITORY" ] || [ "$base_ref" != "main" ]; then
-            echo "only $GITHUB_REPOSITORY:main is trusted for manual recovery" >&2
-            exit 1
-          fi
-
-          runs_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/vellum-freeze-check.yml/runs?event=pull_request&head_sha=$source_head&per_page=100")"
-          candidate="$(printf '%s' "$runs_json" | jq -c \
-            --arg sha "$source_head" --arg base "$base_head" --argjson pr "$DISPATCH_PR" '
-              [.workflow_runs[]
-               | select(.event == "pull_request" and .head_sha == $sha)
-               | select(any(.pull_requests[]?;
-                   .number == $pr and .head.sha == $sha and .base.sha == $base))]
-              | sort_by(.created_at)
-              | last // empty')"
-          if [ -z "$candidate" ]; then
-            echo "no exact-head pull_request-context Vellum freeze run exists for PR #$DISPATCH_PR at $source_head" >&2
-            exit 1
-          fi
-
-          run_id="$(printf '%s' "$candidate" | jq -r .id)"
-          run_status="$(printf '%s' "$candidate" | jq -r .status)"
-          conclusion="$(printf '%s' "$candidate" | jq -r .conclusion)"
-          if [ "$run_status" != "completed" ] || [ "$conclusion" = "success" ]; then
-            echo "run $run_id is status=$run_status conclusion=$conclusion; refusing a redundant or competing re-run" >&2
-            exit 1
-          fi
-
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/rerun"
-          echo "re-run requested for exact PR head $source_head via pull_request run $run_id"
-
   freeze-check:
     name: Vellum freeze
-    if: github.event_name != 'workflow_dispatch'
     # Automatic same-repository and merge-group validation uses the restricted
     # organization pool. Fork PRs and an unset selector fall back to hosted
-    # Linux. Manual recovery is isolated in rerun-pr-context above.
+    # Linux. Manual recovery is isolated in vellum-freeze-recovery.yml so this
+    # workflow never mixes a privileged event with an untrusted checkout.
     # See version-skill-check.yml: these are *_RUNS_ON_JSON variables, so every
     # branch must stay JSON and be parsed. An unparsed array becomes one literal
     # label no runner carries, and GitHub queues that job forever rather than
@@ -103,8 +32,8 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           # On pull_request/merge_group the default checkout already IS the
-          # proposed merge tree. Manual recovery re-runs that restricted event
-          # context and never checks PR code out in the dispatch job.
+          # proposed merge tree. Manual recovery re-runs this restricted event
+          # context from a separate checkout-free workflow.
           fetch-depth: 0
           persist-credentials: false
 
