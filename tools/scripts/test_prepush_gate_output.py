@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -46,6 +47,67 @@ def main() -> int:
     if not captured_diff_cover:
         print("FAIL: slow diff-cover output bypasses gate capture", file=sys.stderr)
         return 1
+
+    # The hook validates checked-out HEAD. Git may ask it to push another local
+    # ref, so prove the pushed-ref contract fails closed before any source gate
+    # can accidentally authorize the wrong commit.
+    with tempfile.TemporaryDirectory(prefix="pulp-prepush-refs-") as temp:
+        repo = Path(temp)
+        (repo / ".githooks" / "lib").mkdir(parents=True)
+        shutil.copy2(GATE_OUTPUT_HELPER, repo / ".githooks" / "lib" / "gate-output.sh")
+
+        def git(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ("git", *args),
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+        git("init", "-q")
+        git("config", "user.name", "Pulp Pre-push Test")
+        git("config", "user.email", "prepush-test@example.invalid")
+        (repo / "fixture.txt").write_text("first\n", encoding="utf-8")
+        git("add", "fixture.txt")
+        git("commit", "-qm", "first")
+        prior = git("rev-parse", "HEAD").stdout.strip()
+        (repo / "fixture.txt").write_text("second\n", encoding="utf-8")
+        git("commit", "-qam", "second")
+        head = git("rev-parse", "HEAD").stdout.strip()
+        zeros = "0" * 40
+
+        def run_hook(update_records: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ("bash", str(PREPUSH)),
+                cwd=repo,
+                input=update_records,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+                env={**os.environ, "PULP_SKIP_PR_BATCH_ADVICE": "1"},
+            )
+
+        exact = run_hook(f"refs/heads/main {head} refs/heads/main {prior}\n")
+        if exact.returncode != 0:
+            print("FAIL: exact checked-out HEAD push was refused", file=sys.stderr)
+            return 1
+
+        mismatched = run_hook(
+            f"refs/heads/prior {prior} refs/heads/prior {zeros}\n"
+        )
+        if mismatched.returncode == 0 or "check out that branch" not in mismatched.stderr:
+            print("FAIL: non-HEAD branch push did not fail closed", file=sys.stderr)
+            return 1
+
+        multi_ref = run_hook(
+            f"refs/heads/main {head} refs/heads/main {prior}\n"
+            f"refs/heads/prior {prior} refs/heads/prior {zeros}\n"
+        )
+        if multi_ref.returncode == 0:
+            print("FAIL: mixed-commit multi-ref push did not fail closed", file=sys.stderr)
+            return 1
 
     read_fd, write_fd = os.pipe()
     try:

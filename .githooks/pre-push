@@ -44,6 +44,12 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     exit 0
 fi
 
+# Git supplies one source/destination record per pushed ref on stdin. Capture
+# those records before any gate subprocess can consume them: every source gate
+# below validates the checked-out HEAD, so a branch update that names another
+# commit must be refused rather than accidentally authorizing the wrong tree.
+PREPUSH_UPDATE_RECORDS="$(cat)"
+
 # Agent/tool subprocesses can inherit nonblocking stdout/stderr pipes. Python's
 # text streams turn a transient EAGAIN on those pipes into BlockingIOError,
 # which used to make a healthy gate look like an internal failure. Capture each
@@ -145,13 +151,46 @@ TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 
-if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
-    # Repo predates the gates; no-op so the hook doesn't block legitimate
-    # pushes on older checkouts.
-    exit 0
+BASE="${PULP_PREPUSH_BASE:-origin/main}"
+
+# Normal `git push origin branch` supplies the checked-out HEAD and remains the
+# fast path. Tag-only pushes and branch deletions carry no new source tree, so
+# they do not need diff coverage. Explicit pushes of another commit, however,
+# cannot be validated from this checkout; fail closed instead of running gates
+# against HEAD and claiming they covered the pushed SHA. Multiple branch refs
+# are accepted only when every one points to this exact HEAD.
+_prepush_source_update_mode="manual-head"
+if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
+    _prepush_source_update_mode="no-source"
+    _prepush_head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+    _prepush_zero_sha="0000000000000000000000000000000000000000"
+    while read -r _prepush_local_ref _prepush_local_sha _prepush_remote_ref _prepush_remote_sha; do
+        [ -n "${_prepush_remote_ref:-}" ] || continue
+        case "$_prepush_remote_ref" in
+            refs/heads/*)
+                [ "${_prepush_local_sha:-}" != "$_prepush_zero_sha" ] || continue
+                if [ -z "$_prepush_head_sha" ] || [ "$_prepush_local_sha" != "$_prepush_head_sha" ]; then
+                    echo "✗ pre-push: branch update $_prepush_remote_ref names $_prepush_local_sha," >&2
+                    echo "  but this checkout is at ${_prepush_head_sha:-unknown}. The gates validate" >&2
+                    echo "  checked-out HEAD; check out that branch and push it separately." >&2
+                    exit 1
+                fi
+                _prepush_source_update_mode="exact-head"
+                ;;
+        esac
+    done <<EOF
+$PREPUSH_UPDATE_RECORDS
+EOF
+    unset _prepush_head_sha _prepush_zero_sha _prepush_local_ref \
+          _prepush_local_sha _prepush_remote_ref _prepush_remote_sha
 fi
 
-BASE="${PULP_PREPUSH_BASE:-origin/main}"
+if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
+    # Repo predates the gates; no-op so the hook doesn't block legitimate
+    # pushes on older checkouts. The pushed-ref/HEAD guard above still runs:
+    # validating another branch's SHA from this checkout is never meaningful.
+    exit 0
+fi
 
 fail=0
 
@@ -468,7 +507,9 @@ check_compat_status_flips() {
 }
 check_compat_status_flips "$BASE"
 DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
-if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
+if [ "$_prepush_source_update_mode" = "no-source" ]; then
+    echo "[pre-push] diff coverage skipped: push carries no branch source update." >&2
+elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     if changed=$(git diff --name-only "$BASE...HEAD" 2>/dev/null); then
         if echo "$changed" | grep -qE '^(core/|tools/cli/|tools/scripts/)'; then
             # Ask the coverage script whether this exact diff can contain native
