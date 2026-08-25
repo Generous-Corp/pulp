@@ -318,6 +318,7 @@ jobs:
           python3 tools/scripts/test_release_platform_subset_check.py
           python3 tools/scripts/test_sdk_provenance.py
           python3 tools/scripts/test_required_gate_liveness.py
+          python3 tools/scripts/test_build_macos_workflow_dispatch.py
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py
           python3 tools/scripts/test_resign_macos_release_tree.py
           python3 tools/scripts/test_workflow_build_dirs.py

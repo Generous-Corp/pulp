@@ -4053,15 +4053,43 @@ Linux/Windows too — wasted compute when they already passed.
 
 `build-macos.yml` is a standalone workflow (introduced in pulp task
 #20) that runs JUST the macOS build/test on a chosen runner pool.
-Branch protection's required `macos` check accepts the latest
-same-named check from either workflow, so `build-macos.yml`'s `macos`
-job supersedes the matrix's `macos` job when fresher.
+Branch protection's required `macos` check accepts the latest same-named check
+on the exact PR head. Because a trusted-main `workflow_dispatch` is attached to
+the main SHA, `build-macos.yml` uses checks-write-only controller jobs to create
+one in-progress check run on the API-pinned PR head before execution and
+complete that same run afterward. The controllers never check out or execute
+PR code.
 
-It must remain semantically identical to the required macOS gate: fetch
-protected `main` for capability-history checks and exclude
+It must remain semantically identical to the required macOS gate: resolve an
+open internal PR from the workflow definition on protected `main`, check out
+trusted control code with credentials disabled, then fetch and verify the PR's
+exact head SHA and immutable base SHA without materializing PR-controlled files.
+The first PR checkout occurs only in the clone owned by `nobody`; this keeps
+PR-selected Git filters and LFS endpoints out of the trusted environment. The
+untrusted build job has only contents-read permission, no Actions/Namespace
+cache action, no persistent build/dependency cache path, and no ccache; all
+writable state is unique to the run and removed at teardown. All PR-controlled
+setup/CMake/build/test commands run as the separate `nobody` uid under `env -i`
+from a disposable non-hardlinked clone created by trusted control before its
+ownership transfers to `nobody`. Do not pass Actions runtime/cache variables,
+GitHub variables, tokens, credentials, or command-file paths across that account
+boundary; do not forward proxy URLs because they may contain userinfo
+credentials. The reporter
+revalidates the complete open PR identity (base and head repository/ref/SHA)
+before posting. Immutable recovery identity must be uploaded before the pending
+check exists; the protected source-free `workflow_run` reconciler terminalizes
+that exact check if cancellation skips the normal reporter. The local route is
+fail-closed even for the current
+`pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the
+main-scoped runtime/cache token while runner and PR code share the guest admin
+account. Re-enable it only with a separately proven two-account Tart class.
+Namespace accepts
+only the exact approved `namespace-profile-generouscorp-macos` selector. It also installs
+the same pinned and checksum-verified Chrome used by `build.yml` inside that
+ephemeral root and excludes
 `validation|slow|performance|bench|quality-lab`. A retarget changes only the
-provider; it must not turn required CI into a full benchmark lane or depend on
-a warm runner's stale refs.
+provider; it must not turn required CI into a full benchmark lane, compare a
+behind PR against newer live `main`, or depend on a warm runner's stale refs.
 
 The macOS lane configures with `-DPULP_LOTTIE=ON` so the opt-in skottie
 render path (LottieAnimation → SkiaCanvas) gets real CI coverage — it is
@@ -4073,7 +4101,7 @@ It only enlarges the test binaries, never shipped plugins.
 
 ```bash
 # Move a PR's macOS leg to a different runner, without touching Linux/Windows:
-pulp macos retarget --pr <N> --to <local|namespace|github-hosted>
+pulp macos retarget --pr <N> --to <namespace|github-hosted>
 
 # See where the latest macOS check landed and its state:
 pulp macos status --pr <N>
@@ -4085,8 +4113,7 @@ PR (from both `build.yml` and `build-macos.yml`), then fires a fresh
 
 **When this is the right tool:**
 
-- Local Mac just freed up and a PR is sitting queued on GH-hosted →
-  `pulp macos retarget --pr N --to local` claws it back to local.
+- Local is deliberately unavailable until the two-account Tart class is proven.
 - One critical PR needs to skip the queue → `--to namespace` (billable).
 - A PR's macOS leg flaked on local; retry on GH-hosted → `--to github-hosted`.
 
@@ -4104,10 +4131,9 @@ GH Actions runner; the launchd template at
 `tools/launchd/pulp-macos-reroute-watcher.plist.template` documents
 the setup steps.
 
-Polling cadence: 30s. When there is **free macOS capacity** AND a BAT
-run's macOS job has cloud labels (`macos-15` or `nscloud-*` /
-`namespace-profile-*`) AND hasn't started yet, the watcher invokes
-`pulp macos retarget --pr N --to local`.
+The watcher is not an active reroute authority while local retarget is
+fail-closed. Preserve its state, but do not enable its local handoff until the
+two-account Tart prerequisite is proven.
 
 **Capacity is VM-slot-aware (#3299).** "Free capacity" is no longer a
 single runner's busy/idle — it's `free_macos_slots(hosts)`, the sum of

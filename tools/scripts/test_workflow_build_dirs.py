@@ -29,6 +29,18 @@ TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.ym
 CONTROL_SDK_CONSUMER = REPO_ROOT / "test" / "cmake" / "test_control_sdk_consumer.cmake"
 
 
+def workflow_named_step(path: Path, job: str, name: str) -> dict[str, object]:
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - workflow-lint installs PyYAML
+        raise unittest.SkipTest("PyYAML not installed")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return next(
+        step for step in document["jobs"][job]["steps"]
+        if step.get("name") == name
+    )
+
+
 class WorkflowBuildDirTests(unittest.TestCase):
     def test_build_matrix_uses_matrix_scoped_build_dir(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
@@ -133,9 +145,26 @@ class WorkflowBuildDirTests(unittest.TestCase):
     def test_macos_retarget_matches_required_gate_selection(self) -> None:
         text = BUILD_MACOS_WORKFLOW.read_text(encoding="utf-8")
 
+        self.assertIn("pr_number:", text)
+        self.assertIn("- name: Resolve exact pull request", text)
+        self.assertIn("base_sha: ${{ steps.pr.outputs.base_sha }}", text)
+        self.assertIn("head_sha: ${{ steps.pr.outputs.head_sha }}", text)
+        self.assertIn("WORKFLOW_REF: ${{ github.ref_name }}", text)
+        self.assertIn('if [ "$WORKFLOW_REF" != "main" ]', text)
+        self.assertIn("ref: ${{ github.sha }}", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn("- name: Verify exact pull request head object", text)
+        trusted_prefix = text.split(
+            "- name: Export exact head into the untrusted account", 1
+        )[0]
+        self.assertNotIn('git checkout --detach "$EXPECTED_HEAD"', trusted_prefix)
         self.assertIn("- name: Fetch protected capability base", text)
         self.assertIn(
-            'git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"',
+            '"+$EXPECTED_BASE:refs/remotes/origin/main"',
+            text,
+        )
+        self.assertNotIn(
+            '"+refs/heads/main:refs/remotes/origin/main"',
             text,
         )
         self.assertIn(
@@ -145,8 +174,27 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("--repeat until-pass:2", text)
         self.assertLess(
             text.index("- name: Fetch protected capability base"),
+            text.index("- name: Verify exact pull request head object"),
+        )
+        self.assertLess(
+            text.index("- name: Verify exact pull request head object"),
             text.index("- name: Test"),
         )
+        chrome_step = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"
+        retarget_chrome = workflow_named_step(
+            BUILD_MACOS_WORKFLOW, "build-test", chrome_step
+        )["run"]
+        required_chrome = workflow_named_step(BUILD_WORKFLOW, "build", chrome_step)
+        required_chrome = required_chrome["run"]
+        for pinned_value in (
+            "151.0.7922.47",
+            "9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee",
+            "Chrome archive SHA-256 mismatch",
+        ):
+            with self.subTest(pinned_value=pinned_value):
+                self.assertIn(pinned_value, retarget_chrome)
+                self.assertIn(pinned_value, required_chrome)
+        self.assertIn("$PULP_EPHEMERAL_ROOT", retarget_chrome)
 
     def test_installed_control_consumer_requests_cxx20(self) -> None:
         text = CONTROL_SDK_CONSUMER.read_text(encoding="utf-8")

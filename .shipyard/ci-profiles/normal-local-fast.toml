@@ -19,6 +19,7 @@ description = "Fast PRs on local ARM64 VMs; nightly GitHub Intel validation."
 strategy = "ordered-fallback"
 targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"]
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
+ephemeral_required = true
 
 # Automatic pull-request Linux stays hosted. The protected local route exists
 # (.github/workflows/pr-safe-linux.yml, fail-closed admission + 15-minute health
@@ -71,9 +72,11 @@ issue_on_failure = true
 
 [targets."macstudio.macos-arm64-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
+ephemeral = true
 
 [targets."m5.macos-arm64-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
+ephemeral = true
 
 [targets."macstudio.linux-arm64-vm"]
 runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]

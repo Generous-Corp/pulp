@@ -7,8 +7,8 @@
 // Subcommands:
 //   pulp macos retarget --pr N --to <local|namespace|github-hosted>
 //       Cancels any in-flight macOS dispatch for PR N and fires a fresh
-//       workflow_dispatch on build-macos.yml against the PR's head branch
-//       with the chosen runner. Branch protection's `macos` required-check
+//       workflow_dispatch from protected main with the PR number, head branch,
+//       and chosen runner. Branch protection's `macos` required-check
 //       is satisfied by whichever workflow most recently produced that
 //       check name, so retargeting supersedes the previous macOS leg.
 //
@@ -135,14 +135,15 @@ int dispatch_retarget(const std::string& pr_number, const std::string& runner) {
 
     int rc = pulp::platform::exec(
         "gh", {"workflow", "run", kBuildMacosWorkflow, "--repo", kRepo,
-               "--ref", head_ref, "--field", "runner=" + runner,
+               "--ref", "main", "--field", "pr_number=" + pr_number,
+               "--field", "runner=" + runner,
                "--field", "target_ref=" + head_ref}).exit_code;
     if (rc != 0) {
         std::cerr << "pulp macos: workflow dispatch failed (exit " << rc << ")\n";
         return rc;
     }
-    std::cout << "pulp macos: dispatched build-macos.yml on '" << head_ref
-              << "' with runner=" << runner << "\n";
+    std::cout << "pulp macos: dispatched protected-main build-macos.yml for PR #"
+              << pr_number << " head '" << head_ref << "' with runner=" << runner << "\n";
     std::cout << "  View progress: gh run watch --repo " << kRepo << "\n";
     return 0;
 }
@@ -178,6 +179,12 @@ int run_retarget(const std::vector<std::string>& args) {
     }
     if (runner != "local" && runner != "namespace" && runner != "github-hosted") {
         std::cerr << "pulp macos retarget: --to must be one of: local, namespace, github-hosted\n";
+        return 1;
+    }
+    if (runner == "local") {
+        std::cerr << "pulp macos retarget: local is fail-closed until the "
+                     "two-account Tart runner class is proven; use "
+                     "github-hosted or namespace\n";
         return 1;
     }
 

@@ -1,16 +1,15 @@
 name: Build and Test (macOS retarget)
 
-permissions:
-  contents: read
-
 # Dedicated workflow for re-running JUST the macOS leg of CI on a different
 # runner pool, without disturbing the Linux/Windows legs that are part of
 # `build.yml`'s matrix. Triggered manually (`workflow_dispatch`) or via the
 # `pulp macos retarget` CLI wrapper.
 #
-# When this workflow's `macos` job completes successfully, its check supersedes
-# the `macos` check from `build.yml`'s matrix leg (branch protection picks the
-# most recent check by name). That's the per-PR override semantic.
+# The dispatch itself is attached to protected main, so trusted controller jobs
+# create and complete one `macos` check run on the resolved exact PR head. The
+# pending check is created before PR code runs and supersedes the matrix leg by
+# name, SHA, and GitHub Actions App identity. The job that executes PR code has
+# no write permission.
 #
 # Sibling to (not replacement for) `build.yml`. Both workflows produce a job
 # named `macos` so branch protection's required-check stays a stable name.
@@ -20,33 +19,46 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      pr_number:
+        description: "Pull request number to retarget (resolved from target_ref when omitted)"
+        required: false
+        default: ""
+        type: string
       runner:
         description: "Where to run the macOS build/test"
         required: true
-        default: local
+        default: github-hosted
         type: choice
         options:
           - local
           - namespace
           - github-hosted
       target_ref:
-        description: "Branch / ref to run against (default: workflow ref)"
-        required: false
-        default: ""
+        description: "Expected PR branch/ref (canonical retarget concurrency identity)"
+        required: true
         type: string
+
+permissions: {}
 
 concurrency:
   # Independent of build.yml's `build-${{ github.ref }}` group so a manual
   # retarget doesn't cancel the matrix workflow_run, and vice versa.
-  group: build-macos-${{ inputs.target_ref || github.ref }}
+  group: build-macos-${{ inputs.target_ref }}
   cancel-in-progress: true
 
 jobs:
   resolve-runner:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
       route: ${{ steps.resolve.outputs.route }}
+      pr_number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
     steps:
       - id: resolve
         env:
@@ -57,7 +69,13 @@ jobs:
           set -euo pipefail
           case "$RUNNER_CHOICE" in
             local)
-              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-[\"self-hosted\",\"sanitizer\"]}"
+              # The current JIT Tart guest is disposable, but its Actions
+              # runner and PR code still share the guest's administrative
+              # account. That cannot protect protected-main runtime/cache
+              # credentials during the job. Local retarget stays fail-closed
+              # until a separately proven two-account Tart class exists.
+              echo "::error::local retarget is disabled pending a hardened two-account Tart runner class." >&2
+              exit 1
               ;;
             namespace)
               if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
@@ -65,6 +83,11 @@ jobs:
                 exit 1
               fi
               SELECTOR="$NAMESPACE_MACOS_RUNS_ON_JSON"
+              if ! jq -e 'type == "string" and . == "namespace-profile-generouscorp-macos"' \
+                <<<"$SELECTOR" >/dev/null; then
+                echo "::error::namespace retarget requires the exact approved Namespace profile." >&2
+                exit 1
+              fi
               ;;
             github-hosted)
               SELECTOR='"macos-15"'
@@ -78,125 +101,515 @@ jobs:
           echo "route=$RUNNER_CHOICE" >> "$GITHUB_OUTPUT"
           echo "resolve-runner: macOS retarget route = $RUNNER_CHOICE; selector = $SELECTOR"
 
-  build-test:
+      - name: Resolve exact pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          WORKFLOW_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$WORKFLOW_REF" != "main" ]; then
+            echo "retarget workflow must be dispatched from protected main, not '$WORKFLOW_REF'" >&2
+            exit 1
+          fi
+          if [ -z "$TARGET_REF" ]; then
+            echo "target_ref is required to resolve an exact pull request" >&2
+            exit 1
+          fi
+          number="$INPUT_PR_NUMBER"
+          if [ -z "$number" ]; then
+            matches="$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=open \
+              -f base=main \
+              -f "head=$GITHUB_REPOSITORY_OWNER:$TARGET_REF")"
+            count="$(printf '%s' "$matches" | jq 'length')"
+            if [ "$count" != "1" ]; then
+              echo "target_ref '$TARGET_REF' resolved to $count open PRs targeting main; expected exactly one" >&2
+              exit 1
+            fi
+            number="$(printf '%s' "$matches" | jq -r '.[0].number')"
+          fi
+          case "$number" in
+            ''|*[!0-9]*)
+              echo "PR number must contain only decimal digits" >&2
+              exit 1
+              ;;
+          esac
+
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number")"
+          state="$(printf '%s' "$pr_json" | jq -r .state)"
+          base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+          base_repository="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
+          base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
+          head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+          head_repository="$(printf '%s' "$pr_json" | jq -r .head.repo.full_name)"
+          head_ref="$(printf '%s' "$pr_json" | jq -r .head.ref)"
+          if [ "$state" != "open" ]; then
+            echo "PR #$number is $state; refusing to retarget a closed PR" >&2
+            exit 1
+          fi
+          if [ "$base_repository" != "$GITHUB_REPOSITORY" ] || [ "$base_ref" != "main" ]; then
+            echo "PR #$number targets $base_repository:$base_ref; expected $GITHUB_REPOSITORY:main" >&2
+            exit 1
+          fi
+          if [ "$head_repository" != "$GITHUB_REPOSITORY" ] || [ "$head_ref" != "$TARGET_REF" ]; then
+            echo "PR #$number head is $head_repository:$head_ref; expected $GITHUB_REPOSITORY:$TARGET_REF" >&2
+            exit 1
+          fi
+          case "$base" in
+            *[!0-9a-f]*|'') echo "PR #$number returned an invalid base SHA" >&2; exit 1 ;;
+          esac
+          case "$head" in
+            *[!0-9a-f]*|'') echo "PR #$number returned an invalid head SHA" >&2; exit 1 ;;
+          esac
+          if [ "${#base}" -ne 40 ] || [ "${#head}" -ne 40 ]; then
+            echo "PR #$number did not return full 40-character base/head SHAs" >&2
+            exit 1
+          fi
+          {
+            echo "number=$number"
+            echo "base_sha=$base"
+            echo "head_sha=$head"
+            echo "head_ref=$head_ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "retargeting PR #$number: base=$base head=$head ref=$head_ref" >&2
+
+  publish-macos-pending:
+    # Create the exact-head check before PR code runs so an older green macos
+    # result cannot authorize a merge while retarget validation is pending.
     needs: resolve-runner
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: read
+    outputs:
+      check_run_id: ${{ steps.publish.outputs.check_run_id }}
+    steps:
+      - name: Prepare cancellation-recovery identity
+        id: recovery
+        env:
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          recovery_dir="$RUNNER_TEMP/macos-retarget-check-owner"
+          mkdir -p "$recovery_dir"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg head_sha "$EXPECTED_HEAD" \
+            --arg external_id "$CHECK_EXTERNAL_ID" \
+            '{schema: 1, repository: $repository, head_sha: $head_sha, external_id: $external_id}' \
+            > "$recovery_dir/check-owner.json"
+          echo "path=$recovery_dir/check-owner.json" >> "$GITHUB_OUTPUT"
+
+      # Upload before creating the pending check. Once the check exists, the
+      # protected workflow_run reconciler therefore has immutable ownership
+      # metadata even if this workflow is cancelled between jobs.
+      - name: Publish cancellation-recovery identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-retarget-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.recovery.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Publish exact-head pending macos check
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PR: ${{ needs.resolve-runner.outputs.pr_number }}
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
+          DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for sha in "$EXPECTED_BASE" "$EXPECTED_HEAD"; do
+            case "$sha" in
+              ''|*[!0-9a-f]* ) echo "invalid resolved PR base/head" >&2; exit 1 ;;
+            esac
+            [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
+          done
+          live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_PR")"
+          live_state="$(printf '%s' "$live_pr" | jq -r .state)"
+          live_base="$(printf '%s' "$live_pr" | jq -r .base.sha)"
+          live_base_repository="$(printf '%s' "$live_pr" | jq -r .base.repo.full_name)"
+          live_base_ref="$(printf '%s' "$live_pr" | jq -r .base.ref)"
+          live_head="$(printf '%s' "$live_pr" | jq -r .head.sha)"
+          live_head_repository="$(printf '%s' "$live_pr" | jq -r .head.repo.full_name)"
+          live_head_ref="$(printf '%s' "$live_pr" | jq -r .head.ref)"
+          [ "$live_state" = open ] &&
+          [ "$live_base" = "$EXPECTED_BASE" ] &&
+          [ "$live_base_repository" = "$GITHUB_REPOSITORY" ] &&
+          [ "$live_base_ref" = main ] &&
+          [ "$live_head" = "$EXPECTED_HEAD" ] &&
+          [ "$live_head_repository" = "$GITHUB_REPOSITORY" ] &&
+          [ "$live_head_ref" = "$EXPECTED_HEAD_REF" ] || {
+            echo "PR #$EXPECTED_PR identity changed before retarget; refusing pending check" >&2
+            exit 1
+          }
+          terminalize_orphan_on_exit() {
+            for delay in 1 2 4; do
+              orphan_id="$(gh api \
+                "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
+                2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
+                '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
+              if [ -n "$orphan_id" ] && gh api --method PATCH \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/check-runs/$orphan_id" \
+                --raw-field status=completed --raw-field conclusion=failure \
+                --raw-field details_url="$DETAILS_URL" \
+                --raw-field 'output[title]=macOS retarget controller failed' \
+                --raw-field 'output[summary]=Pending check publication did not complete cleanly.' \
+                >/dev/null 2>&1; then
+                return
+              fi
+              sleep "$delay"
+            done
+          }
+          trap terminalize_orphan_on_exit EXIT
+          check_run_id="$(gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/check-runs" \
+            --raw-field name=macos \
+            --raw-field head_sha="$EXPECTED_HEAD" \
+            --raw-field external_id="$CHECK_EXTERNAL_ID" \
+            --raw-field status=in_progress \
+            --raw-field details_url="$DETAILS_URL" \
+            --raw-field 'output[title]=macOS retarget running' \
+            --raw-field 'output[summary]=Protected-main retarget validation is in progress.' \
+            --jq .id)"
+          case "$check_run_id" in
+            ''|*[!0-9]* ) echo "invalid check run id" >&2; exit 1 ;;
+          esac
+          echo "check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+          trap - EXIT
+
+  build-test:
+    needs: [resolve-runner, publish-macos-pending]
     runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
     name: macOS retarget build (${{ needs.resolve-runner.outputs.route }})
-    env:
-      # Use a distinct build dir from build.yml's matrix so caches don't
-      # collide if both run concurrently on the same self-hosted host.
-      PULP_BUILD_DIR: build-macos-retarget
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
           lfs: false
-          ref: ${{ inputs.target_ref || github.ref }}
-          # Self-hosted runner reuses its workspace across runs so ccache /
-          # FetchContent / CMake configure persist between PRs.
-          clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
 
-      # The capability-history check fails closed when a workflow_dispatch
-      # checkout has no protected-base ref. Keep the retarget lane aligned with
-      # build.yml instead of relying on whatever a warm runner happened to
-      # retain from an earlier job.
-      - name: Fetch protected capability base
+      # A workflow_dispatch run is scoped to protected main even after it
+      # detaches to a PR head. Never expose that scope's persistent caches to
+      # input-selected code. Derive every writable path while trusted control
+      # is still checked out; the runner cleans this root again at teardown.
+      - name: Initialize isolated retarget paths
         shell: bash
-        run: git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
-
-      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
-      # Persist brew + ccache + Pulp FetchContent across runs on the
-      # same workspace. This workflow's resolve-runner emits a
-      # structured `route` output that's always one of {local,
-      # namespace, github-hosted} — use the route directly rather
-      # than a substring on runs_on_json. #2399 flagged that
-      # `runs_on_json` can contain direct nscloud-* labels that
-      # don't include "namespace" literally; gating on `route` avoids
-      # that whole class of misses.
-      - name: Namespace cache (brew + ccache + Pulp FetchContent)
-        if: needs.resolve-runner.outputs.route == 'namespace'
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: brew
-          path: |
-            ~/Library/Caches/ccache
-            ~/Library/Caches/Pulp/fetchcontent-src
-
-      - name: Install ccache
         run: |
-          brew install ccache || {
-            brew update
-            brew install ccache
+          set -euo pipefail
+          root="$RUNNER_TEMP/pulp-retarget-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$root"
+          cat > "$root/run-untrusted" <<'RUNNER'
+          #!/bin/bash
+          set -euo pipefail
+          # The Actions runner owns protected-main runtime/cache credentials.
+          # PR code runs as another uid with an empty, explicit environment, so
+          # it cannot read the runner process environment or receive any
+          # ACTIONS_*, GITHUB_*, token, credential, or command-file variable.
+          exec sudo -u nobody /usr/bin/env -i \
+            HOME="$PULP_UNTRUSTED_HOME" \
+            TMPDIR="$PULP_UNTRUSTED_TMPDIR" \
+            PATH="$PULP_TRUSTED_PATH" \
+            CI=1 \
+            PULP_BUILD_DIR="$PULP_BUILD_DIR" \
+            PULP_TRUSTED_CHECKOUT="$PULP_TRUSTED_CHECKOUT" \
+            PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
+            PULP_SKIA_CACHE_ROOT="$PULP_SKIA_CACHE_ROOT" \
+            PULP_DESIGN_BROWSER="${PULP_DESIGN_BROWSER:-}" \
+            PULP_EXPECTED_BASE="${PULP_EXPECTED_BASE:-}" \
+            PULP_EXPECTED_HEAD="${PULP_EXPECTED_HEAD:-}" \
+            "$@"
+          RUNNER
+          chmod 0555 "$root/run-untrusted"
+          mkdir -p "$root/source" "$root/build" "$root/fetchcontent" \
+            "$root/skia" "$root/home" "$root/tmp"
+          sudo chown -R nobody "$root/source" "$root/build" \
+            "$root/fetchcontent" "$root/skia" "$root/home" "$root/tmp"
+          {
+            echo "PULP_EPHEMERAL_ROOT=$root"
+            echo "PULP_UNTRUSTED_SOURCE=$root/source"
+            echo "PULP_UNTRUSTED_HOME=$root/home"
+            echo "PULP_UNTRUSTED_TMPDIR=$root/tmp"
+            echo "PULP_UNTRUSTED_RUNNER=$root/run-untrusted"
+            echo "PULP_TRUSTED_CHECKOUT=$GITHUB_WORKSPACE"
+            echo "PULP_TRUSTED_PATH=$PATH"
+            echo "PULP_BUILD_DIR=$root/build"
+            echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/fetchcontent"
+            echo "PULP_SKIA_CACHE_ROOT=$root/skia"
+          } >> "$GITHUB_ENV"
+
+      - name: Fetch protected capability base
+        env:
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trusted_control="$(git rev-parse HEAD)"
+          if [ "$trusted_control" != "$GITHUB_SHA" ]; then
+            echo "retarget control checkout drifted from the protected workflow SHA" >&2
+            echo "expected=$GITHUB_SHA actual=$trusted_control" >&2
+            exit 1
+          fi
+          git fetch --no-tags --depth=1 origin \
+            "+$EXPECTED_BASE:refs/remotes/origin/main" \
+            "+$EXPECTED_HEAD:refs/remotes/pulp-retarget/head"
+          actual_base="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$actual_base" != "$EXPECTED_BASE" ]; then
+            echo "retarget capability base drifted from the resolved PR base" >&2
+            echo "expected=$EXPECTED_BASE actual=$actual_base" >&2
+            exit 1
+          fi
+
+      # Keep the trusted worktree on protected control code. Verify only the
+      # fetched object here; the first materialization of PR-controlled files
+      # happens later under the isolated nobody account, so .gitattributes and
+      # .lfsconfig cannot invoke filters or network activity with protected
+      # runner credentials.
+      - name: Verify exact pull request head object
+        env:
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse refs/remotes/pulp-retarget/head)"
+          if [ "$actual_head" != "$EXPECTED_HEAD" ]; then
+            echo "retarget fetched head drifted from the resolved PR head" >&2
+            echo "expected=$EXPECTED_HEAD actual=$actual_head" >&2
+            exit 1
+          fi
+
+      # Capability history is relative to the immutable base recorded on the
+      # PR, not whichever commits reached main while a recovery waited. The
+      # merge queue validates the combined tree against current main later.
+
+      # Keep browser-source fidelity identical to build.yml's required macOS
+      # lane. The VM images intentionally do not carry mutable system Chrome.
+      - name: Install pinned Chrome for browser-source fidelity (macOS ARM64)
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_root="$PULP_EPHEMERAL_ROOT/chrome-for-testing-151.0.7922.47"
+          chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          if [ ! -x "$chrome" ]; then
+            archive="$PULP_EPHEMERAL_ROOT/chrome-mac-arm64.zip"
+            mkdir -p "$PULP_EPHEMERAL_ROOT"
+            curl --fail --location --retry 3 --output "$archive" \
+              https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
+            expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
+            actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+            [ "$actual" = "$expected" ] || { echo "Chrome archive SHA-256 mismatch" >&2; exit 1; }
+            mkdir -p "$chrome_root"
+            unzip -q "$archive" -d "$chrome_root"
+          fi
+          [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
+          echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
+      - name: Export exact head into the untrusted account
+        env:
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse refs/remotes/pulp-retarget/head)" = "$EXPECTED_HEAD" ] || {
+            echo "refusing to export a non-pinned source object" >&2
+            exit 1
           }
+          # Clone while still under the trusted runner uid, but with local
+          # hardlinks disabled and credentials already removed by checkout.
+          # No PR command executes here. Ownership transfers only after the
+          # exact base/head refs have been reconstructed and verified.
+          git update-ref refs/heads/pulp-retarget-export-base "$EXPECTED_BASE"
+          git update-ref refs/heads/pulp-retarget-export-head "$EXPECTED_HEAD"
+          sudo /bin/rm -rf -- "$PULP_UNTRUSTED_SOURCE"
+          git clone --no-local --no-checkout "$PULP_TRUSTED_CHECKOUT" "$PULP_UNTRUSTED_SOURCE"
+          git -C "$PULP_UNTRUSTED_SOURCE" remote set-url origin \
+            "https://github.com/Generous-Corp/pulp.git"
+          git -C "$PULP_UNTRUSTED_SOURCE" update-ref \
+            refs/remotes/origin/main "$EXPECTED_BASE"
+          test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse refs/remotes/origin/main)" = "$EXPECTED_BASE"
+          test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse "$EXPECTED_HEAD")" = "$EXPECTED_HEAD"
+          sudo chown -R nobody "$PULP_UNTRUSTED_SOURCE"
+          # shellcheck disable=SC2016
+          PULP_EXPECTED_BASE="$EXPECTED_BASE" PULP_EXPECTED_HEAD="$EXPECTED_HEAD" \
+          "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
+            set -euo pipefail
+            git -C "$PULP_UNTRUSTED_SOURCE" checkout --detach "$PULP_EXPECTED_HEAD"
+            test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse refs/remotes/origin/main)" = "$PULP_EXPECTED_BASE"
+            test "$(git -C "$PULP_UNTRUSTED_SOURCE" rev-parse HEAD)" = "$PULP_EXPECTED_HEAD"
+          '
 
-      - name: Restore FetchContent sources (GitHub-hosted)
-        if: runner.environment == 'github-hosted'
-        id: fetchcontent-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/Library/Caches/Pulp/fetchcontent-src
-          key: macOS-macos-retarget-fetchcontent-${{ hashFiles('setup.sh') }}
-          restore-keys: macOS-macos-retarget-fetchcontent-
-
-      - name: Restore ccache (GitHub-hosted)
-        if: runner.environment == 'github-hosted'
-        id: ccache-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/Library/Caches/ccache
-          key: macOS-macos-retarget-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-${{ github.ref }}
-          restore-keys: |
-            macOS-macos-retarget-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
-            macOS-macos-retarget-ccache-
+      - name: Prove protected runtime credentials are absent from PR execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016
+          "$PULP_UNTRUSTED_RUNNER" bash --noprofile --norc -c '
+            test "$(id -un)" = nobody
+            while IFS= read -r name; do
+              case "$name" in
+                ACTIONS_*|GITHUB_*|GH_*|*_TOKEN|*_CREDENTIAL*)
+                  echo "protected credential variable leaked: $name" >&2
+                  exit 1
+                  ;;
+              esac
+            done < <(env | cut -d= -f1)
+          '
 
       - name: Bootstrap repository dependencies
-        run: ./setup.sh --ci --deps-only
+        run: |
+          "$PULP_UNTRUSTED_RUNNER" \
+            "$PULP_UNTRUSTED_SOURCE/setup.sh" --ci --deps-only
 
       - name: Configure
         run: |
-          set -euo pipefail
-          # PULP_LOTTIE=ON exercises the opt-in skottie render path (bundled in
-          # the Skia toolchain from chrome/m151 onward, which ships SkJSON +
-          # skresources). The try-link auto-disables if a Skia bundle can't link
-          # skottie, so this can never break the build; it only gives the Lottie
-          # render + playback tests real coverage. Affects test binaries only —
-          # shipped plugins default PULP_LOTTIE OFF.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_LOTTIE=ON
+          # PULP_LOTTIE=ON exercises the opt-in skottie render path. The
+          # try-link auto-disables if the verified bundle cannot link it.
+          "$PULP_UNTRUSTED_RUNNER" cmake \
+            -S "$PULP_UNTRUSTED_SOURCE" -B "$PULP_BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF
 
       - name: Build
-        run: cmake --build "$PULP_BUILD_DIR" --config Release
-
-      - name: Ccache stats
-        if: always()
         run: |
-          if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats
-          else
-            echo "ccache not available; skipping stats"
-          fi
+          "$PULP_UNTRUSTED_RUNNER" cmake --build "$PULP_BUILD_DIR" --config Release
 
       - name: Test
         # Mirror build.yml's required macOS selection. Retarget is another
         # provider for the same gate, not a full/nightly benchmark lane.
-        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        run: |
+          "$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
+            --output-on-failure --repeat until-pass:2 -C Release \
+            -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 \
+            --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
-  macos:
-    # Stable required-check name. Branch protection on `main` requires a
-    # context literally named `macos`. When this workflow runs, its `macos`
-    # check supersedes the same-named check from build.yml's matrix leg.
-    needs: build-test
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Gate on retarget build
+      - name: Remove untrusted writable state
+        if: always()
+        shell: bash
         run: |
           set -euo pipefail
-          case "${{ needs.build-test.result }}" in
-            success)
-              echo "macOS retarget build green — macos gate ✓"
-              exit 0
-              ;;
-            *)
-              echo "macOS retarget build ${{ needs.build-test.result }} — blocking macos gate"
-              exit 1
-              ;;
+          case "$PULP_EPHEMERAL_ROOT" in
+            "$RUNNER_TEMP"/pulp-retarget-*) sudo /bin/rm -rf -- "$PULP_EPHEMERAL_ROOT" ;;
+            *) echo "refusing unsafe retarget cleanup path" >&2; exit 1 ;;
           esac
+
+  complete-macos-check:
+    # workflow_dispatch itself is attached to protected main. Publish the
+    # stable required check explicitly on the API-pinned PR head. This job owns
+    # checks:write but never checks out or executes PR code.
+    needs: [resolve-runner, publish-macos-pending, build-test]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      checks: write
+    if: always()
+    steps:
+      - name: Publish exact-head macos result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PR: ${{ needs.resolve-runner.outputs.pr_number }}
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          CHECK_RUN_ID: ${{ needs.publish-macos-pending.outputs.check_run_id }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
+          BUILD_RESULT: ${{ needs.build-test.result }}
+          DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for sha in "$EXPECTED_BASE" "$EXPECTED_HEAD"; do
+            case "$sha" in
+              ''|*[!0-9a-f]* ) echo "invalid resolved PR base/head" >&2; exit 1 ;;
+            esac
+            [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
+          done
+          resolve_check_run_id() {
+            case "$CHECK_RUN_ID" in
+              ''|*[!0-9]*) ;;
+              *) printf '%s\n' "$CHECK_RUN_ID"; return 0 ;;
+            esac
+            for delay in 1 2 4; do
+              recovered="$(gh api \
+                "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
+                2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
+                '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
+              case "$recovered" in
+                ''|*[!0-9]*) sleep "$delay" ;;
+                *) printf '%s\n' "$recovered"; return 0 ;;
+              esac
+            done
+            return 1
+          }
+          CHECK_RUN_ID="$(resolve_check_run_id)" || {
+            echo "cannot rediscover pending macos check" >&2
+            exit 1
+          }
+          patch_terminal_check() {
+            conclusion="$1"
+            title="$2"
+            summary="$3"
+            for delay in 1 2 4; do
+              if gh api --method PATCH \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" \
+                --raw-field status=completed \
+                --raw-field conclusion="$conclusion" \
+                --raw-field details_url="$DETAILS_URL" \
+                --raw-field "output[title]=$title" \
+                --raw-field "output[summary]=$summary"; then
+                return 0
+              fi
+              sleep "$delay"
+            done
+            return 1
+          }
+          terminal_published=false
+          publish_failure_on_exit() {
+            if [ "$terminal_published" = false ]; then
+              patch_terminal_check failure 'macOS retarget rejected' \
+                'Exact-head retarget identity or controller validation failed.' \
+                >/dev/null 2>&1 || true
+            fi
+          }
+          trap publish_failure_on_exit EXIT
+          live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_PR")"
+          live_state="$(printf '%s' "$live_pr" | jq -r .state)"
+          live_base="$(printf '%s' "$live_pr" | jq -r .base.sha)"
+          live_base_repository="$(printf '%s' "$live_pr" | jq -r .base.repo.full_name)"
+          live_base_ref="$(printf '%s' "$live_pr" | jq -r .base.ref)"
+          live_head="$(printf '%s' "$live_pr" | jq -r .head.sha)"
+          live_head_repository="$(printf '%s' "$live_pr" | jq -r .head.repo.full_name)"
+          live_head_ref="$(printf '%s' "$live_pr" | jq -r .head.ref)"
+          if [ "$live_state" != open ] || \
+             [ "$live_base" != "$EXPECTED_BASE" ] || \
+             [ "$live_base_repository" != "$GITHUB_REPOSITORY" ] || \
+             [ "$live_base_ref" != main ] || \
+             [ "$live_head" != "$EXPECTED_HEAD" ] || \
+             [ "$live_head_repository" != "$GITHUB_REPOSITORY" ] || \
+             [ "$live_head_ref" != "$EXPECTED_HEAD_REF" ]; then
+            echo "PR #$EXPECTED_PR identity changed during retarget; suppressing stale status" >&2
+            exit 1
+          fi
+          case "$BUILD_RESULT" in
+            success) conclusion=success ;;
+            *) conclusion=failure ;;
+          esac
+          patch_terminal_check "$conclusion" 'macOS retarget complete' \
+            "Exact-head retarget build: $BUILD_RESULT"
+          terminal_published=true
+          [ "$conclusion" = success ] || exit 1

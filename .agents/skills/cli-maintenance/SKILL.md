@@ -1438,14 +1438,30 @@ Gotchas:
 `pulp macos retarget --pr N --to <local|namespace|github-hosted>` cancels
 any in-flight macOS-bearing workflow_runs for PR N (from both `build.yml`'s
 matrix and any prior `build-macos.yml` dispatch) and fires a fresh
-`gh workflow run build-macos.yml --ref <pr-head> --field runner=<choice>`.
+`gh workflow run build-macos.yml --ref main --field pr_number=N --field
+target_ref=<pr-head> --field runner=<choice>`. The workflow definition must
+come from protected `main`: running PR-authored workflow control on a manual
+dispatch can poison persistent CI state before the exact PR checks execute.
+The trusted workflow validates the open internal PR's repository, base, ref,
+and immutable SHAs before fetching and detaching to its head. The build job has
+no cache writer or elevated token and uses only run-unique writable paths;
+checks-write-only controller jobs create one pending exact-head check before
+execution and complete it afterward, without checking out or executing PR code,
+after revalidating the complete base/head
+repository, ref, and SHA identity. The local route always fails closed until a
+separately proven two-account Tart class prevents PR code from reaching the
+guest's Actions runner account. Namespace accepts only its exact approved profile.
+Inside the build job, every PR-controlled command runs as the separate `nobody`
+uid under an empty allowlisted environment, so protected-main Actions runtime
+cache credentials and command-file paths never reach PR code.
 
 Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
 flag): the `build.yml` matrix couples Linux/Windows/macOS into one
 workflow_run. Rerunning macOS via that matrix re-runs Linux/Windows too.
-`build-macos.yml` is independent — it produces its own `macos`-named
-check that supersedes the matrix's `macos` check by recency. Branch
-protection's required-check name stays one stable token.
+`build-macos.yml` is independent — its trusted reporter produces a
+`macos`-named check on the resolved exact PR head that supersedes the matrix's
+same-named check by recency. Branch protection's required-check name stays one
+stable token.
 
 `pulp macos status --pr N` reads the latest `macos` check from the GitHub
 check-runs API for the PR's head SHA. Useful for confirming a retarget
