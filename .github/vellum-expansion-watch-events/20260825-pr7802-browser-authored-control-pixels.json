@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260825-pr7802-browser-authored-control-pixels",
+  "created_at": "2026-08-25T12:45:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned compatibility in the retained native bridge code generator: browser-captured interactive overlays preserve their authored control bodies, and captured text boxes do not apply alignment twice when runtime font resolution differs from Chromium. The repair keeps agent-authored HTML pixels and full labels visible in native plugin views without imposing a house style, changing Figma style selection, or transferring any implementation authority to or from Vellum.",
+  "tests": [
+    "pulp-test-design-import (423 cases, 2995 assertions)",
+    "pulp-test-cli-import-design (76 cases, 105 assertions)",
+    "pulp-test-import-design-tool (48 cases, 10677 assertions)",
+    "Forge Sequencer authored HTML to Chromium to Skia to emitted-runtime proof (98.16% runtime/direct-Skia; 96.29% runtime/Chromium)",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

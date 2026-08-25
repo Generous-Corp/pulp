@@ -36,8 +36,9 @@ struct CodeGenOptions {
     int indent_spaces = 2;
 
     /// When true, audio knobs render as native vector silver/chrome widgets
-    /// (WidgetRenderStyle::silver) instead of PNG sprite-strip images. Per-node
-    /// override via `@sprite` or `@silver` suffix on the Figma layer name.
+    /// (WidgetRenderStyle::silver), except browser-captured control overlays
+    /// whose body pixels remain design authority. Per-node `@sprite` or
+    /// `@silver` suffixes on a Figma layer override the default for that node.
     bool use_silver_knobs = true;
 
     /// When true (default), recognized faders/meters are emitted with a
