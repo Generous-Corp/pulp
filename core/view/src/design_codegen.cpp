@@ -1471,15 +1471,24 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             if (ends_with("@sprite")) node_wants_sprite = true;
             else if (ends_with("@silver")) node_wants_silver = true;
         }
+        auto skin_it = node.attributes.find("asset_path");
+        const bool has_captured_skin =
+            skin_it != node.attributes.end() && !skin_it->second.empty();
+        // A browser-control overlay is the interactive layer over an exact
+        // captured body, so repainting it with Pulp's silver chrome replaces
+        // the agent-authored pixels. Keep the established Figma/global style
+        // contract for every other knob; per-node @silver remains explicit.
+        const bool captured_skin_is_design_authority =
+            has_captured_skin && browser_control_overlay;
         bool use_silver_here =
             node_wants_silver ? true :
             node_wants_sprite ? false :
+            captured_skin_is_design_authority ? false :
             opts.use_silver_knobs;
 
-        auto skin_it = node.attributes.find("asset_path");
         if (use_silver_here) {
             ss << ind << "setWidgetStyle('" << id << "', 'silver');\n";
-        } else if (skin_it != node.attributes.end() && !skin_it->second.empty()) {
+        } else if (has_captured_skin) {
             int frames = 1;
             auto fc_it = node.attributes.find("sprite_strip_frame_count");
             if (fc_it != node.attributes.end()) {
@@ -2130,6 +2139,7 @@ static void emit_js_text_node(const NativeEmit& e) {
     const auto& ind = e.ind;
     const auto& id = e.id;
     const auto& pid = e.pid;
+    const bool has_browser_line_layout = captured_line_decision_usable(node);
     // Text node → createLabel with explicit height (Yoga requirement)
     ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
@@ -2194,7 +2204,14 @@ static void emit_js_text_node(const NativeEmit& e) {
     if (node.style.text_decoration)
         ss << ind << "setTextDecoration('" << id << "', '"
            << js_single_quote_escape(*node.style.text_decoration) << "');\n";
-    if (node.style.text_align)
+    // Chromium's captured text-node box starts at the already-aligned glyph
+    // origin. Reapplying center/right alignment inside that glyph-sized Label
+    // shifts the run a second time whenever the cached browser line layout is
+    // unavailable at runtime (for example, platform face substitution),
+    // clipping compact readouts and footer labels. The captured geometry owns
+    // alignment for this exact artifact; uncaptured text keeps normal CSS
+    // alignment semantics.
+    if (node.style.text_align && !has_browser_line_layout)
         ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
     if (node.style.letter_spacing)
         ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
@@ -2235,7 +2252,6 @@ static void emit_js_text_node(const NativeEmit& e) {
     // its final word even though the captured browser never did. Preserve the
     // captured decision in generated JS just as the direct native
     // materializer does in make_widget().
-    const bool has_browser_line_layout = captured_line_decision_usable(node);
     const bool browser_single_line =
         has_browser_line_layout && node.text_line_boxes.size() == 1;
     const bool browser_wrapped =

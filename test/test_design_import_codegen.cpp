@@ -1943,11 +1943,11 @@ TEST_CASE("generate_pulp_js sprite knob emits an interactive single-frame strip 
     REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js silver knob still wins over a sprite skin", "[view][import][sprite]") {
-    // The default (silver) mode keeps the native-vector body even when body
-    // art is present: silver style applied, no sprite strip emitted.
+TEST_CASE("generate_pulp_js browser control art wins over the silver default", "[view][import][sprite]") {
+    // A browser overlay is the interactive layer for authored pixels, not
+    // permission to replace those pixels with Pulp's house chrome.
     DesignIR ir;
-    ir.source = DesignSource::figma;
+    ir.source = DesignSource::html;
     ir.root.type = "frame";
     ir.root.name = "Controls";
 
@@ -1960,6 +1960,8 @@ TEST_CASE("generate_pulp_js silver knob still wins over a sprite skin", "[view][
     knob.attributes["asset_path"] = "/tmp/synthetic-knob-body.png";
     knob.attributes["art_core_w"] = "100";
     knob.attributes["art_core_h"] = "100";
+    knob.attributes["pulpRouteId"] = "capture:param_1:0";
+    knob.attributes["designed_body"] = "underlay";
     ir.root.children.push_back(knob);
 
     CodeGenOptions opts;
@@ -1968,9 +1970,17 @@ TEST_CASE("generate_pulp_js silver knob still wins over a sprite skin", "[view][
     auto js = generate_pulp_js(ir, opts);
 
     REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
-    REQUIRE(js.find("setWidgetStyle('GainKnob") != std::string::npos);
-    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") == std::string::npos);
-    REQUIRE(js.find("setKnobSpriteCore('GainKnob") == std::string::npos);
+    REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
+    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setKnobSpriteCore('GainKnob") != std::string::npos);
+
+    knob.name = "GainKnob@silver";
+    ir.root.children[0] = knob;
+    const auto explicit_silver = generate_pulp_js(ir, opts);
+    REQUIRE(explicit_silver.find("setWidgetStyle('GainKnobsilver") !=
+            std::string::npos);
+    REQUIRE(explicit_silver.find("setKnobSpriteStrip('GainKnobsilver") ==
+            std::string::npos);
 }
 
 TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yoga constraints", "[view][import]") {
@@ -2242,6 +2252,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     IRNode uncached_ellipsis = ellipsis;
     uncached_ellipsis.name = "UncachedEllipsis";
     uncached_ellipsis.text_content = "uncached label";
+    uncached_ellipsis.style.text_align = "right";
     uncached_ellipsis.text_line_boxes.clear();
     uncached_ellipsis.text_layout_basis.reset();
     ir.root.children.push_back(uncached_ellipsis);
@@ -2305,6 +2316,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     CHECK(js.substr(wrapped_cache, 320).find("start: 6, length: 4") !=
           std::string::npos);
     CHECK(js.find("setMultiLine('Wrapped") != std::string::npos);
+    CHECK(js.find("setTextAlign('Wrapped") == std::string::npos);
     CHECK(js.find("setCapturedLineBoxes('Stale") == std::string::npos);
     CHECK(js.find("setWhiteSpace('Stale") == std::string::npos);
     CHECK(js.find("setMultiLine('Stale") != std::string::npos);
@@ -2320,6 +2332,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     CHECK(js.find("'width', 30", ellipsis_width) != std::string::npos);
     CHECK(js.find("setCapturedLineBoxes('UncachedEllipsis") == std::string::npos);
     CHECK(js.find("setMultiLine('UncachedEllipsis") == std::string::npos);
+    CHECK(js.find("setTextAlign('UncachedEllipsis", 0) != std::string::npos);
     const auto uncached_ellipsis_width = js.find("setFlex('UncachedEllipsis");
     REQUIRE(uncached_ellipsis_width != std::string::npos);
     CHECK(js.find("'width', 30", uncached_ellipsis_width) != std::string::npos);
