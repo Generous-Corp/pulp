@@ -24,6 +24,7 @@ import glob
 import hashlib
 import json
 import os
+import posixpath
 import plistlib
 import shutil
 import subprocess
@@ -434,23 +435,33 @@ def _is_internal_apfs(path):
     return apfs and internal and fixed, f"device={device} apfs={apfs} internal={internal} fixed={fixed}"
 
 
-def _runner_policy_findings(key):
+def _runner_policy_findings(key, *, require_listener=True):
     findings, unobservable = [], []
     dirs = _runner_dirs(key)
     for runner_dir in dirs:
         label = str(runner_dir)
-        try:
-            config = json.loads((runner_dir / ".runner").read_text(encoding="utf-8-sig"))
-        except Exception as exc:
-            unobservable.append(f"{label}: unreadable .runner ({exc})")
+        config_paths = [runner_dir / ".runner"]
+        migrated_path = runner_dir / ".runner_migrated"
+        if migrated_path.exists():
+            config_paths.append(migrated_path)
+        config_unreadable = False
+        for config_path in config_paths:
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+            except Exception as exc:
+                unobservable.append(f"{label}: unreadable {config_path.name} ({exc})")
+                config_unreadable = True
+                continue
+            if config.get("disableUpdate") is not True:
+                findings.append(f"{label}: {config_path.name} disableUpdate is not true")
+        if config_unreadable:
             continue
-        if config.get("disableUpdate") is not True:
-            findings.append(f"{label}: disableUpdate is not true")
-        listener = _runner_process_present(runner_dir, "Runner.Listener")
-        if listener is None:
-            unobservable.append(f"{label}: cannot inspect Runner.Listener process")
-        elif not listener:
-            findings.append(f"{label}: Runner.Listener is offline")
+        if require_listener:
+            listener = _runner_process_present(runner_dir, "Runner.Listener")
+            if listener is None:
+                unobservable.append(f"{label}: cannot inspect Runner.Listener process")
+            elif not listener:
+                findings.append(f"{label}: Runner.Listener is offline")
         got_version = _runner_version(runner_dir)
         if got_version != str(key["runner_version"]):
             findings.append(
@@ -497,7 +508,7 @@ def _runner_policy_findings(key):
     return dirs, findings, unobservable
 
 
-def probe_actions_runner_policy(key):
+def probe_actions_runner_policy(key, *, require_listener=True):
     if not all(key.get(name) for name in ("runner_globs", "runner_version", "runner_sha256")):
         return Probe(
             UNOBS, None,
@@ -506,7 +517,9 @@ def probe_actions_runner_policy(key):
     observation_error = _runner_glob_observation_error(key)
     if observation_error:
         return Probe(UNOBS, None, observation_error)
-    dirs, findings, unobservable = _runner_policy_findings(key)
+    dirs, findings, unobservable = _runner_policy_findings(
+        key, require_listener=require_listener,
+    )
     observed = json.dumps({"runners": len(dirs), "findings": findings}, sort_keys=True)
     if unobservable:
         return Probe(UNOBS, observed, "; ".join(unobservable))
@@ -599,6 +612,64 @@ def _atomic_write(path, text):
         raise
 
 
+def _atomic_write_bytes(path, data, mode=None):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+class _RunnerFileTransaction:
+    """Restore runner policy files exactly if a later migration step fails."""
+
+    def __init__(self):
+        self.snapshots = {}
+
+    def snapshot(self, path):
+        path = Path(path)
+        if path in self.snapshots:
+            return
+        if path.is_symlink():
+            raise RuntimeError(f"refusing to replace symlinked runner policy file {path}")
+        if path.exists():
+            self.snapshots[path] = (
+                path.read_bytes(),
+                path.stat().st_mode & 0o7777,
+            )
+        else:
+            self.snapshots[path] = None
+
+    def rollback(self):
+        errors = []
+        for path, snapshot in reversed(list(self.snapshots.items())):
+            try:
+                if snapshot is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    data, mode = snapshot
+                    _atomic_write_bytes(path, data, mode)
+            except OSError as exc:
+                errors.append(f"restore {path}: {exc}")
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
+    def commit(self):
+        self.snapshots.clear()
+
+
 def _merge_runner_env(runner_dir):
     path = runner_dir / ".env"
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
@@ -622,6 +693,261 @@ def _merge_runner_env(runner_dir):
     _atomic_write(path, "\n".join(out) + "\n")
 
 
+def _archive_link_escapes(member):
+    """Return whether a tar link resolves outside its extraction root."""
+    base = posixpath.dirname(member.name) if member.issym() else ""
+    target = posixpath.normpath(posixpath.join(base, member.linkname))
+    return (
+        posixpath.isabs(member.linkname)
+        or target == ".."
+        or target.startswith("../")
+    )
+
+
+def _validate_runner_archive_members(members):
+    """Reject writes through symlink ancestors as well as lexical escapes."""
+    symlink_paths = set()
+    for member in members:
+        normalized_name = posixpath.normpath(member.name)
+        member_path = Path(member.name)
+        if (
+            member_path.is_absolute()
+            or ".." in member_path.parts
+            or normalized_name in ("", ".", "..")
+            or normalized_name.startswith("../")
+        ):
+            raise RuntimeError(f"runner archive contains unsafe path {member.name!r}")
+        parts = normalized_name.split("/")
+        ancestors = {"/".join(parts[:index]) for index in range(1, len(parts))}
+        if ancestors & symlink_paths:
+            raise RuntimeError(
+                f"runner archive member traverses symlink ancestor {member.name!r}"
+            )
+        if member.issym() or member.islnk():
+            if _archive_link_escapes(member):
+                raise RuntimeError(
+                    f"runner archive contains unsafe link {member.linkname!r}"
+                )
+            if member.islnk():
+                link_parts = posixpath.normpath(member.linkname).split("/")
+                link_ancestors = {
+                    "/".join(link_parts[:index])
+                    for index in range(1, len(link_parts) + 1)
+                }
+                if link_ancestors & symlink_paths:
+                    raise RuntimeError(
+                        f"runner archive hardlink traverses symlink {member.linkname!r}"
+                    )
+        if member.issym():
+            symlink_paths.add(normalized_name)
+
+
+def _remove_path(path):
+    path = Path(path)
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+class _RunnerPackagePublication:
+    """Keep old versioned trees recoverable until the fleet apply commits."""
+
+    def __init__(
+        self, runner_dir, old_targets, targets, backups, published,
+        root_backups=None, root_published=None,
+    ):
+        self.runner_dir = Path(runner_dir)
+        self.old_targets = old_targets
+        self.targets = targets
+        self.backups = backups
+        self.published = set(published)
+        self.root_backups = root_backups if root_backups is not None else {}
+        self.root_published = root_published if root_published is not None else set()
+        self.closed = False
+
+    def rollback(self):
+        if self.closed:
+            return
+        restored_links = set()
+        errors = []
+        for name, old_target in self.old_targets.items():
+            pending = self.runner_dir / f".{name}.fleet-rollback-{os.getpid()}"
+            try:
+                pending.unlink(missing_ok=True)
+                pending.symlink_to(old_target, target_is_directory=True)
+                os.replace(pending, self.runner_dir / name)
+                restored_links.add(name)
+            except OSError as exc:
+                errors.append(f"restore {name} link: {exc}")
+                try:
+                    pending.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        # Never remove a tree still referenced by a link whose rollback failed.
+        for name in (self.published | set(self.backups)) & restored_links:
+            backup = self.backups.get(name)
+            if backup is not None and backup.exists():
+                retired = self.runner_dir / f".{name}.fleet-new-{os.getpid()}"
+                try:
+                    if self.targets[name].exists():
+                        os.replace(self.targets[name], retired)
+                    os.replace(backup, self.targets[name])
+                except OSError as exc:
+                    errors.append(f"restore old {name} tree: {exc}")
+                    if retired.exists() and not self.targets[name].exists():
+                        try:
+                            os.replace(retired, self.targets[name])
+                        except OSError as restore_exc:
+                            errors.append(f"preserve new {name} tree: {restore_exc}")
+                else:
+                    shutil.rmtree(retired, ignore_errors=True)
+            else:
+                try:
+                    _remove_path(self.targets[name])
+                except OSError as exc:
+                    errors.append(f"remove new {name} tree: {exc}")
+
+        for target in reversed(list(self.root_published)):
+            try:
+                _remove_path(target)
+            except OSError as exc:
+                errors.append(f"remove new root entry {target.name}: {exc}")
+        for target, backup in reversed(list(self.root_backups.items())):
+            if not backup.exists():
+                continue
+            try:
+                if target.exists() or target.is_symlink():
+                    _remove_path(target)
+                os.replace(backup, target)
+            except OSError as exc:
+                errors.append(f"restore root entry {target.name}: {exc}")
+
+        self.closed = not errors
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
+    def commit(self):
+        if self.closed:
+            return
+        for backup in self.backups.values():
+            # Publication is already authoritative. Backup cleanup is best
+            # effort and must not turn a consistent tree into a failed apply.
+            shutil.rmtree(backup, ignore_errors=True)
+        for backup in self.root_backups.values():
+            try:
+                _remove_path(backup)
+            except OSError:
+                pass
+        self.closed = True
+
+
+def _publish_staged_root_entries(stage, runner_dir, publication):
+    for source in list(Path(stage).iterdir()):
+        target = Path(runner_dir) / source.name
+        backup = Path(runner_dir) / f".{source.name}.fleet-backup-{os.getpid()}"
+        if backup.exists() or backup.is_symlink():
+            raise RuntimeError(f"stale runner root backup {backup}")
+        if target.exists() or target.is_symlink():
+            os.replace(target, backup)
+            publication.root_backups[target] = backup
+        os.replace(source, target)
+        publication.root_published.add(target)
+
+
+def _extract_runner_package(tf, runner_dir, version):
+    """Extract a runner package without writing through updater symlinks."""
+    components = ("bin", "externals")
+    symlinked = [(runner_dir / name).is_symlink() for name in components]
+    if any(symlinked) and not all(symlinked):
+        raise RuntimeError("runner has a mixed versioned/unversioned package layout")
+    with tempfile.TemporaryDirectory(
+        prefix="runner-extract-", dir=str(runner_dir.parent)
+    ) as td:
+        stage = Path(td)
+        tf.extractall(stage)
+        for name in components:
+            source = stage / name
+            if not source.is_dir() or source.is_symlink():
+                raise RuntimeError(f"runner archive is missing its {name} directory")
+
+        if not all(symlinked):
+            publication = _RunnerPackagePublication(
+                runner_dir, {}, {}, {}, set(), {}, set(),
+            )
+            try:
+                _publish_staged_root_entries(stage, runner_dir, publication)
+            except Exception as exc:
+                try:
+                    publication.rollback()
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        f"runner package publication failed ({exc}); "
+                        f"rollback failed ({rollback_exc})"
+                    ) from exc
+                raise
+            return publication
+
+        # Actions Runner's self-updater keeps bin/externals as absolute links to
+        # versioned siblings. Extracting into the root follows those links and
+        # silently mixes releases. Publish fresh versioned trees first, then
+        # atomically switch the links while the listener is stopped.
+        old_targets = {}
+        targets = {}
+        for name in components:
+            link = runner_dir / name
+            old_target = Path(os.readlink(link))
+            if not old_target.is_absolute():
+                old_target = (runner_dir / old_target).resolve()
+            if old_target.parent != runner_dir or not old_target.name.startswith(f"{name}."):
+                raise RuntimeError(f"unsafe runner {name} link target {old_target}")
+            old_targets[name] = old_target
+            targets[name] = runner_dir / f"{name}.{version}"
+
+        backups = {}
+        published = []
+        root_backups = {}
+        root_published = set()
+        publication = _RunnerPackagePublication(
+            runner_dir, old_targets, targets, backups, published,
+            root_backups, root_published,
+        )
+        try:
+            for name in components:
+                target = targets[name]
+                backup = runner_dir / f".{name}.{version}.fleet-backup-{os.getpid()}"
+                if backup.exists():
+                    raise RuntimeError(f"stale runner package backup {backup}")
+                if target.exists():
+                    os.replace(target, backup)
+                    backups[name] = backup
+                os.replace(stage / name, target)
+                published.append(name)
+                publication.published.add(name)
+
+            for name in components:
+                link = runner_dir / name
+                target = targets[name]
+                pending = runner_dir / f".{name}.fleet-link-{os.getpid()}"
+                pending.symlink_to(target, target_is_directory=True)
+                os.replace(pending, link)
+
+            # The runner archive also owns root launch/config/service scripts.
+            # Publish each staged entry transactionally instead of silently
+            # retaining scripts from a different runner release.
+            _publish_staged_root_entries(stage, runner_dir, publication)
+        except Exception as exc:
+            try:
+                publication.rollback()
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    f"runner package publication failed ({exc}); rollback failed ({rollback_exc})"
+                ) from exc
+            raise
+        return publication
+
+
 def _install_runner_package(runner_dir, version, expected_sha256):
     name = f"actions-runner-osx-arm64-{version}.tar.gz"
     url = f"https://github.com/actions/runner/releases/download/v{version}/{name}"
@@ -637,17 +963,8 @@ def _install_runner_package(runner_dir, version, expected_sha256):
                 f"runner archive sha256 {actual_sha256} != {expected_sha256}"
             )
         with tarfile.open(archive, "r:gz") as tf:
-            for member in tf.getmembers():
-                member_path = Path(member.name)
-                if member_path.is_absolute() or ".." in member_path.parts:
-                    raise RuntimeError(f"runner archive contains unsafe path {member.name!r}")
-                if member.issym() or member.islnk():
-                    link_path = Path(member.linkname)
-                    if link_path.is_absolute() or ".." in link_path.parts:
-                        raise RuntimeError(
-                            f"runner archive contains unsafe link {member.linkname!r}"
-                        )
-            tf.extractall(runner_dir)
+            _validate_runner_archive_members(tf.getmembers())
+            return _extract_runner_package(tf, runner_dir, version)
 
 
 def _ensure_runner_rust(runner_dir):
@@ -703,6 +1020,95 @@ def _ensure_runner_rust(runner_dir):
         raise RuntimeError("private cargo/rustup toolchain is not runnable after install")
 
 
+def _rollback_runner_policy(dirs, originally_running, file_tx, publications):
+    """Quiesce migrated runners, restore old state, then restore prior liveness."""
+    errors = []
+    for runner_dir in dirs:
+        active = _runner_process_present(runner_dir, "Runner.Worker")
+        if active is None:
+            return [f"cannot inspect worker before rollback for {runner_dir}"]
+        if active:
+            return [f"cannot roll back {runner_dir} while Runner.Worker is active"]
+
+    for runner_dir in dirs:
+        listener = _runner_process_present(runner_dir, "Runner.Listener")
+        if listener is None:
+            errors.append(f"cannot inspect listener before rollback for {runner_dir}")
+            continue
+        if listener:
+            try:
+                _run_checked([runner_dir / "svc.sh", "stop"], cwd=runner_dir, timeout=120)
+                if not _wait_runner_process(runner_dir, "Runner.Listener", False):
+                    errors.append(f"listener did not stop for rollback at {runner_dir}")
+            except Exception as exc:
+                errors.append(f"stop {runner_dir} for rollback: {exc}")
+    if errors:
+        return errors
+
+    # Close the same assignment race as the forward migration: stopping the
+    # listeners prevents new work, but a worker may have appeared between the
+    # first observation and service convergence.
+    for runner_dir in dirs:
+        active = _runner_process_present(runner_dir, "Runner.Worker")
+        if active is None:
+            errors.append(f"cannot re-check worker before rollback for {runner_dir}")
+        elif active:
+            errors.append(f"cannot roll back {runner_dir}; Runner.Worker appeared")
+    if errors:
+        return errors
+
+    try:
+        file_tx.rollback()
+    except Exception as exc:
+        errors.append(f"policy-file rollback: {exc}")
+    for publication in reversed(publications):
+        try:
+            publication.rollback()
+        except Exception as exc:
+            errors.append(f"package rollback for {publication.runner_dir}: {exc}")
+
+    if errors:
+        return errors
+    for runner_dir in originally_running:
+        try:
+            _run_checked([runner_dir / "svc.sh", "start"], cwd=runner_dir, timeout=120)
+            started = _wait_runner_process(runner_dir, "Runner.Listener", True)
+            if started is None:
+                raise RuntimeError("cannot inspect restored listener after start")
+            if not started:
+                raise RuntimeError("restored listener did not start within 30s")
+        except Exception as exc:
+            errors.append(f"restart restored runner {runner_dir}: {exc}")
+    return errors
+
+
+def _runner_package_layout_findings(runner_dir):
+    findings = []
+    required = (
+        runner_dir / "bin" / "Runner.Listener",
+        runner_dir / "config.sh",
+        runner_dir / "run.sh",
+        runner_dir / "svc.sh",
+    )
+    for path in required:
+        if not path.is_file() or not os.access(path, os.X_OK):
+            findings.append(f"{path} is missing or not executable")
+    node_candidates = list((runner_dir / "externals").glob("node*/bin/node"))
+    if not any(path.is_file() and os.access(path, os.X_OK) for path in node_candidates):
+        findings.append(f"{runner_dir / 'externals'} has no executable Node runtime")
+    return findings
+
+
+def _runner_package_marker_matches(runner_dir, version, sha256):
+    try:
+        marker = json.loads(
+            (runner_dir / ".fleet-runner-package.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    return marker == {"runner_sha256": str(sha256), "runner_version": str(version)}
+
+
 def apply_actions_runner_policy(key, pr):
     dirs = _runner_dirs(key)
     for runner_dir in dirs:
@@ -713,6 +1119,8 @@ def apply_actions_runner_policy(key, pr):
             return "manual", f"{runner_dir} has an active Runner.Worker; retry after it is idle"
 
     stopped = []
+    publications = []
+    file_tx = _RunnerFileTransaction()
     try:
         for runner_dir in dirs:
             listener = _runner_process_present(runner_dir, "Runner.Listener")
@@ -741,27 +1149,79 @@ def apply_actions_runner_policy(key, pr):
                 return "manual", f"{runner_dir} acquired a Runner.Worker; retry after it is idle"
 
         for runner_dir in dirs:
-            if _runner_version(runner_dir) != str(key["runner_version"]):
-                _install_runner_package(
-                    runner_dir, str(key["runner_version"]), str(key["runner_sha256"]),
+            version = str(key["runner_version"])
+            sha256 = str(key["runner_sha256"])
+            marker_path = runner_dir / ".fleet-runner-package.json"
+            file_tx.snapshot(marker_path)
+            if (
+                _runner_version(runner_dir) != version
+                or not _runner_package_marker_matches(runner_dir, version, sha256)
+            ):
+                publication = _install_runner_package(
+                    runner_dir, version, sha256,
+                )
+                if publication is not None:
+                    publications.append(publication)
+                _atomic_write(
+                    marker_path,
+                    json.dumps(
+                        {"runner_sha256": sha256, "runner_version": version},
+                        indent=2,
+                        sort_keys=True,
+                    ) + "\n",
                 )
             # Stage the private toolchain before switching the runner's env or
             # PATH. A failed download then restarts against the old working
             # bootstrap instead of publishing a half-applied configuration.
             _ensure_runner_rust(runner_dir)
-            config_path = runner_dir / ".runner"
-            config = json.loads(config_path.read_text(encoding="utf-8-sig"))
-            config["disableUpdate"] = True
-            _atomic_write(config_path, json.dumps(config, indent=2, sort_keys=True) + "\n")
+            config_paths = [runner_dir / ".runner"]
+            migrated_path = runner_dir / ".runner_migrated"
+            if migrated_path.exists():
+                config_paths.append(migrated_path)
+            for path in (*config_paths, runner_dir / ".env", runner_dir / ".path"):
+                file_tx.snapshot(path)
+            for config_path in config_paths:
+                config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+                config["disableUpdate"] = True
+                _atomic_write(config_path, json.dumps(config, indent=2, sort_keys=True) + "\n")
             _merge_runner_env(runner_dir)
             _atomic_write(runner_dir / ".path", _runner_path_value(runner_dir) + "\n")
     except Exception as exc:
-        for runner_dir in stopped:
-            try:
-                _run_checked([runner_dir / "svc.sh", "start"], cwd=runner_dir, timeout=120)
-            except Exception:
-                pass
-        return "failed", f"{type(exc).__name__}: {exc}"
+        rollback_errors = _rollback_runner_policy(
+            dirs, stopped, file_tx, publications,
+        )
+        detail = f"{type(exc).__name__}: {exc}"
+        if rollback_errors:
+            detail += "; rollback: " + "; ".join(rollback_errors)
+        return "failed", detail
+
+    # Validate the complete package/config transaction while every listener is
+    # still stopped. Only after all runners agree do we discard rollback state
+    # and expose any listener to GitHub assignment again.
+    staged = probe_actions_runner_policy(key, require_listener=False)
+    layout_findings = [
+        finding
+        for runner_dir in dirs
+        for finding in _runner_package_layout_findings(runner_dir)
+    ]
+    for runner_dir in dirs:
+        if not _runner_package_marker_matches(
+            runner_dir, key["runner_version"], key["runner_sha256"],
+        ):
+            layout_findings.append(f"{runner_dir}: runner package marker is absent or stale")
+    if staged.state != OK or layout_findings:
+        rollback_errors = _rollback_runner_policy(
+            dirs, stopped, file_tx, publications,
+        )
+        detail = f"staged runner policy is {staged.state} ({staged.detail})"
+        if layout_findings:
+            detail += "; package layout: " + "; ".join(layout_findings)
+        if rollback_errors:
+            detail += "; rollback: " + "; ".join(rollback_errors)
+        return "failed", detail
+    for publication in publications:
+        publication.commit()
+    file_tx.commit()
 
     restart_failures = []
     for runner_dir in dirs:
