@@ -1444,9 +1444,10 @@ come from protected `main`: running PR-authored workflow control on a manual
 dispatch can poison persistent CI state before the exact PR checks execute.
 The trusted workflow validates the open internal PR's repository, base, ref,
 and immutable SHAs before fetching and detaching to its head. The build job has
-no cache writer or elevated token and uses only run-unique writable paths; a
-separate status-write-only job publishes the result onto the exact PR head
-without checking out or executing it, after revalidating the complete base/head
+no cache writer or elevated token and uses only run-unique writable paths;
+checks-write-only controller jobs create one pending exact-head check before
+execution and complete it afterward, without checking out or executing PR code,
+after revalidating the complete base/head
 repository, ref, and SHA identity. The local route accepts only the exact
 `pulp-gate-fast` disposable JIT Tart selector; missing or generic self-hosted
 labels fail closed. Namespace likewise accepts only a Namespace-hosted selector.

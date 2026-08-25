@@ -4055,9 +4055,10 @@ Linux/Windows too — wasted compute when they already passed.
 #20) that runs JUST the macOS build/test on a chosen runner pool.
 Branch protection's required `macos` check accepts the latest same-named check
 on the exact PR head. Because a trusted-main `workflow_dispatch` is attached to
-the main SHA, `build-macos.yml` uses a separate status-write-only reporter to
-publish the terminal result onto the API-pinned PR head. The reporter never
-checks out or executes PR code.
+the main SHA, `build-macos.yml` uses checks-write-only controller jobs to create
+one in-progress check run on the API-pinned PR head before execution and
+complete that same run afterward. The controllers never check out or execute
+PR code.
 
 It must remain semantically identical to the required macOS gate: resolve an
 open internal PR from the workflow definition on protected `main`, check out

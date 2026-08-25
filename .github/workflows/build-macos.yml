@@ -5,10 +5,11 @@ name: Build and Test (macOS retarget)
 # `build.yml`'s matrix. Triggered manually (`workflow_dispatch`) or via the
 # `pulp macos retarget` CLI wrapper.
 #
-# The dispatch itself is attached to protected main, so a status-write-only
-# reporter publishes the terminal `macos` result onto the resolved exact PR
-# head. That check supersedes the matrix leg by name and SHA without giving the
-# job that executes PR code any write permission.
+# The dispatch itself is attached to protected main, so trusted controller jobs
+# create and complete one `macos` check run on the resolved exact PR head. The
+# pending check is created before PR code runs and supersedes the matrix leg by
+# name, SHA, and GitHub Actions App identity. The job that executes PR code has
+# no write permission.
 #
 # Sibling to (not replacement for) `build.yml`. Both workflows produce a job
 # named `macos` so branch protection's required-check stays a stable name.
@@ -87,9 +88,9 @@ jobs:
                 exit 1
               fi
               SELECTOR="$NAMESPACE_MACOS_RUNS_ON_JSON"
-              if ! jq -e 'type == "string" and startswith("namespace-")' \
+              if ! jq -e 'type == "string" and . == "namespace-profile-generouscorp-macos"' \
                 <<<"$SELECTOR" >/dev/null; then
-                echo "::error::namespace retarget requires a Namespace-hosted selector, not self-hosted labels." >&2
+                echo "::error::namespace retarget requires the exact approved Namespace profile." >&2
                 exit 1
               fi
               ;;
@@ -181,8 +182,69 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "retargeting PR #$number: base=$base head=$head ref=$head_ref" >&2
 
-  build-test:
+  publish-macos-pending:
+    # Create the exact-head check before PR code runs so an older green macos
+    # result cannot authorize a merge while retarget validation is pending.
     needs: resolve-runner
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: read
+    outputs:
+      check_run_id: ${{ steps.publish.outputs.check_run_id }}
+    steps:
+      - name: Publish exact-head pending macos check
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PR: ${{ needs.resolve-runner.outputs.pr_number }}
+          EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
+          EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
+          EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for sha in "$EXPECTED_BASE" "$EXPECTED_HEAD"; do
+            case "$sha" in
+              ''|*[!0-9a-f]* ) echo "invalid resolved PR base/head" >&2; exit 1 ;;
+            esac
+            [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
+          done
+          live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_PR")"
+          live_state="$(printf '%s' "$live_pr" | jq -r .state)"
+          live_base="$(printf '%s' "$live_pr" | jq -r .base.sha)"
+          live_base_repository="$(printf '%s' "$live_pr" | jq -r .base.repo.full_name)"
+          live_base_ref="$(printf '%s' "$live_pr" | jq -r .base.ref)"
+          live_head="$(printf '%s' "$live_pr" | jq -r .head.sha)"
+          live_head_repository="$(printf '%s' "$live_pr" | jq -r .head.repo.full_name)"
+          live_head_ref="$(printf '%s' "$live_pr" | jq -r .head.ref)"
+          [ "$live_state" = open ] &&
+          [ "$live_base" = "$EXPECTED_BASE" ] &&
+          [ "$live_base_repository" = "$GITHUB_REPOSITORY" ] &&
+          [ "$live_base_ref" = main ] &&
+          [ "$live_head" = "$EXPECTED_HEAD" ] &&
+          [ "$live_head_repository" = "$GITHUB_REPOSITORY" ] &&
+          [ "$live_head_ref" = "$EXPECTED_HEAD_REF" ] || {
+            echo "PR #$EXPECTED_PR identity changed before retarget; refusing pending check" >&2
+            exit 1
+          }
+          check_run_id="$(gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/check-runs" \
+            --raw-field name=macos \
+            --raw-field head_sha="$EXPECTED_HEAD" \
+            --raw-field status=in_progress \
+            --raw-field details_url="$DETAILS_URL" \
+            --raw-field 'output[title]=macOS retarget running' \
+            --raw-field 'output[summary]=Protected-main retarget validation is in progress.' \
+            --jq .id)"
+          case "$check_run_id" in
+            ''|*[!0-9]* ) echo "invalid check run id" >&2; exit 1 ;;
+          esac
+          echo "check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+
+  build-test:
+    needs: [resolve-runner, publish-macos-pending]
     runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
     name: macOS retarget build (${{ needs.resolve-runner.outputs.route }})
     permissions:
@@ -314,15 +376,15 @@ jobs:
             *) echo "refusing unsafe retarget cleanup path" >&2; exit 1 ;;
           esac
 
-  publish-macos-status:
+  complete-macos-check:
     # workflow_dispatch itself is attached to protected main. Publish the
-    # stable required context explicitly on the API-pinned PR head. This job
-    # owns statuses:write but never checks out or executes PR code.
-    needs: [resolve-runner, build-test]
+    # stable required check explicitly on the API-pinned PR head. This job owns
+    # checks:write but never checks out or executes PR code.
+    needs: [resolve-runner, publish-macos-pending, build-test]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
-      statuses: write
+      checks: write
     if: always()
     steps:
       - name: Publish exact-head macos result
@@ -332,6 +394,7 @@ jobs:
           EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
           EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          CHECK_RUN_ID: ${{ needs.publish-macos-pending.outputs.check_run_id }}
           BUILD_RESULT: ${{ needs.build-test.result }}
           DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -360,13 +423,19 @@ jobs:
             echo "PR #$EXPECTED_PR identity changed during retarget; suppressing stale status" >&2
             exit 1
           fi
-          case "$BUILD_RESULT" in
-            success) state=success ;;
-            *) state=failure ;;
+          case "$CHECK_RUN_ID" in
+            ''|*[!0-9]* ) echo "invalid pending check run id" >&2; exit 1 ;;
           esac
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$EXPECTED_HEAD" \
-            --raw-field state="$state" \
-            --raw-field context=macos \
-            --raw-field description="Exact-head retarget build: $BUILD_RESULT" \
-            --raw-field target_url="$DETAILS_URL"
-          [ "$state" = success ] || exit 1
+          case "$BUILD_RESULT" in
+            success) conclusion=success ;;
+            *) conclusion=failure ;;
+          esac
+          gh api --method PATCH \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" \
+            --raw-field status=completed \
+            --raw-field conclusion="$conclusion" \
+            --raw-field details_url="$DETAILS_URL" \
+            --raw-field 'output[title]=macOS retarget complete' \
+            --raw-field "output[summary]=Exact-head retarget build: $BUILD_RESULT"
+          [ "$conclusion" = success ] || exit 1

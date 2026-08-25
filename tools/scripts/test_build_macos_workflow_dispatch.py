@@ -57,9 +57,17 @@ def _runner_script() -> str:
 
 def _reporter_script() -> str:
     document = _workflow()
-    steps = document["jobs"]["publish-macos-status"]["steps"]
+    steps = document["jobs"]["complete-macos-check"]["steps"]
     if len(steps) != 1:
-        raise AssertionError("status reporter must remain a single trusted step")
+        raise AssertionError("check completer must remain a single trusted step")
+    return steps[0]["run"]
+
+
+def _pending_script() -> str:
+    document = _workflow()
+    steps = document["jobs"]["publish-macos-pending"]["steps"]
+    if len(steps) != 1:
+        raise AssertionError("pending publisher must remain a single trusted step")
     return steps[0]["run"]
 
 
@@ -79,8 +87,10 @@ def _job_text(job_name: str) -> str:
 def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     jobs = workflow["jobs"]
     build = jobs["build-test"]
-    reporter = jobs["publish-macos-status"]
+    pending = jobs["publish-macos-pending"]
+    reporter = jobs["complete-macos-check"]
     build_text = json.dumps(build, sort_keys=True)
+    pending_text = json.dumps(pending, sort_keys=True)
     reporter_text = json.dumps(reporter, sort_keys=True)
 
     if workflow.get("permissions") != {}:
@@ -100,12 +110,25 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     ):
         if isolated not in build_text:
             raise AssertionError(f"untrusted build lost isolation marker {isolated}")
-    if reporter.get("permissions") != {
-        "pull-requests": "read", "statuses": "write"
-    }:
-        raise AssertionError("reporter permissions drifted")
-    if "actions/checkout" in reporter_text:
-        raise AssertionError("privileged reporter must never check out source")
+    expected_controller_permissions = {
+        "checks": "write", "pull-requests": "read"
+    }
+    for label, controller, text in (
+        ("pending publisher", pending, pending_text),
+        ("check completer", reporter, reporter_text),
+    ):
+        if controller.get("permissions") != expected_controller_permissions:
+            raise AssertionError(f"{label} permissions drifted")
+        if "actions/checkout" in text:
+            raise AssertionError(f"privileged {label} must never check out source")
+    if build.get("needs") != ["resolve-runner", "publish-macos-pending"]:
+        raise AssertionError("untrusted build must wait for exact-head pending check")
+    if "repos/$GITHUB_REPOSITORY/check-runs" not in pending_text:
+        raise AssertionError("pending publisher must create a Checks API run")
+    if "status=in_progress" not in pending_text:
+        raise AssertionError("pending check must exist before untrusted execution")
+    if "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" not in reporter_text:
+        raise AssertionError("check completer must update the pending check run")
     if "needs.resolve-runner.outputs.head_sha" not in reporter_text:
         raise AssertionError("reporter must use trusted resolver head")
     for identity in (
@@ -114,8 +137,8 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         "live_base_repository", "live_base_ref",
         "live_head_repository", "live_head_ref",
     ):
-        if identity not in reporter_text:
-            raise AssertionError(f"reporter lost PR identity check {identity}")
+        if identity not in reporter_text or identity not in pending_text:
+            raise AssertionError(f"controller lost PR identity check {identity}")
     resolver_text = json.dumps(jobs["resolve-runner"], sort_keys=True)
     for marker in ("pulp-gate-fast", "EXPECTED_LOCAL", "namespace-"):
         if marker not in resolver_text:
@@ -216,6 +239,7 @@ def _run_reporter(*, detail: dict[str, object] | None = None,
             "#!/bin/sh\n"
             "case \" $* \" in\n"
             "  *\" --method POST \"*) printf '%s\\n' \"$*\" > \"$POSTED\" ;;\n"
+            "  *\" --method PATCH \"*) printf '%s\\n' \"$*\" > \"$POSTED\" ;;\n"
             "  *) cat \"$FIXTURE\" ;;\n"
             "esac\n",
             encoding="utf-8",
@@ -231,12 +255,54 @@ def _run_reporter(*, detail: dict[str, object] | None = None,
             "EXPECTED_BASE": expected_base,
             "EXPECTED_HEAD": expected_head,
             "EXPECTED_HEAD_REF": expected_head_ref,
+            "CHECK_RUN_ID": "12345",
             "BUILD_RESULT": "success",
             "DETAILS_URL": "https://example.invalid/run/1",
             "GH_TOKEN": "test-token",
         })
         process = subprocess.run(
             ["bash", "-c", _reporter_script()], cwd=root, env=env,
+            capture_output=True, text=True,
+        )
+        return process.returncode, posted.exists(), process.stderr
+
+
+def _run_pending(*, detail: dict[str, object] | None = None,
+                 ) -> tuple[int, bool, str]:
+    detail = detail if detail is not None else _pr()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        fixture = root / "detail.json"
+        fixture.write_text(json.dumps(detail), encoding="utf-8")
+        posted = root / "posted"
+        fake_gh = fake_bin / "gh"
+        fake_gh.write_text(
+            "#!/bin/sh\n"
+            "case \" $* \" in\n"
+            "  *\" --method POST \"*) printf '%s\\n' \"$*\" > \"$POSTED\"; printf '12345\\n' ;;\n"
+            "  *) cat \"$FIXTURE\" ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(0o755)
+        output = root / "output"
+        output.write_text("", encoding="utf-8")
+        env = os.environ.copy()
+        env.update({
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "FIXTURE": str(fixture), "POSTED": str(posted),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+            "EXPECTED_PR": "7723", "EXPECTED_BASE": BASE_SHA,
+            "EXPECTED_HEAD": HEAD_SHA,
+            "EXPECTED_HEAD_REF": "repair/security-7723",
+            "DETAILS_URL": "https://example.invalid/run/1",
+            "GH_TOKEN": "test-token",
+        })
+        process = subprocess.run(
+            ["bash", "-c", _pending_script()], cwd=root, env=env,
             capture_output=True, text=True,
         )
         return process.returncode, posted.exists(), process.stderr
@@ -274,7 +340,8 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(output["route"], "namespace")
         for selector in (
-            '["self-hosted","macOS"]', '"macos-15"', "", "not-json"
+            '["self-hosted","macOS"]', '"namespace-persistent"',
+            '"macos-15"', "", "not-json"
         ):
             with self.subTest(selector=selector):
                 rc, output, error = _run_runner(
@@ -283,9 +350,22 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                 self.assertEqual(rc, 1)
                 self.assertEqual(output, {})
                 self.assertTrue(
-                    "Namespace-hosted selector" in error
+                    "exact approved Namespace profile" in error
                     or "is not set" in error
                 )
+
+    def test_pending_check_is_published_before_untrusted_build(self) -> None:
+        rc, posted, _ = _run_pending()
+        self.assertEqual(rc, 0)
+        self.assertTrue(posted)
+        workflow = _workflow()
+        self.assertEqual(
+            workflow["jobs"]["build-test"]["needs"],
+            ["resolve-runner", "publish-macos-pending"],
+        )
+        pending = _job_text("publish-macos-pending")
+        self.assertIn("status=in_progress", pending)
+        self.assertIn("checks", pending)
 
     def test_reporter_posts_only_for_unchanged_complete_pr_identity(self) -> None:
         rc, posted, _ = _run_reporter()
@@ -393,25 +473,28 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
 
     def test_privileged_reporter_never_checks_out_or_executes_pr_code(self) -> None:
         workflow = _workflow()
-        reporter = workflow["jobs"]["publish-macos-status"]
+        reporter = workflow["jobs"]["complete-macos-check"]
         self.assertEqual(
             reporter["permissions"],
-            {"pull-requests": "read", "statuses": "write"},
+            {"checks": "write", "pull-requests": "read"},
         )
-        self.assertEqual(reporter["needs"], ["resolve-runner", "build-test"])
-        text = _job_text("publish-macos-status")
+        self.assertEqual(
+            reporter["needs"],
+            ["resolve-runner", "publish-macos-pending", "build-test"],
+        )
+        text = _job_text("complete-macos-check")
         script = reporter["steps"][0]["run"]
         self.assertNotIn("actions/checkout", text)
         self.assertIn("EXPECTED_BASE", text)
         self.assertIn("EXPECTED_HEAD_REF", text)
         self.assertIn("needs.resolve-runner.outputs.head_sha", text)
         self.assertIn("needs.build-test.result", text)
-        self.assertIn("statuses/$EXPECTED_HEAD", text)
-        self.assertIn("--raw-field context=macos", text)
+        self.assertIn("check-runs/$CHECK_RUN_ID", text)
+        self.assertIn("--raw-field status=completed", text)
         self.assertIn("live_head", text)
         self.assertIn("live_base_repository", text)
         self.assertIn("live_head_repository", text)
-        self.assertIn('[ "$state" = success ] || exit 1', script)
+        self.assertIn('[ "$conclusion" = success ] || exit 1', script)
 
     def test_only_trusted_jobs_receive_elevated_permissions(self) -> None:
         jobs = _workflow()["jobs"]
@@ -421,8 +504,12 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         )
         self.assertEqual(jobs["build-test"]["permissions"], {"contents": "read"})
         self.assertEqual(
-            jobs["publish-macos-status"]["permissions"],
-            {"pull-requests": "read", "statuses": "write"},
+            jobs["publish-macos-pending"]["permissions"],
+            {"checks": "write", "pull-requests": "read"},
+        )
+        self.assertEqual(
+            jobs["complete-macos-check"]["permissions"],
+            {"checks": "write", "pull-requests": "read"},
         )
 
     def test_hostile_trust_boundary_mutations_are_rejected(self) -> None:
@@ -447,18 +534,24 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             ),
             (
                 "privileged reporter checks out source",
-                lambda doc: doc["jobs"]["publish-macos-status"]["steps"].insert(
+                lambda doc: doc["jobs"]["complete-macos-check"]["steps"].insert(
                     0, {"uses": "actions/checkout@v5"}
                 ),
             ),
             (
                 "privileged reporter stops checking the immutable base",
-                lambda doc: doc["jobs"]["publish-macos-status"]["steps"][0].update(
+                lambda doc: doc["jobs"]["complete-macos-check"]["steps"][0].update(
                     {"env": {
                         key: value for key, value in
-                        doc["jobs"]["publish-macos-status"]["steps"][0]["env"].items()
+                        doc["jobs"]["complete-macos-check"]["steps"][0]["env"].items()
                         if key != "EXPECTED_BASE"
                     }}
+                ),
+            ),
+            (
+                "untrusted build starts before pending check",
+                lambda doc: doc["jobs"]["build-test"].update(
+                    {"needs": ["resolve-runner"]}
                 ),
             ),
             (

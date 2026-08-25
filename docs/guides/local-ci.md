@@ -1755,7 +1755,7 @@ pulp macos retarget --pr 1910 --to github-hosted
 pulp macos status --pr 1910
 ```
 
-`pulp macos retarget` cancels any in-flight macOS-bearing workflow_run for the PR and fires a fresh `build-macos.yml` dispatch on the chosen runner. A status-write-only reporter publishes the result onto the resolved exact PR head, so branch protection can accept the newest `macos` check **without re-running Linux/Windows**.
+`pulp macos retarget` cancels any in-flight macOS-bearing workflow_run for the PR and fires a fresh `build-macos.yml` dispatch on the chosen runner. A checks-write-only controller creates one in-progress check run on the resolved exact PR head before the build and completes that same check afterward, so branch protection can accept the newest `macos` check **without re-running Linux/Windows**.
 
 `build-macos.yml` is independent of `build.yml`'s matrix — they share check names but not workflow_runs. The matrix workflow continues running Linux/Windows as usual; only the macOS leg is replaced.
 
@@ -1769,8 +1769,8 @@ checks out the trusted workflow SHA with Git credentials disabled, then fetches,
 verifies, and detaches to the exact PR head. That build job has only
 contents-read permission, no Actions/Namespace cache action, no persistent
 ccache, and run-unique build, FetchContent, Skia, and Chrome paths removed at
-teardown. The status-write token exists only in the final reporter, which never
-checks out or executes PR code and revalidates the complete PR identity (open
+teardown. The checks-write token exists only in the pending/final controller
+jobs, which never check out or execute PR code and revalidate the complete PR identity (open
 state, base repository/ref/SHA, and head repository/ref/SHA) before posting.
 The local selector must exactly match the `pulp-gate-fast` clean-per-job JIT
 Tart class; an unset or generic self-hosted selector fails closed instead of
