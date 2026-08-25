@@ -4070,7 +4070,8 @@ writable state is unique to the run and removed at teardown. All PR-controlled
 setup/CMake/build/test commands run as the separate `nobody` uid under `env -i`
 from a disposable isolated clone. Do not pass Actions runtime/cache variables,
 GitHub variables, tokens, credentials, or command-file paths across that account
-boundary. The reporter
+boundary; do not forward proxy URLs because they may contain userinfo
+credentials. The reporter
 revalidates the complete open PR identity (base and head repository/ref/SHA)
 before posting. The local route is fail-closed even for the current
 `pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the

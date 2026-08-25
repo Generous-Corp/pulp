@@ -1775,7 +1775,8 @@ cache credentials, every PR-controlled setup/CMake/build/test command executes
 as the separate `nobody` uid through an empty, explicit environment. The PR
 source is a disposable isolated clone owned by that uid; no `ACTIONS_*`,
 `GITHUB_*`, token, credential, or Actions command-file variable crosses the
-account boundary. The checks-write token exists only in the pending/final controller
+account boundary. Proxy variables are omitted too because proxy URLs may carry
+userinfo credentials. The checks-write token exists only in the pending/final controller
 jobs, which never check out or execute PR code and revalidate the complete PR identity (open
 state, base repository/ref/SHA, and head repository/ref/SHA) before posting.
 The local route always fails closed: today's JIT Tart guest is disposable, but

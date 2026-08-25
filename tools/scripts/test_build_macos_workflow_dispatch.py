@@ -158,7 +158,7 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     for secret in (
         "ACTIONS_RUNTIME_TOKEN=", "ACTIONS_CACHE_URL=",
         "ACTIONS_RESULTS_URL=", "GITHUB_TOKEN=", "GH_TOKEN=",
-        "GITHUB_ENV=", "GITHUB_PATH=",
+        "GITHUB_ENV=", "GITHUB_PATH=", "HTTP_PROXY=", "HTTPS_PROXY=",
     ):
         if secret in init:
             raise AssertionError(f"untrusted wrapper passes protected variable {secret}")
@@ -326,6 +326,7 @@ def _run_pending(*, detail: dict[str, object] | None = None,
             "EXPECTED_PR": "7723", "EXPECTED_BASE": BASE_SHA,
             "EXPECTED_HEAD": HEAD_SHA,
             "EXPECTED_HEAD_REF": "repair/security-7723",
+            "CHECK_EXTERNAL_ID": "retarget-1-1",
             "DETAILS_URL": "https://example.invalid/run/1",
             "GH_TOKEN": "test-token",
         })
@@ -387,6 +388,8 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         )
         pending = _job_text("publish-macos-pending")
         self.assertIn("status=in_progress", pending)
+        self.assertIn("external_id", pending)
+        self.assertIn("terminalize_orphan_on_exit", pending)
         self.assertIn("checks", pending)
 
     def test_reporter_posts_only_for_unchanged_complete_pr_identity(self) -> None:
@@ -523,6 +526,9 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertIn("live_head_repository", text)
         self.assertIn("publish_failure_on_exit", script)
         self.assertIn("trap publish_failure_on_exit EXIT", script)
+        self.assertIn("resolve_check_run_id", script)
+        self.assertIn("patch_terminal_check", script)
+        self.assertIn("for delay in 1 2 4", script)
         self.assertIn('[ "$conclusion" = success ] || exit 1', script)
         cleanup = next(
             step for step in workflow["jobs"]["build-test"]["steps"]

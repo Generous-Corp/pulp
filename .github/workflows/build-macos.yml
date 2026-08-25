@@ -197,6 +197,7 @@ jobs:
           EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
           EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
           DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -224,11 +225,35 @@ jobs:
             echo "PR #$EXPECTED_PR identity changed before retarget; refusing pending check" >&2
             exit 1
           }
+          handoff_ready=false
+          terminalize_orphan_on_exit() {
+            if [ "$handoff_ready" = false ]; then
+              for delay in 1 2 4; do
+                orphan_id="$(gh api \
+                  "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
+                  2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
+                  '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
+                if [ -n "$orphan_id" ] && gh api --method PATCH \
+                  -H 'Accept: application/vnd.github+json' \
+                  "repos/$GITHUB_REPOSITORY/check-runs/$orphan_id" \
+                  --raw-field status=completed --raw-field conclusion=failure \
+                  --raw-field details_url="$DETAILS_URL" \
+                  --raw-field 'output[title]=macOS retarget controller failed' \
+                  --raw-field 'output[summary]=Pending check publication did not complete cleanly.' \
+                  >/dev/null 2>&1; then
+                  return
+                fi
+                sleep "$delay"
+              done
+            fi
+          }
+          trap terminalize_orphan_on_exit EXIT
           check_run_id="$(gh api --method POST \
             -H 'Accept: application/vnd.github+json' \
             "repos/$GITHUB_REPOSITORY/check-runs" \
             --raw-field name=macos \
             --raw-field head_sha="$EXPECTED_HEAD" \
+            --raw-field external_id="$CHECK_EXTERNAL_ID" \
             --raw-field status=in_progress \
             --raw-field details_url="$DETAILS_URL" \
             --raw-field 'output[title]=macOS retarget running' \
@@ -238,6 +263,7 @@ jobs:
             ''|*[!0-9]* ) echo "invalid check run id" >&2; exit 1 ;;
           esac
           echo "check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+          handoff_ready=true
 
   build-test:
     needs: [resolve-runner, publish-macos-pending]
@@ -281,8 +307,6 @@ jobs:
             PULP_SKIA_CACHE_ROOT="$PULP_SKIA_CACHE_ROOT" \
             PULP_DESIGN_BROWSER="${PULP_DESIGN_BROWSER:-}" \
             PULP_EXPECTED_HEAD="${PULP_EXPECTED_HEAD:-}" \
-            HTTP_PROXY="${HTTP_PROXY:-}" HTTPS_PROXY="${HTTPS_PROXY:-}" \
-            NO_PROXY="${NO_PROXY:-}" SSL_CERT_FILE="${SSL_CERT_FILE:-}" \
             "$@"
           RUNNER
           chmod 0555 "$root/run-untrusted"
@@ -469,6 +493,7 @@ jobs:
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
           EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
           CHECK_RUN_ID: ${{ needs.publish-macos-pending.outputs.check_run_id }}
+          CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
           BUILD_RESULT: ${{ needs.build-test.result }}
           DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -479,20 +504,51 @@ jobs:
             esac
             [ "${#sha}" -eq 40 ] || { echo "resolved PR base/head is not full length" >&2; exit 1; }
           done
-          case "$CHECK_RUN_ID" in
-            ''|*[!0-9]* ) echo "invalid pending check run id" >&2; exit 1 ;;
-          esac
-          terminal_published=false
-          publish_failure_on_exit() {
-            if [ "$terminal_published" = false ]; then
-              gh api --method PATCH \
+          resolve_check_run_id() {
+            case "$CHECK_RUN_ID" in
+              ''|*[!0-9]*) ;;
+              *) printf '%s\n' "$CHECK_RUN_ID"; return 0 ;;
+            esac
+            for delay in 1 2 4; do
+              recovered="$(gh api \
+                "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?check_name=macos&filter=all&per_page=100" \
+                2>/dev/null | jq -r --arg external "$CHECK_EXTERNAL_ID" \
+                '.check_runs[] | select(.external_id == $external) | .id' | head -1 || true)"
+              case "$recovered" in
+                ''|*[!0-9]*) sleep "$delay" ;;
+                *) printf '%s\n' "$recovered"; return 0 ;;
+              esac
+            done
+            return 1
+          }
+          CHECK_RUN_ID="$(resolve_check_run_id)" || {
+            echo "cannot rediscover pending macos check" >&2
+            exit 1
+          }
+          patch_terminal_check() {
+            conclusion="$1"
+            title="$2"
+            summary="$3"
+            for delay in 1 2 4; do
+              if gh api --method PATCH \
                 -H 'Accept: application/vnd.github+json' \
                 "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" \
                 --raw-field status=completed \
-                --raw-field conclusion=failure \
+                --raw-field conclusion="$conclusion" \
                 --raw-field details_url="$DETAILS_URL" \
-                --raw-field 'output[title]=macOS retarget rejected' \
-                --raw-field 'output[summary]=Exact-head retarget identity or controller validation failed.' \
+                --raw-field "output[title]=$title" \
+                --raw-field "output[summary]=$summary"; then
+                return 0
+              fi
+              sleep "$delay"
+            done
+            return 1
+          }
+          terminal_published=false
+          publish_failure_on_exit() {
+            if [ "$terminal_published" = false ]; then
+              patch_terminal_check failure 'macOS retarget rejected' \
+                'Exact-head retarget identity or controller validation failed.' \
                 >/dev/null 2>&1 || true
             fi
           }
@@ -519,13 +575,7 @@ jobs:
             success) conclusion=success ;;
             *) conclusion=failure ;;
           esac
-          gh api --method PATCH \
-            -H 'Accept: application/vnd.github+json' \
-            "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_RUN_ID" \
-            --raw-field status=completed \
-            --raw-field conclusion="$conclusion" \
-            --raw-field details_url="$DETAILS_URL" \
-            --raw-field 'output[title]=macOS retarget complete' \
-            --raw-field "output[summary]=Exact-head retarget build: $BUILD_RESULT"
+          patch_terminal_check "$conclusion" 'macOS retarget complete' \
+            "Exact-head retarget build: $BUILD_RESULT"
           terminal_published=true
           [ "$conclusion" = success ] || exit 1
