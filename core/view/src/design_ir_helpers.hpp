@@ -103,6 +103,25 @@ inline std::string asset_uri(
     return {};
 }
 
+// Persisted DesignIR has no importer scratch path. Resolve manifest-backed
+// image identities into the self-contained URI contract consumed by emitters.
+inline void materialize_manifest_image_uris(
+    IRNode& node, const IRAssetManifest& manifest) {
+    const bool is_image = node.type == "image" || node.type == "img";
+    if (is_image && !node.attributes.contains("asset_path")) {
+        if (const auto id = first_asset_id(node)) {
+            if (const auto* asset = manifest.resolve(*id)) {
+                const auto uri = asset_uri(*asset);
+                if (!uri.empty()) node.attributes["asset_path"] = uri;
+            }
+        }
+    }
+    for (auto& child : node.children)
+        materialize_manifest_image_uris(child, manifest);
+    for (auto& frame : node.alternate_frames)
+        materialize_manifest_image_uris(frame, manifest);
+}
+
 // ── On-disk asset resolution ─────────────────────────────────────────────
 //
 // asset_uri() above is the *compile-time* lowering: it names where the bytes

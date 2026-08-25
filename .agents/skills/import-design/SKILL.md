@@ -1488,6 +1488,13 @@ Two consequences when writing code or tests here:
 `asset_uri()` in the same header is deliberately NOT existence-checked: it is
 the codegen lowering, naming where bytes are supposed to be for a generated
 program that runs elsewhere. Do not "fix" it to check the filesystem.
+Generated JS must resolve an image's stable asset identity through that
+manifest helper when `asset_path` is absent. Persisted faithful captures remove
+their importer scratch path and retain self-contained `data:` bytes, so an
+`asset_ref` without `setImageSource(...)` is a blank saved-project regression.
+The widget bridge must then preserve that value as an image source URI; routing
+it through the legacy filesystem-path setter prepends `file://` and paints the
+base64 payload as placeholder text instead of decoding the captured pixels.
 
 **Self-contained JS export (relative asset paths).** The emitted `ui.js`
 never references decode-time locations: after `resolve_sprite_skins` stamps
