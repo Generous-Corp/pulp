@@ -10,6 +10,21 @@
 
 namespace pulp::signal {
 
+/// Semantic accuracy choices for bounded-cycle real-time trigonometry.
+///
+/// The names describe the contract a consumer requests. Polynomial degree and
+/// coefficient layout are implementation details and are not session state.
+enum class FastTrigProfile : std::uint8_t {
+    /// Platform sine; the compatibility default.
+    reference,
+    /// Lower-cost float path with maximum absolute error at most `1.2e-4`
+    /// over one bounded cycle. This profile can audibly change recursive FM.
+    realtime_efficient,
+    /// Float-precision path with maximum absolute error at most `2.5e-7`
+    /// over one bounded cycle.
+    realtime_precise,
+};
+
 /// Math helpers optimized for audio DSP.
 ///
 /// RT contract: all functions are stateless scalar math helpers and allocate no
@@ -25,6 +40,63 @@ namespace pulp::signal {
 /// float db = FastMath::log2(amplitude);     // ~3x faster than std::log2
 /// @endcode
 struct FastMath {
+
+    /// Computes sine for a normalized phase in `[0, 1)`.
+    ///
+    /// The real-time profiles fold the already-bounded phase into a quarter
+    /// cycle and avoid general range reduction. Callers with an arbitrary phase
+    /// must wrap it before calling this function.
+    ///
+    /// The two polynomial expressions are adapted from Lasse Schlör's
+    /// "Fast MiniMax Polynomial Approximations of Sine and Cosine", pinned at
+    /// https://github.com/publik-void/sin-cos-approximations/tree/d65178e684c7626b0fe7df6f261dbadc54403bce
+    /// and used under the author's public permission:
+    /// https://gist.github.com/publik-void/067f7f2fef32dbe5c27d6e215f824c91?permalink_comment_id=5556230#gistcomment-5556230
+    template <FastTrigProfile Profile>
+    static float sin_cycles(float phase_cycles) noexcept {
+        if constexpr (Profile == FastTrigProfile::reference) {
+            constexpr float two_pi = 6.28318530717958647692f;
+            return std::sin(two_pi * phase_cycles);
+        } else {
+            float x = phase_cycles;
+            if (x > 0.5f)
+                x -= 1.0f;
+            if (x > 0.25f)
+                x = 0.5f - x;
+            else if (x < -0.25f)
+                x = -0.5f - x;
+            const float x2 = x * x;
+
+            if constexpr (Profile == FastTrigProfile::realtime_efficient) {
+                return x * (6.28250560008354834003487064338056964f +
+                            x2 * (-41.1664423308903732524414077000881397f +
+                                  74.4524187069072428211419543641796188f * x2));
+            } else {
+                static_assert(Profile == FastTrigProfile::realtime_precise);
+                return x *
+                       (6.28318527379078585274731929079414949f +
+                        x2 *
+                            (-41.3416774783915252855640244027643612f +
+                             x2 *
+                                 (81.6022312427274226421465134076212909f +
+                                  x2 *
+                                      (-76.5749921819992128192000934020817094f +
+                                       39.7109181438058471453004860893416233f * x2))));
+            }
+        }
+    }
+
+    /// Runtime profile dispatch for setup, control, and non-inner-loop use.
+    static float sin_cycles(float phase_cycles, FastTrigProfile profile) noexcept {
+        switch (profile) {
+            case FastTrigProfile::realtime_efficient:
+                return sin_cycles<FastTrigProfile::realtime_efficient>(phase_cycles);
+            case FastTrigProfile::realtime_precise:
+                return sin_cycles<FastTrigProfile::realtime_precise>(phase_cycles);
+            case FastTrigProfile::reference:
+            default: return sin_cycles<FastTrigProfile::reference>(phase_cycles);
+        }
+    }
 
     /// Fast tanh approximation using the [7/6] Padé form (max error ~3e-5
     /// for |x| < 4).

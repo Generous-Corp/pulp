@@ -343,6 +343,16 @@ React-compatible renderer (via `react-reconciler`) over the same `WidgetBridge`.
 | [Unicode Bidirectional Algorithm (UAX #9)](https://www.unicode.org/reports/tr9/) | Unicode Consortium | Bidirectional text layout (via SheenBidi) |
 | [glTF 2.0](https://www.khronos.org/gltf/) | Khronos Group | Optional 3D scene/asset format (Scene3D) |
 
+## Attributed Mathematical Source Material
+
+The entries below are not fetched libraries or runtime dependencies. They name
+specific published mathematical material adapted into Pulp source and the
+permission basis Pulp relies on. They are also recorded in `NOTICE.md`.
+
+| Project | Permission | How Pulp Uses It |
+|---------|------------|------------------|
+| [Fast MiniMax Polynomial Approximations of Sine and Cosine](https://publik-void.github.io/sin-cos-approximations/) by Lasse Schlör | No formal SPDX license declared; used under the author's [public permission comment](https://gist.github.com/publik-void/067f7f2fef32dbe5c27d6e215f824c91?permalink_comment_id=5556230#gistcomment-5556230) | Pulp adapts the selected degree-5 and degree-9 normalized-cycle sine coefficient expressions from pinned revision [`d65178e`](https://github.com/publik-void/sin-cos-approximations/tree/d65178e684c7626b0fe7df6f261dbadc54403bce). Pulp supplies its own phase folding, float rounding, semantic profiles, verification, and consumer integration; upstream scripts, prose, plots, site assets, and unrelated coefficient tables are not redistributed. |
+
 ## Projects That Inspired Pulp
 
 | Project | License | What We Learned |

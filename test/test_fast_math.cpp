@@ -1,6 +1,7 @@
 #include <bit>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -12,6 +13,20 @@ using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 namespace {
+
+#if defined(_MSC_VER)
+#define PULP_TEST_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define PULP_TEST_NOINLINE __attribute__((noinline))
+#else
+#define PULP_TEST_NOINLINE
+#endif
+
+PULP_TEST_NOINLINE float runtime_sin_cycles(float phase, FastTrigProfile profile) {
+    return FastMath::sin_cycles(phase, profile);
+}
+
+#undef PULP_TEST_NOINLINE
 
 float lambert_tanh_through_13(float x) {
     constexpr float odd_denominators[] = {11.0f, 9.0f, 7.0f, 5.0f, 3.0f};
@@ -79,6 +94,47 @@ TEST_CASE("FastMath trigonometry wraps large phases", "[signal][fast_math][issue
     REQUIRE_THAT(FastMath::sin(two_pi + pi * 0.5f), WithinAbs(1.0f, 0.01f));
     REQUIRE_THAT(FastMath::sin(-two_pi - pi * 0.5f), WithinAbs(-1.0f, 0.01f));
     REQUIRE_THAT(FastMath::cos(-two_pi), WithinAbs(1.0f, 0.01f));
+}
+
+TEST_CASE("FastMath bounded-cycle trig profiles meet their float error budgets",
+          "[signal][fast_math][trig-profile]") {
+    constexpr std::size_t sample_count = 1u << 17;
+    double efficient_max_error = 0.0;
+    double precise_max_error = 0.0;
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        const float phase = static_cast<float>(i) / static_cast<float>(sample_count);
+        const double expected =
+            std::sin(2.0 * std::acos(-1.0) * static_cast<double>(phase));
+        efficient_max_error = std::max(
+            efficient_max_error,
+            std::abs(static_cast<double>(FastMath::sin_cycles<
+                         FastTrigProfile::realtime_efficient>(phase)) -
+                     expected));
+        precise_max_error = std::max(
+            precise_max_error,
+            std::abs(static_cast<double>(FastMath::sin_cycles<
+                         FastTrigProfile::realtime_precise>(phase)) -
+                     expected));
+    }
+
+    REQUIRE(efficient_max_error <= 1.2e-4);
+    REQUIRE(precise_max_error <= 2.5e-7);
+}
+
+TEST_CASE("FastMath bounded-cycle runtime dispatch preserves semantic profiles",
+          "[signal][fast_math][trig-profile]") {
+    constexpr float phases[] = {0.0f, 0.125f, 0.25f, 0.5f, 0.75f, 0.875f};
+    for (const float phase : phases) {
+        REQUIRE(runtime_sin_cycles(phase, FastTrigProfile::reference) ==
+                FastMath::sin_cycles<FastTrigProfile::reference>(phase));
+        REQUIRE(runtime_sin_cycles(phase, FastTrigProfile::realtime_efficient) ==
+                FastMath::sin_cycles<FastTrigProfile::realtime_efficient>(phase));
+        REQUIRE(runtime_sin_cycles(phase, FastTrigProfile::realtime_precise) ==
+                FastMath::sin_cycles<FastTrigProfile::realtime_precise>(phase));
+    }
+    const auto invalid = static_cast<FastTrigProfile>(std::numeric_limits<std::uint8_t>::max());
+    REQUIRE(runtime_sin_cycles(0.375f, invalid) ==
+            FastMath::sin_cycles<FastTrigProfile::reference>(0.375f));
 }
 
 TEST_CASE("FastMath cos approximation", "[signal][fast_math]") {
