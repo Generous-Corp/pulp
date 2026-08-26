@@ -10,6 +10,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -104,6 +105,136 @@ class InstallerTests(unittest.TestCase):
                 sleeper=lambda _: None,
                 attempts=2,
             )
+
+    def test_apt_403_parser_requires_an_exact_forbidden_repository(self) -> None:
+        output = """\
+Err:4 https://packages.microsoft.com/repos/azure-cli noble InRelease
+  403  Forbidden [IP: 13.107.246.40 443]
+E: Failed to fetch https://packages.microsoft.com/repos/azure-cli/dists/noble/InRelease
+  403  Forbidden
+"""
+        self.assertEqual(
+            MODULE.failed_apt_403_hosts(output), {"packages.microsoft.com"}
+        )
+        self.assertTrue(
+            MODULE.is_quarantinable_apt_failure(
+                subprocess.CompletedProcess([], 100, stdout=output)
+            )
+        )
+        self.assertFalse(
+            MODULE.is_quarantinable_apt_failure(
+                subprocess.CompletedProcess(
+                    [],
+                    100,
+                    stdout="E: Failed to fetch https://archive.ubuntu.com/x 403 Forbidden",
+                )
+            )
+        )
+        self.assertFalse(
+            MODULE.is_quarantinable_apt_failure(
+                subprocess.CompletedProcess(
+                    [],
+                    100,
+                    stdout="E: Failed to fetch https://packages.microsoft.com/x 404 Not Found",
+                )
+            )
+        )
+
+    def test_quarantine_preserves_distribution_sources_and_rejects_mixed_files(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            parts = root / "sources.list.d"
+            parts.mkdir()
+            (root / "sources.list").write_text(
+                "deb http://archive.ubuntu.com/ubuntu noble main\n",
+                encoding="utf-8",
+            )
+            microsoft = parts / "microsoft-prod.list"
+            microsoft.write_text(
+                "deb\t[arch=amd64]\thttps://packages.microsoft.com/repos/azure-cli noble main\n",
+                encoding="utf-8",
+            )
+            ubuntu = parts / "ubuntu.sources"
+            ubuntu.write_text(
+                "Types: deb\nURIs: http://security.ubuntu.com/ubuntu\nSuites: noble-security\n",
+                encoding="utf-8",
+            )
+
+            with MODULE.quarantined_apt_sources(
+                root, {"packages.microsoft.com"}
+            ) as (options, quarantined):
+                self.assertEqual(quarantined, [microsoft])
+                source_list = pathlib.Path(options[1].split("=", 1)[1])
+                source_parts = pathlib.Path(options[3].split("=", 1)[1])
+                self.assertEqual(
+                    source_list.read_text(encoding="utf-8"),
+                    (root / "sources.list").read_text(encoding="utf-8"),
+                )
+                self.assertEqual(
+                    (source_parts / "ubuntu.sources").read_text(encoding="utf-8"),
+                    ubuntu.read_text(encoding="utf-8"),
+                )
+                self.assertFalse((source_parts / microsoft.name).exists())
+
+            microsoft.write_text(
+                "deb https://packages.microsoft.com/repos/azure-cli noble main\n"
+                "deb [trusted=yes] file:/srv/pulp-apt noble main\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "preserved repositories"):
+                with MODULE.quarantined_apt_sources(
+                    root, {"packages.microsoft.com"}
+                ):
+                    pass
+
+    def test_install_falls_back_once_and_uses_quarantine_for_install(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            parts = root / "sources.list.d"
+            parts.mkdir()
+            (root / "sources.list").write_text(
+                "deb http://archive.ubuntu.com/ubuntu noble main\n",
+                encoding="utf-8",
+            )
+            microsoft = parts / "microsoft-prod.list"
+            microsoft.write_text(
+                "deb https://packages.microsoft.com/repos/azure-cli noble main\n",
+                encoding="utf-8",
+            )
+            calls: list[list[str]] = []
+
+            def runner(
+                command: list[str], **_: object
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(list(command))
+                if len(calls) == 1:
+                    return subprocess.CompletedProcess(
+                        command,
+                        100,
+                        stdout=(
+                            "Err:4 https://packages.microsoft.com/repos/azure-cli noble InRelease\n"
+                            "  403 Forbidden\n"
+                        ),
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout="")
+
+            MODULE.install(
+                ["cmake", "ninja-build"],
+                source_root=root,
+                platform="linux",
+                euid=0,
+                subprocess_runner=runner,
+                sleeper=lambda _: None,
+            )
+
+            self.assertEqual(calls[0], ["apt-get", "update"])
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[1][-1], "update")
+            self.assertEqual(calls[2][-4:], ["install", "-y", "cmake", "ninja-build"])
+            self.assertEqual(calls[1][1:-1], calls[2][1:-4])
+            self.assertIn("Dir::Etc::sourcelist=", " ".join(calls[1]))
 
     def test_dry_run_resolves_without_invoking_apt(self) -> None:
         result = subprocess.run(
