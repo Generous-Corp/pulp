@@ -98,6 +98,7 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
     set_tests_properties(agent-capability-installed-sdk PROPERTIES
+        LABELS "slow;agent-capability-installed-sdk"
         RESOURCE_LOCK agent-capability-manifest-source)
     unset(_pulp_agent_capability_installed_args)
     unset(_pulp_agent_capability_instrumentation_compile_flags)
@@ -106,8 +107,10 @@ if(Python3_Interpreter_FOUND)
     # consumer for every capability row and typed binding.
     # A cold Linux runner configures, builds, and runs hundreds of isolated
     # capability/binding consumers. Ten minutes is below the observed clean
-    # runtime and turns ctest's retry into cross-test pollution; keep the work
-    # bounded while allowing the complete proof to finish once.
+    # runtime and turns ctest's retry into cross-test pollution. Keep it out of
+    # the ordinary PR corpus via the `slow` label; build.yml restores it on the
+    # required macOS leg when an installed-capability surface actually changes,
+    # and nightly-full-build still runs the complete unfiltered inventory.
     set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 1200)
 
     add_test(NAME control-authoring-examples

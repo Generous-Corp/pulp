@@ -805,6 +805,7 @@ jobs:
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
       ios_compile_required: ${{ steps.classify.outputs.ios_compile_required }}
+      agent_capability_installed_sdk_required: ${{ steps.classify.outputs.agent_capability_installed_sdk_required }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -837,6 +838,7 @@ jobs:
           base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
           native_build_required=true
           ios_compile_required=true
+          agent_capability_installed_sdk_required=true
           if [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]]; then
             if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
               # A failed bounded fetch is not a failed gate: the classifier
@@ -851,6 +853,13 @@ jobs:
               "$ci_python" -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
                 <<<"$classification"
             )
+            candidate_agent_capability_installed_sdk_required=$(
+              python3 -c 'import json,sys; value=json.load(sys.stdin).get("agent_capability_installed_sdk_required", True); print("false" if value is False else "true")' \
+                <<<"$classification" 2>/dev/null || true
+            )
+            if [ "$candidate_agent_capability_installed_sdk_required" = false ]; then
+              agent_capability_installed_sdk_required=false
+            fi
             if [ "$EVENT_NAME" = pull_request ] \
                 || [ "$EVENT_NAME" = merge_group ]; then
               candidate_ios_compile_required=$(
@@ -958,8 +967,11 @@ jobs:
             # checkout. No immutable event base means the optimization is off.
             env GITHUB_OUTPUT='' "$ci_python" tools/scripts/classify_changes.py --mode=files
           fi
-          echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"
-          echo "ios_compile_required=$ios_compile_required" >> "$GITHUB_OUTPUT"
+          {
+            echo "native_build_required=$native_build_required"
+            echo "ios_compile_required=$ios_compile_required"
+            echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: [resolve-provider, classify]
@@ -1521,6 +1533,19 @@ jobs:
           # gate and wedging auto-merge. Mirrors sanitizers.yml; each attempt is
           # still bounded by --timeout 120.
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
+
+      - name: Test installed SDK capability contract (affected changes)
+        if: >-
+          runner.os != 'Windows'
+          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
+          && (github.event_name == 'pull_request'
+              || github.event_name == 'merge_group'
+              || github.event_name == 'workflow_dispatch')
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure \
+            -C Release --no-tests=error -R '^agent-capability-installed-sdk$'
 
       - name: Surface ctest failures (non-Windows)
         # On a SELF-HOSTED runner the test step's log is not retrievable via

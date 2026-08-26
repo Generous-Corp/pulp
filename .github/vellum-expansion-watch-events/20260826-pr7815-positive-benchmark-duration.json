@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260826-pr7815-positive-benchmark-duration",
+  "created_at": "2026-08-26T08:29:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record a Pulp-owned benchmark-contract correction that guarantees at least one sample for every positive-duration design-import benchmark phase. The repair changes benchmark measurement only and does not change design import behavior or transfer implementation authority.",
+  "tests": [
+    "design-import benchmark run_phase records idle and interactive contracts (200 consecutive passes)",
+    "pulp-test-design-import-benchmark-contracts (19 cases, 171 assertions)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

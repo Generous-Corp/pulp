@@ -700,7 +700,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     std::vector<double> rss_bytes;
 
     int frame = 0;
-    while (elapsed_ms(phase_start) < static_cast<double>(duration_ms)) {
+    do {
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
         if (interactive) fixture.step(frame);
@@ -717,7 +717,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         next_frame += interval_duration;
         const auto now = Clock::now();
         if (next_frame > now) std::this_thread::sleep_until(next_frame);
-    }
+    } while (elapsed_ms(phase_start) < static_cast<double>(duration_ms));
 
     metrics.samples = static_cast<int>(frame_ms.size());
     if (!frame_ms.empty()) {
