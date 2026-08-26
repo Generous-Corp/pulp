@@ -215,7 +215,10 @@ jobs:
                 last_success_sha="${head_sha}"
                 last_success_run="${rid}"
               fi
-              continue
+              # completed_ids is newest-first. Once the freshest proven set is
+              # found, older-run API failures are irrelevant and must not turn
+              # a conclusive recovery back into unknown state.
+              break
             fi
             echo "Run ${rid} lacks exact current Codecov receipts (${receipt_counts}) — not counting it as fresh coverage."
           done
