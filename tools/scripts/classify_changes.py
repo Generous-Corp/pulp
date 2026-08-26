@@ -53,10 +53,17 @@ classification is data, not a pass/fail signal.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CHANGED_SURFACE_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 # Prefixes whose files never feed the C++/Swift build.
 SKIP_SAFE_PREFIXES = (
@@ -107,6 +114,42 @@ def native_build_required(files: list[str]) -> bool:
     if not files:
         return True
     return not all(is_skip_safe(f) for f in files)
+
+
+def _matches(path: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+
+
+def _mobile_skip_authorized(policy: dict, path: str) -> bool:
+    """Accept only paths with independent, explicit mobile-skip review.
+
+    Changed-surface ``families`` authorize bounded macOS tests, not omission
+    of a mobile compile. Keeping a separate allowlist prevents a future family
+    expansion from silently acquiring this second authorization meaning.
+    """
+    if path == ".shipyard/config.toml" or _matches(path, policy["policy_paths"]):
+        return False
+    if _matches(path, policy["test_topology_paths"]):
+        return False
+    if _matches(path, policy["full_required_paths"]):
+        return False
+    return _matches(path, policy["ios_compile_skip_safe_paths"])
+
+
+def ios_compile_required(
+    files: list[str], *, config_path: Path = CHANGED_SURFACE_CONFIG
+) -> bool:
+    """Fail closed unless every path has reviewed non-mobile authorization."""
+    if not files:
+        return True
+    try:
+        with config_path.open("rb") as config_file:
+            policy = tomllib.load(config_file)["targets"]["mac"][
+                "changed_surface_selection"
+            ]
+        return not all(_mobile_skip_authorized(policy, path) for path in files)
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return True
 
 
 def _changed_files_from_diff(
@@ -170,6 +213,8 @@ def main(argv: list[str]) -> int:
         files = _changed_files_from_diff(args.base, comparison=args.comparison)
 
     # Fail-closed: a None (git error) is treated as "unknown" -> build.
+    resolved_files = files or []
+    mobile_required = ios_compile_required(resolved_files)
     if files is None:
         required = True
         files = []
@@ -195,12 +240,14 @@ def main(argv: list[str]) -> int:
     if github_output:
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"native_build_required={str(required).lower()}\n")
+            fh.write(f"ios_compile_required={str(mobile_required).lower()}\n")
 
     if args.json:
         print(
             json.dumps(
                 {
                     "native_build_required": required,
+                    "ios_compile_required": mobile_required,
                     "changed_file_count": len(files),
                     "reason": reason,
                 }

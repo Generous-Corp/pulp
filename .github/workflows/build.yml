@@ -804,6 +804,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
+      ios_compile_required: ${{ steps.classify.outputs.ios_compile_required }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -829,6 +830,7 @@ jobs:
           set -euo pipefail
           base="$(python3 tools/scripts/resolve_classify_base.py)"
           native_build_required=true
+          ios_compile_required=true
           if [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]]; then
             if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
               # A failed bounded fetch is not a failed gate: the classifier
@@ -843,6 +845,16 @@ jobs:
               python3 -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
                 <<<"$classification"
             )
+            if [ "$EVENT_NAME" = pull_request ] \
+                || [ "$EVENT_NAME" = merge_group ]; then
+              candidate_ios_compile_required=$(
+                python3 -c 'import json,sys; value=json.load(sys.stdin).get("ios_compile_required", True); print("false" if value is False else "true")' \
+                  <<<"$classification" 2>/dev/null || true
+              )
+              if [ "$candidate_ios_compile_required" = false ]; then
+                ios_compile_required=false
+              fi
+            fi
 
             # The fixed release/version-bump branch changes version-bearing
             # CMake/JSON files, so a path-only classifier must conservatively
@@ -941,6 +953,7 @@ jobs:
             env GITHUB_OUTPUT='' python3 tools/scripts/classify_changes.py --mode=files
           fi
           echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"
+          echo "ios_compile_required=$ios_compile_required" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [resolve-provider, classify]
@@ -1349,6 +1362,8 @@ jobs:
 
       - name: Build
         shell: bash
+        env:
+          IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
         run: |
           if [ "${RUNNER_OS}" = "macOS" ]; then
             # The gate reports "not applicable here" with exit 77, the autotools
@@ -1361,16 +1376,20 @@ jobs:
             # deliberately trims simulator payload from the golden image.
             # Distinguish skip from failure; a real gate failure must still red
             # the check.
-            set +e
-            bash test/cmake/test_ios_compile_gate.sh \
-              "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
-            ios_gate_rc=$?
-            set -e
-            if [ "$ios_gate_rc" = 77 ]; then
-              echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
-            elif [ "$ios_gate_rc" != 0 ]; then
-              echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
-              exit "$ios_gate_rc"
+            if [ "$IOS_COMPILE_REQUIRED" = false ]; then
+              echo "::notice::iOS compile gate skipped by exact changed-surface authorization"
+            else
+              set +e
+              bash test/cmake/test_ios_compile_gate.sh \
+                "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
+              ios_gate_rc=$?
+              set -e
+              if [ "$ios_gate_rc" = 77 ]; then
+                echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
+              elif [ "$ios_gate_rc" != 0 ]; then
+                echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
+                exit "$ios_gate_rc"
+              fi
             fi
           fi
           # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro

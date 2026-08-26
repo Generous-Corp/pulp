@@ -129,6 +129,113 @@ class NativeBuildRequiredTests(unittest.TestCase):
             ["tools/scripts/source_tree_pollution_check.py"]))
 
 
+class IosCompileRequiredTests(unittest.TestCase):
+    def test_current_reviewed_mandatory_and_bounded_surfaces_skip(self) -> None:
+        for paths in (
+            ["docs/guides/local-ci.md"],
+            ["test/test_child_process.cpp"],
+            ["tools/cli/cmd_forge.cpp"],
+            ["docs/reference/cli.md", "tools/cli/cmd_dsp.cpp"],
+        ):
+            with self.subTest(paths=paths):
+                self.assertFalse(classify.ios_compile_required(paths))
+
+    def test_mobile_global_unknown_and_mixed_surfaces_run(self) -> None:
+        for paths in (
+            ["apple/auv3/Sources/PulpAudioUnit.swift"],
+            ["core/format/src/auv3_adapter.mm"],
+            ["core/platform/platform/macos/environment_macos.mm"],
+            ["core/view/include/pulp/view/view.hpp"],
+            ["CMakeLists.txt"],
+            [".github/workflows/build.yml"],
+            ["docs/guides/local-ci.md", "apple/ios/HostApp.swift"],
+            [],
+        ):
+            with self.subTest(paths=paths):
+                self.assertTrue(classify.ios_compile_required(paths))
+
+    def test_missing_or_malformed_policy_runs_fail_closed(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing.toml"
+            malformed = Path(tmp) / "malformed.toml"
+            malformed.write_text("not = [valid", encoding="utf-8")
+            for config_path in (missing, malformed):
+                with self.subTest(config_path=config_path):
+                    self.assertTrue(
+                        classify.ios_compile_required(
+                            ["test/test_child_process.cpp"], config_path=config_path
+                        )
+                    )
+
+    def test_removing_mobile_full_rule_does_not_authorize_unknown_path(self) -> None:
+        import tempfile
+
+        source = classify.CHANGED_SURFACE_CONFIG.read_text(encoding="utf-8")
+        mutated = source.replace('  "apple/**",\n', "")
+        self.assertNotEqual(source, mutated)
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+            fh.write(mutated)
+            config_path = Path(fh.name)
+        try:
+            self.assertTrue(
+                classify.ios_compile_required(
+                    ["apple/auv3/Sources/PulpAudioUnit.swift"],
+                    config_path=config_path,
+                )
+            )
+        finally:
+            config_path.unlink()
+
+    def test_new_bounded_family_does_not_inherit_mobile_skip_authority(self) -> None:
+        import tempfile
+
+        source = classify.CHANGED_SURFACE_CONFIG.read_text(encoding="utf-8")
+        source += """
+
+[[targets.mac.changed_surface_selection.families]]
+name = "future-timeline-family"
+paths = ["core/timeline/src/**"]
+tests = ["future-timeline-test"]
+build_targets = ["pulp-timeline"]
+supported_build_types = ["debug"]
+risk_class = "medium"
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+            fh.write(source)
+            config_path = Path(fh.name)
+        try:
+            self.assertTrue(
+                classify.ios_compile_required(
+                    ["core/timeline/src/transport.cpp"],
+                    config_path=config_path,
+                )
+            )
+        finally:
+            config_path.unlink()
+
+    def test_missing_mobile_allowlist_runs_fail_closed(self) -> None:
+        import tempfile
+
+        source = classify.CHANGED_SURFACE_CONFIG.read_text(encoding="utf-8")
+        marker = "ios_compile_skip_safe_paths = ["
+        start = source.index(marker)
+        end = source.index("]\n", start) + 2
+        mutated = source[:start] + source[end:]
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+            fh.write(mutated)
+            config_path = Path(fh.name)
+        try:
+            self.assertTrue(
+                classify.ios_compile_required(
+                    ["test/test_child_process.cpp"], config_path=config_path
+                )
+            )
+        finally:
+            config_path.unlink()
+
+
 class DiffModeTests(unittest.TestCase):
     def test_changed_files_from_diff_disables_rename_detection(self) -> None:
         completed = subprocess.CompletedProcess(
@@ -246,6 +353,7 @@ class CliTests(unittest.TestCase):
         payload = json.loads(r.stdout)
         self.assertEqual(payload["changed_file_count"], 2)
         self.assertFalse(payload["native_build_required"])
+        self.assertTrue(payload["ios_compile_required"])
         self.assertIn("skip-safe", payload["reason"])
         self.assertIn("native_build_required=false", r.stderr)
 
@@ -253,6 +361,15 @@ class CliTests(unittest.TestCase):
         r = self._run("--mode=files", "--json", "core/signal/src/fft.cpp")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('"native_build_required": true', r.stdout)
+
+    def test_files_mode_reports_exact_bounded_ios_authorization(self) -> None:
+        r = self._run(
+            "--mode=files", "--json", "test/test_child_process.cpp"
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(r.stdout)
+        self.assertTrue(payload["native_build_required"])
+        self.assertFalse(payload["ios_compile_required"])
 
     def test_files_mode_truncates_long_native_input_reason(self) -> None:
         files = [f"core/signal/src/file_{i}.cpp" for i in range(10)]
@@ -280,6 +397,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             content = Path(out_path).read_text()
             self.assertIn("native_build_required=false", content)
+            self.assertIn("ios_compile_required=true", content)
         finally:
             os.unlink(out_path)
 
@@ -295,7 +413,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             content = Path(out_path).read_text()
             self.assertIn("existing=1\n", content)
-            self.assertTrue(content.endswith("native_build_required=true\n"))
+            self.assertIn("native_build_required=true\n", content)
+            self.assertTrue(content.endswith("ios_compile_required=true\n"))
         finally:
             os.unlink(out_path)
 

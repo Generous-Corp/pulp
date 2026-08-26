@@ -4426,6 +4426,18 @@ the full suite. The selector self-test itself is in the mandatory kernel. Add
 broader mappings only after shadow
 receipts show they contain the relevant full-suite failures.
 
+The Build-and-Test macOS job uses the independent
+`ios_compile_skip_safe_paths` allowlist to skip its separate two-SDK iOS
+compile step. Accept `ios_compile_required=false` only for `pull_request` or
+`merge_group` diffs whose every path matches that allowlist. A bounded macOS
+test family does not inherit this authority; review mobile impact explicitly
+before adding a path. Any missing/malformed value, empty or mixed diff, unknown path,
+mobile/Apple path, public header, CMake/CI/policy/test-topology change, or policy
+read failure runs the gate. Main, manual, nightly, release, and audit execution
+never accepts this skip and retains its existing event policy. Condition the
+expensive step, never the required workflow/job, so the stable required context
+still reports.
+
 Tests that open a real host audio device belong to the explicit
 `hardware;validation` tier, not the ordinary PR lane. On macOS, a virtual or
 unavailable default CoreAudio route can block inside

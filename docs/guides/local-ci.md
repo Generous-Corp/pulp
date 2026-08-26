@@ -1252,6 +1252,21 @@ macOS Debug configuration, which enables
 `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
 that platform-specific cardinality.
 
+The required Build-and-Test workflow also uses a separate, narrower mobile-safe
+allowlist to avoid an unrelated mobile compile tax. On pull requests and merge
+groups, only a diff whose every path matches
+`ios_compile_skip_safe_paths` may emit the exact
+`ios_compile_required=false` authorization. A bounded macOS test family does
+not inherit mobile-skip authority; each allowlist addition requires its own
+mobile-impact review. The macOS job then skips the
+two-SDK iOS compile step but still performs its ordinary desktop build and
+tests. Missing, malformed, empty, mixed, unknown, policy, CMake, CI, public
+header, test-topology, or `apple/**` evidence runs the iOS gate. Pushes to main,
+manual runs, nightly/release workflows, and audits never accept this skip;
+their existing event policy remains unchanged. Keep the condition inside the
+required job: path-filtering the workflow or job would prevent the stable
+required context from reporting.
+
 CTest display names are not identities: the authoritative target currently has
 20,727 registrations but only 20,668 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,

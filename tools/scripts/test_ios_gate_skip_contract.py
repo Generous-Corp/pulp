@@ -39,7 +39,9 @@ GATE = REPO_ROOT / "test" / "cmake" / "test_ios_compile_gate.sh"
 GITHUB_BASH = ["bash", "--noprofile", "--norc", "-eo", "pipefail"]
 
 
-def run_step(body: str, gate_exit: int) -> tuple[int, str]:
+def run_step(
+    body: str, gate_exit: int, *, ios_compile_required: str = "true"
+) -> tuple[int, str]:
     """Run `body` under GitHub's shell with the gate stubbed to `gate_exit`."""
     with tempfile.TemporaryDirectory() as tmp:
         stub = Path(tmp) / "gate.sh"
@@ -54,7 +56,11 @@ def run_step(body: str, gate_exit: int) -> tuple[int, str]:
         step.write_text(body.replace("@GATE@", str(stub)), encoding="utf-8")
         proc = subprocess.run(
             GITHUB_BASH + [str(step)], capture_output=True, text=True,
-            env={"RUNNER_OS": "macOS", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            env={
+                "RUNNER_OS": "macOS",
+                "IOS_COMPILE_REQUIRED": ios_compile_required,
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            },
         )
         return proc.returncode, proc.stdout + proc.stderr
 
@@ -76,8 +82,8 @@ def workflow_build_step() -> str:
     )
     body = step["run"]
     gate_call = (
-        'bash test/cmake/test_ios_compile_gate.sh \\\n'
-        '    "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
+        '    bash test/cmake/test_ios_compile_gate.sh \\\n'
+        '      "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
     )
     if body.count(gate_call) != 1:
         raise AssertionError("expected exactly one iOS compile-gate call")
@@ -123,6 +129,24 @@ class TestSkipIsNotAFailure(unittest.TestCase):
         rc, out = run_step(workflow_build_step(), 0)
         self.assertEqual(rc, 0)
         self.assertIn("BUILD_RAN", out)
+
+    def test_exact_changed_surface_false_skips_gate_and_still_builds(self):
+        rc, out = run_step(
+            workflow_build_step(), 2, ios_compile_required="false"
+        )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("stub gate exiting", out)
+        self.assertIn("BUILD_RAN", out)
+
+    def test_missing_or_malformed_authorization_runs_gate(self):
+        for value in ("", "False", "0", "malformed"):
+            with self.subTest(value=value):
+                rc, out = run_step(
+                    workflow_build_step(), 2, ios_compile_required=value
+                )
+                self.assertEqual(rc, 2)
+                self.assertIn("stub gate exiting 2", out)
+                self.assertNotIn("BUILD_RAN", out)
 
 
 class TestWorkflowUsesTheGuardedForm(unittest.TestCase):
