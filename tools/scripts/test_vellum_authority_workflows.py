@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 from pathlib import Path
 import unittest
 
@@ -18,6 +20,17 @@ PINNED_CHECKOUT_ACTION = (
     "actions/checkout@"
     "11d5960a326750d5838078e36cf38b85af677262"
 )
+RUNNER_EXPRESSION = (
+    "${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
+    "|| '\"ubuntu-latest\"') }}"
+)
+MACPRO_SELECTOR = [
+    "self-hosted",
+    "Linux",
+    "X64",
+    "pulp-build-linux-x64",
+    "pulp-host-macpro",
+]
 
 
 def workflow(name: str) -> dict[str, object]:
@@ -44,48 +57,81 @@ def step_named(job: dict[str, object], name: str) -> dict[str, object]:
 
 
 class VellumAuthorityWorkflowTests(unittest.TestCase):
-    def test_privileged_pr_gate_checks_out_only_resolved_protected_main(self) -> None:
-        value = workflow("vellum-trusted-gate.yml")
-        trigger = value.get(True) or value["on"]
-        self.assertEqual(trigger["pull_request_target"]["branches"], ["main"])
-
+    def assert_privileged_pr_gate_uses_literal_trusted_checkout(
+        self, value: dict[str, object]
+    ) -> None:
         job = value["jobs"]["trusted-gate"]
         checkout = step_named(job, "Check out trusted base controls")
         self.assertEqual(checkout["uses"], PINNED_CHECKOUT_ACTION)
         self.assertEqual(
             checkout["with"],
             {
-                "ref": "${{ steps.pr.outputs.base_sha }}",
+                "ref": "main",
                 "fetch-depth": 0,
                 "persist-credentials": False,
             },
         )
 
         steps = job["steps"]
-        verify_index = next(
+        checkout_index = steps.index(checkout)
+        bind_index = next(
             i
             for i, step in enumerate(steps)
-            if step.get("name") == "Verify trusted controls match live PR base"
+            if step.get("name") == "Bind checked-out protected base"
         )
         token_index = next(
             i
             for i, step in enumerate(steps)
             if step.get("name") == "Mint one-repository Vellum reader token"
         )
-        self.assertLess(verify_index, token_index)
-        verify = steps[verify_index]
-        self.assertEqual(
-            verify["env"]["EXPECTED_BASE"],
-            "${{ steps.pr.outputs.base_sha }}",
+        self.assertLess(checkout_index, bind_index)
+        self.assertLess(bind_index, token_index)
+        bind = steps[bind_index]
+        self.assertEqual(bind["id"], "trusted-base")
+        self.assertIn('base="$(git rev-parse HEAD)"', bind["run"])
+
+        validation = step_named(
+            job, "Validate proposed data and publish head status"
         )
-        self.assertIn('actual_base="$(git rev-parse HEAD)"', verify["run"])
-        self.assertIn('[ "$actual_base" != "$EXPECTED_BASE" ]', verify["run"])
+        self.assertEqual(
+            validation["env"]["PR_BASE"],
+            "${{ steps.trusted-base.outputs.base_sha }}",
+        )
+
         resolve = step_named(job, "Resolve pull request")["run"]
-        self.assertIn('git/ref/heads/main" --jq .object.sha', resolve)
+        self.assertNotIn("git/ref/heads/main", resolve)
         self.assertNotIn("jq -r .base.sha", resolve)
-        target_check = resolve.index('[ "$base_repository" != "$GITHUB_REPOSITORY" ]')
-        protected_ref = resolve.index("git/ref/heads/main")
-        self.assertLess(target_check, protected_ref)
+        self.assertNotIn("base_sha=", resolve)
+
+    def test_privileged_pr_gate_checks_out_only_literal_protected_main(self) -> None:
+        value = workflow("vellum-trusted-gate.yml")
+        trigger = value.get(True) or value["on"]
+        self.assertEqual(trigger["pull_request_target"]["branches"], ["main"])
+        self.assert_privileged_pr_gate_uses_literal_trusted_checkout(value)
+
+        # Mutation control: prove the structural guard rejects the exact
+        # API-derived ref shape reported by CodeQL alert 42.
+        unsafe = deepcopy(value)
+        checkout = step_named(
+            unsafe["jobs"]["trusted-gate"], "Check out trusted base controls"
+        )
+        checkout["with"]["ref"] = "${{ steps.pr.outputs.base_sha }}"
+        with self.assertRaises(AssertionError):
+            self.assert_privileged_pr_gate_uses_literal_trusted_checkout(unsafe)
+
+    def test_trusted_jobs_use_default_preserving_runner_selector(self) -> None:
+        value = workflow("vellum-trusted-gate.yml")
+        jobs = value["jobs"]
+        for job_name in ("trusted-gate", "trusted-merge-group"):
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    " ".join(jobs[job_name]["runs-on"].split()),
+                    " ".join(RUNNER_EXPRESSION.split()),
+                )
+
+        self.assertEqual(json.loads('"ubuntu-latest"'), "ubuntu-latest")
+        selector = json.dumps(MACPRO_SELECTOR, separators=(",", ":"))
+        self.assertEqual(json.loads(selector), MACPRO_SELECTOR)
 
     def test_proposed_worktree_is_data_only(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
