@@ -106,8 +106,9 @@ class CoverageWorkflowTests(unittest.TestCase):
 
     def test_main_watchdog_requires_both_native_upload_receipts(self) -> None:
         self.assertIn("tools/scripts/check_codecov_receipts.py", self.watchdog)
-        self.assertIn('"linux=${linux_attempt}" "macos=${macos_attempt}"', self.watchdog)
-        self.assertIn('"python-tools=${linux_attempt}"', self.watchdog)
+        self.assertIn('"linux=${linux_attempt}" "macos=${macos_attempt}" "windows=${windows_attempt}"', self.watchdog)
+        self.assertIn('"python-tools=${linux_attempt}" "apple-swift=${macos_attempt}"', self.watchdog)
+        self.assertIn('"android-kotlin=${android_attempt}" "pulp-react=${react_attempt}"', self.watchdog)
         self.assertIn('-f filter=all', self.watchdog)
         self.assertIn('Coverage report (Linux, Clang)', self.watchdog)
         self.assertIn('Coverage report (macOS, Clang)', self.watchdog)
@@ -130,8 +131,8 @@ class CoverageWorkflowTests(unittest.TestCase):
             self.watchdog,
         )
         self.assertIn("--codecov-processed-run-id", self.watchdog)
-        self.assertIn("--required-flag os-linux os-macos python-tools", self.watchdog)
-        self.assertIn('--not-before "${attempt_started_at}"', self.watchdog)
+        self.assertIn('"os-linux=${linux_started_at}" "os-macos=${macos_started_at}"', self.watchdog)
+        self.assertIn('"apple-swift=${macos_started_at}" "android-kotlin=${android_started_at}"', self.watchdog)
         self.assertIn('codecov_page_url="$(jq -r', self.watchdog)
         self.assertIn('repos/${REPO}/compare/${last_success_sha}...${current_main_sha}', self.watchdog)
         self.assertIn("current-main lag ${coverage_lag}", self.watchdog)
@@ -167,7 +168,14 @@ class CoverageWorkflowTests(unittest.TestCase):
         }
         self.assertEqual(
             processed_upload_counts(
-                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"], "2026-08-26T10:00:00Z"
+                payload,
+                repo,
+                run_id,
+                {
+                    "os-linux": "2026-08-26T10:00:00Z",
+                    "os-macos": "2026-08-26T10:00:00Z",
+                    "python-tools": "2026-08-26T10:00:00Z",
+                },
             ),
             {
                 "counts": {"os-linux": 1, "os-macos": 1, "python-tools": 1},
@@ -194,7 +202,14 @@ class CoverageWorkflowTests(unittest.TestCase):
         }
         self.assertEqual(
             processed_upload_counts(
-                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"], "2026-08-26T10:00:00Z"
+                payload,
+                repo,
+                run_id,
+                {
+                    "os-linux": "2026-08-26T10:00:00Z",
+                    "os-macos": "2026-08-26T10:00:00Z",
+                    "python-tools": "2026-08-26T10:00:00Z",
+                },
             ),
             {
                 "counts": {"os-linux": 0, "os-macos": 0, "python-tools": 0},
@@ -287,7 +302,7 @@ class CoverageWorkflowTests(unittest.TestCase):
 
     def test_all_coverage_call_sites_use_shared_action(self) -> None:
         expected = {
-            "coverage.yml": 4,
+            "coverage.yml": 5,
             "pulp-react-build.yml": 1,
         }
         for name, count in expected.items():

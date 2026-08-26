@@ -581,7 +581,7 @@ jobs:
           # libraries and template/header paths. Keep that coverage-driving
           # graph intact; hosted macOS disk is handled by safe image cleanup and
           # lower linker parallelism instead.
-          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
+          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=OFF' }}
           PULP_COVERAGE_JOBS: ${{ matrix.os == 'macos' && runner.environment == 'github-hosted' && '2' || '' }}
           # scripts/run_coverage.sh owns the bounded CTest policy so SSH and
           # self-hosted coverage callers use the same exclusions as this lane.
@@ -903,19 +903,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Compute Codecov upload file list
-        id: codecov_files
-        # `always()` prevents an independent Python/Apple verifier failure from
-        # suppressing an otherwise valid native upload.
-        if: always() && steps.native_cobertura.outcome == 'success'
-        shell: bash
-        run: |
-          files="build-coverage/coverage.cobertura.xml"
-          if [ "${{ steps.apple_lcov.outcome }}" = "success" ]; then
-            files="${files},build-coverage/apple/coverage.apple.lcov"
-          fi
-          echo "files=${files}" >> "${GITHUB_OUTPUT}"
-
       - name: Upload coverage to Codecov
         # Each matrix leg uploads one per-OS flag (`os-linux`,
         # `os-macos`, `os-windows`) so Codecov can cross-filter
@@ -937,10 +924,22 @@ jobs:
         if: always() && steps.native_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
         uses: ./.github/actions/upload-codecov-report
         with:
-          files: ${{ steps.codecov_files.outputs.files }}
+          files: build-coverage/coverage.cobertura.xml
           flags: ${{ matrix.flag }}
           token: ${{ secrets.CODECOV_TOKEN }}
           receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+      - name: Upload Apple Swift coverage to Codecov
+        # Swift is a distinct producer. Keeping it inside os-macos let the
+        # Apple report disappear while a valid native macOS receipt still made
+        # the watchdog green.
+        if: always() && steps.apple_lcov.outcome == 'success' && github.event.pull_request.head.repo.fork != true
+        uses: ./.github/actions/upload-codecov-report
+        with:
+          files: build-coverage/apple/coverage.apple.lcov
+          flags: apple-swift
+          token: ${{ secrets.CODECOV_TOKEN }}
+          receipt-name: codecov-upload-apple-swift-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Python tools coverage to Codecov
         # Python coverage is an independent report contract. In particular,
@@ -1269,8 +1268,9 @@ jobs:
         uses: ./.github/actions/upload-codecov-report
         with:
           files: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
+          flags: android-kotlin
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-android-kotlin-${{ github.sha }}
+          receipt-name: codecov-upload-android-kotlin-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   pulp-react-coverage:
     # Keep @pulp/react's main-branch Codecov upload in the canonical
@@ -1339,7 +1339,7 @@ jobs:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-pulp-react-${{ github.sha }}
+          receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   coverage-diff-gate:
     # Per-PR diff-coverage report. It fails its own advisory check when the
