@@ -318,10 +318,10 @@ timeout_secs = 14400
 schema_version = 3
 # Exact current-main registration count. CTest permits duplicate display names,
 # so this is deliberately not the unique-name count. The canonical multiset
-# contract in changed-surface-inventory.json pins all 20,728 registrations.
+# contract in changed-surface-inventory.json pins all 20,740 registrations.
 # Test-topology changes force a full-suite decision. This remains shadow-only:
 # [validation.default] is still the authoritative execution.
-full_test_count = 20728
+full_test_count = 20740
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [

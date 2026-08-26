@@ -129,6 +129,49 @@ class NativeBuildRequiredTests(unittest.TestCase):
             ["tools/scripts/source_tree_pollution_check.py"]))
 
 
+class AgentCapabilityInstalledSdkRequiredTests(unittest.TestCase):
+    def test_capability_contract_surfaces_select_installed_sdk_proof(self) -> None:
+        for path in (
+            ".agents/skills/agent-capabilities/SKILL.md",
+            "docs/status/agent-capabilities.json",
+            "docs/status/agent-capability-surface.schema.json",
+            "test/test_agent_capability_compile.cpp",
+            "test/cmake/quality_tests.cmake",
+            "tools/agent-capabilities/contract-history.json",
+            "CMakeLists.txt",
+            "core/audio/CMakeLists.txt",
+            "tools/cmake/PulpConfig.cmake.in",
+            "tools/cmake/PulpInstallRules.cmake",
+            "tools/dsp_vocabulary.py",
+            "tools/scripts/agent_capability_registry.py",
+            "tools/scripts/test_agent_capability_manifest.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    classify.agent_capability_installed_sdk_required([path])
+                )
+
+    def test_selected_skip_safe_surface_forces_containing_native_job(self) -> None:
+        path = ".agents/skills/agent-capabilities/SKILL.md"
+        self.assertTrue(classify.is_skip_safe(path))
+        self.assertTrue(classify.agent_capability_installed_sdk_required([path]))
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--mode=files", "--json", path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertTrue(json.loads(result.stdout)["native_build_required"])
+
+    def test_unrelated_runtime_and_test_changes_do_not_select_proof(self) -> None:
+        self.assertFalse(
+            classify.agent_capability_installed_sdk_required(
+                ["core/audio/src/device.cpp", "test/test_child_process.cpp"]
+            )
+        )
+
+
 class IosCompileRequiredTests(unittest.TestCase):
     def test_current_reviewed_mandatory_and_bounded_surfaces_skip(self) -> None:
         for paths in (
@@ -398,6 +441,9 @@ class CliTests(unittest.TestCase):
             content = Path(out_path).read_text()
             self.assertIn("native_build_required=false", content)
             self.assertIn("ios_compile_required=true", content)
+            self.assertIn(
+                "agent_capability_installed_sdk_required=false", content
+            )
         finally:
             os.unlink(out_path)
 
@@ -414,7 +460,12 @@ class CliTests(unittest.TestCase):
             content = Path(out_path).read_text()
             self.assertIn("existing=1\n", content)
             self.assertIn("native_build_required=true\n", content)
-            self.assertTrue(content.endswith("ios_compile_required=true\n"))
+            self.assertIn("ios_compile_required=true\n", content)
+            self.assertTrue(
+                content.endswith(
+                    "agent_capability_installed_sdk_required=false\n"
+                )
+            )
         finally:
             os.unlink(out_path)
 

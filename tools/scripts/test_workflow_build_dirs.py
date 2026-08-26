@@ -449,6 +449,32 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertLess(text.index(configure), text.index(compile_gate))
         self.assertLess(text.index(compile_gate), text.index(build))
 
+    def test_installed_capability_proof_is_affected_and_non_windows(self) -> None:
+        text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "agent_capability_installed_sdk_required: "
+            "${{ steps.classify.outputs.agent_capability_installed_sdk_required }}",
+            text,
+        )
+        self.assertIn(
+            "Test installed SDK capability contract (affected changes)", text
+        )
+        self.assertIn(
+            "runner.os != 'Windows'\n"
+            "          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'",
+            text,
+        )
+        self.assertIn("github.event_name == 'pull_request'", text)
+        self.assertIn("github.event_name == 'merge_group'", text)
+        self.assertIn("github.event_name == 'workflow_dispatch'", text)
+        self.assertIn(
+            'if [ "$candidate_agent_capability_installed_sdk_required" = false ]; then',
+            text,
+        )
+        self.assertIn(
+            "--no-tests=error -R '^agent-capability-installed-sdk$'", text
+        )
+
 
 class MacosNinjaGeneratorTests(unittest.TestCase):
     """The macOS build leg uses the Ninja generator.
