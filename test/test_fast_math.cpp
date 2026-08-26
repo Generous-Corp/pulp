@@ -137,6 +137,25 @@ TEST_CASE("FastMath bounded-cycle runtime dispatch preserves semantic profiles",
             FastMath::sin_cycles<FastTrigProfile::reference>(0.375f));
 }
 
+TEST_CASE("FastMath precise double sine cosine pair meets its cycle and radial budgets",
+          "[signal][fast_math][trig-profile][pair]") {
+    constexpr std::size_t sample_count = 1u << 18;
+    double maximum = 0.0;
+    double radial_maximum = 0.0;
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        const double phase = static_cast<double>(i) / static_cast<double>(sample_count);
+        const auto actual = FastMath::sincos_cycles_precise(phase);
+        const double angle = 2.0 * std::acos(-1.0) * phase;
+        maximum = std::max(maximum, std::abs(actual.sine - std::sin(angle)));
+        maximum = std::max(maximum, std::abs(actual.cosine - std::cos(angle)));
+        radial_maximum = std::max(
+            radial_maximum,
+            std::abs(std::hypot(actual.sine, actual.cosine) - 1.0));
+    }
+    REQUIRE(maximum <= 7.0e-14);
+    REQUIRE(radial_maximum <= 1.0e-13);
+}
+
 #if defined(__APPLE__) && defined(__clang__)
 TEST_CASE("FastMath Apple four-wide precise sine meets the scalar error budget",
           "[signal][fast_math][trig-profile][simd]") {

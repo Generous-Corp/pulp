@@ -150,6 +150,7 @@
 
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/osc/phase.hpp>
 #include <pulp/signal/smoothed_value.hpp>
@@ -328,11 +329,15 @@ enum class FrequencyShiftMode : std::uint8_t {
 /// "deliberately no stereo differentiation", so a preset can distinguish "I
 /// want both channels the same" from "I have not thought about stereo yet".
 /// Only `stereo_split` is a different topology.
-template <typename SampleType = float>
+template <typename SampleType = float,
+          FastTrigProfile TrigProfile = FastTrigProfile::reference>
 class SsbFrequencyShifterT {
 public:
     using Mode = FrequencyShiftMode;
     using Network = HilbertQuadratureNetworkT<double>;
+    static_assert(TrigProfile == FastTrigProfile::reference ||
+                  TrigProfile == FastTrigProfile::realtime_precise);
+    static constexpr FastTrigProfile kTrigProfile = TrigProfile;
 
     // ── Design parameters (the complete roster; see §11 of the spec) ───────
 
@@ -652,9 +657,15 @@ private:
         // non-zero sample 0: at `n = 0` the carrier is already off zero, so the
         // quadrature term contributes immediately.
         carrier_.advance(shift / sample_rate_);
-        const double radians = kTwoPi * carrier_.phase();
-        c.cosine = std::cos(radians);
-        c.sine = std::sin(radians);
+        if constexpr (TrigProfile == FastTrigProfile::realtime_precise) {
+            const auto pair = FastMath::sincos_cycles_precise(carrier_.phase());
+            c.cosine = pair.cosine;
+            c.sine = pair.sine;
+        } else {
+            const double radians = kTwoPi * carrier_.phase();
+            c.cosine = std::cos(radians);
+            c.sine = std::sin(radians);
+        }
         return c;
     }
 
@@ -711,7 +722,6 @@ private:
     double spread_ = 1.0;
     double delay_target_samples_ = 1.0;
     Mode mode_ = Mode::up;
-
     std::array<Network, 2> network_{};
     std::array<DcBlocker<double>, 2> dc_blocker_{};
     std::array<DelayLineT<double>, 2> delay_{};
@@ -728,5 +738,9 @@ private:
 using HilbertQuadratureNetwork = HilbertQuadratureNetworkT<double>;
 using SsbFrequencyShifter = SsbFrequencyShifterT<float>;
 using SsbFrequencyShifter64 = SsbFrequencyShifterT<double>;
+using PreciseSsbFrequencyShifter =
+    SsbFrequencyShifterT<float, FastTrigProfile::realtime_precise>;
+using PreciseSsbFrequencyShifter64 =
+    SsbFrequencyShifterT<double, FastTrigProfile::realtime_precise>;
 
 }  // namespace pulp::signal

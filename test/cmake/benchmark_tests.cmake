@@ -67,6 +67,10 @@ if(PULP_BENCHMARK)
             PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER="${PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER}")
     endif()
 
+    # Advisory actual-consumer paired sine/cosine frequency-shifter matrix.
+    add_executable(pulp-fast-trig-pair-benchmark test_fast_trig_pair_benchmark.cpp)
+    target_link_libraries(pulp-fast-trig-pair-benchmark PRIVATE pulp::signal)
+
     if(APPLE AND NOT PULP_IOS)
         # Advisory Apple-only challenger screen plus actual AdditiveBankT
         # consumer matrix. Timing never gates CI.

@@ -45,6 +45,11 @@ enum class FastTrigProfile : std::uint8_t {
 /// @endcode
 struct FastMath {
 
+    struct SinCosPair64 {
+        double sine;
+        double cosine;
+    };
+
     /// Computes sine for a normalized phase in `[0, 1)`.
     ///
     /// The real-time profiles fold the already-bounded phase into a quarter
@@ -99,6 +104,42 @@ struct FastMath {
             case FastTrigProfile::reference:
             default: return sin_cycles<FastTrigProfile::reference>(phase_cycles);
         }
+    }
+
+    /// Computes a jointly folded precise sine/cosine pair for a normalized
+    /// phase in `[0, 1)`. The two independent Horner chains are interleaved so
+    /// an out-of-order core can overlap their dependency chains. This research
+    /// candidate adapts the pinned upstream degree-13 relative-error sine
+    /// expression cited above; it is not part of a production profile.
+    static SinCosPair64 sincos_cycles_precise(double phase_cycles) noexcept {
+        double sine_x = phase_cycles;
+        if (sine_x > 0.5)
+            sine_x -= 1.0;
+        if (sine_x > 0.25)
+            sine_x = 0.5 - sine_x;
+        else if (sine_x < -0.25)
+            sine_x = -0.5 - sine_x;
+
+        double cosine_x = 0.25 - std::abs(sine_x);
+        if (phase_cycles >= 0.25 && phase_cycles < 0.75)
+            cosine_x = -cosine_x;
+
+        const double sine_x2 = sine_x * sine_x;
+        const double cosine_x2 = cosine_x * cosine_x;
+        double sine_p = precise64_c6;
+        double cosine_p = precise64_c6;
+        sine_p = precise64_c5 + sine_x2 * sine_p;
+        cosine_p = precise64_c5 + cosine_x2 * cosine_p;
+        sine_p = precise64_c4 + sine_x2 * sine_p;
+        cosine_p = precise64_c4 + cosine_x2 * cosine_p;
+        sine_p = precise64_c3 + sine_x2 * sine_p;
+        cosine_p = precise64_c3 + cosine_x2 * cosine_p;
+        sine_p = precise64_c2 + sine_x2 * sine_p;
+        cosine_p = precise64_c2 + cosine_x2 * cosine_p;
+        sine_p = precise64_c1 + sine_x2 * sine_p;
+        cosine_p = precise64_c1 + cosine_x2 * cosine_p;
+        return {sine_x * (precise64_c0 + sine_x2 * sine_p),
+                cosine_x * (precise64_c0 + cosine_x2 * cosine_p)};
     }
 
 #if defined(__APPLE__) && defined(__clang__)
@@ -243,6 +284,20 @@ private:
         -76.5749921819992128192000934020817094f;
     static constexpr float precise_c4 =
         39.7109181438058471453004860893416233f;
+    static constexpr double precise64_c0 =
+        6.28318530717919415440631052356951227;
+    static constexpr double precise64_c1 =
+        -41.3417022398184912491504586563309009;
+    static constexpr double precise64_c2 =
+        81.6052491334177909789178729942153114;
+    static constexpr double precise64_c3 =
+        -76.7058464941280158505651312164454235;
+    static constexpr double precise64_c4 =
+        42.0581028415940046209613080938107769;
+    static constexpr double precise64_c5 =
+        -15.0810317173017800774891418165142071;
+    static constexpr double precise64_c6 =
+        3.66346472229432872653352143098494556;
 
 public:
 

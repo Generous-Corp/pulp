@@ -115,8 +115,8 @@ double peak(const std::vector<double>& x) {
 
 /// Renders `settle + analysis` samples of a caller-supplied signal and returns
 /// the analysis window.
-template <typename Signal>
-std::vector<double> render(Shifter& shifter, Signal&& signal, int length = kAnalysisLen) {
+template <typename ShifterType, typename Signal>
+std::vector<double> render(ShifterType& shifter, Signal&& signal, int length = kAnalysisLen) {
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(length));
     for (int n = 0; n < kSettle + length; ++n) {
@@ -134,8 +134,9 @@ auto sine(double hz, double amplitude = kTestAmplitude) {
 
 /// A shifter prepared at the measurement rate with the feedback path idle, so
 /// what is measured is the feed-forward SSB path alone.
-Shifter make_shifter(double shift_hz, Mode mode = Mode::up) {
-    Shifter s;
+template <typename ShifterType = Shifter>
+ShifterType make_shifter(double shift_hz, Mode mode = Mode::up) {
+    ShifterType s;
     s.prepare(kSr);
     s.set_mode(mode);
     s.set_shift_hz(shift_hz);
@@ -379,18 +380,23 @@ TEST_CASE("T3 image rejection measured end to end through the shifter",
     // depend on the shift: it is set by the network's phase error at the INPUT
     // frequency, which is what the sweep varies.
     constexpr double kShift = 50.0;
-    for (double f0 : {100.0, 250.0, 500.0, 1000.0, 4000.0, 10000.0}) {
-        REQUIRE(on_bin(f0 + kShift));
-        REQUIRE(on_bin(f0 - kShift));
+    auto measure_profile = [&]<typename ShifterType>() {
+        for (double f0 : {100.0, 250.0, 500.0, 1000.0, 4000.0, 10000.0}) {
+            REQUIRE(on_bin(f0 + kShift));
+            REQUIRE(on_bin(f0 - kShift));
 
-        auto shifter = make_shifter(kShift);
-        const auto out = render(shifter, sine(f0));
-        const double desired = magnitude_at(out, f0 + kShift);
-        const double image = magnitude_at(out, f0 - kShift);
-        const double db = 20.0 * std::log10(desired / image);
-        INFO("f0 = " << f0 << " Hz, measured " << db << " dB");
-        REQUIRE(db >= Network::kImageRejectDb);
-    }
+            auto shifter = make_shifter<ShifterType>(kShift);
+            const auto out = render(shifter, sine(f0));
+            const double desired = magnitude_at(out, f0 + kShift);
+            const double image = magnitude_at(out, f0 - kShift);
+            const double db = 20.0 * std::log10(desired / image);
+            INFO("profile = " << static_cast<int>(ShifterType::kTrigProfile)
+                               << ", f0 = " << f0 << " Hz, measured " << db << " dB");
+            REQUIRE(db >= Network::kImageRejectDb);
+        }
+    };
+    measure_profile.template operator()<Shifter>();
+    measure_profile.template operator()<pulp::signal::PreciseSsbFrequencyShifter64>();
 }
 
 // ── T4 — DC and carrier suppression ───────────────────────────────────────
@@ -402,17 +408,29 @@ TEST_CASE("T4 DC in produces no carrier whistle, and silence in is silence out",
     // signal with no audio in it at all. The blocker's corner is
     // kDcCornerHz, so a step decays as exp(−2*pi*fc*t) and is far below the
     // floor within the settle window.
-    auto shifter = make_shifter(250.0);
-    const auto out = render(shifter, [](int) { return 0.5; });
-    const double db = 20.0 * std::log10(std::max(rms(out), 1e-30));
-    INFO("residual " << db << " dBFS");
-    REQUIRE(db <= -80.0);
+    auto measure_profile = [&]<typename ShifterType>() {
+        auto shifter = make_shifter<ShifterType>(250.0);
+        const auto out = render(shifter, [](int) { return 0.5; });
+        const double db = 20.0 * std::log10(std::max(rms(out), 1e-30));
+        INFO("profile = " << static_cast<int>(ShifterType::kTrigProfile)
+                           << ", residual " << db << " dBFS");
+        REQUIRE(db <= -80.0);
 
-    // Zero in, exactly zero out — not merely small. Every stage is linear with
-    // zero-initialised state, so there is nothing for a silent input to excite.
-    Shifter silent = make_shifter(250.0);
-    silent.set_feedback(Shifter::kMaxFeedback);
-    for (int n = 0; n < 4096; ++n) REQUIRE(silent.process(0.0) == 0.0);
+        // Zero in, exactly zero out — not merely small. Every stage is linear
+        // with zero-initialised state, so silence has nothing to excite.
+        ShifterType silent = make_shifter<ShifterType>(250.0);
+        silent.set_feedback(Shifter::kMaxFeedback);
+        for (int n = 0; n < 4096; ++n) REQUIRE(silent.process(0.0) == 0.0);
+    };
+    measure_profile.template operator()<Shifter>();
+    measure_profile.template operator()<pulp::signal::PreciseSsbFrequencyShifter64>();
+}
+
+TEST_CASE("the SSB trig profile is explicit at compile time",
+          "[signal][frequency-shifter][ssb]") {
+    STATIC_REQUIRE(Shifter::kTrigProfile == pulp::signal::FastTrigProfile::reference);
+    STATIC_REQUIRE(pulp::signal::PreciseSsbFrequencyShifter64::kTrigProfile ==
+                   pulp::signal::FastTrigProfile::realtime_precise);
 }
 
 // ── T5 — determinism ──────────────────────────────────────────────────────
@@ -429,7 +447,7 @@ TEST_CASE("T5 a render is bit-identical after reset", "[signal][frequency-shifte
     // the automation's value at n = 0 BEFORE the reset is what makes the
     // smoothers start from the same place on both passes. A reset that left a
     // smoother mid-ramp would show up here as a first pass that differs.
-    auto run = [automation](Shifter& shifter) {
+    auto run = [automation]<typename ShifterType>(ShifterType& shifter) {
         constexpr int length = static_cast<int>(4.0 * kSr);
         shifter.set_shift_hz(automation(0));
         shifter.reset();
@@ -447,47 +465,58 @@ TEST_CASE("T5 a render is bit-identical after reset", "[signal][frequency-shifte
         return out;
     };
 
-    Shifter shifter;
-    shifter.prepare(kSr);
-    shifter.set_feedback(0.6);
-    shifter.set_feedback_delay_ms(8.0);
-    const auto first = run(shifter);
-    const auto second = run(shifter);
+    auto validate_profile = [&]<typename ShifterType>() {
+        ShifterType shifter;
+        shifter.prepare(kSr);
+        shifter.set_feedback(0.6);
+        shifter.set_feedback_delay_ms(8.0);
+        const auto first = run(shifter);
+        const auto second = run(shifter);
 
-    REQUIRE(first.size() == second.size());
-    for (std::size_t n = 0; n < first.size(); ++n) REQUIRE(first[n] == second[n]);
-    // Not vacuous: the render has to have contained something.
-    REQUIRE(peak(first) > 0.01);
+        REQUIRE(first.size() == second.size());
+        for (std::size_t n = 0; n < first.size(); ++n) REQUIRE(first[n] == second[n]);
+        // Not vacuous: the render has to have contained something.
+        REQUIRE(peak(first) > 0.01);
+    };
+    validate_profile.template operator()<Shifter>();
+    validate_profile.template operator()<pulp::signal::PreciseSsbFrequencyShifter64>();
 }
 
 // ── T6 — barberpole feedback stays bounded ────────────────────────────────
 
 TEST_CASE("T6 the feedback loop stays bounded at the feedback ceiling",
           "[signal][frequency-shifter][ssb]") {
-    Shifter shifter;
-    shifter.prepare(kSr);
-    shifter.set_shift_hz(2.0);
-    shifter.set_feedback_delay_ms(8.0);
-    shifter.set_feedback(Shifter::kMaxFeedback);
-    shifter.set_mix(1.0);
-    shifter.reset();
+    auto validate_profile = []<typename ShifterType>() {
+        ShifterType shifter;
+        shifter.prepare(kSr);
+        shifter.set_shift_hz(2.0);
+        shifter.set_feedback_delay_ms(8.0);
+        shifter.set_feedback(ShifterType::kMaxFeedback);
+        shifter.set_mix(1.0);
+        shifter.reset();
 
-    const int burst = static_cast<int>(0.1 * kSr);
-    const int tail = static_cast<int>(10.0 * kSr);
-    double worst = 0.0;
-    bool all_finite = true;
-    for (int n = 0; n < burst + tail; ++n) {
-        const double x =
-            n < burst ? kTestAmplitude * std::sin(2.0 * std::numbers::pi * 1000.0 * n / kSr) : 0.0;
-        const double y = shifter.process(x);
-        all_finite = all_finite && std::isfinite(y);
-        worst = std::max(worst, std::abs(y));
-    }
-    REQUIRE(all_finite);
-    INFO("peak " << worst << " against envelope " << Shifter::worst_case_gain());
-    REQUIRE(worst <= Shifter::worst_case_gain());
-    // The loop has to have actually rung, or the bound is being met by silence.
-    REQUIRE(worst > kTestAmplitude);
+        const int burst = static_cast<int>(0.1 * kSr);
+        const int tail = static_cast<int>(10.0 * kSr);
+        double worst = 0.0;
+        bool all_finite = true;
+        for (int n = 0; n < burst + tail; ++n) {
+            const double x = n < burst
+                                 ? kTestAmplitude *
+                                       std::sin(2.0 * std::numbers::pi * 1000.0 * n / kSr)
+                                 : 0.0;
+            const double y = shifter.process(x);
+            all_finite = all_finite && std::isfinite(y);
+            worst = std::max(worst, std::abs(y));
+        }
+        REQUIRE(all_finite);
+        INFO("profile = " << static_cast<int>(ShifterType::kTrigProfile) << ", peak "
+                           << worst << " against envelope " << ShifterType::worst_case_gain());
+        REQUIRE(worst <= ShifterType::worst_case_gain());
+        // The loop has to have rung, or the bound is being met by silence.
+        REQUIRE(worst > kTestAmplitude);
+    };
+    validate_profile.template operator()<Shifter>();
+    validate_profile.template operator()<pulp::signal::PreciseSsbFrequencyShifter64>();
 }
 
 // ── T7 — latency ──────────────────────────────────────────────────────────
