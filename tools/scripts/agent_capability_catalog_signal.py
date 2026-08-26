@@ -242,7 +242,7 @@ EXPORTS = [
         latency="zero", tail="exact longest configured release", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/fm_operator_engine.hpp",
                          qualified_name="pulp::signal::FmOperatorEngineT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:b92825aa49b916e8c346bf3331fa1dc45759e9589b16a726d861e13c0815c452")],
+                         header_fingerprint="sha256:020ce998eccea8e1f6451a24ca972bf47597ec2e1b971552d31af55543b2a0a2")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FmOperatorEngineT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),

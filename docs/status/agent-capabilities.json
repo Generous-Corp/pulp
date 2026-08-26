@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 36,
+  "manifest_revision": 37,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -8493,6 +8493,8 @@
             "qualified_name": "pulp::signal::FastMath",
             "template": null,
             "methods": [
+              "sin_cycles(float phase_cycles)",
+              "sin_cycles(float phase_cycles, FastTrigProfile profile)",
               "tanh(float x)",
               "sin(float x)",
               "cos(float x)",
@@ -9095,6 +9097,7 @@
               "process()",
               "process(SampleType* output, std::size_t sample_count)",
               "max_operator_count()",
+              "supports_realtime_trig_profiles()",
               "note_on(SampleType velocity = SampleType{1})",
               "note_off()",
               "set_operator_count(std::size_t count)",
@@ -9102,8 +9105,7 @@
               "base_frequency_hz()",
               "set_operator_frequency_mode(std::size_t op, FrequencyMode mode)",
               "set_operator_ratio(std::size_t op, SampleType ratio)",
-              "set_operator_fixed_frequency_hz(std::size_t op, SampleType hz)",
-              "set_operator_level(std::size_t op, SampleType linear_level)"
+              "set_operator_fixed_frequency_hz(std::size_t op, SampleType hz)"
             ],
             "enums": [
               [
