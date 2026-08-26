@@ -31,6 +31,12 @@ permissions:
 on:
   push:
     branches: [main]
+  # The workflow contains a PR-only macOS matrix, changed-surface classifier,
+  # fork-safe upload policy, and diff-coverage report. Without this trigger all
+  # of those paths are unreachable and Codecov can never publish PR coverage.
+  # This workflow is advisory and is not a protected-main required check, so it
+  # runs beside the merge critical path instead of delaying it.
+  pull_request:
   schedule:
     # Supersession-immune main-dashboard refresh. Push-triggered coverage on a
     # high-churn main gets superseded while QUEUED (cancel-in-progress:false +
@@ -61,14 +67,10 @@ on:
         type: string
 
 concurrency:
-  # pulp#1884: do NOT cancel in-progress coverage runs on force-push.
-  # Codecov's `after_n_builds: 4` (pulp#1883) waits for all per-OS uploads
-  # before posting; if a force-push cancels the in-flight run mid-upload,
-  # some legs upload and others don't, Codecov gets stuck waiting for the
-  # missing leg, and the PR merges with no coverage signal (~70% of recent
-  # merges hit this). Letting the older run finish costs some compute on
-  # stale commits but guarantees every push ends with a real conclusion
-  # (success/failure) for the required `Diff coverage required` check.
+  # PR coverage is advisory and codecov.yml uses `after_n_builds: 1`, so a
+  # superseded PR head should stop consuming the native coverage fleet. Main,
+  # schedule, and manual refreshes remain non-cancelling: their cross-platform
+  # receipts are the durable dashboard-refresh authority.
   #
   # Known GitHub Actions limitation: concurrency only exposes `group`
   # and `cancel-in-progress`. There is no `queue: max` / queue-depth
@@ -82,23 +84,19 @@ concurrency:
   # Upstream tracking:
   #   https://github.com/orgs/community/discussions/12835
   #
-  # DELIBERATELY kept `false` (not flipped to `true`): the Coverage-run
-  # hang fixed alongside this comment was caused by missing
-  # `timeout-minutes` on the `coverage` matrix job and `coverage-diff-gate`
-  # — NOT by superseded runs piling up. Those job-level timeouts now bound
-  # every run to a few hours max regardless of `cancel-in-progress`.
-  # Flipping to `true` would reintroduce the pulp#1884 Codecov
-  # stuck-upload bug (cancel mid-`after_n_builds: 4` → no coverage signal
-  # on ~70% of merges). The timeout backstop is the correct fix; staying
-  # `false` preserves the coverage signal.
+  # The pulp#1884 cancellation incident applied to a multi-upload PR report.
+  # The current PR lane has one macOS upload and codecov.yml intentionally
+  # declares `after_n_builds: 1`, so cancelling a superseded PR SHA cannot
+  # strand a partial aggregate. Job-level timeouts remain the backstop for the
+  # non-cancelling main/schedule/manual refreshes.
   # Scheduled dashboard-refresh runs get their OWN group so push churn on a
   # busy main cannot supersede them — the failure mode that left Codecov
   # showing only packages/pulp-react/src for ~2 weeks (every push-triggered
   # main run was cancelled while queued, never uploading the C++ flags).
   # Push/PR runs keep the per-ref group + the queue-depth-1 semantics
-  # documented above.
+  # documented above. Only PR heads opt into cancellation.
   group: coverage-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'scheduled-refresh' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ── Codecov config drift gate (screams on stale codecov.yml) ───────────
@@ -1334,9 +1332,10 @@ jobs:
           receipt-name: codecov-upload-pulp-react-${{ github.sha }}
 
   coverage-diff-gate:
-    # Per-PR diff-coverage gate. REQUIRED — sub-threshold diff coverage
-    # hard-fails the PR. The job still posts a summary comment so
-    # contributors see the number alongside the failing check.
+    # Per-PR diff-coverage report. It fails its own advisory check when the
+    # threshold is missed and posts a summary comment, but it is deliberately
+    # not in protected main's required-check set. Coverage therefore remains
+    # visible and actionable without serializing the merge critical path.
     #
     # The gate runs diff-cover over a MERGED Cobertura XML produced by
     # tools/scripts/merge_cobertura.py. The merge takes max(hits) per
