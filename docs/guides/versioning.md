@@ -428,8 +428,9 @@ answers — so `test/test_ctest_timeout_kills_wedged.sh` runs a real CTest over 
 planted never-ending process and asserts it is still killed at the scaled
 budget.
 
-C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
-authoritative diff-coverage gate is the separate `Diff coverage required` check.
+C++ and diff coverage (`coverage.yml`) are **advisory**, never merge gates. The
+PR signal is named `Diff coverage advisory` and is intentionally absent from
+protected main's required-check set.
 The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
@@ -452,9 +453,12 @@ assertion may coexist with a parseable report and that report remains eligible.
 Configure/build failure or a budget interruption produces no eligible report.
 Native and Python verification remain independent, so either lane can upload a
 valid report when the other verifier fails.
-`coverage-upload-watchdog.yml` counts a main run as fresh
-only when the action emitted exact, non-expired Linux, macOS, and Python-tools
-receipts for that run's commit. Upload-axis Codecov flags do not carry forward,
+`coverage-upload-watchdog.yml` counts a main run as fresh only when the action
+emitted exact, non-expired Linux, macOS, Python-tools, Apple Swift, Android
+Kotlin, and Pulp React receipts and Codecov reports those exact-run uploads as
+merged. Windows remains an explicitly inventoried best-effort producer while
+its bounded instrumented suite can exceed the job cap. Upload-axis Codecov
+flags do not carry forward,
 so a failed current lane cannot masquerade as fresh coverage from an older SHA.
 The native graph retains example-driven tests that exercise first-party core
 code; hosted macOS reclaims only inactive Xcodes and bounds linker parallelism

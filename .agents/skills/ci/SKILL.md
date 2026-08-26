@@ -1338,7 +1338,7 @@ bisectable.
   `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
-- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, and Python-tools receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for all three receipt artifacts before changing `codecov.yml`.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_coverage_surface_contract.py` plus the Codecov config tests guard the semantic producer/component inventory; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, Python, Apple, Android, and React receipts that Codecov reports merged for that exact run. Windows is inventoried and monitored but remains best-effort while its bounded suite can exceed the cap. This catches a report failure, transport failure, cancellation, or Codecov processing stall without putting coverage in protected main's required-check set. When triaging, inspect the semantic manifest, exact receipts, and Codecov upload records before changing `codecov.yml`.
 - **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
@@ -2296,11 +2296,12 @@ on a busy `main` is *designed* to be superseded while queued — the
 supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
-The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
+The **os-windows** coverage leg is explicitly inventoried but best-effort. The instrumented MSVC build +
 ~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 210-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
-staleness watchdog keys off a *successful run*, not per-OS Codecov flags — so a
-red Windows leg would otherwise keep a healthy full run red forever. **The
+staleness watchdog requires the other six reliable producer receipts and exact
+Codecov processing, but reports Windows separately — so a missing Windows
+receipt cannot make the freshness SLO permanently unattainable. **The
 subtle trap (verified by canary):** job-level `continue-on-error` does NOT
 neutralize a `timeout-minutes` *cancellation* — a cancelled job still makes the
 run conclude `cancelled`. It DOES neutralize a normal job *failure*. So the
@@ -4978,15 +4979,17 @@ classifier fails *closed*, any uncertainty → `true`) skip the
 guarded with `github.event_name != 'pull_request'`, so it never allocates
 a runner on PRs. No coverage runner is allocated on a docs PR.
 
-`coverage-diff-gate` is a **REQUIRED branch-protection check** — break it
-and docs PRs get blocked OR coverage silently passes when it shouldn't.
+`coverage-diff-gate` is an **advisory PR signal**, named `Diff coverage
+advisory`, and is not in protected main's required-check set. It may report red
+without blocking queue admission, but it must still fail honestly when its
+inputs or threshold fail.
 It has `needs: [classify, coverage]` + `if: always() && github.event_name
 == 'pull_request'`, and its first step ("Evaluate coverage gate
 preconditions", id `gate_preconditions`) implements **exactly three
 terminal cases**:
 
 1. `classify.result != success` → `exit 1` (fail RED — the
-   `native_build_required` output is untrusted; fail the required gate
+   `native_build_required` output is untrusted; fail the advisory signal
    closed rather than guessing).
 2. `native_build_required != 'true'` → `exit 0` (pass GREEN — the
    classifier approved a skip-safe PR; no coverage is owed).
@@ -4998,14 +5001,14 @@ succeeded) does the step fall through; it sets a step output
 `native_required` and every real diff-cover step below carries
 `if: steps.gate_preconditions.outputs.native_required == 'true'`.
 
-Critical: once coverage is gated, the OLD "all coverage XML missing →
+Critical: even though coverage is advisory, the OLD "all coverage XML missing →
 pass GREEN" fallback is **unsafe** and was removed. For
 `native_required == 'true'`, a missing/empty merged Cobertura XML now
 hard-fails (`exit 1`) in both the merge step (`merge_cobertura` exit-2
 all-missing sentinel → `exit 1`, not `exit 0`) and the `Run diff-cover`
 step. Only the classifier-approved skip-safe path (case 2) gets an
 exit-0 green with no coverage report. If you ever loosen this, you
-re-open a silent bypass of the required 75% diff-coverage floor.
+re-open a false-green 75% diff-coverage signal.
 
 ### Gotcha: per-PR coverage is macOS-only — Linux/Windows/Android live in the nightly lane
 
