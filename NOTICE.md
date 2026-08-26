@@ -1305,6 +1305,24 @@ JSON parser used by fastgltf, fetched only when `PULP_ENABLE_SCENE3D=ON`.
 
 ---
 
+## sin-cos-approximations
+
+Selected normalized-cycle sine coefficient expressions by Lasse Schlör,
+adapted from "Fast MiniMax Polynomial Approximations of Sine and Cosine":
+https://publik-void.github.io/sin-cos-approximations/
+
+Pinned source revision:
+https://github.com/publik-void/sin-cos-approximations/tree/d65178e684c7626b0fe7df6f261dbadc54403bce
+
+No formal SPDX license is declared. Pulp uses the selected expressions under
+the author's public permission comment:
+https://gist.github.com/publik-void/067f7f2fef32dbe5c27d6e215f824c91?permalink_comment_id=5556230#gistcomment-5556230
+
+Pulp does not redistribute the upstream scripts, prose, plots, site assets, or
+unrelated coefficient tables.
+
+---
+
 ## Skia
 
 Copyright 2011 Google LLC

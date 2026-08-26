@@ -2,6 +2,7 @@
 
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/envelope.hpp>
+#include <pulp/signal/fast_math.hpp>
 
 #include <algorithm>
 #include <array>
@@ -249,6 +250,7 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
     using Routing = FmOperatorRoutingT<SampleType, MaxOperators>;
     using FrequencyMode = FmOperatorFrequencyMode;
     using AliasPolicy = FmOperatorAliasPolicy;
+    using TrigProfile = FastTrigProfile;
 
     struct Envelope {
         double delay_ms = 0.0;
@@ -264,6 +266,9 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
 
     static constexpr std::size_t max_operator_count() noexcept {
         return MaxOperators;
+    }
+    static constexpr bool supports_realtime_trig_profiles() noexcept {
+        return std::is_same_v<SampleType, float>;
     }
     static constexpr SampleType kMinRatio = SampleType{1} / SampleType{64};
     static constexpr SampleType kMaxRatio = SampleType{64};
@@ -421,6 +426,29 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
         return alias_policy_;
     }
 
+    /// Selects the sine implementation used by this engine instance.
+    ///
+    /// Reference math remains the default. The real-time profiles are available
+    /// only for float engines because their adapted coefficients and measured
+    /// error budgets are float-specific. Selection is a setup/control operation
+    /// and is dispatched outside the operator loop. Recursive FM can amplify
+    /// even small numerical differences, so non-reference profiles are explicit
+    /// sound/performance alternatives rather than transparent replacements.
+    bool set_trig_profile(TrigProfile profile) noexcept {
+        if (profile != TrigProfile::reference && profile != TrigProfile::realtime_efficient &&
+            profile != TrigProfile::realtime_precise)
+            return false;
+        if constexpr (!supports_realtime_trig_profiles()) {
+            if (profile != TrigProfile::reference)
+                return false;
+        }
+        trig_profile_ = profile;
+        return true;
+    }
+    TrigProfile trig_profile() const noexcept {
+        return trig_profile_;
+    }
+
     bool is_active() const noexcept {
         for (std::size_t op = 0; op < operator_count_; ++op) {
             if (envelopes_[op].active())
@@ -446,6 +474,43 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
     }
 
     SampleType process() noexcept {
+        switch (trig_profile_) {
+            case TrigProfile::realtime_efficient:
+                if constexpr (supports_realtime_trig_profiles())
+                    return process_one_<TrigProfile::realtime_efficient>();
+                break;
+            case TrigProfile::realtime_precise:
+                if constexpr (supports_realtime_trig_profiles())
+                    return process_one_<TrigProfile::realtime_precise>();
+                break;
+            case TrigProfile::reference: break;
+        }
+        return process_one_<TrigProfile::reference>();
+    }
+
+    void process(SampleType* output, std::size_t sample_count) noexcept {
+        if (output == nullptr)
+            return;
+        switch (trig_profile_) {
+            case TrigProfile::realtime_efficient:
+                if constexpr (supports_realtime_trig_profiles()) {
+                    process_block_<TrigProfile::realtime_efficient>(output, sample_count);
+                    return;
+                }
+                break;
+            case TrigProfile::realtime_precise:
+                if constexpr (supports_realtime_trig_profiles()) {
+                    process_block_<TrigProfile::realtime_precise>(output, sample_count);
+                    return;
+                }
+                break;
+            case TrigProfile::reference: break;
+        }
+        process_block_<TrigProfile::reference>(output, sample_count);
+    }
+
+  private:
+    template <TrigProfile Profile> SampleType process_one_() noexcept {
         if (!is_active())
             return SampleType{0};
 
@@ -468,8 +533,16 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
         const auto carrier = [this](std::size_t op) noexcept { return routing_.carrier_gain(op); };
         const auto sine = [](std::size_t, SampleType phase_cycles, SampleType phase_offset_radians,
                              SampleType) noexcept {
-            constexpr SampleType two_pi = SampleType{2} * std::numbers::pi_v<SampleType>;
-            return std::sin(two_pi * phase_cycles + phase_offset_radians);
+            if constexpr (std::is_same_v<SampleType, float> &&
+                          Profile != TrigProfile::reference) {
+                constexpr float inverse_two_pi = 0.15915494309189533577f;
+                float cycles = phase_cycles + phase_offset_radians * inverse_two_pi;
+                cycles -= std::floor(cycles);
+                return FastMath::sin_cycles<Profile>(cycles);
+            } else {
+                constexpr SampleType two_pi = SampleType{2} * std::numbers::pi_v<SampleType>;
+                return std::sin(two_pi * phase_cycles + phase_offset_radians);
+            }
         };
 
         return detail::render_fm_operator_sample(
@@ -478,14 +551,11 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
             carrier, sine);
     }
 
-    void process(SampleType* output, std::size_t sample_count) noexcept {
-        if (output == nullptr)
-            return;
+    template <TrigProfile Profile>
+    void process_block_(SampleType* output, std::size_t sample_count) noexcept {
         for (std::size_t sample = 0; sample < sample_count; ++sample)
-            output[sample] = process();
+            output[sample] = process_one_<Profile>();
     }
-
-  private:
     static void sanitize_envelope_(Envelope& envelope) noexcept {
         if (!std::isfinite(envelope.delay_ms))
             envelope.delay_ms = 0.0;
@@ -546,6 +616,7 @@ template <typename SampleType = float, std::size_t MaxOperators = 8> class FmOpe
     std::size_t operator_count_ = 1;
     SampleType base_frequency_hz_ = SampleType{440};
     AliasPolicy alias_policy_ = AliasPolicy::bright_band_safe;
+    TrigProfile trig_profile_ = TrigProfile::reference;
     Routing routing_{};
 
     std::array<FrequencyMode, MaxOperators> frequency_modes_{};

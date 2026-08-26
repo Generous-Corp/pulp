@@ -13,6 +13,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -20,6 +21,32 @@ namespace {
 
 constexpr double kSampleRate = 48000.0;
 constexpr double kTwoPi = 2.0 * 3.14159265358979323846;
+
+#if defined(_MSC_VER)
+#define PULP_TEST_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define PULP_TEST_NOINLINE __attribute__((noinline))
+#else
+#define PULP_TEST_NOINLINE
+#endif
+
+using FloatFmEngine = pulp::signal::FmOperatorEngine;
+
+PULP_TEST_NOINLINE bool set_float_trig_profile(FloatFmEngine& engine,
+                                                FloatFmEngine::TrigProfile profile) {
+    return engine.set_trig_profile(profile);
+}
+
+PULP_TEST_NOINLINE float process_float_sample(FloatFmEngine& engine) {
+    return engine.process();
+}
+
+PULP_TEST_NOINLINE void process_float_block(FloatFmEngine& engine, float* output,
+                                             std::size_t count) {
+    engine.process(output, count);
+}
+
+#undef PULP_TEST_NOINLINE
 
 template <typename Engine> void set_sustained_envelopes(Engine& engine, double release_ms = 0.0) {
     typename Engine::Envelope envelope;
@@ -461,6 +488,114 @@ TEST_CASE("Envelope release, latency, and tail declarations agree exactly",
     REQUIRE(engine.process() == 0.0);
 }
 
+TEST_CASE("Float FM operators offer explicit efficient and precise trig profiles",
+          "[signal][fm-operator][trig-profile]") {
+    using Engine = pulp::signal::FmOperatorEngine;
+    const auto configure = [](Engine& engine) {
+        engine.set_operator_count(4);
+        engine.prepare(kSampleRate);
+        engine.set_base_frequency_hz(187.5f);
+        for (std::size_t op = 0; op < engine.operator_count(); ++op) {
+            engine.set_operator_ratio(op, static_cast<float>(op + 1));
+            engine.set_operator_level(op, 0.8f);
+        }
+        engine.routing().clear();
+        engine.routing().set_carrier_gain(0, 1.0f);
+        engine.routing().set_phase_modulation_radians(0, 1, 2.5f);
+        engine.routing().set_phase_modulation_radians(1, 2, 1.75f);
+        engine.routing().set_phase_modulation_radians(2, 3, 1.25f);
+        engine.set_operator_feedback_radians(3, 0.8f);
+        set_sustained_envelopes(engine);
+        engine.note_on();
+    };
+
+    Engine reference;
+    Engine efficient;
+    Engine precise;
+    configure(reference);
+    configure(efficient);
+    configure(precise);
+    REQUIRE(reference.trig_profile() == Engine::TrigProfile::reference);
+    REQUIRE(efficient.set_trig_profile(Engine::TrigProfile::realtime_efficient));
+    REQUIRE(precise.set_trig_profile(Engine::TrigProfile::realtime_precise));
+
+    const auto expected = render(reference, 8192);
+    const auto efficient_output = render(efficient, expected.size());
+    const auto precise_output = render(precise, expected.size());
+    double efficient_squared_error = 0.0;
+    double precise_squared_error = 0.0;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const double efficient_error = efficient_output[i] - expected[i];
+        const double precise_error = precise_output[i] - expected[i];
+        efficient_squared_error += efficient_error * efficient_error;
+        precise_squared_error += precise_error * precise_error;
+    }
+    const double efficient_rms =
+        std::sqrt(efficient_squared_error / static_cast<double>(expected.size()));
+    const double precise_rms =
+        std::sqrt(precise_squared_error / static_cast<double>(expected.size()));
+    REQUIRE(efficient_rms > 0.0);
+    REQUIRE(efficient_rms < 1.0e-4);
+    REQUIRE(precise_rms > 0.0);
+    REQUIRE(precise_rms < 3.0e-7);
+}
+
+TEST_CASE("FM trig profile support is float-only and block dispatch is stable",
+          "[signal][fm-operator][trig-profile]") {
+    using FloatEngine = pulp::signal::FmOperatorEngine;
+    using DoubleEngine = pulp::signal::FmOperatorEngine64;
+    STATIC_REQUIRE(FloatEngine::supports_realtime_trig_profiles());
+    STATIC_REQUIRE_FALSE(DoubleEngine::supports_realtime_trig_profiles());
+
+    DoubleEngine double_engine;
+    REQUIRE_FALSE(
+        double_engine.set_trig_profile(DoubleEngine::TrigProfile::realtime_precise));
+    REQUIRE(double_engine.trig_profile() == DoubleEngine::TrigProfile::reference);
+
+    FloatEngine block_engine;
+    FloatEngine sample_engine;
+    for (auto* engine : {&block_engine, &sample_engine}) {
+        engine->prepare(kSampleRate);
+        engine->set_base_frequency_hz(375.0f);
+        set_sustained_envelopes(*engine);
+        REQUIRE(engine->set_trig_profile(FloatEngine::TrigProfile::realtime_precise));
+        engine->note_on();
+    }
+    std::array<float, 257> block_output{};
+    std::array<float, 257> sample_output{};
+    block_engine.process(block_output.data(), block_output.size());
+    for (auto& sample : sample_output)
+        sample = sample_engine.process();
+    REQUIRE(block_output == sample_output);
+}
+
+TEST_CASE("FM trig profile runtime dispatch covers efficient and invalid requests",
+          "[signal][fm-operator][trig-profile]") {
+    using Engine = pulp::signal::FmOperatorEngine;
+    Engine block_engine;
+    Engine sample_engine;
+    for (auto* engine : {&block_engine, &sample_engine}) {
+        engine->prepare(kSampleRate);
+        engine->set_base_frequency_hz(375.0f);
+        set_sustained_envelopes(*engine);
+        REQUIRE(set_float_trig_profile(*engine, Engine::TrigProfile::realtime_efficient));
+        engine->note_on();
+    }
+
+    std::array<float, 257> block_output{};
+    std::array<float, 257> sample_output{};
+    process_float_block(block_engine, block_output.data(), block_output.size());
+    for (auto& sample : sample_output)
+        sample = process_float_sample(sample_engine);
+    REQUIRE(block_output == sample_output);
+
+    process_float_block(block_engine, nullptr, block_output.size());
+    const auto invalid =
+        static_cast<Engine::TrigProfile>(std::numeric_limits<std::uint8_t>::max());
+    REQUIRE_FALSE(set_float_trig_profile(block_engine, invalid));
+    REQUIRE(block_engine.trig_profile() == Engine::TrigProfile::realtime_efficient);
+}
+
 TEST_CASE("Per-operator envelopes expose delay and hold stages",
           "[signal][fm-operator][envelope]") {
     pulp::signal::FmOperatorEngine64 engine;
@@ -574,6 +709,8 @@ TEST_CASE("Float and double operator engines allocate nothing while rendering",
     pulp::signal::FmOperatorEngine64 double_engine;
     float_engine.set_operator_count(8);
     float_engine.prepare(kSampleRate);
+    REQUIRE(float_engine.set_trig_profile(
+        pulp::signal::FmOperatorEngine::TrigProfile::realtime_precise));
     set_sustained_envelopes(float_engine, 20.0);
     double_engine.set_operator_count(8);
     double_engine.prepare(kSampleRate);
