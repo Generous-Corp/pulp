@@ -5799,6 +5799,7 @@ def exact_named_module_selection(prompt: str, inv: dict, cat: dict | None = None
     for word in words:
         at = word.startswith("@")
         token = word.lstrip("@")
+        token = re.sub(r"(?:'s|’s)$", "", token, flags=re.I)
         if "/" in token:
             plugin, _, model = token.partition("/")
             if model in (inv.get(plugin, {}).get("modules") or {}):
@@ -5828,6 +5829,164 @@ def closed_named_module_selection(
         r"\b(?:exactly|use\s+only|only\s+(?:those|these|the)|"
         r"no\s+other\s+modules?)\b", prompt, re.I)
     return set(named) if named and closed else set()
+
+
+def named_module_intent(
+        prompt: str, named: set[tuple[str, str]]) -> dict[str, set]:
+    """Classify exact module mentions with a bounded clause state machine."""
+    result = {"required": set(), "absent": set(), "decrease": set(),
+              "additions": set(), "nonincreasing": set()}
+
+    events = []
+    identity_spans = []
+    for key in named:
+        plugin, model = key
+        token = (rf"(?:@?{re.escape(plugin)}/{re.escape(model)}|"
+                 rf"@{re.escape(model)})")
+        for match in re.finditer(rf"(?<![\w/]){token}(?![\w/])", prompt, re.I):
+            identity_spans.append(match.span())
+            events.append((match.start(), match.end(), "identity", key,
+                           match.group(0)))
+    words = re.compile(
+        r"[.;:\n]|don't|\b(?:do|must|not|only|never|without|avoid|no|except|"
+        r"instead|rather|remove|delete|drop|exclude|omit|replace|swap|add|"
+        r"insert|include|use|using|build|keep|retain|leave|preserve|with|for|"
+        r"by|cable|cables|connection|connections|wire|wires|parameter|"
+        r"parameters|setting|settings|knob|knobs)\b",
+        re.I)
+    for match in words.finditer(prompt):
+        if any(start < match.end() and match.start() < end
+               for start, end in identity_spans):
+            continue
+        events.append((match.start(), match.end(), "word",
+                       match.group(0).casefold(), match.group(0)))
+    events.sort(key=lambda event: (event[0], event[2] != "identity"))
+
+    mode = "required"
+    negated = False
+    negative_scope = False
+    replacement = False
+    negated_replacement = False
+    property_scope = False
+    skip_not = False
+    property_words = {"cable", "cables", "connection", "connections",
+                      "wire", "wires", "parameter", "parameters",
+                      "setting", "settings", "knob", "knobs"}
+
+    def apply(key, action):
+        for values in result.values():
+            values.discard(key)
+        if action == "required":
+            result["required"].add(key)
+        elif action == "addition":
+            result["required"].add(key)
+            result["additions"].add(key)
+        elif action == "absent":
+            result["absent"].add(key)
+        elif action == "decrease":
+            result["decrease"].add(key)
+        elif action == "nonincreasing":
+            result["nonincreasing"].add(key)
+
+    for index, (start, end, kind, value, raw) in enumerate(events):
+        if kind == "identity":
+            following = prompt[end:end + 40]
+            owns_property = re.match(
+                r"(?:'s|’s)\s+(?:cable|connection|wire|parameter|setting|knob)s?\b",
+                following, re.I)
+            action = "required" if property_scope or owns_property else mode
+            apply(value, action)
+            if negative_scope:
+                negative_scope = False
+                negated = False
+            continue
+
+        word = value
+        next_word = events[index + 1][3] if index + 1 < len(events) and \
+            events[index + 1][2] == "word" else None
+        if word in {".", ";", ":", "\n"}:
+            mode, negated, negative_scope = "required", False, False
+            replacement = negated_replacement = property_scope = False
+        elif word == "not" and next_word == "only":
+            mode, negated, negative_scope, skip_not = \
+                "required", False, False, True
+        elif word == "only" and skip_not:
+            skip_not = False
+        elif word in {"do", "must"} and next_word == "not":
+            mode, negated, negative_scope = "absent", True, True
+            property_scope = False
+            skip_not = True
+        elif word == "not" and skip_not:
+            skip_not = False
+        elif word in {"not", "never", "don't"}:
+            mode, negated, negative_scope = "absent", True, True
+            property_scope = False
+        elif word in {"without", "avoid", "no", "except", "instead", "rather"}:
+            mode, negative_scope = "absent", True
+            property_scope = False
+        elif word in {"remove", "delete", "drop"}:
+            mode = "required" if negated else "decrease"
+            negative_scope = False
+            property_scope = False
+            negated = False
+        elif word in {"exclude", "omit"}:
+            mode = "required" if negated else "absent"
+            negative_scope = property_scope = negated = False
+        elif word in {"replace", "swap"}:
+            replacement = True
+            negated_replacement = negated
+            mode = "required" if negated else "absent"
+            property_scope = False
+            negative_scope = False
+            negated = False
+        elif word in {"with", "for", "by"} and replacement:
+            mode = "neutral" if negated_replacement else "required"
+            replacement = negated_replacement = False
+        elif word in {"add", "insert", "include"}:
+            if negated:
+                mode = "nonincreasing"
+            else:
+                mode = "addition"
+            negated = negative_scope = False
+            property_scope = False
+        elif word in {"use", "using", "build"}:
+            if not negative_scope:
+                mode = "absent" if negated else "required"
+                negated = False
+            property_scope = False
+        elif word in {"keep", "retain", "leave", "preserve"}:
+            mode, negated, negative_scope = "required", False, False
+            replacement = negated_replacement = property_scope = False
+        elif word in property_words:
+            property_scope = True
+            mode = "required"
+    return result
+
+
+def named_module_errors(
+        patch: dict, required: set[tuple[str, str]],
+        excluded: set[tuple[str, str]] | None = None) -> list[str]:
+    """Require every explicitly resolved module without closing the patch."""
+    modules = patch.get("modules") if isinstance(patch, dict) else []
+    if not isinstance(modules, list):
+        return []
+    errors = [
+        f"named module request requires {plugin}/{model} in the generated patch"
+        for plugin, model in sorted(required)
+        if not any(isinstance(module, dict) and
+                   module.get("plugin") == plugin and
+                   module.get("model") == model
+                   for module in modules)
+    ]
+    for plugin, model in sorted(excluded or set()):
+        if any(isinstance(module, dict) and
+               module.get("plugin") == plugin and
+               module.get("model") == model
+               for module in modules):
+            errors.append(
+                f"named module request excludes {plugin}/{model} from the "
+                "generated patch")
+    return errors
 
 
 def closed_named_module_errors(
@@ -6914,6 +7073,7 @@ def refinement_errors(base: dict, candidate: dict, prompt: str,
 
     lower = prompt.casefold()
     named = exact_named_module_selection(prompt, inv)
+    named_intent = named_module_intent(prompt, named)
     for plugin, model in named:
         before = sum(module.get("plugin") == plugin and
                      module.get("model") == model
@@ -6921,12 +7081,20 @@ def refinement_errors(base: dict, candidate: dict, prompt: str,
         after = sum(module.get("plugin") == plugin and
                     module.get("model") == model
                     for module in candidate.get("modules") or [])
-        if re.search(r"\b(remove|delete|drop|without)\b", lower) and \
-                after >= before:
+        if (plugin, model) in named_intent["nonincreasing"]:
+            if after > before:
+                errors.append(
+                    f"the refinement asked not to add {plugin}/{model}, but "
+                    "its instance count increased")
+        elif (plugin, model) in named_intent["decrease"] and after >= before:
             errors.append(
                 f"the refinement asked to remove {plugin}/{model}, but its "
                 "instance count did not decrease")
-        if re.search(r"\b(add|insert|include)\b", lower) and after <= before:
+        elif (plugin, model) in named_intent["absent"] and after != 0:
+            errors.append(
+                f"the refinement requires {plugin}/{model} to be absent, but "
+                f"{after} instance{'s remain' if after != 1 else ' remains'}")
+        if (plugin, model) in named_intent["additions"] and after <= before:
             errors.append(
                 f"the refinement asked to add {plugin}/{model}, but its "
                 "instance count did not increase")
@@ -6963,8 +7131,10 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     editable_base = refinement_model_base(base_patch, inv) \
         if base_patch is not None else None
     named = exact_named_module_selection(prompt, inv)
+    named_intent = named_module_intent(prompt, named)
     if base_patch is None:
-        generation_errors = fresh_generation_errors(named, inv)
+        generation_errors = fresh_generation_errors(
+            named_intent["required"], inv)
         if generation_errors:
             raise SystemExit("\n".join(generation_errors))
     mentions = brand_mentions(prompt, catalog())
@@ -6997,12 +7167,13 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     midx = module_index()
     maker_mentions = brand_mentions(prompt, catalogue)
     tag_references = intent_context.resolve_tag_references(prompt, inv, midx)
-    closed_named = closed_named_module_selection(prompt, named)
+    closed_named = closed_named_module_selection(
+        prompt, named_intent["required"])
     module_idiom_contract = closed_module_idiom_contract(
         closed_named, claimed.slug if claimed.gating else None, inv)
     effective_claimed = claimed if module_idiom_contract is None else \
         claimed._replace(slug=None, gating=False)
-    selected: set[tuple[str, str]] = set(named)
+    selected: set[tuple[str, str]] = set(named_intent["required"])
     if base_patch is not None:
         selected.update((module.get("plugin"), module.get("model"))
                         for module in base_patch.get("modules") or []
@@ -7205,6 +7376,15 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             patch = json.loads(pj.group(1))
         except json.JSONDecodeError as e:
             ctx = f"The patch block was not valid JSON: {e}"
+            continue
+        named_errors = named_module_errors(
+            patch, named_intent["required"],
+            named_intent["absent"] |
+            (named_intent["decrease"] if base_patch is None else set()))
+        if named_errors:
+            keep_attempt(patch, "rejected by the named module contract:\n" +
+                         "\n".join(named_errors), attempt + 1, "rejected")
+            ctx = "The patch was rejected:\n" + "\n".join(named_errors)
             continue
         closed_errors = closed_named_module_errors(patch, closed_named)
         if closed_errors:

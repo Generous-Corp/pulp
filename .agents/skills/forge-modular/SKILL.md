@@ -251,6 +251,16 @@ a suite that measures nothing goes green. It caught one on its first run.
 
 ### Installed does not mean authorable from a fresh patch
 
+An exact qualified module identity in a request is an output contract, not
+only an inventory hint. After parsing a model response, `patch.py` must require
+every positively named `Plugin/Model` identity to appear in the patch before it
+can be saved or installed. Exclusions, replacements, coordinated removals, and
+mixed clauses are classified separately; refinements use the same classification
+for presence and instance-count checks. Prove this offline with
+`--response-file`, including a retained response that omits the requested
+identity and an identity-only mutation control, before spending another model
+call.
+
 Some Rack modules depend on opaque state stored in a saved patch that cannot be
 reconstructed from the public parameter and port inventory. Record these as an
 exact plugin-version `fresh_generation = unsupported` contract in
