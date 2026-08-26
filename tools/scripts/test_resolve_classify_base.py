@@ -256,9 +256,10 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertNotIn("          GH_TOKEN: ${{ github.token }}", classify_job)
         self.assertIn("native_build_required=false", classify_job)
         self.assertIn(
-            'echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"',
+            'echo "native_build_required=$native_build_required"',
             classify_job,
         )
+        self.assertIn('} >> "$GITHUB_OUTPUT"', classify_job)
 
     def test_windows_functional_matrix_uses_the_stable_runtime_image(self) -> None:
         self.assertIn(

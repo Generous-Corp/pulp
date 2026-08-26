@@ -854,7 +854,7 @@ jobs:
                 <<<"$classification"
             )
             candidate_agent_capability_installed_sdk_required=$(
-              python3 -c 'import json,sys; value=json.load(sys.stdin).get("agent_capability_installed_sdk_required", True); print("false" if value is False else "true")' \
+              "$ci_python" -c 'import json,sys; value=json.load(sys.stdin).get("agent_capability_installed_sdk_required", True); print("false" if value is False else "true")' \
                 <<<"$classification" 2>/dev/null || true
             )
             if [ "$candidate_agent_capability_installed_sdk_required" = false ]; then
