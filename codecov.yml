@@ -178,233 +178,29 @@ comment:
   behavior: default
   require_changes: true        # only post when coverage data is present
 
-# Flag definitions are retained for Phase 1 PR 4 (per-OS upload jobs)
-# and for future workflows that genuinely upload one file per flag.
-# The main coverage.yml upload does NOT attach any flags - Codecov
-# rejects single-upload multi-flag submissions with "Multiple flags
-# detected. Please ensure one flag per upload." The per-subsystem /
-# per-platform / per-surface breakdown comes from `component_management`
-# below, which slices the single upload by path. Component IDs mirror
-# these flag names 1:1 so cross-referencing stays consistent.
+# Flags identify reports that workflows actually upload. Path-based dashboard
+# slicing belongs exclusively to `component_management` below. Declaring a
+# path flag without an upload producer makes Codecov show a plausible but empty
+# filter, so the exact seven producer flags are pinned by
+# `ci/coverage-surfaces.yaml` and its semantic contract test.
 #
-# Every top-level `core/*` directory plus the platform/surface slices
-# below gets a matching flag/component pair. Adding a new subsystem
-# means updating both blocks in this file; `tools/scripts/test_codecov_config.py`
-# checks them against the live `core/*` tree so drift fails fast.
+# Every producer flag is non-carryforward. A failed or missing current upload
+# must remain visible rather than borrowing a green report from an older SHA.
 flags:
-  # Core subsystems - one flag per top-level core/** directory.
-  audio:
-    paths:
-      - core/audio/
-    carryforward: true
-  canvas:
-    paths:
-      - core/canvas/
-    carryforward: true
-  dawproject:
-    paths:
-      - core/dawproject/
-    carryforward: true
-  dsl:
-    paths:
-      - core/dsl/
-    carryforward: true
-  events:
-    paths:
-      - core/events/
-    carryforward: true
-  format:
-    paths:
-      - core/format/
-    carryforward: true
-  gpu_audio:
-    paths:
-      - core/gpu_audio/
-    carryforward: true
-  graph:
-    paths:
-      - core/graph/
-    carryforward: true
-  host:
-    paths:
-      - core/host/
-    carryforward: true
-  interchange:
-    paths:
-      - core/interchange/
-    carryforward: true
-  midi:
-    paths:
-      - core/midi/
-    carryforward: true
-  music:
-    paths:
-      - core/music/
-    carryforward: true
-  native-components:
-    paths:
-      - core/native-components/
-    carryforward: true
-  osc:
-    paths:
-      - core/osc/
-    carryforward: true
-  playback:
-    paths:
-      - core/playback/
-    carryforward: true
-  project_package:
-    paths:
-      - core/project_package/
-    carryforward: true
-  sequence:
-    paths:
-      - core/sequence/
-    carryforward: true
-  platform:
-    paths:
-      - core/platform/
-    carryforward: true
-  render:
-    paths:
-      - core/render/
-    carryforward: true
-  runtime:
-    paths:
-      - core/runtime/
-    carryforward: true
-  sample_bank_manifest:
-    paths:
-      - core/sample_bank_manifest/
-    carryforward: true
-  scene:
-    paths:
-      - core/scene/
-    carryforward: true
-  signal:
-    paths:
-      - core/signal/
-    carryforward: true
-  smf:
-    paths:
-      - core/smf/
-    carryforward: true
-  state:
-    paths:
-      - core/state/
-    carryforward: true
-  timebase:
-    paths:
-      - core/timebase/
-    carryforward: true
-  timeline:
-    paths:
-      - core/timeline/
-    carryforward: true
-  timeline_agent_view:
-    paths:
-      - core/timeline_agent_view/
-    carryforward: true
-  timeline_editor:
-    paths:
-      - core/timeline_editor/
-    carryforward: true
-  timeline_view:
-    paths:
-      - core/timeline_view/
-    carryforward: true
-  view:
-    paths:
-      - core/view/
-    carryforward: true
-
-  # Platform flags (4) - cross-cut the subsystem flags. "What's host
-  # coverage on Windows?" is answered by cross-filtering `host AND
-  # windows`. Paths cover all subsystems because any subsystem can
-  # have a Windows shim under its own `platform/windows/` tree.
-  android:
-    paths:
-      - core/platform/src/android/
-      - android/
-      - core/render/platform/android/
-      - core/**/android/
-    carryforward: true
-  apple:
-    paths:
-      - apple/
-      - core/**/macos/
-      - core/**/ios/
-      - core/**/mac/
-    carryforward: true
-  linux:
-    paths:
-      - core/**/linux/
-      - core/**/alsa/
-    carryforward: true
-  windows:
-    paths:
-      - core/**/win/
-      - core/**/windows/
-      - core/**/wasapi/
-    carryforward: true
-  # Browser/wasm. Scoped to `platform/web` for the same reason as the `web`
-  # component: `core/**/web/` would also swallow the WAM/WebCLAP adapter
-  # headers under core/format/include/pulp/format/web/.
-  web:
-    paths:
-      - core/**/platform/web/
-    carryforward: true
-
-  # Surface flags (4) - non-core but first-party:
-  cli:
-    paths:
-      - tools/cli/
-    carryforward: true
-  inspect:
-    paths:
-      - inspect/
-    carryforward: true
-  ship:
-    paths:
-      - ship/
-    carryforward: true
-  tools:
-    # Everything under tools/ except the CLI (which already has its
-    # own flag above). Codecov's glob takes first-matching-flag per
-    # file, and more-specific `tools/cli/` wins over the broader
-    # `tools/` here.
-    paths:
-      - tools/
-    carryforward: true
-
-  # OS flags (3) - Phase 1 PR 4 cross-platform coverage matrix. These
-  # are NOT path-scoped; every file measured on a given matrix leg is
-  # tagged with that OS's flag at upload time via the corresponding
-  # matrix entry in .github/workflows/coverage.yml. Federate with the
-  # subsystem + platform + surface flags above for cross-filtering:
-  # `host AND os-windows` answers "what fraction of core/host is
-  # exercised when tests run on Windows?" - a different question from
-  # `host AND windows` (which reads "what fraction of the windows/
-  # shim files are covered at all"). See docs/guides/coverage.md
-  # section "Multi-OS coverage" for the rationale on Codecov-flag unions vs
-  # llvm-profdata merge.
   os-linux:
-    # OS upload flags describe a particular run, not a stable path slice.
-    # Never substitute an older run when the current native lane is broken.
     carryforward: false
   os-macos:
     carryforward: false
   os-windows:
     carryforward: false
   python-tools:
-    # Produced independently from the Linux native report so a C++ compiler
-    # regression cannot discard fresh tools/scripts coverage.
     carryforward: false
-
-# Path-scoped subsystem flags carry forward when a change cannot affect them.
-# Upload-axis flags do not: substituting an older OS/language report after a
-# failed lane is precisely the stale-dashboard failure the receipt watchdog is
-# intended to expose.
+  android-kotlin:
+    carryforward: false
+  apple-swift:
+    carryforward: false
+  pulp-react:
+    carryforward: false
 
 # Components are Codecov's canonical mechanism for path-based coverage
 # slicing driven by a single upload. Flags (above) are ultimately keyed
@@ -415,8 +211,9 @@ flags:
 # but has historically been less reliable for trend analysis across
 # many flags attached to one upload).
 #
-# Keep component_id values aligned with the flag names above so the
-# dashboard reads consistently whichever dimension you filter by.
+# Components and upload flags are intentionally different dimensions: a
+# component answers "which source surface?", while a flag answers "which
+# producer measured it?".
 component_management:
   default_rules:
     statuses:
@@ -610,3 +407,6 @@ component_management:
       paths:
         - "tools/**"
         - "!tools/cli/**"
+    - component_id: pulp-react
+      name: pulp-react
+      paths: ["packages/pulp-react/src/**"]

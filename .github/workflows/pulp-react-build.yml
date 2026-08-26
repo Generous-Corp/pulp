@@ -4,6 +4,13 @@ permissions:
   contents: read
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/pulp-react/**'
+      - 'packages/pulp-import-ir/**'
+      - 'test/fixtures/anchor_vectors.json'
+      - '.github/workflows/pulp-react-build.yml'
   push:
     branches: [main]
     paths:

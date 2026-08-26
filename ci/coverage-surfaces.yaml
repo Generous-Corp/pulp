@@ -1,0 +1,160 @@
+# Semantic inventory for every Codecov upload producer and configured component.
+# This is intentionally independent of branch protection: all Codecov statuses
+# and receipt watchdogs are advisory and must not add merge latency.
+schema_version: 1
+
+policy:
+  merge_behavior: advisory
+  required_status_contexts: []
+  carryforward: false
+  canonical_refresh_cron: "17 */8 * * *"
+
+component_sets:
+  native-default:
+    - audio
+    - canvas
+    - dawproject
+    - dsl
+    - events
+    - format
+    - gpu_audio
+    - graph
+    - host
+    - interchange
+    - midi
+    - music
+    - native-components
+    - osc
+    - platform
+    - playback
+    - project_package
+    - render
+    - runtime
+    - sequence
+    - signal
+    - smf
+    - state
+    - timebase
+    - timeline
+    - timeline_agent_view
+    - timeline_editor
+    - timeline_view
+    - view
+    - cli
+    - inspect
+    - ship
+    - tools
+  linux-platform: [linux]
+  macos-platform: [apple]
+  windows-platform: [windows]
+  python-tools: [tools]
+  android-kotlin: [android]
+  apple-swift: [apple]
+  pulp-react: [pulp-react]
+
+producers:
+  - id: native-linux
+    flag: os-linux
+    report: build-coverage/coverage.cobertura.xml
+    expected_component_sets: [native-default, linux-platform]
+    events: [push-main, schedule-8h, workflow-dispatch]
+    cadence: main-push plus supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: coverage
+        flag_mode: matrix
+        receipt: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: native-macos
+    flag: os-macos
+    report: build-coverage/coverage.cobertura.xml
+    expected_component_sets: [native-default, macos-platform]
+    events: [pull-request, push-main, schedule-8h, workflow-dispatch]
+    cadence: every native PR plus main-push and supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: coverage
+        flag_mode: matrix
+        receipt: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: native-windows
+    flag: os-windows
+    report: build-coverage/coverage.cobertura.xml
+    expected_component_sets: [native-default, windows-platform]
+    events: [push-main, schedule-8h, workflow-dispatch]
+    cadence: main-push plus supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: coverage
+        flag_mode: matrix
+        receipt: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: python-tools
+    flag: python-tools
+    report: build-coverage/python/coverage.python.xml
+    expected_component_sets: [python-tools]
+    events: [push-main, schedule-8h, workflow-dispatch]
+    cadence: Linux main-push plus supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: coverage
+        flag_mode: literal
+        receipt: codecov-upload-python-tools-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: android-kotlin
+    flag: android-kotlin
+    report: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
+    expected_component_sets: [android-kotlin]
+    events: [push-main, schedule-8h, workflow-dispatch]
+    cadence: main-push plus supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: android-kotlin-coverage
+        flag_mode: literal
+        receipt: codecov-upload-android-kotlin-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: apple-swift
+    flag: apple-swift
+    report: build-coverage/apple/coverage.apple.lcov
+    expected_component_sets: [apple-swift]
+    events: [pull-request-ios-paths, push-main, schedule-8h, workflow-dispatch]
+    cadence: iOS-relevant PRs plus main-push and supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: coverage
+        flag_mode: literal
+        receipt: codecov-upload-apple-swift-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+  - id: pulp-react
+    flag: pulp-react
+    report: packages/pulp-react/coverage/cobertura-coverage.xml
+    expected_component_sets: [pulp-react]
+    events: [pull-request-react-paths, push-main, schedule-8h, workflow-dispatch]
+    cadence: React-relevant PRs plus main-push and supersession-immune 8-hour refresh
+    uploads:
+      - workflow: .github/workflows/coverage.yml
+        job: pulp-react-coverage
+        flag_mode: literal
+        receipt: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
+      - workflow: .github/workflows/pulp-react-build.yml
+        job: build
+        flag_mode: literal
+        receipt: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+not_applicable:
+  - id: scene
+    component: scene
+    paths: [core/scene/**]
+    reason: PULP_ENABLE_SCENE3D defaults OFF, so the canonical native coverage build does not compile this opt-in surface.
+  - id: web
+    component: web
+    paths: [core/**/platform/web/**]
+    reason: Browser and wasm sources use a separate toolchain and no first-party coverage producer currently emits a compatible report.
+  - id: rust
+    component: null
+    paths: [experimental/pulp-rs/**]
+    reason: The experimental Rust CLI has no cargo-llvm-cov producer and is not claimed by Codecov.
+  - id: sample-bank-manifest
+    component: sample_bank_manifest
+    paths: [core/sample_bank_manifest/**]
+    reason: This surface contains build metadata only and has no instrumentable first-party source.
