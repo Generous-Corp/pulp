@@ -229,6 +229,16 @@ a full-history preamble was observed entering a 70 GiB `.git` directory with
 Workflows whose actual release/audit algorithm traverses historical ranges may
 still require full history; changed-path classification does not.
 
+The preamble also cannot inherit its Python contract from an interactive shell.
+macOS LaunchAgents default to `/usr/bin:/bin:/usr/sbin:/sbin`; on hosts where
+`/usr/bin/python3` is 3.9, importing the classifier fails before it can request
+the conservative full build because `.shipyard/config.toml` requires
+`tomllib`. Keep the classifier step's explicit Homebrew/user-bin PATH, resolve
+one interpreter through `tools/ci/find_python311.py`, and use that exact
+interpreter for the base resolver, policy classifier, JSON extraction, and
+protected-base version-bump verifier. A result that depends on whether M3 or M5
+claimed `pulp-preamble` is a fleet fault, not a retryable check failure.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before

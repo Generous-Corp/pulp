@@ -175,10 +175,43 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertNotIn("fetch-depth: 0", classify_job)
         self.assertIn('git fetch --no-tags --depth=1 origin "$base"', classify_job)
         self.assertIn("--mode=diff --comparison=trees", classify_job)
-        self.assertIn("python3 tools/scripts/classify_changes.py --mode=files", classify_job)
+        self.assertIn(
+            '"$ci_python" tools/scripts/classify_changes.py --mode=files',
+            classify_job,
+        )
         self.assertIn(
             "Never trust a retained remote-tracking ref", classify_job
         )
+
+    def test_classify_resolves_one_python311_runtime_under_launchd_path(self) -> None:
+        classify_job = self.text.split("\n  classify:\n", 1)[1].split(
+            "\n  build:\n", 1
+        )[0]
+
+        self.assertIn(
+            'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"',
+            classify_job,
+        )
+        self.assertIn(
+            'ci_python="$(python3 tools/ci/find_python311.py)"', classify_job
+        )
+        for invocation in (
+            '"$ci_python" tools/scripts/resolve_classify_base.py',
+            '"$ci_python" tools/scripts/classify_changes.py',
+            '"$ci_python" -c',
+            '"$ci_python" "$trusted_bump_check"',
+        ):
+            with self.subTest(invocation=invocation):
+                self.assertIn(invocation, classify_job)
+        self.assertNotIn(
+            "python3 tools/scripts/classify_changes.py",
+            classify_job,
+            "a bare parser invocation would restore machine-dependent tomllib failures",
+        )
+        self.assertNotIn(
+            "python3 tools/scripts/resolve_classify_base.py", classify_job
+        )
+        self.assertNotIn("python3 -c", classify_job)
 
     def test_classify_no_longer_hardcodes_origin_main_as_the_base(self) -> None:
         # The dead inline expression this replaces.
@@ -217,15 +250,16 @@ class WorkflowWiringTests(unittest.TestCase):
             classify_job,
         )
         self.assertIn(
-            'GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check"',
+            'GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check"',
             classify_job,
         )
         self.assertNotIn("          GH_TOKEN: ${{ github.token }}", classify_job)
         self.assertIn("native_build_required=false", classify_job)
         self.assertIn(
-            'echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"',
+            'echo "native_build_required=$native_build_required"',
             classify_job,
         )
+        self.assertIn('} >> "$GITHUB_OUTPUT"', classify_job)
 
     def test_windows_functional_matrix_uses_the_stable_runtime_image(self) -> None:
         self.assertIn(
