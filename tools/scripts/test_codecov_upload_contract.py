@@ -60,6 +60,9 @@ class CoverageWorkflowTests(unittest.TestCase):
             self.coverage,
             "PR coverage must remain advisory and off the merge critical path",
         )
+        self.assertIn("name: Diff coverage advisory", self.coverage)
+        self.assertIn("--advisory", self.coverage)
+        self.assertNotIn("--no-advisory", self.coverage)
         self.assertIn(
             "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
             self.coverage,
