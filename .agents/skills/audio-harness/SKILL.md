@@ -293,6 +293,15 @@ usually means the processor emitted (almost) nothing, which is the finding.
   All three executions reproduced identical per-domain checksums for each lane.
   These numbers document this host/compiler decision; rerun before drawing a
   conclusion on another architecture or toolchain.
+- **Fast trigonometry is accepted per consumer, not per primitive.** Read
+  `docs/validation/fast-trigonometry.md` before changing a realtime sine/cosine
+  path. It records the shipped profiles, licensing pin, Release methodology,
+  actual FM/additive results, rejected Chebyshev/RLIBM/vForce/recurrence/ASM
+  alternatives, and exact reopen rules. For Apple additive work, enable
+  `PULP_BENCHMARK`, build `pulp-fast-trig-apple-bank-benchmark`, verify both
+  cache and target flags say `-O3 -DNDEBUG`, and repeat the order-balanced
+  consumer matrix. Primitive throughput cannot authorize a call-site sweep,
+  default change, global fast-math flag, or a quadrature/GPU/control claim.
 - **Grade discontinuity correctors against the shipped baseline.** A minBLEP
   table needs a reproducible generator and a freshness check, but table
   provenance alone does not prove audio quality. Render free-running and synced

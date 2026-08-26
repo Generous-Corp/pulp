@@ -49,8 +49,18 @@ float platform_sine(float phase) noexcept {
     return std::sin(kTwoPi * phase);
 }
 
-float current_fastmath_sine(float phase) noexcept {
+float legacy_fastmath_sine(float phase) noexcept {
     return pulp::signal::FastMath::sin(kTwoPi * phase);
+}
+
+float efficient_fastmath_sine(float phase) noexcept {
+    return pulp::signal::FastMath::sin_cycles<
+        pulp::signal::FastTrigProfile::realtime_efficient>(phase);
+}
+
+float precise_fastmath_sine(float phase) noexcept {
+    return pulp::signal::FastMath::sin_cycles<
+        pulp::signal::FastTrigProfile::realtime_precise>(phase);
 }
 
 // Deliberately incomplete odd Taylor series after quarter-wave folding. This
@@ -225,7 +235,12 @@ int main() {
                  "\"inputs\":"
               << inputs.size() << ",\"trials\":" << kTrials << "}\n";
     report("platform-sinf", inputs, [](float phase) { return platform_sine(phase); });
-    report("current-fastmath", inputs, [](float phase) { return current_fastmath_sine(phase); });
+    report("legacy-fastmath-bhaskara", inputs,
+           [](float phase) { return legacy_fastmath_sine(phase); });
+    report("fastmath-realtime-efficient", inputs,
+           [](float phase) { return efficient_fastmath_sine(phase); });
+    report("fastmath-realtime-precise", inputs,
+           [](float phase) { return precise_fastmath_sine(phase); });
     report("weak-taylor-negative-control", inputs,
            [](float phase) { return weak_taylor_sine(phase); });
 

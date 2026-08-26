@@ -67,6 +67,15 @@ if(PULP_BENCHMARK)
             PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER="${PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER}")
     endif()
 
+    if(APPLE AND NOT PULP_IOS)
+        # Advisory Apple-only challenger screen plus actual AdditiveBankT
+        # consumer matrix. Timing never gates CI.
+        add_executable(pulp-fast-trig-apple-bank-benchmark
+            test_fast_trig_apple_bank_benchmark.cpp)
+        target_link_libraries(pulp-fast-trig-apple-bank-benchmark PRIVATE
+            pulp::signal "-framework Accelerate")
+    endif()
+
     pulp_add_test_suite(pulp-test-osc-bench
         LIBRARIES pulp::signal
         INCLUDE_DIRS ${choc_SOURCE_DIR}

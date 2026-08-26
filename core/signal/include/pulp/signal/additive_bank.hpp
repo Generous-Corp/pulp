@@ -134,19 +134,17 @@
 ///
 /// ## The sine
 ///
-/// `std::sin(2π·φ)` evaluated in `double` — which IS the catalog's sine, not a
-/// substitute for it: `osc/va.hpp`'s `VaShape::sine` is exactly this expression
-/// (plus a sentinel mapping at the period boundary that a bank never reaches,
-/// because `PhaseAccumulator::phase()` is always in `[0, 1)`). A single partial
-/// is therefore bit-identical to a catalog sine oscillator at the same phase,
-/// which the suite asserts.
-///
-/// Note for anyone tempted to speed this up: `FastMath::sin` is a Bhaskara-style
-/// approximation with ~1e-3 maximum error — about −60 dB. Summing 64 partials
-/// evaluated that way accumulates harmonic error far above the −100 dB a single
-/// evaluated sine is required to hold. If a fast path is ever wanted here it
-/// needs to be a high-order polynomial or an interpolated table built for this
-/// purpose, and it needs its own THD test.
+/// The default is `std::sin(2π·φ)` evaluated in `double` — the catalog sine,
+/// not a substitute for it. It is bit-identical to `osc::VaOscillator` at the
+/// same phase, which the suite asserts. Float banks may explicitly select
+/// `FastTrigProfile::realtime_precise`: on supported Apple arm64/Clang targets
+/// four bounded-cycle degree-9 evaluations run together while phase
+/// accumulation, wrap events, gain/frequency ramps, and envelope state remain
+/// in double. The profile has its own two-float-LSB bank-output and −100 dB THD
+/// gates. Other targets retain the same scalar approximation semantics but do
+/// not claim an acceleration; query `trig_profile_has_vector_path()` before
+/// presenting the choice as a performance feature. `AdditiveBank64` always
+/// retains reference sine semantics.
 ///
 /// ## Calibration table — every design parameter in one place
 ///
@@ -205,6 +203,7 @@
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/additive_spectral_envelope.hpp>
 #include <pulp/signal/envelope.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/osc/phase.hpp>
 #include <pulp/signal/rng.hpp>
 #include <pulp/signal/units.hpp>
@@ -213,6 +212,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal {
@@ -558,6 +558,31 @@ public:
     }
     double master_gain_db() const { return master_gain_db_; }
 
+    /// Selects the bounded-cycle sine implementation used by the float bank.
+    /// The reference profile remains the compatibility default. The precise
+    /// profile is opt-in; unsupported targets retain scalar profile semantics.
+    bool set_trig_profile(FastTrigProfile profile) noexcept {
+        if (profile != FastTrigProfile::reference &&
+            profile != FastTrigProfile::realtime_precise)
+            return false;
+        if constexpr (!std::is_same_v<SampleType, float>) {
+            if (profile != FastTrigProfile::reference) return false;
+        }
+        trig_profile_ = profile;
+        return true;
+    }
+    FastTrigProfile trig_profile() const noexcept { return trig_profile_; }
+
+    static constexpr bool trig_profile_has_vector_path(FastTrigProfile profile) {
+#if defined(__APPLE__) && defined(__clang__) && defined(__aarch64__)
+        return std::is_same_v<SampleType, float> &&
+               profile == FastTrigProfile::realtime_precise;
+#else
+        (void)profile;
+        return false;
+#endif
+    }
+
     // ── The partial table ─────────────────────────────────────────────────
 
     void load_voice(const VoiceTable& v) {
@@ -713,12 +738,38 @@ public:
     }
 
     void process(SampleType* out, int n) {
+        switch (trig_profile_) {
+            case FastTrigProfile::realtime_precise:
+                process_with_trig<FastTrigProfile::realtime_precise>(out, n);
+                return;
+            case FastTrigProfile::reference:
+            default:
+                process_with_trig<FastTrigProfile::reference>(out, n);
+                return;
+        }
+    }
+
+private:
+    template <FastTrigProfile Profile>
+    void process_with_trig(SampleType* out, int n) {
         for (int i = 0; i < n; ++i) {
             if (cadence_countdown_ <= 0) update_control_block(false);
             --cadence_countdown_;
 
             double sum = 0.0;
-            for (int r = 0; r < render_count_; ++r) {
+#if defined(__APPLE__) && defined(__clang__) && defined(__aarch64__)
+            if constexpr (std::is_same_v<SampleType, float> &&
+                          Profile == FastTrigProfile::realtime_precise)
+                sum = render_precise_simd_sample();
+#endif
+            constexpr bool rendered_simd =
+#if defined(__APPLE__) && defined(__clang__) && defined(__aarch64__)
+                std::is_same_v<SampleType, float> &&
+                Profile == FastTrigProfile::realtime_precise;
+#else
+                false;
+#endif
+            for (int r = rendered_simd ? render_count_ : 0; r < render_count_; ++r) {
                 const auto s = static_cast<std::size_t>(render_slots_[
                     static_cast<std::size_t>(r)]);
                 // Evaluate at the CURRENT phase, then advance — the catalog's
@@ -728,8 +779,15 @@ public:
                 // would start at 0.9983 rather than at 1, and a bank would not
                 // agree sample-for-sample with a catalog sine osc set to the
                 // same phase.
-                sum += gain_[s] * decay_env_[s] *
-                       std::sin(kTwoPi * phase_[s].phase());
+                const double sine = [&] {
+                    if constexpr (Profile == FastTrigProfile::reference)
+                        return std::sin(kTwoPi * phase_[s].phase());
+                    else
+                        return static_cast<double>(
+                            FastMath::sin_cycles<Profile>(
+                                static_cast<float>(phase_[s].phase())));
+                }();
+                sum += gain_[s] * decay_env_[s] * sine;
                 phase_[s].advance(increment_[s]);
                 gain_[s] += gain_step_[s];
                 increment_[s] += increment_step_[s];
@@ -744,8 +802,6 @@ public:
                 snap_to_zero(sum * env * master_linear_));
         }
     }
-
-private:
     static constexpr double kPi() { return 3.14159265358979323846; }
 
     /// Slot layout: partial `p`'s primary oscillator is `2p`, its doublet
@@ -754,6 +810,53 @@ private:
     static constexpr std::size_t slot(int p, int k) {
         return static_cast<std::size_t>(2 * p + k);
     }
+
+#if defined(__APPLE__) && defined(__clang__) && defined(__aarch64__)
+    /// Evaluates four float outputs at once while retaining double phase state.
+    double render_precise_simd_sample() {
+        simd_float4 accumulated = simd_make_float4(0.0f);
+        int r = 0;
+        for (; r + 3 < render_count_; r += 4) {
+            const auto s0 = static_cast<std::size_t>(render_slots_[r]);
+            const auto s1 = static_cast<std::size_t>(render_slots_[r + 1]);
+            const auto s2 = static_cast<std::size_t>(render_slots_[r + 2]);
+            const auto s3 = static_cast<std::size_t>(render_slots_[r + 3]);
+            const simd_float4 phase = simd_make_float4(
+                static_cast<float>(phase_[s0].phase()),
+                static_cast<float>(phase_[s1].phase()),
+                static_cast<float>(phase_[s2].phase()),
+                static_cast<float>(phase_[s3].phase()));
+            const simd_float4 sine = FastMath::sin_cycles_precise(phase);
+            const simd_float4 amplitude = simd_make_float4(
+                static_cast<float>(gain_[s0] * decay_env_[s0]),
+                static_cast<float>(gain_[s1] * decay_env_[s1]),
+                static_cast<float>(gain_[s2] * decay_env_[s2]),
+                static_cast<float>(gain_[s3] * decay_env_[s3]));
+            accumulated += amplitude * sine;
+
+            const std::array<std::size_t, 4> slots{s0, s1, s2, s3};
+            for (const auto s : slots) {
+                phase_[s].advance(increment_[s]);
+                gain_[s] += gain_step_[s];
+                increment_[s] += increment_step_[s];
+                decay_env_[s] *= decay_coef_[s];
+            }
+        }
+        double sum = static_cast<double>(simd_reduce_add(accumulated));
+        for (; r < render_count_; ++r) {
+            const auto s = static_cast<std::size_t>(render_slots_[r]);
+            sum += gain_[s] * decay_env_[s] *
+                   static_cast<double>(FastMath::sin_cycles<
+                                       FastTrigProfile::realtime_precise>(
+                       static_cast<float>(phase_[s].phase())));
+            phase_[s].advance(increment_[s]);
+            gain_[s] += gain_step_[s];
+            increment_[s] += increment_step_[s];
+            decay_env_[s] *= decay_coef_[s];
+        }
+        return sum;
+    }
+#endif
 
     /// The shared onset is an attack that HOLDS at unity while gated, then
     /// releases — a shape none of the named envelope types provides directly.
@@ -922,6 +1025,7 @@ private:
     SpectralDomain domain_ = SpectralDomain::absolute_hz;
     EnvelopeMode envelope_mode_ = EnvelopeMode::per_partial_decay;
     RetrigPhase retrig_phase_ = RetrigPhase::reset_stored;
+    FastTrigProfile trig_profile_ = FastTrigProfile::reference;
 
     VoiceTable voice_ = make_organ_voice(kPartialCountDefault);
     SpectralEnvelope envelope_a_{};

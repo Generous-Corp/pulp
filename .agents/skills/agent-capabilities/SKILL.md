@@ -485,6 +485,16 @@ When you do revert, prune whatever the reverted call sites were the only users o
 helper introduced for three call sites that no longer exist is dead public surface, and it
 enlarges the very fingerprint you are trying to keep small.
 
+### Keep platform-only overloads out of the portable vocabulary cap
+
+The compatibility vocabulary intentionally publishes a bounded method list per type. A
+conditional platform implementation overload can therefore crowd out a portable API even
+though the public header still contains both. When adding such an overload, exclude its
+platform-only signature from the generator-facing compatibility projection and add a
+regression that asserts both sides: the portable method remains advertised and the conditional
+implementation signature is absent. Do not raise the global method cap to hide this local
+classification error.
+
 ### `test_signal_no_exceptions.cpp` is a shared ledger — three hazards, not two
 
 Nearly every signal capability appends to it, and it assigns a **unique non-zero exit code per

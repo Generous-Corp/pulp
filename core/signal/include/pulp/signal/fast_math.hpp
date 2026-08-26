@@ -8,6 +8,10 @@
 #include <cstring>
 #include <cmath>
 
+#if defined(__APPLE__) && defined(__clang__)
+#include <simd/simd.h>
+#endif
+
 namespace pulp::signal {
 
 /// Semantic accuracy choices for bounded-cycle real-time trigonometry.
@@ -74,14 +78,13 @@ struct FastMath {
             } else {
                 static_assert(Profile == FastTrigProfile::realtime_precise);
                 return x *
-                       (6.28318527379078585274731929079414949f +
+                       (precise_c0 +
                         x2 *
-                            (-41.3416774783915252855640244027643612f +
+                            (precise_c1 +
                              x2 *
-                                 (81.6022312427274226421465134076212909f +
+                                 (precise_c2 +
                                   x2 *
-                                      (-76.5749921819992128192000934020817094f +
-                                       39.7109181438058471453004860893416233f * x2))));
+                                      (precise_c3 + precise_c4 * x2))));
             }
         }
     }
@@ -97,6 +100,25 @@ struct FastMath {
             default: return sin_cycles<FastTrigProfile::reference>(phase_cycles);
         }
     }
+
+#if defined(__APPLE__) && defined(__clang__)
+    /// Four-wide Apple implementation of the precise bounded-cycle profile.
+    /// Input lanes must already be in `[0, 1)`, matching the scalar contract.
+    static simd_float4 sin_cycles_precise(simd_float4 phase_cycles) noexcept {
+        simd_float4 x = phase_cycles - simd::floor(phase_cycles + 0.5f);
+        const simd_float4 magnitude = simd::abs(x);
+        x = simd::copysign(simd::min(magnitude, 0.5f - magnitude), x);
+        const simd_float4 x2 = x * x;
+        return x *
+               (precise_c0 +
+                x2 *
+                    (precise_c1 +
+                     x2 *
+                         (precise_c2 +
+                          x2 *
+                              (precise_c3 + precise_c4 * x2))));
+    }
+#endif
 
     /// Fast tanh approximation using the [7/6] Padé form (max error ~3e-5
     /// for |x| < 4).
@@ -209,6 +231,20 @@ struct FastMath {
         y = y * (1.5f - 0.5f * x * y * y); // Newton-Raphson
         return y;
     }
+
+private:
+    static constexpr float precise_c0 =
+        6.28318527379078585274731929079414949f;
+    static constexpr float precise_c1 =
+        -41.3416774783915252855640244027643612f;
+    static constexpr float precise_c2 =
+        81.6022312427274226421465134076212909f;
+    static constexpr float precise_c3 =
+        -76.5749921819992128192000934020817094f;
+    static constexpr float precise_c4 =
+        39.7109181438058471453004860893416233f;
+
+public:
 
     /// Clamp to [-1, 1] without branching (for saturation).
     static float clamp_unit(float x) {

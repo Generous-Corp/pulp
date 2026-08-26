@@ -1133,6 +1133,13 @@ def exercise_compatibility(canonical: dict) -> int:
     vocabulary = json.loads(legacy.stdout)
     manifest_projection = canonical["compatibility"]["signal_vocabulary"]["entries"]
     assert vocabulary == manifest_projection == header_projection
+    fast_math = next(
+        row
+        for row in vocabulary["fast_math.hpp"]
+        if row["class"] == "FastMath"
+    )
+    assert "soft_clip(float x)" in fast_math["methods"]
+    assert not any("simd_float4" in method for method in fast_math["methods"])
     advertised_signal = [
         row for row in canonical["capabilities"] if row["domain"] == "signal"
     ]

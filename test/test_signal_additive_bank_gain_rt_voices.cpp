@@ -319,6 +319,115 @@ TEST_CASE("Nothing allocates after prepare",
     }
 }
 
+TEST_CASE("The precise additive trig profile is explicit and float-only",
+          "[signal][additive][fast-trig]") {
+    AdditiveBank bank;
+    REQUIRE(bank.trig_profile() == FastTrigProfile::reference);
+    REQUIRE(bank.set_trig_profile(FastTrigProfile::realtime_precise));
+    REQUIRE(bank.trig_profile() == FastTrigProfile::realtime_precise);
+
+    AdditiveBank64 analysis;
+    REQUIRE_FALSE(analysis.set_trig_profile(FastTrigProfile::realtime_precise));
+    REQUIRE(analysis.trig_profile() == FastTrigProfile::reference);
+
+#if defined(__APPLE__) && defined(__clang__) && defined(__aarch64__)
+    REQUIRE(AdditiveBank::trig_profile_has_vector_path(
+        FastTrigProfile::realtime_precise));
+#else
+    REQUIRE_FALSE(AdditiveBank::trig_profile_has_vector_path(
+        FastTrigProfile::realtime_precise));
+#endif
+    REQUIRE_FALSE(AdditiveBank::trig_profile_has_vector_path(
+        FastTrigProfile::reference));
+    REQUIRE_FALSE(AdditiveBank::trig_profile_has_vector_path(
+        FastTrigProfile::realtime_efficient));
+    REQUIRE_FALSE(bank.set_trig_profile(FastTrigProfile::realtime_efficient));
+    REQUIRE(bank.trig_profile() == FastTrigProfile::realtime_precise);
+
+    const auto invalid =
+        static_cast<FastTrigProfile>(std::numeric_limits<std::uint8_t>::max());
+    REQUIRE_FALSE(bank.set_trig_profile(invalid));
+    REQUIRE(bank.trig_profile() == FastTrigProfile::realtime_precise);
+}
+
+TEST_CASE("The precise additive profile stays within two float LSBs",
+          "[signal][additive][fast-trig][quality]") {
+    for (bool bell : {false, true}) {
+        for (int count : {1, 63, 64, 128}) {
+            const auto voice = bell ? make_bell_voice(count)
+                                    : make_organ_voice(count);
+            AdditiveBank reference;
+            AdditiveBank candidate;
+            configure_steady(reference, voice, count, bell ? 180.0 : 110.0);
+            configure_steady(candidate, voice, count, bell ? 180.0 : 110.0);
+            reference.set_detune_cents(bell ? 7.0 : 0.0);
+            candidate.set_detune_cents(bell ? 7.0 : 0.0);
+            reference.reset();
+            candidate.reset();
+            reference.retrigger();
+            candidate.retrigger();
+            REQUIRE(candidate.set_trig_profile(
+                FastTrigProfile::realtime_precise));
+
+            const auto expected = render(reference, 48000);
+            const auto actual = render(candidate, 48000);
+            double maximum = 0.0;
+            double squared = 0.0;
+            for (std::size_t i = 0; i < actual.size(); ++i) {
+                const double error = actual[i] - expected[i];
+                maximum = std::max(maximum, std::abs(error));
+                squared += error * error;
+            }
+            INFO("bell=" << bell << " count=" << count);
+            REQUIRE(maximum <= 2.0 * kOneLsb);
+            REQUIRE(std::sqrt(squared / static_cast<double>(actual.size())) <=
+                    0.5 * kOneLsb);
+        }
+    }
+}
+
+TEST_CASE("The precise additive profile remains allocation-free",
+          "[signal][additive][fast-trig][rt]") {
+    AdditiveBank bank;
+    configure_steady(bank, make_bell_voice(63), 63, 180.0);
+    bank.set_detune_cents(9.0);
+    REQUIRE(bank.set_trig_profile(FastTrigProfile::realtime_precise));
+    std::array<float, 512> output{};
+    require_allocates_no_memory(
+        [&] { bank.process(output.data(), static_cast<int>(output.size())); });
+}
+
+TEST_CASE("Additive trig profile changes preserve oscillator state",
+          "[signal][additive][fast-trig][state]") {
+    AdditiveBank reference;
+    AdditiveBank switched;
+    const auto voice = make_organ_voice(64);
+    configure_steady(reference, voice, 64, 110.0);
+    configure_steady(switched, voice, 64, 110.0);
+
+    std::array<float, 257> prefix_reference{};
+    std::array<float, 257> prefix_switched{};
+    reference.process(prefix_reference.data(), 257);
+    switched.process(prefix_switched.data(), 257);
+    REQUIRE(prefix_reference == prefix_switched);
+
+    REQUIRE(switched.set_trig_profile(FastTrigProfile::realtime_precise));
+    std::array<float, 513> middle_reference{};
+    std::array<float, 513> middle_switched{};
+    reference.process(middle_reference.data(), 513);
+    switched.process(middle_switched.data(), 513);
+    for (std::size_t i = 0; i < middle_reference.size(); ++i)
+        REQUIRE(std::abs(middle_reference[i] - middle_switched[i]) <=
+                2.0f * static_cast<float>(kOneLsb));
+
+    REQUIRE(switched.set_trig_profile(FastTrigProfile::reference));
+    std::array<float, 512> suffix_reference{};
+    std::array<float, 512> suffix_switched{};
+    reference.process(suffix_reference.data(), 512);
+    switched.process(suffix_switched.data(), 512);
+    REQUIRE(suffix_reference == suffix_switched);
+}
+
 TEST_CASE("Latency is zero and output begins at sample zero",
           "[signal][additive][latency]") {
     REQUIRE(Bank::latency_samples() == 0);
