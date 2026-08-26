@@ -209,3 +209,40 @@ TEST_CASE("Element: RecordingCanvas clear resets", "[element][paint]") {
     rc.clear();
     REQUIRE(rc.command_count() == 0);
 }
+
+TEST_CASE("Element: img.src property reaches the native ImageView",
+          "[element][api][img]") {
+    TestEnvironment env;
+    env.run(
+        "const im = document.createElement('img');\n"
+        "im.src = 'data:image/png;base64,iVBORw0KGgo=';\n"
+        "document.body.appendChild(im);\n"
+        "globalThis.__img_id = im._id;\n"
+        "globalThis.__img_src = im.src;\n");
+
+    const auto id = env.engine.evaluate("globalThis.__img_id").toString();
+    auto* image = dynamic_cast<ImageView*>(env.widget(id));
+    REQUIRE(image != nullptr);
+    CHECK(image->image_source() == "data:image/png;base64,iVBORw0KGgo=");
+    CHECK(env.engine.evaluate("globalThis.__img_src").toString() ==
+          "data:image/png;base64,iVBORw0KGgo=");
+}
+
+TEST_CASE("Element: img.src remains reflected after mount",
+          "[element][api][img]") {
+    TestEnvironment env;
+    env.run(
+        "const im = document.createElement('img');\n"
+        "im.src = '/tmp/property.png';\n"
+        "document.body.appendChild(im);\n"
+        "im.setAttribute('src', '/tmp/attribute.png');\n"
+        "globalThis.__img_id = im._id;\n"
+        "globalThis.__img_src = im.src;\n");
+
+    const auto id = env.engine.evaluate("globalThis.__img_id").toString();
+    auto* image = dynamic_cast<ImageView*>(env.widget(id));
+    REQUIRE(image != nullptr);
+    CHECK(image->image_source() == "file:///tmp/attribute.png");
+    CHECK(env.engine.evaluate("globalThis.__img_src").toString() ==
+          "/tmp/attribute.png");
+}

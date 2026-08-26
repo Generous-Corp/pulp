@@ -131,9 +131,11 @@ These entries are implemented by the current DOM-lite runtime:
   `type=date/time/file/color/url/search` to text-editor IS the
   supported behavior; these accept input correctly. Specialized
   chrome (date pickers etc.) is a separate UX concern.
-- **`html/img`** — `<img>` now creates an `ImageView`; `src`
-  routes through `setImageSource` to `ImageView::set_image_path`, and
-  Skia-backed canvases decode file paths through `draw_image_from_file`.
+- **`html/img`** — `<img>` now creates an `ImageView`; property and attribute
+  `src` writes both route through `setImageSource` to
+  `ImageView::set_image_path`, including writes made before the element is
+  appended. Skia-backed canvases decode file paths and self-contained `data:`
+  image URLs through `draw_image_from_file`.
   Empty or undecodable sources still render the built-in `IMG`
   placeholder.
 

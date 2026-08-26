@@ -953,6 +953,17 @@ Object.defineProperty(Element.prototype, "placeholder", {
 
 // ── DOM manipulation ─────────────────────────────────────────────────────────
 
+// `src` reflects to the attribute, like the other reflected properties above.
+// Delegate to setAttribute so property and attribute writes share the existing
+// ImageView replay path, including assignments made before appendChild.
+Object.defineProperty(Element.prototype, "src", {
+    get: function() {
+        var v = this._attributes ? this._attributes.src : undefined;
+        return v === undefined ? "" : String(v);
+    },
+    set: function(v) { this.setAttribute("src", v == null ? "" : String(v)); }
+});
+
 Object.defineProperty(Element.prototype, "children", {
     get: function() { return this._children.slice(); }
 });
@@ -1077,8 +1088,8 @@ Element.prototype.setAttribute = function(name, value) {
     // SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
     // (Skia draw_image_from_file path). Idempotent: also replayed by
     // __replayMediaAttributes__ in the appendChild-after-setAttribute
-    // path. Only file:// and bare-path forms are wired today; data: URLs and
-    // http(s) fetch remain unsupported.
+    // path. File paths and self-contained data: image URLs are supported;
+    // http(s) fetching remains unsupported.
     else if (name === "src" && this.tagName === "IMG") {
         if (this._nativeCreated && typeof setImageSource === "function") {
             setImageSource(this._id, String(value));

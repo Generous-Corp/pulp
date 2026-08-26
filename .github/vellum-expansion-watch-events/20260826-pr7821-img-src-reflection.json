@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260826-pr7821-img-src-reflection",
+  "created_at": "2026-08-26T14:01:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned DOM compatibility that reflects img.src property writes through the retained native ImageView bridge, including assignments made before append. This repair makes already-supported self-contained data URI images visible in persisted Forge plugin UIs; it changes neither Vellum source authority nor any transferred implementation boundary.",
+  "tests": [
+    "pulp-test-web-compat-events [element][api][img] (2 cases, 6 assertions)",
+    "pulp-test-image-view-fill [image][fill] (2 cases, 13 assertions)",
+    "pulp-test-image-view-fill-gpu [image][fill] (1 case, 5 assertions, Metal Graphite)",
+    "changed-surface-policy-selftest",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
