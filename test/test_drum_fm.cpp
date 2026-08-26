@@ -87,8 +87,9 @@ double tone_amplitude(const Container& x, double f) {
     return std::sqrt(re * re + im * im) / (static_cast<double>(n) * 0.25);
 }
 
-double high_fraction(const std::vector<float>& x, double split_hz) {
-    const double a = 1.0 - std::exp(-2.0 * kPi * split_hz / kFs);
+double high_fraction(const std::vector<float>& x, double split_hz,
+                     double sample_rate = kFs) {
+    const double a = 1.0 - std::exp(-2.0 * kPi * split_hz / sample_rate);
     double lp = 0.0, low = 0.0, high = 0.0;
     for (float v : x) {
         lp += a * (static_cast<double>(v) - lp);
@@ -111,8 +112,8 @@ void bare(FmDrumVoice& voice) {
 
 void configure_fm8(Fm8DrumVoice& voice, int algorithm, int wave_base,
                    double tune_hz, double depth, double feedback,
-                   FastTrigProfile profile) {
-    voice.prepare(kFs);
+                   FastTrigProfile profile, double sample_rate = kFs) {
+    voice.prepare(sample_rate);
     voice.set_algorithm(algorithm);
     voice.set_tune_hz(tune_hz);
     voice.set_depth(depth);
@@ -513,6 +514,13 @@ TEST_CASE("FM8 fast trig is an explicit precise opt-in",
     REQUIRE(voice.trig_profile() == FastTrigProfile::realtime_precise);
 }
 
+TEST_CASE("FM8 wavetable read retains its public function signature",
+          "[signal][drum][fm8][compatibility]") {
+    using Reader = double (*)(int, double, double);
+    const Reader reader = &FmWaveTable::read;
+    REQUIRE(reader(0, 0.125, 0.0) == FmWaveTable::read(0, 0.125, 0.0));
+}
+
 TEST_CASE("FM8 precise trig is deterministic and block-partition invariant",
           "[signal][drum][fm8][fast-trig][determinism]") {
     for (const auto& scenario : {
@@ -543,33 +551,51 @@ TEST_CASE("FM8 precise trig preserves whole-hit energy and spectral character",
           "[signal][drum][fm8][fast-trig][quality]") {
     for (const auto& scenario : {
              std::array<double, 5>{0.0, 0.0, 90.0, 0.0, 0.0},
+             std::array<double, 5>{3.0, 4.0, 120.0, 3.0, 0.2},
+             std::array<double, 5>{6.0, 8.0, 150.0, 4.5, 0.35},
+             std::array<double, 5>{9.0, 12.0, 210.0, 7.5, 0.55},
              std::array<double, 5>{12.0, 20.0, 180.0, 6.0, 0.45},
              std::array<double, 5>{15.0, 22.0, 960.0, 12.0, 1.0},
-         }) {
-        Fm8DrumVoice reference;
-        Fm8DrumVoice candidate;
-        const auto configure = [&](Fm8DrumVoice& voice, FastTrigProfile profile) {
-            configure_fm8(voice, static_cast<int>(scenario[0]),
-                          static_cast<int>(scenario[1]), scenario[2], scenario[3],
-                          scenario[4], profile);
-            voice.note_on(0.82f);
-        };
-        configure(reference, FastTrigProfile::reference);
-        configure(candidate, FastTrigProfile::realtime_precise);
-        const auto reference_hit = render(reference, 16384, 64);
-        const auto candidate_hit = render(candidate, 16384, 64);
+        }) {
+        for (double sample_rate : {44100.0, 48000.0, 96000.0}) {
+            INFO("algorithm=" << static_cast<int>(scenario[0])
+                              << " wave_base=" << static_cast<int>(scenario[1])
+                              << " sample_rate=" << sample_rate);
+            Fm8DrumVoice reference;
+            Fm8DrumVoice candidate;
+            const auto configure = [&](Fm8DrumVoice& voice,
+                                       FastTrigProfile profile) {
+                configure_fm8(voice, static_cast<int>(scenario[0]),
+                              static_cast<int>(scenario[1]), scenario[2],
+                              scenario[3], scenario[4], profile, sample_rate);
+                voice.note_on(0.82f);
+            };
+            configure(reference, FastTrigProfile::reference);
+            configure(candidate, FastTrigProfile::realtime_precise);
+            const int whole_hit_frames =
+                static_cast<int>(std::ceil(sample_rate * 0.75));
+            const auto reference_hit = render(reference, whole_hit_frames, 64);
+            const auto candidate_hit = render(candidate, whole_hit_frames, 64);
 
-        for (float sample : candidate_hit) REQUIRE(std::isfinite(sample));
-        const double peak_ratio = peak(candidate_hit) / peak(reference_hit);
-        const double rms_ratio = rms(candidate_hit) / rms(reference_hit);
-        REQUIRE(peak_ratio >= 0.75);
-        REQUIRE(peak_ratio <= 1.25);
-        REQUIRE(rms_ratio >= 0.8);
-        REQUIRE(rms_ratio <= 1.2);
-        REQUIRE(std::fabs(mean(candidate_hit) - mean(reference_hit)) < 1.0e-6);
-        for (double split_hz : {500.0, 2000.0, 8000.0}) {
-            REQUIRE(std::fabs(high_fraction(candidate_hit, split_hz) -
-                              high_fraction(reference_hit, split_hz)) < 0.02);
+            for (float sample : candidate_hit) REQUIRE(std::isfinite(sample));
+            const double peak_ratio = peak(candidate_hit) / peak(reference_hit);
+            const double rms_ratio = rms(candidate_hit) / rms(reference_hit);
+            INFO("peak_ratio=" << peak_ratio << " rms_ratio=" << rms_ratio
+                               << " mean_delta="
+                               << std::fabs(mean(candidate_hit) -
+                                            mean(reference_hit)));
+            REQUIRE(peak_ratio >= 0.75);
+            REQUIRE(peak_ratio <= 1.25);
+            REQUIRE(rms_ratio >= 0.9);
+            REQUIRE(rms_ratio <= 1.1);
+            REQUIRE(std::fabs(mean(candidate_hit) - mean(reference_hit)) <
+                    1.0e-6);
+            for (double split_hz : {500.0, 2000.0, 8000.0}) {
+                REQUIRE(std::fabs(high_fraction(candidate_hit, split_hz,
+                                                sample_rate) -
+                                  high_fraction(reference_hit, split_hz,
+                                                sample_rate)) < 0.02);
+            }
         }
     }
 }

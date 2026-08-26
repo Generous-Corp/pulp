@@ -253,13 +253,13 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "disposition": "capability_support",
             "capability_keys": ["signal.fm-operator-engine"],
             "rationale": (
-                "Existing drum voice composes the reusable fixed-capacity FM operator engine "
-                "while retaining its voice-specific contract."
+                "Existing FM drum voices and harmonic helpers support the reusable "
+                "fixed-capacity FM operator capability while retaining voice-specific contracts."
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/drum/fm.hpp", "sha256:85942ebd78c03c631aab5425254455068c07aeac89b53b49a955ab6452eaa2fe"),
-            ("pulp/signal/drum/fm_tables.hpp", "sha256:517a1fc7d9eb3bf824a5e310893b69572081c90cfdceef31e955e006d8ffa033"),
+            ("pulp/signal/drum/fm.hpp", "sha256:8fac2205d1819703290488a14dedaa9b89b22ee33d0529dfd63037cda2c28194"),
+            ("pulp/signal/drum/fm_tables.hpp", "sha256:6356aea7f727b91e2eed62d395a7a2a28e073ee88b2d6feacae3c1489906d73f"),
             ("pulp/signal/drum/fm6.hpp", "sha256:1059887e7cfa8785366482b2171b0306d49f950adf35da2a88b64067249b57e6"),
         ]
     ],
@@ -513,7 +513,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:52ac415bf5ee3c93d3810768b52fd0823292ead6bd2459d2d8ee68fccddc4b63",
+        "fingerprint": "sha256:bd102f63b5f5499ff535a6b3d2fec722d33d690903ac5335faa75062b983d37b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

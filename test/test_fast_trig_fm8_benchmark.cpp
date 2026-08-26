@@ -17,7 +17,8 @@ namespace {
 using pulp::signal::FastTrigProfile;
 using pulp::signal::drum::Fm8DrumVoice;
 
-constexpr std::size_t kFrames = 1u << 14;
+constexpr std::size_t kTimingFrames = 1u << 14;
+constexpr double kQualitySeconds = 0.75;
 constexpr int kTrials = 15;
 constexpr int kPasses = 3;
 volatile double g_sink = 0.0;
@@ -131,8 +132,8 @@ Metrics metrics(const std::vector<float>& output, double sample_rate) {
 }
 
 Pair measure(const Scenario& scenario, double sample_rate, int block_size) {
-    std::vector<float> reference_output(kFrames);
-    std::vector<float> candidate_output(kFrames);
+    std::vector<float> reference_output(kTimingFrames);
+    std::vector<float> candidate_output(kTimingFrames);
     std::array<double, kTrials> reference_trials{};
     std::array<double, kTrials> candidate_trials{};
     double reference_checksum = 0.0;
@@ -162,16 +163,21 @@ Pair measure(const Scenario& scenario, double sample_rate, int block_size) {
                     run(FastTrigProfile::realtime_precise, candidate_output, candidate_checksum);
             }
         }
-        reference_trials[static_cast<std::size_t>(trial)] = reference_elapsed / (kPasses * kFrames);
-        candidate_trials[static_cast<std::size_t>(trial)] = candidate_elapsed / (kPasses * kFrames);
+        reference_trials[static_cast<std::size_t>(trial)] =
+            reference_elapsed / (kPasses * kTimingFrames);
+        candidate_trials[static_cast<std::size_t>(trial)] =
+            candidate_elapsed / (kPasses * kTimingFrames);
         g_sink = reference_checksum + candidate_checksum;
     }
 
+    const auto quality_frames = static_cast<std::size_t>(std::ceil(sample_rate * kQualitySeconds));
+    reference_output.resize(quality_frames);
+    candidate_output.resize(quality_frames);
     render(scenario, sample_rate, block_size, FastTrigProfile::reference, reference_output);
     render(scenario, sample_rate, block_size, FastTrigProfile::realtime_precise, candidate_output);
     double maximum_error = 0.0;
     double squared_error = 0.0;
-    for (std::size_t frame = 0; frame < kFrames; ++frame) {
+    for (std::size_t frame = 0; frame < quality_frames; ++frame) {
         const double error = static_cast<double>(candidate_output[frame]) -
                              static_cast<double>(reference_output[frame]);
         maximum_error = std::max(maximum_error, std::abs(error));
@@ -183,7 +189,7 @@ Pair measure(const Scenario& scenario, double sample_rate, int block_size) {
     return {summarise(reference_trials, reference_checksum),
             summarise(candidate_trials, candidate_checksum),
             maximum_error,
-            std::sqrt(squared_error / static_cast<double>(kFrames)),
+            std::sqrt(squared_error / static_cast<double>(quality_frames)),
             reference_metrics.peak,
             candidate_metrics.peak,
             reference_metrics.rms,
@@ -202,7 +208,8 @@ int main() {
     return 2;
 #endif
     std::cout << std::setprecision(10)
-              << "{\"schema\":\"pulp.fast-trig-fm8-benchmark.v1\",\"frames\":" << kFrames
+              << "{\"schema\":\"pulp.fast-trig-fm8-benchmark.v2\",\"timing_frames\":"
+              << kTimingFrames << ",\"quality_seconds\":" << kQualitySeconds
               << ",\"trials\":" << kTrials << ",\"passes\":" << kPasses << "}\n";
     for (const auto& scenario : kScenarios) {
         for (double sample_rate : {44100.0, 48000.0, 96000.0}) {

@@ -164,6 +164,15 @@ TEST_CASE("FastMath degree-13 precise sine meets its double error budget",
                     7.0e-14);
         }
     }
+
+    for (double phase : {-12.875, -3.5, -1.125, -0.25, 0.125, 2.75,
+                         9.375}) {
+        const double expected = std::sin(2.0 * std::acos(-1.0) * phase);
+        REQUIRE(std::abs(FastMath::sin_cycles_precise64(phase) - expected) <
+                7.0e-14);
+        REQUIRE(FastMath::sin_cycles_precise64(phase) ==
+                FastMath::sin_cycles_precise64(phase + 16.0));
+    }
 }
 
 TEST_CASE("FastMath cos approximation", "[signal][fast_math]") {

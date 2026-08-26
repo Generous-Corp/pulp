@@ -48,9 +48,15 @@ struct FmWaveTable {
             {{1.00, -0.25, -0.500, 0.75}},
         }};
 
-    template <FastTrigProfile Profile = FastTrigProfile::reference>
     static double read(int wave, double phase,
                        double phase_increment = 0.0) {
+        return read_profile<FastTrigProfile::reference>(wave, phase,
+                                                        phase_increment);
+    }
+
+    template <FastTrigProfile Profile>
+    static double read_profile(int wave, double phase,
+                               double phase_increment = 0.0) {
         static_assert(Profile == FastTrigProfile::reference ||
                       Profile == FastTrigProfile::realtime_precise);
         const auto index =

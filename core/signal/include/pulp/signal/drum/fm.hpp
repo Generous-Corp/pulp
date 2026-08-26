@@ -510,19 +510,6 @@ public:
     /// Overall modulation depth, scaling every routed connection at once.
     void set_depth(double depth) { depth_ = std::clamp(depth, 0.0, 12.0); }
 
-    /// Selects the FM8 carrier implementation between hits. An active voice
-    /// rejects the change so a control update cannot splice two recursive
-    /// trajectories into one hit.
-    bool set_trig_profile(FastTrigProfile profile) noexcept {
-        if (profile != FastTrigProfile::reference &&
-            profile != FastTrigProfile::realtime_precise)
-            return false;
-        if (is_active()) return false;
-        trig_profile_ = profile;
-        return true;
-    }
-    FastTrigProfile trig_profile() const noexcept { return trig_profile_; }
-
     /// A formant bandpass on the summed carriers.
     void set_formant_hz(double hz) { formant_hz_ = std::clamp(hz, 40.0, 18000.0); }
     void set_formant_q(double q) { formant_q_ = std::clamp(q, 0.5, 12.0); }
@@ -540,6 +527,19 @@ public:
         transient_ = -1;
         noise_decay_ms_ = std::clamp(ms, 0.5, 500.0);
     }
+
+    /// Selects the FM8 carrier implementation between hits. An active voice
+    /// rejects the change so a control update cannot splice two recursive
+    /// trajectories into one hit.
+    bool set_trig_profile(FastTrigProfile profile) noexcept {
+        if (profile != FastTrigProfile::reference &&
+            profile != FastTrigProfile::realtime_precise)
+            return false;
+        if (is_active()) return false;
+        trig_profile_ = profile;
+        return true;
+    }
+    FastTrigProfile trig_profile() const noexcept { return trig_profile_; }
     void set_noise_color(NoiseColor color) {
         transient_ = -1;
         noise_color_ = color;
@@ -661,7 +661,7 @@ private:
             const auto wave = [&](std::size_t op, double phase_cycles,
                                   double phase_offset_radians,
                                   double phase_increment) {
-                return FmWaveTable::read<Profile>(
+                return FmWaveTable::read_profile<Profile>(
                     waves_[op],
                     phase_cycles +
                         phase_offset_radians /

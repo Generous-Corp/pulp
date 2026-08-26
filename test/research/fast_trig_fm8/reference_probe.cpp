@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 
@@ -33,8 +35,14 @@ constexpr std::array<Scenario, 3> kScenarios{{
     {15, 22, 960.0, 12.0, 1.0},
 }};
 
-double render_all() {
+struct RenderResult {
+    double checksum;
+    std::uint64_t hash;
+};
+
+template <bool HashSamples> RenderResult render_all() {
     double checksum = 0.0;
+    std::uint64_t hash = 14695981039346656037ULL;
     for (const auto& scenario : kScenarios) {
         Fm8DrumVoice voice;
         voice.prepare(48000.0);
@@ -58,12 +66,20 @@ double render_all() {
         for (std::size_t offset = 0; offset < kFrames; offset += block.size()) {
             block.fill(0.0f);
             voice.process(block.data(), static_cast<int>(block.size()));
-            for (std::size_t index = 0; index < block.size(); ++index)
+            for (std::size_t index = 0; index < block.size(); ++index) {
                 checksum +=
                     static_cast<double>(block[index]) * static_cast<double>(offset + index + 1);
+                if constexpr (HashSamples) {
+                    const auto bits = std::bit_cast<std::uint32_t>(block[index]);
+                    for (unsigned shift = 0; shift < 32; shift += 8) {
+                        hash ^= (bits >> shift) & 0xffu;
+                        hash *= 1099511628211ULL;
+                    }
+                }
+            }
         }
     }
-    return checksum;
+    return {checksum, hash};
 }
 
 } // namespace
@@ -76,8 +92,10 @@ int main() {
     double checksum = 0.0;
     for (int trial = 0; trial < kTrials; ++trial) {
         const auto begin = std::chrono::steady_clock::now();
-        for (int pass = 0; pass < kPasses; ++pass)
-            checksum += render_all();
+        for (int pass = 0; pass < kPasses; ++pass) {
+            const auto rendered = render_all<false>();
+            checksum += rendered.checksum;
+        }
         const auto end = std::chrono::steady_clock::now();
         trials[static_cast<std::size_t>(trial)] =
             std::chrono::duration<double, std::nano>(end - begin).count() /
@@ -85,7 +103,9 @@ int main() {
         g_sink = checksum;
     }
     std::sort(trials.begin(), trials.end());
-    std::cout << std::setprecision(12) << "{\"median_ns_per_frame\":" << trials[trials.size() / 2]
-              << ",\"checksum\":" << checksum << "}\n";
+    const auto sample_hash = render_all<true>().hash;
+    std::cout << std::setprecision(17) << "{\"median_ns_per_frame\":" << trials[trials.size() / 2]
+              << ",\"checksum\":" << checksum << ",\"sample_hash\":\"" << std::hex << sample_hash
+              << "\"}\n";
     return std::isfinite(g_sink) ? 0 : 1;
 }
