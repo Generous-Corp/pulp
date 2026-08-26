@@ -35,6 +35,11 @@ void dispatch_dom_pointer_event(View& root, View* target,
 /// Only the hit view is consulted — the callback does not bubble to ancestors.
 bool dispatch_context_menu(View& root, Point root_pos);
 
+/// Route a context menu to an already-resolved pointer target. Platform hosts
+/// that perform overlay-aware hit testing must use this overload so the
+/// context-menu channel cannot fall through to a sibling beneath the overlay.
+bool dispatch_context_menu(View& root, View* target, Point root_pos);
+
 /// Feed one pointer event to `root`'s gesture arbiter and report whether the
 /// host must now YIELD — i.e. whether a recognizer actually took the pointer,
 /// so the host skips its own delivery for this event.
@@ -348,5 +353,52 @@ void deliver_mouse_cancel(View& root, View* target, Point root_pt,
 /// No-op when `target` is null or no longer in the tree.
 void deliver_gesture_handoff(View& root, View* target, Point root_pt,
                              uint16_t modifiers, int click_count);
+
+/// What consulting the generalized overlay slot decided about a press.
+enum class OverlayPressRouting {
+    /// Nothing claimed `View::active_overlay_`; the caller proceeds normally.
+    no_overlay,
+    /// The press landed inside the overlay and resolved to a view in its
+    /// subtree. Deliver to `OverlayPressTarget::target` and stop; the regular
+    /// tree `hit_test` must not run, or an absolutely-positioned popover child
+    /// loses the click to whatever sibling occupies that pixel.
+    routed,
+    /// The press landed inside the overlay's rect, but the overlay's own
+    /// visible / enabled / hit-testable / pointer-events guards rejected it.
+    /// The overlay stays claimed (it is still mounted, just not interactive
+    /// here) and the caller falls through to the regular hit test.
+    not_hittable,
+    /// The press landed outside the overlay, so it was dismissed. The caller
+    /// still falls through to the regular hit test, matching WebView's
+    /// outside-click closes-and-clicks-through behavior.
+    dismissed,
+};
+
+struct OverlayPressTarget {
+    OverlayPressRouting routing = OverlayPressRouting::no_overlay;
+    /// Non-null only when `routing == OverlayPressRouting::routed`.
+    View* target = nullptr;
+};
+
+/// Consult the generalized overlay slot for a press at `root_pt`.
+///
+/// `View::active_overlay_` is the mechanism `@pulp/react`'s `<View overlay>`
+/// prop — and therefore every imported/materialized design's popover — claims.
+/// It is deliberately separate from `ComboBox::active_popup_`, which covers
+/// only the native combo dropdown.
+///
+/// Each platform host owns the obligation to call this on its press path,
+/// which is exactly how the two mechanisms drifted apart: the standalone macOS
+/// host consulted both while the DAW plugin hosts consulted only the ComboBox
+/// one, so a React popover inside a plugin editor could never be dismissed by
+/// clicking outside it. Living here rather than inside a host makes the
+/// decision headlessly testable and gives every host one call to make.
+/// `tools/scripts/overlay_dismissal_wiring_guard.py` fences the two mechanisms
+/// together so a future host cannot wire one without the other.
+///
+/// Call this AFTER the ComboBox popup routing (which stays exact-as-was, per
+/// the regression in test_combo_dropdown.cpp) and BEFORE the regular tree
+/// `hit_test`.
+OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt);
 
 }  // namespace pulp::view

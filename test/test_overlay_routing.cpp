@@ -21,7 +21,10 @@
 // invariants pure C++ so the test runs on every CI lane.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
+
+#include <memory>
 
 using pulp::view::View;
 using pulp::view::Point;
@@ -102,6 +105,29 @@ TEST_CASE("View destructor releases the overlay slot [issue-1148]",
     // Without the dtor release, this would dangle and the next
     // mouseDown would dereference freed memory.
     REQUIRE(View::active_overlay_ == nullptr);
+}
+
+TEST_CASE("removing and destroying an overlay clears its former root slot",
+          "[view][overlay][lifetime]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0, 0, 200, 200});
+    auto sibling = std::make_unique<TestView>();
+    sibling->set_bounds({100, 100, 50, 50});
+    root.add_child(std::move(sibling));
+    auto owned = std::make_unique<TestView>();
+    auto* overlay = owned.get();
+    overlay->set_bounds({0, 0, 100, 100});
+    root.add_child(std::move(owned));
+    overlay->claim_overlay();
+    REQUIRE(root.existing_interaction()->active_overlay == overlay);
+
+    auto retired = root.remove_child(overlay);
+    retired.reset();
+
+    REQUIRE(root.existing_interaction()->active_overlay == nullptr);
+    REQUIRE(route_press_to_active_overlay(root, {10, 10}).routing ==
+            pulp::view::OverlayPressRouting::no_overlay);
 }
 
 TEST_CASE("View::overlay_contains uses absolute window coords [issue-1148]",
@@ -431,4 +457,123 @@ TEST_CASE("Pre-existing release_overlay path still works without callback "
     REQUIRE(View::active_overlay_ == &v);
     v.release_overlay();
     REQUIRE(View::active_overlay_ == nullptr);
+}
+
+// ── Host press routing: route_press_to_active_overlay ──────────────────────
+//
+// The dismissal MECHANISM above was already fenced, but nothing fenced whether
+// a platform host actually consults it on a press. The two mechanisms — the
+// native ComboBox popup and this generalized slot — are wired per host, and
+// they drifted: the standalone macOS host consulted both while the DAW plugin
+// hosts consulted only the ComboBox one. A React / imported-design popover
+// therefore stayed open forever when the user clicked outside it inside a
+// plugin editor, while the identical UI dismissed correctly standalone.
+//
+// The decision now lives in one portable verb so it is testable without a
+// window, and `tools/scripts/overlay_dismissal_wiring_guard.py` fences the
+// hosts so one cannot be wired without the other.
+
+TEST_CASE("route_press_to_active_overlay: no claim leaves the press alone",
+          "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {150.0f, 150.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::no_overlay);
+    REQUIRE(press.target == nullptr);
+}
+
+TEST_CASE("route_press_to_active_overlay: press inside routes into the overlay",
+          "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {150.0f, 150.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::routed);
+    REQUIRE(press.target == overlay);
+    // Routing into an overlay must never dismiss it.
+    REQUIRE(View::active_overlay_ == overlay);
+}
+
+// The regression that encodes the reported bug: open a dropdown, tap outside,
+// it must close. Before the plugin hosts consulted this verb, the press simply
+// never reached the dismissal mechanism and the dropdown stayed open.
+TEST_CASE("route_press_to_active_overlay: press outside dismisses the overlay",
+          "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    int dismissed_calls = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissed_calls; };
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {500.0f, 500.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.target == nullptr);
+    REQUIRE(View::active_overlay_ == nullptr);
+    // Routed through dismiss_active_overlay(), not a bare release_overlay(),
+    // so React state can flip setOpen(false).
+    REQUIRE(dismissed_calls == 1);
+}
+
+TEST_CASE("route_press_to_active_overlay: guards rejecting the point do not "
+          "dismiss", "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    // Inside the overlay's rect, but the overlay opts out of hit-testing: it
+    // is still mounted, just not interactive here, so the caller falls through
+    // to the regular hit test WITHOUT closing it.
+    overlay->set_hit_testable(false);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {150.0f, 150.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::not_hittable);
+    REQUIRE(press.target == nullptr);
+    REQUIRE(View::active_overlay_ == overlay);
+}
+
+TEST_CASE("route_press_to_active_overlay: another tree's overlay is isolated",
+          "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    TestView other_root;
+    other_root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto foreign_owned = std::make_unique<TestView>();
+    auto* foreign = foreign_owned.get();
+    foreign->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    other_root.add_child(std::move(foreign_owned));
+    foreign->claim_overlay();
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {150.0f, 150.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::no_overlay);
+    REQUIRE(View::active_overlay_ == foreign);
+    REQUIRE(other_root.interaction().active_overlay == foreign);
 }

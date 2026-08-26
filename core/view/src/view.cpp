@@ -728,6 +728,25 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->set_plugin_view_host(nullptr);
     child->set_host_params(nullptr);
     child->set_host_actions(nullptr);
+    // Release root-owned overlay identity while the removed subtree still has
+    // its old ancestry. Once parent_ is severed, its destructor resolves the
+    // detached fallback state and cannot clear the former root's slot.
+    if (RootInteractionState* state = structure_root->existing_interaction();
+        state && state->active_overlay) {
+        bool overlay_is_removed = false;
+        for (View* current = state->active_overlay; current;
+             current = current->parent_) {
+            if (current == child) {
+                overlay_is_removed = true;
+                break;
+            }
+        }
+        if (overlay_is_removed) {
+            if (active_overlay_ == state->active_overlay)
+                active_overlay_ = nullptr;
+            state->active_overlay = nullptr;
+        }
+    }
     child->parent_ = nullptr;
     auto owned = std::move(*it);
     children_.erase(it);
@@ -1150,6 +1169,17 @@ void View::dismiss_active_overlay() {
     if (RootInteractionState* s = victim->existing_interaction();
         s && s->active_overlay == victim)
         s->active_overlay = nullptr;
+    if (victim->on_overlay_dismissed) {
+        victim->on_overlay_dismissed();
+    }
+}
+
+void View::dismiss_active_overlay(View& scope) {
+    RootInteractionState* state = scope.existing_interaction();
+    View* victim = state ? state->active_overlay : nullptr;
+    if (!victim) return;
+    state->active_overlay = nullptr;
+    if (active_overlay_ == victim) active_overlay_ = nullptr;
     if (victim->on_overlay_dismissed) {
         victim->on_overlay_dismissed();
     }
