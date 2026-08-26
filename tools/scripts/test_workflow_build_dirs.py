@@ -429,11 +429,23 @@ class WorkflowBuildDirTests(unittest.TestCase):
         configure = 'cmake -S . -B "$PULP_BUILD_DIR"'
         compile_gate = (
             "bash test/cmake/test_ios_compile_gate.sh \\\n"
-            '              "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
+            '                "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
         )
         build = 'cmake --build "$PULP_BUILD_DIR" --config Release'
 
         self.assertIn(compile_gate, text)
+        self.assertIn(
+            "ios_compile_required: ${{ steps.classify.outputs.ios_compile_required }}",
+            text,
+        )
+        self.assertIn(
+            "IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}",
+            text,
+        )
+        self.assertIn('if [ "$IOS_COMPILE_REQUIRED" = false ]; then', text)
+        self.assertIn(
+            "iOS compile gate skipped by exact changed-surface authorization", text
+        )
         self.assertLess(text.index(configure), text.index(compile_gate))
         self.assertLess(text.index(compile_gate), text.index(build))
 

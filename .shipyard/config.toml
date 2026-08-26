@@ -334,6 +334,18 @@ baseline_tests = [
 ]
 baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
 baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
+# Independent authorization for omitting the expensive iOS/AUv3 compile gate.
+# Do not infer this from `families`: a bounded macOS test family may still feed
+# a mobile build target. Each addition here requires its own mobile-impact
+# review and focused classifier mutation proof.
+ios_compile_skip_safe_paths = [
+  "docs/guides/**",
+  "docs/reference/**",
+  "docs/examples/**",
+  "tools/cli/cmd_forge.cpp",
+  "tools/cli/cmd_dsp.cpp",
+  "test/test_child_process.cpp",
+]
 
 # Known global build, toolchain, ABI, security, provenance, packaging, and
 # dependency surfaces are ineligible for bounded execution. Unknown paths also
