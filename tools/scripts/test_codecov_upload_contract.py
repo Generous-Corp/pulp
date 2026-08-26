@@ -67,6 +67,8 @@ class CoverageWorkflowTests(unittest.TestCase):
         )
         self.assertIn("after_n_builds: 1", self.coverage)
         self.assertNotIn("after_n_builds: 4", self.coverage)
+        self.assertIn('macos=\'"macos-15"\'', self.coverage)
+        self.assertIn('[ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]', self.coverage)
 
     def test_native_upload_requires_semantically_verified_report(self) -> None:
         self.assertIn("id: native_cobertura", self.coverage)
@@ -129,6 +131,8 @@ class CoverageWorkflowTests(unittest.TestCase):
         )
         self.assertIn("--codecov-processed-run-id", self.watchdog)
         self.assertIn("--required-flag os-linux os-macos python-tools", self.watchdog)
+        self.assertIn('--not-before "${attempt_started_at}"', self.watchdog)
+        self.assertIn('codecov_page_url="$(jq -r', self.watchdog)
         self.assertIn('repos/${REPO}/compare/${last_success_sha}...${current_main_sha}', self.watchdog)
         self.assertIn("current-main lag ${coverage_lag}", self.watchdog)
         self.assertIn('if [ "${DRY_RUN}" != "true" ]; then\n              exit 1', self.watchdog)
@@ -154,16 +158,16 @@ class CoverageWorkflowTests(unittest.TestCase):
         payload = {
             "count": 5,
             "results": [
-                {"build_url": exact_url, "state": "merged", "flags": ["os-linux"]},
-                {"build_url": exact_url, "state": "merged", "flags": ["os-macos"]},
-                {"build_url": exact_url, "state": "merged", "flags": ["python-tools"]},
-                {"build_url": exact_url, "state": "merged", "flags": ["pulp-react"]},
-                {"build_url": exact_url, "state": "merged", "flags": []},
+                {"build_url": exact_url, "state": "merged", "flags": ["os-linux"], "created_at": "2026-08-26T10:01:00Z"},
+                {"build_url": exact_url, "state": "merged", "flags": ["os-macos"], "created_at": "2026-08-26T10:02:00Z"},
+                {"build_url": exact_url, "state": "merged", "flags": ["python-tools"], "created_at": "2026-08-26T10:03:00Z"},
+                {"build_url": exact_url, "state": "merged", "flags": ["pulp-react"], "created_at": "2026-08-26T10:04:00Z"},
+                {"build_url": exact_url, "state": "merged", "flags": [], "created_at": "2026-08-26T10:05:00Z"},
             ],
         }
         self.assertEqual(
             processed_upload_counts(
-                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"]
+                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"], "2026-08-26T10:00:00Z"
             ),
             {
                 "counts": {"os-linux": 1, "os-macos": 1, "python-tools": 1},
@@ -178,21 +182,22 @@ class CoverageWorkflowTests(unittest.TestCase):
         payload = {
             "count": 4,
             "results": [
-                {"build_url": exact_url, "state": "merged", "flags": ["os-linux"]},
-                {"build_url": exact_url, "state": "pending", "flags": ["os-macos"]},
+                {"build_url": exact_url, "state": "merged", "flags": ["os-linux"], "created_at": "2026-08-26T09:59:00Z"},
+                {"build_url": exact_url, "state": "pending", "flags": ["os-macos"], "created_at": "2026-08-26T10:01:00Z"},
                 {
                     "build_url": f"https://github.com/{repo}/actions/runs/999",
                     "state": "merged",
                     "flags": ["python-tools"],
+                    "created_at": "2026-08-26T10:02:00Z",
                 },
             ],
         }
         self.assertEqual(
             processed_upload_counts(
-                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"]
+                payload, repo, run_id, ["os-linux", "os-macos", "python-tools"], "2026-08-26T10:00:00Z"
             ),
             {
-                "counts": {"os-linux": 1, "os-macos": 0, "python-tools": 0},
+                "counts": {"os-linux": 0, "os-macos": 0, "python-tools": 0},
                 "complete_page": False,
             },
         )

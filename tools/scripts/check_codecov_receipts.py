@@ -64,7 +64,11 @@ def receipt_summary(
 
 
 def processed_upload_counts(
-    payload: dict[str, Any], repository: str, run_id: int, required_flags: list[str]
+    payload: dict[str, Any],
+    repository: str,
+    run_id: int,
+    required_flags: list[str],
+    not_before: str,
 ) -> dict[str, Any]:
     """Count exact-run Codecov uploads that reached the merged state."""
     uploads = payload.get("results")
@@ -73,12 +77,18 @@ def processed_upload_counts(
         raise ValueError("Codecov upload payload must contain count and results")
     complete_page = declared_count == len(uploads)
     expected_build_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+    boundary = _parse_github_timestamp(not_before)
+    if boundary is None:
+        raise ValueError("--not-before must be an ISO-8601 timestamp")
     counts = {
         flag: sum(
             upload.get("build_url") == expected_build_url
             and upload.get("state") == "merged"
             and isinstance(upload.get("flags"), list)
             and flag in upload["flags"]
+            and (created_at := upload.get("created_at")) is not None
+            and (created := _parse_github_timestamp(created_at)) is not None
+            and created >= boundary
             for upload in uploads
         )
         for flag in required_flags
@@ -105,6 +115,7 @@ def main() -> int:
     parser.add_argument("--codecov-processed-run-id", type=int)
     parser.add_argument("--repository")
     parser.add_argument("--required-flag", nargs="+")
+    parser.add_argument("--not-before")
     args = parser.parse_args()
 
     payload = json.load(sys.stdin)
@@ -112,9 +123,9 @@ def main() -> int:
     if args.codecov_processed_run_id is not None:
         if args.sha or args.required_axis:
             raise SystemExit("processed-upload mode cannot be combined with receipt mode")
-        if not args.repository or not args.required_flag:
+        if not args.repository or not args.required_flag or not args.not_before:
             raise SystemExit(
-                "processed-upload mode requires --repository and --required-flag"
+                "processed-upload mode requires --repository, --required-flag, and --not-before"
             )
         if not isinstance(payload, dict):
             raise SystemExit("Codecov upload payload must be an object")
@@ -124,6 +135,7 @@ def main() -> int:
                 args.repository,
                 args.codecov_processed_run_id,
                 args.required_flag,
+                args.not_before,
             )
         except ValueError as error:
             raise SystemExit(str(error)) from None

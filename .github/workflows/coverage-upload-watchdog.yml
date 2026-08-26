@@ -107,7 +107,7 @@ jobs:
             if ! jobs="$(gh api -X GET --paginate --slurp \
                 "repos/${REPO}/actions/runs/${rid}/jobs" \
                 -f filter=all -f per_page=100 2>/dev/null \
-                | jq -c '[.[].jobs[] | {name, run_attempt}]')"; then
+                | jq -c '[.[].jobs[] | {name, run_attempt, started_at}]')"; then
               echo "::warning::Could not read jobs for Coverage run ${rid}; freshness is unknown and issue state will not be mutated."
               scan_incomplete=1
               continue
@@ -116,6 +116,16 @@ jobs:
             macos_attempt="$(printf '%s' "${jobs}" | jq -r '[.[] | select(.name == "Coverage report (macOS, Clang)") | .run_attempt] | max // empty')"
             if [ -z "${linux_attempt}" ] || [ -z "${macos_attempt}" ]; then
               echo "Run ${rid} has no complete Linux/macOS job-attempt map; not a full native refresh."
+              continue
+            fi
+            attempt_started_at="$(printf '%s' "${jobs}" | jq -r \
+              --argjson linux_attempt "${linux_attempt}" --argjson macos_attempt "${macos_attempt}" \
+              '[.[] | select(
+                (.name == "Coverage report (Linux, Clang)" and .run_attempt == $linux_attempt) or
+                (.name == "Coverage report (macOS, Clang)" and .run_attempt == $macos_attempt)
+              ) | .started_at] | map(select(. != null)) | min // empty')"
+            if [ -z "${attempt_started_at}" ]; then
+              echo "Run ${rid} has no start-time boundary for the current Linux/macOS attempts; not accepting older-attempt uploads."
               continue
             fi
             if ! receipts="$(gh api -X GET --paginate --slurp \
@@ -138,24 +148,51 @@ jobs:
               owner="${REPO%%/*}"
               repo_name="${REPO#*/}"
               codecov_response="${RUNNER_TEMP}/codecov-uploads-${rid}.json"
-              if ! codecov_http="$(curl --silent --show-error --max-time 30 \
-                  --output "${codecov_response}" --write-out '%{http_code}' \
-                  "https://api.codecov.io/api/v2/github/${owner}/repos/${repo_name}/commits/${head_sha}/uploads/?page_size=100")"; then
-                echo "::warning::Could not query Codecov for Coverage run ${rid}; freshness is unknown and issue state will not be mutated."
+              codecov_results='[]'
+              codecov_page_url="https://api.codecov.io/api/v2/github/${owner}/repos/${repo_name}/commits/${head_sha}/uploads/?page_size=100"
+              codecov_page_count=0
+              codecov_query_failed=0
+              while [ "${codecov_page_url}" != "null" ] && [ -n "${codecov_page_url}" ]; do
+                codecov_page_count=$((codecov_page_count + 1))
+                if [ "${codecov_page_count}" -gt 20 ]; then
+                  echo "::warning::Codecov upload pagination exceeded 20 pages for run ${rid}; freshness is unknown."
+                  codecov_query_failed=1
+                  break
+                fi
+                codecov_page="${RUNNER_TEMP}/codecov-uploads-${rid}-${codecov_page_count}.json"
+                if ! codecov_http="$(curl --silent --show-error --max-time 30 \
+                    --output "${codecov_page}" --write-out '%{http_code}' \
+                    "${codecov_page_url}")"; then
+                  echo "::warning::Could not query Codecov for Coverage run ${rid}; freshness is unknown."
+                  codecov_query_failed=1
+                  break
+                fi
+                if [ "${codecov_http}" = "404" ]; then
+                  echo "Run ${rid} has exact upload receipts but Codecov has no record for ${head_sha}; not counting it as processed coverage."
+                  codecov_query_failed=2
+                  break
+                fi
+                if [ "${codecov_http}" != "200" ]; then
+                  echo "::warning::Codecov returned HTTP ${codecov_http} for Coverage run ${rid}; freshness is unknown."
+                  codecov_query_failed=1
+                  break
+                fi
+                codecov_results="$(jq -nc --argjson accumulated "${codecov_results}" \
+                  --argjson page "$(jq -c '.results' "${codecov_page}")" \
+                  '$accumulated + $page')"
+                codecov_page_url="$(jq -r '.next // empty' "${codecov_page}")"
+              done
+              if [ "${codecov_query_failed}" -eq 1 ]; then
                 scan_incomplete=1
                 continue
-              fi
-              if [ "${codecov_http}" = "404" ]; then
-                echo "Run ${rid} has exact upload receipts but Codecov has no record for ${head_sha}; not counting it as processed coverage."
+              elif [ "${codecov_query_failed}" -eq 2 ]; then
                 continue
               fi
-              if [ "${codecov_http}" != "200" ]; then
-                echo "::warning::Codecov returned HTTP ${codecov_http} for Coverage run ${rid}; freshness is unknown and issue state will not be mutated."
-                scan_incomplete=1
-                continue
-              fi
+              jq -nc --argjson results "${codecov_results}" \
+                '{count: ($results | length), results: $results}' >"${codecov_response}"
               if ! processed_counts="$(python3 tools/scripts/check_codecov_receipts.py \
                   --codecov-processed-run-id "${rid}" --repository "${REPO}" \
+                  --not-before "${attempt_started_at}" \
                   --required-flag os-linux os-macos python-tools \
                   <"${codecov_response}")"; then
                 echo "Run ${rid} receipts are not backed by merged exact-run Codecov uploads for every required flag (${processed_counts})."

@@ -218,6 +218,8 @@ jobs:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
           ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           resolve() {
@@ -239,17 +241,25 @@ jobs:
           # gate pool that serves the required `macos` check — a long advisory
           # coverage run there would contend with / starve the gate. The dedicated
           # ephemeral lane uses pulp-coverage-vm-macos.
-          macos=$(resolve \
-            "Coverage (macOS)" \
-            EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
-            MACOS_RUNS_ON_JSON \
-            macos-latest \
-            pulp-build,pulp-build-vm)
-          android_kotlin=$(resolve \
-            "Coverage (Android, Kotlin)" \
-            "" \
-            ANDROID_KOTLIN_RUNS_ON_JSON \
-            macos-latest)
+          # Repository variables resolve for fork PRs. Never let an untrusted
+          # fork select a self-hosted Tart machine; run its macOS work on a
+          # disposable GitHub-hosted image instead.
+          if [ -n "${PR_HEAD_REPO}" ] && [ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]; then
+            macos='"macos-15"'
+            android_kotlin='"macos-15"'
+          else
+            macos=$(resolve \
+              "Coverage (macOS)" \
+              EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
+              MACOS_RUNS_ON_JSON \
+              macos-latest \
+              pulp-build,pulp-build-vm)
+            android_kotlin=$(resolve \
+              "Coverage (Android, Kotlin)" \
+              "" \
+              ANDROID_KOTLIN_RUNS_ON_JSON \
+              macos-latest)
+          fi
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             # Keep PR Windows coverage on GitHub-hosted runners until the
             # Namespace Windows queue is reliably assigning jobs again.
