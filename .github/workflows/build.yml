@@ -828,7 +828,13 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
         run: |
           set -euo pipefail
-          base="$(python3 tools/scripts/resolve_classify_base.py)"
+          # LaunchAgents inherit macOS's stripped /usr/bin-only PATH. That made
+          # the same merge group pass on M3 but fail on M5 when /usr/bin/python3
+          # (3.9) could not import tomllib. Resolve one reviewed 3.11+ runtime
+          # up front and use it for every parser in this job.
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+          ci_python="$(python3 tools/ci/find_python311.py)"
+          base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
           native_build_required=true
           ios_compile_required=true
           if [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]]; then
@@ -838,17 +844,17 @@ jobs:
               git fetch --no-tags --depth=1 origin "$base" || true
             fi
             classification=$(
-              env GITHUB_OUTPUT='' python3 tools/scripts/classify_changes.py \
+              env GITHUB_OUTPUT='' "$ci_python" tools/scripts/classify_changes.py \
                 --mode=diff --comparison=trees --base "$base" --json
             )
             native_build_required=$(
-              python3 -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
+              "$ci_python" -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
                 <<<"$classification"
             )
             if [ "$EVENT_NAME" = pull_request ] \
                 || [ "$EVENT_NAME" = merge_group ]; then
               candidate_ios_compile_required=$(
-                python3 -c 'import json,sys; value=json.load(sys.stdin).get("ios_compile_required", True); print("false" if value is False else "true")' \
+                "$ci_python" -c 'import json,sys; value=json.load(sys.stdin).get("ios_compile_required", True); print("false" if value is False else "true")' \
                   <<<"$classification" 2>/dev/null || true
               )
               if [ "$candidate_ios_compile_required" = false ]; then
@@ -937,7 +943,7 @@ jobs:
               if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
                   && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
                   >"$trusted_bump_check" 2>/dev/null \
-                  && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+                  && GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
                     --repo . \
                     --event-name "$EVENT_NAME" \
                     --event-path "$EVENT_PATH" \
@@ -950,7 +956,7 @@ jobs:
           else
             # Never trust a retained remote-tracking ref in a reusable shallow
             # checkout. No immutable event base means the optimization is off.
-            env GITHUB_OUTPUT='' python3 tools/scripts/classify_changes.py --mode=files
+            env GITHUB_OUTPUT='' "$ci_python" tools/scripts/classify_changes.py --mode=files
           fi
           echo "native_build_required=$native_build_required" >> "$GITHUB_OUTPUT"
           echo "ios_compile_required=$ios_compile_required" >> "$GITHUB_OUTPUT"

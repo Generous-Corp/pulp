@@ -1353,6 +1353,15 @@ diff is always empty — so a docs-only merge is otherwise indistinguishable fro
 a core merge, and the run never skips. A docs-only merge to main now correctly
 skips the whole matrix.
 
+The classifier also establishes its interpreter explicitly. A macOS
+LaunchAgent normally sees only `/usr/bin:/bin:/usr/sbin:/sbin`; on M5 that made
+the preamble use Apple's Python 3.9 and fail importing `tomllib`, while the same
+merge group passed when M3 claimed it. `build.yml` prepends the Homebrew and
+user-bin locations, resolves one Python 3.11+ executable through
+`tools/ci/find_python311.py`, and uses that executable for every classifier and
+JSON parser in the job. Keep this fail-closed interpreter selection with the
+self-hosted preamble route; interactive-shell PATH is not fleet configuration.
+
 One semantic fast path sits above that path classifier. A same-repository
 `release/version-bump` pull request may skip the native matrix and the required
 WebCLAP proof only when the protected base's
