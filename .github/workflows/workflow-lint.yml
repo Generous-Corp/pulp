@@ -43,6 +43,8 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
+      - 'tools/scripts/test_coverage_surface_contract.py'
+      - 'ci/coverage-surfaces.yaml'
       - 'tools/scripts/generated_version_bump_check.py'
       - 'tools/scripts/test_generated_version_bump_check.py'
       - 'tools/scripts/release_product_matrix.json'
@@ -127,6 +129,8 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
+      - 'tools/scripts/test_coverage_surface_contract.py'
+      - 'ci/coverage-surfaces.yaml'
       - 'tools/scripts/generated_version_bump_check.py'
       - 'tools/scripts/test_generated_version_bump_check.py'
       - 'tools/scripts/release_product_matrix.json'
@@ -265,6 +269,7 @@ jobs:
           python3 tools/scripts/test_verify_control_shipping_native_evidence.py
           python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py
+          python3 tools/scripts/test_coverage_surface_contract.py
           python3 tools/scripts/test_generated_version_bump_check.py
 
       - name: Workflow lint regression contract

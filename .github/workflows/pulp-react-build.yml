@@ -101,7 +101,7 @@ jobs:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-pulp-react-${{ github.sha }}
+          receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   import-ir:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
