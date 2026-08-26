@@ -4,19 +4,30 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
-from collections.abc import Callable, Sequence
+import urllib.parse
+from collections.abc import Callable, Iterator, Sequence
 
 MANIFEST = pathlib.Path(__file__).with_name("linux_build_deps.json")
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
 MAX_ATTEMPTS = 3
+UNRELATED_THIRD_PARTY_APT_HOSTS = frozenset({"packages.microsoft.com"})
+APT_SOURCE_SUFFIXES = frozenset({".list", ".sources"})
+URL_RE = re.compile(r"https?://[^\s'\"]+")
+ONE_LINE_SOURCE_RE = re.compile(
+    r"^\s*deb(?:-src)?\s+(?:\[[^\]]*\]\s+)?(?P<uri>\S+)",
+    re.IGNORECASE,
+)
 
 
 def load_profiles(path: pathlib.Path = MANIFEST) -> dict[str, list[str]]:
@@ -112,13 +123,25 @@ def run_with_retry(
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
     attempts: int = MAX_ATTEMPTS,
-) -> None:
+    capture_output: bool = False,
+    retry_if: Callable[[subprocess.CompletedProcess[str]], bool] | None = None,
+) -> subprocess.CompletedProcess[str]:
     for attempt in range(1, attempts + 1):
-        result = runner(command, check=False, text=True)
+        kwargs: dict[str, object] = {"check": False, "text": True}
+        if capture_output:
+            kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = runner(command, **kwargs)
         if result.returncode == 0:
-            return
-        if attempt == attempts:
-            raise subprocess.CalledProcessError(result.returncode, command)
+            return result
+        output = result.stdout or ""
+        if output:
+            print(output.rstrip(), file=sys.stderr)
+        if attempt == attempts or (retry_if is not None and not retry_if(result)):
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                command,
+                output=output,
+            )
         delay = 5 * attempt
         print(
             f"apt command failed (attempt {attempt}/{attempts}); "
@@ -126,22 +149,204 @@ def run_with_retry(
             file=sys.stderr,
         )
         sleeper(delay)
+    raise AssertionError("unreachable")
 
 
-def install(packages: Sequence[str]) -> None:
-    if sys.platform != "linux":
+def failed_apt_403_hosts(output: str) -> set[str]:
+    """Return repository hosts named by apt as HTTP 403 failures."""
+
+    hosts: set[str] = set()
+    pending_error_hosts: set[str] = set()
+    for line in output.splitlines():
+        stripped = line.strip()
+        line_hosts = {
+            urllib.parse.urlparse(url.rstrip(".,;:)")).hostname
+            for url in URL_RE.findall(stripped)
+        }
+        line_hosts.discard(None)
+        if stripped.startswith("Err:"):
+            pending_error_hosts = {str(host) for host in line_hosts}
+        if "403" not in stripped:
+            continue
+        if "Failed to fetch" in stripped or stripped.startswith("Err:"):
+            hosts.update(str(host) for host in line_hosts)
+        elif pending_error_hosts:
+            hosts.update(pending_error_hosts)
+        pending_error_hosts.clear()
+    return hosts
+
+
+def is_quarantinable_apt_failure(result: subprocess.CompletedProcess[str]) -> bool:
+    hosts = failed_apt_403_hosts(result.stdout or "")
+    return bool(hosts) and hosts <= UNRELATED_THIRD_PARTY_APT_HOSTS
+
+
+def _active_source_uris(path: pathlib.Path) -> set[str]:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".list":
+        return {
+            match.group("uri")
+            for line in text.splitlines()
+            if (match := ONE_LINE_SOURCE_RE.match(line))
+        }
+
+    uris: set[str] = set()
+    for paragraph in re.split(r"\n\s*\n", text):
+        if re.search(r"(?im)^Enabled:\s*no\s*$", paragraph):
+            continue
+        lines = paragraph.splitlines()
+        for index, line in enumerate(lines):
+            match = re.match(r"(?i)^URIs:\s*(.*)$", line)
+            if not match:
+                continue
+            values = [match.group(1)]
+            for continuation in lines[index + 1 :]:
+                if not continuation.startswith((" ", "\t")):
+                    break
+                values.append(continuation.strip())
+            uris.update(" ".join(values).split())
+    return uris
+
+
+def _source_uri_host(uri: str) -> str | None:
+    if urllib.parse.urlparse(uri).scheme not in {"http", "https"}:
+        return None
+    return urllib.parse.urlparse(uri).hostname
+
+
+def _apt_source_files(source_root: pathlib.Path) -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    primary = source_root / "sources.list"
+    if primary.is_file():
+        files.append(primary)
+    parts = source_root / "sources.list.d"
+    if parts.is_dir():
+        files.extend(
+            path
+            for path in sorted(parts.iterdir())
+            if path.is_file() and path.suffix in APT_SOURCE_SUFFIXES
+        )
+    return files
+
+
+@contextlib.contextmanager
+def quarantined_apt_sources(
+    source_root: pathlib.Path,
+    failing_hosts: set[str],
+) -> Iterator[tuple[list[str], list[pathlib.Path]]]:
+    """Yield apt options excluding dedicated files for exact failing hosts.
+
+    A file that mixes a failing third-party host with any other repository is
+    rejected rather than partially rewritten. This keeps distribution and
+    profile-required repositories byte-for-byte intact.
+    """
+
+    source_files = _apt_source_files(source_root)
+    quarantined: list[pathlib.Path] = []
+    mixed: list[pathlib.Path] = []
+    for path in source_files:
+        uris = _active_source_uris(path)
+        hosts = {_source_uri_host(uri) for uri in uris}
+        if not hosts.intersection(failing_hosts):
+            continue
+        if uris and all(_source_uri_host(uri) in failing_hosts for uri in uris):
+            quarantined.append(path)
+        else:
+            mixed.append(path)
+    if mixed:
+        joined = ", ".join(str(path) for path in mixed)
+        raise RuntimeError(
+            "refusing to quarantine apt source file(s) that also contain "
+            f"preserved repositories: {joined}"
+        )
+    if not quarantined:
+        hosts = ", ".join(sorted(failing_hosts))
+        raise RuntimeError(
+            "apt reported failing third-party host(s) but no dedicated source "
+            f"file was found: {hosts}"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="pulp-apt-sources-") as directory:
+        temporary_root = pathlib.Path(directory)
+        temporary_parts = temporary_root / "sources.list.d"
+        temporary_parts.mkdir()
+        temporary_primary = temporary_root / "sources.list"
+        primary = source_root / "sources.list"
+        if primary.is_file() and primary not in quarantined:
+            shutil.copyfile(primary, temporary_primary)
+        else:
+            temporary_primary.touch()
+        for path in source_files:
+            if path == primary or path in quarantined:
+                continue
+            shutil.copyfile(path, temporary_parts / path.name)
+        options = [
+            "-o",
+            f"Dir::Etc::sourcelist={temporary_primary}",
+            "-o",
+            f"Dir::Etc::sourceparts={temporary_parts}",
+        ]
+        yield options, quarantined
+
+
+def install(
+    packages: Sequence[str],
+    *,
+    source_root: pathlib.Path = pathlib.Path("/etc/apt"),
+    platform: str = sys.platform,
+    euid: int | None = None,
+    subprocess_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    if platform != "linux":
         raise RuntimeError("Linux dependency installation is supported only on Linux")
-    prefix = [] if os.geteuid() == 0 else ["sudo"]
+    effective_euid = os.geteuid() if euid is None else euid
+    prefix = [] if effective_euid == 0 else ["sudo"]
     env = os.environ.copy()
     env["DEBIAN_FRONTEND"] = "noninteractive"
 
-    def runner(
-        command: Sequence[str], *, check: bool, text: bool
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(command, check=check, text=text, env=env)
+    def runner(command: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess_runner(command, env=env, **kwargs)
 
-    run_with_retry([*prefix, "apt-get", "update"], runner=runner)
-    run_with_retry([*prefix, "apt-get", "install", "-y", *packages], runner=runner)
+    try:
+        run_with_retry(
+            [*prefix, "apt-get", "update"],
+            runner=runner,
+            sleeper=sleeper,
+            capture_output=True,
+            retry_if=lambda result: not is_quarantinable_apt_failure(result),
+        )
+    except subprocess.CalledProcessError as error:
+        failing_hosts = failed_apt_403_hosts(str(error.output or ""))
+        if not failing_hosts or not failing_hosts <= UNRELATED_THIRD_PARTY_APT_HOSTS:
+            raise
+        with quarantined_apt_sources(source_root, failing_hosts) as (
+            apt_options,
+            quarantined,
+        ):
+            print(
+                "apt source quarantine: HTTP 403 from unrelated host(s) "
+                f"{', '.join(sorted(failing_hosts))}; temporarily excluding "
+                + ", ".join(str(path) for path in quarantined),
+                file=sys.stderr,
+            )
+            run_with_retry(
+                [*prefix, "apt-get", *apt_options, "update"],
+                runner=runner,
+                sleeper=sleeper,
+                capture_output=True,
+            )
+            run_with_retry(
+                [*prefix, "apt-get", *apt_options, "install", "-y", *packages],
+                runner=runner,
+                sleeper=sleeper,
+            )
+            return
+    run_with_retry(
+        [*prefix, "apt-get", "install", "-y", *packages],
+        runner=runner,
+        sleeper=sleeper,
+    )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

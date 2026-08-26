@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260817-plugin-host-overlay-dismissal",
+  "kind": "change",
+  "created_at": "2026-08-17T22:33:13Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp carries two independent popup-dismissal mechanisms that every platform host wires separately: ComboBox::notify_global_click for the native combo dropdown, and the View active-overlay slot that @pulp/react's overlay prop and every imported or materialized design popover claims. The standalone macOS host and the web host consult both; the macOS and Windows DAW plugin hosts consulted only the ComboBox one, so an outside press inside a plugin editor never reached the generalized dismissal path. Making the decision portable requires a route_press_to_active_overlay verb in pointer dispatch next to deliver_mouse_down, which is where Pulp already hoists host press logic so it can be exercised headlessly. This is Pulp-specific plug-in-host and @pulp/react bridge integration: the duplicated mechanisms exist because Pulp grew a native widget dropdown and a React-driven overlay slot separately, and the fix binds them to Pulp's own per-host press paths. A future Vellum framework should carry a single overlay-dismissal contract in its own host abstraction rather than adopt this reconciliation.",
+  "tests": [
+    "Vellum freeze",
+    "overlay-dismissal-wiring",
+    "pulp-test-combo-dropdown",
+    "pulp-test-overlay-routing"
+  ],
+  "disposition": "pulp-only"
+}

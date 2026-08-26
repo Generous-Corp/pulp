@@ -263,6 +263,56 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
         return;
     }
 
+    // Generalized overlay routing, in the same slot the standalone host runs
+    // it: after the ComboBox popup path and before the regular hit_test. A
+    // React / imported-design popover claims `View::active_overlay_`, which
+    // this host previously never consulted — so clicking outside such a
+    // dropdown inside a DAW editor never closed it, while the identical UI
+    // dismissed correctly in the standalone app.
+    {
+        const auto overlay_press = pulp::view::route_press_to_active_overlay(
+            *root, pt);
+        if (overlay_press.routing == pulp::view::OverlayPressRouting::routed) {
+            drag_target->set(overlay_press.target);
+            pulp::view::ComboBox::notify_global_click(drag_target->live_in(*root));
+            // Match the ordinary plug-in press path: native IME teardown must
+            // happen before focus transfer. The callback may synchronously
+            // rebuild the overlay, so resolve through the root-owned overlay
+            // slot again instead of retaining the pre-callback target.
+            if (auto* te = dynamic_cast<pulp::view::TextEditor*>(
+                    pulp_focus_under_root(root));
+                te && te->has_marked_text()) {
+                pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
+                const auto refreshed = pulp::view::route_press_to_active_overlay(
+                    *root, pt);
+                if (refreshed.routing !=
+                    pulp::view::OverlayPressRouting::routed) {
+                    drag_target->reset();
+                    return;
+                }
+                drag_target->set(refreshed.target);
+            }
+            auto* target = drag_target->live_in(*root);
+            if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+                drag_target->reset();
+                return;
+            }
+            // bubble=false matches the standalone host's overlay path, which
+            // has never bubbled pointerdown to ancestors from inside an
+            // overlay. Unifying that is a separate, deliberate decision.
+            if (!pulp::view::deliver_mouse_down(
+                    *root, drag_target->live_in(*root), pt,
+                    pulp::view::mac_geometry::modifiers_from_ns_flags(
+                        event.modifierFlags),
+                    static_cast<int>(event.clickCount), /*bubble=*/false))
+                drag_target->reset();
+            return;
+        }
+        // dismissed / not_hittable / no_overlay all fall through to the
+        // regular path below, so an outside click both closes the overlay and
+        // activates whatever sits underneath.
+    }
+
     pulp::view::MouseEvent gesture_event;
     gesture_event.position = pt;
     gesture_event.window_position = pt;
@@ -314,6 +364,26 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
   } catch (...) {
     std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw (unknown)\n");
   }
+}
+
+struct PulpPluginContextPressResult {
+    bool handled = false;
+    bool overlay_dismissed = false;
+};
+
+PulpPluginContextPressResult pulp_plugin_context_press(
+    pulp::view::View* root, pulp::view::Point point) {
+    if (!root) return {};
+    const auto overlay_press = pulp::view::route_press_to_active_overlay(
+        *root, point);
+    auto* target = overlay_press.routing ==
+                           pulp::view::OverlayPressRouting::routed
+                       ? overlay_press.target
+                       : root->hit_test(point);
+    return {
+        pulp::view::dispatch_context_menu(*root, target, point),
+        overlay_press.routing == pulp::view::OverlayPressRouting::dismissed,
+    };
 }
 
 // `event` supplies the modifier flags and click count the drag carries. They
@@ -949,9 +1019,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
   @try {
     try {
         if (!self.rootView) { [super rightMouseDown:event]; return; }
-        if (pulp::view::dispatch_context_menu(*self.rootView, [self localPoint:event]))
+        const auto result = pulp_plugin_context_press(
+            self.rootView, [self localPoint:event]);
+        if (result.handled || result.overlay_dismissed)
             [self setNeedsDisplay:YES];
-        else
+        if (!result.handled)
             [super rightMouseDown:event];  // let the host show its own menu
     } catch (const std::exception& e) {
         std::cerr << "PulpPluginView rightMouseDown error: " << e.what() << "\n";
@@ -1672,6 +1744,26 @@ private:
     pulp_plugin_mouse_down(self, self.rootView, event, [self localPoint:event], &_dragTarget);
     if (self.rootView) self.rootView->request_repaint();
     [self syncKeyFocus];
+}
+- (void)rightMouseDown:(NSEvent*)event {
+  @try {
+    try {
+        if (!self.rootView) { [super rightMouseDown:event]; return; }
+        const auto result = pulp_plugin_context_press(
+            self.rootView, [self localPoint:event]);
+        if (result.handled || result.overlay_dismissed)
+            self.rootView->request_repaint();
+        if (!result.handled)
+            [super rightMouseDown:event];
+    } catch (const std::exception& e) {
+        std::cerr << "PulpGpuPluginView rightMouseDown error: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "PulpGpuPluginView rightMouseDown error: unknown exception\n";
+    }
+  } @catch (NSException* exception) {
+    std::cerr << "PulpGpuPluginView rightMouseDown NSException: "
+              << [[exception name] UTF8String] << "\n";
+  }
 }
 - (void)mouseDragged:(NSEvent*)event {
     pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);

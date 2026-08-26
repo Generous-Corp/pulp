@@ -141,12 +141,31 @@ public:
             // This host owns one capture bracket. Close a prior button before
             // accepting a chord mate instead of overwriting its target.
             if (session_.active()) cancel_gesture();
+            last_point_ = pt;
+            View& root = host_.input_root();
+            // Native ComboBox menus are paint-only overlays. They have first
+            // refusal, matching the macOS host: consulting the generalized
+            // overlay first could dismiss it (and run arbitrary callbacks)
+            // before a click visibly inside this independent popup arrives.
+            if (button == MouseButton::left &&
+                route_press_to_open_combo(root, pt, modifiers)) {
+                host_.input_request_repaint();
+                return;
+            }
             if (!session_.begin(button)) return;
             generation = session_.generation();
             const auto accepts_original = [this, generation, button] {
                 return session_.accepts(generation, button);
             };
-            last_point_ = pt;
+            // Outside presses must dismiss this editor's generalized overlay
+            // even when a gesture recognizer consumes the press below.
+            const auto overlay_press = route_press_to_active_overlay(root, pt);
+            // Outside-dismiss callbacks are arbitrary application code and may
+            // synchronously replace the pointer bracket. A stale outer frame
+            // must not feed its press into the replacement's gesture session.
+            if (!accepts_original()) return;
+            if (overlay_press.routing == OverlayPressRouting::routed)
+                drag_target_.set(overlay_press.target);
             MouseEvent gesture_event;
             gesture_event.position = pt;
             gesture_event.window_position = pt;
@@ -154,7 +173,13 @@ public:
             gesture_event.modifiers = modifiers;
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
-            if (yield_to_gesture(gesture_event)) {
+            // Claimed overlays paint in a separate top layer, so the ordinary
+            // gesture arbiter's root hit-test can resolve a later sibling
+            // underneath. Match the standalone/mac overlay path: deliver the
+            // resolved overlay press directly rather than offering it to an
+            // unrelated underlay recognizer.
+            if (overlay_press.routing != OverlayPressRouting::routed &&
+                yield_to_gesture(gesture_event)) {
                 // A synchronous gesture callback may have terminalized this
                 // bracket. Capture only for the still-current claimed session.
                 if (accepts_original()) host_.input_capture_pointer();
@@ -162,8 +187,13 @@ public:
             }
             if (!accepts_original()) return;
 
-            View& root = host_.input_root();
-            drag_target_.set(root.hit_test(pt));
+            // Consult the generalized overlay slot before the regular hit
+            // test, so a React / imported-design popover both receives clicks
+            // aimed at it and is dismissed by a click outside it. This host
+            // previously handled only the native ComboBox mechanism below,
+            // which left such a popover open forever.
+            if (overlay_press.routing != OverlayPressRouting::routed)
+                drag_target_.set(root.hit_test(pt));
             View* drag_target = drag_target_.live_in(root);
             if (button == MouseButton::left)
                 ComboBox::notify_global_click(drag_target);
@@ -199,7 +229,8 @@ public:
             // callback may have synchronously cancelled/replaced the session.
             if (!accepts_original()) return;
             if (!target_alive) drag_target_.reset();
-            if (button == MouseButton::right) dispatch_context_menu(root, pt);
+            if (button == MouseButton::right)
+                dispatch_context_menu(root, drag_target_.live_in(root), pt);
             if (!accepts_original()) return;
             host_.input_request_repaint();
         } catch (const std::exception& e) {
@@ -458,6 +489,26 @@ public:
     }
 
 private:
+    static bool route_press_to_open_combo(View& root, Point pt,
+                                          std::uint16_t modifiers) {
+        auto* combo = ComboBox::active_popup_in(root);
+        if (!combo) return false;
+        float x = 0, y = 0, width = 0, height = 0;
+        if (!combo->dropdown_window_rect(x, y, width, height) ||
+            pt.x < x || pt.x > x + width ||
+            pt.y < y || pt.y > y + height)
+            return false;
+        MouseEvent event;
+        event.position = point_to_local(pt, combo, &root);
+        event.window_position = pt;
+        event.button = MouseButton::left;
+        event.modifiers = modifiers;
+        event.is_down = true;
+        event.phase = MousePhase::press;
+        combo->on_mouse_event(event);
+        return true;
+    }
+
     /// Offer a press/drag to the gesture arbiter. Returns whether the arbiter
     /// took the event, in which case raw delivery is suppressed for it.
     bool yield_to_gesture(const MouseEvent& event) {

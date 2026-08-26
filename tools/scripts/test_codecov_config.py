@@ -42,7 +42,7 @@ EXPECTED_NON_CORE_COMPONENT_IDS = {
     # component already owns.
     "android", "apple", "linux", "windows", "web",
     # surfaces
-    "cli", "inspect", "ship", "tools",
+    "cli", "inspect", "ship", "tools", "pulp-react",
 }
 
 # Upload-axis flags are intentionally not components: they describe
@@ -53,6 +53,9 @@ EXPECTED_UPLOAD_ONLY_FLAGS = {
     "os-macos",
     "os-windows",
     "python-tools",
+    "android-kotlin",
+    "apple-swift",
+    "pulp-react",
 }
 
 
@@ -196,52 +199,19 @@ class CodecovYamlStructure(unittest.TestCase):
                     f"{component_id} component path must recurse with /**: {path}",
                 )
 
-    def test_flags_stay_aligned_with_components_and_upload_axes(self):
-        # Path-based flags must match component ids 1:1, with only the
-        # explicit upload-axis os-* flags allowed as extras.
+    def test_flags_match_real_upload_producers(self):
+        # Flags identify report producers. Components independently provide
+        # path-based source slicing, so component ids must not be repeated as
+        # plausible-but-never-uploaded flags.
         flag_names = set(self.doc.get("flags", {}).keys())
-        comp_ids = expected_component_ids()
         self.assertEqual(
             flag_names,
-            comp_ids | EXPECTED_UPLOAD_ONLY_FLAGS,
-            "flags drifted from the expected component ids plus upload-only "
-            "os-* flags — Codecov dashboard filters will be inconsistent.",
+            EXPECTED_UPLOAD_ONLY_FLAGS,
+            "flags drifted from the reports the workflows actually upload",
         )
 
-    def test_flags_have_expected_path_and_carryforward_shape(self):
+    def test_upload_flags_are_current_and_not_path_scoped(self):
         flags = self.doc["flags"]
-        comp_ids = expected_component_ids()
-
-        for flag_name in sorted(comp_ids):
-            with self.subTest(flag=flag_name):
-                flag = flags[flag_name]
-                self.assertIs(
-                    flag.get("carryforward"),
-                    True,
-                    f"{flag_name} flag must carry forward coverage",
-                )
-                paths = flag.get("paths")
-                self.assertIsInstance(
-                    paths,
-                    list,
-                    f"{flag_name} flag must declare a paths list",
-                )
-                self.assertGreater(
-                    len(paths),
-                    0,
-                    f"{flag_name} flag must declare at least one path",
-                )
-                for path in paths:
-                    self.assertIsInstance(
-                        path,
-                        str,
-                        f"{flag_name} flag path must be a string",
-                    )
-                    self.assertTrue(
-                        path.endswith("/"),
-                        f"{flag_name} flag path must remain directory-scoped: {path}",
-                    )
-
         for flag_name in sorted(EXPECTED_UPLOAD_ONLY_FLAGS):
             with self.subTest(flag=flag_name):
                 flag = flags[flag_name]
@@ -304,21 +274,18 @@ class CodecovYamlStructure(unittest.TestCase):
 
     def test_core_axes_use_canonical_directory_mappings(self):
         # Core subsystem ids come directly from core/* and should map to
-        # exactly that directory in both flag and component declarations.
+        # exactly that directory in component declarations.
         # Components MAY additionally declare `!`-prefix exclude patterns
         # to push platform-specific subtrees into the matching platform
         # component (#1055); the first include path must still be the
         # canonical `core/<name>/**` directory glob.
-        flags = self.doc["flags"]
         components = self.components_by_id()
 
         for entry in CORE_DIR.iterdir():
             if not entry.is_dir():
                 continue
-            expected_flag_paths = [f"core/{entry.name}/"]
             expected_canonical = f"core/{entry.name}/**"
             with self.subTest(component=entry.name):
-                self.assertEqual(flags[entry.name]["paths"], expected_flag_paths)
                 paths = components[entry.name]["paths"]
                 include_paths = [p for p in paths if not p.startswith("!")]
                 self.assertEqual(
@@ -357,13 +324,12 @@ class CodecovYamlStructure(unittest.TestCase):
     def test_platform_axes_keep_live_repo_path_conventions(self):
         # Regression: the repo's Windows sources live under `win/`,
         # not `windows/`, and the platform axes need the live naming.
-        flags = self.doc["flags"]
         components = {
             component_id: set(entry.get("paths", []))
             for component_id, entry in self.components_by_id().items()
         }
 
-        windows_paths = set(flags["windows"]["paths"]) | components["windows"]
+        windows_paths = components["windows"]
         self.assertTrue(
             any("/win/" in path for path in windows_paths),
             "windows platform axis lost the repo's `win/` path mapping",
@@ -373,7 +339,7 @@ class CodecovYamlStructure(unittest.TestCase):
             "windows platform axis must still cover WASAPI-specific paths",
         )
 
-        linux_paths = set(flags["linux"]["paths"]) | components["linux"]
+        linux_paths = components["linux"]
         self.assertTrue(
             any("/linux/" in path for path in linux_paths),
             "linux platform axis must cover `linux/` paths",
@@ -383,7 +349,7 @@ class CodecovYamlStructure(unittest.TestCase):
             "linux platform axis must keep the ALSA slice",
         )
 
-        apple_paths = set(flags["apple"]["paths"]) | components["apple"]
+        apple_paths = components["apple"]
         self.assertTrue(
             any("/mac/" in path for path in apple_paths),
             "apple platform axis must cover `mac/` paths",
@@ -393,7 +359,7 @@ class CodecovYamlStructure(unittest.TestCase):
             "apple platform axis must cover `ios/` paths",
         )
 
-        android_paths = set(flags["android"]["paths"]) | components["android"]
+        android_paths = components["android"]
         self.assertTrue(
             any("/android/" in path for path in android_paths),
             "android platform axis must cover Android source paths",
@@ -403,25 +369,21 @@ class CodecovYamlStructure(unittest.TestCase):
         # inspect/ is a first-party C++ surface and is included in the
         # native coverage object list, so it must not fall through as an
         # uncategorized Codecov path.
-        flags = self.doc["flags"]
         components = {
             component_id: set(entry.get("paths", []))
             for component_id, entry in self.components_by_id().items()
         }
 
-        self.assertEqual(set(flags["inspect"]["paths"]), {"inspect/"})
         self.assertEqual(components["inspect"], {"inspect/**"})
 
     def test_specific_tools_surface_precedes_broad_tools_surface(self):
         # The CLI slice is more specific than tools/. Keep it before the
         # broad tools slice anywhere YAML order affects dashboard grouping.
-        flag_order = list(self.doc["flags"].keys())
         component_order = [
             entry["component_id"]
             for entry in self.component_entries()
         ]
 
-        self.assertLess(flag_order.index("cli"), flag_order.index("tools"))
         self.assertLess(component_order.index("cli"), component_order.index("tools"))
 
     def test_comment_policy_requires_coverage_changes(self):

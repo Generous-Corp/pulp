@@ -1301,12 +1301,11 @@ public:
     /// Does NOT fire `on_overlay_dismissed` — used by JSX unmount and the
     /// View destructor where React already knows the popover is closing.
     void release_overlay();
-    /// Dismiss-path release. Releases the active overlay (if any) and fires its
-    /// `on_overlay_dismissed` callback so React state can flip `setOpen(false)`
-    /// to keep the JSX tree in sync. Called by the platform window host from
-    /// the ESC keypath and the outside-click path. No-op if nothing claimed the
-    /// slot.
+    /// Dismiss the active overlay and fire `on_overlay_dismissed` so React state
+    /// stays synchronized. Used by platform ESC and outside-click paths.
     static void dismiss_active_overlay();
+    /// Hosted variant acts only on `scope`'s interaction slot.
+    static void dismiss_active_overlay(View& scope);
     /// Fired when the active overlay is dismissed via a framework
     /// auto-dismissal path (ESC / outside-click). Not fired for
     /// `release_overlay()` (JSX unmount / destructor). The bridge uses this to

@@ -84,6 +84,7 @@ MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
 IMPORT_PROV="$ROOT/tools/scripts/check_import_provenance.py"
 CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
+CODECOV_SURFACE_TEST="$ROOT/tools/scripts/test_coverage_surface_contract.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
@@ -392,14 +393,16 @@ fi
 # list mirrors coverage_config.json's diff_cover_excludes. Sub-second.
 # Needs PyYAML; skip cleanly if the local interpreter lacks it (CI's
 # codecov-config-validation job is the authoritative gate).
-if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
+if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ] && [ -f "$CODECOV_SURFACE_TEST" ]; then
     echo "" >&2
     echo "▸ codecov-config drift (flags/components mirror core/*; ignore mirrors diff_cover_excludes)" >&2
     if ! "$PYTHON" -c "import yaml" >/dev/null 2>&1; then
         echo "  codecov-config: skipped (PyYAML not installed locally; CI enforces it)." >&2
-    elif ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
+    elif ! "$PYTHON" "$CODECOV_SURFACE_TEST" >/dev/null 2>&1 \
+            || ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
             || ! "$PYTHON" "$CODECOV_COMP_TEST" >/dev/null 2>&1; then
         echo "  codecov-config: drift detected — codecov.yml is stale. Run:" >&2
+        echo "    python3 tools/scripts/test_coverage_surface_contract.py" >&2
         echo "    python3 tools/scripts/test_codecov_config.py" >&2
         echo "    python3 tools/scripts/test_codecov_components.py" >&2
         fail=1

@@ -29,6 +29,21 @@ Successful output is:
   tokens.json
 ```
 
+The viewport starts at `--initial-width` and grows once, by both clipped
+margins, when the settled layout centres content past its left or top edge.
+`--width` replaces that correction with a width the caller already knows the
+layout resolves at, which is the lever for a responsive shell whose own width
+changes at a breakpoint the single bounded step lands inside. The two are
+mutually exclusive, and `provenance.viewport.width_pinned` records which
+decided the capture. No width recovers content anchored left of the document
+origin (an absolutely positioned element at a negative left, `position: fixed`,
+or a negative margin on `<html>`), and a capture refused for that reason says
+so rather than naming a flag that cannot help. Raw bounds from a descendant
+clipped by an overflow-hidden ancestor are another non-width cause and are
+named explicitly rather than misdiagnosed as responsive layout. The supported `pulp
+import-design` entry point maps an explicit `--render-size WxH` to this pinned
+width; its default viewport remains an automatically correctable initial width.
+
 `--interactions <plan.json>` optionally reaches one deterministic secondary
 state before the same-frame evidence capture. Plans use
 `pulp-browser-interactions-v1` and contain only bounded `click`,

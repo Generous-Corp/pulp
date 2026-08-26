@@ -43,6 +43,7 @@ def receipt_summary(
         ]
         for axis, name in expected.items()
     }
+
     created_at = [
         artifact.get("created_at")
         for axis_matches in matches.values()
@@ -62,6 +63,44 @@ def receipt_summary(
     }
 
 
+def processed_upload_counts(
+    payload: dict[str, Any],
+    repository: str,
+    run_id: int,
+    required_flags: dict[str, str],
+) -> dict[str, Any]:
+    """Count exact-run Codecov uploads that reached the merged state."""
+    uploads = payload.get("results")
+    declared_count = payload.get("count")
+    if not isinstance(uploads, list) or not isinstance(declared_count, int):
+        raise ValueError("Codecov upload payload must contain count and results")
+    complete_page = declared_count == len(uploads)
+    expected_build_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+    boundaries = {
+        flag: _parse_github_timestamp(not_before)
+        for flag, not_before in required_flags.items()
+    }
+    if any(boundary is None for boundary in boundaries.values()):
+        raise ValueError("required flag boundaries must be ISO-8601 timestamps")
+    counts = {
+        flag: sum(
+            upload.get("build_url") == expected_build_url
+            and (
+                upload.get("state") == "merged"
+                or upload.get("state_name") == "MERGED"
+            )
+            and isinstance(upload.get("flags"), list)
+            and flag in upload["flags"]
+            and (created_at := upload.get("created_at")) is not None
+            and (created := _parse_github_timestamp(created_at)) is not None
+            and created >= boundaries[flag]
+            for upload in uploads
+        )
+        for flag in required_flags
+    }
+    return {"counts": counts, "complete_page": complete_page}
+
+
 def _parse_github_timestamp(value: str) -> dt.datetime | None:
     try:
         return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -71,17 +110,55 @@ def _parse_github_timestamp(value: str) -> dt.datetime | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sha", required=True)
+    parser.add_argument("--sha")
     parser.add_argument(
         "--required-axis",
         nargs="+",
-        required=True,
         metavar="AXIS=ATTEMPT",
         help="Required receipt axes and the latest workflow attempt that ran each axis.",
     )
+    parser.add_argument("--codecov-processed-run-id", type=int)
+    parser.add_argument("--repository")
+    parser.add_argument("--required-flag", nargs="+")
     args = parser.parse_args()
 
     payload = json.load(sys.stdin)
+
+    if args.codecov_processed_run_id is not None:
+        if args.sha or args.required_axis:
+            raise SystemExit("processed-upload mode cannot be combined with receipt mode")
+        if not args.repository or not args.required_flag:
+            raise SystemExit(
+                "processed-upload mode requires --repository and --required-flag"
+            )
+        required_flags: dict[str, str] = {}
+        for spec in args.required_flag:
+            try:
+                flag, not_before = spec.split("=", 1)
+            except ValueError:
+                raise SystemExit(f"invalid --required-flag value: {spec!r}") from None
+            if not flag or not not_before:
+                raise SystemExit(f"invalid --required-flag value: {spec!r}")
+            required_flags[flag] = not_before
+        if not isinstance(payload, dict):
+            raise SystemExit("Codecov upload payload must be an object")
+        try:
+            summary = processed_upload_counts(
+                payload,
+                args.repository,
+                args.codecov_processed_run_id,
+                required_flags,
+            )
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        print(json.dumps(summary, sort_keys=True))
+        return 0 if (
+            summary["complete_page"]
+            and all(count >= 1 for count in summary["counts"].values())
+        ) else 1
+
+    if not args.sha or not args.required_axis:
+        raise SystemExit("receipt mode requires --sha and --required-axis")
     artifacts = payload.get("artifacts", payload) if isinstance(payload, dict) else payload
     if not isinstance(artifacts, list):
         raise SystemExit("artifact payload must be a list or contain an artifacts list")

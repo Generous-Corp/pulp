@@ -44,7 +44,10 @@ Point point_to_local(Point root_pos, View* target, View* root) {
 }
 
 bool dispatch_context_menu(View& root, Point root_pos) {
-    View* target = root.hit_test(root_pos);
+    return dispatch_context_menu(root, root.hit_test(root_pos), root_pos);
+}
+
+bool dispatch_context_menu(View& root, View* target, Point root_pos) {
     if (!target || !target->on_context_menu) return false;
     auto callback = target->on_context_menu;
     callback(point_to_local(root_pos, target, &root));
@@ -664,6 +667,34 @@ void deliver_gesture_handoff(View& root, View* target, Point root_pt,
     // needed here. Empty MouseUpHost: a handoff must not synthesize a click.
     deliver_mouse_up(root, target, root_pt, modifiers, click_count,
                      MouseUpHost{});
+}
+
+OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
+    auto* state = root.existing_interaction();
+    auto* overlay = state ? state->active_overlay : nullptr;
+    if (!overlay) return {};
+
+    // The root-owned slot guarantees this overlay belongs to this editor. Keep
+    // the tree check as a stale-slot safety guard: a detached holder is treated
+    // like an outside press and dismissed only from this root's slot.
+    if (still_in_tree(overlay, &root) && overlay->overlay_contains(root_pt)) {
+        // Hit-test inside the overlay's own subtree so nested buttons and
+        // labels still receive the press. Only route when this resolves to a
+        // real view: a null result means the overlay's guards rejected the
+        // point, and force-dispatching to the overlay anyway would bypass
+        // them. Do not dismiss in that case — the overlay is still mounted.
+        if (auto* sub = overlay->hit_test(point_to_local(root_pt, overlay, &root)))
+            return {OverlayPressRouting::routed, sub};
+        return {OverlayPressRouting::not_hittable, nullptr};
+    }
+
+    // Outside the overlay: auto-release so "dismiss on outside click" works
+    // without every JSX caller registering a global click listener. Go through
+    // dismiss_active_overlay() rather than the bare release_overlay() so React
+    // state can flip setOpen(false) via on_overlay_dismissed; a bare release
+    // leaves the component believing it is still open.
+    View::dismiss_active_overlay(root);
+    return {OverlayPressRouting::dismissed, nullptr};
 }
 
 }  // namespace pulp::view

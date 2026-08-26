@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/platform/win_plugin_input_router.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/text_editor.hpp>
 
@@ -94,6 +95,40 @@ public:
     std::vector<MouseButton> presses;
     int downs = 0, ups = 0, cancels = 0, cancelled_events = 0, drags = 0;
     std::function<void()> on_down_cb;
+};
+
+class ClaimOnPressRecognizer final : public GestureRecognizer {
+protected:
+    void on_pointer_event(const MouseEvent& event,
+                          const GestureContext&) override {
+        if (event.phase == MousePhase::press)
+            transition_to(GestureState::began);
+    }
+};
+
+class CallbackClaimRecognizer final : public GestureRecognizer {
+public:
+    std::function<void()> callback;
+
+protected:
+    void on_pointer_event(const MouseEvent& event,
+                          const GestureContext&) override {
+        if (event.phase != MousePhase::press) return;
+        transition_to(GestureState::began);
+        if (callback) callback();
+    }
+};
+
+class ClaimOnSecondPressRecognizer final : public GestureRecognizer {
+protected:
+    void on_pointer_event(const MouseEvent& event,
+                          const GestureContext&) override {
+        if (event.phase == MousePhase::press && ++presses_ == 2)
+            transition_to(GestureState::began);
+    }
+
+private:
+    int presses_ = 0;
 };
 
 /// Root + one hit-testable probe child, the shape almost every case needs.
@@ -189,6 +224,165 @@ TEST_CASE("a target removed during native focus transfer is not dereferenced",
 
     CHECK_FALSE(router.gesture_active());
     CHECK_FALSE(router.has_captured_target());
+}
+
+TEST_CASE("a stale gesture callback frame preserves its replacement press",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto first_owned = std::make_unique<ProbeView>();
+    auto* first = first_owned.get();
+    first->set_bounds({0, 0, 100, 100});
+    auto second_owned = std::make_unique<ProbeView>();
+    auto* second = second_owned.get();
+    second->set_bounds({100, 0, 100, 100});
+    root.add_child(std::move(first_owned));
+    root.add_child(std::move(second_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    auto recognizer = std::make_unique<CallbackClaimRecognizer>();
+    auto* recognizer_ptr = recognizer.get();
+    recognizer->callback = [&] {
+        recognizer_ptr->callback = {};
+        router.on_mouse_down({150, 50}, MouseButton::left, 0);
+    };
+    first->add_gesture_recognizer(std::move(recognizer));
+
+    router.on_mouse_down({50, 50}, MouseButton::left, 0);
+
+    REQUIRE(router.gesture_active());
+    REQUIRE(router.captured_target() == second);
+    REQUIRE(second->downs == 1);
+}
+
+TEST_CASE("a right click routes its context menu to the active overlay",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    // The claiming wrapper is small; its overflow-visible child paints over
+    // a later sibling outside that wrapper because claimed overlays have their
+    // own paint pass. A regular root hit-test follows tree order and resolves
+    // the later sibling, while overlay-aware routing resolves the painted
+    // child.
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100, 100, 20, 20});
+    overlay->set_overflow(View::Overflow::visible);
+    auto popup_owned = std::make_unique<ProbeView>();
+    auto* popup = popup_owned.get();
+    popup->set_bounds({-80, -80, 60, 60});
+    int overlay_menus = 0;
+    popup->on_context_menu = [&](Point) { ++overlay_menus; };
+    overlay->add_child(std::move(popup_owned));
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    auto under_owned = std::make_unique<ProbeView>();
+    auto* under = under_owned.get();
+    under->set_bounds({0, 0, 200, 200});
+    int under_menus = 0;
+    under->on_context_menu = [&](Point) { ++under_menus; };
+    root.add_child(std::move(under_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({50, 50}, MouseButton::right, 0);
+
+    REQUIRE(overlay_menus == 1);
+    REQUIRE(under_menus == 0);
+}
+
+TEST_CASE("an underlay recognizer cannot claim a routed overlay press",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    auto under_owned = std::make_unique<ProbeView>();
+    auto* under = under_owned.get();
+    under->set_bounds({0, 0, 200, 200});
+    under->add_gesture_recognizer(std::make_unique<ClaimOnPressRecognizer>());
+    root.add_child(std::move(under_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({50, 50}, MouseButton::left, 0);
+
+    REQUIRE(overlay->downs == 1);
+    REQUIRE(under->downs == 0);
+    REQUIRE(router.captured_target() == overlay);
+}
+
+TEST_CASE("an overlay dismissal callback may replace the pointer bracket",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({0, 0, 40, 40});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    auto target_owned = std::make_unique<ProbeView>();
+    auto* replacement = target_owned.get();
+    replacement->set_bounds({0, 0, 200, 200});
+    replacement->add_gesture_recognizer(
+        std::make_unique<ClaimOnSecondPressRecognizer>());
+    root.add_child(std::move(target_owned));
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    overlay->on_overlay_dismissed = [&] {
+        router.on_mouse_down({100, 100}, MouseButton::left, 0);
+    };
+
+    router.on_mouse_down({150, 150}, MouseButton::left, 0);
+
+    REQUIRE(router.gesture_active());
+    REQUIRE(router.captured_target() == replacement);
+    REQUIRE(replacement->downs == 1);
+}
+
+TEST_CASE("an open ComboBox has priority over an independent active overlay",
+          "[win-input-router][runtime-eval]") {
+    View root;
+    root.set_bounds({0, 0, 240, 200});
+    auto combo_owned = std::make_unique<ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({0, 0, 140, 28});
+    combo->set_items({"One", "Two", "Three"});
+    combo->set_selected(0);
+    root.add_child(std::move(combo_owned));
+    MouseEvent open;
+    open.position = {70, 14};
+    open.window_position = {70, 14};
+    open.button = MouseButton::left;
+    open.is_down = true;
+    open.phase = MousePhase::press;
+    combo->on_mouse_event(open);
+    REQUIRE(combo->is_open());
+
+    auto overlay_owned = std::make_unique<ProbeView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({180, 150, 20, 20});
+    int dismissals = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissals; };
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    router.on_mouse_down({70, 54}, MouseButton::left, 0);
+
+    REQUIRE(combo->selected() == 1);
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(root.existing_interaction()->active_overlay == overlay);
+    REQUIRE(dismissals == 0);
 }
 
 TEST_CASE("a second button closes the first bracket rather than overwriting it",

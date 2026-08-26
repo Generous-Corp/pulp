@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7669-plugin-host-overlay-dismissal",
+  "created_at": "2026-08-17T22:33:13Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record teaching the macOS and Windows plug-in hosts to consult the generalized overlay slot on a press, which only the standalone and web hosts did, so a popover claimed by @pulp/react's overlay prop or by an imported design stayed open forever on an outside click inside a DAW editor. The decision moves into a route_press_to_active_overlay verb in pointer dispatch so it is testable headlessly, and a wiring gate fences it to the existing ComboBox dismissal so a host cannot wire one without the other. Watch-only: no design-import or rendering authority is transferred, and no imported node kind, asset path, or render backend changes behavior.",
+  "tests": [
+    "overlay-dismissal-wiring",
+    "pulp-test-overlay-routing",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

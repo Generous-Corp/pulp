@@ -31,6 +31,12 @@ permissions:
 on:
   push:
     branches: [main]
+  # The workflow contains a PR-only macOS matrix, changed-surface classifier,
+  # fork-safe upload policy, and diff-coverage report. Without this trigger all
+  # of those paths are unreachable and Codecov can never publish PR coverage.
+  # This workflow is advisory and is not a protected-main required check, so it
+  # runs beside the merge critical path instead of delaying it.
+  pull_request:
   schedule:
     # Supersession-immune main-dashboard refresh. Push-triggered coverage on a
     # high-churn main gets superseded while QUEUED (cancel-in-progress:false +
@@ -61,14 +67,10 @@ on:
         type: string
 
 concurrency:
-  # pulp#1884: do NOT cancel in-progress coverage runs on force-push.
-  # Codecov's `after_n_builds: 4` (pulp#1883) waits for all per-OS uploads
-  # before posting; if a force-push cancels the in-flight run mid-upload,
-  # some legs upload and others don't, Codecov gets stuck waiting for the
-  # missing leg, and the PR merges with no coverage signal (~70% of recent
-  # merges hit this). Letting the older run finish costs some compute on
-  # stale commits but guarantees every push ends with a real conclusion
-  # (success/failure) for the required `Diff coverage required` check.
+  # PR coverage is advisory and codecov.yml uses `after_n_builds: 1`, so a
+  # superseded PR head should stop consuming the native coverage fleet. Main,
+  # schedule, and manual refreshes remain non-cancelling: their cross-platform
+  # receipts are the durable dashboard-refresh authority.
   #
   # Known GitHub Actions limitation: concurrency only exposes `group`
   # and `cancel-in-progress`. There is no `queue: max` / queue-depth
@@ -82,36 +84,34 @@ concurrency:
   # Upstream tracking:
   #   https://github.com/orgs/community/discussions/12835
   #
-  # DELIBERATELY kept `false` (not flipped to `true`): the Coverage-run
-  # hang fixed alongside this comment was caused by missing
-  # `timeout-minutes` on the `coverage` matrix job and `coverage-diff-gate`
-  # — NOT by superseded runs piling up. Those job-level timeouts now bound
-  # every run to a few hours max regardless of `cancel-in-progress`.
-  # Flipping to `true` would reintroduce the pulp#1884 Codecov
-  # stuck-upload bug (cancel mid-`after_n_builds: 4` → no coverage signal
-  # on ~70% of merges). The timeout backstop is the correct fix; staying
-  # `false` preserves the coverage signal.
+  # The pulp#1884 cancellation incident applied to a multi-upload PR report.
+  # The current PR lane has one macOS upload and codecov.yml intentionally
+  # declares `after_n_builds: 1`, so cancelling a superseded PR SHA cannot
+  # strand a partial aggregate. Job-level timeouts remain the backstop for the
+  # non-cancelling main/schedule/manual refreshes.
   # Scheduled dashboard-refresh runs get their OWN group so push churn on a
   # busy main cannot supersede them — the failure mode that left Codecov
   # showing only packages/pulp-react/src for ~2 weeks (every push-triggered
   # main run was cancelled while queued, never uploading the C++ flags).
   # Push/PR runs keep the per-ref group + the queue-depth-1 semantics
-  # documented above.
+  # documented above. Only PR heads opt into cancellation.
   group: coverage-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'scheduled-refresh' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ── Codecov config drift gate (screams on stale codecov.yml) ───────────
-  # codecov.yml's flags + components must mirror the live core/* tree, and
+  # codecov.yml's producer flags + path components must match the semantic
+  # surface manifest and live core/* tree, and
   # its `ignore:` list must mirror coverage_config.json's diff_cover_excludes
   # so the Codecov bot and the Pulp diff-cover gate count the same lines.
-  # When a new core/<sub>/ subsystem lands without a matching flag+component,
+  # When a new core/<sub>/ subsystem lands without a matching component,
   # its coverage is silently dropped from the sliced dashboard; when a
   # platform subtree isn't `!`-excluded it gets double-counted; when the
   # two ignore lists drift the bot fires a false low-patch-coverage check.
   # All three are pure-config faults invisible to a normal build, so this
   # job runs on every PR with no native build and fails loudly on drift.
-  # These contract tests (test_codecov_config.py / test_codecov_components.py)
+  # These contract tests (test_coverage_surface_contract.py /
+  # test_codecov_config.py / test_codecov_components.py)
   # were authored alongside #1055 but were never wired into a gate — the
   # graph/scene subsystems drifted onto main undetected until this job
   # existed. Keep it cheap and unconditional.
@@ -127,6 +127,7 @@ jobs:
         run: python3 -m pip install --upgrade pyyaml
       - name: Validate codecov.yml mirrors the live tree + diff-cover excludes
         run: |
+          python3 tools/scripts/test_coverage_surface_contract.py
           python3 tools/scripts/test_codecov_config.py
           python3 tools/scripts/test_codecov_components.py
 
@@ -220,6 +221,8 @@ jobs:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
           ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           resolve() {
@@ -241,17 +244,25 @@ jobs:
           # gate pool that serves the required `macos` check — a long advisory
           # coverage run there would contend with / starve the gate. The dedicated
           # ephemeral lane uses pulp-coverage-vm-macos.
-          macos=$(resolve \
-            "Coverage (macOS)" \
-            EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
-            MACOS_RUNS_ON_JSON \
-            macos-latest \
-            pulp-build,pulp-build-vm)
-          android_kotlin=$(resolve \
-            "Coverage (Android, Kotlin)" \
-            "" \
-            ANDROID_KOTLIN_RUNS_ON_JSON \
-            macos-latest)
+          # Repository variables resolve for fork PRs. Never let an untrusted
+          # fork select a self-hosted Tart machine; run its macOS work on a
+          # disposable GitHub-hosted image instead.
+          if [ -n "${PR_HEAD_REPO}" ] && [ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]; then
+            macos='"macos-15"'
+            android_kotlin='"macos-15"'
+          else
+            macos=$(resolve \
+              "Coverage (macOS)" \
+              EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
+              MACOS_RUNS_ON_JSON \
+              macos-latest \
+              pulp-build,pulp-build-vm)
+            android_kotlin=$(resolve \
+              "Coverage (Android, Kotlin)" \
+              "" \
+              ANDROID_KOTLIN_RUNS_ON_JSON \
+              macos-latest)
+          fi
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             # Keep PR Windows coverage on GitHub-hosted runners until the
             # Namespace Windows queue is reliably assigning jobs again.
@@ -398,8 +409,9 @@ jobs:
     # GitHub-hosted windows-latest, so the
     # os-windows leg times out. Its C++ coverage adds little unique signal
     # over the Linux/macOS legs (same sources via llvm-cov), and the
-    # receipt-aware upload watchdog (#6252) requires exact Linux, macOS, and
-    # Python-tools receipts, but intentionally treats Windows as advisory.
+    # receipt-aware upload watchdog requires exact Linux, macOS, Python,
+    # Apple, Android, and React receipts, but intentionally treats Windows as
+    # an explicit best-effort producer until it can reliably finish in budget.
     # Letting Windows fail non-fatally therefore preserves the required fresh
     # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}
@@ -573,7 +585,7 @@ jobs:
           # libraries and template/header paths. Keep that coverage-driving
           # graph intact; hosted macOS disk is handled by safe image cleanup and
           # lower linker parallelism instead.
-          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
+          PULP_COVERAGE_CMAKE_ARGS: ${{ matrix.os == 'linux' && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
           PULP_COVERAGE_JOBS: ${{ matrix.os == 'macos' && runner.environment == 'github-hosted' && '2' || '' }}
           # scripts/run_coverage.sh owns the bounded CTest policy so SSH and
           # self-hosted coverage callers use the same exclusions as this lane.
@@ -895,19 +907,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Compute Codecov upload file list
-        id: codecov_files
-        # `always()` prevents an independent Python/Apple verifier failure from
-        # suppressing an otherwise valid native upload.
-        if: always() && steps.native_cobertura.outcome == 'success'
-        shell: bash
-        run: |
-          files="build-coverage/coverage.cobertura.xml"
-          if [ "${{ steps.apple_lcov.outcome }}" = "success" ]; then
-            files="${files},build-coverage/apple/coverage.apple.lcov"
-          fi
-          echo "files=${files}" >> "${GITHUB_OUTPUT}"
-
       - name: Upload coverage to Codecov
         # Each matrix leg uploads one per-OS flag (`os-linux`,
         # `os-macos`, `os-windows`) so Codecov can cross-filter
@@ -929,10 +928,22 @@ jobs:
         if: always() && steps.native_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
         uses: ./.github/actions/upload-codecov-report
         with:
-          files: ${{ steps.codecov_files.outputs.files }}
+          files: build-coverage/coverage.cobertura.xml
           flags: ${{ matrix.flag }}
           token: ${{ secrets.CODECOV_TOKEN }}
           receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+      - name: Upload Apple Swift coverage to Codecov
+        # Swift is a distinct producer. Keeping it inside os-macos let the
+        # Apple report disappear while a valid native macOS receipt still made
+        # the watchdog green.
+        if: always() && steps.apple_lcov.outcome == 'success' && github.event.pull_request.head.repo.fork != true
+        uses: ./.github/actions/upload-codecov-report
+        with:
+          files: build-coverage/apple/coverage.apple.lcov
+          flags: apple-swift
+          token: ${{ secrets.CODECOV_TOKEN }}
+          receipt-name: codecov-upload-apple-swift-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Python tools coverage to Codecov
         # Python coverage is an independent report contract. In particular,
@@ -1098,7 +1109,7 @@ jobs:
               [ "${job_name}" = "${SELF_JOB_NAME}" ] && continue
               # Only the REQUIRED native coverage legs — `Coverage report
               # (macOS, Clang)` / `(Linux, Clang)` / `(Windows, Clang)`.
-              # These are the legs the required `Diff coverage required`
+              # These are the legs the `Diff coverage advisory`
               # gate depends on and the ones that route to a saturated
               # self-hosted / Namespace pool. Match a name that both
               # starts with `Coverage report (` AND ends with `, Clang)`.
@@ -1126,7 +1137,7 @@ jobs:
             done <<< "${jobs_tsv}"
 
             if [ -n "${stuck_leg}" ]; then
-              echo "::error::Coverage leg '${stuck_leg}' has been queued ${stuck_age_min} min (>= ${QUEUED_GRACE_MINUTES} min grace) — the runner pool is saturated and never assigned it a runner. Cancelling run ${RUN_ID} so the required 'Diff coverage required' gate reaches a terminal conclusion instead of hanging."
+              echo "::error::Coverage leg '${stuck_leg}' has been queued ${stuck_age_min} min (>= ${QUEUED_GRACE_MINUTES} min grace) — the runner pool is saturated and never assigned it a runner. Cancelling advisory run ${RUN_ID} so it stops consuming queue capacity."
               # POST cancel. Once GitHub accepts this (202) the run —
               # including this watchdog job — is torn down; the cancel is
               # already committed, so a mid-call kill is harmless.
@@ -1261,8 +1272,9 @@ jobs:
         uses: ./.github/actions/upload-codecov-report
         with:
           files: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
+          flags: android-kotlin
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-android-kotlin-${{ github.sha }}
+          receipt-name: codecov-upload-android-kotlin-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   pulp-react-coverage:
     # Keep @pulp/react's main-branch Codecov upload in the canonical
@@ -1331,12 +1343,13 @@ jobs:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-pulp-react-${{ github.sha }}
+          receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   coverage-diff-gate:
-    # Per-PR diff-coverage gate. REQUIRED — sub-threshold diff coverage
-    # hard-fails the PR. The job still posts a summary comment so
-    # contributors see the number alongside the failing check.
+    # Per-PR diff-coverage report. It fails its own advisory check when the
+    # threshold is missed and posts a summary comment, but it is deliberately
+    # not in protected main's required-check set. Coverage therefore remains
+    # visible and actionable without serializing the merge critical path.
     #
     # The gate runs diff-cover over a MERGED Cobertura XML produced by
     # tools/scripts/merge_cobertura.py. The merge takes max(hits) per
@@ -1365,10 +1378,9 @@ jobs:
     # job-creation time, before `needs.coverage.result` is available, so
     # the literal `${{ }}` template appeared in the check name on every
     # PR and the gate stayed `[cancelled]` (zero enforcement value).
-    # The static name below renders correctly, lets us add the check to
-    # branch-protection's required-status-checks list, and shows the
-    # threshold inside the rendered PR comment body instead of the name.
-    name: Diff coverage required
+    # The static advisory name below renders correctly and accurately states
+    # that this signal is not in protected main's required-check set.
+    name: Diff coverage advisory
     # GitHub-hosted runner on purpose: a pure diff-coverage gate must
     # never queue behind a saturated self-hosted macOS pool. Combined
     # with `if: always()` below, this guarantees the required check can
@@ -1417,13 +1429,13 @@ jobs:
           echo "native_required=${native_required}" >> "$GITHUB_OUTPUT"
           echo "gate_ready=false" >> "$GITHUB_OUTPUT"
           if [ "$classify_result" != "success" ]; then
-            echo "::error::classify failed; failing required coverage gate closed"; exit 1
+            echo "::error::classify failed; advisory coverage signal cannot be computed"; exit 1
           fi
           if [ "$native_required" != "true" ]; then
             echo "Skip-safe PR; no native coverage required."; exit 0
           fi
           if [ "$coverage_result" != "success" ]; then
-            echo "::error::coverage job result was $coverage_result; failing required coverage gate"; exit 1
+            echo "::error::coverage job result was $coverage_result; advisory coverage signal cannot be computed"; exit 1
           fi
           # native_required==true AND coverage succeeded: run the real diff-cover steps.
           echo "gate_ready=true" >> "$GITHUB_OUTPUT"
@@ -1557,14 +1569,14 @@ jobs:
           if [ "$rc" -eq 0 ]; then
             exit 0
           elif [ "$rc" -eq 2 ]; then
-            echo "::error::merge_cobertura: every per-OS coverage XML is missing/empty, but the classifier says this PR needs native coverage. The coverage matrix failed to produce a report. Failing the required diff-coverage gate; investigate the 'coverage' matrix legs above."
+            echo "::error::merge_cobertura: every per-OS coverage XML is missing/empty, but the classifier says this PR needs native coverage. The advisory signal cannot be computed; investigate the 'coverage' matrix legs above."
             exit 1
           else
-            echo "::error::merge_cobertura failed with exit ${rc} (corrupt artifact, parse error, or script bug — NOT the all-missing sentinel which is exit 2). Failing the required diff-coverage gate; investigate the per-OS coverage artifacts."
+            echo "::error::merge_cobertura failed with exit ${rc} (corrupt artifact, parse error, or script bug — NOT the all-missing sentinel which is exit 2). The advisory signal cannot be computed; investigate the per-OS coverage artifacts."
             exit "$rc"
           fi
 
-      - name: Run diff-cover (required)
+      - name: Run diff-cover (advisory signal)
         id: diff_cover
         # Sub-threshold diff coverage hard-fails this job. The job
         # still posts a summary comment via the downstream "Render PR
@@ -1587,7 +1599,7 @@ jobs:
             # missing merged XML here is a real failure, not a skip-safe
             # PR. Fail RED rather than silently passing the required
             # gate (the old "no XML → exit 0" path bypassed the gate).
-            echo "::error::No merged Cobertura XML for a PR that needs native coverage — the coverage matrix produced no report. Failing the required diff-coverage gate."
+            echo "::error::No merged Cobertura XML for a PR that needs native coverage — the advisory coverage signal cannot be computed."
             : > coverage-diff.md
             echo "exit_code=missing-xml" >> "$GITHUB_OUTPUT"
             exit 1
@@ -1694,14 +1706,14 @@ jobs:
         # there is no coverage report to comment on.
         if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
         run: |
-          # The gate is required. --no-advisory selects the
-          # required-gate banner form.
+          # Coverage remains outside protected main's required-check set, so
+          # render the explicit advisory banner even when the signal is red.
           THRESHOLD=$(jq -r '.diff_coverage_fail_under' tools/scripts/coverage_config.json)
           python3 tools/scripts/coverage_diff_comment.py \
               --report coverage-diff.md \
               --flip-date 2026-05-04 \
               --threshold "${THRESHOLD}" \
-              --no-advisory \
+              --advisory \
               --out coverage-diff-comment.md
           # Append the per-tier section if the tier check produced a
           # report.
@@ -1771,7 +1783,7 @@ jobs:
               "${#PLATFORM_FILES[@]}"
             printf ' and are NOT covered by per-PR macOS coverage.**\n'
             printf '> They are validated by the nightly cross-platform lane'
-            printf " (\`cross-platform-check.yml\`), not by this required diff-coverage gate.\n"
+            printf " (\`cross-platform-check.yml\`), not by this advisory diff-coverage signal.\n"
             printf '>\n'
             for f in "${PLATFORM_FILES[@]}"; do
               printf "> - \`%s\`\n" "$f"

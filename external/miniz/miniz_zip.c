@@ -4447,9 +4447,9 @@ mz_bool mz_zip_add_mem_to_archive_file_in_place(const char *pZip_filename, const
 
 mz_bool mz_zip_add_mem_to_archive_file_in_place_v2(const char *pZip_filename, const char *pArchive_name, const void *pBuf, size_t buf_size, const void *pComment, mz_uint16 comment_size, mz_uint level_and_flags, mz_zip_error *pErr)
 {
-    mz_bool status, created_new_archive = MZ_FALSE;
+    mz_bool status;
     mz_zip_archive zip_archive;
-    struct MZ_FILE_STAT_STRUCT file_stat;
+    MZ_FILE *pFile = NULL;
     mz_zip_error actual_err = MZ_ZIP_NO_ERROR;
 
     mz_zip_zero_struct(&zip_archive);
@@ -4470,36 +4470,52 @@ mz_bool mz_zip_add_mem_to_archive_file_in_place_v2(const char *pZip_filename, co
         return MZ_FALSE;
     }
 
-    /* Important: The regular non-64 bit version of stat() can fail here if the file is very large, which could cause the archive to be overwritten. */
-    /* So be sure to compile with _LARGEFILE64_SOURCE 1 */
-    if (MZ_FILE_STAT(pZip_filename, &file_stat) != 0)
+    /*
+       Open the archive once and retain that stream for the complete operation.
+       A separate stat()/open sequence lets another process replace the path
+       between the existence check and the later truncating open. If no archive
+       exists, C11 exclusive creation fails rather than following or replacing a
+       path that appeared after the first open attempt.
+    */
+    pFile = MZ_FOPEN(pZip_filename, "r+b");
+    if (!pFile)
     {
-        /* Create a new archive. */
-        if (!mz_zip_writer_init_file_v2(&zip_archive, pZip_filename, 0, level_and_flags))
+        pFile = MZ_FOPEN(pZip_filename, "w+bx");
+        if (!pFile)
         {
             if (pErr)
-                *pErr = zip_archive.m_last_error;
+                *pErr = MZ_ZIP_FILE_OPEN_FAILED;
             return MZ_FALSE;
         }
 
-        created_new_archive = MZ_TRUE;
+        if (!mz_zip_writer_init_cfile(&zip_archive, pFile, level_and_flags))
+        {
+            actual_err = zip_archive.m_last_error;
+            MZ_FCLOSE(pFile);
+            if (pErr)
+                *pErr = actual_err;
+            return MZ_FALSE;
+        }
     }
     else
     {
         /* Append to an existing archive. */
-        if (!mz_zip_reader_init_file_v2(&zip_archive, pZip_filename, level_and_flags | MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY, 0, 0))
+        if (!mz_zip_reader_init_cfile(&zip_archive, pFile, 0, level_and_flags | MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY))
         {
+            actual_err = zip_archive.m_last_error;
+            MZ_FCLOSE(pFile);
             if (pErr)
-                *pErr = zip_archive.m_last_error;
+                *pErr = actual_err;
             return MZ_FALSE;
         }
 
-        if (!mz_zip_writer_init_from_reader_v2(&zip_archive, pZip_filename, level_and_flags))
+        if (!mz_zip_writer_init_from_reader_v2(&zip_archive, NULL, level_and_flags))
         {
             if (pErr)
                 *pErr = zip_archive.m_last_error;
 
             mz_zip_reader_end_internal(&zip_archive, MZ_FALSE);
+            MZ_FCLOSE(pFile);
 
             return MZ_FALSE;
         }
@@ -4525,13 +4541,21 @@ mz_bool mz_zip_add_mem_to_archive_file_in_place_v2(const char *pZip_filename, co
         status = MZ_FALSE;
     }
 
-    if ((!status) && (created_new_archive))
+    if (MZ_FCLOSE(pFile) == EOF)
     {
-        /* It's a new archive and something went wrong, so just delete it. */
-        int ignoredStatus = MZ_DELETE_FILE(pZip_filename);
-        (void)ignoredStatus;
+        if (!actual_err)
+            actual_err = MZ_ZIP_FILE_CLOSE_FAILED;
+
+        status = MZ_FALSE;
     }
 
+    /*
+       Do not remove a failed newly-created archive by pathname: the exclusive
+       stream may have been renamed and replaced while it was open. The helper
+       already documents that an interrupted in-place update may leave an
+       invalid archive, and preserving an unrelated replacement is safer than
+       unlinking it here.
+    */
     if (pErr)
         *pErr = actual_err;
 

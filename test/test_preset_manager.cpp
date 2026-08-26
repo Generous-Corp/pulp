@@ -161,6 +161,50 @@ static fs::path write_content_pack_archive_without_hashes(const fs::path& archiv
     return archive;
 }
 
+#if !defined(_WIN32)
+TEST_CASE("miniz in-place archive creation refuses a dangling symlink",
+          "[runtime][zip][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-miniz-exclusive-create");
+    const fs::path archive = sandbox.root / "archive.zip";
+    const fs::path absent_target = sandbox.root / "must-not-be-created.zip";
+    std::error_code ec;
+    fs::create_symlink(absent_target.filename(), archive, ec);
+    REQUIRE_FALSE(ec);
+
+    const std::string payload = "security regression fixture";
+    mz_zip_error error = MZ_ZIP_NO_ERROR;
+    REQUIRE_FALSE(mz_zip_add_mem_to_archive_file_in_place_v2(
+        archive.string().c_str(), "payload.txt", payload.data(), payload.size(),
+        nullptr, 0, MZ_DEFAULT_COMPRESSION, &error));
+
+    REQUIRE(error == MZ_ZIP_FILE_OPEN_FAILED);
+    REQUIRE(fs::is_symlink(archive));
+    REQUIRE_FALSE(fs::exists(absent_target));
+}
+#endif
+
+TEST_CASE("miniz in-place archive creation and append preserve both entries",
+          "[runtime][zip]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-miniz-in-place-roundtrip");
+    const fs::path archive = sandbox.root / "archive.zip";
+    const std::string first = "first payload";
+    const std::string second = "second payload";
+
+    REQUIRE(mz_zip_add_mem_to_archive_file_in_place(
+        archive.string().c_str(), "first.txt", first.data(), first.size(),
+        nullptr, 0, MZ_DEFAULT_COMPRESSION));
+    REQUIRE(mz_zip_add_mem_to_archive_file_in_place(
+        archive.string().c_str(), "second.txt", second.data(), second.size(),
+        nullptr, 0, MZ_DEFAULT_COMPRESSION));
+
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_reader_init_file(&zip, archive.string().c_str(), 0));
+    REQUIRE(mz_zip_reader_get_num_files(&zip) == 2);
+    REQUIRE(mz_zip_reader_locate_file(&zip, "first.txt", nullptr, 0) >= 0);
+    REQUIRE(mz_zip_reader_locate_file(&zip, "second.txt", nullptr, 0) >= 0);
+    REQUIRE(mz_zip_reader_end(&zip));
+}
+
 TEST_CASE("PresetManager construction sets paths", "[state][preset]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-construction");
     StateStore store;

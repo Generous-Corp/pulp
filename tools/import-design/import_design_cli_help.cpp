@@ -121,7 +121,8 @@ void print_usage() {
     std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
     std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
     std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
-    std::cout << "  --render-size WxH Render dimensions (default: the design's canvas size)\n";
+    std::cout << "  --render-size WxH Render dimensions; pins the authored viewport for browser\n";
+    std::cout << "                    captures (default: the design's canvas size)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";

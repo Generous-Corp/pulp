@@ -112,6 +112,7 @@ BrowserHtmlImportResult import_browser_html(
     capture.input_file = staged.entry;
     capture.staged_root = staged.root;
     capture.output_directory = capture_directory;
+    capture.pinned_width = request.pinned_width;
     capture.initial_width = request.initial_width;
     capture.initial_height = request.initial_height;
     capture.interaction_plan = request.browser_interactions;

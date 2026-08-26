@@ -145,13 +145,16 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
     TempTree tree;
     auto request = request_for(tree);
     request.browser_interactions = tree.root / "interactions.json";
+    request.pinned_width = 1440;
     std::optional<fs::path> observed;
+    std::optional<int> observed_width;
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
         [&](const id::BrowserHtmlImportRequest& capture_request,
             std::string_view) {
             observed = capture_request.browser_interactions;
+            observed_width = capture_request.pinned_width;
             return id::BrowserHtmlNotApplicable{};
         };
     operations.validate_capture =
@@ -173,6 +176,7 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
     REQUIRE(failure);
     CHECK(failure->exit_code == 2);
     REQUIRE(observed);
+    CHECK(observed_width == 1440);
     CHECK(*observed == *request.browser_interactions);
 }
 

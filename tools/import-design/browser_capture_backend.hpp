@@ -166,6 +166,10 @@ struct CaptureRequest {
     std::optional<fs::path> capture_script;
     std::optional<fs::path> interaction_plan;
 
+    // When present, author the page at this exact width and disable the
+    // backend's one-shot responsive-width correction. The ordinary default
+    // remains an initial width that the capture may grow once.
+    std::optional<int> pinned_width;
     int initial_width = 1280;
     int initial_height = 800;
     int device_scale_factor = kDefaultDeviceScaleFactor;
