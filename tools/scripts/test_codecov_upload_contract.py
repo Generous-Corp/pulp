@@ -129,9 +129,10 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn('-f created=">=${scan_cutoff}"', self.watchdog)
         self.assertIn(".oldest_created_at", self.watchdog)
         self.assertIn(
-            "older-run API failures are irrelevant",
+            "once freshness itself is proven",
             self.watchdog,
         )
+        self.assertIn("candidate_age_seconds", self.watchdog)
         self.assertIn('[[ "${candidate_at}" > "${last_success_at}" ]]', self.watchdog)
         self.assertIn("scan_incomplete=1", self.watchdog)
         self.assertIn("leaving watchdog issue state unchanged", self.watchdog)

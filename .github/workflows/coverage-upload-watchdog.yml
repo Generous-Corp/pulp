@@ -215,10 +215,17 @@ jobs:
                 last_success_sha="${head_sha}"
                 last_success_run="${rid}"
               fi
-              # completed_ids is newest-first. Once the freshest proven set is
-              # found, older-run API failures are irrelevant and must not turn
-              # a conclusive recovery back into unknown state.
-              break
+              candidate_epoch="$(date -u -d "${candidate_at}" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${candidate_at}" +%s)"
+              candidate_age_seconds=$(( now_epoch - candidate_epoch ))
+              if [ "${candidate_age_seconds}" -le $(( MAX_AGE_HOURS * 3600 )) ]; then
+                # A qualifying fresh set conclusively proves recovery. Workflow
+                # update order can be changed by reruns, so stale candidates do
+                # not stop the scan; once freshness itself is proven, failures
+                # from any remaining historical tail are irrelevant.
+                scan_incomplete=0
+                break
+              fi
+              continue
             fi
             echo "Run ${rid} lacks exact current Codecov receipts (${receipt_counts}) — not counting it as fresh coverage."
           done
