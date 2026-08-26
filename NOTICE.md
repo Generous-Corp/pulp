@@ -1318,8 +1318,10 @@ No formal SPDX license is declared. Pulp uses the selected expressions under
 the author's public permission comment:
 https://gist.github.com/publik-void/067f7f2fef32dbe5c27d6e215f824c91?permalink_comment_id=5556230#gistcomment-5556230
 
-Pulp does not redistribute the upstream scripts, prose, plots, site assets, or
-unrelated coefficient tables.
+Pulp adapts the selected degree-5 and degree-9 expressions for float FM and
+additive profiles, and the degree-13 expression for the precise double FM8
+profile. Pulp does not redistribute the upstream scripts, prose, plots, site
+assets, or unrelated coefficient tables.
 
 ---
 

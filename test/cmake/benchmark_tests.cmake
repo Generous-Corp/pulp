@@ -55,6 +55,12 @@ if(PULP_BENCHMARK)
     add_executable(pulp-fast-exp2-benchmark test_fast_exp2_benchmark.cpp)
     target_link_libraries(pulp-fast-exp2-benchmark PRIVATE pulp::signal)
 
+    # Advisory Release-only actual-voice FM8 fast-trig measurement. Timing
+    # never gates CI and the reference profile remains the compatibility default.
+    add_executable(pulp-fast-trig-fm8-benchmark
+        test_fast_trig_fm8_benchmark.cpp)
+    target_link_libraries(pulp-fast-trig-fm8-benchmark PRIVATE pulp::signal)
+
     pulp_add_test_suite(pulp-test-osc-bench
         LIBRARIES pulp::signal
         INCLUDE_DIRS ${choc_SOURCE_DIR}

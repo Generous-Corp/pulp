@@ -137,6 +137,35 @@ TEST_CASE("FastMath bounded-cycle runtime dispatch preserves semantic profiles",
             FastMath::sin_cycles<FastTrigProfile::reference>(0.375f));
 }
 
+TEST_CASE("FastMath degree-13 precise sine meets its double error budget",
+          "[signal][fast_math][fast-trig]") {
+    constexpr std::size_t sample_count = 1u << 18;
+    double maximum_error = 0.0;
+    for (std::size_t index = 0; index <= sample_count; ++index) {
+        const double phase = static_cast<double>(index) /
+                             static_cast<double>(sample_count);
+        const double expected = std::sin(2.0 * std::acos(-1.0) * phase);
+        maximum_error =
+            std::max(maximum_error,
+                     std::abs(FastMath::sin_cycles_precise64(phase) - expected));
+    }
+    REQUIRE(maximum_error < 7.0e-14);
+
+    for (double seam : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+        for (double phase : {
+                 std::nextafter(seam,
+                                -std::numeric_limits<double>::infinity()),
+                 seam,
+                 std::nextafter(seam,
+                                std::numeric_limits<double>::infinity()),
+             }) {
+            const double expected = std::sin(2.0 * std::acos(-1.0) * phase);
+            REQUIRE(std::abs(FastMath::sin_cycles_precise64(phase) - expected) <
+                    7.0e-14);
+        }
+    }
+}
+
 TEST_CASE("FastMath cos approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::cos(0.0f), WithinAbs(1.0, 0.01));
     REQUIRE_THAT(FastMath::cos(1.5707963f), WithinAbs(0.0, 0.02));  // pi/2

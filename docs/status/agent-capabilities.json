@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 37,
+  "manifest_revision": 38,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -7739,11 +7739,11 @@
               "set_operator_feedback(int op, double amount)",
               "set_operator_wave(int op, int wave)",
               "set_depth(double depth)",
+              "set_trig_profile(FastTrigProfile profile)",
+              "trig_profile()",
               "set_formant_hz(double hz)",
               "set_formant_q(double q)",
-              "set_transient(int index)",
-              "set_noise_level(double level)",
-              "set_noise_decay_ms(double ms)"
+              "set_transient(int index)"
             ],
             "enums": []
           }
@@ -8495,6 +8495,7 @@
             "methods": [
               "sin_cycles(float phase_cycles)",
               "sin_cycles(float phase_cycles, FastTrigProfile profile)",
+              "sin_cycles_precise64(double phase_cycles)",
               "tanh(float x)",
               "sin(float x)",
               "cos(float x)",
@@ -8505,8 +8506,7 @@
               "gain_to_db(float gain)",
               "rcp(float x)",
               "rsqrt(float x)",
-              "clamp_unit(float x)",
-              "soft_clip(float x)"
+              "clamp_unit(float x)"
             ],
             "enums": []
           }

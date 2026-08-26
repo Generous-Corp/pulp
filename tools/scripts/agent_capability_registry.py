@@ -258,7 +258,8 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/drum/fm.hpp", "sha256:6858bf1217026bddf4a89db818ba528c8671261236304393c61626bf4fbe9219"),
+            ("pulp/signal/drum/fm.hpp", "sha256:85942ebd78c03c631aab5425254455068c07aeac89b53b49a955ab6452eaa2fe"),
+            ("pulp/signal/drum/fm_tables.hpp", "sha256:517a1fc7d9eb3bf824a5e310893b69572081c90cfdceef31e955e006d8ffa033"),
             ("pulp/signal/drum/fm6.hpp", "sha256:1059887e7cfa8785366482b2171b0306d49f950adf35da2a88b64067249b57e6"),
         ]
     ],
@@ -512,7 +513,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:82cde36d9693d5c925a47ba4937b72e0f071ce96c4b74a2262d97100e90dc539",
+        "fingerprint": "sha256:52ac415bf5ee3c93d3810768b52fd0823292ead6bd2459d2d8ee68fccddc4b63",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

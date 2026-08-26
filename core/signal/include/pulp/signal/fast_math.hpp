@@ -20,8 +20,9 @@ enum class FastTrigProfile : std::uint8_t {
     /// Lower-cost float path with maximum absolute error at most `1.2e-4`
     /// over one bounded cycle. This profile can audibly change recursive FM.
     realtime_efficient,
-    /// Float-precision path with maximum absolute error at most `2.5e-7`
-    /// over one bounded cycle.
+    /// Precise real-time path. Float implementations have maximum absolute
+    /// error at most `2.5e-7` over one bounded cycle; a double consumer may
+    /// tighten that budget while preserving this semantic choice.
     realtime_precise,
 };
 
@@ -96,6 +97,31 @@ struct FastMath {
             case FastTrigProfile::reference:
             default: return sin_cycles<FastTrigProfile::reference>(phase_cycles);
         }
+    }
+
+    /// Precise double sine for a bounded cycle count. Folding is part of this
+    /// helper because FM phase offsets and harmonic multiples can span several
+    /// cycles.
+    /// This degree-13 expression comes from the same pinned source and public
+    /// permission cited by `sin_cycles` above.
+    static double sin_cycles_precise64(double phase_cycles) noexcept {
+        double x = phase_cycles - std::floor(phase_cycles + 0.5);
+        const double magnitude = std::abs(x);
+        x = std::copysign(std::min(magnitude, 0.5 - magnitude), x);
+        const double x2 = x * x;
+        return x *
+               (6.28318530717919415440631052356951227 +
+                x2 *
+                    (-41.3417022398184912491504586563309009 +
+                     x2 *
+                         (81.6052491334177909789178729942153114 +
+                          x2 *
+                              (-76.7058464941280158505651312164454235 +
+                               x2 *
+                                   (42.0581028415940046209613080938107769 +
+                                    x2 *
+                                        (-15.0810317173017800774891418165142071 +
+                                         3.66346472229432872653352143098494556 * x2))))));
     }
 
     /// Fast tanh approximation using the [7/6] Padé form (max error ~3e-5

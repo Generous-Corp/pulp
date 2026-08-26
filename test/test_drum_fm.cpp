@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,7 @@ using pulp::signal::drum::FmDrumVoice;
 using pulp::signal::drum::FmWaveTable;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
+using pulp::signal::FastTrigProfile;
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kFs = 48000.0;
@@ -51,6 +53,19 @@ double peak(const std::vector<float>& x) {
     double m = 0.0;
     for (float v : x) m = std::max(m, std::fabs(static_cast<double>(v)));
     return m;
+}
+
+double rms(const std::vector<float>& x) {
+    double energy = 0.0;
+    for (float value : x)
+        energy += static_cast<double>(value) * static_cast<double>(value);
+    return std::sqrt(energy / static_cast<double>(x.size()));
+}
+
+double mean(const std::vector<float>& x) {
+    double sum = 0.0;
+    for (float value : x) sum += static_cast<double>(value);
+    return sum / static_cast<double>(x.size());
 }
 
 template <typename Container>
@@ -92,6 +107,28 @@ void bare(FmDrumVoice& voice) {
     voice.set_cutoff_hz(18000.0);
     voice.set_resonance(0.7);
     voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+}
+
+void configure_fm8(Fm8DrumVoice& voice, int algorithm, int wave_base,
+                   double tune_hz, double depth, double feedback,
+                   FastTrigProfile profile) {
+    voice.prepare(kFs);
+    voice.set_algorithm(algorithm);
+    voice.set_tune_hz(tune_hz);
+    voice.set_depth(depth);
+    voice.set_formant_hz(12000.0);
+    voice.set_formant_q(0.7);
+    voice.set_noise_level(0.0);
+    voice.set_click_level(0.0);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
+        voice.set_operator_level(op, 1.0 - 0.07 * static_cast<double>(op));
+        voice.set_operator_ratio(op, 1.0 + 0.63 * static_cast<double>(op));
+        voice.set_operator_decay_ms(op, 40.0 + 37.0 * static_cast<double>(op));
+        voice.set_operator_feedback(op, feedback);
+        voice.set_operator_wave(op, (wave_base + op) % FmWaveTable::wave_count);
+    }
+    REQUIRE(voice.set_trig_profile(profile));
 }
 
 }  // namespace
@@ -461,6 +498,100 @@ TEST_CASE("Velocity opens the index rather than only the level",
 }
 
 // -- Eight operators ---------------------------------------------------------
+
+TEST_CASE("FM8 fast trig is an explicit precise opt-in",
+          "[signal][drum][fm8][fast-trig]") {
+    Fm8DrumVoice voice;
+    REQUIRE(voice.trig_profile() == FastTrigProfile::reference);
+    REQUIRE_FALSE(voice.set_trig_profile(FastTrigProfile::realtime_efficient));
+    REQUIRE(voice.trig_profile() == FastTrigProfile::reference);
+    REQUIRE(voice.set_trig_profile(FastTrigProfile::realtime_precise));
+    REQUIRE(voice.trig_profile() == FastTrigProfile::realtime_precise);
+    voice.prepare(kFs);
+    voice.note_on(1.0f);
+    REQUIRE_FALSE(voice.set_trig_profile(FastTrigProfile::reference));
+    REQUIRE(voice.trig_profile() == FastTrigProfile::realtime_precise);
+}
+
+TEST_CASE("FM8 precise trig is deterministic and block-partition invariant",
+          "[signal][drum][fm8][fast-trig][determinism]") {
+    for (const auto& scenario : {
+             std::array<double, 5>{0.0, 0.0, 90.0, 0.0, 0.0},
+             std::array<double, 5>{12.0, 20.0, 180.0, 6.0, 0.45},
+             std::array<double, 5>{15.0, 22.0, 960.0, 12.0, 1.0},
+         }) {
+        auto configured = [&scenario] {
+            auto voice = std::make_unique<Fm8DrumVoice>();
+            configure_fm8(*voice, static_cast<int>(scenario[0]),
+                          static_cast<int>(scenario[1]), scenario[2], scenario[3],
+                          scenario[4], FastTrigProfile::realtime_precise);
+            voice->note_on(0.82f);
+            return voice;
+        };
+        auto a = configured();
+        auto b = configured();
+        auto c = configured();
+        const auto block_32 = render(*a, 16384, 32);
+        const auto block_512 = render(*b, 16384, 512);
+        const auto repeat = render(*c, 16384, 32);
+        REQUIRE(block_32 == block_512);
+        REQUIRE(block_32 == repeat);
+    }
+}
+
+TEST_CASE("FM8 precise trig preserves whole-hit energy and spectral character",
+          "[signal][drum][fm8][fast-trig][quality]") {
+    for (const auto& scenario : {
+             std::array<double, 5>{0.0, 0.0, 90.0, 0.0, 0.0},
+             std::array<double, 5>{12.0, 20.0, 180.0, 6.0, 0.45},
+             std::array<double, 5>{15.0, 22.0, 960.0, 12.0, 1.0},
+         }) {
+        Fm8DrumVoice reference;
+        Fm8DrumVoice candidate;
+        const auto configure = [&](Fm8DrumVoice& voice, FastTrigProfile profile) {
+            configure_fm8(voice, static_cast<int>(scenario[0]),
+                          static_cast<int>(scenario[1]), scenario[2], scenario[3],
+                          scenario[4], profile);
+            voice.note_on(0.82f);
+        };
+        configure(reference, FastTrigProfile::reference);
+        configure(candidate, FastTrigProfile::realtime_precise);
+        const auto reference_hit = render(reference, 16384, 64);
+        const auto candidate_hit = render(candidate, 16384, 64);
+
+        for (float sample : candidate_hit) REQUIRE(std::isfinite(sample));
+        const double peak_ratio = peak(candidate_hit) / peak(reference_hit);
+        const double rms_ratio = rms(candidate_hit) / rms(reference_hit);
+        REQUIRE(peak_ratio >= 0.75);
+        REQUIRE(peak_ratio <= 1.25);
+        REQUIRE(rms_ratio >= 0.8);
+        REQUIRE(rms_ratio <= 1.2);
+        REQUIRE(std::fabs(mean(candidate_hit) - mean(reference_hit)) < 1.0e-6);
+        for (double split_hz : {500.0, 2000.0, 8000.0}) {
+            REQUIRE(std::fabs(high_fraction(candidate_hit, split_hz) -
+                              high_fraction(reference_hit, split_hz)) < 0.02);
+        }
+    }
+}
+
+TEST_CASE("FM8 precise trig allocates nothing while rendering",
+          "[signal][drum][fm8][fast-trig][rt-safety]") {
+    Fm8DrumVoice voice;
+    configure_fm8(voice, 12, 20, 180.0, 6.0, 0.45,
+                  FastTrigProfile::realtime_precise);
+    std::array<float, 256> buffer{};
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        voice.note_on(0.82f);
+        for (int block = 0; block < 32; ++block) {
+            buffer.fill(0.0f);
+            voice.process(buffer.data(), static_cast<int>(buffer.size()));
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
 
 TEST_CASE("FM8 selects a wave independently for every operator",
           "[signal][drum][fm8][wave]") {

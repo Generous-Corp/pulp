@@ -510,6 +510,19 @@ public:
     /// Overall modulation depth, scaling every routed connection at once.
     void set_depth(double depth) { depth_ = std::clamp(depth, 0.0, 12.0); }
 
+    /// Selects the FM8 carrier implementation between hits. An active voice
+    /// rejects the change so a control update cannot splice two recursive
+    /// trajectories into one hit.
+    bool set_trig_profile(FastTrigProfile profile) noexcept {
+        if (profile != FastTrigProfile::reference &&
+            profile != FastTrigProfile::realtime_precise)
+            return false;
+        if (is_active()) return false;
+        trig_profile_ = profile;
+        return true;
+    }
+    FastTrigProfile trig_profile() const noexcept { return trig_profile_; }
+
     /// A formant bandpass on the summed carriers.
     void set_formant_hz(double hz) { formant_hz_ = std::clamp(hz, 40.0, 18000.0); }
     void set_formant_q(double q) { formant_q_ = std::clamp(q, 0.5, 12.0); }
@@ -609,6 +622,17 @@ protected:
     }
 
     void render_add(float* out, int num_samples) override {
+        if (trig_profile_ == FastTrigProfile::realtime_precise) {
+            render_add_profile_<FastTrigProfile::realtime_precise>(out,
+                                                                    num_samples);
+        } else {
+            render_add_profile_<FastTrigProfile::reference>(out, num_samples);
+        }
+    }
+
+private:
+    template <FastTrigProfile Profile>
+    void render_add_profile_(float* out, int num_samples) {
         const Algorithm& alg = algorithms[static_cast<std::size_t>(algorithm_)];
 
         for (int i = 0; i < num_samples; ++i) {
@@ -637,7 +661,7 @@ protected:
             const auto wave = [&](std::size_t op, double phase_cycles,
                                   double phase_offset_radians,
                                   double phase_increment) {
-                return FmWaveTable::read(
+                return FmWaveTable::read<Profile>(
                     waves_[op],
                     phase_cycles +
                         phase_offset_radians /
@@ -666,7 +690,6 @@ protected:
         }
     }
 
-private:
     void apply_transient() {
         const auto& recipe =
             kFmTransients[static_cast<std::size_t>(transient_)];
@@ -712,6 +735,7 @@ private:
 
     double velocity_gain_ = 1.0;
     double applied_depth_ = 3.0;
+    FastTrigProfile trig_profile_ = FastTrigProfile::reference;
 };
 
 }  // namespace pulp::signal::drum

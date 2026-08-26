@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/noise_source.hpp>
 
 #include <algorithm>
@@ -47,8 +48,11 @@ struct FmWaveTable {
             {{1.00, -0.25, -0.500, 0.75}},
         }};
 
+    template <FastTrigProfile Profile = FastTrigProfile::reference>
     static double read(int wave, double phase,
                        double phase_increment = 0.0) {
+        static_assert(Profile == FastTrigProfile::reference ||
+                      Profile == FastTrigProfile::realtime_precise);
         const auto index =
             static_cast<std::size_t>(std::clamp(wave, 0, wave_count - 1));
         phase -= std::floor(phase);
@@ -72,9 +76,16 @@ struct FmWaveTable {
                 nyquist_gain = t * t * (3.0 - 2.0 * t);
             }
             const double weighted = coefficient * nyquist_gain;
-            sample += weighted *
-                      std::sin(2.0 * 3.14159265358979323846 *
-                               static_cast<double>(harmonic + 1) * phase);
+            if constexpr (Profile == FastTrigProfile::realtime_precise) {
+                const double harmonic_phase =
+                    static_cast<double>(harmonic + 1) * phase;
+                sample += weighted *
+                          FastMath::sin_cycles_precise64(harmonic_phase);
+            } else {
+                sample += weighted *
+                          std::sin(2.0 * 3.14159265358979323846 *
+                                   static_cast<double>(harmonic + 1) * phase);
+            }
             normalization += std::fabs(weighted);
         }
         return normalization > 0.0 ? sample / normalization : 0.0;

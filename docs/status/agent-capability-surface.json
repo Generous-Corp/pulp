@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 55,
+  "inventory_version": 56,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,14 +38,14 @@
   ],
   "counts": {
     "public_headers": 441,
-    "reviewed_headers": 145,
-    "legacy_unreviewed_headers": 296,
+    "reviewed_headers": 146,
+    "legacy_unreviewed_headers": 295,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 94,
-      "capability_support": 38,
+      "capability_support": 39,
       "infrastructure": 11,
-      "legacy_unreviewed": 296,
+      "legacy_unreviewed": 295,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -75,8 +75,8 @@
       },
       "signal": {
         "public_headers": 262,
-        "reviewed_headers": 103,
-        "legacy_unreviewed_headers": 159,
+        "reviewed_headers": 104,
+        "legacy_unreviewed_headers": 158,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2200,7 +2200,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/fm.hpp",
-      "fingerprint": "sha256:6858bf1217026bddf4a89db818ba528c8671261236304393c61626bf4fbe9219",
+      "fingerprint": "sha256:85942ebd78c03c631aab5425254455068c07aeac89b53b49a955ab6452eaa2fe",
       "include": "pulp/signal/drum/fm.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2222,11 +2222,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/fm_tables.hpp",
-      "fingerprint": "sha256:374f888d2228dca073721a81583caa52336c6d292b7ab51c668bdc4dd2d0c03c",
+      "fingerprint": "sha256:517a1fc7d9eb3bf824a5e310893b69572081c90cfdceef31e955e006d8ffa033",
       "include": "pulp/signal/drum/fm_tables.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.fm-operator-engine"
+      ],
+      "rationale": "Existing drum voice composes the reusable fixed-capacity FM operator engine while retaining its voice-specific contract."
     },
     {
       "domain": "signal",
@@ -2441,7 +2443,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:82cde36d9693d5c925a47ba4937b72e0f071ce96c4b74a2262d97100e90dc539",
+      "fingerprint": "sha256:52ac415bf5ee3c93d3810768b52fd0823292ead6bd2459d2d8ee68fccddc4b63",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
