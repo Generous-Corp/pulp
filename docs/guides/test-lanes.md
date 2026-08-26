@@ -30,7 +30,9 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   gate**; reported by the advisory `example-validation` lane and also run
   nightly. They do not block merges until that context is promoted.
 - **`slow`** — a genuinely long test (e.g. `cmake-ios-auv3-configure`, a
-  ~25-30 min iOS try-compile). **Excluded from the required gate**; run nightly.
+  ~25-30 min iOS try-compile). **Excluded from the ordinary required corpus**;
+  run nightly. A slow test that must gate affected changes needs an explicit
+  affected-surface step in the required job.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
@@ -39,6 +41,24 @@ The required gate excludes both groups with one CTest filter,
 `cross-platform-check.yml` already use. It is set in
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
+
+### Affected slow proofs
+
+`agent-capability-installed-sdk` installs Pulp and builds an independent
+consumer for every exported capability and typed binding. It measured roughly
+12 minutes by itself on a warm Apple runner, so charging it to every unrelated
+PR made the required test phase mostly one irrelevant proof. It carries
+`slow;agent-capability-installed-sdk` and is restored by `build.yml` only when
+the exact diff touches the capability skill, installed manifest/schemas,
+capability history, registry/generator, compile projection, CMake target/export
+definitions, or their tests. The restored run executes on the required macOS
+job and the parallel Linux matrix leg so platform-specific exports retain their
+pre-merge proof; even an otherwise skip-safe selected documentation change
+allocates those jobs. Relevant changes therefore still fail before merge, while unrelated PRs
+and merge groups do not pay its cost. An unknown diff fails closed and runs it.
+The explicit restoration is limited to reduced PR, merge-group, and Shipyard
+dispatch corpora; unfiltered main/nightly runs already include the proof and do
+not run it a second time.
 
 ## Why example validators are off the required gate
 
@@ -183,6 +203,9 @@ lane checks its own.
 - **A genuinely long test** (minutes) → `LABELS "slow"`, and make sure something
   (nightly, or a dedicated lane) actually runs it — do **not** rely on the
   informational nightly alone if it must be enforced.
+- **A long proof needed only for a bounded source contract** → give it a
+  descriptive label in addition to `slow`, add a fail-closed affected-diff
+  classifier, and restore it explicitly in the required job on that surface.
 
 ## The trap to avoid
 

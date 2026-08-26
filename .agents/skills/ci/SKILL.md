@@ -258,6 +258,14 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   (`.shipyard/config.toml` `test = "ctest ... --label-exclude \"validation|slow\""`,
   matching `build.yml`'s PR ctest and `cross-platform-check.yml`). The required
   gate also runs `--repeat until-pass:2`, so a single timing-flake self-heals.
+  A slow proof can still gate an affected diff explicitly: the roughly
+  12-minute `agent-capability-installed-sdk` test is restored by the
+  fail-closed classifier on parallel macOS and Linux matrix legs for
+  capability/install surfaces and CMake target/export definitions, while unrelated PRs and merge
+  groups avoid that cost. A selected skip-safe documentation path must still
+  force allocation of the native job that owns the proof. Do not remove
+  that explicit affected step when maintaining the broad `slow` exclusion,
+  and do not run it again on unfiltered main/nightly corpora that already own it.
 - **`validation` is example-only** — the `pluginval-*` / `auval-*` /
   `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
   run on the **`example-validation`** lane

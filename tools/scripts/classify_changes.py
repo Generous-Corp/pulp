@@ -90,6 +90,29 @@ FORCE_BUILD_PREFIXES = (
     "docs/migrations/",
 )
 
+# The installed-SDK capability proof installs Pulp, then compiles and runs one
+# independent consumer per exported capability/binding. It measured about 12
+# minutes on a warm Apple runner, so it is selected only when one of its source
+# contracts changes.
+# Unknown diff state remains fail-closed in main().
+AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS = (
+    ".agents/skills/agent-capabilities/**",
+    "CMakeLists.txt",
+    "*.cmake",
+    "*.cmake.in",
+    "**/CMakeLists.txt",
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "docs/status/agent-capabilit*.json",
+    "test/test_agent_capability_compile.cpp",
+    "test/cmake/quality_tests.cmake",
+    "tools/agent-capabilities/**",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/dsp_vocabulary.py",
+    "tools/scripts/agent_capability*.py",
+    "tools/scripts/test_agent_capability*.py",
+)
+
 
 def is_skip_safe(path: str) -> bool:
     """True if this single file provably does not affect the native build."""
@@ -114,6 +137,15 @@ def native_build_required(files: list[str]) -> bool:
     if not files:
         return True
     return not all(is_skip_safe(f) for f in files)
+
+
+def agent_capability_installed_sdk_required(files: list[str]) -> bool:
+    """Select the expensive installed capability proof for affected diffs."""
+    return any(
+        fnmatch.fnmatchcase(path, pattern)
+        for path in files
+        for pattern in AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS
+    )
 
 
 def _matches(path: str, patterns: list[str]) -> bool:
@@ -215,6 +247,11 @@ def main(argv: list[str]) -> int:
     # Fail-closed: a None (git error) is treated as "unknown" -> build.
     resolved_files = files or []
     mobile_required = ios_compile_required(resolved_files)
+    capability_installed_required = (
+        True
+        if files is None or not resolved_files
+        else agent_capability_installed_sdk_required(resolved_files)
+    )
     if files is None:
         required = True
         files = []
@@ -223,12 +260,18 @@ def main(argv: list[str]) -> int:
         required = True
         reason = "no changed files resolved — defaulting to native build (fail-closed)"
     else:
-        required = native_build_required(files)
+        # The installed-SDK proof lives in the native build job.  Any path
+        # selecting that proof must therefore allocate the job even when the
+        # path would otherwise be skip-safe documentation.
+        required = native_build_required(files) or capability_installed_required
         non_safe = [f for f in files if not is_skip_safe(f)]
         if required:
-            shown = ", ".join(non_safe[:8])
-            extra = f" (+{len(non_safe) - 8} more)" if len(non_safe) > 8 else ""
-            reason = f"native build inputs changed: {shown}{extra}"
+            if non_safe:
+                shown = ", ".join(non_safe[:8])
+                extra = f" (+{len(non_safe) - 8} more)" if len(non_safe) > 8 else ""
+                reason = f"native build inputs changed: {shown}{extra}"
+            else:
+                reason = "installed-SDK capability proof selected"
         else:
             reason = f"all {len(files)} changed file(s) are skip-safe (docs/config only)"
 
@@ -241,6 +284,10 @@ def main(argv: list[str]) -> int:
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"native_build_required={str(required).lower()}\n")
             fh.write(f"ios_compile_required={str(mobile_required).lower()}\n")
+            fh.write(
+                "agent_capability_installed_sdk_required="
+                f"{str(capability_installed_required).lower()}\n"
+            )
 
     if args.json:
         print(
@@ -248,6 +295,9 @@ def main(argv: list[str]) -> int:
                 {
                     "native_build_required": required,
                     "ios_compile_required": mobile_required,
+                    "agent_capability_installed_sdk_required": (
+                        capability_installed_required
+                    ),
                     "changed_file_count": len(files),
                     "reason": reason,
                 }

@@ -229,6 +229,19 @@ artifacts are absent, read the installed schema and manifest, and independently
 compile/link/run every capability and every typed binding against only its
 declared minimal target. It must reject wrong-target declarations and checkout-
 path leakage, and use configuration-aware build/install and executable paths.
+Because that proof takes roughly 12 minutes on a warm Apple runner, its CTest
+registration carries `slow;agent-capability-installed-sdk`. Ordinary PR and
+merge-group corpora exclude it, but `classify_changes.py` restores the exact
+test on the parallel macOS and Linux matrix legs when the diff touches capability manifests,
+schemas, history, registries/generators, vocabulary, install rules, or their
+compile tests. All CMake target/export definitions are included because an
+`INSTALL_INTERFACE`, exported dependency, or target-name change can break the
+isolated consumer even outside `PulpInstallRules.cmake`. A selected documentation
+surface also forces allocation of the containing native job; unknown or
+unavailable diffs run it fail-closed. Keep that
+affected-surface step (macOS is the required queue context; Linux preserves its
+platform-specific export proof) and the unfiltered main/nightly proof when changing its
+label or registration; `slow` alone is not authorization to stop enforcing it.
 When checking CMake File API include paths, permit paths outside the install
 prefix only when CMake marks them as system includes; transitive platform and
 third-party headers may be legitimate, but non-system source/build leakage is

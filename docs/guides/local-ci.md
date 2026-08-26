@@ -2369,6 +2369,13 @@ YAML:
   - `pulp-test-sync`, `pulp-test-sync-race-hammer`,
     `pulp-test-events-timer-helpers` (race + timer hammers; also covered
     under sanitizer.yml's TSan lane)
+  - `agent-capability-installed-sdk` (roughly 12 minutes to install the SDK and
+    compile/run every exported capability and typed binding). The classifier
+    restores this exact test on the parallel macOS and Linux matrix legs for capability manifest,
+    schema, history, registry/generator, vocabulary, CMake target/export,
+    install-rule, and compile-test changes. A selected documentation-only
+    surface still allocates the native job; unknown diffs run it fail-closed,
+    so unrelated PRs get the speedup without weakening affected changes.
 
 - **Full-CI** runs on `push` to `main`, the nightly schedule, and
   `workflow_dispatch`. Only the `validation` label is excluded — every
