@@ -47,6 +47,10 @@ class SelectionExecutionError(ValueError):
     """The literal selection cannot safely replace the full test stage."""
 
 
+class FullAuthorityExecutionError(RuntimeError):
+    """The ordinary full validation failed before it could report a result."""
+
+
 def parse_literal_selection(payload: bytes) -> list[str]:
     """Parse a UTF-8, newline-delimited set of literal test names."""
 
@@ -667,9 +671,154 @@ def write_result_receipt(result_dir: Path, receipt: dict[str, Any]) -> Path:
     raise SelectionExecutionError("cannot allocate immutable result receipt")
 
 
+def _fallback_receipt_identity(
+    args: argparse.Namespace,
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Recover planner identity only after it was bound to this checkout."""
+
+    if getattr(args, "_changed_surface_receipt_identity_verified", False) is not True:
+        raise SelectionExecutionError(
+            "fallback requires a selection receipt bound to this checkout"
+        )
+    names, _payload, targets, _target_payload, receipt = decode_selection_receipt(
+        args.selection_receipt_b64, args.selection_receipt_sha256
+    )
+    return names, targets, receipt
+
+
+def write_fallback_result_receipt(
+    args: argparse.Namespace,
+    error: BaseException,
+    *,
+    result_dir: Path,
+    selection_identity: tuple[list[str], list[str], dict[str, Any]],
+    full_build_result: int | None,
+    full_build_seconds: float | None,
+    full_result: int,
+    full_seconds: float,
+) -> None:
+    """Record that selected execution refused and full validation stayed authoritative."""
+
+    reason = f"{type(error).__name__}: {error}"[:1024]
+    selected_build_completed = (
+        getattr(args, "_changed_surface_selected_build_completed", False) is True
+    )
+    selected_build_seconds = getattr(
+        args, "_changed_surface_selected_build_seconds", None
+    )
+    selected_build_result = getattr(
+        args, "_changed_surface_selected_build_result", None
+    )
+    if not selected_build_completed:
+        selected_build_seconds = None
+        selected_build_result = None
+    if full_build_seconds is None:
+        full_build_timing = full_build_timing_fields(None, None)
+    elif selected_build_completed:
+        full_build_timing = full_build_timing_fields(
+            selected_build_seconds, full_build_seconds
+        )
+    else:
+        full_build_timing = {
+            "full_build_is_incremental_after_selected": False,
+            "full_build_incremental_duration_seconds": full_build_seconds,
+            "full_build_estimated_total_duration_seconds": full_build_seconds,
+        }
+    selected_names, selected_targets, selection = selection_identity
+    receipt = {
+        "schema_version": 2,
+        "recorded_at_unix_ns": time.time_ns(),
+        "repository": selection["repository"],
+        "pull_request": selection["pull_request"],
+        "target": selection["target"],
+        "base_sha": selection["base_sha"],
+        "head_sha": selection["head_sha"],
+        "tree_sha": selection["tree_sha"],
+        "execution_payload_sha256": args.selection_receipt_sha256,
+        "policy_digest": selection["policy_digest"],
+        "selection_receipt_digest": selection["selection_receipt_digest"],
+        "validation_contract_digest": selection["validation_contract_digest"],
+        "workflow_digest": selection["workflow_digest"],
+        "selected_tests_digest": selection["selected_tests_digest"],
+        "selected_logical_count": len(selected_names),
+        "selected_registration_count": None,
+        "full_registration_count": None,
+        "prebuild_unbuilt_placeholder_count": None,
+        "inventory_validation_deferred_until_full_build": None,
+        "verification_duration_seconds": None,
+        "selected_duration_seconds": None,
+        "selected_returncode": None,
+        "selected_build_targets_digest": selection.get(
+            "selected_build_targets_digest"
+        ),
+        "selected_build_target_count": len(selected_targets),
+        "selected_build_duration_seconds": selected_build_seconds,
+        "selected_build_returncode": selected_build_result,
+        "full_duration_seconds": full_seconds,
+        "full_returncode": full_result,
+        **full_build_timing,
+        "full_build_returncode": full_build_result,
+        "full_authoritative": True,
+        "failure_coverage": "selected_execution_refused",
+        "comparison_verdict": "fallback_full_non_graduation",
+        "graduation_eligible": False,
+        "selected_execution_disposition": "refused_fallback_full",
+        "fallback_reason": reason,
+    }
+    write_result_receipt(result_dir, receipt)
+
+
+def run_full_fallback(
+    args: argparse.Namespace, build_dir: Path, error: BaseException
+) -> int:
+    """Run the untouched full authority after a shadow-only selection refusal."""
+
+    result_dir_value = os.environ.get("SHIPYARD_CHANGED_SURFACE_RESULT_DIR")
+    if not result_dir_value:
+        raise SelectionExecutionError(
+            "shadow fallback requires an immutable result receipt directory"
+        )
+    result_dir = Path(result_dir_value)
+    if not result_dir.is_absolute():
+        raise SelectionExecutionError("result receipt directory must be absolute")
+    identity = _fallback_receipt_identity(args)
+    selection_schema = identity[2]["schema_version"]
+    full_build_result: int | None = None
+    full_build_seconds: float | None = None
+    if selection_schema == 2:
+        full_build_started = time.monotonic()
+        full_build_result = subprocess.run(build_argv(build_dir), shell=False).returncode
+        full_build_seconds = time.monotonic() - full_build_started
+        if full_build_result == 0:
+            full_build_result = clear_build_sentinel(build_dir)
+    full_result = full_build_result if full_build_result is not None else 0
+    full_seconds = 0.0
+    if full_build_result in (None, 0):
+        full_started = time.monotonic()
+        full_result = subprocess.run(execution_argv(build_dir), shell=False).returncode
+        full_seconds = time.monotonic() - full_started
+    write_fallback_result_receipt(
+        args,
+        error,
+        result_dir=result_dir,
+        selection_identity=identity,
+        full_build_result=full_build_result,
+        full_build_seconds=full_build_seconds,
+        full_result=full_result,
+        full_seconds=full_seconds,
+    )
+    return full_result
+
+
 def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     """Verify and execute one selection while the build tree is exclusive."""
 
+    args._changed_surface_full_authority_started = False
+    args._changed_surface_fallback_safe = False
+    args._changed_surface_receipt_identity_verified = False
+    args._changed_surface_selected_build_completed = False
+    args._changed_surface_selected_build_seconds = None
+    args._changed_surface_selected_build_result = None
     verification_started = time.monotonic()
     config_path = args.config.resolve(strict=True)
     contract_path = args.inventory_contract.resolve(strict=True)
@@ -681,7 +830,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         selection_receipt,
     ) = decode_selection_receipt(args.selection_receipt_b64, args.selection_receipt_sha256)
     validate_receipt_identity(selection_receipt, args.target)
-    require_ctest_version()
+    args._changed_surface_receipt_identity_verified = True
     policy = load_policy(config_path, args.target)
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     source_root = inventory.source_root_for_build(build_dir).resolve(strict=True)
@@ -690,6 +839,11 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             f"build source root {source_root} does not match checkout {REPO_ROOT.resolve()}"
         )
     validate_build_configuration(build_dir, policy)
+    # Only selection-layer failures may fall back to the ordinary full stage.
+    # Checkout identity, build-source provenance, and live build configuration
+    # remain hard prerequisites for accepting any execution result.
+    args._changed_surface_fallback_safe = True
+    require_ctest_version()
     compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
@@ -745,6 +899,9 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 build_argv(build_dir, selected_build_targets), shell=False
             ).returncode
             selected_build_seconds = time.monotonic() - selected_build_started
+            args._changed_surface_selected_build_completed = True
+            args._changed_surface_selected_build_seconds = selected_build_seconds
+            args._changed_surface_selected_build_result = selected_build_result
         if selected_build_result in (None, 0) and prebuild_unbuilt_placeholder_count:
             deferred_verification_started = time.monotonic()
             full_tests = ctest_json(build_dir)
@@ -775,6 +932,7 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
         full_result: int | None = None
         full_seconds: float | None = None
         if compare_full:
+            args._changed_surface_full_authority_started = True
             if selection_receipt["schema_version"] == 2:
                 full_build_started = time.monotonic()
                 full_build_result = subprocess.run(build_argv(build_dir), shell=False).returncode
@@ -886,7 +1044,25 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
 def run(args: argparse.Namespace) -> int:
     build_dir = args.build_dir.resolve(strict=True)
     with build_dir_lock.exclusive_build_dir(build_dir):
-        return run_locked(args, build_dir)
+        try:
+            return run_locked(args, build_dir)
+        except (
+            SelectionExecutionError,
+            inventory.InventoryError,
+            OSError,
+            json.JSONDecodeError,
+        ) as error:
+            if getattr(args, "_changed_surface_full_authority_started", False) is True:
+                raise FullAuthorityExecutionError(str(error)) from error
+            if os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") != "1":
+                raise
+            if getattr(args, "_changed_surface_fallback_safe", False) is not True:
+                raise
+            args._changed_surface_full_authority_started = True
+            try:
+                return run_full_fallback(args, build_dir, error)
+            except (OSError, SelectionExecutionError) as full_error:
+                raise FullAuthorityExecutionError(str(full_error)) from full_error
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -903,7 +1079,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main() -> int:
     try:
         return run(parse_args())
-    except (SelectionExecutionError, inventory.InventoryError, OSError, json.JSONDecodeError) as error:
+    except (
+        SelectionExecutionError,
+        inventory.InventoryError,
+        FullAuthorityExecutionError,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
         print(f"changed-surface execution refused: {error}", file=sys.stderr)
         return 2
 
