@@ -79,6 +79,7 @@ producers:
 
   - id: native-windows
     flag: os-windows
+    freshness_required: false
     report: build-coverage/coverage.cobertura.xml
     expected_component_sets: [native-default, windows-platform]
     events: [push-main, schedule-8h, workflow-dispatch]

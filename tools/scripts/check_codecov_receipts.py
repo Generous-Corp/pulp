@@ -85,7 +85,10 @@ def processed_upload_counts(
     counts = {
         flag: sum(
             upload.get("build_url") == expected_build_url
-            and upload.get("state") == "merged"
+            and (
+                upload.get("state") == "merged"
+                or upload.get("state_name") == "MERGED"
+            )
             and isinstance(upload.get("flags"), list)
             and flag in upload["flags"]
             and (created_at := upload.get("created_at")) is not None

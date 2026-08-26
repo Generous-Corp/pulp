@@ -409,8 +409,9 @@ jobs:
     # GitHub-hosted windows-latest, so the
     # os-windows leg times out. Its C++ coverage adds little unique signal
     # over the Linux/macOS legs (same sources via llvm-cov), and the
-    # receipt-aware upload watchdog (#6252) requires exact Linux, macOS, and
-    # Python-tools receipts, but intentionally treats Windows as advisory.
+    # receipt-aware upload watchdog requires exact Linux, macOS, Python,
+    # Apple, Android, and React receipts, but intentionally treats Windows as
+    # an explicit best-effort producer until it can reliably finish in budget.
     # Letting Windows fail non-fatally therefore preserves the required fresh
     # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}

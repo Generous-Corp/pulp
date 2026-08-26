@@ -172,6 +172,11 @@ class CoverageSurfaceContract(unittest.TestCase):
     def test_producer_event_and_receipt_contract_is_complete(self):
         for producer in self.producers():
             with self.subTest(producer=producer["id"]):
+                self.assertEqual(
+                    producer.get("freshness_required", True),
+                    producer["id"] != "native-windows",
+                    "only the bounded best-effort Windows producer may be advisory",
+                )
                 self.assertTrue(producer["report"])
                 self.assertTrue(producer["cadence"])
                 self.assertTrue(producer["events"])

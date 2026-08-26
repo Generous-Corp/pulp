@@ -1,6 +1,6 @@
 name: Coverage upload watchdog
 # Processed-receipt invariant: "main should have a completed Coverage workflow
-# with exact current-attempt receipts for all seven producers that
+# with exact current-attempt receipts for every reliable producer that
 # Codecov processed for the same SHA within the last N hours." Codecov's dashboard silently degrades when
 # fresh complete uploads stop arriving — and there was no alarm for it (the
 # release pipeline has cadence/stuck/cli watchdogs; coverage had none). This
@@ -13,7 +13,7 @@ name: Coverage upload watchdog
 #     real OS leg, which now drops its report and skips upload NON-FATALLY (so
 #     the run concludes `success` with no C++ upload). A conclusion==success
 #     proxy alone would be blinded by this, so this watchdog requires the
-#     seven producer receipt artifacts emitted only after the shared Codecov
+#     required producer receipt artifacts emitted only after the shared Codecov
 #     action completes successfully. The check uses the actions API and needs
 #     no Codecov token.
 #   - Codecov `after_n_builds` waiting forever on a missing per-OS leg.
@@ -92,9 +92,11 @@ jobs:
           # The shared upload action emits a receipt only after the Codecov
           # action completes successfully. Main coverage is complete enough to
           # count as fresh only when both required native dashboard axes,
-          # Linux, macOS, Windows, Python, Swift, Android, and React must each
-          # produce an exact non-expired receipt for this run's SHA. This
-          # watchdog remains advisory; completeness cannot block a merge.
+          # Linux, macOS, Python, Swift, Android, and React must each produce an
+          # exact non-expired receipt for this run's SHA. Windows is still
+          # discovered and reported, but remains best-effort while its bounded
+          # instrumented suite can legitimately exceed the 210-minute cap.
+          # This watchdog remains advisory; completeness cannot block a merge.
           completed_ids="$(printf '%s' "$runs_json" \
             | jq -r '[.[] | select(.status=="completed")] | sort_by(.updated_at) | reverse | .[].id')"
           last_success_at=""
@@ -141,7 +143,7 @@ jobs:
             receipt_counts='{}'
             if receipt_counts="$(printf '%s' "${receipts}" | python3 tools/scripts/check_codecov_receipts.py \
                 --sha "${head_sha}" --required-axis \
-                "linux=${linux_attempt}" "macos=${macos_attempt}" "windows=${windows_attempt}" \
+                "linux=${linux_attempt}" "macos=${macos_attempt}" \
                 "python-tools=${linux_attempt}" "apple-swift=${macos_attempt}" \
                 "android-kotlin=${android_attempt}" "pulp-react=${react_attempt}")"; then
               # A receipt proves that the uploader command returned success; it
@@ -197,17 +199,17 @@ jobs:
                   --codecov-processed-run-id "${rid}" --repository "${REPO}" \
                   --required-flag \
                   "os-linux=${linux_started_at}" "os-macos=${macos_started_at}" \
-                  "os-windows=${windows_started_at}" "python-tools=${linux_started_at}" \
+                  "python-tools=${linux_started_at}" \
                   "apple-swift=${macos_started_at}" "android-kotlin=${android_started_at}" \
                   "pulp-react=${react_started_at}" \
                   <"${codecov_response}")"; then
-                echo "Run ${rid} receipts are not backed by merged exact-run Codecov uploads for every required flag (${processed_counts})."
+                echo "Run ${rid} receipts are not backed by merged exact-run Codecov uploads for every required freshness flag (${processed_counts})."
                 continue
               fi
               # Freshness begins at the oldest required receipt, not workflow
               # updated_at (which an unrelated long-running job can refresh).
               candidate_at="$(printf '%s' "${receipt_counts}" | jq -r '.oldest_created_at')"
-              echo "Complete Codecov-processed seven-producer receipt set: ${rid} (${candidate_at}, ${head_sha})"
+              echo "Complete Codecov-processed required receipt set: ${rid} (${candidate_at}, ${head_sha}); Windows remains explicitly monitored as best-effort."
               if [ -z "${last_success_at}" ] || [[ "${candidate_at}" > "${last_success_at}" ]]; then
                 last_success_at="${candidate_at}"
                 last_success_sha="${head_sha}"
@@ -261,7 +263,7 @@ jobs:
             --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .number // empty" || true)"
 
           if [ "${age_h}" -ge "${MAX_AGE_HOURS}" ]; then
-            body="$(printf '%s\n\n**main has had no complete exact-attempt seven-producer receipt set processed by Codecov in ~%sh** (threshold %sh). A run may conclude success while a report, transport upload, or Codecov processing was skipped, so the dashboard can silently degrade.\n\nLast processed upload set: %s (SHA %s; current-main lag %s)\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. A Linux, macOS, or Windows native build/report verification failed before upload.\n2. Python, Swift, Android, or React coverage failed independently.\n3. The instrumented suite hit its internal time budget and intentionally dropped the report.\n4. Codecov transport or exact-run processing failed after local report verification.\n5. CI dispatch throttling cancelled the run before required uploads.\n6. A rerun failed to reproduce receipts from its current attempt.\n\nAuto-closes when a fresh Coverage run produces all seven upload receipts and Codecov reports every exact-run flag merged.' \
+            body="$(printf '%s\n\n**main has had no complete exact-attempt required receipt set processed by Codecov in ~%sh** (threshold %sh). A run may conclude success while a report, transport upload, or Codecov processing was skipped, so the dashboard can silently degrade. Windows remains explicitly monitored but best-effort while its bounded suite can exceed the job cap.\n\nLast processed upload set: %s (SHA %s; current-main lag %s)\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. A Linux or macOS native build/report verification failed before upload.\n2. Python, Swift, Android, or React coverage failed independently.\n3. The instrumented suite hit its internal time budget and intentionally dropped the report.\n4. Codecov transport or exact-run processing failed after local report verification.\n5. CI dispatch throttling cancelled the run before required uploads.\n6. A rerun failed to reproduce receipts from its current attempt.\n\nAuto-closes when a fresh Coverage run produces every required upload receipt and Codecov reports each required exact-run flag merged.' \
               "${MARKER}" "${age_h}" "${MAX_AGE_HOURS}" "${last_success_at:-<none>}" "${last_success_sha:-<none>}" "${coverage_lag}" "${recent_summary}")"
             if [ "${DRY_RUN}" = "true" ]; then
               echo "::warning::[dry-run] would open/update coverage-upload watchdog issue"

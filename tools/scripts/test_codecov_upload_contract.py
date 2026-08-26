@@ -104,9 +104,11 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn('$i == "WINPID"', self.coverage)
         self.assertIn('taskkill.exe //PID "${cov_winpid}" //T //F', self.coverage)
 
-    def test_main_watchdog_requires_both_native_upload_receipts(self) -> None:
+    def test_main_watchdog_requires_reliable_uploads_and_monitors_windows(self) -> None:
         self.assertIn("tools/scripts/check_codecov_receipts.py", self.watchdog)
-        self.assertIn('"linux=${linux_attempt}" "macos=${macos_attempt}" "windows=${windows_attempt}"', self.watchdog)
+        self.assertIn('"linux=${linux_attempt}" "macos=${macos_attempt}"', self.watchdog)
+        self.assertNotIn('"windows=${windows_attempt}"', self.watchdog)
+        self.assertIn('windows_attempt=', self.watchdog)
         self.assertIn('"python-tools=${linux_attempt}" "apple-swift=${macos_attempt}"', self.watchdog)
         self.assertIn('"android-kotlin=${android_attempt}" "pulp-react=${react_attempt}"', self.watchdog)
         self.assertIn('-f filter=all', self.watchdog)
@@ -159,7 +161,7 @@ class CoverageWorkflowTests(unittest.TestCase):
         payload = {
             "count": 5,
             "results": [
-                {"build_url": exact_url, "state": "merged", "flags": ["os-linux"], "created_at": "2026-08-26T10:01:00Z"},
+                {"build_url": exact_url, "state_name": "MERGED", "flags": ["os-linux"], "created_at": "2026-08-26T10:01:00Z"},
                 {"build_url": exact_url, "state": "merged", "flags": ["os-macos"], "created_at": "2026-08-26T10:02:00Z"},
                 {"build_url": exact_url, "state": "merged", "flags": ["python-tools"], "created_at": "2026-08-26T10:03:00Z"},
                 {"build_url": exact_url, "state": "merged", "flags": ["pulp-react"], "created_at": "2026-08-26T10:04:00Z"},
