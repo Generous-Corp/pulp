@@ -316,6 +316,8 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
 
         self.assertIn("inspect/include/**", sdk["trigger_paths"])
         self.assertIn("inspect/src/**", sdk["trigger_paths"])
+        self.assertIn("core/**/js/**", sdk["trigger_paths"])
+        self.assertIn("core/**/js/**", sdk["internal_only_paths"])
         self.assertIn("inspect/CMakeLists.txt", sdk["trigger_paths"])
         self.assertIn(
             "tools/cmake/PulpInstallRules.cmake", sdk["trigger_paths"]
