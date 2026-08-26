@@ -5487,6 +5487,28 @@ rejects correct panels. A control the user cannot reach is never intentional —
 it drives a parameter that can now only be automated. `capture-control-clipped`
 names each binding and how many pixels were lost.
 
+There is a third asymmetry, and it bites hardest because the refusal looks
+authoritative. The extent scan (`settle.mjs`, `EXTENT_EXPRESSION`) mins raw
+`getBoundingClientRect()` over every `body *` and has no model of clipping at
+all, so a box the page **clips away** still pushes the measured extent left of
+the origin. A decorative bloom at `position:absolute; left:-70px` inside an
+`overflow:hidden` panel paints no pixels and still refuses the capture. If a
+panel is refused for a handful of pixels, check whether the offending box is
+clipped before touching the layout: `planning/friction/2026-08-17-browser-capture-extent-counts-clipped-boxes.md`
+has the measurements and the reason the obvious fix (walking `parentElement`
+for an `overflow` ancestor) is wrong.
+
+`--width` pins the viewport to a width the layout is known to resolve at, and
+skips the automatic correction rather than seeding it — that is what separates
+it from `--initial-width`, and the two are mutually exclusive. It is the lever
+for a responsive shell whose own width changes at a breakpoint the single
+bounded correction lands inside. **No width recovers content anchored left of
+the document origin** (an absolutely positioned element at a negative `left`,
+`position: fixed`, or a negative margin on `<html>`); reach for `--width` only
+when the layout's own width tracks the viewport. Through the supported `pulp
+import-design` entry point, an explicit `--render-size WxH` supplies this pinned
+width; the default render size continues to seed the automatic correction.
+
 ## The value arc belongs to the WIDGET, and a blank knob in the capture is correct
 
 A captured knob that is a bare shaded disc — no arc, no pointer — looks like a

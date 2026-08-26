@@ -722,8 +722,10 @@ CaptureResult capture_document(
             "selected browser executable does not exist or is not executable",
             request.output_directory);
     }
+    const int capture_width =
+        request.pinned_width.value_or(request.initial_width);
     if (!viewport_within_capture_limits(
-            request.initial_width, request.initial_height,
+            capture_width, request.initial_height,
             request.device_scale_factor)
         || request.device_scale_factor != kDefaultDeviceScaleFactor
         || request.timeout_ms <= 0) {
@@ -789,10 +791,11 @@ CaptureResult capture_document(
         "--root", canonical_root.string(),
         "--output", output_directory->string(),
         "--profile-dir", profile->path.string(),
-        "--initial-width", std::to_string(request.initial_width),
         "--initial-height", std::to_string(request.initial_height),
         "--dpr", std::to_string(request.device_scale_factor),
         "--timeout-ms", std::to_string(request.timeout_ms)};
+    args.push_back(request.pinned_width ? "--width" : "--initial-width");
+    args.push_back(std::to_string(capture_width));
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());

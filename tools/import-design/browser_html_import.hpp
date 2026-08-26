@@ -21,6 +21,7 @@ struct BrowserHtmlImportRequest {
     std::optional<std::filesystem::path> browser_executable;
     std::optional<std::filesystem::path> browser_interactions;
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
+    std::optional<int> pinned_width;
     int initial_width = 1280;
     int initial_height = 800;
     bool offline = false;

@@ -2506,6 +2506,11 @@ int main(int argc, char* argv[]) {
                  ? std::optional<fs::path>{}
                  : std::optional<fs::path>{browser_interactions_path},
          .source = *source,
+         // An explicit --render-size is the user's authored viewport, not a
+         // seed the capture may silently replace during width correction.
+         .pinned_width = render_size_explicit
+             ? std::optional<int>{render_width}
+             : std::optional<int>{},
          .initial_width = render_size_explicit ? render_width : 1280,
          .initial_height = render_size_explicit ? render_height : 800,
          .reference_image = reference_image,

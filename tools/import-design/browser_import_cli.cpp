@@ -611,6 +611,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .browser_executable = request.browser_executable,
          .browser_interactions = request.browser_interactions,
          .source = request.source,
+         .pinned_width = request.pinned_width,
          .initial_width = request.initial_width,
          .initial_height = request.initial_height,
          .offline = request.offline,
