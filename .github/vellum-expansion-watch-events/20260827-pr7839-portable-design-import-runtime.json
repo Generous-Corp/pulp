@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260827-pr7839-portable-design-import-runtime",
+  "created_at": "2026-08-27T04:59:55Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record Pulp-owned release and SDK packaging closure for the existing browser design importer. The change bundles the pinned official Node runtime beside browser_capture-v1 so installed Forge products do not depend on Homebrew or build-machine paths. Import behavior and Vellum source authority are unchanged.",
+  "tests": [
+    "test_prepare_node_for_release.py (2 cases)",
+    "test_package_cli.py (25 cases)",
+    "test_release_artifact_contents.py (57 cases)",
+    "test_check_sdk_complete.py (3 cases)",
+    "sterile HTML to Chromium to Skia replay (99 percent pixel match)",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
