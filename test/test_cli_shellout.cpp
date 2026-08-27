@@ -1589,6 +1589,19 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
     REQUIRE(selected_receipt.get("registry_sha256")->as_string() ==
             "816f6dac45b399fb611ec0651850c90728a2a383fd54e1b1204f72b52e7e7a69");
 
+    ProcessResult selected_from_source_build;
+    {
+        ScopedCurrentPath selected_cwd(downstream);
+        selected_from_source_build =
+            exec(pulp_binary().string(), {"authority", "query", "dsp", "--json"}, 30000);
+    }
+    INFO(selected_from_source_build.stderr_output);
+    REQUIRE(selected_from_source_build.exit_code == 0);
+    REQUIRE(selected_from_source_build.stdout_output.find(
+                "\"resolution_source\":\"pulp.toml:sdk_path\"") != std::string::npos);
+    REQUIRE(selected_from_source_build.stdout_output.find(sdk.generic_string()) !=
+            std::string::npos);
+
     auto missing = cold / "missing";
     write_text(missing / "pulp.toml", "[pulp]\nsdk_version = \"99.99.99-authority-missing\"\n"
                                       "sdk_path = \"" +

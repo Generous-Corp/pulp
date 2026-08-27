@@ -72,10 +72,14 @@ int cmd_authority(const std::vector<std::string>& args) {
 
     const auto cwd = fs::current_path();
     const auto executable = current_executable_path();
-    auto resolved = pulp::cli::authority::resolve_registry(cwd, executable);
+    const auto project = find_pulp_toml_root(cwd);
+    // The working tree itself is authoritative when the command runs inside a
+    // Pulp source checkout. A source-built CLI is only a fallback, however:
+    // downstream projects must resolve their explicitly selected SDK first.
+    auto resolved = pulp::cli::authority::resolve_registry(cwd, {});
     if (resolved && resolved->context == pulp::cli::authority::Context::source) {
         // A real Pulp checkout/source build is the highest-precedence authority.
-    } else if (const auto project = find_pulp_toml_root(cwd); !project.empty()) {
+    } else if (!project.empty()) {
         const auto sdk = resolve_standalone_sdk(project, false);
         if (sdk.resolved_sdk_dir.empty()) {
             print_authority_error(
@@ -102,6 +106,8 @@ int cmd_authority(const std::vector<std::string>& args) {
         }
         resolved = pulp::cli::authority::resolve_registry(
             cwd, executable, selected_sdk, selected_sdk_version, selected_sdk_source);
+    } else {
+        resolved = pulp::cli::authority::resolve_registry(cwd, executable);
     }
     if (!resolved) {
         print_authority_error(

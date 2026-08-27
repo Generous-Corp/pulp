@@ -462,10 +462,6 @@ std::optional<ResolvedRegistry> resolve_registry(const fs::path& cwd, const fs::
         return ResolvedRegistry{root / kRegistryRelative, root / kSchemaRelative, root,
                                 Context::source,          "source_checkout",      std::nullopt};
     }
-    if (const auto root = source_root_from_build_binary(executable); !root.empty()) {
-        return ResolvedRegistry{root / kRegistryRelative, root / kSchemaRelative, root,
-                                Context::source,          "source_build",         std::nullopt};
-    }
     if (!selected_sdk.empty()) {
         return ResolvedRegistry{selected_sdk / kInstalledRelative,
                                 selected_sdk / kInstalledSchemaRelative,
@@ -475,6 +471,10 @@ std::optional<ResolvedRegistry> resolve_registry(const fs::path& cwd, const fs::
                                 selected_sdk_version.empty()
                                     ? std::nullopt
                                     : std::optional<std::string>{selected_sdk_version}};
+    }
+    if (const auto root = source_root_from_build_binary(executable); !root.empty()) {
+        return ResolvedRegistry{root / kRegistryRelative, root / kSchemaRelative, root,
+                                Context::source,          "source_build",         std::nullopt};
     }
     const auto prefix = executable.parent_path().parent_path();
     const auto candidate = prefix / kInstalledRelative;

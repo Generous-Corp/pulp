@@ -363,6 +363,16 @@ TEST_CASE("docs command reports usage outside and inside projects", "[cli][docs]
         REQUIRE(downstream_resolution->context == pulp::cli::authority::Context::installed);
         REQUIRE(downstream_resolution->context_root == prefix);
 
+        auto source_build = authority_tmp.path / "source-build";
+        write_file(source_build / "CMakeCache.txt",
+                   "CMAKE_HOME_DIRECTORY:INTERNAL=" + source.generic_string() + "\n");
+        auto selected_over_source_build = pulp::cli::authority::resolve_registry(
+            downstream / "core", source_build / "tools/cli/pulp-cpp", prefix, "7.8.9",
+            "pulp.toml:sdk_version");
+        REQUIRE(selected_over_source_build);
+        REQUIRE(selected_over_source_build->context == pulp::cli::authority::Context::installed);
+        REQUIRE(selected_over_source_build->context_root == prefix);
+
         auto unrelated_ancestor = authority_tmp.path / "ancestor";
         write_file(unrelated_ancestor / "share/pulp/authority-navigation.json", "{}\n");
         auto nested_binary = unrelated_ancestor / "nested/bin/pulp-cpp";
