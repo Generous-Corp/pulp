@@ -68,15 +68,16 @@ require(
     "PR, dispatch, and merge-group macOS legs must own the required context",
 )
 require(
-    "needs: [resolve-provider, classify]" in merge_bootstrap
+    "needs: [resolve-provider, classify, protected-receipt-reuse]" in merge_bootstrap
     and "needs: [build" not in merge_bootstrap,
     "merge bootstrap must not depend on the advisory build matrix",
 )
 require("gh api" not in merge_bootstrap, "merge bootstrap must not poll jobs")
 require(
     "macos-merge-unused" in merge_bootstrap
-    and "native_build_required != 'true'" in merge_bootstrap,
-    "native merge groups must not emit a duplicate required context",
+    and "native_build_required != 'true'" in merge_bootstrap
+    and "protected-receipt-reuse.outputs.macos_reused == 'true'" in merge_bootstrap,
+    "native merge groups must emit a bootstrap context only for exact reuse",
 )
 require(
     "provider resolution did not succeed" in merge_bootstrap
@@ -84,5 +85,9 @@ require(
     "merge bootstrap must fail closed when its dependencies are untrusted",
 )
 require("Skip-safe merge group" in merge_bootstrap, "native skip must remain green")
+require(
+    "protected receipt decision unavailable" in merge_bootstrap,
+    "native receipt bootstrap must fail closed without its derived decision",
+)
 
 print("required macos alias contract: ok")

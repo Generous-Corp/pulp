@@ -1423,6 +1423,27 @@ name before checkout; an ordinary CI label or an unknown name fails closed.
 The pending exact-head status remains the durable obligation while every Mac
 is offline, so its age alone never creates a duplicate model invocation.
 
+## Exact PR receipts on an unchanged merge-group candidate
+
+A successful pull-request macOS or Linux matrix child publishes a two-day
+`protected-validation-<target>-<head>-<base>` receipt. The receipt binds the
+exact synthetic merge tree and parents, protected workflow/policy blobs,
+observed platform/toolchain identity, and SHA-256 identities for every CTest
+executable that was actually exercised. Receipt publication is an optimization
+after the normal build and tests; inability to publish does not weaken the PR
+gate.
+
+On `merge_group`, the preamble loads the verifier from the candidate's exact
+protected-base parent. It accepts exactly one unexpired artifact from a
+successful `pull_request` run, verifies GitHub's archive digest, then derives a
+new decision bound to the merge-group SHA. The candidate must have exactly the
+same base, head, tree, and policy blobs as the validated PR checkout. Any API,
+history, artifact, schema, digest, base/head/tree, or policy mismatch leaves
+that target in the original native matrix. The required `macos` bootstrap may
+report success only from the new subject-bound decision; a PR receipt alone can
+never satisfy the merge-group check. Fork PRs use the same public Actions
+artifact contract and keep the existing hosted-runner trust boundary.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single

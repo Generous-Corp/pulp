@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** `validation` and `slow` labels; `--repeat until-pass:2` |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** `validation` and `slow` labels; an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including `validation` + `slow`; results eyeballed, build failures file an issue |
@@ -17,6 +17,10 @@ single source of truth for that model.
 
 The required gate is **serialized on self-hosted macOS runners** and takes
 ~30 min. Keeping it lean is why the two label groups below are excluded from it.
+For a merge group whose base, head, tree, policy, toolchain record, and tested
+artifact identities exactly match a successful PR receipt, the protected-base
+verifier derives a new merge-group-bound decision and the native repetition is
+omitted. Any missing or changed binding retains the ordinary full gate.
 
 ## The label taxonomy (how routing works)
 

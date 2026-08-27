@@ -973,15 +973,95 @@ jobs:
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
 
-  build:
+  protected-receipt-reuse:
     needs: [resolve-provider, classify]
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    outputs:
+      matrix_json: ${{ steps.reuse.outputs.matrix_json }}
+      build_required: ${{ steps.reuse.outputs.build_required }}
+      macos_reused: ${{ steps.reuse.outputs.macos_reused }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          lfs: false
+      - id: reuse
+        env:
+          ORIGINAL_MATRIX: ${{ needs.resolve-provider.outputs.matrix_json }}
+          NATIVE_BUILD_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
+          RECEIPT_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -u
+          matrix="$ORIGINAL_MATRIX"
+          macos_reused=false
+          if [ "$GITHUB_EVENT_NAME" = merge_group ] \
+            && [ "$NATIVE_BUILD_REQUIRED" = true ]; then
+            read -r group base head extra <<EOF
+          $(git rev-list --parents -n 1 "$GITHUB_SHA")
+          EOF
+            if [ -n "${extra:-}" ] || [ -z "${base:-}" ] || [ -z "${head:-}" ]; then
+              echo "::notice::receipt reuse unavailable: merge group is not exactly two-parent"
+            elif git show "$base:tools/scripts/protected_merge_receipt.py" \
+              > "$RUNNER_TEMP/protected_merge_receipt.py"; then
+              for target in macos linux; do
+                artifact_name="protected-validation-${target}-${head}-${base}"
+                receipt_path="$RUNNER_TEMP/${target}-receipt.json"
+                decision_path="$RUNNER_TEMP/${target}-decision.json"
+                if python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
+                    --repository "$GITHUB_REPOSITORY" --target "$target" \
+                    --token "$RECEIPT_TOKEN" --artifact-name "$artifact_name" \
+                    --base-sha "$base" --head-sha "$head" \
+                    --output "$receipt_path" \
+                  && python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
+                    --repo "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
+                    --target "$target" --group-sha "$group" \
+                    --receipt "$receipt_path" --output "$decision_path"; then
+                  matrix="$(MATRIX_JSON="$matrix" TARGET="$target" python3 - <<'PY'
+          import json, os
+          matrix = json.loads(os.environ["MATRIX_JSON"])
+          matrix["include"] = [
+              item for item in matrix["include"] if item.get("key") != os.environ["TARGET"]
+          ]
+          print(json.dumps(matrix, separators=(",", ":")))
+          PY
+          )"
+                  [ "$target" != macos ] || macos_reused=true
+                  echo "::notice::exact protected receipt reused for ${target}"
+                else
+                  echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
+                fi
+              done
+            else
+              echo "::notice::protected base has no receipt verifier; full validation retained"
+            fi
+          fi
+          build_required="$(MATRIX_JSON="$matrix" python3 - <<'PY'
+          import json, os
+          print("true" if json.loads(os.environ["MATRIX_JSON"])["include"] else "false")
+          PY
+          )"
+          {
+            echo "matrix_json=$matrix"
+            echo "build_required=$build_required"
+            echo "macos_reused=$macos_reused"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [resolve-provider, classify, protected-receipt-reuse]
     # Skip the entire native build matrix (no runner allocated) when the PR
     # touches no C++/Swift build input. The macos/linux/windows alias jobs
     # below still run and report.
-    if: needs.classify.outputs.native_build_required == 'true'
+    if: >-
+      always()
+      && needs.resolve-provider.result == 'success'
+      && needs.classify.result == 'success'
+      && needs.classify.outputs.native_build_required == 'true'
+      && (needs.protected-receipt-reuse.result != 'success'
+          || needs.protected-receipt-reuse.outputs.build_required == 'true')
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
+      matrix: ${{ fromJSON(needs.protected-receipt-reuse.outputs.matrix_json || needs.resolve-provider.outputs.matrix_json || '{"include":[]}') }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     # The macOS child owns the required `macos` context directly on PR heads,
@@ -1608,6 +1688,40 @@ jobs:
           if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
+      - name: Issue exact protected-validation receipt
+        id: protected-receipt
+        if: >-
+          success()
+          && github.event_name == 'pull_request'
+          && (matrix.key == 'macos' || matrix.key == 'linux')
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin \
+            "$PR_BASE_SHA" "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/receipt-head"
+          receipt_dir="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}"
+          mkdir -p "$receipt_dir"
+          python3 tools/scripts/protected_merge_receipt.py issue \
+            --repository "$GITHUB_REPOSITORY" --target "${{ matrix.key }}" \
+            --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
+            --checkout-sha "$GITHUB_SHA" --workflow-sha "${{ github.workflow_sha }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
+          echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact protected-validation receipt
+        if: steps.protected-receipt.outcome == 'success'
+        uses: actions/upload-artifact@v5
+        with:
+          name: protected-validation-${{ matrix.key }}-${{ github.event.pull_request.head.sha }}-${{ github.event.pull_request.base.sha }}
+          path: ${{ steps.protected-receipt.outputs.path }}/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
@@ -1876,15 +1990,16 @@ jobs:
     # bootstrap owns the name only when that leg is intentionally absent or
     # cannot be trusted to start, preserving skip-safe green and fail-closed
     # dependency handling without waiting for advisory Linux.
-    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-merge-unused' }}
-    needs: [resolve-provider, classify]
+    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.protected-receipt-reuse.outputs.macos_reused == 'true') && 'macos' || 'macos-merge-unused' }}
+    needs: [resolve-provider, classify, protected-receipt-reuse]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       always()
       && github.event_name == 'merge_group'
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
-          || needs.classify.outputs.native_build_required != 'true')
+          || needs.classify.outputs.native_build_required != 'true'
+          || needs.protected-receipt-reuse.outputs.macos_reused == 'true')
     steps:
       - name: macOS merge-group bootstrap (required when native leg is absent)
         run: |
@@ -1897,7 +2012,16 @@ jobs:
             echo "classify did not succeed — failing macos gate closed"
             exit 1
           fi
-          echo "Skip-safe merge group — macos gate ✓ (native matrix omitted)"
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
+            if [ "${{ needs.protected-receipt-reuse.result }}" != "success" ] \
+              || [ "${{ needs.protected-receipt-reuse.outputs.macos_reused }}" != "true" ]; then
+              echo "protected receipt decision unavailable — failing macos gate closed"
+              exit 1
+            fi
+            echo "Exact-tree protected PR receipt revalidated for this merge group — macos gate ✓"
+          else
+            echo "Skip-safe merge group — macos gate ✓ (native matrix omitted)"
+          fi
 
   linux:
     needs: [build, classify]
