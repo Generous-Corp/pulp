@@ -51,7 +51,10 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
     def test_receipts_are_only_published_after_successful_pr_validation(self) -> None:
         self.assertIn("github.event_name == 'pull_request'", WORKFLOW)
         self.assertIn("success()", WORKFLOW)
-        self.assertIn("steps.protected-receipt.outcome == 'success'", WORKFLOW)
+        self.assertIn("id: protected_receipt", WORKFLOW)
+        self.assertIn("steps.protected_receipt.outcome == 'success'", WORKFLOW)
+        self.assertIn("steps.protected_receipt.outputs.path", WORKFLOW)
+        self.assertNotIn("steps.protected-receipt", WORKFLOW)
         self.assertIn("retention-days: 2", WORKFLOW)
 
     def test_receipt_uses_the_checkout_that_was_built_not_event_sha(self) -> None:
