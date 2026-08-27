@@ -9,9 +9,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from typing import NewType
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
+ExactCommitSha = NewType("ExactCommitSha", str)
 
 
 class TrustedMergeError(RuntimeError):
@@ -41,7 +43,7 @@ def _git(
     return result
 
 
-def _exact_commit(repo: Path, value: str, label: str) -> str:
+def _exact_commit(repo: Path, value: str, label: str) -> ExactCommitSha:
     if not SHA_RE.fullmatch(value):
         raise TrustedMergeError(f"{label} is not a full lowercase commit SHA")
     resolved = _git(repo, "rev-parse", "--verify", f"{value}^{{commit}}").stdout.strip()
@@ -49,10 +51,10 @@ def _exact_commit(repo: Path, value: str, label: str) -> str:
         raise TrustedMergeError(
             f"{label} resolved to {resolved}, expected exact commit {value}"
         )
-    return resolved
+    return ExactCommitSha(resolved)
 
 
-def build_trusted_merge(repo: Path, base: str, head: str) -> str:
+def build_trusted_merge(repo: Path, base: str, head: str) -> ExactCommitSha:
     """Return a synthetic merge commit with exactly ``base`` and ``head`` parents."""
 
     base = _exact_commit(repo, base, "base")
@@ -98,12 +100,14 @@ def build_trusted_merge(repo: Path, base: str, head: str) -> str:
             committed.stderr.strip() or "git commit-tree failed"
         )
     candidate = committed.stdout.strip()
+    if not SHA_RE.fullmatch(candidate):
+        raise TrustedMergeError("git commit-tree did not return an exact commit SHA")
     parents = _git(repo, "rev-list", "--parents", "-n", "1", candidate).stdout.split()
     if parents != [candidate, base, head]:
         raise TrustedMergeError("synthetic merge commit has unexpected parents")
     if _git(repo, "rev-parse", f"{candidate}^{{tree}}").stdout.strip() != tree:
         raise TrustedMergeError("synthetic merge commit has unexpected tree")
-    return candidate
+    return ExactCommitSha(candidate)
 
 
 def main() -> int:
@@ -111,17 +115,19 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
-    parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="private file that receives the validated exact commit SHA",
+    )
     args = parser.parse_args()
     try:
         candidate = build_trusted_merge(args.repo, args.base, args.head)
     except TrustedMergeError as exc:
         print(f"vellum-trusted-merge: {exc}", file=sys.stderr)
         return 1
-    if args.output:
-        args.output.write_text(candidate + "\n", encoding="utf-8")
-    else:
-        print(candidate)
+    args.output.write_text(candidate + "\n", encoding="utf-8")
     return 0
 
 

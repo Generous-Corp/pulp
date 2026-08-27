@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("vellum_trusted_merge.py")
@@ -76,6 +77,48 @@ class VellumTrustedMergeTests(unittest.TestCase):
     def test_non_exact_sha_is_rejected(self) -> None:
         with self.assertRaisesRegex(MERGE.TrustedMergeError, "full lowercase"):
             MERGE.build_trusted_merge(self.repo, self.base[:12], self.base)
+
+    def test_commit_tree_must_return_an_exact_sha(self) -> None:
+        original_run = subprocess.run
+
+        def corrupt_commit_tree(
+            *args: object,
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            command = args[0]
+            if isinstance(command, list) and "commit-tree" in command:
+                return subprocess.CompletedProcess(command, 0, "secret-not-a-sha\n", "")
+            return original_run(*args, **kwargs)
+
+        with mock.patch.object(MERGE.subprocess, "run", side_effect=corrupt_commit_tree):
+            with self.assertRaisesRegex(MERGE.TrustedMergeError, "exact commit SHA"):
+                MERGE.build_trusted_merge(self.repo, self.base, self.base)
+
+    def test_cli_requires_private_output_file_and_keeps_stdout_empty(self) -> None:
+        output = self.repo / "candidate.sha"
+        head = self.commit("head.txt", "head\n", "head")
+        completed = subprocess.run(
+            [
+                "python3",
+                str(SCRIPT),
+                "--repo",
+                str(self.repo),
+                "--base",
+                self.base,
+                "--head",
+                head,
+                "--output",
+                str(output),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "")
+        self.assertRegex(output.read_text(), r"^[0-9a-f]{40}\n$")
 
 
 if __name__ == "__main__":
