@@ -27,10 +27,11 @@ push or PR in the current repo state.
 
 The API-doc build has a separate installed-header authority gate:
 `python3 tools/scripts/doxygen_installed_header_check.py`. It reads the static
-install rules and Doxygen `INPUT` roots, checks every `.h`/`.hpp` in both
-directions, validates inspector-on and inspector-off authority, and rejects
-dynamic constructs it cannot prove. The install-layout test repeats the check
-against the actual staged SDK prefix. Temporary source-only documentation debt
+install rules and Doxygen `INPUT` roots, checks every installed `.h`, `.hpp`,
+and `.inc` plus the generated `.hpp.in` authority in both directions, validates
+inspector-on and inspector-off authority, and rejects dynamic constructs it
+cannot prove. The install-layout test repeats the check against the actual
+staged SDK prefix. Temporary source-only documentation debt
 must be an exact entry in
 `docs/doxygen/installed-public-header-policy.json`; stale exceptions fail.
 

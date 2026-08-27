@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -25,6 +26,7 @@ def write(path: Path, text: str = "// header\n") -> None:
 def fixture(root: Path) -> None:
     write(root / "core/a/include/pulp/a/a.hpp")
     write(root / "core/a/include/pulp/a/detail/support.hpp")
+    write(root / "core/a/include/pulp/a/src/internal.hpp")
     write(root / "core/runtime/include/pulp/runtime/build_info.hpp.in")
     write(root / "core/runtime/CMakeLists.txt",
           "build_info.hpp.in -> pulp/runtime/build_info.hpp\n")
@@ -33,6 +35,8 @@ def fixture(root: Path) -> None:
     write(root / "inspect/include/pulp/inspect/methods.inc")
     for name in ("arranger_view.hpp", "piano_roll_view.hpp"):
         write(root / f"core/timeline_view/include/pulp/timeline_view/{name}")
+    write(root / "core/timeline_view/include/pulp/timeline_view/detail/internal.hpp")
+    write(root / "core/timeline_view/include/pulp/timeline_view/src/internal.hpp")
     write(root / "docs/doxygen/Doxyfile", """INPUT = ../../core/a/include \\
         ../../inspect/include \\
         ../../core/runtime/include \\
@@ -43,7 +47,12 @@ EXCLUDE_PATTERNS = */src/* */detail/*
 """)
     write(root / "tools/cmake/PulpInstallRules.cmake", """set(_pulp_sdk_header_subsystems a runtime)
 foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
-  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include/pulp/")
+  set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
+  if(EXISTS "${_inc_dir}")
+    install(DIRECTORY "${_inc_dir}/pulp/"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+  endif()
 endforeach()
 elseif(TARGET pulp-inspect-protocol)
   install(FILES
@@ -73,6 +82,19 @@ def main() -> int:
         root = Path(directory)
         fixture(root)
         require(not checker.check(root), "positive fixture must pass")
+        cli = subprocess.run(
+            [sys.executable, str(Path(checker.__file__)), "--repo-root", str(root), "--check"],
+            text=True, capture_output=True, check=False,
+        )
+        require(cli.returncode == 0 and "parity: OK" in cli.stdout,
+                f"--check compatibility CLI failed: {cli.stdout}{cli.stderr}")
+        cli_bad = subprocess.run(
+            [sys.executable, str(Path(checker.__file__)), "--repo-root",
+             str(root / "missing"), "--check"],
+            text=True, capture_output=True, check=False,
+        )
+        require(cli_bad.returncode == 1 and "parity: FAILED" in cli_bad.stderr,
+                "--check compatibility CLI did not preserve failing exit status")
 
         doxy = root / checker.DOXYFILE
         original = doxy.read_text()
@@ -81,6 +103,14 @@ def main() -> int:
                 "missing Doxygen root escaped")
         doxy.write_text(original + "INPUT = ../../core/a/include\n")
         require(checker.check(root), "dynamic/duplicate Doxygen authority escaped")
+        doxy.write_text(original)
+
+        doxy.write_text(original + "INPUT += ../../core/a/include\n")
+        require(any("unsupported INPUT accumulation" in item for item in checker.check(root)),
+                "Doxygen INPUT accumulation escaped")
+        doxy.write_text(original + "EXCLUDE = ../../core/a/include/pulp/a/a.hpp\n")
+        require(any("EXCLUDE must be empty" in item for item in checker.check(root)),
+                "nonempty Doxygen EXCLUDE escaped")
         doxy.write_text(original)
 
         policy = json.loads((root / checker.POLICY).read_text())
@@ -99,6 +129,7 @@ def main() -> int:
         prefix = root / "prefix"
         write(prefix / "include/pulp/a/a.hpp")
         write(prefix / "include/pulp/a/detail/support.hpp")
+        write(prefix / "include/pulp/a/src/internal.hpp")
         write(prefix / "include/pulp/runtime/build_info.hpp")
         write(prefix / "include/pulp/inspect/protocol.hpp")
         write(prefix / "include/pulp/inspect/methods.inc")
@@ -119,6 +150,19 @@ def main() -> int:
         (prefix / "include/pulp/a/a.hpp").unlink()
         require(any("missing authority header" in item for item in checker.check(root, prefix, "on")),
                 "missing installed header escaped")
+
+        fixture(root)
+        prefix = root / "prefix-symlink"
+        write(prefix / "include/pulp/a/a.hpp")
+        (prefix / "include/pulp/a/link.hpp").symlink_to("a.hpp")
+        require(any("installed prefix contains a symlink" in item
+                    for item in checker.check(root, prefix, "on")),
+                "installed-prefix file symlink escaped")
+        (prefix / "include/pulp/a/link.hpp").unlink()
+        (prefix / "include/pulp/a/broken.hpp").symlink_to("../../../../outside.hpp")
+        require(any("installed prefix contains a symlink" in item
+                    for item in checker.check(root, prefix, "on")),
+                "broken/out-of-prefix installed symlink escaped")
 
     doxy_mutations = [
         ("RECURSIVE = YES", "RECURSIVE = NO", "RECURSIVE"),
@@ -172,6 +216,57 @@ def main() -> int:
             "new installed root absent from Doxygen escaped")
     temporary.cleanup()
 
+    def replace_consumer(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text().replace(
+            'install(DIRECTORY "${_inc_dir}/pulp/"',
+            'message(STATUS "${_inc_dir}/pulp/") #',
+        ))
+
+    temporary, root, errors = mutated(replace_consumer)
+    require(any("canonical install loop" in item for item in errors),
+            "missing canonical SDK subsystem consumer escaped")
+    temporary.cleanup()
+
+    def add_independent_install(root: Path) -> None:
+        write(root / "core/b/include/pulp/b/b.hpp")
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text() + '''
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/b/include/pulp/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+  FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+''')
+
+    temporary, root, errors = mutated(add_independent_install)
+    require(any("unsupported independent public-header install authority" in item
+                for item in errors),
+            "independent Pulp public-header install escaped")
+    temporary.cleanup()
+
+    temporary, root, errors = mutated(
+        lambda root: write(root / "core/a/include/foreign.hpp")
+    )
+    require(any("Doxygen public header is not installed" in item and "foreign.hpp" in item
+                for item in errors),
+            "foreign header beneath an installed include root escaped")
+    temporary.cleanup()
+
+    def source_symlink(root: Path) -> None:
+        (root / "core/a/include/pulp/a/link.hpp").symlink_to("a.hpp")
+
+    temporary, root, errors = mutated(source_symlink)
+    require(any("authority root contains a symlink" in item for item in errors),
+            "source file symlink escaped")
+    temporary.cleanup()
+
+    def broken_source_symlink(root: Path) -> None:
+        (root / "core/a/include/pulp/a/broken.hpp").symlink_to("../../outside.hpp")
+
+    temporary, root, errors = mutated(broken_source_symlink)
+    require(any("authority root contains a symlink" in item for item in errors),
+            "broken/out-of-root source symlink escaped")
+    temporary.cleanup()
+
     def add_doxygen_only(root: Path) -> None:
         write(root / "core/b/include/pulp/b/b.hpp")
         doxy = root / checker.DOXYFILE
@@ -202,7 +297,7 @@ def main() -> int:
     require(not errors, f"recursive new installed headers were not covered: {errors}")
     temporary.cleanup()
 
-    print("doxygen installed-header parity selftest: OK (25 controls)")
+    print("doxygen installed-header parity selftest: OK (36 controls)")
     return 0
 
 

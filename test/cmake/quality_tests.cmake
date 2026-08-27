@@ -19,10 +19,10 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
-    add_test(NAME doxygen-installed-header-parity
+    add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")
-    add_test(NAME doxygen-installed-header-parity-selftest
+    add_test(NAME doxygen-installed-header-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_doxygen_installed_header_check.py")
     add_test(NAME agent-capability-manifest-check
