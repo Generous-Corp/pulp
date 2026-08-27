@@ -302,6 +302,12 @@ usually means the processor emitted (almost) nothing, which is the finding.
   cache and target flags say `-O3 -DNDEBUG`, and repeat the order-balanced
   consumer matrix. Primitive throughput cannot authorize a call-site sweep,
   default change, global fast-math flag, or a quadrature/GPU/control claim.
+  For a new local-overlay candidate, run
+  `pulp-fast-trig-benchmark --qualification-only --inputs 16777216` first; this
+  emits dense error JSON without timing loops. Exit zero means the measurement
+  completed, not that the candidate passed; compare its fields with the selected
+  profile's numerical contract. If it misses, stop rather than interpreting
+  incidental speed.
 - **Grade discontinuity correctors against the shipped baseline.** A minBLEP
   table needs a reproducible generator and a freshness check, but table
   provenance alone does not prove audio quality. Render free-running and synced
