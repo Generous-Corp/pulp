@@ -179,6 +179,9 @@ struct CaptureRequest {
     // of its byte-identical stability requirements.
     int timeout_ms = 90000;
     bool allow_network = false;
+    // Derive one viewport from the authored root, reload the same target once,
+    // and require the root to be a contained fixed point at that viewport.
+    bool fit_authored_frame = false;
 };
 
 struct CaptureArtifacts {
