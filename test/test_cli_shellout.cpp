@@ -9,8 +9,8 @@
 // stdout/stderr invariants for the non-destructive subcommands every
 // user hits on day one.
 
-#include "test_cli_shellout_helpers.hpp"
 #include "../tools/cli/json_parser.hpp"
+#include "test_cli_shellout_helpers.hpp"
 
 #include <optional>
 #include <thread>
@@ -401,15 +401,13 @@ TEST_CASE("pulp audio sampler-mip parser errors honor json mode",
          "--levels requires an unsigned integer"},
         {{"audio", "sampler-mip", "build", "tone.wav", "--json", "--levels"},
          "--levels requires a value"},
-        {{"audio", "sampler-mip", "build", "tone.wav", "--levels", "4294967296",
-          "--json"},
+        {{"audio", "sampler-mip", "build", "tone.wav", "--levels", "4294967296", "--json"},
          "--levels is too large"},
         {{"audio", "sampler-mip", "build", "tone.wav", "--unknown", "--json"},
          "unknown option --unknown"},
         {{"audio", "sampler-mip", "build", "one.wav", "two.wav", "--json"},
          "only one source may be provided"},
-        {{"audio", "sampler-mip", "unknown", "--json"},
-         "expected sampler-mip verb 'build'"},
+        {{"audio", "sampler-mip", "unknown", "--json"}, "expected sampler-mip verb 'build'"},
     };
 
     for (const auto& c : cases) {
@@ -466,8 +464,8 @@ TEST_CASE("pulp audio sampler-mip builds and preserves a prior bounded bundle",
     const auto payload_before = read_file(payloads_before.front());
     REQUIRE_FALSE(payload_before.empty());
 
-    auto json = run_pulp(
-        {"audio", "sampler-mip", "build", source.string(), "--levels", "1", "--json"});
+    auto json =
+        run_pulp({"audio", "sampler-mip", "build", source.string(), "--levels", "1", "--json"});
     REQUIRE_FALSE(json.timed_out);
     REQUIRE(json.exit_code == 0);
     REQUIRE(json.stderr_output.empty());
@@ -493,12 +491,12 @@ TEST_CASE("pulp audio sampler-mip builds and preserves a prior bounded bundle",
     std::optional<ProcessResult> one_level_race;
     std::optional<ProcessResult> two_level_race;
     std::thread first_builder([&] {
-        one_level_race = run_pulp(
-            {"audio", "sampler-mip", "build", source.string(), "--levels", "1", "--json"});
+        one_level_race =
+            run_pulp({"audio", "sampler-mip", "build", source.string(), "--levels", "1", "--json"});
     });
     std::thread second_builder([&] {
-        two_level_race = run_pulp(
-            {"audio", "sampler-mip", "build", source.string(), "--levels", "2", "--json"});
+        two_level_race =
+            run_pulp({"audio", "sampler-mip", "build", source.string(), "--levels", "2", "--json"});
     });
     first_builder.join();
     second_builder.join();
@@ -511,8 +509,8 @@ TEST_CASE("pulp audio sampler-mip builds and preserves a prior bounded bundle",
     REQUIRE(one_level_race->stdout_output.find("\"ok\":true") != std::string::npos);
     REQUIRE(two_level_race->stdout_output.find("\"ok\":true") != std::string::npos);
 
-    auto converged = run_pulp(
-        {"audio", "sampler-mip", "build", source.string(), "--levels", "2", "--json"});
+    auto converged =
+        run_pulp({"audio", "sampler-mip", "build", source.string(), "--levels", "2", "--json"});
     REQUIRE_FALSE(converged.timed_out);
     REQUIRE(converged.exit_code == 0);
     REQUIRE(converged.stdout_output.find("\"ok\":true") != std::string::npos);
@@ -520,14 +518,13 @@ TEST_CASE("pulp audio sampler-mip builds and preserves a prior bounded bundle",
     REQUIRE(sampler_mip_payloads_in(root).size() == 2);
 
 #if defined(PULP_SAMPLER_SIDECAR_PROBE_BINARY)
-    const auto runtime_probe = exec(
-        PULP_SAMPLER_SIDECAR_PROBE_BINARY,
-        {source.string(), "2"}, 30000);
+    const auto runtime_probe =
+        exec(PULP_SAMPLER_SIDECAR_PROBE_BINARY, {source.string(), "2"}, 30000);
     REQUIRE_FALSE(runtime_probe.timed_out);
     REQUIRE(runtime_probe.exit_code == 0);
     REQUIRE(runtime_probe.stderr_output.empty());
-    REQUIRE(runtime_probe.stdout_output.find(
-                "PulpSampler loaded CLI sidecar levels=2") != std::string::npos);
+    REQUIRE(runtime_probe.stdout_output.find("PulpSampler loaded CLI sidecar levels=2") !=
+            std::string::npos);
 #else
     FAIL("PulpSampler CLI sidecar probe was not configured");
 #endif
@@ -1419,10 +1416,9 @@ TEST_CASE("pulp import-design --from claude writes JS + bridge handler scaffold"
     fs::remove(tokens_path);
     fs::remove(bridge_path);
 
-    auto r = run_pulp({"import-design", "--from", "claude", "--offline",
-                       "--file", html_path.string(),
-                       "--output", js_path.string(), "--tokens", tokens_path.string(),
-                       "--bridge-output", bridge_path.string()},
+    auto r = run_pulp({"import-design", "--from", "claude", "--offline", "--file",
+                       html_path.string(), "--output", js_path.string(), "--tokens",
+                       tokens_path.string(), "--bridge-output", bridge_path.string()},
                       30000);
     REQUIRE_FALSE(r.timed_out);
     INFO(r.stderr_output);
@@ -1467,9 +1463,8 @@ TEST_CASE("pulp import-design --from claude --no-bridge-scaffold writes only the
     fs::remove(js_path);
     fs::remove(bridge_path);
 
-    auto r = run_pulp({"import-design", "--from", "claude", "--offline",
-                       "--file", html_path.string(),
-                       "--output", js_path.string(), "--no-bridge-scaffold"},
+    auto r = run_pulp({"import-design", "--from", "claude", "--offline", "--file",
+                       html_path.string(), "--output", js_path.string(), "--no-bridge-scaffold"},
                       30000);
     REQUIRE_FALSE(r.timed_out);
     INFO(r.stderr_output);
@@ -1491,14 +1486,15 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
     // needs to survive help output — if someone silently drops one
     // from the dispatch table, this fails loudly.
     for (const char* cmd :
-         {"build",  "test",   "run",     "validate", "ship",  "version", "doctor", "create",
-          "clean",  "docs",   "status",  "inspect",  "audit", "add",     "remove", "list",
-          "search", "update", "suggest", "target",   "tool",  "help"}) {
+         {"build", "test",   "run",       "validate", "ship",    "version", "doctor", "create",
+          "clean", "docs",   "authority", "status",   "inspect", "audit",   "add",    "remove",
+          "list",  "search", "update",    "suggest",  "target",  "tool",    "help"}) {
         INFO("help output missing subcommand: " << cmd);
         REQUIRE(r.stdout_output.find(cmd) != std::string::npos);
     }
 
     for (const char* row : {
+             "  authority      Find the native source of truth",
              "  audit          License and provenance audit",
              "  add            Add a component to the project",
              "  remove         Remove a previously added package",
@@ -1513,6 +1509,129 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
         INFO("help output missing package/tool row: " << row);
         REQUIRE(r.stdout_output.find(row) != std::string::npos);
     }
+
+    auto observational_home = unique_temp_dir("pulp-authority-observational-home");
+    const auto pending_marker = observational_home / "pending-upgrade";
+    write_text(pending_marker, "sentinel-must-remain-byte-identical\n");
+    ScopedEnvVar authority_home("PULP_HOME");
+    authority_home.set(observational_home.string());
+    ScopedEnvVar authority_debug("PULP_DEBUG");
+    authority_debug.set("1");
+    auto listed = run_pulp({"authority", "list", "--json"});
+    INFO(listed.stderr_output);
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.stderr_output.empty());
+    REQUIRE(read_file(pending_marker) == "sentinel-must-remain-byte-identical\n");
+    REQUIRE(std::distance(fs::directory_iterator(observational_home), fs::directory_iterator{}) ==
+            1);
+    REQUIRE(listed.stdout_output.find("\"schema\":\"pulp.authority-navigation.query.v1\"") !=
+            std::string::npos);
+
+    auto alias = run_pulp({"authority", "query", "agent-api", "--json"});
+    INFO(alias.stderr_output);
+    REQUIRE(alias.exit_code == 0);
+    REQUIRE(alias.stdout_output.find("\"id\":\"agent-capabilities\"") != std::string::npos);
+    REQUIRE(alias.stdout_output.find("\"matched_token\":\"agent-api\"") != std::string::npos);
+
+    auto live = run_pulp({"authority", "query", "live-control", "--json"});
+    INFO(live.stderr_output);
+    REQUIRE(live.exit_code == 0);
+    REQUIRE(live.stdout_output.find("\"context_status\":\"requires_exact_live_instance\"") !=
+            std::string::npos);
+    REQUIRE(live.stdout_output.find("control instances") == std::string::npos);
+
+    auto unknown = run_pulp({"authority", "query", "not-an-authority"});
+    REQUIRE(unknown.exit_code != 0);
+    REQUIRE(unknown.stderr_output.find("unknown authority") != std::string::npos);
+
+    auto bad_args = run_pulp({"authority", "list", "extra"});
+    REQUIRE(bad_args.exit_code != 0);
+    REQUIRE(bad_args.stderr_output.find("expected `pulp authority list`") != std::string::npos);
+    REQUIRE(bad_args.stdout_output.find("Usage:") != std::string::npos);
+
+    auto cold = unique_temp_dir("pulp-authority-cold");
+    auto cold_binary = cold / "bin" / pulp_binary().filename();
+    fs::create_directories(cold_binary.parent_path());
+    REQUIRE(fs::copy_file(pulp_binary(), cold_binary));
+    auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
+    auto sdk = cold / "sdk";
+    write_text(sdk / "lib/cmake/Pulp/PulpConfig.cmake", "# exact SDK fixture\n");
+    write_text(sdk / "version.txt", "7.8.9\n");
+    write_text(sdk / "share/pulp/authority-navigation.json",
+               read_file(repo_root / "docs/status/authority-navigation.json"));
+    write_text(sdk / "share/pulp/authority-navigation.schema.json",
+               read_file(repo_root / "docs/status/authority-navigation.schema.json"));
+    auto downstream = cold / "downstream";
+    write_text(downstream / "pulp.toml",
+               "[pulp]\nsdk_version = \"7.8.9\"\nsdk_path = \"" + sdk.generic_string() + "\"\n");
+    ProcessResult selected;
+    {
+        ScopedCurrentPath selected_cwd(downstream);
+        selected = exec(cold_binary.string(), {"authority", "query", "dsp", "--json"}, 30000);
+    }
+    INFO(selected.stderr_output);
+    REQUIRE(selected.exit_code == 0);
+    REQUIRE(selected.stdout_output.find("\"resolution_source\":\"pulp.toml:sdk_path\"") !=
+            std::string::npos);
+    REQUIRE(selected.stdout_output.find("\"selected_sdk_version\":\"7.8.9\"") != std::string::npos);
+    REQUIRE(selected.stdout_output.find(sdk.generic_string()) != std::string::npos);
+    pulp::cli::pkg::JsonParser selected_parser{selected.stdout_output, 0};
+    const auto selected_receipt = selected_parser.parse();
+    selected_parser.skip_ws();
+    REQUIRE(selected_parser.pos == selected.stdout_output.size());
+    REQUIRE(selected_receipt.type == pulp::cli::pkg::JsonValue::Object);
+    REQUIRE(selected_receipt.get("resolved_root") != nullptr);
+    REQUIRE(selected_receipt.get("resolved_root")->as_string() == sdk.generic_string());
+    REQUIRE(selected_receipt.get("registry_path") != nullptr);
+    REQUIRE(selected_receipt.get("registry_path")->as_string() ==
+            (sdk / "share/pulp/authority-navigation.json").generic_string());
+    REQUIRE(selected_receipt.get("registry_sha256") != nullptr);
+    REQUIRE(selected_receipt.get("registry_sha256")->as_string() ==
+            "816f6dac45b399fb611ec0651850c90728a2a383fd54e1b1204f72b52e7e7a69");
+
+    auto missing = cold / "missing";
+    write_text(missing / "pulp.toml", "[pulp]\nsdk_version = \"99.99.99-authority-missing\"\n"
+                                      "sdk_path = \"" +
+                                          (cold / "does-not-exist").generic_string() + "\"\n");
+    ProcessResult missing_selected;
+    {
+        ScopedCurrentPath missing_cwd(missing);
+        missing_selected = exec(cold_binary.string(), {"authority", "list", "--json"}, 30000);
+    }
+    REQUIRE(missing_selected.exit_code != 0);
+    pulp::cli::pkg::JsonParser missing_parser{missing_selected.stderr_output, 0};
+    const auto missing_error = missing_parser.parse();
+    missing_parser.skip_ws();
+    REQUIRE(missing_parser.pos == missing_selected.stderr_output.size());
+    REQUIRE(missing_error.type == pulp::cli::pkg::JsonValue::Object);
+    REQUIRE(missing_error.get("schema") != nullptr);
+    REQUIRE(missing_error.get("schema")->as_string() == "pulp.authority-navigation.error.v1");
+    REQUIRE(missing_error.get("error") != nullptr);
+    REQUIRE(missing_error.get("error")->get("code") != nullptr);
+    REQUIRE(missing_error.get("error")->get("code")->as_string() ==
+            "authority_registry_unavailable");
+
+    auto cli_only = cold / "cli-only";
+    fs::create_directories(cli_only / "bin");
+    auto cli_only_binary = cli_only / "bin" / pulp_binary().filename();
+    REQUIRE(fs::copy_file(pulp_binary(), cli_only_binary));
+    ProcessResult unavailable;
+    {
+        ScopedCurrentPath cli_only_cwd(cli_only);
+        unavailable = exec(cli_only_binary.string(), {"authority", "list", "--json"}, 30000);
+    }
+    REQUIRE(unavailable.exit_code != 0);
+    pulp::cli::pkg::JsonParser unavailable_parser{unavailable.stderr_output, 0};
+    const auto unavailable_error = unavailable_parser.parse();
+    unavailable_parser.skip_ws();
+    REQUIRE(unavailable_parser.pos == unavailable.stderr_output.size());
+    REQUIRE(unavailable_error.type == pulp::cli::pkg::JsonValue::Object);
+    REQUIRE(unavailable_error.get("schema") != nullptr);
+    REQUIRE(unavailable_error.get("schema")->as_string() == "pulp.authority-navigation.error.v1");
+    REQUIRE(unavailable_error.get("error") != nullptr);
+    REQUIRE(unavailable_error.get("error")->get("code") != nullptr);
+    REQUIRE(unavailable_error.get("error")->get("code")->as_string() ==
+            "authority_registry_unavailable");
 }
 
 TEST_CASE("pulp macos validates local operator arguments before gh calls",
@@ -1580,15 +1699,15 @@ TEST_CASE("pulp macos keeps API branch names out of the command shell",
     auto marker = fixture / "injected";
     auto log = fixture / "gh-args";
     auto gh = fixture / "gh";
-    write_text(gh,
-               "#!/bin/sh\n"
-               "printf '[%s]\\n' \"$@\" >> \"$PULP_SECURITY_ARG_LOG\"\n"
-               "case \"$*\" in\n"
-               "  *pulls/123*) printf \"branch'; touch '%s'; #\\\"or(true))|.id#\\n\" \"$PULP_SECURITY_MARKER\" ;;\n"
-               "esac\n"
-               "exit 0\n");
-    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write |
-                        fs::perms::owner_exec, fs::perm_options::replace);
+    write_text(gh, "#!/bin/sh\n"
+                   "printf '[%s]\\n' \"$@\" >> \"$PULP_SECURITY_ARG_LOG\"\n"
+                   "case \"$*\" in\n"
+                   "  *pulls/123*) printf \"branch'; touch '%s'; #\\\"or(true))|.id#\\n\" "
+                   "\"$PULP_SECURITY_MARKER\" ;;\n"
+                   "esac\n"
+                   "exit 0\n");
+    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
 
     ScopedEnvVar path("PATH");
     const auto old_path = std::getenv("PATH") ? std::getenv("PATH") : "";
@@ -1600,8 +1719,7 @@ TEST_CASE("pulp macos keeps API branch names out of the command shell",
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     update_disabled.set("1");
 
-    auto result = run_pulp(
-        {"macos", "retarget", "--pr", "123", "--to", "github-hosted"}, 10000);
+    auto result = run_pulp({"macos", "retarget", "--pr", "123", "--to", "github-hosted"}, 10000);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE_FALSE(fs::exists(marker));
@@ -1620,15 +1738,14 @@ TEST_CASE("pulp doctor treats GitHub metadata as argv data, never shell syntax",
     fs::create_directories(fixture);
     auto marker = fixture / "injected";
     auto gh = fixture / "gh";
-    write_text(gh,
-               "#!/bin/sh\n"
-               "if [ \"$1\" = repo ]; then\n"
-               "  printf \"owner/repo'; touch '%s'; #\\n\" \"$PULP_SECURITY_MARKER\"\n"
-               "  exit 0\n"
-               "fi\n"
-               "printf '{\"secrets\":[]}\\n'\n");
-    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write |
-                        fs::perms::owner_exec, fs::perm_options::replace);
+    write_text(gh, "#!/bin/sh\n"
+                   "if [ \"$1\" = repo ]; then\n"
+                   "  printf \"owner/repo'; touch '%s'; #\\n\" \"$PULP_SECURITY_MARKER\"\n"
+                   "  exit 0\n"
+                   "fi\n"
+                   "printf '{\"secrets\":[]}\\n'\n");
+    fs::permissions(gh, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
 
     ScopedEnvVar path("PATH");
     const auto old_path = std::getenv("PATH") ? std::getenv("PATH") : "";
@@ -1638,8 +1755,7 @@ TEST_CASE("pulp doctor treats GitHub metadata as argv data, never shell syntax",
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     update_disabled.set("1");
 
-    auto result = run_pulp(
-        {"doctor", "--fix", "--only", "RELEASE_BOT_TOKEN secret"}, 10000);
+    auto result = run_pulp({"doctor", "--fix", "--only", "RELEASE_BOT_TOKEN secret"}, 10000);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE_FALSE(fs::exists(marker));
     REQUIRE(result.stdout_output.find("requires manual steps") != std::string::npos);
@@ -1712,25 +1828,22 @@ TEST_CASE("pulp control grant-request exposes only profile or typed-operation se
     CHECK(help.stdout_output.find("--host") == std::string::npos);
     CHECK(help.stdout_output.find("--port") == std::string::npos);
 
-    const auto missing =
-        run_pulp({"control", "grant-request", "--instance", "instance-1"}, 10000);
+    const auto missing = run_pulp({"control", "grant-request", "--instance", "instance-1"}, 10000);
     REQUIRE_FALSE(missing.timed_out);
     REQUIRE(missing.exit_code == 2);
     CHECK(missing.stderr_output.find("requires exactly one of --profile") != std::string::npos);
 
-    const auto conflicting = run_pulp(
-        {"control", "grant-request", "--instance", "instance-1", "--profile",
-         "inspect-readonly", "--operation", "dev.pulp.runtime/evaluate@1"},
-        10000);
+    const auto conflicting =
+        run_pulp({"control", "grant-request", "--instance", "instance-1", "--profile",
+                  "inspect-readonly", "--operation", "dev.pulp.runtime/evaluate@1"},
+                 10000);
     REQUIRE_FALSE(conflicting.timed_out);
     REQUIRE(conflicting.exit_code == 2);
-    CHECK(conflicting.stderr_output.find("requires exactly one of --profile") !=
-          std::string::npos);
+    CHECK(conflicting.stderr_output.find("requires exactly one of --profile") != std::string::npos);
 
-    const auto arbitrary = run_pulp(
-        {"control", "grant-request", "--instance", "instance-1", "--operation",
-         "dev.pulp.raw/arbitrary@1"},
-        10000);
+    const auto arbitrary = run_pulp({"control", "grant-request", "--instance", "instance-1",
+                                     "--operation", "dev.pulp.raw/arbitrary@1"},
+                                    10000);
     REQUIRE_FALSE(arbitrary.timed_out);
     REQUIRE(arbitrary.exit_code == 2);
     CHECK(arbitrary.stderr_output.find("unknown or not grantable") != std::string::npos);
@@ -1749,11 +1862,8 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
     auto help = run_pulp({"inspect", "--help"}, 10000);
     REQUIRE_FALSE(help.timed_out);
     REQUIRE(help.exit_code == 0);
-    REQUIRE(help.stdout_output.find(
-                "Usage: pulp inspect profiles [--json]") !=
-            std::string::npos);
-    REQUIRE(help.stdout_output.find("pulp inspect audit ARTIFACT [--json]") !=
-            std::string::npos);
+    REQUIRE(help.stdout_output.find("Usage: pulp inspect profiles [--json]") != std::string::npos);
+    REQUIRE(help.stdout_output.find("pulp inspect audit ARTIFACT [--json]") != std::string::npos);
     REQUIRE(help.stdout_output.find("--port PORT") == std::string::npos);
     REQUIRE(help.stdout_output.find("--command METHOD") == std::string::npos);
     REQUIRE(help.stdout_output.find(
@@ -1764,8 +1874,7 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
 
     REQUIRE_FALSE(missing.timed_out);
     REQUIRE(missing.exit_code == 2);
-    REQUIRE(missing.stderr_output.find("unknown inspect command: list") !=
-            std::string::npos);
+    REQUIRE(missing.stderr_output.find("unknown inspect command: list") != std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
@@ -3011,9 +3120,8 @@ TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --for
     }
 
     pulp_setenv("PULP_DELEGATE_EXPAND", "expanded-by-shell", 1);
-    auto r = run_pulp(
-        {"import-design", "--export-tokens", "--format", "%PULP_DELEGATE_EXPAND%"},
-        30000);
+    auto r =
+        run_pulp({"import-design", "--export-tokens", "--format", "%PULP_DELEGATE_EXPAND%"}, 30000);
     pulp_unsetenv("PULP_DELEGATE_EXPAND");
     REQUIRE_FALSE(r.timed_out);
     // Exit 2 must survive: NOT collapsed to 0 by an undecoded wait status.
@@ -3036,8 +3144,7 @@ TEST_CASE("pulp import-design --help survives the Windows cmd leading-quote rule
     auto r = run_pulp({"import-design", "--help"}, 30000);
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
-    REQUIRE((r.stdout_output + r.stderr_output).find("import-design") !=
-            std::string::npos);
+    REQUIRE((r.stdout_output + r.stderr_output).find("import-design") != std::string::npos);
 }
 
 // `pulp ci-host` is the optional Tart-VM host-onboarding wrapper around
@@ -3101,13 +3208,12 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     fs::remove_all(dir);
     fs::create_directories(dir);
 
-    auto auv3 = run_pulp({"validate", "--target", "all", "--json",
-                          (dir / "Missing.appex").string()});
+    auto auv3 =
+        run_pulp({"validate", "--target", "all", "--json", (dir / "Missing.appex").string()});
     REQUIRE_FALSE(auv3.timed_out);
-    REQUIRE(auv3.stdout_output.find(
-        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
-    REQUIRE(auv3.stdout_output.find("\"inspector_capabilities\": []") !=
+    REQUIRE(auv3.stdout_output.find("\"inspector_capability_evidence_complete\": true") !=
             std::string::npos);
+    REQUIRE(auv3.stdout_output.find("\"inspector_capabilities\": []") != std::string::npos);
 
     const auto first = dir / "First.app" / "Contents/MacOS";
     const auto second = dir / "Second.app" / "Contents/MacOS";
@@ -3123,50 +3229,48 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     }
     {
         std::ofstream manifest(first / "First.inspector-capabilities.json");
-        manifest << R"({"product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+        manifest
+            << R"({"product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
     }
     auto multiple = run_pulp({"validate", "--target", "standalone", "--json",
-                              (dir / "First.app").string(),
-                              (dir / "Second.app").string()});
+                              (dir / "First.app").string(), (dir / "Second.app").string()});
     REQUIRE_FALSE(multiple.timed_out);
-    REQUIRE(multiple.stdout_output.find(
-        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(multiple.stdout_output.find("\"inspector_capability_evidence_complete\": false") !=
+            std::string::npos);
     REQUIRE(multiple.exit_code != 0);
 
     {
         std::ofstream executable(first / "First", std::ios::binary);
-        executable << standalone_artifact_marker()
-                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker() << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
-    auto stale = run_pulp({"validate", "--target", "standalone", "--json",
-                           (dir / "First.app").string()});
+    auto stale =
+        run_pulp({"validate", "--target", "standalone", "--json", (dir / "First.app").string()});
     REQUIRE_FALSE(stale.timed_out);
-    REQUIRE(stale.stdout_output.find(
-        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(stale.stdout_output.find("\"inspector_capability_evidence_complete\": false") !=
+            std::string::npos);
     REQUIRE(stale.exit_code != 0);
 
-    auto stale_plain = run_pulp({"validate", "--target", "standalone",
-                                 (dir / "First.app").string()});
+    auto stale_plain =
+        run_pulp({"validate", "--target", "standalone", (dir / "First.app").string()});
     REQUIRE_FALSE(stale_plain.timed_out);
-    REQUIRE(stale_plain.stderr_output.find(
-        "Inspector capability evidence incomplete") != std::string::npos);
+    REQUIRE(stale_plain.stderr_output.find("Inspector capability evidence incomplete") !=
+            std::string::npos);
     REQUIRE(stale_plain.exit_code != 0);
 
     const auto raw = dir / "RawStandalone";
     {
         std::ofstream executable(raw, std::ios::binary);
-        executable << standalone_artifact_marker()
-                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker() << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
     {
         std::ofstream sidecar(dir / "RawStandalone.inspector-capabilities.json");
-        sidecar << R"({"product_name":"RawStandalone","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+        sidecar
+            << R"({"product_name":"RawStandalone","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
     }
-    auto raw_stale = run_pulp(
-        {"validate", "--target", "standalone", "--json", raw.string()});
+    auto raw_stale = run_pulp({"validate", "--target", "standalone", "--json", raw.string()});
     REQUIRE_FALSE(raw_stale.timed_out);
-    REQUIRE(raw_stale.stdout_output.find(
-        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(raw_stale.stdout_output.find("\"inspector_capability_evidence_complete\": false") !=
+            std::string::npos);
     REQUIRE(raw_stale.exit_code != 0);
 }
 
@@ -3185,29 +3289,26 @@ TEST_CASE("pulp validate accepts a manifest-free empty build report",
     auto result = run_pulp_in_directory(project, {"validate", "--json"});
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stdout_output.find(
-        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
-    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
+    REQUIRE(result.stdout_output.find("\"inspector_capability_evidence_complete\": true") !=
             std::string::npos);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") != std::string::npos);
 
-    const auto artifact_dir =
-        project / "build" / "products" / "Stale.app" / "Contents/MacOS";
+    const auto artifact_dir = project / "build" / "products" / "Stale.app" / "Contents/MacOS";
     fs::create_directories(artifact_dir);
     {
-        std::ofstream sidecar(
-            artifact_dir / "Stale.inspector-capabilities.json");
-        sidecar << R"({"product_name":"Stale","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+        std::ofstream sidecar(artifact_dir / "Stale.inspector-capabilities.json");
+        sidecar
+            << R"({"product_name":"Stale","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
     }
     {
         std::ofstream executable(artifact_dir / "Stale", std::ios::binary);
-        executable << standalone_artifact_marker()
-                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker() << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
     auto incomplete = run_pulp_in_directory(project, {"validate"});
     REQUIRE_FALSE(incomplete.timed_out);
     REQUIRE(incomplete.exit_code != 0);
-    REQUIRE(incomplete.stderr_output.find(
-        "Inspector capability evidence incomplete") != std::string::npos);
+    REQUIRE(incomplete.stderr_output.find("Inspector capability evidence incomplete") !=
+            std::string::npos);
 }
 
 TEST_CASE("pulp ship check android ignores standalone inspector manifests",
@@ -3227,14 +3328,12 @@ TEST_CASE("pulp ship check android ignores standalone inspector manifests",
         std::ofstream apk(project / "artifacts" / "fixture.apk", std::ios::binary);
         apk << "unsigned fixture";
     }
-    auto result = run_pulp_in_directory(
-        project, {"ship", "check", "--target", "android", "--json"});
+    auto result =
+        run_pulp_in_directory(project, {"ship", "check", "--target", "android", "--json"});
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
-            std::string::npos);
-    REQUIRE(result.stderr_output.find("inspector capability manifest") ==
-            std::string::npos);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") != std::string::npos);
+    REQUIRE(result.stderr_output.find("inspector capability manifest") == std::string::npos);
 }
 
 TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
@@ -3257,8 +3356,7 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
         std::ofstream cache(project / "build" / "CMakeCache.txt");
         cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
     }
-    const auto executable_dir =
-        project / "build" / "Share.app" / "Contents/MacOS";
+    const auto executable_dir = project / "build" / "Share.app" / "Contents/MacOS";
     fs::create_directories(executable_dir);
     {
         std::ofstream executable(executable_dir / "Share", std::ios::binary);
@@ -3266,61 +3364,53 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
                    << " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
                       "PULP_INSPECT_CAPABILITY_UI_READ_V1";
     }
-    fs::permissions(executable_dir / "Share", fs::perms::owner_exec,
-                    fs::perm_options::add);
+    fs::permissions(executable_dir / "Share", fs::perms::owner_exec, fs::perm_options::add);
     {
         std::ofstream sidecar(executable_dir / "Share.inspector-capabilities.json");
-        sidecar << R"({"product_name":"Share","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})";
+        sidecar
+            << R"({"product_name":"Share","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})";
     }
     const auto app = project / "build" / "Share.app";
-    auto refused = run_pulp_in_directory(
-        project, {"ship", "share", app.string(), "--dry-run"});
+    auto refused = run_pulp_in_directory(project, {"ship", "share", app.string(), "--dry-run"});
     REQUIRE_FALSE(refused.timed_out);
     REQUIRE(refused.exit_code != 0);
-    REQUIRE(refused.stderr_output.find("requires --ship-inspector") !=
-            std::string::npos);
+    REQUIRE(refused.stderr_output.find("requires --ship-inspector") != std::string::npos);
 
     auto acknowledged = run_pulp_in_directory(
-        project, {"ship", "share", app.string(), "--dry-run",
-                  "--ship-inspector"});
+        project, {"ship", "share", app.string(), "--dry-run", "--ship-inspector"});
     REQUIRE_FALSE(acknowledged.timed_out);
     REQUIRE(acknowledged.exit_code == 0);
-    REQUIRE(acknowledged.stdout_output.find("pulp ship share plan") !=
-            std::string::npos);
+    REQUIRE(acknowledged.stdout_output.find("pulp ship share plan") != std::string::npos);
 
     const auto dmg_source = project / "build" / "dmg-source";
     fs::create_directories(dmg_source);
     fs::copy(app, dmg_source / app.filename(), fs::copy_options::recursive);
     const auto dmg = project / "build" / "Share.dmg";
-    const auto create_dmg = "hdiutil create -quiet -fs HFS+ -srcfolder \"" +
-        dmg_source.string() + "\" \"" + dmg.string() + "\"";
+    const auto create_dmg = "hdiutil create -quiet -fs HFS+ -srcfolder \"" + dmg_source.string() +
+                            "\" \"" + dmg.string() + "\"";
     REQUIRE(std::system(create_dmg.c_str()) == 0);
-    auto container_refused = run_pulp_in_directory(
-        project, {"ship", "share", dmg.string(), "--dry-run"});
+    auto container_refused =
+        run_pulp_in_directory(project, {"ship", "share", dmg.string(), "--dry-run"});
     REQUIRE_FALSE(container_refused.timed_out);
     REQUIRE(container_refused.exit_code == 0);
-    REQUIRE(container_refused.stdout_output.find("pulp ship share plan") !=
-            std::string::npos);
+    REQUIRE(container_refused.stdout_output.find("pulp ship share plan") != std::string::npos);
 
     auto container_acknowledged = run_pulp_in_directory(
-        project, {"ship", "share", dmg.string(), "--dry-run",
-                  "--ship-inspector"});
+        project, {"ship", "share", dmg.string(), "--dry-run", "--ship-inspector"});
     REQUIRE_FALSE(container_acknowledged.timed_out);
     REQUIRE(container_acknowledged.exit_code == 0);
-    REQUIRE(container_acknowledged.stdout_output.find("pulp ship share plan") !=
-            std::string::npos);
+    REQUIRE(container_acknowledged.stdout_output.find("pulp ship share plan") != std::string::npos);
 
     const auto placeholder_dmg = project / "build" / "Placeholder.dmg";
     {
         std::ofstream placeholder(placeholder_dmg, std::ios::binary);
         placeholder << "not a disk image";
     }
-    auto placeholder_plan = run_pulp_in_directory(
-        project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
+    auto placeholder_plan =
+        run_pulp_in_directory(project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
     REQUIRE_FALSE(placeholder_plan.timed_out);
     REQUIRE(placeholder_plan.exit_code == 0);
-    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") !=
-            std::string::npos);
+    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") != std::string::npos);
 #endif
 }
 
@@ -3342,8 +3432,7 @@ TEST_CASE("pulp ship package json remains structured on inspector refusal",
         cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
     }
 
-    auto result = run_pulp_in_directory(
-        project, {"ship", "package", "--json", "--ship-inspector"});
+    auto result = run_pulp_in_directory(project, {"ship", "package", "--json", "--ship-inspector"});
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code != 0);
     REQUIRE(result.stdout_output.find("\"error\":") != std::string::npos);

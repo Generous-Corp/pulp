@@ -353,9 +353,32 @@ fn main() -> ExitCode {
     if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
         return force_cpp_fallthrough();
     }
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("authority")) {
+        return cpp_only_authority_fallthrough();
+    }
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => code,
+    }
+}
+
+/// Delegate the C++-owned authority navigator before Rust startup services run.
+/// This ordering is the side-effect boundary: authority cannot reconcile or
+/// launch the optional broker even if future clap parsing recognizes it.
+fn cpp_only_authority_fallthrough() -> ExitCode {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    match pulp_rs::fallthrough::delegate(&argv) {
+        Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) => {
+            ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1))
+        }
+        Ok(pulp_rs::fallthrough::Outcome::Disabled | pulp_rs::fallthrough::Outcome::NotFound) => {
+            eprintln!("pulp: authority navigation requires the installed pulp-cpp companion");
+            ExitCode::from(2)
+        }
+        Err(error) => {
+            eprintln!("pulp: authority delegation failed: {error}");
+            ExitCode::from(1)
+        }
     }
 }
 

@@ -96,6 +96,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Browse local documentation",
     },
     Entry {
+        name: "authority",
+        summary: "Find the native source of truth",
+    },
+    Entry {
         name: "forge",
         summary: "Export Forge catalog integration data",
     },

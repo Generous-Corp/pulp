@@ -331,6 +331,34 @@ the hosting skill's descriptor contract aligned. The command intentionally has
 no MCP tool: agents consume the committed/installed artifact, so keep its
 `cli_only` parity reason current.
 
+### `pulp authority` — routing-only authority navigator
+
+`pulp authority list|query <id-or-alias> [--json]` routes an agent to the
+existing native authority for a bounded capability family. It does not become
+a universal catalog: registry rows carry locations, a descriptive native
+query or validator, coverage/absence semantics, and `does_not_prove`, but no
+copied semantic rows, support verdicts, operations, grants, or live receipts.
+Never execute the stored route string.
+
+Keep the command C++-owned. Add it to `help.rs::COMMANDS` so the installed Rust
+banner advertises the unified surface, but do not add a Rust `Command` variant:
+the unknown-subcommand path must delegate the original argv unchanged to the
+sibling `pulp-cpp`. Pin that contract in `rollback_test.rs`. The source checkout
+uses `docs/status/authority-navigation.json`; a downstream project resolves
+the exact SDK selected by `pulp.toml` with materialization disabled, and an
+SDK-installed CLI may use its exact adjacent `share/pulp/authority-navigation.json`.
+A source-only row reports
+`unavailable_in_installed_context`, and a standalone CLI-only release archive
+without that SDK registry reports the registry unavailable. Do not search a
+different checkout or SDK, or another installed SDK version.
+
+This is intentionally CLI-only in the parity baseline. It describes the
+separate offline MCP authority and the exact-instance live-control route; it
+does not wrap either as a new generic MCP or control operation. The live row
+must require a caller-supplied exact instance ID and must never point to
+`pulp control instances`, because that management command can launch the
+broker-owned ordinary Standalone host when inventory is empty.
+
 ### 8. Decide: does this need an MCP tool?
 
 Every top-level CLI command is checked for MCP parity by

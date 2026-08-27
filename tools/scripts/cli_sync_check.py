@@ -11,7 +11,7 @@ from cli_command_inventory import extract_rust_command_names
 
 # Commands that intentionally don't have slash commands
 SKIP_SLASH_COMMANDS = {
-    "audio", "cache", "clean", "upgrade", "config", "export-tokens",
+    "audio", "authority", "cache", "clean", "upgrade", "config", "export-tokens",
     "ci-local", "design-debug", "harness", "help", "add", "audit",
     "identity", "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "render", "search", "suggest",

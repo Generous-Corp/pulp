@@ -807,6 +807,28 @@ commands:
             description: "Regenerate docs/status/dsp-capabilities.json"
     docs: reference/cli.md#dsp
 
+  - name: authority
+    status: experimental
+    summary: Find the native source of truth for a bounded Pulp capability family without copying its semantic rows, executing its reported route, or crossing static, offline, release-evidence, and live-control planes.
+    subcommands:
+      - name: list
+        summary: List the finite authority routes and their availability in the source checkout, a downstream project's exact selected SDK resolved without materialization, or the exact adjacent installed-SDK context.
+        args:
+          - name: --json
+            kind: flag
+            description: Emit registry path/root, resolution source, context, selected SDK version when applicable, SHA-256 provenance, and routing-only rows as stable JSON.
+      - name: query
+        summary: Resolve one exact authority id or globally unique alias and report its native owner, route, coverage, absence semantics, and limits.
+        args:
+          - name: id-or-alias
+            kind: positional
+            required: true
+            description: Exact canonical authority id or alias; fuzzy and implicit selection are not supported.
+          - name: --json
+            kind: flag
+            description: Emit stable routing and provenance JSON.
+    docs: reference/cli.md#authority
+
   - name: forge
     status: experimental
     summary: Export the Forge-facing semantic DSP catalog with numeric ranges and defaults joined from baked nodes at runtime.

@@ -491,6 +491,23 @@ unset(_pulp_agent_capability_snapshot)
 unset(_pulp_agent_capability_schema)
 unset(_pulp_agent_capability_handoff_schema)
 
+# Routing-only authority navigator. The registry points at the native owners
+# above and at source-only maintenance authorities without copying their rows.
+set(_pulp_authority_navigation
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/authority-navigation.json")
+set(_pulp_authority_navigation_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/authority-navigation.schema.json")
+if(NOT EXISTS "${_pulp_authority_navigation}"
+        OR NOT EXISTS "${_pulp_authority_navigation_schema}")
+    message(FATAL_ERROR "Required authority navigation registry or schema is missing.")
+endif()
+install(FILES
+    "${_pulp_authority_navigation}"
+    "${_pulp_authority_navigation_schema}"
+    DESTINATION "share/pulp")
+unset(_pulp_authority_navigation)
+unset(_pulp_authority_navigation_schema)
+
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")

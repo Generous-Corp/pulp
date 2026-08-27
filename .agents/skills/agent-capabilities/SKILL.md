@@ -35,6 +35,21 @@ describe what an SDK can design or generate; it must never contain runtime
 operations, grants, policy, risk decisions, instances, activation, sessions,
 revocation, or receipts.
 
+`pulp authority list|query` is the routing-only navigator across this and the
+other bounded machine authorities. For design-time capability questions it
+must point to `agent-capabilities.json` and this manifest checker; it must not
+copy capability rows into `authority-navigation.json`, treat an absent key as
+unsupported, or infer any live state. In a source checkout it binds its answer
+to the checkout registry. In a downstream project it resolves the exact SDK
+selected by `pulp.toml` without materializing it; otherwise an SDK-installed
+CLI may bind to its adjacent `share/pulp/authority-navigation.json`.
+Source-only routes report unavailable, and a missing selected SDK never falls
+back to another installed version.
+The standalone CLI-only release archive has no SDK registry and must fail
+clearly rather than search another checkout or SDK. A reported
+`query_or_validator` is descriptive guidance only and is never executed by the
+navigator.
+
 The installed SDK also ships canonical runtime-control headers, CMake helpers,
 and control-authoring examples. Their presence in the same install tree does
 not make them agent-capability rows: keep runtime-control operations and policy

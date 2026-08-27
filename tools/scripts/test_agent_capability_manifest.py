@@ -23,6 +23,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools/scripts/agent_capability_manifest.py"
 
 
+def load_authority_navigation_module():
+    path = ROOT / "tools/scripts/authority_navigation.py"
+    spec = importlib.util.spec_from_file_location("pulp_authority_navigation", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_installed_sdk_test_module():
+    path = ROOT / "tools/scripts/test_agent_capability_installed_sdk.py"
+    spec = importlib.util.spec_from_file_location("pulp_installed_sdk_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(TOOL), *args],
@@ -55,6 +73,153 @@ def refresh_digest(row: dict) -> None:
 def expect_problem(problems: list[str], needle: str) -> None:
     joined = "\n".join(problems)
     assert needle in joined, f"expected {needle!r} in {joined!r}"
+
+
+def exercise_authority_navigation() -> int:
+    authority = load_authority_navigation_module()
+    canonical = json.loads(authority.REGISTRY.read_text())
+    schema = json.loads(authority.SCHEMA.read_text())
+    assert authority.validate_document(canonical, schema, ROOT) == []
+    assert authority.load_and_validate() == canonical
+    checks = 2
+
+    unsorted = copy.deepcopy(canonical)
+    unsorted["authorities"][0], unsorted["authorities"][1] = (
+        unsorted["authorities"][1],
+        unsorted["authorities"][0],
+    )
+    expect_problem(
+        authority.validate_document(unsorted, schema, ROOT),
+        "authority rows must be bytewise sorted by id",
+    )
+    checks += 1
+
+    duplicate_alias = copy.deepcopy(canonical)
+    duplicate_alias["authorities"][1]["aliases"][0] = canonical["authorities"][0][
+        "aliases"
+    ][0]
+    duplicate_alias["authorities"][1]["aliases"].sort()
+    expect_problem(
+        authority.validate_document(duplicate_alias, schema, ROOT),
+        "is claimed by both",
+    )
+    checks += 1
+
+    recursive_route = copy.deepcopy(canonical)
+    recursive_route["authorities"][0]["query_or_validator"]["source"] = (
+        "pulp authority query agent-capabilities"
+    )
+    expect_problem(
+        authority.validate_document(recursive_route, schema, ROOT),
+        "must route to a native authority",
+    )
+    checks += 1
+
+    missing_native = copy.deepcopy(canonical)
+    missing_native["authorities"][0]["source_location"] = "docs/status/not-present.json"
+    expect_problem(
+        authority.validate_document(missing_native, schema, ROOT),
+        "source_location does not exist",
+    )
+    checks += 1
+
+    missing_route = copy.deepcopy(canonical)
+    missing_route["authorities"].pop()
+    expect_problem(
+        authority.validate_document(missing_route, schema, ROOT),
+        "exactly the finite v1 authority ids",
+    )
+    checks += 1
+
+    discover_live_instance = copy.deepcopy(canonical)
+    live_control = next(
+        row for row in discover_live_instance["authorities"] if row["id"] == "live-control"
+    )
+    live_control["query_or_validator"]["installed"] = (
+        "pulp control instances && pulp control status "
+        "--instance <caller-supplied-exact-instance-id> --json"
+    )
+    expect_problem(
+        authority.validate_document(discover_live_instance, schema, ROOT),
+        "must equal the exact caller-supplied-instance query",
+    )
+    checks += 1
+
+    extra_row = copy.deepcopy(canonical)
+    extra = copy.deepcopy(extra_row["authorities"][-1])
+    extra["id"] = "unexpected-authority"
+    extra["aliases"] = ["unexpected"]
+    extra_row["authorities"].append(extra)
+    expect_problem(
+        authority.validate_document(extra_row, schema, ROOT),
+        "exactly the finite v1 authority ids",
+    )
+    checks += 1
+
+    unsorted_aliases = copy.deepcopy(canonical)
+    row_with_aliases = next(
+        row for row in unsorted_aliases["authorities"] if len(row["aliases"]) > 1
+    )
+    row_with_aliases["aliases"].reverse()
+    expect_problem(
+        authority.validate_document(unsorted_aliases, schema, ROOT),
+        "aliases must be bytewise sorted",
+    )
+    checks += 1
+
+    forbidden_field = copy.deepcopy(canonical)
+    forbidden_field["authorities"][0]["operations"] = ["query"]
+    expect_problem(
+        authority.validate_document(forbidden_field, schema, ROOT),
+        "operations",
+    )
+    checks += 1
+
+    installed_dsp_admission = copy.deepcopy(canonical)
+    dsp_admission = next(
+        row
+        for row in installed_dsp_admission["authorities"]
+        if row["id"] == "dsp-survey-admission"
+    )
+    dsp_admission["installed_location"] = "share/pulp/dsp-survey.json"
+    dsp_admission["query_or_validator"]["installed"] = "pulp dsp-survey validate"
+    expect_problem(
+        authority.validate_document(installed_dsp_admission, schema, ROOT),
+        "must remain source-only",
+    )
+    checks += 1
+
+    installed_test = load_installed_sdk_test_module()
+    with tempfile.TemporaryDirectory(prefix="pulp-installed-authority-fixture-") as temp:
+        prefix = pathlib.Path(temp)
+        shared = prefix / "share/pulp"
+        shared.mkdir(parents=True)
+        shutil.copy2(authority.REGISTRY, shared / authority.REGISTRY.name)
+        shutil.copy2(authority.SCHEMA, shared / authority.SCHEMA.name)
+        assert installed_test.load_installed_authority_registry(prefix) == canonical
+        (shared / authority.REGISTRY.name).write_text(
+            json.dumps(installed_dsp_admission, indent=2) + "\n"
+        )
+        try:
+            installed_test.load_installed_authority_registry(prefix)
+        except RuntimeError as exc:
+            assert "must remain source-only" in str(exc)
+        else:
+            raise AssertionError("installed semantic mutation unexpectedly passed")
+        permissive = copy.deepcopy(canonical)
+        permissive["$schema"] = "permissive.json"
+        (shared / authority.REGISTRY.name).write_text(
+            json.dumps(permissive, indent=2) + "\n"
+        )
+        (shared / "permissive.json").write_text("{}\n")
+        try:
+            installed_test.load_installed_authority_registry(prefix)
+        except RuntimeError as exc:
+            assert "installed relative schema" in str(exc)
+        else:
+            raise AssertionError("registry-selected permissive schema unexpectedly passed")
+    checks += 3
+    return checks
 
 
 def exercise_manifest_mutations(canonical: dict) -> int:
@@ -1271,6 +1436,7 @@ def main() -> int:
 
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
+    checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0
 
