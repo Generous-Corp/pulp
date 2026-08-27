@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-layout-constraints-native-lanes",
+  "created_at": "2026-08-17T18:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record teaching the runtime materializer and the baked C++ emitter the figma resize constraints (h_constraint/v_constraint) and grid track flow (grid_auto_flow) that only the script lane lowered, so a right-pinned or centered node landed pinned in a script bundle and flush-left at runtime and in every exported plugin. The mapping moves into one shared resolve_layout_constraints() the script lane is also refactored onto, so three lanes read one definition instead of one lane owning a private copy. Takes the two tokens rather than the whole IRLayout so each lane still names the fields at its call site and stays visible to the cross-surface parity ledger. Watch-only: no design-import or rendering authority is transferred, the engine capabilities used (auto-unit margins, percentage minimums, GridStyle::parse_auto_flow) already existed, and no field that was already lowered changes behavior.",
+  "tests": [
+    "native materializer lowers figma resize constraints onto flex",
+    "native materializer lowers grid auto-flow",
+    "baked C++ emits figma resize constraints and grid auto-flow",
+    "generate_pulp_cpp emits the public layout and visual-style surface",
+    "design-import four-surface parity",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

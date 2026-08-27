@@ -3,8 +3,11 @@
 // Two code-generation backends plus the shared public entry point:
 //
 //   * web-compat JS generator   — emits @pulp/react-compatible JS from
-//     the design IR (the default import target).
-//   * native Pulp API generator — emits direct Pulp widget API calls.
+//     the design IR. Opt-in, via `--web-compat`.
+//   * native Pulp API generator — emits direct Pulp widget API calls. This is
+//     the DEFAULT (CodeGenMode::bridge_native_js), and the two lower different
+//     subsets of IRLayout, so which one produced a bundle is load-bearing when
+//     reading a layout difference between two renders of one design.
 //   * generate_pulp_js()        — public dispatch over CodeGenOptions.
 //
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
@@ -856,6 +859,7 @@ struct NativeEmit {
     std::string ind;
     std::string pid;
     std::string parent_id;
+    std::optional<LayoutDirection> parent_direction;
 };
 
 // emit_js_container recurses through the same entry point that dispatched to it
@@ -866,11 +870,13 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                  const ResolvedNativeNode& resolved,
                                  const CodeGenOptions& opts, int depth,
                                  int& var_counter, const std::string& parent_id,
+                                 std::optional<LayoutDirection> parent_direction,
                                  std::unordered_map<const IRNode*, std::string>* id_map = nullptr);
 static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
                                       const ResolvedNativeNode& resolved,
                                       const CodeGenOptions& opts, int depth,
                                       int& var_counter, const std::string& parent_id,
+                                      std::optional<LayoutDirection> parent_direction,
                                       std::unordered_map<const IRNode*, std::string>* id_map);
 
 // Map Figma resize CONSTRAINTS (node.layout.h/v_constraint) onto flex within
@@ -935,37 +941,45 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
         ss << ind << "setFlex('" << target_id << "', 'align_self', 'stretch');\n";
         stretch_done = true;
     };
-    if (L.h_constraint) {
-        const std::string& h = *L.h_constraint;
-        if (h == "center") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
-            ss << ind << "setFlex('" << target_id << "', 'margin_right', 'auto');\n";
-        } else if (h == "right") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
-        } else if (h == "scale") {
-            grow();
-        } else if (h == "stretch") {
-            stretch();
-            // Pin both horizontal edges = fill width. min-width:100% keeps
-            // this effective even when the node ALSO has an explicit width
-            // (Yoga clamps the final width up to min-width), so STRETCH is no
-            // longer a no-op against a defined cross-size.
+    // Resize constraints resolve through the mapping shared with the native
+    // materializer and the baked C++ emitter, so a constrained node cannot
+    // land pinned in one render of the design and flush-left in another.
+    const auto constraints = resolve_layout_constraints(L.h_constraint, L.v_constraint);
+    const bool parent_is_row = e.parent_direction && *e.parent_direction == LayoutDirection::row;
+    const bool parent_is_column = !e.parent_direction || *e.parent_direction == LayoutDirection::column;
+    auto auto_margin = [&](const char* side) {
+        ss << ind << "setFlex('" << target_id << "', '" << side << "', 'auto');\n";
+    };
+    if (constraints.margin_left_auto) auto_margin("margin_left");
+    if (constraints.margin_right_auto) auto_margin("margin_right");
+    if (constraints.margin_top_auto) auto_margin("margin_top");
+    if (constraints.margin_bottom_auto) auto_margin("margin_bottom");
+    if ((constraints.scale_width || constraints.stretch_width) && parent_is_row) grow();
+    if ((constraints.scale_height || constraints.stretch_height) && parent_is_column) grow();
+    // Cross-axis SCALE has no faithful Flexbox equivalent. Preserve the
+    // authored dimension instead of turning proportional resize into STRETCH.
+    const bool fill_width_cross = constraints.stretch_width && parent_is_column;
+    const bool fill_height_cross = constraints.stretch_height && parent_is_row;
+    const bool apply_cross_fill = (fill_width_cross || fill_height_cross) && !stretch_done;
+    if (apply_cross_fill) stretch();
+    // Pinning both edges is fill-the-axis. min-width/min-height 100% keeps that
+    // effective even when the node ALSO has an explicit size (Yoga clamps a
+    // final size up to min-*), so STRETCH is not a no-op against a defined one.
+    // An authored minimum is stronger than the 100% fallback used to make
+    // stretch effective against a fixed size.
+    if (fill_width_cross && apply_cross_fill) {
+        if (node.style.min_width)
+            ss << ind << "setFlex('" << target_id << "', 'min_width', "
+               << *node.style.min_width << ");\n";
+        else
             ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
-        }
     }
-    if (L.v_constraint) {
-        const std::string& v = *L.v_constraint;
-        if (v == "center") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
-            ss << ind << "setFlex('" << target_id << "', 'margin_bottom', 'auto');\n";
-        } else if (v == "bottom") {
-            ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
-        } else if (v == "scale") {
-            grow();
-        } else if (v == "stretch") {
-            stretch();
+    if (fill_height_cross && apply_cross_fill) {
+        if (node.style.min_height)
+            ss << ind << "setFlex('" << target_id << "', 'min_height', "
+               << *node.style.min_height << ");\n";
+        else
             ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
-        }
     }
 }
 
@@ -2695,7 +2709,8 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
                 nudge_this_child = true;
             }
         }
-        generate_native_node(ss, child, child_resolved, opts, depth + 1, var_counter, id, id_map);
+        generate_native_node(ss, child, child_resolved, opts, depth + 1, var_counter, id,
+                             node.layout.direction, id_map);
         if (nudge_this_child) {
             std::string child_ind = indent(depth + 1, opts.indent_spaces);
             ss << child_ind << "setFlex('" << child_var_id_pre
@@ -2772,6 +2787,7 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
                                       const ResolvedNativeNode& resolved,
                                       const CodeGenOptions& opts, int depth,
                                       int& var_counter, const std::string& parent_id,
+                                      std::optional<LayoutDirection> parent_direction,
                                       std::unordered_map<const IRNode*, std::string>* id_map) {
     std::string id = sanitize_var(node.name.empty() ? node.type : node.name);
     if (depth > 0) id += std::to_string(var_counter++);
@@ -2784,7 +2800,7 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     const NativeEmit e{ss, node, resolved, opts, depth, id,
                        indent(depth, opts.indent_spaces),
                        parent_id.empty() ? "''" : ("'" + parent_id + "'"),
-                       parent_id};
+                       parent_id, parent_direction};
 
     // Emit the anchor trail in bridge-native-JS codegen too. Same
     // gate + format as generate_node(), so downstream tooling has one
@@ -2859,12 +2875,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                  const ResolvedNativeNode& resolved,
                                  const CodeGenOptions& opts, int depth,
                                  int& var_counter, const std::string& parent_id,
+                                 std::optional<LayoutDirection> parent_direction,
                                  std::unordered_map<const IRNode*, std::string>* id_map) {
     // The caller's map when it wants the ids, a local one otherwise — the
     // binding must not depend on whether someone else asked for the mapping.
     std::unordered_map<const IRNode*, std::string> local_ids;
     auto* ids = id_map ? id_map : &local_ids;
-    generate_native_node_impl(ss, node, resolved, opts, depth, var_counter, parent_id, ids);
+    generate_native_node_impl(ss, node, resolved, opts, depth, var_counter, parent_id,
+                              parent_direction, ids);
     if (!node.stable_anchor_id || node.stable_anchor_id->empty()) return;
     auto it = ids->find(&node);
     if (it == ids->end()) return;
@@ -3106,7 +3124,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         int var_counter = 0;
         std::unordered_map<const IRNode*, std::string> id_map;
         generate_native_node(
-            ss, native_ir.root, resolved_root, opts, 0, var_counter, "", &id_map);
+            ss, native_ir.root, resolved_root, opts, 0, var_counter, "", std::nullopt, &id_map);
         ss << "void 0;\n";
 
         // Tree-level fidelity pass: catch vector/path nodes codegen dropped to

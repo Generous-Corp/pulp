@@ -64,6 +64,12 @@ void emit_common_layout(std::ostringstream& out,
         if (node.layout.row_gap || node.layout.gap != 0.0f)
             emit_line(out, depth + 1, opts.indent_spaces,
                       "grid.row_gap = " + format_float(node.layout.row_gap.value_or(node.layout.gap)) + ";");
+        // Track flow direction. Without it a `grid-auto-flow: column` design
+        // fills row-first, so implicitly-placed children land transposed.
+        if (node.layout.grid_auto_flow)
+            emit_line(out, depth + 1, opts.indent_spaces,
+                      "grid.auto_flow = pulp::view::GridStyle::parse_auto_flow(" +
+                          cpp_string_literal(lower_copy(*node.layout.grid_auto_flow)) + ");");
         emit_line(out, depth, opts.indent_spaces, "}");
     }
     if (node.layout.gap != 0.0f)
@@ -202,6 +208,39 @@ void emit_common_layout(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "flex.dim_width = {0.0f, pulp::view::DimensionUnit::auto_};");
     if (node.layout.height_mode == SizingMode::hug && !node.style.height)
         emit_line(out, depth, opts.indent_spaces, "flex.dim_height = {0.0f, pulp::view::DimensionUnit::auto_};");
+
+    // Resize constraints, through the shared mapping every lane consults.
+    // The requested design axis must be translated through the parent's flex
+    // direction: main-axis fill is grow, cross-axis fill is stretch.
+    const auto constraints = resolve_layout_constraints(node.layout.h_constraint, node.layout.v_constraint);
+    auto emit_auto_margin = [&](const char* dim_field, const char* float_field) {
+        emit_line(out, depth, opts.indent_spaces,
+                  "flex." + std::string(dim_field) + " = {0.0f, pulp::view::DimensionUnit::auto_};");
+        emit_line(out, depth, opts.indent_spaces, "flex." + std::string(float_field) + " = -1.0f;");
+    };
+    if (constraints.margin_left_auto) emit_auto_margin("dim_margin_left", "margin_left");
+    if (constraints.margin_right_auto) emit_auto_margin("dim_margin_right", "margin_right");
+    if (constraints.margin_top_auto) emit_auto_margin("dim_margin_top", "margin_top");
+    if (constraints.margin_bottom_auto) emit_auto_margin("dim_margin_bottom", "margin_bottom");
+    if ((constraints.scale_width || constraints.stretch_width) && parent_is_row)
+        emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
+    if ((constraints.scale_height || constraints.stretch_height) &&
+        (!parent_direction || parent_is_column))
+        emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
+    // SCALE is proportional resizing, which Flexbox cannot express on its
+    // cross axis. Leave that dimension authored rather than misrepresenting it
+    // as STRETCH (pinning both edges).
+    const bool fill_width_cross = constraints.stretch_width &&
+                                  (!parent_direction || parent_is_column);
+    const bool fill_height_cross = constraints.stretch_height && parent_is_row;
+    if ((fill_width_cross || fill_height_cross) && !has_explicit_align_self)
+        emit_line(out, depth, opts.indent_spaces, "flex.align_self = pulp::view::FlexAlign::stretch;");
+    if (fill_width_cross && !has_explicit_align_self && !node.style.min_width)
+        emit_line(out, depth, opts.indent_spaces,
+                  "flex.dim_min_width = {100.0f, pulp::view::DimensionUnit::percent};");
+    if (fill_height_cross && !has_explicit_align_self && !node.style.min_height)
+        emit_line(out, depth, opts.indent_spaces,
+                  "flex.dim_min_height = {100.0f, pulp::view::DimensionUnit::percent};");
 }
 
 void report_unlowered_visual_style(const EmitContext& ctx,
