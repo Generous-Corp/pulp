@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import inspect
 import json
 import math
 import os
+import re
 import sys
 from unittest import mock
 
@@ -773,6 +775,329 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
     bad += check(offline_selected == selected,
                  "installed qualified modules resolve from Cartog inventory "
                  "without remote catalogue access")
+    possessive_selected = P.exact_named_module_selection(
+        "remove TwinSlide/TwinSlide's cable", inv)
+    bad += check(possessive_selected == {("TwinSlide", "TwinSlide")},
+                 "possessive qualified identities reach intent classification")
+    negative_prompt = "build a patch without ForgeModular/LFO"
+    negative_named = {("ForgeModular", "LFO")}
+    negative_intent = P.named_module_intent(negative_prompt, negative_named)
+    bad += check(negative_intent["required"] == set()
+                 and negative_intent["absent"] == negative_named
+                 and not P.named_module_errors(
+                     {"modules": []}, negative_intent["required"]),
+                 "fresh negative named intent does not require the excluded module")
+    bad += check(any("excludes ForgeModular/LFO" in error for error in
+                     P.named_module_errors(
+                         {"modules": [{"plugin": "ForgeModular",
+                                       "model": "LFO"}]},
+                         negative_intent["required"],
+                         negative_intent["absent"])),
+                 "fresh negative named intent rejects the excluded module")
+    with mock.patch.object(P, "module_state_rules", return_value={
+            "ForgeModular/LFO": {
+                "plugin_version": "1.0", "fresh_generation": {
+                    "status": "unsupported", "reason": "opaque state"}}}):
+        bad += check(not P.fresh_generation_errors(
+                         negative_intent["required"],
+                         {"ForgeModular": {"version": "1.0"}}),
+                     "fresh exclusion bypasses positive-only authoring refusal")
+    refinement_prompt = "use TwinSlide/TwinSlide for the voice"
+    refinement_named = {("TwinSlide", "TwinSlide")}
+    refinement_intent = P.named_module_intent(
+        refinement_prompt, refinement_named)
+    bad += check(any("requires TwinSlide/TwinSlide" in error for error in
+                     P.named_module_errors(
+                         {"modules": []}, refinement_intent["required"])),
+                 "positive refinement intent requires its exact named module")
+    mixed_intent = P.named_module_intent(
+        "remove TwinSlide/TwinSlide and add ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(mixed_intent["decrease"] == {("TwinSlide", "TwinSlide")}
+                 and mixed_intent["required"] == {("ForgeModular", "LFO")}
+                 and mixed_intent["additions"] == {("ForgeModular", "LFO")},
+                 "mixed removal and addition classify each exact identity once")
+    replacement_intent = P.named_module_intent(
+        "replace TwinSlide/TwinSlide with ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(replacement_intent["absent"] ==
+                 {("TwinSlide", "TwinSlide")}
+                 and replacement_intent["required"] ==
+                 {("ForgeModular", "LFO")},
+                 "replacement excludes its source and requires its target")
+    coordinated_intent = P.named_module_intent(
+        "remove all instances of TwinSlide/TwinSlide and ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(coordinated_intent["decrease"] ==
+                 {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")},
+                 "a modified coordinated removal excludes every named source")
+    clause_intent = P.named_module_intent(
+        "do not use TwinSlide/TwinSlide; build with ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(clause_intent["absent"] == {("TwinSlide", "TwinSlide")}
+                 and clause_intent["required"] == {("ForgeModular", "LFO")},
+                 "punctuation keeps negative and positive clauses separate")
+    instead_intent = P.named_module_intent(
+        "use ForgeModular/LFO instead of TwinSlide/TwinSlide",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(instead_intent["absent"] == {("TwinSlide", "TwinSlide")}
+                 and instead_intent["required"] == {("ForgeModular", "LFO")},
+                 "instead-of substitution keeps the chosen identity required")
+    for swap_prompt in ("swap TwinSlide/TwinSlide for ForgeModular/LFO",
+                        "replace TwinSlide/TwinSlide by ForgeModular/LFO"):
+        swap_intent = P.named_module_intent(
+            swap_prompt,
+            {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+        bad += check(swap_intent["absent"] == {("TwinSlide", "TwinSlide")}
+                     and swap_intent["required"] == {("ForgeModular", "LFO")},
+                     "replacement separator preserves source and target polarity")
+    remove_add_prompt = ("remove TwinSlide/TwinSlide then add "
+                         "TwinSlide/TwinSlide back")
+    remove_add = P.named_module_intent(remove_add_prompt, refinement_named)
+    bad += check(remove_add["required"] == refinement_named
+                 and remove_add["absent"] == set()
+                 and remove_add["decrease"] == set()
+                 and remove_add["additions"] == refinement_named,
+                 "the last positive mention wins after an earlier removal")
+    add_remove_prompt = ("add TwinSlide/TwinSlide then remove "
+                         "TwinSlide/TwinSlide")
+    add_remove = P.named_module_intent(add_remove_prompt, refinement_named)
+    bad += check(add_remove["required"] == set()
+                 and add_remove["decrease"] == refinement_named
+                 and add_remove["additions"] == set(),
+                 "the last negative mention wins after an earlier addition")
+    for retention_prompt in (
+            "do not remove TwinSlide/TwinSlide",
+            "remove the cable from TwinSlide/TwinSlide",
+            "replace the cable from TwinSlide/TwinSlide to ForgeModular/LFO",
+            "swap the connection from TwinSlide/TwinSlide to ForgeModular/LFO"):
+        retention_intent = P.named_module_intent(
+            retention_prompt,
+            {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+        expected_retained = ({("TwinSlide", "TwinSlide"),
+                              ("ForgeModular", "LFO")}
+                             if "ForgeModular" in retention_prompt
+                             else refinement_named)
+        bad += check(retention_intent["required"] == expected_retained
+                     and retention_intent["absent"] == set()
+                     and retention_intent["decrease"] == set(),
+                     "retaining a module or removing its cable keeps it required")
+
+    two_instances = {"modules": [
+        {"id": 1, "plugin": "TwinSlide", "model": "TwinSlide"},
+        {"id": 2, "plugin": "TwinSlide", "model": "TwinSlide"}],
+        "cables": []}
+    one_instance = {"modules": [
+        {"id": 1, "plugin": "TwinSlide", "model": "TwinSlide"}],
+        "cables": []}
+    count_prompt = "remove one TwinSlide/TwinSlide"
+    count_intent = P.named_module_intent(count_prompt, refinement_named)
+    bad += check(count_intent["decrease"] == refinement_named
+                 and not P.refinement_errors(
+                     two_instances, one_instance, count_prompt,
+                     {"TwinSlide": {"modules": {"TwinSlide": {}}}}),
+                 "a refinement may remove one of several named instances")
+    absent_prompt = "avoid TwinSlide/TwinSlide"
+    absent_errors = P.refinement_errors(
+        two_instances, one_instance, absent_prompt,
+        {"TwinSlide": {"modules": {"TwinSlide": {}}}})
+    no_instances = {"modules": [], "cables": []}
+    absent_closed_errors = P.refinement_errors(
+        two_instances, no_instances, absent_prompt,
+        {"TwinSlide": {"modules": {"TwinSlide": {}}}})
+    bad += check(any("requires TwinSlide/TwinSlide to be absent" in error
+                     for error in absent_errors)
+                 and not any("requires TwinSlide/TwinSlide to be absent" in error
+                             for error in absent_closed_errors),
+                 "absolute absence cannot retain a remaining instance")
+    for retain_verb in ("keep", "retain", "leave", "preserve"):
+        mixed_retention = P.named_module_intent(
+            f"remove TwinSlide/TwinSlide but {retain_verb} ForgeModular/LFO",
+            {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+        bad += check(mixed_retention["decrease"] ==
+                     {("TwinSlide", "TwinSlide")}
+                     and mixed_retention["required"] ==
+                     {("ForgeModular", "LFO")},
+                     "retention clause stops the preceding removal scope")
+    for negative_form in (
+            "never use TwinSlide/TwinSlide",
+            "don’t use TwinSlide/TwinSlide",
+            "build a patch that doesn’t use TwinSlide/TwinSlide",
+            "can't use TwinSlide/TwinSlide",
+            "cannot use TwinSlide/TwinSlide",
+            "must not use TwinSlide/TwinSlide",
+            "build with anything except TwinSlide/TwinSlide",
+            "use ForgeModular/LFO, not TwinSlide/TwinSlide"):
+        explicit_negative = P.named_module_intent(
+            negative_form, refinement_named)
+        bad += check(explicit_negative["absent"] == refinement_named
+                     and explicit_negative["required"] == set(),
+                     "explicit negative form excludes the named identity")
+    negated_replace = P.named_module_intent(
+        "do not replace TwinSlide/TwinSlide with ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(negated_replace["required"] == refinement_named
+                 and negated_replace["absent"] == set()
+                 and negated_replace["decrease"] == set(),
+                 "negated replacement keeps its source without requiring its target")
+    without_replacing = P.named_module_intent(
+        "without replacing TwinSlide/TwinSlide with ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(without_replacing["required"] == refinement_named
+                 and without_replacing["absent"] == set(),
+                 "negated replacement gerund keeps only its source required")
+    for property_prompt in (
+            "remove TwinSlide/TwinSlide's cable",
+            "replace TwinSlide/TwinSlide's connection"):
+        property_intent = P.named_module_intent(
+            property_prompt, refinement_named)
+        bad += check(property_intent["required"] == refinement_named
+                     and property_intent["absent"] == set()
+                     and property_intent["decrease"] == set(),
+                     "module-owned property edits retain the named module")
+    no_add_prompt = "do not add another TwinSlide/TwinSlide"
+    no_add_intent = P.named_module_intent(no_add_prompt, refinement_named)
+    no_add_errors = P.refinement_errors(
+        one_instance, one_instance, no_add_prompt,
+        {"TwinSlide": {"modules": {"TwinSlide": {}}}})
+    bad += check(no_add_intent["nonincreasing"] == refinement_named
+                 and not any("asked not to add" in error
+                             for error in no_add_errors),
+                 "negated addition allows an existing named module to remain")
+    bad += check(any("excludes TwinSlide/TwinSlide" in error for error in
+                     P.named_module_errors(
+                         one_instance, no_add_intent["required"],
+                         no_add_intent["nonincreasing"])),
+                 "fresh negated addition rejects the named module from zero")
+
+    A = ("TwinSlide", "TwinSlide")
+    B = ("ForgeModular", "LFO")
+    intent_cases = [
+        ("build TwinSlide/TwinSlide", {A}, set(), set(), set(), set()),
+        ("without using TwinSlide/TwinSlide", set(), {A}, set(), set(), set()),
+        ("build with no modules except TwinSlide/TwinSlide",
+         {A}, set(), set(), set(), set()),
+        ("use ForgeModular/LFO, not TwinSlide/TwinSlide",
+         {B}, {A}, set(), set(), set()),
+        ("use not TwinSlide/TwinSlide but ForgeModular/LFO",
+         {B}, {A}, set(), set(), set()),
+        ("use not only TwinSlide/TwinSlide but also ForgeModular/LFO",
+         {A, B}, set(), set(), set(), set()),
+        ("remove TwinSlide/TwinSlide and ForgeModular/LFO",
+         set(), set(), {A, B}, set(), set()),
+        ("remove TwinSlide/TwinSlide then add TwinSlide/TwinSlide",
+         {A}, set(), set(), {A}, set()),
+        ("add TwinSlide/TwinSlide then remove TwinSlide/TwinSlide",
+         set(), set(), {A}, set(), set()),
+        ("replace TwinSlide/TwinSlide with ForgeModular/LFO",
+         {B}, {A}, set(), set(), set()),
+        ("swap TwinSlide/TwinSlide for ForgeModular/LFO",
+         {B}, {A}, set(), set(), set()),
+        ("use ForgeModular/LFO instead of TwinSlide/TwinSlide",
+         {B}, {A}, set(), set(), set()),
+        ("do not replace TwinSlide/TwinSlide with ForgeModular/LFO",
+         {A}, set(), set(), set(), set()),
+        ("remove TwinSlide/TwinSlide's cable",
+         {A}, set(), set(), set(), set()),
+        ("without a cable from TwinSlide/TwinSlide",
+         {A}, set(), set(), set(), set()),
+        ("do not add another TwinSlide/TwinSlide",
+         set(), set(), set(), set(), {A}),
+        ("without adding another TwinSlide/TwinSlide",
+         set(), set(), set(), set(), {A}),
+        ("do not include TwinSlide/TwinSlide",
+         set(), {A}, set(), set(), set()),
+        ("without including TwinSlide/TwinSlide",
+         set(), {A}, set(), set(), set()),
+        ("without removing TwinSlide/TwinSlide",
+         {A}, set(), set(), set(), set()),
+        ("remove TwinSlide/TwinSlide; build with ForgeModular/LFO",
+         {B}, set(), {A}, set(), set()),
+        ("avoid TwinSlide/TwinSlide and use ForgeModular/LFO",
+         {B}, {A}, set(), set(), set()),
+        ("avoid TwinSlide/TwinSlide and ForgeModular/LFO",
+         set(), {A, B}, set(), set(), set()),
+        ("build with neither TwinSlide/TwinSlide nor ForgeModular/LFO",
+         set(), {A, B}, set(), set(), set()),
+        ("do not use TwinSlide/TwinSlide and use ForgeModular/LFO",
+         {B}, {A}, set(), set(), set()),
+        ("change TwinSlide/TwinSlide's parameter without ForgeModular/LFO",
+         {A}, {B}, set(), set(), set()),
+    ]
+    for (case_prompt, required, absent, decrease, additions,
+         nonincreasing) in intent_cases:
+        classified = P.named_module_intent(case_prompt, {A, B})
+        bad += check(
+            classified == {"required": required, "absent": absent,
+                           "decrease": decrease, "additions": additions,
+                           "nonincreasing": nonincreasing},
+            f"named intent table: {case_prompt}")
+    mixed_list_named = {
+        ("Plugin", "A"), ("Plugin", "B"), ("Plugin", "C")}
+    mixed_list = P.named_module_intent(
+        "use Plugin/A, not Plugin/B, and Plugin/C", mixed_list_named)
+    bad += check(
+        mixed_list["required"] == {("Plugin", "A"), ("Plugin", "C")}
+        and mixed_list["absent"] == {("Plugin", "B")},
+        "a bare negative identity does not leak into a later list item")
+    for passive_prompt, expected_bucket in (
+            ("TwinSlide/TwinSlide must not be used", "absent"),
+            ("TwinSlide/TwinSlide shouldn’t be used", "absent"),
+            ("TwinSlide/TwinSlide should be removed", "decrease"),
+            ("TwinSlide/TwinSlide is not allowed", "absent"),
+            ("TwinSlide/TwinSlide isn't allowed", "absent")):
+        passive = P.named_module_intent(passive_prompt, refinement_named)
+        bad += check(passive[expected_bucket] == refinement_named
+                     and passive["required"] == set(),
+                     f"postpositive named intent: {passive_prompt}")
+    keyword_named = {("Plugin", "No"), ("Plugin", "Utility")}
+    for keyword_prompt in ("use @No and @Utility",
+                           "use Plugin/No and Plugin/Utility"):
+        keyword_intent = P.named_module_intent(keyword_prompt, keyword_named)
+        bad += check(keyword_intent["required"] == keyword_named
+                     and not keyword_intent["absent"],
+                     "keyword-like module slugs remain complete identities")
+    open_patch = {"modules": [
+        {"plugin": "TwinSlide", "model": "TwinSlide"},
+        {"plugin": "ForgeModular", "model": "LFO"},
+        {"plugin": "Core", "model": "AudioInterface2"},
+        {"plugin": "Other", "model": "Utility"},
+    ]}
+    bad += check(not P.named_module_errors(open_patch, selected),
+                 "ordinary named requests require their exact modules but "
+                 "still allow supporting modules")
+
+    omitted = copy.deepcopy(open_patch)
+    omitted["modules"] = [module for module in omitted["modules"]
+                          if module["plugin"] != "TwinSlide"]
+    omitted_errors = P.named_module_errors(omitted, selected)
+    bad += check(any("requires TwinSlide/TwinSlide" in error
+                     for error in omitted_errors),
+                 "a generated patch cannot omit an explicitly named module")
+
+    mutated = copy.deepcopy(open_patch)
+    mutated["modules"][0]["plugin"] = "Fundamental"
+    mutation_errors = P.named_module_errors(mutated, selected)
+    bad += check(any("requires TwinSlide/TwinSlide" in error
+                     for error in mutation_errors),
+                 "a plugin-identity mutation cannot satisfy a qualified name")
+
+    malformed = {"modules": [None, {"plugin": [], "model": {}}]}
+    bad += check(any("requires TwinSlide/TwinSlide" in error
+                     for error in P.named_module_errors(malformed, selected)),
+                 "malformed model identities fail the named contract without crashing")
+    for malformed_modules in (1, {}):
+        malformed = {"modules": malformed_modules, "cables": []}
+        _, structural_errors = P.prepare_and_lint(malformed, inv)
+        bad += check(not P.named_module_errors(malformed, selected)
+                     and structural_errors ==
+                     ["patch modules must be a JSON array"],
+                     "non-array modules defer to canonical generation validation")
+
+    role_words = P.exact_named_module_selection(
+        "build a sequencer with a filter and an audio interface", inv)
+    bad += check(role_words == set(),
+                 "ordinary module-role words do not become named anchors")
     closed = P.closed_named_module_selection(prompt, selected)
     bad += check(closed == selected,
                  "explicit exactly/only wording closes the named module set")
@@ -885,6 +1210,36 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
                  else f"above Cartog maximum {maximum:g}" in error)
                 for error in range_errors),
             f"TwinSlide param {param_id} cannot exceed its Cartog range")
+    return bad
+
+
+def test_retained_named_module_omission_fails_offline() -> int:
+    response_path = os.path.join(
+        HERE, "test_fixtures", "twinslide_omitted_model_response.txt")
+    response = open(response_path, encoding="utf-8").read()
+    bad = check(
+        hashlib.sha256(response.rstrip("\n").encode("utf-8")).hexdigest() ==
+        "3b30e50dbcd4ff08f8a7f8b6307f64bd765e76c0f1be2bbe63cb56846e0bbac5",
+        "the regression replays the exact retained TwinSlide-omitting response")
+    match = re.search(r"```(?:json patch|json)\s*\n(.*?)```", response, re.S)
+    retained_patch = json.loads(match.group(1)) if match else {}
+    required = {("TwinSlide", "TwinSlide")}
+    errors = P.named_module_errors(retained_patch, required)
+    bad += check(any("requires TwinSlide/TwinSlide" in error
+                     for error in errors),
+                 "the retained response fails before outcome installation")
+
+    repaired = copy.deepcopy(retained_patch)
+    repaired["modules"].append(
+        {"id": 9, "plugin": "TwinSlide", "model": "TwinSlide"})
+    bad += check(not P.named_module_errors(repaired, required),
+                 "adding the exact requested identity satisfies the contract")
+
+    mutated = copy.deepcopy(repaired)
+    mutated["modules"][-1]["plugin"] = "TwinSlideFork"
+    bad += check(any("requires TwinSlide/TwinSlide" in error
+                     for error in P.named_module_errors(mutated, required)),
+                 "mutating the requested plugin identity reopens the failure")
     return bad
 
 
@@ -1122,6 +1477,7 @@ def main() -> int:
         test_cold_twinslide_state_contract,
         test_twinslide_authoring_contract_reaches_model,
         test_named_sparse_module_contract_is_small_and_exact,
+        test_retained_named_module_omission_fails_offline,
         test_cartog_parameter_contract_fails_closed,
         test_twinslide_runtime_contract,
         test_generation_defaults_to_one_model_call,

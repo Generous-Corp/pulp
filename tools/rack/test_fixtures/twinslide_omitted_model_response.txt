@@ -1,0 +1,206 @@
+```json patch
+{
+  "version": "2.6.6",
+  "modules": [
+    {
+      "id": 1,
+      "plugin": "ForgeModular",
+      "model": "LFO",
+      "pos": [0, 0],
+      "params": [
+        { "id": 0, "value": 2.0 }
+      ]
+    },
+    {
+      "id": 2,
+      "plugin": "AS",
+      "model": "SEQ16",
+      "pos": [6, 0],
+      "params": [
+        { "id": 1, "value": 1.0 },
+        { "id": 3, "value": 8.0 },
+        { "id": 8, "physical": 0.0, "unit": "V" },
+        { "id": 9, "physical": 0.583, "unit": "V" },
+        { "id": 10, "physical": 0.0, "unit": "V" },
+        { "id": 11, "physical": 0.583, "unit": "V" },
+        { "id": 12, "physical": 1.0, "unit": "V" },
+        { "id": 13, "physical": 0.25, "unit": "V" },
+        { "id": 14, "physical": 0.0, "unit": "V" },
+        { "id": 15, "physical": 1.0, "unit": "V" },
+        { "id": 24, "physical": 10.0, "unit": "V" },
+        { "id": 25, "physical": 0.0, "unit": "V" },
+        { "id": 26, "physical": 10.0, "unit": "V" },
+        { "id": 27, "physical": 10.0, "unit": "V" },
+        { "id": 28, "physical": 10.0, "unit": "V" },
+        { "id": 29, "physical": 10.0, "unit": "V" },
+        { "id": 30, "physical": 10.0, "unit": "V" },
+        { "id": 31, "physical": 10.0, "unit": "V" },
+        { "id": 40, "physical": 0.0, "unit": "V" },
+        { "id": 41, "physical": 0.0, "unit": "V" },
+        { "id": 42, "physical": 1.0, "unit": "V" },
+        { "id": 43, "physical": 0.0, "unit": "V" },
+        { "id": 44, "physical": 1.0, "unit": "V" },
+        { "id": 45, "physical": 0.0, "unit": "V" },
+        { "id": 46, "physical": 0.0, "unit": "V" },
+        { "id": 47, "physical": 0.0, "unit": "V" },
+        { "id": 56, "value": 1.0 },
+        { "id": 57, "value": 1.0 },
+        { "id": 58, "value": 1.0 },
+        { "id": 59, "value": 1.0 },
+        { "id": 60, "value": 1.0 },
+        { "id": 61, "value": 1.0 },
+        { "id": 62, "value": 1.0 },
+        { "id": 63, "value": 1.0 }
+      ]
+    },
+    {
+      "id": 3,
+      "plugin": "Fundamental",
+      "model": "Process",
+      "pos": [46, 0],
+      "params": [
+        { "id": 0, "physical": 10.0, "unit": "ms/V" }
+      ]
+    },
+    {
+      "id": 4,
+      "plugin": "ForgeModular",
+      "model": "VCO",
+      "pos": [56, 0],
+      "params": [
+        { "id": 0, "value": -2.25 }
+      ]
+    },
+    {
+      "id": 5,
+      "plugin": "ForgeModular",
+      "model": "VCF",
+      "pos": [64, 0],
+      "params": [
+        { "id": 0, "value": -2.0 },
+        { "id": 1, "value": 0.85 },
+        { "id": 2, "value": 1.0 }
+      ]
+    },
+    {
+      "id": 6,
+      "plugin": "ForgeModular",
+      "model": "ENV",
+      "pos": [72, 0],
+      "params": [
+        { "id": 0, "physical": 0.001, "unit": "s" },
+        { "id": 1, "physical": 0.06, "unit": "s" },
+        { "id": 2, "physical": 0.0, "unit": "%" },
+        { "id": 3, "physical": 0.01, "unit": "s" }
+      ]
+    },
+    {
+      "id": 7,
+      "plugin": "ForgeModular",
+      "model": "VCA",
+      "pos": [80, 0],
+      "params": [
+        { "id": 0, "value": 0.25 }
+      ]
+    },
+    {
+      "id": 8,
+      "plugin": "Core",
+      "model": "AudioInterface2",
+      "pos": [86, 0]
+    }
+  ],
+  "cables": [
+    {
+      "id": 1,
+      "outputModuleId": 1,
+      "outputId": 1,
+      "inputModuleId": 2,
+      "inputId": 1,
+      "color": "#ffb437"
+    },
+    {
+      "id": 2,
+      "outputModuleId": 2,
+      "outputId": 1,
+      "inputModuleId": 3,
+      "inputId": 1,
+      "color": "#3695ef"
+    },
+    {
+      "id": 3,
+      "outputModuleId": 2,
+      "outputId": 2,
+      "inputModuleId": 3,
+      "inputId": 2,
+      "color": "#8b4ade"
+    },
+    {
+      "id": 4,
+      "outputModuleId": 3,
+      "outputId": 4,
+      "inputModuleId": 4,
+      "inputId": 0,
+      "color": "#3695ef"
+    },
+    {
+      "id": 5,
+      "outputModuleId": 4,
+      "outputId": 0,
+      "inputModuleId": 5,
+      "inputId": 1,
+      "color": "#f3374b"
+    },
+    {
+      "id": 6,
+      "outputModuleId": 2,
+      "outputId": 3,
+      "inputModuleId": 5,
+      "inputId": 0,
+      "color": "#8b4ade"
+    },
+    {
+      "id": 7,
+      "outputModuleId": 2,
+      "outputId": 0,
+      "inputModuleId": 6,
+      "inputId": 0,
+      "color": "#ffb437"
+    },
+    {
+      "id": 8,
+      "outputModuleId": 5,
+      "outputId": 0,
+      "inputModuleId": 7,
+      "inputId": 1,
+      "color": "#f3374b"
+    },
+    {
+      "id": 9,
+      "outputModuleId": 6,
+      "outputId": 0,
+      "inputModuleId": 7,
+      "inputId": 0,
+      "color": "#8b4ade"
+    },
+    {
+      "id": 10,
+      "outputModuleId": 7,
+      "outputId": 0,
+      "inputModuleId": 8,
+      "inputId": 0,
+      "color": "#f3374b"
+    }
+  ]
+}
+```
+
+```json why
+{
+  "1:1>2:1": "the steady clock locks every note to the repeating riff",
+  "2:2>3:2": "one low selector makes only the chosen fifth arrival slide",
+  "3:4>4:0": "short selective portamento supplies the acid line's signature glide",
+  "2:3>5:0": "two accented steps punch open the whistling low-pass",
+  "6:0>7:0": "the short envelope leaves silence between the hammered notes"
+}
+```
