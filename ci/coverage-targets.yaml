@@ -53,9 +53,15 @@ tiers:
       - core/gpu_audio/**
       - core/graph/**
       - core/host/**
+      - core/music/**
       - core/midi/**
       - core/native-components/**
+      - core/playback/**
+      - core/sequence/**
       - core/signal/**
+      - core/smf/**
+      - core/timebase/**
+      - core/timeline/**
       - core/platform/**
 
   - name: user-facing
@@ -64,6 +70,9 @@ tiers:
       - core/view/**
       - core/render/**
       - core/scene/**
+      - core/timeline_agent_view/**
+      - core/timeline_editor/**
+      - core/timeline_view/**
       - inspect/**
       - tools/cli/**
       # JS/TS sources in @pulp/react are user-visible SDK surface.
@@ -82,7 +91,10 @@ tiers:
       - core/runtime/**
       - core/state/**
       - core/canvas/**
+      - core/dawproject/**
+      - core/interchange/**
       - core/osc/**
+      - core/project_package/**
       - ship/**
       - tools/**
       # Platform integration. Kotlin (`android/**.kt`) and Swift
