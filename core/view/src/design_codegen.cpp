@@ -954,10 +954,22 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     // Pinning both edges is fill-the-axis. min-width/min-height 100% keeps that
     // effective even when the node ALSO has an explicit size (Yoga clamps a
     // final size up to min-*), so STRETCH is not a no-op against a defined one.
-    if (constraints.fill_width)
-        ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
-    if (constraints.fill_height)
-        ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
+    // An authored minimum is stronger than the 100% fallback used to make
+    // stretch effective against a fixed size.
+    if (constraints.fill_width) {
+        if (node.style.min_width)
+            ss << ind << "setFlex('" << target_id << "', 'min_width', "
+               << *node.style.min_width << ");\n";
+        else
+            ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
+    }
+    if (constraints.fill_height) {
+        if (node.style.min_height)
+            ss << ind << "setFlex('" << target_id << "', 'min_height', "
+               << *node.style.min_height << ");\n";
+        else
+            ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
+    }
 }
 
 // Grid item placement: a child of a grid container can carry grid-column /

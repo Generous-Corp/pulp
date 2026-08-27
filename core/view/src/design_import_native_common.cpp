@@ -1342,8 +1342,10 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
     if (constraints.grow) flex.flex_grow = std::max(flex.flex_grow, 1.0f);
     if (constraints.stretch && !has_explicit_align_self) flex.align_self = FlexAlign::stretch;
-    if (constraints.fill_width) flex.dim_min_width = {100.0f, DimensionUnit::percent};
-    if (constraints.fill_height) flex.dim_min_height = {100.0f, DimensionUnit::percent};
+    if (constraints.fill_width && !node.style.min_width)
+        flex.dim_min_width = {100.0f, DimensionUnit::percent};
+    if (constraints.fill_height && !node.style.min_height)
+        flex.dim_min_height = {100.0f, DimensionUnit::percent};
 }
 
 // Every CSS color a design can write, from ONE place.

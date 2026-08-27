@@ -225,10 +225,10 @@ void emit_common_layout(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
     if (constraints.stretch && !has_explicit_align_self)
         emit_line(out, depth, opts.indent_spaces, "flex.align_self = pulp::view::FlexAlign::stretch;");
-    if (constraints.fill_width)
+    if (constraints.fill_width && !node.style.min_width)
         emit_line(out, depth, opts.indent_spaces,
                   "flex.dim_min_width = {100.0f, pulp::view::DimensionUnit::percent};");
-    if (constraints.fill_height)
+    if (constraints.fill_height && !node.style.min_height)
         emit_line(out, depth, opts.indent_spaces,
                   "flex.dim_min_height = {100.0f, pulp::view::DimensionUnit::percent};");
 }

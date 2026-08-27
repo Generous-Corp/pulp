@@ -3761,6 +3761,17 @@ TEST_CASE("native materializer lowers figma resize constraints onto flex",
         CHECK(child->flex().dim_min_width.value == Catch::Approx(100.0f));
     }
 
+    SECTION("an authored minimum wins over the stretch fallback") {
+        auto ir = frame_with("stretch", nullptr);
+        ir.root.children[0].style.min_width = 500.0f;
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* child = root->child_at(0);
+        REQUIRE(child != nullptr);
+        CHECK(child->flex().align_self == FlexAlign::stretch);
+        CHECK(child->flex().dim_min_width.unit == DimensionUnit::px);
+        CHECK(child->flex().dim_min_width.value == Catch::Approx(500.0f));
+    }
+
     SECTION("scale raises flex-grow without overruling a larger authored one") {
         auto ir = frame_with("scale", nullptr);
         ir.root.children[0].layout.flex_grow = 3.0f;

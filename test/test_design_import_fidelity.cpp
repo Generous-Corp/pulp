@@ -864,6 +864,22 @@ TEST_CASE("codegen lowers resize constraints to flex within the parent",
         INFO(js);
         CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
     }
+    // An explicit minimum remains authoritative; the percentage minimum is
+    // only the fallback that makes stretch effective against a fixed size.
+    {
+        DesignIR ir;
+        ir.root.type = "frame";
+        IRNode child;
+        child.type = "frame";
+        child.style.width = 40.0f;
+        child.style.min_width = 500.0f;
+        child.layout.h_constraint = "stretch";
+        ir.root.children.push_back(std::move(child));
+        const auto js = generate_pulp_js(ir, {});
+        INFO(js);
+        CHECK(js.find("'min_width', 500") != std::string::npos);
+        CHECK(js.find("'min_width', '100%'") == std::string::npos);
+    }
     // left/top → flex default: nothing emitted.
     {
         auto js = emit("left", "top");

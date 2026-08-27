@@ -501,6 +501,25 @@ TEST_CASE("baked C++ emits figma resize constraints and grid auto-flow",
               std::string::npos);
     }
 
+    SECTION("stretch preserves an authored minimum") {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.name = "Root";
+        IRNode child;
+        child.type = "frame";
+        child.name = "Pinned";
+        child.style.width = 40.0f;
+        child.style.min_width = 500.0f;
+        child.layout.h_constraint = "stretch";
+        ir.root.children.push_back(std::move(child));
+        const auto src = generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+        CHECK(src.find("flex.dim_min_width = {500.0f, pulp::view::DimensionUnit::px};") !=
+              std::string::npos);
+        CHECK(src.find("flex.dim_min_width = {100.0f, pulp::view::DimensionUnit::percent};") ==
+              std::string::npos);
+    }
+
     SECTION("scale raises flex-grow rather than assigning it") {
         const auto src = source_for("scale", nullptr);
         CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") != std::string::npos);
