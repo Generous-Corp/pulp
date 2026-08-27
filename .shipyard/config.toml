@@ -318,10 +318,10 @@ timeout_secs = 14400
 schema_version = 3
 # Exact current-main registration count. CTest permits duplicate display names,
 # so this is deliberately not the unique-name count. The canonical multiset
-# contract in changed-surface-inventory.json pins all 20,787 registrations.
+# contract in changed-surface-inventory.json pins all 20,788 registrations.
 # Test-topology changes force a full-suite decision. This remains shadow-only:
 # [validation.default] is still the authoritative execution.
-full_test_count = 20787
+full_test_count = 20788
 build_type = "debug"
 build_flags = ["-DCMAKE_BUILD_TYPE=Debug", "-DPULP_BUILD_TESTS=ON", "-DPULP_BUILD_EXAMPLES=ON", "-DPULP_CHANGED_SURFACE_INVENTORY_TARGET=ON"]
 baseline_tests = [
@@ -333,7 +333,12 @@ baseline_tests = [
   "changed-surface-policy-selftest",
 ]
 baseline_build_targets = ["pulp-test-build-check", "pulp-cli"]
-baseline_only_paths = ["docs/guides/**", "docs/reference/**", "docs/examples/**"]
+baseline_only_paths = [
+  "docs/guides/**",
+  "docs/reference/**",
+  "docs/examples/**",
+  "docs/validation/**",
+]
 # Independent authorization for omitting the expensive iOS/AUv3 compile gate.
 # Do not infer this from `families`: a bounded macOS test family may still feed
 # a mobile build target. Each addition here requires its own mobile-impact
@@ -342,6 +347,7 @@ ios_compile_skip_safe_paths = [
   "docs/guides/**",
   "docs/reference/**",
   "docs/examples/**",
+  "docs/validation/**",
   "tools/cli/cmd_forge.cpp",
   "tools/cli/cmd_dsp.cpp",
   "test/test_child_process.cpp",
@@ -477,6 +483,25 @@ tests = [
 build_targets = ["pulp-test-child-process"]
 supported_build_types = ["debug", "release"]
 risk_class = "low"
+
+[[targets.mac.changed_surface_selection.families]]
+name = "forge-rack-generator"
+paths = [
+  "tools/rack/generate.py",
+  "tools/rack/test_generate_safety.py",
+  ".agents/skills/forge-modular/SKILL.md",
+]
+tests = [
+  "rack-generator-safety",
+  "rack-generator-endings",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = ["debug", "release"]
+risk_class = "medium"
+extended_tests = [
+  "rack-generation-eligibility",
+  "rack-inert-input-cause",
+]
 
 # The repository may describe a bounded POSIX test-stage adapter, but it cannot
 # activate it. Shipyard reads the independent machine-global
