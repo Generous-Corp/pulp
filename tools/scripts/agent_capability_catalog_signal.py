@@ -247,6 +247,36 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.additive-bank", domain="signal",
+        summary=(
+            "Prepared sinusoidal partial bank for harmonic, inharmonic, modal, "
+            "doublet, and independently decaying additive voices."
+        ),
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control; may allocate",
+                   "process": "audio", "reset": "audio", "release": "audio note event"},
+        state_model=(
+            "Prepared voice/envelope tables, double phase accumulators, control-rate "
+            "gain/frequency ramps, per-partial decay, and explicit float trig profile."
+        ),
+        seed_model="explicit xorshift seed for random retrigger phase and doublet jitter",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="voice table, note frequency, spectral envelopes, and note events",
+        output_domain="bounded mono additive audio",
+        units=["samples", "frames", "hertz", "cycles", "decibels", "milliseconds"],
+        latency="zero", tail="shared release or longest configured partial decay",
+        scheduling="sample-synchronous with 32-sample bounded control ramps",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/signal/additive_bank.hpp",
+            qualified_name="pulp::signal::AdditiveBankT<float>", target="Pulp::signal",
+            header_fingerprint="sha256:4a3a79b3d1d8faff30cb3778afd1b47c3591f525f6e30d0bb79c4ed50950be22")],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::signal::AdditiveBankT<float>",
+            "operation": "member_call", "member": "reset", "arguments": ""
+        }],
+    ),
+    capability(
         key="signal.fractional-delay", domain="signal",
         summary="Prepared causal fractional-delay history and line with Lagrange or Thiran interpolation.",
         rt_class="mixed",

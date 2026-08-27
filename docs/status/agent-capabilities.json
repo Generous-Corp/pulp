@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 37,
+  "manifest_revision": 38,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 54
+        "capabilities": 55
       },
       "timebase": {
         "state": "partial",
@@ -1823,6 +1823,69 @@
         }
       },
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
+    },
+    {
+      "key": "signal.additive-bank",
+      "domain": "signal",
+      "summary": "Prepared sinusoidal partial bank for harmonic, inharmonic, modal, doublet, and independently decaying additive voices.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; may allocate",
+        "process": "audio",
+        "reset": "audio",
+        "release": "audio note event"
+      },
+      "state_model": "Prepared voice/envelope tables, double phase accumulators, control-rate gain/frequency ramps, per-partial decay, and explicit float trig profile.",
+      "seed_model": "explicit xorshift seed for random retrigger phase and doublet jitter",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "voice table, note frequency, spectral envelopes, and note events",
+      "output_domain": "bounded mono additive audio",
+      "units": [
+        "samples",
+        "frames",
+        "hertz",
+        "cycles",
+        "decibels",
+        "milliseconds"
+      ],
+      "latency": "zero",
+      "tail": "shared release or longest configured partial decay",
+      "scheduling": "sample-synchronous with 32-sample bounded control ramps",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/additive_bank.hpp",
+          "qualified_name": "pulp::signal::AdditiveBankT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:22aedd018b5593bf5cc4d98aa3f9f24b66acb788d8ab87a44631e3f7dd8af27c"
     },
     {
       "key": "signal.auto-ducked-send",
@@ -6159,14 +6222,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 87,
+    "total": 88,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 54,
+      "signal": 55,
       "timebase": 9
     }
   },

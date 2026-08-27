@@ -808,8 +808,15 @@ prepared design data and belong off the audio thread. `next()` returns one
 sample; `process(out,frames)` replaces the output buffer. Partial/envelope
 methods are pure realized-frequency/gain queries.
 
+`set_trig_profile()` is a setup/control operation for `AdditiveBank` only;
+`reference` is the default and `AdditiveBank64` ignores non-reference requests.
+`trig_profile_has_vector_path()` reports compiled vector-path availability, not
+a speed claim for every bank density. Use the precise option for measured dense
+banks, not as a global math setting; the evidence and target matrix are in the
+[fast-trigonometry evaluation](../validation/fast-trigonometry.md).
+
 - Lifecycle and note events: `prepare()`, `reset()`, `retrigger()`, `release()`, `active()`.
-- Voice controls and accessors: `set_fundamental_hz()`/`fundamental_hz()`, `set_partial_count()`/`partial_count()`, `max_partials()`, `set_inharmonicity_b()`/`inharmonicity_b()`, `set_spectral_tilt_db_oct()`/`spectral_tilt_db_oct()`, `set_master_gain_db()`/`master_gain_db()`, `load_voice()`/`voice()`, `set_partial()`.
+- Voice controls and accessors: `set_fundamental_hz()`/`fundamental_hz()`, `set_partial_count()`/`partial_count()`, `max_partials()`, `set_inharmonicity_b()`/`inharmonicity_b()`, `set_spectral_tilt_db_oct()`/`spectral_tilt_db_oct()`, `set_master_gain_db()`/`master_gain_db()`, `set_trig_profile()`/`trig_profile()`, `trig_profile_has_vector_path()`, `load_voice()`/`voice()`, `set_partial()`.
 - Envelope and variation controls: `set_envelope_a()`, `set_envelope_b()`, `set_morph()`/`morph()`, `set_spectral_domain()`/`spectral_domain()`, `envelope_db_at()`, `set_envelope_mode()`/`envelope_mode()`, `set_attack_ms()`, `set_release_ms()`, `set_detune_cents()`/`detune_cents()`, `doublet_active()`, `set_pitch_glide()`, `set_retrig_phase()`/`retrig_phase()`, `set_seed()`.
 - Processing and realized pitch: `next()`, `process()`, `latency_samples()`, `worst_case_gain()`, `partial_frequency()`, `partial_frequency_hz()`, `nyquist_guard_gain()`.
 - `SpectralEnvelope`: `clear()`, `size()`, `add()`, `tilt()`, `gain_db_at()`. `VoiceTable`: `clear()`, `add()`.

@@ -33,6 +33,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
+    "pulp/signal/additive_bank.hpp": "Pulp::signal",
     "pulp/signal/spectral_feature_frontends.hpp": "Pulp::signal",
     "pulp/signal/audio_matrix_mixer.hpp": "Pulp::signal",
     "pulp/signal/breakpoint_envelope.hpp": "Pulp::signal",
@@ -512,14 +513,13 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:82cde36d9693d5c925a47ba4937b72e0f071ce96c4b74a2262d97100e90dc539",
+        "fingerprint": "sha256:419c6e831cfe4aa999c21f918ad453ecf03ae07ea8317c8def0be9cd4d67e698",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
-            "FastMath is a shared scalar implementation utility rather than a "
-            "standalone semantic DSP unit. The corrected exp2 operation has no "
-            "product consumer outside its own documentation and tests, so exposing "
-            "it as a generator capability would overstate demonstrated adoption."
+            "FastMath is shared scalar/SIMD implementation infrastructure rather "
+            "than a standalone semantic DSP unit. Its bounded trig profiles are "
+            "advertised through accepted consumer capabilities, not as raw math."
         ),
     },
     {

@@ -127,6 +127,26 @@ TEST_CASE("The catalog sine meets the THD requirement and FastMath does not",
     REQUIRE(db(fast_thd) - db(shipped_thd) > 30.0);
 }
 
+TEST_CASE("The precise additive trig profile meets the THD requirement",
+          "[signal][additive][fast-trig][quality]") {
+    constexpr int kWindow = 48000;
+    constexpr int kCycles = 440;
+
+    AdditiveBank bank;
+    configure_steady(bank, harmonic_voice(1), 1, 440.0);
+    REQUIRE(bank.set_trig_profile(FastTrigProfile::realtime_precise));
+    const auto x = render(bank, kWindow);
+
+    const double fundamental = coherent_amplitude(x, kCycles, kWindow);
+    double thd = 0.0;
+    for (int h = 2; h <= 20; ++h) {
+        const double amplitude = coherent_amplitude(x, kCycles * h, kWindow);
+        thd += amplitude * amplitude;
+    }
+    thd = std::sqrt(thd) / fundamental;
+    REQUIRE(db(thd) < -100.0);
+}
+
 TEST_CASE("Partial magnitudes match the voice table",
           "[signal][additive][spectrum]") {
     constexpr int kWindow = 48000;

@@ -24,6 +24,15 @@ bank.retrigger();
 bank.process(output, num_frames); // replaces output
 ```
 
+Reference sine remains the default. Dense float banks on Apple arm64/Clang
+targets can explicitly select
+`FastTrigProfile::realtime_precise`; query
+`AdditiveBank::trig_profile_has_vector_path()` before presenting it as a
+performance choice. The option keeps double phase state and is intended for
+high-partial-count organ, modal/bell, additive-pad, and resynthesis voices. See
+the [fast-trigonometry evaluation](../validation/fast-trigonometry.md) for the
+benchmark matrix, quality gates, rejected alternatives, and reopen rules.
+
 `SpectralEnvelope::gain_db_at()` and `AdditiveBank::envelope_db_at()` expose the
 configured and realized curves respectively. Use them for plots and tests.
 

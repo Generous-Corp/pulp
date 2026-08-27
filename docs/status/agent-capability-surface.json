@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 55,
+  "inventory_version": 56,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,14 +38,14 @@
   ],
   "counts": {
     "public_headers": 441,
-    "reviewed_headers": 145,
-    "legacy_unreviewed_headers": 296,
+    "reviewed_headers": 146,
+    "legacy_unreviewed_headers": 295,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 94,
+      "capability_entrypoint": 95,
       "capability_support": 38,
       "infrastructure": 11,
-      "legacy_unreviewed": 296,
+      "legacy_unreviewed": 295,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -75,8 +75,8 @@
       },
       "signal": {
         "public_headers": 262,
-        "reviewed_headers": 103,
-        "legacy_unreviewed_headers": 159,
+        "reviewed_headers": 104,
+        "legacy_unreviewed_headers": 158,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1682,11 +1682,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/additive_bank.hpp",
-      "fingerprint": "sha256:f0035051d020bb09b8d721ec04aa2b314caccfc1ec6a3571d57b6266016aedeb",
+      "fingerprint": "sha256:4a3a79b3d1d8faff30cb3778afd1b47c3591f525f6e30d0bb79c4ed50950be22",
       "include": "pulp/signal/additive_bank.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.additive-bank"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2441,11 +2443,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:82cde36d9693d5c925a47ba4937b72e0f071ce96c4b74a2262d97100e90dc539",
+      "fingerprint": "sha256:419c6e831cfe4aa999c21f918ad453ecf03ae07ea8317c8def0be9cd4d67e698",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "FastMath is a shared scalar implementation utility rather than a standalone semantic DSP unit. The corrected exp2 operation has no product consumer outside its own documentation and tests, so exposing it as a generator capability would overstate demonstrated adoption."
+      "rationale": "FastMath is shared scalar/SIMD implementation infrastructure rather than a standalone semantic DSP unit. Its bounded trig profiles are advertised through accepted consumer capabilities, not as raw math."
     },
     {
       "domain": "signal",

@@ -588,6 +588,11 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
     # a method invites the model to call it.
     kKeywords = ("if(", "for(", "while(", "switch(", "return(", "sizeof(")
     out = [s for s in out if not s.startswith(kKeywords)]
+    # Platform-only SIMD overloads are implementation accelerators, not
+    # portable generator vocabulary. Keeping this overload would consume one
+    # of the bounded FastMath slots and hide the portable soft_clip API.
+    if cls == "FastMath":
+        out = [s for s in out if "simd_float4" not in s]
     seen, uniq = set(), []
     for s in out:
         if s not in seen:

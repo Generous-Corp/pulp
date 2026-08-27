@@ -137,6 +137,37 @@ TEST_CASE("FastMath bounded-cycle runtime dispatch preserves semantic profiles",
             FastMath::sin_cycles<FastTrigProfile::reference>(0.375f));
 }
 
+#if defined(__APPLE__) && defined(__clang__)
+TEST_CASE("FastMath Apple four-wide precise sine meets the scalar error budget",
+          "[signal][fast_math][trig-profile][simd]") {
+    constexpr std::size_t sample_count = 1u << 17;
+    double maximum = 0.0;
+    double scalar_parity_maximum = 0.0;
+    for (std::size_t i = 0; i < sample_count; i += 4) {
+        const simd_float4 phase = simd_make_float4(
+            static_cast<float>(i) / static_cast<float>(sample_count),
+            static_cast<float>(i + 1) / static_cast<float>(sample_count),
+            static_cast<float>(i + 2) / static_cast<float>(sample_count),
+            static_cast<float>(i + 3) / static_cast<float>(sample_count));
+        const simd_float4 actual = FastMath::sin_cycles_precise(phase);
+        for (std::size_t lane = 0; lane < 4; ++lane) {
+            const double expected = std::sin(
+                2.0 * std::acos(-1.0) * static_cast<double>(phase[lane]));
+            maximum = std::max(
+                maximum,
+                std::abs(static_cast<double>(actual[lane]) - expected));
+            const double scalar = FastMath::sin_cycles<
+                FastTrigProfile::realtime_precise>(phase[lane]);
+            scalar_parity_maximum = std::max(
+                scalar_parity_maximum,
+                std::abs(static_cast<double>(actual[lane]) - scalar));
+        }
+    }
+    REQUIRE(maximum <= 2.5e-7);
+    REQUIRE(scalar_parity_maximum <= 2.5e-7);
+}
+#endif
+
 TEST_CASE("FastMath cos approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::cos(0.0f), WithinAbs(1.0, 0.01));
     REQUIRE_THAT(FastMath::cos(1.5707963f), WithinAbs(0.0, 0.02));  // pi/2

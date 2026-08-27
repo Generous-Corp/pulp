@@ -643,6 +643,11 @@ docs:
     kind: guide
     summary: Reproducible C1-C7 capture protocol, independent cyclic calibration oracle, and keyed listening-pack workflow
 
+  - slug: fast-trigonometry-evaluation
+    path: validation/fast-trigonometry.md
+    kind: reference
+    summary: Reproducible fast-sine consumer benchmarks, quality gates, selected paths, rejected alternatives, and reopen rules
+
   # Policies
   - slug: code-style
     path: policies/code-style.md
