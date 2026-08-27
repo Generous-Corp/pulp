@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 38,
+  "manifest_revision": 39,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 55
+        "capabilities": 56
       },
       "timebase": {
         "state": "partial",
@@ -2125,6 +2125,94 @@
         }
       },
       "contract_digest": "sha256:08136a7d244957d09fa1ce15132db230faac72978f525d631c8b62f2beecedb6"
+    },
+    {
+      "key": "signal.commuted-string-excitation",
+      "domain": "signal",
+      "summary": "Fixed-capacity control-prepared body-IR convolution with immutable shared profiles and allocation-free independent per-voice cursors.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; bounded convolution and transactional profile publication",
+        "process": "audio cursor next/render",
+        "reset": "audio cursor trigger/retrigger/reset",
+        "release": "none"
+      },
+      "state_model": "One fixed-capacity prepared sample array and retained length shared immutably, plus per-voice span, position, and active state.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite non-aliasing base excitation and body impulse response whose full convolution fits the retained-sample capacity",
+      "output_domain": "immutable finite body-shaped excitation samples and independent per-voice cursor streams that return zero after exhaustion",
+      "units": [
+        "samples",
+        "frames",
+        "linear amplitude"
+      ],
+      "latency": "zero; the causal prepared excitation begins at the trigger sample",
+      "tail": "exactly base samples plus body-IR samples minus one after trigger, bounded to 16384 samples by the default profile",
+      "scheduling": "prepare only while quiescent; profile storage must outlive cursors; one cursor per voice, sample- or block-synchronous",
+      "bindings": [
+        {
+          "role": "prepare_status",
+          "kind": "cpp_type",
+          "include": "pulp/signal/commuted_string_excitation.hpp",
+          "qualified_name": "pulp::signal::CommutedStringExcitationPrepareStatus",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "profile",
+          "kind": "cpp_type",
+          "include": "pulp/signal/commuted_string_excitation.hpp",
+          "qualified_name": "pulp::signal::CommutedStringExcitationProfileT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "cursor",
+          "kind": "cpp_type",
+          "include": "pulp/signal/commuted_string_excitation.hpp",
+          "qualified_name": "pulp::signal::CommutedStringExcitationCursorT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:e1eb8c50f0fdd927692c2ffb8dc307c76fcefe7f3dff237bbfdfb077d3f5dc1b"
     },
     {
       "key": "signal.cross-feedback-multitap-delay",
@@ -6222,14 +6310,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 88,
+    "total": 89,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 55,
+      "signal": 56,
       "timebase": 9
     }
   },
@@ -7247,6 +7335,37 @@
               "clear_fault_count()",
               "processing_latency_samples()",
               "tail_samples()"
+            ],
+            "enums": []
+          }
+        ],
+        "commuted_string_excitation.hpp": [
+          {
+            "class": "CommutedStringExcitationCursorT",
+            "qualified_name": "pulp::signal::CommutedStringExcitationCursorT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "reset()",
+              "trigger()",
+              "retrigger()",
+              "next()",
+              "render(std::span<SampleType> output)",
+              "active()",
+              "position()",
+              "remaining()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "CommutedStringExcitationProfileT",
+            "qualified_name": "pulp::signal::CommutedStringExcitationProfileT",
+            "template": "typename SampleType = float, std::size_t MaximumRetainedSamples = 16384",
+            "methods": [
+              "prepare(std::span<const SampleType> base_excitation, std::span<const SampleType> body_impulse_response)",
+              "samples()",
+              "retained_samples()",
+              "empty()",
+              "make_cursor()"
             ],
             "enums": []
           }

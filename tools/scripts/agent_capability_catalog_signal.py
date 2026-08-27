@@ -342,6 +342,95 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="signal.commuted-string-excitation", domain="signal",
+        summary=(
+            "Fixed-capacity control-prepared body-IR convolution with immutable shared "
+            "profiles and allocation-free independent per-voice cursors."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control; bounded convolution and transactional profile publication",
+            "process": "audio cursor next/render",
+            "reset": "audio cursor trigger/retrigger/reset",
+            "release": "none",
+        },
+        state_model=(
+            "One fixed-capacity prepared sample array and retained length shared immutably, "
+            "plus per-voice span, position, and active state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite non-aliasing base excitation and body impulse response whose full "
+            "convolution fits the retained-sample capacity"
+        ),
+        output_domain=(
+            "immutable finite body-shaped excitation samples and independent per-voice "
+            "cursor streams that return zero after exhaustion"
+        ),
+        units=["samples", "frames", "linear amplitude"],
+        latency="zero; the causal prepared excitation begins at the trigger sample",
+        tail=(
+            "exactly base samples plus body-IR samples minus one after trigger, bounded to "
+            "16384 samples by the default profile"
+        ),
+        scheduling=(
+            "prepare only while quiescent; profile storage must outlive cursors; one cursor "
+            "per voice, sample- or block-synchronous"
+        ),
+        bindings=[
+            binding(
+                role="prepare_status", kind="cpp_type",
+                include="pulp/signal/commuted_string_excitation.hpp",
+                qualified_name="pulp::signal::CommutedStringExcitationPrepareStatus",
+                target="Pulp::signal",
+                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
+            ),
+            binding(
+                role="profile", kind="cpp_type",
+                include="pulp/signal/commuted_string_excitation.hpp",
+                qualified_name="pulp::signal::CommutedStringExcitationProfileT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
+            ),
+            binding(
+                role="cursor", kind="cpp_type",
+                include="pulp/signal/commuted_string_excitation.hpp",
+                qualified_name="pulp::signal::CommutedStringExcitationCursorT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "prepare_status",
+                "binding": "pulp::signal::CommutedStringExcitationPrepareStatus",
+                "operation": "construct",
+                "arguments": "pulp::signal::CommutedStringExcitationPrepareStatus::ok",
+            },
+            {
+                "role": "profile",
+                "binding": "pulp::signal::CommutedStringExcitationProfileT<float>",
+                "operation": "member_call",
+                "member": "prepare",
+                "arguments": (
+                    "[](){ static constexpr float x[]{1.0f}; return "
+                    "std::span<const float>{x}; }(), [](){ static constexpr float h[]{1.0f}; "
+                    "return std::span<const float>{h}; }()"
+                ),
+            },
+            {
+                "role": "cursor",
+                "binding": "pulp::signal::CommutedStringExcitationCursorT<float>",
+                "operation": "member_call",
+                "member": "next",
+                "arguments": "",
+            },
+        ],
+    ),
+    capability(
         key="signal.particle-percussion", domain="signal",
         summary=(
             "Deterministic depleted-energy particle collisions and prepared resonant "
