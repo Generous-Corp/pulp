@@ -1609,9 +1609,11 @@
       "delivery_state": "pending",
       "claim_id": "fccf4eba-0c01-467d-84f8-8bc39e936d58",
       "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
         "core/timeline/include/pulp/timeline/document_session.hpp",
         "core/timeline/include/pulp/timeline/transaction.hpp",
         "core/timeline/src/document_session.cpp",
+        "test/cmake/timeline_tests.cmake",
         "test/test_timeline_transactions.cpp",
         "test/test_timeline_writer_capabilities.cpp"
       ],
