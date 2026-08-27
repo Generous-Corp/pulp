@@ -456,11 +456,13 @@ TEST_CASE("baked C++ codegen emits a resolved clip rectangle",
 // exported plugin laying out differently from the design it was baked from.
 TEST_CASE("baked C++ emits figma resize constraints and grid auto-flow",
           "[view][import][cpp-codegen][parity]") {
-    auto source_for = [](const char* h, const char* v) {
+    auto source_for = [](const char* h, const char* v,
+                         LayoutDirection parent_direction = LayoutDirection::column) {
         DesignIR ir;
         ir.source = DesignSource::figma;
         ir.root.type = "frame";
         ir.root.name = "Root";
+        ir.root.layout.direction = parent_direction;
         IRNode child;
         child.type = "frame";
         child.name = "Pinned";
@@ -521,8 +523,14 @@ TEST_CASE("baked C++ emits figma resize constraints and grid auto-flow",
     }
 
     SECTION("scale raises flex-grow rather than assigning it") {
-        const auto src = source_for("scale", nullptr);
+        const auto src = source_for("scale", nullptr, LayoutDirection::row);
         CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") != std::string::npos);
+    }
+
+    SECTION("horizontal scale stretches under a column parent") {
+        const auto src = source_for("scale", nullptr, LayoutDirection::column);
+        CHECK(src.find("flex.align_self = pulp::view::FlexAlign::stretch;") != std::string::npos);
+        CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") == std::string::npos);
     }
 
     SECTION("left and top emit nothing") {

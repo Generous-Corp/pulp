@@ -1320,9 +1320,8 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_height = {0.0f, DimensionUnit::auto_};
 
     // Resize constraints, through the shared mapping every lane consults.
-    // Applied last so an explicit flex value the design already carries wins:
-    // `grow` raises flex-grow rather than assigning it, and `stretch` yields to
-    // an author-set align-self, matching the fill-sizing rules just above.
+    // Translate the requested design axis through the parent's flex direction:
+    // main-axis fill is grow, cross-axis fill is stretch.
     const auto constraints = resolve_layout_constraints(node.layout.h_constraint, node.layout.v_constraint);
     if (constraints.margin_left_auto) {
         flex.dim_margin_left = {0.0f, DimensionUnit::auto_};
@@ -1340,11 +1339,17 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_margin_bottom = {0.0f, DimensionUnit::auto_};
         flex.margin_bottom = -1.0f;
     }
-    if (constraints.grow) flex.flex_grow = std::max(flex.flex_grow, 1.0f);
-    if (constraints.stretch && !has_explicit_align_self) flex.align_self = FlexAlign::stretch;
-    if (constraints.fill_width && !node.style.min_width)
+    if (constraints.fill_width && parent_is_row)
+        flex.flex_grow = std::max(flex.flex_grow, 1.0f);
+    if (constraints.fill_height && (!parent_direction || parent_is_column))
+        flex.flex_grow = std::max(flex.flex_grow, 1.0f);
+    const bool fill_width_cross = constraints.fill_width && (!parent_direction || parent_is_column);
+    const bool fill_height_cross = constraints.fill_height && parent_is_row;
+    if ((fill_width_cross || fill_height_cross) && !has_explicit_align_self)
+        flex.align_self = FlexAlign::stretch;
+    if (fill_width_cross && !has_explicit_align_self && !node.style.min_width)
         flex.dim_min_width = {100.0f, DimensionUnit::percent};
-    if (constraints.fill_height && !node.style.min_height)
+    if (fill_height_cross && !has_explicit_align_self && !node.style.min_height)
         flex.dim_min_height = {100.0f, DimensionUnit::percent};
 }
 

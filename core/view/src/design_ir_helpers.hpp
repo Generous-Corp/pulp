@@ -418,10 +418,8 @@ struct ResolvedLayoutConstraints {
     bool margin_right_auto = false;
     bool margin_top_auto = false;
     bool margin_bottom_auto = false;
-    bool grow = false;         // flex-grow: 1
-    bool stretch = false;      // align-self: stretch
-    bool fill_width = false;   // min-width: 100%
-    bool fill_height = false;  // min-height: 100%
+    bool fill_width = false;
+    bool fill_height = false;
 };
 
 // `left` / `top` need no expression: they are the flex default, anchored start.
@@ -444,10 +442,7 @@ inline ResolvedLayoutConstraints resolve_layout_constraints(
             r.margin_right_auto = true;
         } else if (h == "right") {
             r.margin_left_auto = true;
-        } else if (h == "scale") {
-            r.grow = true;
-        } else if (h == "stretch") {
-            r.stretch = true;
+        } else if (h == "scale" || h == "stretch") {
             r.fill_width = true;
         }
     }
@@ -458,10 +453,7 @@ inline ResolvedLayoutConstraints resolve_layout_constraints(
             r.margin_bottom_auto = true;
         } else if (v == "bottom") {
             r.margin_top_auto = true;
-        } else if (v == "scale") {
-            r.grow = true;
-        } else if (v == "stretch") {
-            r.stretch = true;
+        } else if (v == "scale" || v == "stretch") {
             r.fill_height = true;
         }
     }

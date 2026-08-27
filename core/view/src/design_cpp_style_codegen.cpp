@@ -208,9 +208,8 @@ void emit_common_layout(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "flex.dim_height = {0.0f, pulp::view::DimensionUnit::auto_};");
 
     // Resize constraints, through the shared mapping every lane consults.
-    // Emitted last so an explicit flex value the design already carries wins:
-    // `grow` raises flex-grow rather than assigning it, and `stretch` yields to
-    // an author-set align-self, matching the fill-sizing rules just above.
+    // The requested design axis must be translated through the parent's flex
+    // direction: main-axis fill is grow, cross-axis fill is stretch.
     const auto constraints = resolve_layout_constraints(node.layout.h_constraint, node.layout.v_constraint);
     auto emit_auto_margin = [&](const char* dim_field, const char* float_field) {
         emit_line(out, depth, opts.indent_spaces,
@@ -221,14 +220,18 @@ void emit_common_layout(std::ostringstream& out,
     if (constraints.margin_right_auto) emit_auto_margin("dim_margin_right", "margin_right");
     if (constraints.margin_top_auto) emit_auto_margin("dim_margin_top", "margin_top");
     if (constraints.margin_bottom_auto) emit_auto_margin("dim_margin_bottom", "margin_bottom");
-    if (constraints.grow)
+    if (constraints.fill_width && parent_is_row)
         emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
-    if (constraints.stretch && !has_explicit_align_self)
+    if (constraints.fill_height && (!parent_direction || parent_is_column))
+        emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
+    const bool fill_width_cross = constraints.fill_width && (!parent_direction || parent_is_column);
+    const bool fill_height_cross = constraints.fill_height && parent_is_row;
+    if ((fill_width_cross || fill_height_cross) && !has_explicit_align_self)
         emit_line(out, depth, opts.indent_spaces, "flex.align_self = pulp::view::FlexAlign::stretch;");
-    if (constraints.fill_width && !node.style.min_width)
+    if (fill_width_cross && !has_explicit_align_self && !node.style.min_width)
         emit_line(out, depth, opts.indent_spaces,
                   "flex.dim_min_width = {100.0f, pulp::view::DimensionUnit::percent};");
-    if (constraints.fill_height && !node.style.min_height)
+    if (fill_height_cross && !has_explicit_align_self && !node.style.min_height)
         emit_line(out, depth, opts.indent_spaces,
                   "flex.dim_min_height = {100.0f, pulp::view::DimensionUnit::percent};");
 }

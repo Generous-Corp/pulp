@@ -822,9 +822,11 @@ TEST_CASE("parse_design_ir_json normalizes Figma resize constraints",
 
 TEST_CASE("codegen lowers resize constraints to flex within the parent",
           "[view][import][codegen][constraints]") {
-    auto emit = [](const std::string& h, const std::string& v) {
+    auto emit = [](const std::string& h, const std::string& v,
+                   LayoutDirection parent_direction = LayoutDirection::column) {
         DesignIR ir;
         ir.root.type = "frame"; ir.root.name = "Root";
+        ir.root.layout.direction = parent_direction;
         ir.root.style.width = 400.0f; ir.root.style.height = 400.0f;
         IRNode child; child.type = "frame"; child.name = "Child";
         child.style.width = 50.0f; child.style.height = 50.0f;
@@ -854,9 +856,16 @@ TEST_CASE("codegen lowers resize constraints to flex within the parent",
     }
     // scale → flex-grow:1.
     {
-        auto js = emit("scale", "");
+        auto js = emit("scale", "", LayoutDirection::row);
         INFO(js);
         CHECK(js.find("'flex_grow', 1)") != std::string::npos);
+    }
+    // The same horizontal fill is cross-axis under a column parent.
+    {
+        auto js = emit("scale", "", LayoutDirection::column);
+        INFO(js);
+        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+        CHECK(js.find("'flex_grow', 1)") == std::string::npos);
     }
     // stretch (pin both edges) → align-self:stretch.
     {
@@ -917,8 +926,8 @@ TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex c
         auto js = emit_ir("LEFT_RIGHT", "TOP_BOTTOM");
         INFO(js);
         CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
-        CHECK(js.find("'min_width', '100%')")     != std::string::npos);
         CHECK(js.find("'min_height', '100%')")    != std::string::npos);
+        CHECK(js.find("'flex_grow', 1)")           != std::string::npos);
     }
     // REST dialect: RIGHT / BOTTOM → leading auto margin only.
     {
@@ -974,8 +983,7 @@ TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex c
     {
         auto js = emit_envelope("STRETCH", "MAX");
         INFO(js);
-        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
-        CHECK(js.find("'min_width', '100%')")     != std::string::npos);
+        CHECK(js.find("'flex_grow', 1)")          != std::string::npos);
         CHECK(js.find("'margin_top', 'auto')")    != std::string::npos);
         CHECK(js.find("margin_bottom") == std::string::npos);
     }
@@ -984,7 +992,8 @@ TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex c
         INFO(js);
         CHECK(js.find("'margin_left', 'auto')") != std::string::npos);
         CHECK(js.find("margin_right") == std::string::npos);
-        CHECK(js.find("'flex_grow', 1)") != std::string::npos);
+        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+        CHECK(js.find("'min_height', '100%')") != std::string::npos);
     }
     {
         auto js = emit_envelope("MIN", "MIN");
@@ -1487,9 +1496,9 @@ TEST_CASE("per-range runs inherit the parent Label's dominant style",
 
 TEST_CASE("STRETCH constraint fills its axis even with an explicit size",
           "[view][import][codegen][constraints]") {
-    // A STRETCH constraint pins both edges = fill that dimension. min-width/
-    // height:100% makes it effective even when the node also has an explicit
-    // pixel size (Yoga clamps up to min), so STRETCH is no longer a no-op.
+    // A STRETCH constraint pins both edges = fill that dimension. The cross
+    // axis uses a percentage minimum against explicit pixels; the main axis
+    // uses grow, selected from the parent's direction.
     DesignIR ir;
     ir.root.type = "frame"; ir.root.name = "Root";
     ir.root.style.width = 400.0f; ir.root.style.height = 400.0f;
@@ -1502,7 +1511,7 @@ TEST_CASE("STRETCH constraint fills its axis even with an explicit size",
     const auto js = generate_pulp_js(ir, opts);
     INFO(js);
     CHECK(js.find("'min_width', '100%'") != std::string::npos);
-    CHECK(js.find("'min_height', '100%'") != std::string::npos);
+    CHECK(js.find("'flex_grow', 1)") != std::string::npos);
 }
 
 TEST_CASE("grid item 'N / span M' resolves to an end line",
