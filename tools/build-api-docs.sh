@@ -31,6 +31,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DOXYFILE="$ROOT/docs/doxygen/Doxyfile"
 TIMELINE_STRICT_DOXYFILE="$ROOT/docs/doxygen/Doxyfile.timeline-strict"
 SEQUENCER_API_BASELINE="$ROOT/docs/doxygen/sequencer-api-contract-legacy-baseline.json"
+INSTALLED_HEADER_POLICY="$ROOT/docs/doxygen/installed-public-header-policy.json"
 OUTPUT="$ROOT/build/api-docs"
 PUBLISH_LOCK="${OUTPUT}.publish.lock"
 
@@ -51,6 +52,12 @@ if [ ! -f "$SEQUENCER_API_BASELINE" ]; then
     echo "Error: sequencer API contract baseline not found at $SEQUENCER_API_BASELINE"
     exit 1
 fi
+if [ ! -f "$INSTALLED_HEADER_POLICY" ]; then
+    echo "Error: installed public-header policy not found at $INSTALLED_HEADER_POLICY"
+    exit 1
+fi
+
+python3 "$ROOT/tools/scripts/doxygen_installed_header_check.py"
 
 # Extract `project(Pulp VERSION x.y.z)` from the root CMakeLists.txt. Uses
 # grep/sed so this works under both BSD and GNU userland (macOS + Linux).

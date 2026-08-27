@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "documented_source_only": [
+    "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+    "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp"
+  ]
+}

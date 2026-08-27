@@ -20,7 +20,7 @@ docs/*.md  →  mkdocs build  →  build/site/*.html  →  GitHub Pages
 2. **Index**: `docs/status/docs-index.yaml` defines the slug-to-path mapping; `tools/mkdocs_hooks.py` reads it in `on_files` to rewrite each page's URL to `/pulp/{slug}.html` at the site root (so historical deep-links keep resolving).
 3. **Pre-build gates**: `tools/mkdocs_hooks.py` `on_pre_build` runs `tools/docs_generate.py check` and `tools/check-docs-consistency.py`. A drift fails the build.
 4. **Build**: `mkdocs build` with the config in `mkdocs.yml` renders Material HTML.
-5. **API docs**: `tools/build-api-docs.sh` runs Doxygen on public headers, output merged into `build/site/api/`. The script pulls the current SDK version from `CMakeLists.txt` and injects it as Doxygen's `PROJECT_NUMBER` so `/api/` always shows the right release.
+5. **API docs**: `tools/build-api-docs.sh` first proves file-granular parity between the public headers installed by `PulpInstallRules.cmake` and the roots in `docs/doxygen/Doxyfile`, then runs Doxygen and merges its output into `build/site/api/`. The only source-only debt is the exact two Timeline View headers recorded in `installed-public-header-policy.json`; stale or broadened exceptions fail. The script also injects the SDK version from `CMakeLists.txt` as Doxygen's `PROJECT_NUMBER`.
 6. **Install scripts**: `tools/install/install.sh` and `install.ps1` are copied to `build/site/` root so the one-liner installer keeps working.
 7. **Deploy**: GitHub Actions uploads `build/site/` as a Pages artifact.
 
@@ -53,8 +53,9 @@ All doc pages are flattened to the root level (no subdirectory structure in URLs
 The workflow triggers on pushes to `main` that touch:
 - `docs/**`
 - `mkdocs.yml`, `requirements-docs.txt`, `tools/mkdocs_hooks.py`
-- `core/**/include/**` (public headers affect API docs)
+- `core/**/include/**`, `inspect/include/**`, and `tools/audio/analysis/include/**` (installed public headers affect API docs)
 - `tools/build-api-docs.sh`
+- `tools/scripts/doxygen_installed_header_check.py`, `tools/cmake/PulpInstallRules.cmake`
 - `tools/install/install.sh` or `tools/install/install.ps1`
 - `docs/doxygen/**`
 - `.github/workflows/docs-deploy.yml`

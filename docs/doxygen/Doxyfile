@@ -11,26 +11,35 @@ INPUT                  = ../../core/audio/include \
                          ../../core/canvas/include \
                          ../../core/events/include \
                          ../../core/format/include \
+                         ../../core/gpu_audio/include \
+                         ../../core/graph/include \
                          ../../core/host/include \
                          ../../core/interchange/include \
                          ../../core/midi/include \
                          ../../core/music/include \
                          ../../core/osc/include \
-                         ../../core/host/include \
+                         ../../core/native-components/include \
                          ../../core/platform/include \
                          ../../core/playback/include \
+                         ../../core/project_package/include \
                          ../../core/render/include \
                          ../../core/runtime/include \
                          ../../core/sequence/include \
                          ../../core/signal/include \
                          ../../core/state/include \
+                         ../../core/dawproject/include \
+                         ../../core/dsl/include \
+                         ../../core/smf/include \
                          ../../core/timebase/include \
                          ../../core/timeline/include \
+                         ../../core/timeline_agent_view/include \
                          ../../core/timeline_editor/include \
                          ../../core/timeline_view/include \
-                         ../../core/view/include
+                         ../../core/view/include \
+                         ../../tools/audio/analysis/include \
+                         ../../inspect/include
 RECURSIVE              = YES
-FILE_PATTERNS          = *.hpp *.h
+FILE_PATTERNS          = *.hpp *.h *.inc *.hpp.in
 
 # Extraction settings
 EXTRACT_ALL            = YES

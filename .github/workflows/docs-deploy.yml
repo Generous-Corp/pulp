@@ -15,10 +15,14 @@ on:
       - 'requirements-docs.txt'
       - 'tools/mkdocs_hooks.py'
       - 'tools/build-api-docs.sh'
+      - 'tools/scripts/doxygen_installed_header_check.py'
+      - 'tools/cmake/PulpInstallRules.cmake'
       - 'tools/install/install.sh'
       - 'tools/install/install.ps1'
       - 'docs/doxygen/**'
       - 'core/**/include/**'
+      - 'inspect/include/**'
+      - 'tools/audio/analysis/include/**'
       # `tools/build-api-docs.sh` reads `project(Pulp VERSION …)` from
       # the root CMakeLists.txt to set Doxygen's `PROJECT_NUMBER`, so a
       # version-only bump should re-deploy `/api/` with the new number

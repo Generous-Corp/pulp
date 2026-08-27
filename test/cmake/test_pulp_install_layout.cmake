@@ -41,6 +41,14 @@ file(MAKE_DIRECTORY "${_prefix}")
 # already produced by the previous `cmake --build` step are copied. The
 # CMake-package files (PulpConfig.cmake, PulpUtils.cmake, …) are
 # generated at configure time, so they are always present.
+file(STRINGS "${PULP_BUILD_DIR}/CMakeCache.txt" _pulp_inspector_cache
+    REGEX "^PULP_ENABLE_INSPECTOR:")
+if(_pulp_inspector_cache MATCHES "=ON$")
+    set(_pulp_inspector_mode on)
+else()
+    set(_pulp_inspector_mode off)
+endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
             --install "${PULP_BUILD_DIR}"
@@ -53,6 +61,21 @@ if(NOT _rc EQUAL 0)
         "cmake --install failed (rc=${_rc}):\n"
         "----- stdout -----\n${_stdout}\n"
         "----- stderr -----\n${_stderr}\n----- end -----")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONDONTWRITEBYTECODE=1"
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../../tools/scripts/doxygen_installed_header_check.py"
+            --repo-root "${CMAKE_CURRENT_LIST_DIR}/../.."
+            --installed-prefix "${_prefix}"
+            --inspector-mode "${_pulp_inspector_mode}"
+    RESULT_VARIABLE _header_parity_rc
+    OUTPUT_VARIABLE _header_parity_stdout
+    ERROR_VARIABLE _header_parity_stderr)
+if(NOT _header_parity_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed public-header/Doxygen parity failed:\n"
+        "${_header_parity_stdout}${_header_parity_stderr}")
 endif()
 
 # Locate the installed PulpUtils.cmake — Pulp installs into
