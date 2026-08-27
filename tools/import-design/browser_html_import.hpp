@@ -77,6 +77,16 @@ struct BrowserImportReadiness {
     std::string error;
 };
 
+struct BundledBrowserRuntime {
+    std::optional<std::filesystem::path> node_executable;
+    std::optional<std::filesystem::path> capture_script;
+};
+
+/// Find the self-contained browser-capture runtime installed beside the
+/// importer. The versioned directory wins over the legacy compatibility path.
+BundledBrowserRuntime find_bundled_browser_runtime(
+    const std::filesystem::path& importer_executable);
+
 BrowserImportReadiness probe_browser_import_readiness(
     const std::optional<std::filesystem::path>& browser_executable = {});
 

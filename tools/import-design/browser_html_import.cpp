@@ -15,6 +15,40 @@ namespace pulp::import_design {
 
 namespace fs = std::filesystem;
 
+BundledBrowserRuntime find_bundled_browser_runtime(
+    const fs::path& importer_executable) {
+    std::error_code ec;
+    const auto executable = fs::weakly_canonical(importer_executable, ec);
+    if (ec) return {};
+
+    BundledBrowserRuntime runtime;
+    for (const auto directory : {
+             browser_capture::kBrowserCaptureRuntimeDirectory,
+             browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
+        const auto sibling_node = executable.parent_path() / directory /
+#ifdef _WIN32
+            "node.exe";
+#else
+            "node";
+#endif
+        if (fs::is_regular_file(sibling_node)) {
+            runtime.node_executable = sibling_node;
+            break;
+        }
+    }
+    for (const auto directory : {
+             browser_capture::kBrowserCaptureRuntimeDirectory,
+             browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
+        const auto sibling =
+            executable.parent_path() / directory / "capture.mjs";
+        if (fs::is_regular_file(sibling)) {
+            runtime.capture_script = sibling;
+            break;
+        }
+    }
+    return runtime;
+}
+
 BrowserImportReadiness probe_browser_import_readiness(
     const std::optional<fs::path>& browser_executable) {
     browser_capture::BrowserDiscoveryOptions options;
@@ -118,35 +152,12 @@ BrowserHtmlImportResult import_browser_html(
     capture.interaction_plan = request.browser_interactions;
     capture.allow_network = request.allow_browser_network;
 
-    std::error_code ec;
-    const auto executable =
-        fs::weakly_canonical(request.importer_executable, ec);
-    for (const auto directory : {
-             browser_capture::kBrowserCaptureRuntimeDirectory,
-             browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
-        const auto sibling_node = executable.parent_path() / directory /
-#ifdef _WIN32
-            "node.exe";
-#else
-            "node";
-#endif
-        if (!ec && fs::is_regular_file(sibling_node)) {
-            discovery.node_executable = sibling_node;
-            capture.node_executable = sibling_node;
-            break;
-        }
-    }
-    for (const auto directory : {
-             browser_capture::kBrowserCaptureRuntimeDirectory,
-             browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
-        const auto sibling =
-            executable.parent_path() / directory / "capture.mjs";
-        if (!ec && fs::is_regular_file(sibling)) {
-            discovery.capture_script = sibling;
-            capture.capture_script = sibling;
-            break;
-        }
-    }
+    const auto bundled_runtime =
+        find_bundled_browser_runtime(request.importer_executable);
+    discovery.node_executable = bundled_runtime.node_executable;
+    capture.node_executable = bundled_runtime.node_executable;
+    discovery.capture_script = bundled_runtime.capture_script;
+    capture.capture_script = bundled_runtime.capture_script;
 
     auto captured =
         browser_capture::discover_and_capture(discovery, capture);
