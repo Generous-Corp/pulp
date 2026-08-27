@@ -128,22 +128,38 @@ finding; do not rewrite the historical row to make an old decision look current.
 
 Nathan Blair's 2026
 [root-factored sine candidate](https://x.com/nthnblair/status/2092672129338630389)
-is one bounded reassessment input, not adopted Pulp code. Its published Apple M4
-chart measures scalar float with signed phase already reduced and Clang
-`-O3 -ffast-math`. The degree-11 form reports `2.80e-7` maximum float error and
-about `-140.2 dB` THD; those are different metrics, and the peak error is
-slightly outside Pulp's existing `realtime_precise` `2.5e-7` contract. Its
+was evaluated as a bounded local-only reassessment on 2026-08-27 and is not
+adopted Pulp code. Its published Apple M4 chart measures scalar float with
+signed phase already reduced and Clang `-O3 -ffast-math`. The degree-11 Horner
+form reports `2.80e-7` maximum float error and about `-140.2 dB` THD; those are
+different metrics. Pulp reproduced the peak-error claim under normal production
+flags, but it is outside the existing `realtime_precise` `2.5e-7` contract. Its
 `x * (x^2 - 0.25)` factor does make the cycle-boundary roots exact.
 
-If revisited, inject root-11 Horner and Estrin forms as local benchmark overlays
-under normal Pulp production flags. Compare Horner in independent additive
-lanes and Estrin in serial float FM/PM—or a named drum voice only when profiling
-shows sine dependency latency is hot—against the shipped degree-9 backend. Keep
-the existing error, audio, state-continuity, and 10% whole-consumer gates. A
-winner may replace an implementation behind an existing semantic profile; it
-does not add a Horner/Estrin control, weaken the error budget, or authorize
-compiler-wide fast-math. The published degree-7 form (`4.02e-4` maximum error,
-about `-71.3 dB` THD) has no clean general-audio role.
+The Pulp run used an Apple M3 Ultra, macOS 26.6.2, Apple Clang 21.0.0,
+`-O3 -DNDEBUG`, arm64, macOS minimum 13.4, and no `-ffast-math`. A `2^24`
+uniform cycle sweep plus adjacent-float searches measured `2.802574095e-7`
+maximum absolute error for Horner and `3.104929449e-7` for the same coefficients
+scheduled with Estrin. Shipped degree 9 measured `1.702105797e-7`. Two
+qualification executions were byte-identical. Both external forms therefore
+stopped at `deferred_quality_no_go`; their incidental first-screen timing was
+not interpreted, and no additive, FM, drum, licensing, production, or Unified
+Control work followed.
+
+The unredistributed candidate header was transcribed from the linked thread on
+2026-08-27 and had SHA-256
+`a2f9ec78f1d30d9ddec42945dee6352a149d1ffb4c5505704d4922a56c6c9bb0`.
+The digest lets a future rerun verify the same input without placing the
+third-party coefficient text in Pulp.
+
+Reopen only for materially changed coefficients or evaluation, or after a
+separate decision changes the semantic quality contract before measurement. A
+future candidate still has to pass numerical qualification before Horner's
+independent-lane or Estrin's dependency-latency hypotheses reach an actual
+consumer. A winner may replace an implementation behind an existing semantic
+profile; it does not add an evaluation-order control, weaken the error budget,
+or authorize compiler-wide fast-math. The published degree-7 form (`4.02e-4`
+maximum error, about `-71.3 dB` THD) has no clean general-audio role.
 
 An unredistributed candidate can join the general primitive/FM/64-partial screen
 without entering Pulp source. Supply a local header that defines
@@ -152,15 +168,23 @@ callable)` for each bounded-cycle float sine, then configure with:
 
 ```sh
 cmake -S . -B build-fast-trig-candidate -DCMAKE_BUILD_TYPE=Release \
-  -DPULP_BENCHMARK=ON \
+  -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF \
   -DPULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER=/absolute/path/candidates.hpp
-cmake --build build-fast-trig-candidate --target pulp-fast-trig-benchmark
-./build-fast-trig-candidate/test/pulp-fast-trig-benchmark
+tools/ci/governed-build.sh cmake --build build-fast-trig-candidate \
+  --target pulp-fast-trig-benchmark --parallel 4
+./build-fast-trig-candidate/test/pulp-fast-trig-benchmark \
+  --qualification-only --inputs 16777216
 ```
 
-A screening win only authorizes an actual-consumer experiment. It does not
-change defaults or supersede the audio, state-continuity, platform, licensing,
-and whole-consumer gates below.
+Qualification mode emits numerical JSON without running the timing loops. Exit
+code zero means measurement completed; it does not mean a candidate passed.
+Compare each candidate's fields with the selected profile's contract. Only a
+candidate that meets that contract proceeds to the ordinary timing command (the
+same binary with no arguments). A screening win then authorizes only an actual-
+consumer experiment; it does not change defaults or supersede the audio,
+state-continuity, platform, licensing, and whole-consumer gates below. The
+`dense_rms_error` field covers the uniform grid; maxima also include the
+adjacent-float searches.
 
 The paired SSB experiment is preserved on the non-production
 [`64150c552359` research snapshot](https://github.com/Generous-Corp/pulp/tree/64150c55235957f8df3d8f36a9ca7720d7fa2af3/test/research/fast_trig_pair).
@@ -180,15 +204,16 @@ pair and public aliases are deliberately absent from `main`.
 | 2026-08-26 | Apple arm64 float additive bank, four-wide degree 9 | 39.80% minimum, 47.59% median, and 63.83% p95 across 54 final cell medians | Adopt as opt-in `realtime_precise` |
 | 2026-08-26 | Double FM8 drum voice, degree 13 | Immutable research snapshot: 24.16–25.07% minimum, 33.00–33.30% median, and 38.69–40.83% p95 across 36 cell medians; exact-base sample hash matched in seven pairs; broadened hit corpus found peak ratio `0.613740` for algorithm 9/wave base 12/48 kHz | `deferred_quality_no_go`; preserve research, ship no selector |
 | 2026-08-26 | Double SSB pair, degree 13 | 9.91% minimum, 12.38% median, and 19.02% p95 across 36 cell medians; maximum error `1.05e-13`; image, carrier, DC, determinism, and 10-second stability screens passed | `deferred_more_evidence`; preserve research harness, not production code |
-| 2026-08-26 | External root-factored degree-11 Horner/Estrin intake | Published M4 primitive chart only: already-ranged scalar float with `-ffast-math`; `2.80e-7` maximum error and about `-140.2 dB` THD | Candidate intake only; run normal-flag Pulp consumer matrices before any source or control change |
+| 2026-08-27 | External root-factored degree-11 Horner/Estrin | M3 Ultra, Apple Clang 21.0.0, normal Release flags, `2^24` sweep plus adjacent-float search: Horner `2.802574095e-7`, Estrin `3.104929449e-7`, shipped degree 9 `1.702105797e-7`; repeated qualification output was byte-identical | `deferred_quality_no_go`; both exceed the `2.5e-7` precise budget, so do not run consumer or production work |
 
-The Pulp rows are measurements of the named consumers and environment, not
-universal claims about a primitive; the external-intake row is explicitly not a
-Pulp measurement. FM8 was evaluated separately because its per-sample harmonic
-reader has materially different trig density from FM6. Its failed quality result
-does not authorize another drum: each candidate still requires an actual-voice
-matrix, representative hit corpus, and at least a 10% gain while preserving the
-existing audio and state-continuity gates.
+The rows are Pulp measurements of the named consumers or local overlays in the
+named environments, not universal claims about a primitive. An external-
+candidate row identifies unadopted candidate provenance; it does not make the
+measurement external. FM8 was evaluated separately because its per-sample
+harmonic reader has materially different trig density from FM6. Its failed
+quality result does not authorize another drum: each candidate still requires
+an actual-voice matrix, representative hit corpus, and at least a 10% gain while
+preserving the existing audio and state-continuity gates.
 
 The exact two-operator FM and double-FM6 whole-consumer executables were not
 retained on `main` or an immutable public research snapshot, so those two
@@ -208,7 +233,7 @@ preserve a current actual-consumer experiment under the audio-harness contract.
 | Degree-13 double FM6 | Median whole-voice gain only 6.8–7.1%, below the 10% gate | A materially new vectorized double design is proposed |
 | Degree-13 double FM8 | Strong speed win, but recursive hit peak changed −38.63% in the broadened corpus | A materially different implementation or explicitly different timbral product contract declares a new quality gate before measurement |
 | 2017 Chebyshev approximation | No current Pulp role after the selected degree-9 path won on both speed and quality objectives | A new objective or target demonstrates a whole-consumer advantage over the selected path |
-| 2026 root-factored degree-11 Horner/Estrin | Promising external primitive result, but not measured under Pulp flags or consumers and its published peak error exceeds the precise profile budget | A local-overlay screen clears the existing error gate, then Horner wins an independent-lane consumer or Estrin wins a measured dependent FM/PM or drum consumer by at least 10% |
+| 2026 root-factored degree-11 Horner/Estrin | Pulp reproduced the published Horner peak-error scale, but Horner and Estrin both failed the existing precise budget under normal Release flags | Materially changed coefficients/evaluation first clear the same error gate; only then may a named consumer seek the 10% whole-consumer gate |
 | RLIBM-ALL | Correct-rounding general-purpose scope exceeds realtime bounded-phase need | Correct rounding becomes a stated requirement, or an applicable double-pair design enters an actual-consumer screen |
 | Integer SIMD or assembly | Not required to establish the portable/Apple SIMD win | A portable integer prototype first clears conversion and accuracy gates, then target assembly demonstrates enough additional consumer value to justify its maintenance cost |
 | Compiler-wide fast-math | Rejected; changes unrelated floating-point contracts | Never as part of this facility; benchmark only as separately labeled research |
