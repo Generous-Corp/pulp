@@ -227,9 +227,14 @@ ctest --test-dir build -C Release -R '^agent-capability-' --output-on-failure
 The installed-SDK test must install to an isolated prefix, verify maintenance
 artifacts are absent, read the installed schema and manifest, and independently
 compile/link/run every capability and every typed binding against only its
-declared minimal target. It must reject wrong-target declarations and checkout-
-path leakage, and use configuration-aware build/install and executable paths.
-Because that proof takes roughly 12 minutes on a warm Apple runner, its CTest
+declared minimal target. The positive consumers may share one CMake configure
+and bounded parallel build, but each proof must retain its own source, executable
+target, declared-minimal-target link, CMake File API isolation inspection, and
+process execution. Coverage validation must reject missing, duplicate, or wrong-
+target proofs before configuration. The test must reject wrong-target
+declarations and checkout-path leakage, and use configuration-aware build/install
+and executable paths. Because that proof can take roughly 18 minutes when every
+consumer is configured and built serially on an Apple runner, its CTest
 registration carries `slow;agent-capability-installed-sdk`. Ordinary PR and
 merge-group corpora exclude it, but `classify_changes.py` restores the exact
 test on the parallel macOS and Linux matrix legs when the diff touches capability manifests,
