@@ -295,37 +295,64 @@ def collect(xml_dir: Path) -> tuple[dict[Debt, tuple[str, int, str]], dict[str, 
     return undocumented, public_types
 
 
-def load_baseline(path: Path) -> tuple[set[Debt], list[tuple[str, int, str]]]:
+def load_baseline(
+    path: Path,
+    *,
+    diagnostic_path: str | None = None,
+) -> tuple[set[Debt], list[tuple[str, int, str]]]:
+    display_path = diagnostic_path if diagnostic_path is not None else str(path)
     findings: list[tuple[str, int, str]] = []
     try:
         payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        return set(), [(str(path), 0, f"cannot read API contract baseline: {error}")]
+    except OSError as error:
+        detail = "" if diagnostic_path is not None else f": {error}"
+        return set(), [(display_path, 0, f"cannot read API contract baseline{detail}")]
+    except json.JSONDecodeError as error:
+        return set(), [
+            (
+                display_path,
+                0,
+                "cannot read API contract baseline: invalid JSON at "
+                f"line {error.lineno}, column {error.colno}",
+            )
+        ]
 
     if not isinstance(payload, dict) or set(payload) != {"version", "entries"}:
-        return set(), [(str(path), 0, "baseline must contain only version and entries")]
+        return set(), [(display_path, 0, "baseline must contain only version and entries")]
     if payload["version"] != BASELINE_VERSION or not isinstance(payload["entries"], list):
-        return set(), [(str(path), 0, f"baseline must use version {BASELINE_VERSION} and an entries array")]
+        return set(), [
+            (
+                display_path,
+                0,
+                f"baseline must use version {BASELINE_VERSION} and an entries array",
+            )
+        ]
 
     debts: list[Debt] = []
     expected_keys = {"kind", "name", "parameters", "file"}
     for index, value in enumerate(payload["entries"]):
         if not isinstance(value, dict) or set(value) != expected_keys:
-            findings.append((str(path), 0, f"baseline entry {index} has an invalid shape"))
+            findings.append((display_path, 0, f"baseline entry {index} has an invalid shape"))
             continue
         if not all(isinstance(value[key], str) for key in expected_keys):
-            findings.append((str(path), 0, f"baseline entry {index} values must be strings"))
+            findings.append((display_path, 0, f"baseline entry {index} values must be strings"))
             continue
         debt = Debt(**value)
         if debt.kind not in ({"type", "callable"} | PUBLIC_DECLARATION_KINDS) or not baseline_eligible(debt):
-            findings.append((str(path), 0, f"baseline entry {index} is outside the legacy sequencer roots"))
+            findings.append(
+                (
+                    display_path,
+                    0,
+                    f"baseline entry {index} is outside the legacy sequencer roots",
+                )
+            )
             continue
         debts.append(debt)
 
     if debts != sorted(debts):
-        findings.append((str(path), 0, "baseline entries are not in canonical sorted order"))
+        findings.append((display_path, 0, "baseline entries are not in canonical sorted order"))
     if len(set(debts)) != len(debts):
-        findings.append((str(path), 0, "baseline contains duplicate entries"))
+        findings.append((display_path, 0, "baseline contains duplicate entries"))
     return set(debts), findings
 
 
@@ -348,7 +375,7 @@ def check_baseline_growth(
     if not trusted_path.is_file():
         return [
             (
-                str(trusted_path),
+                "<trusted-api-baseline>",
                 0,
                 "configured trusted baseline is missing or unreadable",
             )
@@ -362,7 +389,10 @@ def check_baseline_growth(
             )
         ]
     candidate, candidate_findings = load_baseline(candidate_path)
-    trusted, trusted_findings = load_baseline(trusted_path)
+    trusted, trusted_findings = load_baseline(
+        trusted_path,
+        diagnostic_path="<trusted-api-baseline>",
+    )
     findings = candidate_findings + trusted_findings
     if findings:
         return findings
@@ -588,6 +618,34 @@ def publication_self_test() -> list[str]:
             if (symlink_target / "marker.txt").read_text() != "sentinel" or not symlink_stage.is_dir():
                 failures.append("symlink refusal mutated publication state")
 
+    return failures
+
+
+def diagnostic_privacy_self_test() -> list[str]:
+    """Prove a private trusted-baseline path never reaches diagnostics."""
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        candidate = root / "candidate.json"
+        candidate.write_text('{"version": 1, "entries": []}\n')
+        private_name = "ghs_private_trusted_baseline"
+        trusted = root / private_name
+        trusted.write_text("not-json\n")
+
+        findings = check_baseline_growth(candidate, trusted, False)
+        rendered = "\n".join(f"{file}:{line}: {message}" for file, line, message in findings)
+        if private_name in rendered or str(trusted) in rendered:
+            failures.append("trusted baseline path leaked through malformed-baseline diagnostics")
+        if {file for file, _, _ in findings} != {"<trusted-api-baseline>"}:
+            failures.append("malformed trusted baseline did not use the fixed diagnostic label")
+
+        missing = root / (private_name + "-missing")
+        findings = check_baseline_growth(candidate, missing, False)
+        rendered = "\n".join(f"{file}:{line}: {message}" for file, line, message in findings)
+        if private_name in rendered or str(missing) in rendered:
+            failures.append("trusted baseline path leaked through missing-baseline diagnostics")
+        if {file for file, _, _ in findings} != {"<trusted-api-baseline>"}:
+            failures.append("missing trusted baseline did not use the fixed diagnostic label")
     return failures
 
 
@@ -1270,6 +1328,17 @@ def self_test() -> int:
         print(f"  [FAIL] publication transaction controls: {'; '.join(publication_failures)}")
     else:
         print("  [ok] publication transaction controls")
+
+    diagnostic_privacy_failures = diagnostic_privacy_self_test()
+    cases += 1
+    if diagnostic_privacy_failures:
+        failures += 1
+        print(
+            "  [FAIL] diagnostic privacy controls: "
+            + "; ".join(diagnostic_privacy_failures)
+        )
+    else:
+        print("  [ok] diagnostic privacy controls")
 
     if failures:
         print(f"sequencer API docs checker self-test FAILED ({failures} case(s))")
