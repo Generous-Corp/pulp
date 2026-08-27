@@ -124,6 +124,21 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         self.assertEqual(decision["verdict"], "reuse")
         self.assertEqual(decision["merge_group_sha"], self.group)
 
+    def test_shallow_merge_checkout_preserves_object_parent_identity(self) -> None:
+        # actions/checkout fetch-depth=1 records the checked-out synthetic merge
+        # in .git/shallow. Revision walkers hide its parents, but exact receipt
+        # identity must use the parents stored in the commit object itself.
+        (self.repo / ".git/shallow").write_text(
+            f"{self.validated}\n", encoding="ascii"
+        )
+        issued = receipt.issue(self.issue_args())
+        self.assertEqual(
+            issued["validated_checkout"]["parents"], [self.base, self.head]
+        )
+        self.assertEqual(
+            receipt.verify_receipt(issued, self.verify_args())["verdict"], "reuse"
+        )
+
     def test_changed_base_or_head_fails_closed(self) -> None:
         issued = receipt.issue(self.issue_args())
         changed = git(

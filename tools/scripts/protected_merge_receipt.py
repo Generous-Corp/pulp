@@ -64,8 +64,22 @@ def _git(repo: Path, *args: str) -> str:
 
 def commit_identity(repo: Path, sha: str) -> dict[str, Any]:
     resolved = _git(repo, "rev-parse", f"{sha}^{{commit}}")
-    tree = _git(repo, "show", "-s", "--format=%T", resolved)
-    parents = _git(repo, "show", "-s", "--format=%P", resolved).split()
+    # Read the commit object instead of revision-walking metadata. Actions uses
+    # a depth-1 checkout for pull_request merge refs, which marks the synthetic
+    # merge itself as a shallow boundary. `git show --format=%P` deliberately
+    # hides parents at that boundary even though the immutable commit object
+    # still records them, making an exact valid merge appear parentless.
+    tree = ""
+    parents: list[str] = []
+    for line in _git(repo, "cat-file", "-p", resolved).splitlines():
+        if not line:
+            break
+        if line.startswith("tree "):
+            tree = line.removeprefix("tree ")
+        elif line.startswith("parent "):
+            parents.append(line.removeprefix("parent "))
+    if not tree:
+        raise ReceiptError("validated commit tree is unavailable")
     return {"sha": resolved, "tree": tree, "parents": parents}
 
 
