@@ -125,6 +125,8 @@ benchmark schema, three independent summaries, quality result, and resulting
 `adopt`, `covered`, `deferred_no_win`, `deferred_more_evidence`,
 `deferred_quality_no_go`, or `not_applicable` verdict. Append a new dated
 finding; do not rewrite the historical row to make an old decision look current.
+Keep primitive-only results labeled separately from whole-consumer evidence so
+a faster approximation is not mistaken for a demonstrated product speedup.
 
 Nathan Blair's 2026
 [root-factored sine candidate](https://x.com/nthnblair/status/2092672129338630389)
