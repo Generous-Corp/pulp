@@ -64,6 +64,15 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         executable = self.build / "pulp-test"
         executable.write_bytes(b"exact tested artifact\n")
         executable.chmod(0o755)
+        compiler = self.build / "fake-cxx"
+        compiler.write_text("#!/bin/sh\necho fake-cxx 1.0\n", encoding="utf-8")
+        compiler.chmod(0o755)
+        (self.build / "CMakeCache.txt").write_text(
+            "CMAKE_BUILD_TYPE:STRING=Release\n"
+            f"CMAKE_CXX_COMPILER:FILEPATH={compiler}\n"
+            "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+            encoding="utf-8",
+        )
         self.ctest_json = self.build / "ctest.json"
         self.ctest_json.write_text(
             json.dumps({"tests": [{"name": "unit", "command": [str(executable)]}]}),

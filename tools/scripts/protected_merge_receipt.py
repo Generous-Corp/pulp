@@ -142,7 +142,43 @@ def artifact_identity(build_dir: Path, ctest_json: Path | None = None) -> dict[s
     return identity
 
 
-def toolchain_identity(target: str) -> dict[str, Any]:
+def _version(command: list[str]) -> str:
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode:
+        raise ReceiptError(f"toolchain probe failed: {' '.join(command)}")
+    return (result.stdout or result.stderr).strip()
+
+
+def _cmake_cache_contract(build_dir: Path) -> dict[str, str]:
+    cache_path = build_dir / "CMakeCache.txt"
+    try:
+        lines = cache_path.read_text(encoding="utf-8", errors="strict").splitlines()
+    except OSError as error:
+        raise ReceiptError("CMake toolchain cache is unavailable") from error
+    wanted = {
+        "CMAKE_BUILD_TYPE", "CMAKE_CXX_COMPILER", "CMAKE_CXX_COMPILER_ID",
+        "CMAKE_CXX_COMPILER_VERSION", "CMAKE_GENERATOR", "CMAKE_OSX_ARCHITECTURES",
+        "CMAKE_SYSTEM_NAME", "CMAKE_SYSTEM_PROCESSOR",
+    }
+    values: dict[str, str] = {}
+    for line in lines:
+        if not line or line.startswith(("#", "//")) or "=" not in line or ":" not in line:
+            continue
+        key_and_type, value = line.split("=", 1)
+        key = key_and_type.split(":", 1)[0]
+        if key in wanted:
+            values[key] = value
+    compiler_text = values.get("CMAKE_CXX_COMPILER")
+    if not compiler_text:
+        raise ReceiptError("CMake C++ compiler identity is unavailable")
+    compiler = Path(compiler_text).resolve(strict=True)
+    values["CMAKE_CXX_COMPILER_REALPATH"] = str(compiler)
+    values["CMAKE_CXX_COMPILER_SHA256"] = _sha256_file(compiler)
+    values["CMAKE_CXX_COMPILER_VERSION_OUTPUT"] = _version([str(compiler), "--version"])
+    return values
+
+
+def toolchain_identity(target: str, build_dir: Path) -> dict[str, Any]:
     values = {
         "target": target,
         "runner_os": os.environ.get("RUNNER_OS", platform.system()),
@@ -150,6 +186,9 @@ def toolchain_identity(target: str) -> dict[str, Any]:
         "runner_image": os.environ.get("ImageOS", "self-hosted"),
         "runner_image_version": os.environ.get("ImageVersion", "self-hosted"),
         "python": platform.python_version(),
+        "cmake_version": _version(["cmake", "--version"]),
+        "ctest_version": _version(["ctest", "--version"]),
+        "cmake_cache": _cmake_cache_contract(build_dir),
     }
     return {"values": values, "digest": digest(values)}
 
@@ -177,7 +216,7 @@ def issue(args: argparse.Namespace) -> dict[str, Any]:
         "head_sha": expected_parents[1],
         "validated_checkout": checkout,
         "policy": policy,
-        "toolchain": toolchain_identity(args.target),
+        "toolchain": toolchain_identity(args.target, args.build_dir.resolve()),
         "artifact": artifact,
         "validation": {"conclusion": "success", "ctest_exit": 0},
     }
