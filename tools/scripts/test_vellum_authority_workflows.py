@@ -151,9 +151,15 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             value["jobs"]["trusted-gate"],
             "Validate proposed data and publish head status",
         )["run"]
-        self.assertIn('merge_base=$(git rev-parse "$proposed_head^1")', validation)
-        self.assertIn('merge_source=$(git rev-parse "$proposed_head^2")', validation)
-        coherence = validation.index('[ "$merge_base" != "$PR_BASE" ]')
+        self.assertIn(
+            '"$trusted_root/tools/scripts/vellum_trusted_merge.py"', validation
+        )
+        self.assertIn('--base "$PR_BASE"', validation)
+        self.assertIn('--head "$PR_HEAD"', validation)
+        self.assertIn('fetched_head=$(git rev-parse refs/vellum/pr-head)', validation)
+        self.assertIn('[ "$fetched_head" != "$PR_HEAD" ]', validation)
+        self.assertNotIn('refs/pull/$PR_NUMBER/merge', validation)
+        coherence = validation.index('[ "$fetched_head" != "$PR_HEAD" ]')
         pending = validation.index("post_status pending")
         validators = validation.index("run_validator python3")
         self.assertLess(coherence, pending)

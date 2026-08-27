@@ -83,6 +83,7 @@ jobs:
           python3 tools/scripts/test_vellum_expansion_watch_check.py
           python3 tools/scripts/test_github_app_jwt.py
           python3 tools/scripts/test_vellum_authority_workflows.py
+          python3 tools/scripts/test_vellum_trusted_merge.py
 
       - name: Verify extraction and tooling inventories
         run: |
