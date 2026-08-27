@@ -35,6 +35,8 @@
         "docs/status/agent-capability-handoff.schema.json",
         "docs/status/agent-capability-surface.json",
         "docs/status/agent-capability-surface.schema.json",
+        "docs/status/authority-navigation.json",
+        "docs/status/authority-navigation.schema.json",
         "test/cmake/quality_tests.cmake",
         "test/test_agent_capability_compile.cpp",
         "tools/agent-capabilities/**",
@@ -54,6 +56,7 @@
         "tools/scripts/agent_capability_registry_types.py",
         "tools/scripts/agent_capability_surface.py",
         "tools/scripts/agent_capability_transaction.py",
+        "tools/scripts/authority_navigation.py",
         "tools/scripts/test_agent_capability_installed_sdk.py",
         "tools/scripts/test_agent_capability_manifest.py"
       ]
@@ -181,6 +184,9 @@
         "tools/scripts/check_cli_mcp_parity.py",
         "tools/scripts/test_check_cli_mcp_parity.py",
         "tools/scripts/cli_mcp_parity_baseline.json",
+        "docs/status/authority-navigation.json",
+        "docs/status/authority-navigation.schema.json",
+        "tools/scripts/authority_navigation.py",
         ".claude/commands/**"
       ]
     },

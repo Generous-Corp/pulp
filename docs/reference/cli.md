@@ -2271,6 +2271,53 @@ an error that never mentions disk. The floor is `min_free_disk_gib` in
 `tools/scripts/coverage_config.json`; override it for one run with
 `PULP_DIFF_COVER_MIN_FREE_GIB=<gib>`, or set `0` to disable the check.
 
+### authority
+
+**Status**: experimental
+
+Find the native source of truth for a bounded capability family without
+creating another capability catalog:
+
+```bash
+pulp authority list
+pulp authority list --json
+pulp authority query dsp
+pulp authority query timeline --json
+```
+
+`list` reports the finite routing inventory. `query` accepts one exact
+canonical ID or globally unique alias and reports the native owner, the route
+available in the current context, coverage and absence semantics, and explicit
+`does_not_prove` limits. JSON output also binds the answer to the resolved
+registry path and root, resolution source, registry context, revision,
+SHA-256, and selected SDK version when applicable. The command never
+executes `query_or_validator`; those strings are descriptive directions to the
+native authority. It does not copy semantic capability rows, start a live
+instance, choose an instance, issue a grant, or infer support from absence.
+
+Availability is deliberately strict:
+
+- In a Pulp source checkout, the command reads
+  `docs/status/authority-navigation.json` from that checkout and reports source
+  routes.
+- In a downstream project, it resolves the project's exact selected SDK from
+  `pulp.toml` without downloading or materializing anything, then reads that
+  SDK's `share/pulp/authority-navigation.json`. If the exact SDK is absent, the
+  command fails without falling back to another installed version.
+- Outside a downstream project, an SDK-installed CLI may read the registry
+  adjacent to its own exact SDK. Rows whose
+  native artifact is source-only report `unavailable_in_installed_context`;
+  the command does not fall back to another checkout or SDK.
+- The standalone CLI-only release archive does not carry the SDK registry.
+  `pulp authority` therefore reports that the registry is unavailable instead
+  of returning unbound or potentially stale routes. Install or select the exact
+  SDK when authority navigation is required.
+
+The live-control row routes only to `pulp control status --instance <exact-id>`.
+The caller must already hold the exact broker-issued instance ID. The
+navigator never invokes `pulp control instances`: that management command may
+start the broker-owned ordinary Standalone host when inventory is empty.
+
 ### dsp
 
 **Status**: experimental

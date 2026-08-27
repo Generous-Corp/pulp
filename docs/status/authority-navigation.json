@@ -1,0 +1,177 @@
+{
+  "$schema": "authority-navigation.schema.json",
+  "schema": "pulp.authority-navigation.v1",
+  "registry_revision": 1,
+  "authorities": [
+    {
+      "id": "agent-capabilities",
+      "aliases": ["agent-api", "design-time", "generator-capabilities"],
+      "plane": "design_time_static",
+      "native_owner": "tools/scripts/agent_capability_manifest.py",
+      "source_location": "docs/status/agent-capabilities.json",
+      "installed_location": "share/pulp/agent-capabilities.json",
+      "query_or_validator": {
+        "source": "python3 tools/scripts/agent_capability_manifest.py --check",
+        "installed": "read share/pulp/agent-capabilities.json and validate its relative schema and SDK capability handoff"
+      },
+      "coverage_semantics": "Curated partial inventory of generator-facing public audio, MIDI, music, sequence, signal, and timebase contracts.",
+      "absence_semantics": "unknown",
+      "does_not_prove": [
+        "An absent key is unsupported.",
+        "A declared design-time capability is built, activated, granted, or live in any running instance.",
+        "The installed manifest has official-release provenance unless its SDK capability handoff is also validated."
+      ]
+    },
+    {
+      "id": "dsp-capabilities",
+      "aliases": ["bake-dsp", "dsp", "dsp-catalog-headers"],
+      "plane": "dsp_static",
+      "native_owner": "tools/scripts/dsp_capability_registry.py",
+      "source_location": "docs/status/dsp-capabilities.json",
+      "installed_location": "share/pulp/dsp-capabilities.json",
+      "query_or_validator": {
+        "source": "pulp dsp capabilities --json",
+        "installed": "read share/pulp/dsp-capabilities.json from the selected SDK"
+      },
+      "coverage_semantics": "Static extraction of type IDs, factories, and baked parameter declarations from the covered Forge bake catalog headers.",
+      "absence_semantics": "not_present_in_covered_forge_bake_catalog_headers",
+      "does_not_prove": [
+        "Pulp lacks an absent DSP primitive.",
+        "Construction-time or sample-rate-dependent values such as intrinsic latency.",
+        "A DSP-survey disposition, implementation claim, or release state."
+      ]
+    },
+    {
+      "id": "dsp-survey-admission",
+      "aliases": ["dsp-admission", "dsp-claims", "dsp-survey"],
+      "plane": "release_evidence",
+      "native_owner": "danielraffel/pulp-planning:dsp-survey-claims/WORKER-PROMPT.md",
+      "source_location": "planning",
+      "installed_location": null,
+      "query_or_validator": {
+        "source": "read dsp-survey-claims/WORKER-PROMPT.md from current danielraffel/pulp-planning main",
+        "installed": null
+      },
+      "coverage_semantics": "Admission, claim, evidence, disposition, release, and cleanup protocol for the separately owned DSP survey workstream.",
+      "absence_semantics": "unknown",
+      "does_not_prove": [
+        "The Pulp planning submodule pin contains the current DSP survey authority.",
+        "A claimed or surveyed capability is implemented, merged, released, or present in an installed SDK.",
+        "The DSP capability registry replaces admission or disposition evidence."
+      ]
+    },
+    {
+      "id": "forge-catalog",
+      "aliases": ["dsp-parameters", "forge-numeric", "node-parameters"],
+      "plane": "dsp_static",
+      "native_owner": "pulp::host::forge_catalog_export_nodes",
+      "source_location": "docs/status/forge-catalog.json",
+      "installed_location": "share/pulp/forge-catalog.json",
+      "query_or_validator": {
+        "source": "pulp forge catalog export --json",
+        "installed": "read share/pulp/forge-catalog.json from the selected SDK"
+      },
+      "coverage_semantics": "Joined semantic node catalog, realization axes, choices, ranges, and defaults emitted from constructed registered Forge nodes.",
+      "absence_semantics": "not_present_in_joined_forge_catalog",
+      "does_not_prove": [
+        "Pulp lacks an absent lower-level primitive.",
+        "A node is selected into a product or supported by a particular Forge release.",
+        "Live instance availability or runtime grants."
+      ]
+    },
+    {
+      "id": "live-control",
+      "aliases": ["control", "live-instance", "unified-control"],
+      "plane": "live_control",
+      "native_owner": "pulp::inspect::ControlBroker",
+      "source_location": "inspect/include/pulp/inspect/control_broker.hpp",
+      "installed_location": null,
+      "query_or_validator": {
+        "source": "pulp control status --instance <caller-supplied-exact-instance-id> --json",
+        "installed": "pulp control status --instance <caller-supplied-exact-instance-id> --json"
+      },
+      "coverage_semantics": "Discovery is broker-local; authoritative capability and lifecycle status is scoped to one explicitly selected exact live instance at query time.",
+      "absence_semantics": "requires_exact_live_instance",
+      "does_not_prove": [
+        "Static source or SDK presence means any instance is live.",
+        "An instance was discovered, launched, or selected; the caller must already hold its exact ID.",
+        "The newest or only instance may be selected implicitly."
+      ]
+    },
+    {
+      "id": "offline-cli",
+      "aliases": ["cli", "commands", "headless-cli"],
+      "plane": "offline_command",
+      "native_owner": "tools/cli/pulp_cli.cpp and experimental/pulp-rs/src/main.rs",
+      "source_location": "docs/status/cli-commands.yaml",
+      "installed_location": null,
+      "query_or_validator": {
+        "source": "python3 tools/scripts/cli_sync_check.py",
+        "installed": null
+      },
+      "coverage_semantics": "Top-level C++ and Rust CLI dispatch is reconciled bidirectionally with the authored command-status manifest.",
+      "absence_semantics": "not_registered_as_a_top_level_cli_command",
+      "does_not_prove": [
+        "A CLI command has an MCP equivalent.",
+        "A registered command is usable in the current build or installed configuration.",
+        "Offline command reachability implies a live operation or grant."
+      ]
+    },
+    {
+      "id": "offline-mcp",
+      "aliases": ["mcp", "mcp-tools", "tools-list"],
+      "plane": "offline_command",
+      "native_owner": "pulp_mcp::server::tools_list_json",
+      "source_location": "tools/mcp/pulp_mcp.cpp",
+      "installed_location": "bin/pulp-mcp",
+      "query_or_validator": {
+        "source": "pulp-mcp JSON-RPC tools/list",
+        "installed": "pulp-mcp JSON-RPC tools/list"
+      },
+      "coverage_semantics": "Exact tool descriptors advertised by the queried MCP server, including generated Timeline tools present in that build.",
+      "absence_semantics": "not_advertised_by_the_queried_mcp_server",
+      "does_not_prove": [
+        "An advertised tool has a same-named CLI command.",
+        "A tool invocation will succeed for a particular input, build option, environment, or live instance.",
+        "Offline MCP registration implies live-control authority."
+      ]
+    },
+    {
+      "id": "sequencer-exposure",
+      "aliases": ["sequencer-release", "sequencer-surfaces", "timeline-exposure"],
+      "plane": "release_evidence",
+      "native_owner": "tools/scripts/sequencer_exposure_check.py",
+      "source_location": "docs/status/sequencer-exposure.json",
+      "installed_location": null,
+      "query_or_validator": {
+        "source": "python3 tools/scripts/sequencer_exposure_check.py --base <exact-protected-base>",
+        "installed": null
+      },
+      "coverage_semantics": "In-progress ledger containing only reverified sequencer-related delivery rows, explicit surface dispositions, tombstones, and visible audit gaps.",
+      "absence_semantics": "unknown_outside_reverified_rows",
+      "does_not_prove": [
+        "Historical census completeness while audit.status is in_progress.",
+        "A released row satisfies separately held product acceptance.",
+        "Static SDK or offline exposure implies live-product control."
+      ]
+    },
+    {
+      "id": "timeline-schema",
+      "aliases": ["sequence-schema", "timeline", "timeline-types"],
+      "plane": "timeline_static",
+      "native_owner": "pulp::timeline::register_builtin_timeline_schemas",
+      "source_location": "core/timeline/schema/timeline_schema.json",
+      "installed_location": null,
+      "query_or_validator": {
+        "source": "pulp seq schema",
+        "installed": null
+      },
+      "coverage_semantics": "Complete emitted schema manifest for the built-in Timeline registry in the queried binary.",
+      "absence_semantics": "not_registered_in_builtin_timeline_schema_registry",
+      "does_not_prove": [
+        "A schema type has an offline CLI verb, MCP tool, live-control operation, or released sequencer exposure.",
+        "A source-only committed schema artifact is installed with the SDK."
+      ]
+    }
+  ]
+}

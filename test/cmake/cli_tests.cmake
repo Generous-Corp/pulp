@@ -328,6 +328,7 @@ catch_discover_tests(pulp-test-cli-tartci-lease)
 add_executable(pulp-test-cli-docs-command
     test_cli_docs_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/authority_navigation.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
@@ -342,6 +343,8 @@ target_include_directories(pulp-test-cli-docs-command PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli
     ${CMAKE_BINARY_DIR}/tools/cli)
+target_compile_definitions(pulp-test-cli-docs-command PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(pulp-test-cli-docs-command PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)

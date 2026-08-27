@@ -77,6 +77,8 @@ add_executable(pulp-cli
     cmd_design_subcommands.cpp
     cmd_doctor.cpp
     cmd_docs.cpp
+    cmd_authority.cpp
+    authority_navigation.cpp
     cmd_misc.cpp
     cmd_run.cpp
     cmd_run_parse.cpp

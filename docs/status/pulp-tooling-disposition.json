@@ -540,6 +540,38 @@
         "subcommands": []
       },
       {
+        "name": "authority",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "list",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "query",
+            "arguments": [
+              {
+                "name": "id-or-alias",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "bake",
         "disposition": "excluded",
         "arguments": [

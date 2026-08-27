@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -27,6 +28,7 @@ from agent_capability_installed_sdk_consumers import (
 
 
 SCHEMA = "pulp.agent-capabilities.v1"
+AUTHORITY_SCHEMA_SHA256 = "ff94b9c5ef5560f65d1cf83b96d0b6104edf1bed203e219689a6c398a48f8572"
 SUPPORTED_REQUIRED_FEATURES = {
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -211,6 +213,43 @@ def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dic
             if not header.is_file():
                 raise RuntimeError(f"advertised installed header missing: {header}")
     validate_target_ownership(document, owners)
+    return document
+
+
+def load_installed_authority_registry(prefix: pathlib.Path) -> dict:
+    shared = prefix / "share/pulp"
+    path = shared / "authority-navigation.json"
+    if not path.is_file():
+        raise RuntimeError(f"installed authority registry missing: {path}")
+    document = json.loads(path.read_text())
+    schema_name = document.get("$schema")
+    if schema_name != "authority-navigation.schema.json" or not (
+        shared / "authority-navigation.schema.json"
+    ).is_file():
+        raise RuntimeError("installed authority registry has no installed relative schema")
+    schema_path = shared / "authority-navigation.schema.json"
+    schema_bytes = schema_path.read_bytes().replace(b"\r\n", b"\n")
+    if b"\r" in schema_bytes or hashlib.sha256(schema_bytes).hexdigest() != AUTHORITY_SCHEMA_SHA256:
+        raise RuntimeError("installed authority registry schema is not the canonical v1 schema")
+    schema = json.loads(schema_bytes)
+    authority_tool_path = pathlib.Path(__file__).with_name("authority_navigation.py")
+    spec = importlib.util.spec_from_file_location(
+        "pulp_installed_authority_navigation", authority_tool_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load installed authority semantic validator")
+    authority_tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(authority_tool)
+    problems = authority_tool.validate_document(
+        document, schema, prefix, require_source_locations=False
+    )
+    if problems:
+        raise RuntimeError(
+            "installed authority registry does not satisfy its installed contract: "
+            + "; ".join(problems)
+        )
+    if document.get("schema") != "pulp.authority-navigation.v1":
+        raise RuntimeError("installed authority registry has the wrong semantic schema")
     return document
 
 
@@ -721,9 +760,53 @@ def main() -> int:
         if installed.returncode != 0:
             raise RuntimeError(f"SDK install failed:\n{installed.stdout}\n{installed.stderr}")
         document = load_installed_manifest(prefix, owners)
+        authority_document = load_installed_authority_registry(prefix)
+        if not authority_document.get("authorities"):
+            raise RuntimeError("installed authority registry contains no routes")
         installed_keys = {row["key"] for row in document["capabilities"]}
         if set(probes) != installed_keys:
             raise RuntimeError("consumer link probes do not exactly cover installed capabilities")
+
+        authority_schema = prefix / "share/pulp/authority-navigation.schema.json"
+        held_authority_schema = authority_schema.with_suffix(".held")
+        authority_schema.rename(held_authority_schema)
+        try:
+            expect_failure(
+                "missing installed authority schema",
+                lambda: load_installed_authority_registry(prefix),
+            )
+        finally:
+            held_authority_schema.rename(authority_schema)
+
+        authority_registry = prefix / "share/pulp/authority-navigation.json"
+        original_authority_registry = authority_registry.read_text()
+        malformed_authority = copy.deepcopy(authority_document)
+        malformed_authority["registry_revision"] = "one"
+        authority_registry.write_text(json.dumps(malformed_authority, indent=2) + "\n")
+        try:
+            expect_failure(
+                "installed authority registry violates its schema",
+                lambda: load_installed_authority_registry(prefix),
+            )
+        finally:
+            authority_registry.write_text(original_authority_registry)
+
+        semantic_mutation = copy.deepcopy(authority_document)
+        dsp_admission = next(
+            row
+            for row in semantic_mutation["authorities"]
+            if row["id"] == "dsp-survey-admission"
+        )
+        dsp_admission["installed_location"] = "share/pulp/dsp-survey.json"
+        dsp_admission["query_or_validator"]["installed"] = "pulp dsp-survey validate"
+        authority_registry.write_text(json.dumps(semantic_mutation, indent=2) + "\n")
+        try:
+            expect_failure(
+                "installed authority registry violates its semantic contract",
+                lambda: load_installed_authority_registry(prefix),
+            )
+        finally:
+            authority_registry.write_text(original_authority_registry)
 
         schema = prefix / "share/pulp/agent-capabilities.schema.json"
         held_schema = schema.with_suffix(".held")
@@ -1050,7 +1133,7 @@ def main() -> int:
 
     print(
         "agent-capabilities-installed-sdk: "
-        f"16 negative/install controls and {len(positive_proofs)} independent "
+        f"18 negative/install controls and {len(positive_proofs)} independent "
         "capability/binding compile-link-run proofs passed in one positive "
         f"configure/build batch with {generator or 'default generator'} "
         f"in {configuration or 'the default single configuration'}"

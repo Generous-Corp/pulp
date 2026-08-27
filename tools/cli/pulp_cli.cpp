@@ -31,51 +31,54 @@ struct Command {
 };
 
 static const Command commands[] = {
-    {"build",    "Configure and build the project",       cmd_build},
-    {"run",      "Launch a standalone Pulp application",  cmd_run},
-    {"test",     "Run the test suite",                    cmd_test},
-    {"status",   "Show project status and info",          cmd_status},
-    {"create",   "Scaffold a new plugin project",         cmd_create},
-    {"validate", "Run plugin format validators",          cmd_validate},
-    {"doctor",   "Diagnose environment issues",           cmd_doctor},
-    {"ship",     "Sign, package, and distribute",         cmd_ship},
-    {"bake",     "Freeze a graph into a signed .pulpbake", cmd_bake},
-    {"design",   "Launch the AI design tool",             cmd_design},
-    {"docs",     "Browse local documentation",            cmd_docs},
+    {"build", "Configure and build the project", cmd_build},
+    {"run", "Launch a standalone Pulp application", cmd_run},
+    {"test", "Run the test suite", cmd_test},
+    {"status", "Show project status and info", cmd_status},
+    {"create", "Scaffold a new plugin project", cmd_create},
+    {"validate", "Run plugin format validators", cmd_validate},
+    {"doctor", "Diagnose environment issues", cmd_doctor},
+    {"ship", "Sign, package, and distribute", cmd_ship},
+    {"bake", "Freeze a graph into a signed .pulpbake", cmd_bake},
+    {"design", "Launch the AI design tool", cmd_design},
+    {"docs", "Browse local documentation", cmd_docs},
+    {"authority", "Find the native source of truth", cmd_authority},
     {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
     {"forge", "Export Forge catalog integration data", cmd_forge},
-    {"clean",    "Remove build directory",                cmd_clean},
-    {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
-    {"cache",    "Manage SDK and asset cache",            cmd_cache},
-    {"audio",    "Repo-level audio model and bundle tooling", cmd_audio},
+    {"clean", "Remove build directory", cmd_clean},
+    {"fmt", "Run clang-format on the source tree", cmd_fmt},
+    {"cache", "Manage SDK and asset cache", cmd_cache},
+    {"audio", "Repo-level audio model and bundle tooling", cmd_audio},
 #if PULP_ENABLE_PROJECT_PACKAGE
-    {"seq",      "Inspect and edit timeline projects",    cmd_seq},
-    {"render",   "Render a timeline project to WAV",      cmd_render},
+    {"seq", "Inspect and edit timeline projects", cmd_seq},
+    {"render", "Render a timeline project to WAV", cmd_render},
 #endif
-    {"sdk",      "Manage the Pulp SDK installation",      cmd_sdk},
-    {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
-    {"version",  "Show, bump, or check version info",     cmd_version},
-    {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
-    {"loop",     "Leveraged-prototype focus marker + watch loop", cmd_loop},
-    {"inspect",  "Connect to an explicitly hosted inspector fixture", cmd_inspect},
-    {"control",  "Authenticated local capability control", cmd_control},
-    {"scan",     "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
-    {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
-    {"import",   "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
-    {"kit",      "Inspect and apply local Pulp package manifests", pulp::cli::kit::cmd_kit},
-    {"content",  "Validate and install data-only content packs", pulp::cli::content::cmd_content},
-    {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
+    {"sdk", "Manage the Pulp SDK installation", cmd_sdk},
+    {"upgrade", "Update the CLI to the latest version", cmd_upgrade},
+    {"version", "Show, bump, or check version info", cmd_version},
+    {"dev", "Unified dev loop: watch, build, test, run", cmd_dev},
+    {"loop", "Leveraged-prototype focus marker + watch loop", cmd_loop},
+    {"inspect", "Connect to an explicitly hosted inspector fixture", cmd_inspect},
+    {"control", "Authenticated local capability control", cmd_control},
+    {"scan", "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
+    {"host", "Load a plug-in and run a synthetic audio block through it", cmd_host},
+    {"import", "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
+    {"kit", "Inspect and apply local Pulp package manifests", pulp::cli::kit::cmd_kit},
+    {"content", "Validate and install data-only content packs", pulp::cli::content::cmd_content},
+    {"pr", "One-shot push-a-PR: gates + bump + ship", cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
-    {"project",  "Per-project SDK pin: pin, unpin, undo", cmd_project},
+    {"project", "Per-project SDK pin: pin, unpin, undo", cmd_project},
     // Keep the config command in the primary dispatcher so every key
     // accepted by cmd_config.cpp is reachable from the installed CLI.
-    {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
+    {"config", "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
-    {"minos",    "Minimum-OS tooling (measure a binary; sweep all consumers)", cmd_minos},
-    {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
-    {"ci-host",  "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)", cmd_ci_host},
-    {"overflow", "Configure macOS-runner overflow routing (status/enable/disable/threshold)", cmd_overflow},
-    {"tweaks",   "Inspect the pulp-tweaks.json sidecar (diff against a design)", cmd_tweaks},
+    {"minos", "Minimum-OS tooling (measure a binary; sweep all consumers)", cmd_minos},
+    {"macos", "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
+    {"ci-host", "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)",
+     cmd_ci_host},
+    {"overflow", "Configure macOS-runner overflow routing (status/enable/disable/threshold)",
+     cmd_overflow},
+    {"tweaks", "Inspect the pulp-tweaks.json sidecar (diff against a design)", cmd_tweaks},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
@@ -83,13 +86,14 @@ static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
 // Script commands: delegate to a Python script in the project tree
 struct ScriptCommand {
     const char* name;
-    const char* script_path;  // relative to project root
+    const char* script_path; // relative to project root
     const char* summary;
 };
 
 static const ScriptCommand script_commands[] = {
-    {"ci-local", "tools/local-ci/local_ci.py",       "Local-first CI across configured hosts"},
-    {"harness",  "tools/harness/verifier.py",        "Catalog-driven coverage harness (compat.json verifier)"},
+    {"ci-local", "tools/local-ci/local_ci.py", "Local-first CI across configured hosts"},
+    {"harness", "tools/harness/verifier.py",
+     "Catalog-driven coverage harness (compat.json verifier)"},
 };
 
 static constexpr int script_command_count = sizeof(script_commands) / sizeof(script_commands[0]);
@@ -97,15 +101,17 @@ static constexpr int script_command_count = sizeof(script_commands) / sizeof(scr
 // Binary commands: delegate to a built binary
 struct BinaryCommand {
     const char* name;
-    const char* binary_path;  // relative to project build dir
+    const char* binary_path; // relative to project build dir
     const char* summary;
-    const char* extra_arg;    // prepended arg (e.g., "--demo"), or nullptr
+    const char* extra_arg; // prepended arg (e.g., "--demo"), or nullptr
 };
 
 static const BinaryCommand binary_commands[] = {
-    {"design-debug",  "tools/design/pulp-design-debug",            "Headless design debug runner", nullptr},
-    {"import-design", "tools/import-design/pulp-import-design",    "Import designs from Figma/Stitch/v0/Pencil", nullptr},
-    {"export-tokens", "tools/import-design/pulp-import-design",    "Export theme as W3C Design Tokens", "--export-tokens"},
+    {"design-debug", "tools/design/pulp-design-debug", "Headless design debug runner", nullptr},
+    {"import-design", "tools/import-design/pulp-import-design",
+     "Import designs from Figma/Stitch/v0/Pencil", nullptr},
+    {"export-tokens", "tools/import-design/pulp-import-design", "Export theme as W3C Design Tokens",
+     "--export-tokens"},
 };
 
 static constexpr int binary_command_count = sizeof(binary_commands) / sizeof(binary_commands[0]);
@@ -126,9 +132,12 @@ static int delegate_to_binary(const BinaryCommand& bc, const std::vector<std::st
 static int handle_audit(const std::vector<std::string>& args) {
     bool pkg_flag = false, plat_flag = false, lic_flag = false;
     for (auto& a : args) {
-        if (a == "--packages") pkg_flag = true;
-        if (a == "--platforms") plat_flag = true;
-        if (a == "--licenses") lic_flag = true;
+        if (a == "--packages")
+            pkg_flag = true;
+        if (a == "--platforms")
+            plat_flag = true;
+        if (a == "--licenses")
+            lic_flag = true;
     }
     if (pkg_flag || plat_flag || lic_flag) {
         auto root = find_project_root();
@@ -137,9 +146,12 @@ static int handle_audit(const std::vector<std::string>& args) {
             return 1;
         }
         int rc = 0;
-        if (pkg_flag) rc |= pulp::cli::pkg::audit_packages(root);
-        if (plat_flag) rc |= pulp::cli::pkg::audit_platforms(root);
-        if (lic_flag) rc |= pulp::cli::pkg::audit_licenses(root);
+        if (pkg_flag)
+            rc |= pulp::cli::pkg::audit_packages(root);
+        if (plat_flag)
+            rc |= pulp::cli::pkg::audit_platforms(root);
+        if (lic_flag)
+            rc |= pulp::cli::pkg::audit_licenses(root);
         return rc;
     }
     return delegate_to_python_script("tools/audit.py", args);
@@ -152,27 +164,32 @@ static void print_usage() {
     std::cout << "Usage: pulp <command> [options]\n\n";
     std::cout << "Commands:\n";
     for (int i = 0; i < command_count; ++i) {
-        std::cout << "  " << std::left << std::setw(14) << commands[i].name
-                  << " " << commands[i].summary << "\n";
+        std::cout << "  " << std::left << std::setw(14) << commands[i].name << " "
+                  << commands[i].summary << "\n";
     }
     std::cout << "\n";
     for (int i = 0; i < script_command_count; ++i) {
-        std::cout << "  " << std::left << std::setw(14) << script_commands[i].name
-                  << " " << script_commands[i].summary << "\n";
+        std::cout << "  " << std::left << std::setw(14) << script_commands[i].name << " "
+                  << script_commands[i].summary << "\n";
     }
     for (int i = 0; i < binary_command_count; ++i) {
-        std::cout << "  " << std::left << std::setw(14) << binary_commands[i].name
-                  << " " << binary_commands[i].summary << "\n";
+        std::cout << "  " << std::left << std::setw(14) << binary_commands[i].name << " "
+                  << binary_commands[i].summary << "\n";
     }
     std::cout << "  " << std::left << std::setw(14) << "audit" << " License and provenance audit\n";
     std::cout << "  " << std::left << std::setw(14) << "add" << " Add a component to the project\n";
-    std::cout << "  " << std::left << std::setw(14) << "remove" << " Remove a previously added package\n";
+    std::cout << "  " << std::left << std::setw(14) << "remove"
+              << " Remove a previously added package\n";
     std::cout << "  " << std::left << std::setw(14) << "list" << " Show installed packages\n";
     std::cout << "  " << std::left << std::setw(14) << "search" << " Search the package registry\n";
-    std::cout << "  " << std::left << std::setw(14) << "update" << " Check for and apply package updates\n";
-    std::cout << "  " << std::left << std::setw(14) << "suggest" << " Context-aware package recommendations\n";
-    std::cout << "  " << std::left << std::setw(14) << "target" << " Manage project platform targets\n";
-    std::cout << "  " << std::left << std::setw(14) << "tool" << " Manage third-party developer tools\n";
+    std::cout << "  " << std::left << std::setw(14) << "update"
+              << " Check for and apply package updates\n";
+    std::cout << "  " << std::left << std::setw(14) << "suggest"
+              << " Context-aware package recommendations\n";
+    std::cout << "  " << std::left << std::setw(14) << "target"
+              << " Manage project platform targets\n";
+    std::cout << "  " << std::left << std::setw(14) << "tool"
+              << " Manage third-party developer tools\n";
     std::cout << "  " << std::left << std::setw(14) << "help" << " Show this help\n";
     std::cout << "\nExamples:\n";
     std::cout << "  pulp create MyPlugin              # Create a new effect plugin\n";
@@ -224,16 +241,15 @@ namespace uc = pulp::cli::update_check;
 namespace um = pulp::cli::update_mode;
 
 const char* kBannerBlockedCommands[] = {
-    "config",     // machine-parseable output
-    "version",    // same — used by shell scripts
-    "help",
-    "--help",
-    "-h",
+    "config",  // machine-parseable output
+    "version", // same — used by shell scripts
+    "help",    "--help", "-h",
 };
 
 bool banner_blocked(const std::string& cmd) {
     for (const char* blocked : kBannerBlockedCommands) {
-        if (cmd == blocked) return true;
+        if (cmd == blocked)
+            return true;
     }
     return false;
 }
@@ -247,7 +263,8 @@ um::Mode read_update_mode() {
 
 int read_check_interval_hours() {
     auto v = read_user_config_value("update", "check_interval_hours");
-    if (v.empty()) return 24;
+    if (v.empty())
+        return 24;
     try {
         int n = std::stoi(v);
         return n > 0 ? n : 24;
@@ -257,24 +274,27 @@ int read_check_interval_hours() {
 }
 
 fs::path pulp_home_path_or_empty() {
-    return pulp_home();  // cli_common helper; empty on HOME/USERPROFILE unset
+    return pulp_home(); // cli_common helper; empty on HOME/USERPROFILE unset
 }
 
 fs::path banner_cache_path() {
     auto home = pulp_home_path_or_empty();
-    if (home.empty()) return {};
+    if (home.empty())
+        return {};
     return home / "update-cache.json";
 }
 
 fs::path snooze_path() {
     auto home = pulp_home_path_or_empty();
-    if (home.empty()) return {};
+    if (home.empty())
+        return {};
     return home / "update-snooze";
 }
 
 fs::path pending_upgrade_path() {
     auto home = pulp_home_path_or_empty();
-    if (home.empty()) return {};
+    if (home.empty())
+        return {};
     return home / "pending-upgrade";
 }
 
@@ -299,7 +319,8 @@ fs::path pending_upgrade_path() {
 // before writing. This keeps `banner_shown_for_version` set even if
 // the refresh finishes later than the banner-write.
 void kick_background_refresh(const fs::path& cache_path) {
-    if (cache_path.empty()) return;
+    if (cache_path.empty())
+        return;
     std::thread([cache_path]() {
         uc::GitHubReleasesFetcher fetcher;
         auto r = fetcher.fetch_latest_release(PULP_GITHUB_REPO);
@@ -334,9 +355,9 @@ void kick_background_refresh(const fs::path& cache_path) {
 // (empty args, unwritable PULP_HOME, etc.). The auto-mode banner
 // suppresses its "downloaded / will complete next invocation" notice
 // on false so the user isn't promised a completion that cannot happen.
-bool kick_auto_stage(const fs::path& marker_path,
-                     const std::string& staged_version) {
-    if (marker_path.empty() || staged_version.empty()) return false;
+bool kick_auto_stage(const fs::path& marker_path, const std::string& staged_version) {
+    if (marker_path.empty() || staged_version.empty())
+        return false;
     um::PendingUpgrade p;
     p.version = staged_version;
     p.staged_at_epoch_sec = uc::now_epoch_sec();
@@ -401,19 +422,23 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
         maybe_complete_pending_upgrade();
         pulp_debug("update-banner: maybe_complete_pending_upgrade exit");
 
-        if (banner_blocked(command)) return;
+        if (banner_blocked(command))
+            return;
 
         // Explicit off-switch that bypasses config entirely. Used by
         // CI / air-gapped envs and by the unit-test shell-out lane.
         // Matches design Section G: "zero network calls".
-        if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED")) return;
+        if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED"))
+            return;
 
         pulp_debug("update-banner: read_update_mode");
         auto mode = read_update_mode();
-        if (mode == um::Mode::Off) return;
+        if (mode == um::Mode::Off)
+            return;
 
         auto cache_path = banner_cache_path();
-        if (cache_path.empty()) return;
+        if (cache_path.empty())
+            return;
 
         pulp_debug("update-banner: read_cache_file");
         auto cache_opt = uc::read_cache_file(cache_path);
@@ -425,14 +450,12 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
         const bool banner_already_shown_this_cycle =
             !latest.empty() && cache.banner_shown_for_version == latest;
         const auto snooze = snooze_path();
-        const bool snooze_active =
-            !snooze.empty() && um::is_snooze_active(snooze, now);
+        const bool snooze_active = !snooze.empty() && um::is_snooze_active(snooze, now);
 
         // ── Prompt mode ─────────────────────────────────────────────────────
         if (mode == um::Mode::Prompt) {
             auto decision = um::decide_prompt_banner(
-                mode, installed, latest,
-                banner_already_shown_this_cycle, snooze_active);
+                mode, installed, latest, banner_already_shown_this_cycle, snooze_active);
             if (decision.show_banner) {
                 std::cerr << uc::compose_banner(installed, latest) << "\n";
                 cache.banner_shown_for_version = latest;
@@ -449,9 +472,7 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
         // invocation). Snooze does not apply — manual mode is already
         // the "quiet" mode; adding another silence layer would make
         // the notice invisible.
-        if (mode == um::Mode::Manual &&
-            !latest.empty() &&
-            uc::is_newer(installed, latest) &&
+        if (mode == um::Mode::Manual && !latest.empty() && uc::is_newer(installed, latest) &&
             cache.banner_shown_for_version != latest) {
             std::cerr << um::compose_manual_notice(installed, latest) << "\n";
             cache.banner_shown_for_version = latest;
@@ -465,12 +486,10 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
         // cmd_upgrade is responsible for the actual swap on the next
         // invocation. We never replace the binary mid-command — the
         // design explicitly forbids that (Section G).
-        if (mode == um::Mode::Auto && !latest.empty() &&
-            uc::is_newer(installed, latest)) {
+        if (mode == um::Mode::Auto && !latest.empty() && uc::is_newer(installed, latest)) {
             auto marker = pending_upgrade_path();
-            auto existing = marker.empty()
-                                ? std::optional<um::PendingUpgrade>{}
-                                : um::read_pending_upgrade(marker);
+            auto existing = marker.empty() ? std::optional<um::PendingUpgrade>{}
+                                           : um::read_pending_upgrade(marker);
             if (um::should_stage_auto_download(mode, installed, latest, existing)) {
                 // Only print the "downloaded / will complete next
                 // invocation" banner and record it in the cache if the
@@ -497,7 +516,7 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
     }
 }
 
-}  // namespace
+} // namespace
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
@@ -517,9 +536,16 @@ int main(int argc, char* argv[]) {
     std::string command = argv[1];
     std::vector<std::string> args;
     for (int i = 2; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--no-color") == 0) continue;
+        if (std::strcmp(argv[i], "--no-color") == 0)
+            continue;
         args.push_back(argv[i]);
     }
+
+    // Authority queries are offline, observational, and machine-readable.
+    // Dispatch before every update hook so they cannot emit a notice, mutate
+    // update state, clean a tombstone, or start a background network refresh.
+    if (command == "authority")
+        return cmd_authority(args);
 
     pulp_debug("main: update-banner enter");
     maybe_emit_update_banner_and_refresh(command);
@@ -527,29 +553,41 @@ int main(int argc, char* argv[]) {
 
     // Lookup in command table
     for (int i = 0; i < command_count; ++i) {
-        if (command == commands[i].name) return commands[i].handler(args);
+        if (command == commands[i].name)
+            return commands[i].handler(args);
     }
 
     // Lookup in script commands
     for (int i = 0; i < script_command_count; ++i) {
-        if (command == script_commands[i].name) return delegate_to_script(script_commands[i], args);
+        if (command == script_commands[i].name)
+            return delegate_to_script(script_commands[i], args);
     }
 
     // Lookup in binary commands
     for (int i = 0; i < binary_command_count; ++i) {
-        if (command == binary_commands[i].name) return delegate_to_binary(binary_commands[i], args);
+        if (command == binary_commands[i].name)
+            return delegate_to_binary(binary_commands[i], args);
     }
 
     // Package manager commands
-    if (command == "add")      return pulp::cli::pkg::cmd_add(args);
-    if (command == "remove")   return pulp::cli::pkg::cmd_remove(args);
-    if (command == "list")     return pulp::cli::pkg::cmd_list(args);
-    if (command == "search")   return pulp::cli::pkg::cmd_search(args);
-    if (command == "update")   return pulp::cli::pkg::cmd_update(args);
-    if (command == "suggest")  return pulp::cli::pkg::cmd_suggest(args);
-    if (command == "target")   return pulp::cli::pkg::cmd_target(args);
-    if (command == "audit")    return handle_audit(args);
-    if (command == "tool")     return pulp::cli::tools::cmd_tool(args);
+    if (command == "add")
+        return pulp::cli::pkg::cmd_add(args);
+    if (command == "remove")
+        return pulp::cli::pkg::cmd_remove(args);
+    if (command == "list")
+        return pulp::cli::pkg::cmd_list(args);
+    if (command == "search")
+        return pulp::cli::pkg::cmd_search(args);
+    if (command == "update")
+        return pulp::cli::pkg::cmd_update(args);
+    if (command == "suggest")
+        return pulp::cli::pkg::cmd_suggest(args);
+    if (command == "target")
+        return pulp::cli::pkg::cmd_target(args);
+    if (command == "audit")
+        return handle_audit(args);
+    if (command == "tool")
+        return pulp::cli::tools::cmd_tool(args);
 
     // Legacy aliases
     if (command == "add-component") {
@@ -575,19 +613,25 @@ int main(int argc, char* argv[]) {
     auto levenshtein = [](const std::string& a, const std::string& b) -> int {
         size_t m = a.size(), n = b.size();
         std::vector<int> dp((m + 1) * (n + 1));
-        for (size_t i = 0; i <= m; ++i) dp[i * (n + 1)] = static_cast<int>(i);
-        for (size_t j = 0; j <= n; ++j) dp[j] = static_cast<int>(j);
+        for (size_t i = 0; i <= m; ++i)
+            dp[i * (n + 1)] = static_cast<int>(i);
+        for (size_t j = 0; j <= n; ++j)
+            dp[j] = static_cast<int>(j);
         for (size_t i = 1; i <= m; ++i)
             for (size_t j = 1; j <= n; ++j) {
-                int cost = (a[i-1] == b[j-1]) ? 0 : 1;
-                dp[i*(n+1)+j] = std::min({dp[(i-1)*(n+1)+j]+1, dp[i*(n+1)+j-1]+1,
-                                           dp[(i-1)*(n+1)+j-1]+cost});
+                int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+                dp[i * (n + 1) + j] =
+                    std::min({dp[(i - 1) * (n + 1) + j] + 1, dp[i * (n + 1) + j - 1] + 1,
+                              dp[(i - 1) * (n + 1) + j - 1] + cost});
             }
-        return dp[m*(n+1)+n];
+        return dp[m * (n + 1) + n];
     };
     for (int i = 0; i < command_count; ++i) {
         int d = levenshtein(command, commands[i].name);
-        if (d < best_dist) { best_dist = d; best_name = commands[i].name; }
+        if (d < best_dist) {
+            best_dist = d;
+            best_name = commands[i].name;
+        }
     }
     if (best_dist <= 3 && best_name) {
         std::cerr << "Did you mean: pulp " << best_name << "?\n";

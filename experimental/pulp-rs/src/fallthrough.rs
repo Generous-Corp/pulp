@@ -162,7 +162,14 @@ pub enum Outcome {
 /// Propagates spawner failure (e.g. binary exists but can't be run
 /// due to a permission error).
 pub fn delegate(argv: &[String]) -> Result<Outcome> {
-    delegate_with(argv, &SystemResolver, &SystemSpawner)
+    delegate_with_debug(argv, &SystemResolver, &SystemSpawner, true)
+}
+
+/// Delegate without emitting the Rust wrapper's `PULP_DEBUG` trace. This is
+/// reserved for observational machine-readable commands whose child process
+/// still inherits the caller's environment unchanged.
+pub fn delegate_silent(argv: &[String]) -> Result<Outcome> {
+    delegate_with_debug(argv, &SystemResolver, &SystemSpawner, false)
 }
 
 /// Full-fat entry point — tests inject mock resolver + spawner so the
@@ -181,6 +188,15 @@ pub fn delegate_with<R: BinaryResolver, S: Spawner>(
     resolver: &R,
     spawner: &S,
 ) -> Result<Outcome> {
+    delegate_with_debug(argv, resolver, spawner, true)
+}
+
+fn delegate_with_debug<R: BinaryResolver, S: Spawner>(
+    argv: &[String],
+    resolver: &R,
+    spawner: &S,
+    emit_debug_trace: bool,
+) -> Result<Outcome> {
     if is_fallthrough_disabled() {
         return Ok(Outcome::Disabled);
     }
@@ -191,7 +207,7 @@ pub fn delegate_with<R: BinaryResolver, S: Spawner>(
     let Some(cpp_path) = resolver.resolve(&program_name) else {
         return Ok(Outcome::NotFound);
     };
-    if std::env::var_os(DEBUG_ENV).is_some_and(|v| !v.is_empty()) {
+    if emit_debug_trace && std::env::var_os(DEBUG_ENV).is_some_and(|v| !v.is_empty()) {
         eprintln!(
             "[pulp-rs] fallthrough → {} {}",
             cpp_path.display(),

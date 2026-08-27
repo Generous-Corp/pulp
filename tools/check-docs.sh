@@ -311,6 +311,15 @@ python3 tools/scripts/agent_capability_manifest.py --write"
 fi
 
 # ── Skills catalog sync (docs/reference/skills.md ⇔ every SKILL.md) ────────────
+# The navigator must stay a routing index over existing native authorities.
+if [ -f "$ROOT/tools/scripts/authority_navigation.py" ]; then
+    echo "Checking authority navigation registry and native source routes..."
+    if ! python3 "$ROOT/tools/scripts/authority_navigation.py" --check; then
+        error "docs/status/authority-navigation.json is invalid, ambiguous, or references a missing native source authority"
+    fi
+fi
+
+# Continue with the generated skills catalog after authority routing validates.
 if [ -f "$ROOT/tools/scripts/skills_doc_check.py" ]; then
     echo "Checking skills catalog (docs/reference/skills.md) is in sync..."
     if ! python3 "$ROOT/tools/scripts/skills_doc_check.py" --check; then

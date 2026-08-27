@@ -161,26 +161,57 @@ fn unknown_subcommand_falls_through_to_pulp_cpp_when_on_path() {
     search_paths.insert(0, td.path().to_path_buf());
     let joined = std::env::join_paths(search_paths).expect("paths");
 
-    let output = Command::cargo_bin(BIN_NAME)
-        .expect("binary")
-        .arg("ship")
-        .arg("sign")
-        .arg("--identity")
-        .arg("Developer ID Application")
-        .env("PATH", joined)
-        .env_remove("PULP_USE_CPP")
-        .env_remove("PULP_RS_CPP_BINARY")
-        .env_remove("PULP_RS_FALLTHROUGH")
-        .output()
-        .expect("run");
+    for (argv, expected) in [
+        (
+            &["ship", "sign", "--identity", "Developer ID Application"][..],
+            "ship sign --identity Developer ID Application",
+        ),
+        (
+            &["authority", "query", "dsp", "--json"][..],
+            "authority query dsp --json",
+        ),
+    ] {
+        let observational_home = tempfile::tempdir().expect("observational home");
+        let observational_temp = tempfile::tempdir().expect("observational temp");
+        let output = Command::cargo_bin(BIN_NAME)
+            .expect("binary")
+            .args(argv)
+            .env("PATH", &joined)
+            .env("HOME", observational_home.path())
+            .env("TMPDIR", observational_temp.path())
+            .env_remove("PULP_USE_CPP")
+            .env_remove("PULP_RS_CPP_BINARY")
+            .env_remove("PULP_RS_FALLTHROUGH")
+            .env("PULP_DEBUG", if argv[0] == "authority" { "1" } else { "" })
+            .output()
+            .expect("run");
 
-    let code = output.status.code().expect("exit code");
-    assert_eq!(code, 42, "expected stub exit 42 (delegation), got {code}");
-    let stdout = String::from_utf8(output.stdout).expect("utf8");
-    assert!(
-        stdout.contains("ship") && stdout.contains("sign") && stdout.contains("--identity"),
-        "stub should echo forwarded argv; got: {stdout:?}"
-    );
+        assert_eq!(output.status.code(), Some(42));
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("utf8").trim(),
+            expected
+        );
+        if argv[0] == "authority" {
+            assert!(
+                output.stderr.is_empty(),
+                "authority delegation must remain machine-readable under PULP_DEBUG"
+            );
+        }
+        assert_eq!(
+            fs::read_dir(observational_home.path())
+                .expect("read observational home")
+                .count(),
+            0,
+            "C++ delegation must happen before startup broker mutation"
+        );
+        assert_eq!(
+            fs::read_dir(observational_temp.path())
+                .expect("read observational temp")
+                .count(),
+            0,
+            "C++ delegation must not create a broker transition workspace"
+        );
+    }
 }
 
 #[test]

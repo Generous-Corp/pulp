@@ -13,6 +13,7 @@ Commands:
   ship           Sign, package, and distribute
   design         Launch the AI design tool
   docs           Browse local documentation
+  authority      Find the native source of truth
   forge          Export Forge catalog integration data
   clean          Remove build directory
   fmt            Run clang-format on the source tree
