@@ -271,6 +271,22 @@ def main() -> int:
             "disabled SDK subsystem consumer guard escaped")
     temporary.cleanup()
 
+    def wrap_consumer_in_disabled_guard(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text().replace(
+            "foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)\n",
+            "foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)\n  if(FALSE)\n",
+        ).replace(
+            "endforeach()\n",
+            "  endif()\nendforeach()\n",
+            1,
+        ))
+
+    temporary, root, errors = mutated(wrap_consumer_in_disabled_guard)
+    require(any("canonical install loop" in item for item in errors),
+            "outer disabled SDK subsystem consumer guard escaped")
+    temporary.cleanup()
+
     def add_independent_install(root: Path) -> None:
         write(root / "core/b/include/pulp/b/b.hpp")
         rules = root / checker.INSTALL_RULES
@@ -363,7 +379,7 @@ install(DIRECTORY "${_extra_public_root}/pulp/"
     require(not errors, f"recursive new installed headers were not covered: {errors}")
     temporary.cleanup()
 
-    print("doxygen installed-header parity selftest: OK (44 controls)")
+    print("doxygen installed-header parity selftest: OK (45 controls)")
     return 0
 
 

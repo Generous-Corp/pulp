@@ -122,7 +122,7 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
     if len(consumers) != 1:
         raise ValueError("install rules must have exactly one SDK header subsystem consumer")
     consumer = consumers[0]
-    canonical_consumers = re.findall(
+    canonical_consumer = re.fullmatch(
         r'''(?msx)
         set\(_inc_dir\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}/core/\$\{subsystem\}/include"\)\s*
         if\(EXISTS\s+"\$\{_inc_dir\}"\)\s*
@@ -131,9 +131,9 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
           FILES_MATCHING\s+PATTERN\s+"\*\.hpp"\s+PATTERN\s+"\*\.h"\s*\)\s*
         endif\(\)
         ''',
-        consumer,
+        consumer.strip(),
     )
-    if len(canonical_consumers) != 1:
+    if canonical_consumer is None:
         raise ValueError("SDK header subsystem consumer is not the canonical install loop")
     if text.count('install(DIRECTORY "${_inc_dir}/pulp/"') != 1:
         raise ValueError("install rules must have one canonical SDK header directory install")
