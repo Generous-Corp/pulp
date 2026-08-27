@@ -111,6 +111,21 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
         with self.assertRaisesRegex(handoff.HandoffError, "runtime sha256"):
             self.verify()
 
+    def test_large_bundled_node_runtime_is_hashable(self) -> None:
+        node = handoff.IMPORTER_RUNTIME_ROOT / "node"
+        (self.prefix / node).write_bytes(b"n" * (17 * 1024 * 1024))
+        expected = {path.as_posix() for path in (*RUNTIME_PATHS, node)}
+        document = handoff.build_handoff(
+            self.prefix,
+            sdk_source_sha=SOURCE_SHA,
+            platform=PLATFORM,
+            expected_importer_runtime_paths=expected,
+        )
+        self.assertEqual(
+            {entry["path"] for entry in document["importer"]["runtime"]},
+            expected,
+        )
+
     def test_duplicate_importer_runtime_path_is_rejected(self) -> None:
         document = self.stamp()
         duplicate = dict(document["importer"]["runtime"][0])

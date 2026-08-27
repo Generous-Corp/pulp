@@ -635,6 +635,23 @@
       ]
     },
     {
+      "name": "Node.js runtime",
+      "category": "design-import",
+      "license": "MIT and bundled third-party notices",
+      "version": "22.23.2",
+      "source_kind": "release-asset",
+      "repository": "https://github.com/nodejs/node",
+      "upstream": { "kind": "github_release", "tag": "v22.23.2" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Target-architecture official binary and complete upstream LICENSE ship beside pulp-import-design; archive SHA-256 values are pinned in prepare_node_runtime.py.",
+      "source_files": [
+        "tools/scripts/prepare_node_runtime.py",
+        "tools/import-design/CMakeLists.txt",
+        "tools/import-design/browser_html_import.cpp"
+      ]
+    },
+    {
       "name": "Noto Color Emoji",
       "category": "fonts",
       "license": "SIL OFL 1.1",

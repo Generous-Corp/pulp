@@ -984,6 +984,17 @@ SOFTWARE.
 
 ---
 
+## Node.js runtime
+
+Copyright Node.js contributors. All rights reserved.
+
+Node.js 22.23.2 is distributed under the MIT license and includes third-party
+components under compatible licenses. The complete unmodified upstream
+`node.LICENSE` file is installed beside the bundled runtime and is included in
+every CLI/SDK payload that contains `pulp-import-design`.
+
+---
+
 ## Noto Color Emoji
 
 Copyright 2013 Google LLC

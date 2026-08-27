@@ -20,6 +20,7 @@ CAPABILITIES_PATH = Path("share/pulp/agent-capabilities.json")
 CAPABILITIES_SCHEMA_PATH = Path("share/pulp/agent-capabilities.schema.json")
 IMPORTER_RUNTIME_ROOT = Path("bin/browser_capture-v1")
 MAX_JSON_BYTES = 16 * 1024 * 1024
+MAX_IMPORTER_RUNTIME_BYTES = 256 * 1024 * 1024
 
 
 class HandoffError(RuntimeError):
@@ -45,7 +46,10 @@ def _installed_importer_runtime(
     if not children or any(not path.is_file() for path in children):
         raise HandoffError(f"invalid importer runtime directory: {root}")
     runtime = {
-        path.relative_to(prefix).as_posix(): _read_bytes(path) for path in children
+        path.relative_to(prefix).as_posix(): _read_bytes(
+            path, limit=MAX_IMPORTER_RUNTIME_BYTES
+        )
+        for path in children
     }
     if set(runtime) != expected_paths:
         raise HandoffError(

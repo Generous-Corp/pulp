@@ -53,6 +53,14 @@ jobs:
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
+      - name: Prepare pinned Node runtime
+        run: |
+          node_path="$RUNNER_TEMP/pulp-node-runtime/node"
+          python3 tools/scripts/prepare_node_runtime.py \
+            --platform "${{ matrix.platform }}" --output "$node_path"
+          echo "PULP_NODE_RUNTIME_EXECUTABLE=$node_path" >> "$GITHUB_ENV"
+        shell: bash
+
       - name: Configure (mirrors release-cli.yml)
         run: |
           # Examples OFF to match release-cli.yml. The Build CLI step below
@@ -64,6 +72,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_NODE_RUNTIME_EXECUTABLE="$PULP_NODE_RUNTIME_EXECUTABLE" \
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \
             -DPULP_BUILD_WEBVIEW=ON
         shell: bash
@@ -96,6 +105,8 @@ jobs:
             --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json \
             --import-design-binary build/tools/import-design/pulp-import-design \
             --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
+            --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE" \
+            --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz

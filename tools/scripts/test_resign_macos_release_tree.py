@@ -29,23 +29,25 @@ class ResignMacosReleaseTreeTests(unittest.TestCase):
             (root / "libexec" / "pulp").mkdir(parents=True)
             binary = root / "bin" / "pulp-cpp"
             broker = root / "libexec" / "pulp" / "pulp-control-broker"
+            node = root / "bin" / "node"
             archive = root / "lib" / "libpulp.a"
             binary.write_bytes(b"macho")
             broker.write_bytes(b"macho")
+            node.write_bytes(b"macho")
             archive.write_bytes(b"archive")
 
             def fake_run(args, **_kwargs):
                 if args[0] == "file":
                     kind = (
                         "Mach-O 64-bit executable"
-                        if args[1] in {str(binary), str(broker)}
+                        if args[1] in {str(binary), str(broker), str(node)}
                         else "current ar archive"
                     )
                     return mock.Mock(stdout=kind, returncode=0)
                 return mock.Mock(stdout="", returncode=0)
 
             with mock.patch.object(rmrt.subprocess, "run", side_effect=fake_run) as run:
-                self.assertEqual(rmrt.resign(root), [binary, broker])
+                self.assertEqual(rmrt.resign(root), [node, binary, broker])
 
             commands = [call.args[0] for call in run.call_args_list]
             self.assertIn(["codesign", "--force", "--sign", "-", str(binary)], commands)
@@ -58,6 +60,9 @@ class ResignMacosReleaseTreeTests(unittest.TestCase):
                 commands,
             )
             self.assertFalse(any(str(archive) in command and command[0] == "codesign" for command in commands))
+            self.assertFalse(any(
+                str(node) in command and "--force" in command for command in commands
+            ))
 
     def test_negative_control_failed_signature_is_fatal(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -140,6 +140,7 @@ class ProductMatrix:
     inspector_sdk_floor: str
     control_broker_floor: str
     control_standalone_host_floor: str
+    node_runtime_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
     # `platforms` stays the full historical inventory (per-platform archive
@@ -196,6 +197,9 @@ class ProductMatrix:
                 ),
                 control_standalone_host_floor=str(
                     doc.get("control_standalone_host_floor", "999999.0.0")
+                ),
+                node_runtime_floor=str(
+                    doc.get("node_runtime_floor", "999999.0.0")
                 ),
                 platforms=tuple(doc["platforms"]),
                 active_platforms=tuple(
@@ -435,22 +439,39 @@ def cli_members(
         | resources
         | frozenset({cli_runtime_member(platform)})
     )
+    if version is not None and version_tuple(version) >= version_tuple(matrix.node_runtime_floor):
+        node_name = "node.exe" if platform.startswith("windows-") else "node"
+        members |= {
+            f"browser_capture/{node_name}",
+            "browser_capture/node.LICENSE",
+        }
     if control_standalone_host_required(platform, matrix, version):
         members |= {CONTROL_STANDALONE_HOST_CLI_MANIFEST}
     return frozenset(members)
 
 
 def sdk_import_design_runtime_members(
+    platform: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
     version: str | None = None,
 ) -> frozenset[str]:
     _binaries, resources = effective_cli_contract(matrix, version)
     prefix = "browser_capture/"
-    return frozenset(
+    members = {
         f"pulp-sdk/bin/browser_capture-v1/{member.removeprefix(prefix)}"
         for member in resources
         if member.startswith(prefix)
-    )
+    }
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.node_runtime_floor)
+    ):
+        node_name = "node.exe" if platform.startswith("windows-") else "node"
+        members.update({
+            f"pulp-sdk/bin/browser_capture-v1/{node_name}",
+            "pulp-sdk/bin/browser_capture-v1/node.LICENSE",
+        })
+    return frozenset(members)
 
 
 def sdk_binary_members(
@@ -543,7 +564,9 @@ def required_sdk_members(
                 f"pulp-sdk/{importer_path(platform).as_posix()}",
             }
         )
-        required.update(sdk_import_design_runtime_members(matrix, version))
+        required.update(
+            sdk_import_design_runtime_members(platform, matrix, version)
+        )
     return frozenset(required)
 
 
@@ -843,7 +866,9 @@ def verify_sdk_archive(
                 ) from exc
         if version_tuple(version) >= version_tuple(matrix.capability_handoff_floor):
             prefix = "pulp-sdk/"
-            expected_runtime = sdk_import_design_runtime_members(matrix, version)
+            expected_runtime = sdk_import_design_runtime_members(
+                platform, matrix, version
+            )
             runtime_prefix = "pulp-sdk/bin/browser_capture-v1/"
             actual_runtime = {
                 name for name in names if name.startswith(runtime_prefix)
@@ -867,7 +892,9 @@ def verify_sdk_archive(
                         limit=512 * 1024 * 1024,
                     ),
                     importer_runtime_bytes={
-                        member.removeprefix(prefix): archive.read(member)
+                        member.removeprefix(prefix): archive.read(
+                            member, limit=256 * 1024 * 1024
+                        )
                         for member in expected_runtime
                     },
                     capability_bytes=archive.read(

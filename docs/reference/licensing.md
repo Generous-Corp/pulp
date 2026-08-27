@@ -207,6 +207,7 @@ packages are installed on demand via `npm`.
 | **fastgltf** | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/spnda/fastgltf](https://github.com/spnda/fastgltf) |
 | **ffmpeg-static** | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Developer-only desktop video-proof composer (`tools/local-ci`); encodes captured frames to MP4 (a system `PULP_FFMPEG` works too). `npm`-installed on demand — never bundled or shipped in plugins | [github.com/eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) |
 | **node-addon-api** | MIT | Node.js bindings via Node-API | [github.com/nodejs/node-addon-api](https://github.com/nodejs/node-addon-api) |
+| **Node.js runtime** | MIT and bundled third-party notices | Self-contained runtime shipped with browser-backed design import | [github.com/nodejs/node](https://github.com/nodejs/node) |
 | **pybind11** | BSD-3-Clause | Python bindings for HeadlessHost | [github.com/pybind/pybind11](https://github.com/pybind/pybind11) |
 | **react** | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); npm-installed by plugin authors, never bundled into Pulp itself | [github.com/facebook/react](https://github.com/facebook/react) |
 | **react-reconciler** | MIT | Reconciler runtime wrapped by `@pulp/react` to drive `pulp::view::WidgetBridge`; npm-installed alongside the package | [github.com/facebook/react](https://github.com/facebook/react) |

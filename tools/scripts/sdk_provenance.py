@@ -113,22 +113,31 @@ def _capability_handoff_required(prefix: Path) -> bool:
     return _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(floor)
 
 
-def _importer_runtime_paths() -> set[str]:
+def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
     try:
         matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
         members = matrix["common_cli_members"]
+        node_floor = str(matrix.get("node_runtime_floor", "999999.0.0"))
     except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
         raise ProvenanceError(
             f"cannot determine importer runtime contract from {PRODUCT_MATRIX}: {exc}"
         ) from exc
-    prefix = "browser_capture/"
+    capture_prefix = "browser_capture/"
     paths = {
-        "bin/browser_capture-v1/" + str(member).removeprefix(prefix)
+        "bin/browser_capture-v1/" + str(member).removeprefix(capture_prefix)
         for member in members
-        if isinstance(member, str) and member.startswith(prefix)
+        if isinstance(member, str) and member.startswith(capture_prefix)
     }
     if not paths:
         raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
+    if _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(
+        node_floor
+    ):
+        node_name = "node.exe" if platform.startswith("windows-") else "node"
+        paths.update({
+            f"bin/browser_capture-v1/{node_name}",
+            "bin/browser_capture-v1/node.LICENSE",
+        })
     return paths
 
 
@@ -468,7 +477,9 @@ def verify_release_sdk(
             prefix,
             expected_platform=expected_platform,
             expected_sdk_source_sha=expected_source_sha,
-            expected_importer_runtime_paths=_importer_runtime_paths(),
+            expected_importer_runtime_paths=_importer_runtime_paths(
+                prefix, expected_platform
+            ),
         )
     return marker
 
@@ -504,7 +515,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             handoff = None
             if _capability_handoff_required(args.prefix):
-                runtime_paths = _importer_runtime_paths()
+                runtime_paths = _importer_runtime_paths(
+                    args.prefix, args.platform
+                )
                 handoff = build_handoff(
                     args.prefix,
                     sdk_source_sha=args.source_sha,
