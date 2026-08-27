@@ -111,6 +111,14 @@ def main() -> int:
         doxy.write_text(original + "EXCLUDE = ../../core/a/include/pulp/a/a.hpp\n")
         require(any("EXCLUDE must be empty" in item for item in checker.check(root)),
                 "nonempty Doxygen EXCLUDE escaped")
+        doxy.write_text(original + "@INCLUDE = hidden.conf\n")
+        require(any("unsupported active @INCLUDE directive" in item
+                    for item in checker.check(root)),
+                "active Doxygen @INCLUDE escaped")
+        doxy.write_text(original + "@INCLUDE_PATH = ../../hidden\n")
+        require(any("unsupported active @INCLUDE_PATH directive" in item
+                    for item in checker.check(root)),
+                "active Doxygen @INCLUDE_PATH escaped")
         doxy.write_text(original)
 
         policy = json.loads((root / checker.POLICY).read_text())
@@ -163,6 +171,25 @@ def main() -> int:
         require(any("installed prefix contains a symlink" in item
                     for item in checker.check(root, prefix, "on")),
                 "broken/out-of-prefix installed symlink escaped")
+
+        actual_prefix = root / "actual-prefix"
+        write(actual_prefix / "include/pulp/a/a.hpp")
+        linked_prefix = root / "linked-prefix"
+        linked_prefix.symlink_to(actual_prefix, target_is_directory=True)
+        require(any("installed prefix root is a symlink" in item
+                    for item in checker.check(root, linked_prefix, "on")),
+                "symlinked installed-prefix root escaped")
+
+        component_prefix = root / "component-prefix"
+        outside_include = root / "outside-include"
+        write(outside_include / "pulp/a/a.hpp")
+        component_prefix.mkdir()
+        (component_prefix / "include").symlink_to(
+            outside_include, target_is_directory=True
+        )
+        require(any("installed prefix contains a symlink component" in item
+                    for item in checker.check(root, component_prefix, "on")),
+                "out-of-prefix symlinked include component escaped")
 
     doxy_mutations = [
         ("RECURSIVE = YES", "RECURSIVE = NO", "RECURSIVE"),
@@ -297,7 +324,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/b/include/pulp/"
     require(not errors, f"recursive new installed headers were not covered: {errors}")
     temporary.cleanup()
 
-    print("doxygen installed-header parity selftest: OK (36 controls)")
+    print("doxygen installed-header parity selftest: OK (40 controls)")
     return 0
 
 

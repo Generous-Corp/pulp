@@ -56,6 +56,11 @@ def _headers(root: Path, relative_root: str,
 def _doxy_assignments(text: str) -> dict[str, str]:
     clean = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
     logical = clean.replace("\\\n", " ")
+    directive = re.search(r"(?m)^\s*@(INCLUDE(?:_PATH)?)\b", logical)
+    if directive:
+        raise ValueError(
+            f"Doxyfile has unsupported active @{directive.group(1)} directive"
+        )
     assignments: dict[str, str] = {}
     for key, operator, value in re.findall(
         r"(?m)^([A-Z][A-Z0-9_]*)\s*(\+?=)\s*(.*)$", logical
@@ -227,6 +232,14 @@ def check(root: Path, installed_prefix: Path | None = None,
 
     if installed_prefix is not None:
         include = installed_prefix / "include" / "pulp"
+        if installed_prefix.is_symlink():
+            errors.append(f"installed prefix root is a symlink: {installed_prefix}")
+            return errors
+        try:
+            _reject_symlink_components(installed_prefix, Path("include/pulp"))
+        except ValueError as error:
+            errors.append(f"installed prefix contains a symlink component: {error}")
+            return errors
         if not include.is_dir():
             errors.append(f"installed prefix has no include/pulp directory: {installed_prefix}")
         else:
