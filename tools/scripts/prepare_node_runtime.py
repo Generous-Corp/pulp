@@ -12,6 +12,7 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
+from pathlib import PurePosixPath
 
 
 VERSION = "22.23.2"
@@ -40,6 +41,32 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _regular_tar_member(bundle: tarfile.TarFile, suffix: str) -> tarfile.TarInfo:
+    expected_tail = PurePosixPath(suffix.lstrip("/")).parts
+    matches = []
+    for member in bundle.getmembers():
+        parts = PurePosixPath(member.name).parts
+        if len(parts) == len(expected_tail) + 1 and parts[1:] == expected_tail:
+            matches.append(member)
+    if len(matches) != 1:
+        raise RuntimeError(f"Node archive must contain exactly one {suffix!r} member")
+    member = matches[0]
+    path = PurePosixPath(member.name)
+    if path.is_absolute() or ".." in path.parts:
+        raise RuntimeError(f"Node archive contains an unsafe {suffix!r} member path")
+    if not member.isreg():
+        raise RuntimeError(f"Node archive {suffix!r} member must be a regular file")
+    return member
+
+
+def _copy_tar_member(bundle: tarfile.TarFile, member: tarfile.TarInfo, output: Path) -> None:
+    source = bundle.extractfile(member)
+    if source is None:
+        raise RuntimeError(f"Cannot read Node archive member {member.name!r}")
+    with source, output.open("wb") as destination:
+        shutil.copyfileobj(source, destination)
+
+
 def prepare(target: str, output: Path, archive: Path | None = None) -> Path:
     name, expected = ARTIFACTS[target]
     with tempfile.TemporaryDirectory() as td:
@@ -58,14 +85,17 @@ def prepare(target: str, output: Path, archive: Path | None = None) -> Path:
             with zipfile.ZipFile(payload) as bundle:
                 bundle.extractall(extracted)
             candidate = next(extracted.glob("*/node.exe"))
+            license_file = next(extracted.glob("*/LICENSE"))
+            output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, output)
+            shutil.copy2(license_file, output.with_name("node.LICENSE"))
         else:
             with tarfile.open(payload) as bundle:
-                bundle.extractall(extracted, filter="data")
-            candidate = next(extracted.glob("*/bin/node"))
-        license_file = next(extracted.glob("*/LICENSE"))
-        output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(candidate, output)
-        shutil.copy2(license_file, output.with_name("node.LICENSE"))
+                node_member = _regular_tar_member(bundle, "/bin/node")
+                license_member = _regular_tar_member(bundle, "/LICENSE")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                _copy_tar_member(bundle, node_member, output)
+                _copy_tar_member(bundle, license_member, output.with_name("node.LICENSE"))
         if target.startswith(("darwin-", "linux-")):
             output.chmod(0o755)
     return output
