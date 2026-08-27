@@ -119,6 +119,14 @@ advisory during the macOS-focused product phase and may continue after queue
 admission. The `macos` and `macos-merge-group` bootstrap jobs own the required
 name only for an intentional native skip or a fail-closed provider/classifier
 failure; their inactive names end in `-unused`.
+An exact unchanged merge group may also use `macos-merge-group` after
+`protected-receipt-reuse` authenticates one unexpired successful PR artifact
+and runs the verifier loaded from the exact protected-base parent. The receipt
+binds base/head/tree, policy blobs, platform/toolchain, and hashed tested
+executables; the bootstrap consumes only the newly derived merge-group
+decision. Missing, ambiguous, expired, or mutated evidence must leave the
+original matrix entry in place. Never make the PR receipt itself a required
+context, and never execute the candidate's verifier as the authority.
 `tools/scripts/test_required_macos_alias.py` and
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
