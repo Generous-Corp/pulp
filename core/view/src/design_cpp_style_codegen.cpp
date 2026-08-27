@@ -343,6 +343,7 @@ void emit_visual_style(std::ostringstream& out,
 void report_unlowered_visual_style(const EmitContext& ctx,
                                    const IRNode& node,
                                    const IRStyle& style) {
+    // design-import-parity: non-lowering-begin
     // This lane lowers a subset of IRStyle. Every property below is carried by
     // the IR and applied by the runtime materializer, and is dropped here.
     // A drop is invisible in the output — the exported plugin lays out
@@ -389,6 +390,7 @@ void report_unlowered_visual_style(const EmitContext& ctx,
         note("text-overflow", "overflowing text hard-clips instead of ellipsising");
     if (style.pointer_events && !style.pointer_events->empty())
         note("pointer-events", "the node keeps default hit behaviour");
+    // design-import-parity: non-lowering-end
 }
 
 void emit_label_style(std::ostringstream& out,
