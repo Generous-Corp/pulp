@@ -2533,6 +2533,14 @@ A supervisor that cannot resolve one refuses to register rather than contribute
 a runner that is online, idle, and selectable by nothing. Declared tags live in
 `tools/scripts/runner_topology.json`.
 
+For pull requests, this privileged workflow evaluates a locally constructed
+merge of the checked-out protected-main commit and the exact API-resolved PR
+head. It verifies the fetched `refs/pull/N/head` against that SHA and uses only
+trusted-base code to build and validate the two-parent candidate. Conflicts,
+missing commits, and provenance mismatches fail closed. The workflow does not
+use `refs/pull/N/merge`, because GitHub may leave that synthetic ref based on an
+older main commit while a PR is `BEHIND`.
+
 ### Advisory macOS selectors
 
 | Variable | Precedence and behavior | Example |

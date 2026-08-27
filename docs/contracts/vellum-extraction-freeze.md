@@ -58,7 +58,13 @@ Allowed dispositions are:
 
 The required `Vellum freeze` check verifies the append-only declaration,
 validates old-to-new ownership-map transitions, and determines affected slices
-from the actual proposed merge (including renames). A separate post-merge
+from the actual proposed merge (including renames). Its privileged companion,
+`Vellum trusted freeze`, checks out literal protected `main` controls, fetches
+the API-bound PR head, and constructs the candidate merge locally from those
+two exact commits. It does not consume GitHub's asynchronous
+`refs/pull/N/merge`; a stale synthetic ref therefore cannot block a merely
+behind PR, while a source-head mismatch or merge conflict still fails closed.
+A separate post-merge
 workflow recomputes the compact outbox record without secrets and dispatches it
 to the private Vellum observatory from a one-step credential-bearing job. The
 event remains permanently replayable from Pulp history even if dispatch is

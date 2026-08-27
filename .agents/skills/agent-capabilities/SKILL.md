@@ -261,6 +261,11 @@ and adjacent policy self-tests. When adding a new Python policy test there,
 register the test explicitly in the same change; merely creating a
 `tools/ci/test_*.py` file does not make CTest execute it.
 
+That registry also carries the trusted Vellum merge self-test. Keep its clean
+base+head positive control and real content-conflict negative control together:
+the required gate must prove it can construct the exact two-parent candidate,
+and that the same constructor refuses a conflicted candidate before validation.
+
 The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST
 inventory may reduce comment/private-detail churn only if its version and

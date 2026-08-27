@@ -202,6 +202,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
     set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
+    # The privileged Vellum gate constructs its exact base+head candidate
+    # locally. Exercise both a clean merge and a real content conflict so the
+    # conflict path cannot degrade into an untested fail-open branch.
+    add_test(NAME vellum-trusted-merge-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_trusted_merge.py")
+    set_tests_properties(vellum-trusted-merge-selftest PROPERTIES TIMEOUT 120)
 
     # Development-inspector truth gate: mutation tests prove capability/profile
     # and user-facing runtime claims fail when either side drifts.

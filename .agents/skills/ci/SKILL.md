@@ -5863,16 +5863,21 @@ up" by weakening the check or by writing a `pulp-only` disposition you cannot
 justify; the rationale field is the artifact that makes a later ingest decision
 possible. `docs/contracts/vellum-extraction-freeze.md` is the contract.
 
-**If `Vellum freeze` passes but `Trusted base executor` fails, the PR is just
-behind `main`.** The two jobs run the same check, so disagreement is a base-
-resolution artifact, never a content problem. The trusted gate evaluates the
-**merge result** (`refs/pull/N/merge`) for this reason: `base.sha` is the
+**If `Vellum freeze` passes but `Trusted base executor` fails, first check
+whether the PR is merely behind `main`.** The two jobs run the same check, so
+disagreement can be a base-resolution artifact rather than a content problem.
+The trusted gate evaluates a **locally constructed merge result** for this
+reason: `base.sha` is the
 base-branch *tip*, so diffing it against the raw branch head reports every file
 that landed on `main` after you forked as *deleted by your PR* — and an outbox
 event someone else added then trips `Vellum outbox events are append-only;
 modify/delete/rename is forbidden` against an author who deleted nothing. A
-genuinely conflicted PR has no merge ref and is reported as such, rather than as
-a freeze violation.
+The workflow fetches and verifies the exact API-resolved PR head, then trusted
+base code constructs a two-parent candidate from that head and the checked-out
+protected-main commit. It never consumes GitHub's `refs/pull/N/merge`, because
+that synthetic ref can retain an older first parent while a PR is `BEHIND`.
+A genuinely conflicted PR fails local merge construction and is reported as
+such, rather than as a freeze violation.
 
 **Do not merge `main` into the branch to clear it.** That was the workaround
 before the gate evaluated the merge result; it no longer fixes anything, and

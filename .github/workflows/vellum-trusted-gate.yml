@@ -172,7 +172,20 @@ jobs:
           proposed_tree="$RUNNER_TEMP/vellum-proposed-$PR_NUMBER"
           git fetch --no-tags origin \
             "$PR_BASE" \
-            "refs/pull/$PR_NUMBER/head"
+            "+refs/pull/$PR_NUMBER/head:refs/vellum/pr-head"
+          fetched_head=$(git rev-parse refs/vellum/pr-head)
+          if [ "$fetched_head" != "$PR_HEAD" ]; then
+            live_head=$(gh api \
+              "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+            if [ "$live_head" != "$PR_HEAD" ]; then
+              trap - EXIT
+              echo "PR #$PR_NUMBER advanced to $live_head — ignoring stale validation run" >&2
+              exit 0
+            fi
+            echo "vellum-trusted-gate: fetched PR head $fetched_head does not match" \
+                 "the live API head $PR_HEAD" >&2
+            exit 1
+          fi
           git cat-file -e "$PR_HEAD^{commit}"
 
           # Evaluate the MERGE RESULT, not the raw branch head.
@@ -187,33 +200,20 @@ jobs:
           # what a trusted re-run exists to rule out.
           #
           # Mirror the PR-side contract: head = merge result, source-head = the
-          # real PR commit (event provenance is validated against that).
-          if git fetch --no-tags origin \
-               "refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge" 2>/dev/null; then
-            proposed_head=$(git rev-parse refs/vellum/pr-merge)
-          else
-            live_state=$(gh api "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER" --jq .state)
-            if [ "$live_state" != "open" ]; then
-              trap - EXIT
-              echo "PR #$PR_NUMBER is now $live_state — ignoring stale validation run" >&2
-              exit 0
-            fi
-            # GitHub publishes the merge ref only for a mergeable PR. Absent it,
-            # say so: a conflicted PR must not be reported as a freeze violation.
-            echo "vellum-trusted-gate: refs/pull/$PR_NUMBER/merge is unavailable;" \
-                 "the PR likely has merge conflicts. Resolve them and re-run." >&2
-            exit 1
+          # real PR commit (event provenance is validated against that). Build
+          # that result from the two exact commits instead of depending on
+          # GitHub's asynchronously refreshed refs/pull/N/merge. The trusted
+          # helper fails closed on conflicts and proves the candidate's parents.
+          candidate_file="$RUNNER_TEMP/vellum-trusted-candidate"
+          if ! python3 "$trusted_root/tools/scripts/vellum_trusted_merge.py" \
+            --repo "$trusted_root" \
+            --base "$PR_BASE" \
+            --head "$PR_HEAD" \
+            --output "$candidate_file" 2>&1 | tee -a "$log"
+          then
+            exit "${PIPESTATUS[0]}"
           fi
-          merge_base=$(git rev-parse "$proposed_head^1")
-          merge_source=$(git rev-parse "$proposed_head^2")
-          if [ "$merge_base" != "$PR_BASE" ] || [ "$merge_source" != "$PR_HEAD" ]; then
-            echo "vellum-trusted-gate: GitHub's merge ref is not coherent with" \
-                 "the resolved protected-main and PR-head commits; re-run after" \
-                 "GitHub refreshes refs/pull/$PR_NUMBER/merge." >&2
-            echo "expected base=$PR_BASE head=$PR_HEAD;" \
-                 "merge parents base=$merge_base head=$merge_source" >&2
-            exit 1
-          fi
+          proposed_head=$(cat "$candidate_file")
           post_status pending 'Validating with base-branch controls'
           git worktree add --detach "$proposed_tree" "$proposed_head"
 

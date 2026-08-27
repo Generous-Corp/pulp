@@ -419,20 +419,20 @@ class TrustedGateScheduling(unittest.TestCase):
         for step in steps[resolve_index + 1:]:
             self.assertEqual(step.get("if"), "steps.pr.outputs.active == 'true'")
 
-    def test_pending_status_is_published_only_after_merge_ref_exists(self):
+    def test_pending_status_is_published_only_after_exact_local_merge_exists(self):
         steps = self.workflow["jobs"]["trusted-gate"]["steps"]
         script = next(
             step["run"]
             for step in steps
             if step.get("name") == "Validate proposed data and publish head status"
         )
-        fetch = script.index('"refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge"')
-        live_state = script.index('live_state=$(gh api', fetch)
+        fetch = script.index('"+refs/pull/$PR_NUMBER/head:refs/vellum/pr-head"')
+        local_merge = script.index("vellum_trusted_merge.py", fetch)
         pending = script.index("post_status pending")
-        self.assertLess(fetch, live_state)
-        self.assertLess(live_state, pending)
-        self.assertIn('if [ "$live_state" != "open" ]', script)
-        self.assertIn("trap - EXIT", script[live_state:pending])
+        self.assertLess(fetch, local_merge)
+        self.assertLess(local_merge, pending)
+        self.assertNotIn('refs/pull/$PR_NUMBER/merge', script)
+        self.assertIn('[ "$fetched_head" != "$PR_HEAD" ]', script[fetch:pending])
 
     def test_each_status_write_rechecks_live_pr_state(self):
         steps = self.workflow["jobs"]["trusted-gate"]["steps"]
