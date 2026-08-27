@@ -59,6 +59,36 @@ pulp_add_test_suite(pulp-test-multi-channel-meter
     SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio)
 
+pulp_add_test_suite(pulp-test-signal-sub-oscillator
+    SOURCES test_signal_sub_oscillator.cpp
+    LIBRARIES pulp::signal)
+
+add_executable(pulp-test-signal-sub-oscillator-no-exceptions
+    test_signal_sub_oscillator_no_exceptions.cpp)
+target_link_libraries(pulp-test-signal-sub-oscillator-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-signal-sub-oscillator-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-signal-sub-oscillator-no-exceptions PRIVATE -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME signal-sub-oscillator-no-exceptions
+    COMMAND pulp-test-signal-sub-oscillator-no-exceptions)
+
+pulp_add_test_suite(pulp-test-signal-blit-oscillator
+    SOURCES test_signal_blit_oscillator.cpp
+    LIBRARIES pulp::signal)
+
+add_executable(pulp-test-signal-blit-oscillator-no-exceptions
+    test_signal_blit_oscillator_no_exceptions.cpp)
+target_link_libraries(pulp-test-signal-blit-oscillator-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-signal-blit-oscillator-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-signal-blit-oscillator-no-exceptions PRIVATE -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME signal-blit-oscillator-no-exceptions
+    COMMAND pulp-test-signal-blit-oscillator-no-exceptions)
+
 pulp_add_test_suite(pulp-test-midi-message-collector
     SOURCES test_midi_message_collector.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
