@@ -166,8 +166,6 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"z_index",
          {{"swift"},
           "js+cpp+native lower it; SwiftUI relies on declaration order"}},
-        {"transform",
-         {{"cpp"}, "js+swift+native lower it; cpp codegen transform deferred"}},
         {"min_width", {{"swift"}, "js+cpp+native lower it; SwiftUI min sizing deferred"}},
         {"min_height", {{"swift"}, "js+cpp+native lower it; SwiftUI min sizing deferred"}},
         {"max_width", {{"swift"}, "js+cpp+native lower it; SwiftUI max sizing deferred"}},
@@ -297,6 +295,28 @@ std::string strip_comments(const std::string& src) {
     return out;
 }
 
+/// Remove explicitly marked report-only reads before counting lowering
+/// references. A fidelity reporter consumes a field precisely because the
+/// exporter does not lower it; counting that read as lowering would invert the
+/// parity ledger. The narrow paired markers keep real lowering outside the
+/// reporter visible to the guard.
+std::string strip_non_lowering_regions(std::string src) {
+    constexpr std::string_view begin =
+        "// design-import-parity: non-lowering-begin";
+    constexpr std::string_view end =
+        "// design-import-parity: non-lowering-end";
+    for (std::size_t start = src.find(begin); start != std::string::npos;
+         start = src.find(begin, start)) {
+        const std::size_t finish = src.find(end, start + begin.size());
+        INFO("every non-lowering parity marker must have a closing marker");
+        REQUIRE(finish != std::string::npos);
+        src.replace(start, finish + end.size() - start, " ");
+    }
+    INFO("a closing non-lowering parity marker must not appear by itself");
+    REQUIRE(src.find(end) == std::string::npos);
+    return src;
+}
+
 bool is_ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
@@ -400,6 +420,20 @@ bool references_field(const std::string& src, const std::string& field) {
     return false;
 }
 
+TEST_CASE("report-only reads do not count as design-import lowering",
+          "[view][import][parity]") {
+    const auto source = strip_comments(strip_non_lowering_regions(R"(
+        if (style.opacity) lower(style.opacity);
+        // design-import-parity: non-lowering-begin
+        if (style.box_shadow) report(style.box_shadow);
+        // design-import-parity: non-lowering-end
+        if (style.filter) lower(style.filter);
+    )"));
+    REQUIRE(references_field(source, "opacity"));
+    REQUIRE_FALSE(references_field(source, "box_shadow"));
+    REQUIRE(references_field(source, "filter"));
+}
+
 std::string join(const std::set<std::string>& s) {
     std::string out;
     for (const auto& v : s) out += (out.empty() ? "" : ", ") + v;
@@ -447,7 +481,8 @@ TEST_CASE("every lowerable IR field reaches all four codegen surfaces or is allo
     // lowering doesn't count as parity).
     std::map<std::string, std::string> surface_src;
     for (const auto& s : surfaces()) {
-        surface_src[s.key] = strip_comments(read_surface_source(root, s));
+        surface_src[s.key] = strip_comments(
+            strip_non_lowering_regions(read_surface_source(root, s)));
         INFO("surface " << s.key << " aggregate looks implausibly small");
         REQUIRE(surface_src[s.key].size() > 4096);
     }

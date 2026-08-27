@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260817-pr7641-baked-cpp-fidelity-sink",
+  "created_at": "2026-08-17T08:55:16Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record giving the baked C++ lowering lane the fidelity_report sink the JS and Swift lanes already carry, so it can report the IRStyle properties it does not lower instead of dropping them silently, and emitting set_ancestor_clip_radii beside the clip rect it already emitted. Watch-only: reporting adds no lowering authority, and the clip-radii emission brings the baked lane into line with the runtime materializer rather than changing either contract.",
+  "tests": [
+    "generate_pulp_cpp emits clip radii beside the clip rect",
+    "generate_pulp_cpp reports the style properties it cannot lower",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

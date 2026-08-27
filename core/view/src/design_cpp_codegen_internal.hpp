@@ -87,6 +87,7 @@ void emit_visual_style(std::ostringstream& out,
                        int depth,
                        const EmitContext& ctx,
                        std::string_view var,
+                       const IRNode& node,
                        const IRStyle& style);
 void emit_label_style(std::ostringstream& out,
                       int depth,

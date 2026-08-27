@@ -2,6 +2,8 @@
 
 #include "design_ir_helpers.hpp"
 
+#include <pulp/view/css_effect_parse.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -202,10 +204,15 @@ void emit_common_layout(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "flex.dim_height = {0.0f, pulp::view::DimensionUnit::auto_};");
 }
 
+void report_unlowered_visual_style(const EmitContext& ctx,
+                                   const IRNode& node,
+                                   const IRStyle& style);
+
 void emit_visual_style(std::ostringstream& out,
                        int depth,
                        const EmitContext& ctx,
                        std::string_view var,
+                       const IRNode& node,
                        const IRStyle& style) {
     const auto& opts = ctx.opts;
     auto emit_color = [&](std::string_view method, const std::optional<std::string>& value) {
@@ -278,6 +285,17 @@ void emit_visual_style(std::ostringstream& out,
                       float_expr(ctx, style.clip_rect->y) + ", " +
                       float_expr(ctx, style.clip_rect->width) + ", " +
                       float_expr(ctx, style.clip_rect->height) + "});");
+        // The radii are half of the clip, not decoration on it: a rounded card
+        // whose media area is a plain rectangle paints that rectangle square
+        // into the corner and the card reads as unrounded. The runtime
+        // materializer emits both halves, so emitting only the rect here made
+        // a baked export clip differently from the same design at runtime.
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_ancestor_clip_radii(" +
+                      float_expr(ctx, style.clip_rect->radius_tl) + ", " +
+                      float_expr(ctx, style.clip_rect->radius_tr) + ", " +
+                      float_expr(ctx, style.clip_rect->radius_br) + ", " +
+                      float_expr(ctx, style.clip_rect->radius_bl) + ");");
     }
     if (style.overflow) {
         std::string lower;
@@ -309,6 +327,70 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_left(" + float_expr(ctx, *style.left) + ");");
     if (style.z_index)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_z_index(" + std::to_string(*style.z_index) + ");");
+    // Rotation goes through the same parser the runtime materializer uses, so a
+    // design that rotates looks the same baked as it does at runtime. Only the
+    // rotation component lowers; any other transform stays unlowered and is
+    // reported below, matching what the runtime keeps as an unhandled value.
+    if (style.transform) {
+        if (const auto degrees = css_transform_rotation(*style.transform))
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_rotation(" + float_expr(ctx, *degrees) + ");");
+    }
+
+    report_unlowered_visual_style(ctx, node, style);
+}
+
+void report_unlowered_visual_style(const EmitContext& ctx,
+                                   const IRNode& node,
+                                   const IRStyle& style) {
+    // design-import-parity: non-lowering-begin
+    // This lane lowers a subset of IRStyle. Every property below is carried by
+    // the IR and applied by the runtime materializer, and is dropped here.
+    // A drop is invisible in the output — the exported plugin lays out
+    // identically and simply renders flatter — so without this report the only
+    // way to notice is a side-by-side against the design.
+    //
+    // Reporting is not the fix. It is what makes the remaining gaps findable,
+    // and what makes the NEXT unlowered property announce itself instead of
+    // joining the list silently.
+    auto* sink = ctx.opts.fidelity_report;
+    if (sink == nullptr)
+        return;
+
+    const auto note = [&](std::string_view property, std::string_view consequence) {
+        sink->push_back(FidelityIssue{
+            node.stable_anchor_id.value_or(node.name),
+            node.name,
+            "cpp-unlowered-style",
+            std::string(property) + " is set on this node but the baked C++ lane does not "
+                "lower it; " + std::string(consequence),
+            false,
+        });
+    };
+
+    if (!style.box_shadow.empty())
+        note("box-shadow", "the node paints flat");
+    if (style.mix_blend_mode && !style.mix_blend_mode->empty())
+        note("mix-blend-mode", "the node composites as an opaque fill");
+    if (style.filter && !style.filter->empty())
+        note("filter", "the node renders unfiltered");
+    if (style.backdrop_filter && !style.backdrop_filter->empty())
+        note("backdrop-filter", "the backdrop renders opaque");
+    if (style.clip_path && !style.clip_path->empty())
+        note("clip-path", "the node paints its full rectangle");
+    // Rotation lowers above. A transform that carries anything else (scale,
+    // skew, translate, matrix) still does not, so report only that remainder
+    // rather than claiming the whole property was dropped.
+    if (style.transform && !style.transform->empty() &&
+        !css_transform_rotation(*style.transform))
+        note("transform", "the node renders untransformed");
+    if (style.border_style && !style.border_style->empty())
+        note("border-style", "the border renders solid");
+    if (style.text_overflow && !style.text_overflow->empty())
+        note("text-overflow", "overflowing text hard-clips instead of ellipsising");
+    if (style.pointer_events && !style.pointer_events->empty())
+        note("pointer-events", "the node keeps default hit behaviour");
+    // design-import-parity: non-lowering-end
 }
 
 void emit_label_style(std::ostringstream& out,
