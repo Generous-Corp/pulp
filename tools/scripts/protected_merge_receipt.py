@@ -64,8 +64,22 @@ def _git(repo: Path, *args: str) -> str:
 
 def commit_identity(repo: Path, sha: str) -> dict[str, Any]:
     resolved = _git(repo, "rev-parse", f"{sha}^{{commit}}")
-    tree = _git(repo, "show", "-s", "--format=%T", resolved)
-    parents = _git(repo, "show", "-s", "--format=%P", resolved).split()
+    # Read the commit object instead of revision-walking metadata. Actions uses
+    # a depth-1 checkout for pull_request merge refs, which marks the synthetic
+    # merge itself as a shallow boundary. `git show --format=%P` deliberately
+    # hides parents at that boundary even though the immutable commit object
+    # still records them, making an exact valid merge appear parentless.
+    tree = ""
+    parents: list[str] = []
+    for line in _git(repo, "cat-file", "-p", resolved).splitlines():
+        if not line:
+            break
+        if line.startswith("tree "):
+            tree = line.removeprefix("tree ")
+        elif line.startswith("parent "):
+            parents.append(line.removeprefix("parent "))
+    if not tree:
+        raise ReceiptError("validated commit tree is unavailable")
     return {"sha": resolved, "tree": tree, "parents": parents}
 
 
@@ -196,12 +210,16 @@ def toolchain_identity(target: str, build_dir: Path) -> dict[str, Any]:
 def issue(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     checkout = commit_identity(repo, args.checkout_sha)
-    expected_parents = [
-        _git(repo, "rev-parse", f"{args.base_sha}^{{commit}}"),
-        _git(repo, "rev-parse", f"{args.head_sha}^{{commit}}"),
-    ]
-    if checkout["parents"] != expected_parents:
-        raise ReceiptError("validated checkout is not the exact base+head merge")
+    expected_base = _git(repo, "rev-parse", f"{args.base_sha}^{{commit}}")
+    expected_head = _git(repo, "rev-parse", f"{args.head_sha}^{{commit}}")
+    expected_parents = [expected_base, expected_head]
+    if (
+        checkout["sha"] != expected_head
+        and checkout["parents"] != expected_parents
+    ):
+        raise ReceiptError(
+            "validated checkout is neither the exact head nor the exact base+head merge"
+        )
     policy = policy_identity(repo, checkout["sha"])
     artifact = artifact_identity(args.build_dir.resolve(), args.ctest_json)
     body = {
@@ -264,7 +282,11 @@ def verify_receipt(receipt: dict[str, Any], args: argparse.Namespace) -> dict[st
     validated = receipt["validated_checkout"]
     if set(validated) != {"sha", "tree", "parents"}:
         raise ReceiptError("validated checkout identity is malformed")
-    if validated.get("parents") != group["parents"] or validated.get("tree") != group["tree"]:
+    validated_subject_matches = (
+        validated.get("sha") == receipt["head_sha"]
+        or validated.get("parents") == group["parents"]
+    )
+    if not validated_subject_matches or validated.get("tree") != group["tree"]:
         raise ReceiptError("merge-group tree is not identical to validated PR tree")
     current_policy = policy_identity(repo, group["sha"])
     protected_policy = policy_identity(repo, group["parents"][0])

@@ -115,6 +115,30 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         self.assertEqual(decision["source_receipt_digest"], issued["receipt_digest"])
         self.assertNotEqual(decision["decision_digest"], issued["receipt_digest"])
 
+    def test_exact_head_checkout_derives_same_subject_bound_decision(self) -> None:
+        args = self.issue_args()
+        args.checkout_sha = self.head
+        issued = receipt.issue(args)
+        decision = receipt.verify_receipt(issued, self.verify_args())
+        self.assertEqual(issued["validated_checkout"]["sha"], self.head)
+        self.assertEqual(decision["verdict"], "reuse")
+        self.assertEqual(decision["merge_group_sha"], self.group)
+
+    def test_shallow_merge_checkout_preserves_object_parent_identity(self) -> None:
+        # actions/checkout fetch-depth=1 records the checked-out synthetic merge
+        # in .git/shallow. Revision walkers hide its parents, but exact receipt
+        # identity must use the parents stored in the commit object itself.
+        (self.repo / ".git/shallow").write_text(
+            f"{self.validated}\n", encoding="ascii"
+        )
+        issued = receipt.issue(self.issue_args())
+        self.assertEqual(
+            issued["validated_checkout"]["parents"], [self.base, self.head]
+        )
+        self.assertEqual(
+            receipt.verify_receipt(issued, self.verify_args())["verdict"], "reuse"
+        )
+
     def test_changed_base_or_head_fails_closed(self) -> None:
         issued = receipt.issue(self.issue_args())
         changed = git(
@@ -165,10 +189,15 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(receipt.ReceiptError, "artifact identity"):
             receipt.verify_receipt(issued, self.verify_args())
 
-    def test_issue_rejects_non_merge_checkout_and_missing_artifact(self) -> None:
+    def test_issue_rejects_unrelated_checkout_and_missing_artifact(self) -> None:
         args = self.issue_args()
-        args.checkout_sha = self.head
-        with self.assertRaisesRegex(receipt.ReceiptError, "exact base.head merge"):
+        unrelated = git(
+            self.repo,
+            "commit-tree", f"{self.head}^{{tree}}", "-p", self.head,
+            input_text="unrelated checkout\n",
+        )
+        args.checkout_sha = unrelated
+        with self.assertRaisesRegex(receipt.ReceiptError, "neither the exact head"):
             receipt.issue(args)
         args = self.issue_args()
         Path(json.loads(self.ctest_json.read_text())["tests"][0]["command"][0]).unlink()

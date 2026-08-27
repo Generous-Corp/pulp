@@ -1689,7 +1689,7 @@ jobs:
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       - name: Issue exact protected-validation receipt
-        id: protected-receipt
+        id: protected_receipt
         if: >-
           success()
           && github.event_name == 'pull_request'
@@ -1703,22 +1703,27 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin \
             "$PR_BASE_SHA" "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/receipt-head"
+          # Actions may check out either the exact PR head or a synthetic merge,
+          # depending on the event/ref configuration. Bind the receipt to the
+          # commit actually built and tested; the issuer then proves that subject
+          # against the event-pinned base and head.
+          checkout_sha="$(git rev-parse --verify 'HEAD^{commit}')"
           receipt_dir="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}"
           mkdir -p "$receipt_dir"
           python3 tools/scripts/protected_merge_receipt.py issue \
             --repository "$GITHUB_REPOSITORY" --target "${{ matrix.key }}" \
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
-            --checkout-sha "$GITHUB_SHA" --workflow-sha "${{ github.workflow_sha }}" \
+            --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
           echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact protected-validation receipt
-        if: steps.protected-receipt.outcome == 'success'
+        if: steps.protected_receipt.outcome == 'success'
         uses: actions/upload-artifact@v5
         with:
           name: protected-validation-${{ matrix.key }}-${{ github.event.pull_request.head.sha }}-${{ github.event.pull_request.base.sha }}
-          path: ${{ steps.protected-receipt.outputs.path }}/receipt.json
+          path: ${{ steps.protected_receipt.outputs.path }}/receipt.json
           if-no-files-found: error
           retention-days: 2
 
