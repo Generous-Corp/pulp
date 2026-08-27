@@ -47,6 +47,11 @@ on:
         required: false
         default: ""
         type: string
+      local_proof:
+        description: "Run only the bounded protected-main Pulp repository-isolation proof"
+        required: false
+        default: false
+        type: boolean
       run_windows:
         description: "Include the hosted Windows leg; disable for a trusted Linux-only Mac Pro dispatch"
         required: false
@@ -63,8 +68,11 @@ on:
 # cancel-in-progress would let a rapid second merge kill the first run's
 # cache-save step and leave the cache stale exactly when main is busiest.
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  # A local proof must neither cancel nor be cancelled by ordinary validation.
+  # The run ID gives each proof its own domain while preserving the historical
+  # build-<ref> domain byte-for-byte for every non-proof event.
+  group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' && !inputs.local_proof }}
 
 permissions:
   actions: read
@@ -72,7 +80,40 @@ permissions:
   pull-requests: read
 
 jobs:
+  # Default-off, non-mergeable assignment proof for the repository-isolated M1
+  # fleet profile. It intentionally checks out and executes no repository code,
+  # receives no token permissions, and requests the exact protected Pulp runner
+  # group plus the merge-group tier watched by TartCI. Operators may cancel the
+  # bounded hold after capturing run/job/runner/group/lease/VM identity; doing so
+  # cannot affect a normal Build and Test concurrency group or another repo.
+  local-proof:
+    name: Pulp repository-isolation local proof
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+      && inputs.local_proof
+    permissions: {}
+    runs-on:
+      group: pulp-trusted-build
+      labels:
+        - self-hosted
+        - macOS
+        - ARM64
+        - pulp-build
+        - pulp-build-vm
+        - pulp-build-merge-group
+    timeout-minutes: 12
+    steps:
+      - name: Hold bounded assignment proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Pulp repository-isolation proof assigned to ${RUNNER_NAME}"
+          echo "Holding for at most 600 seconds; operator cancellation is expected during the paired proof."
+          sleep 600
+
   resolve-provider:
+    if: ${{ !inputs.local_proof }}
     # Runner for the required-gate routing preamble. Defaults to ubuntu-latest
     # (no behaviour change). Set the PULP_PREAMBLE_RUNS_ON_JSON repo var to a
     # self-hosted Linux selector — e.g. ["self-hosted","Linux","ARM64",
@@ -798,6 +839,7 @@ jobs:
   # treats any uncertainty as "native build required". See that script's
   # module docstring + tools/scripts/test_classify_changes.py.
   classify:
+    if: ${{ !inputs.local_proof }}
     # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
     # required-gate preamble off the saturated GitHub-hosted pool when opted in.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
@@ -974,6 +1016,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   protected-receipt-reuse:
+    if: ${{ !inputs.local_proof }}
     needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
@@ -1053,7 +1096,8 @@ jobs:
     # touches no C++/Swift build input. The macos/linux/windows alias jobs
     # below still run and report.
     if: >-
-      always()
+      !inputs.local_proof
+      && always()
       && needs.resolve-provider.result == 'success'
       && needs.classify.result == 'success'
       && needs.classify.outputs.native_build_required == 'true'
@@ -1781,7 +1825,8 @@ jobs:
     # saturate the concurrent-hosted-job pool and starve the required
     # ubuntu check that the merge queue waits on.
     if: >-
-      needs.classify.outputs.native_build_required == 'true'
+      !inputs.local_proof
+      && needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
@@ -1857,7 +1902,8 @@ jobs:
     # saturate the concurrent-hosted-job pool and starve the required
     # ubuntu check that the merge queue waits on.
     if: >-
-      needs.classify.outputs.native_build_required == 'true'
+      !inputs.local_proof
+      && needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
@@ -1921,7 +1967,8 @@ jobs:
     # saturate the concurrent-hosted-job pool and starve the required
     # ubuntu check that the merge queue waits on.
     if: >-
-      needs.classify.outputs.native_build_required == 'true'
+      !inputs.local_proof
+      && needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
@@ -1971,7 +2018,8 @@ jobs:
     needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
-      always()
+      !inputs.local_proof
+      && always()
       && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
@@ -1999,7 +2047,8 @@ jobs:
     needs: [resolve-provider, classify, protected-receipt-reuse]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
-      always()
+      !inputs.local_proof
+      && always()
       && github.event_name == 'merge_group'
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
@@ -2042,7 +2091,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
+    if: ${{ !inputs.local_proof && always() && github.event_name != 'push' && github.event_name != 'merge_group' }}
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -2089,7 +2138,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
+    if: ${{ !inputs.local_proof && always() && github.event_name != 'push' && github.event_name != 'merge_group' }}
     steps:
       - name: Windows leg outcome (advisory)
         env:

@@ -1,6 +1,8 @@
 self-hosted-runner:
   labels:
     - pulp-queue-authority-studio
+    - pulp-build
     - pulp-build-vm
+    - pulp-build-merge-group
     - shipyard-recovery-pool
     - shipyard-recovery-canary-m5-20260814
