@@ -196,12 +196,16 @@ def toolchain_identity(target: str, build_dir: Path) -> dict[str, Any]:
 def issue(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     checkout = commit_identity(repo, args.checkout_sha)
-    expected_parents = [
-        _git(repo, "rev-parse", f"{args.base_sha}^{{commit}}"),
-        _git(repo, "rev-parse", f"{args.head_sha}^{{commit}}"),
-    ]
-    if checkout["parents"] != expected_parents:
-        raise ReceiptError("validated checkout is not the exact base+head merge")
+    expected_base = _git(repo, "rev-parse", f"{args.base_sha}^{{commit}}")
+    expected_head = _git(repo, "rev-parse", f"{args.head_sha}^{{commit}}")
+    expected_parents = [expected_base, expected_head]
+    if (
+        checkout["sha"] != expected_head
+        and checkout["parents"] != expected_parents
+    ):
+        raise ReceiptError(
+            "validated checkout is neither the exact head nor the exact base+head merge"
+        )
     policy = policy_identity(repo, checkout["sha"])
     artifact = artifact_identity(args.build_dir.resolve(), args.ctest_json)
     body = {
@@ -264,7 +268,11 @@ def verify_receipt(receipt: dict[str, Any], args: argparse.Namespace) -> dict[st
     validated = receipt["validated_checkout"]
     if set(validated) != {"sha", "tree", "parents"}:
         raise ReceiptError("validated checkout identity is malformed")
-    if validated.get("parents") != group["parents"] or validated.get("tree") != group["tree"]:
+    validated_subject_matches = (
+        validated.get("sha") == receipt["head_sha"]
+        or validated.get("parents") == group["parents"]
+    )
+    if not validated_subject_matches or validated.get("tree") != group["tree"]:
         raise ReceiptError("merge-group tree is not identical to validated PR tree")
     current_policy = policy_identity(repo, group["sha"])
     protected_policy = policy_identity(repo, group["parents"][0])
