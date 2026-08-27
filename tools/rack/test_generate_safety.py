@@ -1604,6 +1604,37 @@ class BehaviourGateInfrastructureSafety(unittest.TestCase):
 
 
 class ZeroModelReplay(unittest.TestCase):
+    def test_normal_module_build_spends_one_provider_call_by_default(self) -> None:
+        response_text = (
+            "```json manifest\n"
+            '{"slug":"WRONGVCA","name":"Wrong VCA","hp":4,'
+            '"params":[],"inputs":[],"outputs":[],"tags":[]}'
+            "\n```\n```cpp dsp\n"
+            "#include <pulp/signal/vca.hpp>\n"
+            "pulp::signal::VcaT<float> amplifier;\n"
+            "```\n")
+        with tempfile.TemporaryDirectory() as root:
+            pack = pathlib.Path(root) / "pack"
+            for subdir in ("modules", "src", "res"):
+                (pack / subdir).mkdir(parents=True)
+            provider = mock.Mock(return_value=response_text)
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate.fetch_sdk, "compiler_missing",
+                                      return_value=None), \
+                    mock.patch.object(generate, "preflight"), \
+                    mock.patch.object(generate, "ensure_writable_toolchain"), \
+                    mock.patch.object(generate, "resolve_sdk", return_value="/sdk"), \
+                    mock.patch.object(generate, "preflight_behaviour_gate"), \
+                    mock.patch.object(generate, "ask_model", provider):
+                with self.assertRaisesRegex(
+                        SystemExit, "gave up after 1 attempts"):
+                    generate.main([
+                        "generate.py",
+                        "an 8 HP slew limiter with separate rise and fall and "
+                        "an end-of-rise gate"])
+
+            self.assertEqual(1, provider.call_count)
+
     def test_failed_provider_partial_response_is_retained(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             pack = pathlib.Path(root) / "pack"
