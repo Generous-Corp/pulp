@@ -860,11 +860,12 @@ TEST_CASE("codegen lowers resize constraints to flex within the parent",
         INFO(js);
         CHECK(js.find("'flex_grow', 1)") != std::string::npos);
     }
-    // The same horizontal fill is cross-axis under a column parent.
+    // Cross-axis proportional SCALE has no faithful Flexbox equivalent, so it
+    // keeps the authored dimension instead of being broadened into STRETCH.
     {
         auto js = emit("scale", "", LayoutDirection::column);
         INFO(js);
-        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+        CHECK(js.find("'align_self', 'stretch')") == std::string::npos);
         CHECK(js.find("'flex_grow', 1)") == std::string::npos);
     }
     // stretch (pin both edges) → align-self:stretch.
@@ -992,8 +993,8 @@ TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex c
         INFO(js);
         CHECK(js.find("'margin_left', 'auto')") != std::string::npos);
         CHECK(js.find("margin_right") == std::string::npos);
-        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
-        CHECK(js.find("'min_height', '100%')") != std::string::npos);
+        CHECK(js.find("'align_self', 'stretch')") == std::string::npos);
+        CHECK(js.find("'flex_grow', 1)") == std::string::npos);
     }
     {
         auto js = emit_envelope("MIN", "MIN");

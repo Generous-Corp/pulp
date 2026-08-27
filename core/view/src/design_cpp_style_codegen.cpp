@@ -220,12 +220,17 @@ void emit_common_layout(std::ostringstream& out,
     if (constraints.margin_right_auto) emit_auto_margin("dim_margin_right", "margin_right");
     if (constraints.margin_top_auto) emit_auto_margin("dim_margin_top", "margin_top");
     if (constraints.margin_bottom_auto) emit_auto_margin("dim_margin_bottom", "margin_bottom");
-    if (constraints.fill_width && parent_is_row)
+    if ((constraints.scale_width || constraints.stretch_width) && parent_is_row)
         emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
-    if (constraints.fill_height && (!parent_direction || parent_is_column))
+    if ((constraints.scale_height || constraints.stretch_height) &&
+        (!parent_direction || parent_is_column))
         emit_line(out, depth, opts.indent_spaces, "flex.flex_grow = std::max(flex.flex_grow, 1.0f);");
-    const bool fill_width_cross = constraints.fill_width && (!parent_direction || parent_is_column);
-    const bool fill_height_cross = constraints.fill_height && parent_is_row;
+    // SCALE is proportional resizing, which Flexbox cannot express on its
+    // cross axis. Leave that dimension authored rather than misrepresenting it
+    // as STRETCH (pinning both edges).
+    const bool fill_width_cross = constraints.stretch_width &&
+                                  (!parent_direction || parent_is_column);
+    const bool fill_height_cross = constraints.stretch_height && parent_is_row;
     if ((fill_width_cross || fill_height_cross) && !has_explicit_align_self)
         emit_line(out, depth, opts.indent_spaces, "flex.align_self = pulp::view::FlexAlign::stretch;");
     if (fill_width_cross && !has_explicit_align_self && !node.style.min_width)

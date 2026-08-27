@@ -1339,12 +1339,14 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_margin_bottom = {0.0f, DimensionUnit::auto_};
         flex.margin_bottom = -1.0f;
     }
-    if (constraints.fill_width && parent_is_row)
+    if ((constraints.scale_width || constraints.stretch_width) && parent_is_row)
         flex.flex_grow = std::max(flex.flex_grow, 1.0f);
-    if (constraints.fill_height && (!parent_direction || parent_is_column))
+    if ((constraints.scale_height || constraints.stretch_height) &&
+        (!parent_direction || parent_is_column))
         flex.flex_grow = std::max(flex.flex_grow, 1.0f);
-    const bool fill_width_cross = constraints.fill_width && (!parent_direction || parent_is_column);
-    const bool fill_height_cross = constraints.fill_height && parent_is_row;
+    const bool fill_width_cross = constraints.stretch_width &&
+                                  (!parent_direction || parent_is_column);
+    const bool fill_height_cross = constraints.stretch_height && parent_is_row;
     if ((fill_width_cross || fill_height_cross) && !has_explicit_align_self)
         flex.align_self = FlexAlign::stretch;
     if (fill_width_cross && !has_explicit_align_self && !node.style.min_width)

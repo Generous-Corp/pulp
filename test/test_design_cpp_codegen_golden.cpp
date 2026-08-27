@@ -527,9 +527,9 @@ TEST_CASE("baked C++ emits figma resize constraints and grid auto-flow",
         CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") != std::string::npos);
     }
 
-    SECTION("horizontal scale stretches under a column parent") {
+    SECTION("horizontal scale preserves its authored cross-axis size") {
         const auto src = source_for("scale", nullptr, LayoutDirection::column);
-        CHECK(src.find("flex.align_self = pulp::view::FlexAlign::stretch;") != std::string::npos);
+        CHECK(src.find("flex.align_self = pulp::view::FlexAlign::stretch;") == std::string::npos);
         CHECK(src.find("flex.flex_grow = std::max(flex.flex_grow, 1.0f);") == std::string::npos);
     }
 

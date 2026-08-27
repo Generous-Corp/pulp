@@ -954,10 +954,12 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     if (constraints.margin_right_auto) auto_margin("margin_right");
     if (constraints.margin_top_auto) auto_margin("margin_top");
     if (constraints.margin_bottom_auto) auto_margin("margin_bottom");
-    if (constraints.fill_width && parent_is_row) grow();
-    if (constraints.fill_height && parent_is_column) grow();
-    const bool fill_width_cross = constraints.fill_width && parent_is_column;
-    const bool fill_height_cross = constraints.fill_height && parent_is_row;
+    if ((constraints.scale_width || constraints.stretch_width) && parent_is_row) grow();
+    if ((constraints.scale_height || constraints.stretch_height) && parent_is_column) grow();
+    // Cross-axis SCALE has no faithful Flexbox equivalent. Preserve the
+    // authored dimension instead of turning proportional resize into STRETCH.
+    const bool fill_width_cross = constraints.stretch_width && parent_is_column;
+    const bool fill_height_cross = constraints.stretch_height && parent_is_row;
     const bool apply_cross_fill = (fill_width_cross || fill_height_cross) && !stretch_done;
     if (apply_cross_fill) stretch();
     // Pinning both edges is fill-the-axis. min-width/min-height 100% keeps that

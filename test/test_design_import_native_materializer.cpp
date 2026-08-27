@@ -3782,13 +3782,13 @@ TEST_CASE("native materializer lowers figma resize constraints onto flex",
         CHECK(child->flex().flex_grow == Catch::Approx(3.0f));
     }
 
-    SECTION("horizontal scale stretches the cross axis of a column parent") {
+    SECTION("horizontal scale preserves its authored cross-axis size") {
         auto ir = frame_with("scale", nullptr);
         ir.root.layout.direction = LayoutDirection::column;
         auto root = build_native_view_tree(ir, {}, {});
         auto* child = root->child_at(0);
         REQUIRE(child != nullptr);
-        CHECK(child->flex().align_self == FlexAlign::stretch);
+        CHECK(child->flex().align_self != FlexAlign::stretch);
         CHECK(child->flex().flex_grow == Catch::Approx(0.0f));
     }
 
