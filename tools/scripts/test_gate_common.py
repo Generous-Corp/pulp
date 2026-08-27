@@ -153,13 +153,13 @@ class GitHelperTests(unittest.TestCase):
             run_git(d, "init", "-q", "-b", "main")
             run_git(d, "config", "user.email", "t@t")
             run_git(d, "config", "user.name", "t")
-            (open(os.path.join(d, "base.txt"), "w")).write("base\n")
+            pathlib.Path(d, "base.txt").write_text("base\n")
             run_git(d, "add", "."); run_git(d, "commit", "-qm", "base")
             run_git(d, "checkout", "-qb", "feature")
-            (open(os.path.join(d, "Y.txt"), "w")).write("y\n")  # the PR's real change
+            pathlib.Path(d, "Y.txt").write_text("y\n")  # the PR's real change
             run_git(d, "add", "."); run_git(d, "commit", "-qm", "add Y")
             run_git(d, "checkout", "-q", "main")
-            (open(os.path.join(d, "X.txt"), "w")).write("x\n")  # an unrelated later merge
+            pathlib.Path(d, "X.txt").write_text("x\n")  # an unrelated later merge
             run_git(d, "add", "."); run_git(d, "commit", "-qm", "add X")
 
             cwd = os.getcwd()
@@ -169,6 +169,110 @@ class GitHelperTests(unittest.TestCase):
             finally:
                 os.chdir(cwd)
             self.assertEqual(changed, ["Y.txt"])  # NOT X.txt (branch is behind on it)
+
+    def test_comparison_receipt_uses_merge_base_when_base_is_not_ancestor(self) -> None:
+        completed = iter([
+            subprocess.CompletedProcess([], 0, stdout="h" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="b" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="a" * 40 + "\n", stderr=""),
+        ])
+        with mock.patch.object(gc.subprocess, "run", side_effect=lambda *a, **k: next(completed)):
+            result = gc.resolve_git_comparison("/repo", "origin/main", source="test")
+        self.assertEqual(result.status, "available")
+        self.assertEqual(result.comparison_mode, "merge_base")
+        self.assertEqual(result.comparison_anchor, "a" * 40)
+
+    def test_comparison_never_falls_back_to_raw_tip_without_merge_base(self) -> None:
+        completed = iter([
+            subprocess.CompletedProcess([], 0, stdout="h" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="b" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="no merge base\n"),
+        ])
+        with mock.patch.object(gc.subprocess, "run", side_effect=lambda *a, **k: next(completed)):
+            result = gc.resolve_git_comparison("/repo", "origin/main")
+        self.assertEqual(result.status, "history_unavailable")
+        self.assertIsNone(result.comparison_anchor)
+        self.assertEqual(result.resolved_base_tip, "b" * 40)
+
+    def test_missing_base_receipt_still_resolves_requested_head(self) -> None:
+        completed = iter([
+            subprocess.CompletedProcess([], 0, stdout="h" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 128, stdout="", stderr="missing base\n"),
+        ])
+        with mock.patch.object(
+            gc.subprocess, "run", side_effect=lambda *a, **k: next(completed)
+        ):
+            result = gc.resolve_git_comparison("/repo", "missing", "HEAD")
+        self.assertEqual(result.status, "history_unavailable")
+        self.assertEqual(result.resolved_head, "h" * 40)
+        self.assertIsNone(result.resolved_base_tip)
+
+    def test_unrelated_real_histories_have_no_comparison_anchor(self) -> None:
+        import tempfile
+
+        def run_git(cwd, *args):
+            return subprocess.run(
+                ["git", *args], cwd=cwd, check=True, capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        with tempfile.TemporaryDirectory() as directory:
+            first = pathlib.Path(directory, "first")
+            second = pathlib.Path(directory, "second")
+            first.mkdir()
+            second.mkdir()
+            for repo, name in ((first, "first"), (second, "second")):
+                run_git(repo, "init", "-q", "-b", "main")
+                run_git(repo, "config", "user.email", "t@t")
+                run_git(repo, "config", "user.name", "t")
+                pathlib.Path(repo, f"{name}.txt").write_text(name + "\n")
+                run_git(repo, "add", ".")
+                run_git(repo, "commit", "-qm", name)
+            run_git(first, "fetch", "-q", str(second), "HEAD:unrelated")
+            result = gc.resolve_git_comparison(first, "main", "unrelated")
+        self.assertEqual(result.status, "history_unavailable")
+        self.assertEqual(result.comparison_mode, "unresolved")
+        self.assertIsNone(result.comparison_anchor)
+        self.assertIsNotNone(result.resolved_base_tip)
+        self.assertIsNotNone(result.resolved_head)
+
+    def test_read_git_path_distinguishes_absent_path_from_unavailable_history(self) -> None:
+        comparison = gc.GitComparisonProvenance(
+            "base", "HEAD", "test", "b" * 40, "h" * 40, "b" * 40,
+            "base_tip", "available",
+        )
+        absent = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with mock.patch.object(gc.subprocess, "run", return_value=absent):
+            result = gc.read_git_path("/repo", comparison, "missing.json")
+        self.assertEqual(result.status, "path_absent")
+        unavailable = gc.GitComparisonProvenance("bad", "HEAD", "test")
+        self.assertEqual(
+            gc.read_git_path("/repo", unavailable, "missing.json").status,
+            "history_unavailable",
+        )
+
+    def test_receipt_bounds_stderr_and_excludes_content(self) -> None:
+        result = gc.GitComparisonProvenance(
+            "base", "HEAD", "test", status="command_failed",
+            stderr=gc._bounded_git_stderr("x" * 800), content="secret bytes",
+        )
+        receipt = gc.git_comparison_receipt(result)
+        self.assertNotIn("secret bytes", receipt)
+        self.assertLess(len(result.stderr), 513)
+        self.assertIn('"status":"command_failed"', receipt)
+
+    def test_post_resolution_failure_returns_new_consistent_receipt(self) -> None:
+        available = gc.GitComparisonProvenance(
+            "base", "HEAD", "test", "b" * 40, "h" * 40, "b" * 40,
+            "base_tip", "available", content="resolved content",
+        )
+        failed = gc.git_comparison_command_failed(available, "x" * 900)
+        self.assertEqual(available.status, "available")
+        self.assertEqual(failed.status, "command_failed")
+        self.assertIsNone(failed.content)
+        self.assertLessEqual(len(failed.stderr), 512)
 
     def test_parse_trailer_block_ignores_non_trailer_output(self) -> None:
         completed = subprocess.CompletedProcess(

@@ -10,6 +10,14 @@ import subprocess
 from typing import Any
 
 import agent_capability_surface as surface
+from gate_common import (
+    GitComparisonProvenance,
+    git_comparison_authority_unavailable,
+    git_comparison_command_failed,
+    git_comparison_receipt,
+    read_git_path,
+    resolve_git_comparison,
+)
 from agent_capability_evolution import (
     manifest_evolution_problems as evolution_problems,
     surface_evolution_problems,
@@ -153,31 +161,50 @@ def protected_base_problems(
     history: dict[str, Any],
     current_manifest: dict[str, Any],
     current_surface: dict[str, Any],
+    comparison: GitComparisonProvenance | None = None,
 ) -> list[str]:
     """Compare against protected-tip artifacts, which this checkout cannot edit."""
     base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
-    if _git_output(root, ["rev-parse", "--is-inside-work-tree"]) != "true":
+    if comparison is None:
         # Source archives have no independently addressable protected history.
         # Their self-contained history is still checked above; PR/CI checkouts
-        # must resolve or fetch the immutable protected tip below.
-        return []
-    protected_tip = _resolve_protected_tip(root, base_ref)
-    if protected_tip is None:
+        # with Git metadata must resolve or fetch the immutable tip below.
+        if not (root / ".git").exists():
+            return []
+        comparison = _resolve_protected_comparison(root, base_ref)
+    if comparison.status != "available":
         return [
-            f"could not resolve protected capability history base {base_ref!r}; "
-            "set PULP_AGENT_CAPABILITY_BASE_REF to the CI base ref"
+            "protected capability history is unavailable; comparison receipt="
+            + git_comparison_receipt(comparison)
         ]
-    tip_manifest = _git_json(root, protected_tip, SNAPSHOT)
-    old_manifest = tip_manifest
-    old_surface = _git_json(root, protected_tip, surface.SURFACE_SNAPSHOT)
-    old_history = _git_json(root, protected_tip, HISTORY_FILE)
-    if old_manifest is None and old_surface is None and old_history is None:
+    reads = [
+        read_git_path(root, comparison, SNAPSHOT),
+        read_git_path(root, comparison, surface.SURFACE_SNAPSHOT),
+        read_git_path(root, comparison, HISTORY_FILE),
+    ]
+    unavailable = [item for item in reads if item.status not in {"available", "path_absent"}]
+    if unavailable:
+        return [
+            "protected capability history is unavailable; comparison receipt="
+            + git_comparison_receipt(unavailable[0])
+        ]
+    if all(item.status == "path_absent" for item in reads):
         if len(history.get("entries", [])) != 1:
             return ["initial capability history bootstrap must contain exactly one entry"]
         return []
-    problems: list[str] = []
-    if old_manifest is None or old_surface is None or old_history is None:
+    if any(item.status == "path_absent" for item in reads):
         return ["protected base has an incomplete capability history contract"]
+    parsed: list[Any] = []
+    for item in reads:
+        try:
+            parsed.append(json.loads(item.content or ""))
+        except json.JSONDecodeError as error:
+            return [
+                f"protected capability authority is invalid JSON at "
+                f"{item.path}: {error}"
+            ]
+    old_manifest, old_surface, old_history = parsed
+    problems: list[str] = []
     problems.extend(append_only_history_problems(old_history, history))
     problems.extend(
         evolution_problems(
@@ -223,13 +250,18 @@ def _git_json(root: pathlib.Path, revision: str, path: pathlib.Path) -> Any:
         return {"_invalid": True}
 
 def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
+    comparison = _resolve_protected_comparison(root, base_ref)
+    return comparison.comparison_anchor if comparison.status == "available" else None
+
+
+def _resolve_protected_comparison(
+    root: pathlib.Path, base_ref: str
+) -> GitComparisonProvenance:
     explicit_ref = "PULP_AGENT_CAPABILITY_BASE_REF" in os.environ
     if explicit_ref:
-        tip = _git_output(
-            root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"]
+        return resolve_git_comparison(
+            root, base_ref, source="environment_base_ref"
         )
-        if tip is not None:
-            return tip
     candidate: str | None = None
     event_path = (
         os.environ.get("GITHUB_EVENT_PATH")
@@ -239,8 +271,21 @@ def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
     if event_path is not None:
         try:
             event = json.loads(pathlib.Path(event_path).read_text())
-            candidate = event.get("pull_request", {}).get("base", {}).get("sha")
-            candidate = candidate or event.get("merge_group", {}).get("base_sha")
+            if not isinstance(event, dict):
+                raise TypeError("GitHub event root is not an object")
+            pull_request = event.get("pull_request")
+            if "pull_request" in event and not isinstance(pull_request, dict):
+                raise TypeError("GitHub event pull_request is not an object")
+            pull_base = pull_request.get("base") if pull_request else None
+            if pull_request and "base" in pull_request and not isinstance(pull_base, dict):
+                raise TypeError("GitHub event pull_request.base is not an object")
+            merge_group = event.get("merge_group")
+            if "merge_group" in event and not isinstance(merge_group, dict):
+                raise TypeError("GitHub event merge_group is not an object")
+            candidate = pull_base.get("sha") if pull_base else None
+            candidate = candidate or (
+                merge_group.get("base_sha") if merge_group else None
+            )
             before = event.get("before")
             if (
                 candidate is None
@@ -248,9 +293,26 @@ def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
                 and before != "0" * 40
             ):
                 candidate = before
-        except (OSError, json.JSONDecodeError, AttributeError):
-            candidate = None
+        except (OSError, json.JSONDecodeError, TypeError) as error:
+            resolved = resolve_git_comparison(root, base_ref, source="github_event")
+            return git_comparison_authority_unavailable(
+                resolved, f"cannot read GitHub event authority: {error}"
+            )
+        if candidate is not None and not (
+            isinstance(candidate, str)
+            and re.fullmatch(r"[0-9a-fA-F]{40}", candidate)
+        ):
+            resolved = resolve_git_comparison(root, base_ref, source="github_event")
+            return git_comparison_authority_unavailable(
+                resolved, "GitHub event base authority is not a 40-hex commit"
+            )
     if isinstance(candidate, str) and re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
+        candidate = candidate.lower()
+        comparison = resolve_git_comparison(root, candidate, source="github_event")
+        if comparison.status == "available":
+            return comparison
+        if comparison.resolved_head is None or comparison.resolved_base_tip is not None:
+            return comparison
         if _git_output(root, ["cat-file", "-e", f"{candidate}^{{commit}}"]) is None:
             try:
                 fetched = subprocess.run(
@@ -259,12 +321,16 @@ def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
                     text=True,
                     capture_output=True,
                 )
-            except OSError:
-                return None
+            except OSError as error:
+                return git_comparison_command_failed(
+                    comparison, f"could not execute git fetch: {error}"
+                )
             if fetched.returncode != 0:
-                return None
-        return candidate.lower()
-    return _resolve_local_base(root, base_ref)
+                return git_comparison_authority_unavailable(
+                    comparison, fetched.stderr or "git fetch failed"
+                )
+        return resolve_git_comparison(root, candidate, source="github_event")
+    return resolve_git_comparison(root, base_ref, source="local_ref")
 
 def _resolve_local_base(root: pathlib.Path, base_ref: str) -> str | None:
     """Resolve the protected base for a checkout with no CI event to read.
@@ -284,19 +350,12 @@ def _resolve_local_base(root: pathlib.Path, base_ref: str) -> str | None:
     So resolve the ref, and if it is not an ancestor of HEAD, step back to the
     merge-base — the newest commit the two genuinely share. That point does not
     move when the tip advances, which is what makes the answer reproducible.
-    Falls back to the raw tip when there is no merge-base (unrelated histories,
-    or a shallow clone whose graph cannot answer), preserving prior behaviour
-    rather than failing closed on a checkout the check simply cannot reason about.
+    If no merge-base is available (unrelated histories or an incomplete shallow
+    graph), resolution fails closed. Comparing against the raw moving tip would
+    silently answer a different question.
     """
-    tip = _git_output(root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
-    if tip is None:
-        return None
-    head = _git_output(root, ["rev-parse", "--verify", "HEAD^{commit}"])
-    if head is None:
-        return tip
-    if _git_succeeds(root, ["merge-base", "--is-ancestor", tip, head]):
-        return tip
-    return _git_output(root, ["merge-base", head, tip]) or tip
+    comparison = resolve_git_comparison(root, base_ref, source="local_ref")
+    return comparison.comparison_anchor if comparison.status == "available" else None
 
 def _git_succeeds(root: pathlib.Path, arguments: list[str]) -> bool:
     try:

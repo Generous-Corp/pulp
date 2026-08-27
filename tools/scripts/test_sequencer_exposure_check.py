@@ -11,7 +11,10 @@ import tempfile
 from pathlib import Path
 
 from sequencer_exposure_check import (
+    _ancestry_problem,
     _load_base_transition,
+    _load_base_transition_with_receipt,
+    _load_sequencer_trailers,
     _semantic_added_paths,
     is_sequencer_owned_path,
     validate_document,
@@ -209,6 +212,20 @@ def initialize_history(root: Path) -> tuple[str, str, str, str]:
 
 
 def main() -> int:
+    negative = _ancestry_problem(
+        subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+        "not ancestor", "history unavailable",
+    )
+    unavailable = _ancestry_problem(
+        subprocess.CompletedProcess([], 128, stdout="", stderr="x" * 900),
+        "not ancestor", "history unavailable",
+    )
+    if negative != "not ancestor":
+        raise AssertionError(f"ancestry exit-1 control misclassified: {negative}")
+    if unavailable is None or "history unavailable (git exit 128)" not in unavailable:
+        raise AssertionError(f"ancestry execution-failure control escaped: {unavailable}")
+    if len(unavailable) > 570:
+        raise AssertionError("ancestry stderr was not bounded")
     with tempfile.TemporaryDirectory(prefix="pulp-sequencer-exposure-") as directory:
         root = Path(directory)
         # Materialize evidence before committing a real two-parent merge graph.
@@ -221,6 +238,11 @@ def main() -> int:
         provenance_errors = validate_git_provenance(valid, root)
         if provenance_errors:
             raise AssertionError("valid provenance failed:\n" + "\n".join(provenance_errors))
+        _, _, unavailable_errors = _load_base_transition(root, "missing-base-ref")
+        if not any("git history unavailable" in error for error in unavailable_errors):
+            raise AssertionError(
+                f"missing history mutation unexpectedly passed: {unavailable_errors}"
+            )
         squash_valid = copy.deepcopy(valid)
         squash_valid["rows"] = [copy.deepcopy(valid["rows"][0])]
         squash_valid["rows"][0]["owned_paths"] = ["squash.txt"]
@@ -233,6 +255,29 @@ def main() -> int:
         provenance_errors = validate_git_provenance(squash_valid, root)
         if provenance_errors:
             raise AssertionError("valid squash provenance failed:\n" + "\n".join(provenance_errors))
+        frozen_provenance_errors = validate_git_provenance(
+            squash_valid, root, merge_sha
+        )
+        if not any("not an ancestor" in error for error in frozen_provenance_errors):
+            raise AssertionError(
+                "provenance escaped frozen head: " +
+                "\n".join(frozen_provenance_errors)
+            )
+        frozen_tombstone = {
+            "tombstones": [{
+                "id": "SEQ-FUTURE-REMOVAL",
+                "delivery_state": "released",
+                "removed_in_merge": squash_merge,
+            }]
+        }
+        frozen_tombstone_errors = validate_tombstone_provenance(
+            frozen_tombstone, root, merge_sha
+        )
+        if not any("not an ancestor" in error for error in frozen_tombstone_errors):
+            raise AssertionError(
+                "tombstone provenance escaped frozen head: " +
+                "\n".join(frozen_tombstone_errors)
+            )
         remote = root.parent / f"{root.name}-remote.git"
         fresh = root.parent / f"{root.name}-fresh"
         subprocess.run(
@@ -384,6 +429,28 @@ def main() -> int:
             raise AssertionError(
                 f"false historical evidence unexpectedly passed: {historical_errors}"
             )
+        mutation = copy.deepcopy(valid)
+        mutation["rows"][0]["evidence"][0]["path"] = "docs/absent-at-merge.txt"
+        absent_errors = validate_release_evidence(mutation, root)
+        if not any("path was absent from released snapshot" in error
+                   for error in absent_errors):
+            raise AssertionError(f"absent evidence path escaped: {absent_errors}")
+        mutation = copy.deepcopy(valid)
+        mutation["rows"][0]["release"]["merge_sha"] = SHA_A
+        unavailable_errors = validate_release_evidence(mutation, root)
+        if not any("evidence history unavailable" in error
+                   for error in unavailable_errors):
+            raise AssertionError(
+                f"unavailable evidence history misclassified: {unavailable_errors}"
+            )
+        absent_tombstone_errors = validate_tombstone_provenance(
+            frozen_tombstone, root
+        )
+        if not any("removal snapshot does not contain" in error
+                   for error in absent_tombstone_errors):
+            raise AssertionError(
+                f"absent tombstone snapshot misclassified: {absent_tombstone_errors}"
+            )
 
         mutation = copy.deepcopy(valid)
         mutation["rows"][0]["delivery_state"] = "pending"
@@ -416,6 +483,24 @@ def main() -> int:
         if not any("not covered" in error for error in transition_errors):
             raise AssertionError(
                 f"unguarded E0 infrastructure change unexpectedly passed: {transition_errors}"
+            )
+        for infrastructure_path in (
+            "tools/scripts/sequencer_exposure_check.py",
+            "tools/scripts/test_sequencer_exposure_check.py",
+        ):
+            transition_errors = validate_transition(
+                valid, valid, [infrastructure_path]
+            )
+            if transition_errors:
+                raise AssertionError(
+                    f"checker infrastructure path was governed: "
+                    f"{infrastructure_path}: {transition_errors}"
+                )
+        adjacent_checker = "tools/scripts/sequencer_release_check.py"
+        transition_errors = validate_transition(valid, valid, [adjacent_checker])
+        if not any(adjacent_checker in error for error in transition_errors):
+            raise AssertionError(
+                f"adjacent sequencer checker escaped governance: {transition_errors}"
             )
         e0_current = copy.deepcopy(valid)
         e0_pending = copy.deepcopy(valid["rows"][0])
@@ -540,12 +625,28 @@ def main() -> int:
         semantic_base = git(rename_root, "rev-parse", "HEAD")
         semantic_path = "core/state/include/pulp/state/new_control.hpp"
         write(rename_root, semantic_path, "class SequencerStateChannelAdapter {};")
-        git(rename_root, "add", semantic_path)
+        write(rename_root, "docs/status/sequencer-exposure.json", "{}\n")
+        git(rename_root, "add", semantic_path, "docs/status/sequencer-exposure.json")
         git(rename_root, "commit", "-q", "-m", "cross-module sequencer semantics")
+        semantic_head = git(rename_root, "rev-parse", "HEAD")
+        (
+            bootstrap_document,
+            bootstrap_paths,
+            bootstrap_load_errors,
+            bootstrap_receipt,
+        ) = _load_base_transition_with_receipt(rename_root, semantic_base)
+        if bootstrap_document is not None or bootstrap_load_errors:
+            raise AssertionError(
+                f"proven absent-ledger bootstrap failed: {bootstrap_load_errors}"
+            )
+        if bootstrap_receipt.status != "available":
+            raise AssertionError(
+                f"bootstrap lost available comparison: {bootstrap_receipt}"
+            )
         semantic_paths, semantic_errors = _semantic_added_paths(
-            rename_root, semantic_base, [semantic_path]
+            rename_root, semantic_base, bootstrap_paths, semantic_head
         )
-        if semantic_errors or semantic_paths != {semantic_path}:
+        if semantic_errors or semantic_path not in semantic_paths:
             raise AssertionError(
                 f"added-line semantic scan failed: {semantic_paths}, {semantic_errors}"
             )
@@ -576,6 +677,45 @@ def main() -> int:
         if transition_errors:
             raise AssertionError(
                 f"covered semantic change with trailer failed: {transition_errors}"
+            )
+        late_path = "core/state/include/pulp/state/late_control.hpp"
+        write(rename_root, late_path, "class LateSequencerControl {};")
+        git(rename_root, "add", late_path)
+        git(
+            rename_root, "commit", "-q", "-m",
+            "late semantic\n\nSequencer-Exposure: SEQ-LATE",
+        )
+        _, frozen_paths, frozen_errors, frozen_receipt = (
+            _load_base_transition_with_receipt(
+                rename_root, semantic_base, bootstrap_receipt
+            )
+        )
+        if frozen_errors or late_path in frozen_paths:
+            raise AssertionError(
+                f"base transition escaped frozen head: {frozen_paths}, {frozen_errors}"
+            )
+        if frozen_receipt.resolved_head != semantic_head:
+            raise AssertionError(f"base transition re-resolved HEAD: {frozen_receipt}")
+        pinned_paths, pinned_errors = _semantic_added_paths(
+            rename_root, semantic_head, [late_path], semantic_head
+        )
+        if pinned_errors or pinned_paths:
+            raise AssertionError(
+                f"semantic scan escaped frozen head: {pinned_paths}, {pinned_errors}"
+            )
+        pinned_trailers, pinned_trailer_errors = _load_sequencer_trailers(
+            rename_root, semantic_base, semantic_head
+        )
+        live_trailers, live_trailer_errors = _load_sequencer_trailers(
+            rename_root, semantic_base
+        )
+        if pinned_trailer_errors or live_trailer_errors:
+            raise AssertionError(
+                f"trailer range failed: {pinned_trailer_errors}, {live_trailer_errors}"
+            )
+        if "SEQ-LATE" in pinned_trailers or "SEQ-LATE" not in live_trailers:
+            raise AssertionError(
+                f"trailer scan escaped frozen head: {pinned_trailers}, {live_trailers}"
             )
         shutil.rmtree(rename_root)
 

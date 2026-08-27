@@ -29,16 +29,26 @@ Usage:
     python3 tools/scripts/silent_revert_guard.py --base origin/main --mode=report
 
 Exit codes:
-    0 — clean, or advisory mode, or git unavailable (degrades to a pass)
+    0 — clean, or hint mode (which always exits 0 but still reports loudly)
     1 — blocked: the push byte-exactly reverts a recent landing (report mode)
+    2 — Git history unavailable; no verdict was produced (report mode only)
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+from gate_common import (
+    GitComparisonProvenance,
+    git_comparison_command_failed,
+    git_comparison_history_unavailable,
+    git_comparison_receipt,
+    resolve_git_comparison,
+)
 
 # A range that says what it is doing is not a SILENT revert. `git revert` writes
 # the first form; the trailers are the deliberate, auditable escape hatches.
@@ -70,6 +80,8 @@ class GuardVerdict:
     reason: str = ""
     merge_id: str = ""
     reverted_paths: list[str] = field(default_factory=list)
+    history_status: str = "available"
+    provenance: Optional[GitComparisonProvenance] = None
 
 
 # ===========================================================================
@@ -160,9 +172,13 @@ class GuardBackstop:
 # ===========================================================================
 # GIT ADAPTER — real refs in production; tests inject snapshots for the predicate.
 # ===========================================================================
-def _git(args: list[str], cwd: Optional[str] = None) -> str:
+def _git(
+    args: list[str], cwd: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
+) -> str:
     return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True,
+        env=env,
     ).stdout
 
 
@@ -171,6 +187,29 @@ def _blob_sha(repo: str, rev: str, path: str) -> Optional[str]:
         return _git(["rev-parse", f"{rev}:{path}"], cwd=repo).strip() or None
     except Exception:
         return None  # path did not exist at that rev (added/deleted)
+
+
+def _blob_sha_checked(
+    repo: str, rev: str, path: str,
+    env: Optional[dict[str, str]] = None,
+) -> tuple[Optional[str], str]:
+    try:
+        listed = subprocess.run(
+            ["git", "ls-tree", "-z", rev, "--", path], cwd=repo,
+            capture_output=True, text=True, env=env,
+        )
+    except OSError as error:
+        return None, str(error)[:512]
+    if listed.returncode != 0:
+        return None, " ".join(listed.stderr.strip().split())[:512]
+    if not listed.stdout:
+        return None, ""
+    try:
+        return _git(
+            ["rev-parse", f"{rev}:{path}"], cwd=repo, env=env
+        ).strip(), ""
+    except Exception as error:
+        return None, str(error)[:512]
 
 
 def _since_arg(since_hours: float, now: Optional[datetime] = None) -> str:
@@ -324,6 +363,167 @@ def proposed_from_git(repo: str, base_ref: str, head_ref: str = "HEAD") -> dict:
     return proposed
 
 
+def _proposed_from_comparison(
+    repo: str, comparison: GitComparisonProvenance
+) -> tuple[dict, str]:
+    if comparison.comparison_anchor is None or comparison.resolved_head is None:
+        return {}, "comparison anchor is unavailable"
+    try:
+        raw = _git(
+            ["diff", "--raw", "--no-abbrev", "--no-renames",
+             comparison.comparison_anchor,
+             comparison.resolved_head], cwd=repo
+        )
+    except Exception as error:
+        return {}, str(error)[:512]
+    changes, error = _parse_raw_changes(raw)
+    if error:
+        return {}, error
+    return {path: post for path, (_, post) in changes.items()}, ""
+
+
+def _parse_raw_changes(raw: str) -> tuple[dict[str, tuple[Optional[str], Optional[str]]], str]:
+    """Parse --raw --no-renames output into path -> (old blob, new blob)."""
+    changes: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    for line in raw.splitlines():
+        if not line:
+            continue
+        try:
+            metadata, path = line.split("\t", 1)
+            fields = metadata.split()
+            if len(fields) != 5 or not fields[0].startswith(":") or not path:
+                raise ValueError
+            old_blob, new_blob = fields[2], fields[3]
+        except ValueError:
+            return {}, f"malformed raw Git diff record: {line!r}"[:512]
+        changes[path] = (
+            None if not old_blob.strip("0") else old_blob,
+            None if not new_blob.strip("0") else new_blob,
+        )
+    return changes, ""
+
+
+def _has_revert_intent_checked(
+    repo: str, comparison: GitComparisonProvenance
+) -> tuple[bool, str]:
+    if comparison.comparison_anchor is None or comparison.resolved_head is None:
+        return False, "comparison anchor is unavailable"
+    try:
+        body = _git(
+            ["log", "--format=%B",
+             f"{comparison.comparison_anchor}..{comparison.resolved_head}"], cwd=repo
+        )
+    except Exception as error:
+        return False, str(error)[:512]
+    return bool(
+        _REVERT_SUBJECT.search(body)
+        or _REVERT_TRAILER.search(body)
+        or _SKIP_TRAILER.search(body)
+    ), ""
+
+
+def _recent_landings_checked(
+    repo: str, base_ref: str, since_hours: float, paths: list[str],
+    now: Optional[datetime],
+) -> tuple[list[MergeRecord], str, str]:
+    try:
+        shallow = _git(
+            ["rev-parse", "--is-shallow-repository"], cwd=repo
+        ).strip().lower()
+    except Exception as error:
+        return [], str(error)[:512], "command_failed"
+    if shallow not in {"true", "false"}:
+        return [], (
+            f"unexpected --is-shallow-repository output: {shallow!r}"
+        ), "command_failed"
+    history_env: Optional[dict[str, str]] = None
+    if shallow == "true":
+        history_env = dict(os.environ)
+        history_env["GIT_SHALLOW_FILE"] = os.devnull
+    # Prove the complete first-parent ancestry before applying a path filter.
+    # Git's date traversal is not monotonic, so --since cannot safely bound this
+    # walk: an old-dated commit may have a newer-dated parent behind it.
+    argv = ["log", "--first-parent", "--format=%H %cI", base_ref]
+    try:
+        log = _git(argv, cwd=repo, env=history_env)
+    except Exception as error:
+        status = "history_unavailable" if shallow == "true" else "command_failed"
+        detail = str(error)[:420]
+        if shallow == "true":
+            detail = "shallow history has missing hidden objects: " + detail
+        return [], detail, status
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(hours=since_hours)
+    history: list[tuple[str, datetime]] = []
+    for line in log.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            return [], f"malformed git log record: {line!r}"[:512], "command_failed"
+        sha, when = parts
+        try:
+            merged_at = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        except Exception as error:
+            return [], str(error)[:512], "command_failed"
+        history.append((sha, merged_at))
+
+    recent_indexes = [
+        index for index, (_, merged_at) in enumerate(history)
+        if merged_at >= cutoff
+    ]
+    if not recent_indexes:
+        return [], "", "available"
+
+    furthest_recent = max(recent_indexes)
+    if furthest_recent + 1 < len(history):
+        # Exclude the first parent immediately older than the required prefix.
+        path_range = f"{history[furthest_recent + 1][0]}..{base_ref}"
+    else:
+        path_range = base_ref
+    try:
+        path_log = _git(
+            ["log", "--first-parent", "--format=%H", path_range, "--", *paths],
+            cwd=repo, env=history_env,
+        )
+    except Exception as error:
+        status = "history_unavailable" if shallow == "true" else "command_failed"
+        return [], str(error)[:512], status
+
+    timestamps = dict(history)
+    records: list[MergeRecord] = []
+    for sha in (line.strip() for line in path_log.splitlines()):
+        if not sha:
+            continue
+        merged_at = timestamps.get(sha)
+        if merged_at is None:
+            return [], (
+                f"path-limited history returned unknown commit {sha}"
+            ), "command_failed"
+        # Keep filtering after the bounded path walk: commit dates within the
+        # exact prefix can still move backwards and forwards.
+        if merged_at < cutoff:
+            continue
+        try:
+            raw = _git(
+                ["diff-tree", "--root", "--no-commit-id", "--raw",
+                 "--no-abbrev", "--no-renames", "-r", sha],
+                cwd=repo, env=history_env,
+            )
+        except Exception as error:
+            status = "history_unavailable" if shallow == "true" else "command_failed"
+            return [], str(error)[:512], status
+        changes, error = _parse_raw_changes(raw)
+        if error:
+            return [], error, "command_failed"
+        touched = list(changes)
+        if not set(touched).issubset(paths):
+            continue
+        records.append(MergeRecord(
+            sha, merged_at,
+            {path: {"pre": pre, "post": post}
+             for path, (pre, post) in changes.items()},
+        ))
+    return records, "", "available"
+
+
 def has_revert_intent(repo: str, base_ref: str, head_ref: str = "HEAD") -> bool:
     """True if any commit in the range states that it is a revert.
 
@@ -355,15 +555,51 @@ def check_push(
     replayed at the moment it actually happened rather than against wall-clock
     time, which would put it outside the window and pass for the wrong reason.
     """
-    if has_revert_intent(repo, base_ref, head_ref):
-        return GuardVerdict(blocked=False, reason="explicit revert intent stated")
-    proposed = proposed_from_git(repo, base_ref, head_ref)
-    if not proposed:
-        return GuardVerdict(blocked=False, reason="no changes proposed")
-    landings = recent_landings(
-        repo, base_ref, since_hours, paths=sorted(proposed.keys()), now=now
+    comparison = resolve_git_comparison(
+        repo, base_ref, head_ref, source="silent_revert_guard"
     )
-    return GuardBackstop(since_hours).check(proposed, landings, now=now)
+    if comparison.status != "available":
+        return GuardVerdict(
+            blocked=True, reason="Git history unavailable; no verdict produced",
+            history_status=comparison.status, provenance=comparison,
+        )
+    has_intent, error = _has_revert_intent_checked(repo, comparison)
+    if error:
+        failed = git_comparison_command_failed(comparison, error)
+        return GuardVerdict(
+            blocked=True, reason=failed.stderr, history_status=failed.status,
+            provenance=failed,
+        )
+    if has_intent:
+        return GuardVerdict(blocked=False, reason="explicit revert intent stated",
+                            provenance=comparison)
+    proposed, error = _proposed_from_comparison(repo, comparison)
+    if error:
+        failed = git_comparison_command_failed(comparison, error)
+        return GuardVerdict(
+            blocked=True, reason=failed.stderr, history_status=failed.status,
+            provenance=failed,
+        )
+    if not proposed:
+        return GuardVerdict(blocked=False, reason="no changes proposed",
+                            provenance=comparison)
+    landings, error, history_status = _recent_landings_checked(
+        repo, comparison.resolved_base_tip or base_ref, since_hours,
+        sorted(proposed.keys()), now,
+    )
+    if error:
+        failed = (
+            git_comparison_history_unavailable(comparison, error)
+            if history_status == "history_unavailable"
+            else git_comparison_command_failed(comparison, error)
+        )
+        return GuardVerdict(
+            blocked=True, reason=failed.stderr, history_status=failed.status,
+            provenance=failed,
+        )
+    verdict = GuardBackstop(since_hours).check(proposed, landings, now=now)
+    verdict.provenance = comparison
+    return verdict
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -378,17 +614,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--mode",
         choices=["report", "hint"],
         default="report",
-        help="report exits 1 on a block; hint always exits 0",
+        help=(
+            "report exits 1 on a content block and 2 on unavailable history; "
+            "hint always exits 0 but still reports either condition loudly"
+        ),
     )
     args = ap.parse_args(argv)
 
     verdict = check_push(args.repo, args.base, args.head, args.since_hours)
+    if verdict.history_status != "available":
+        print("  silent-revert guard: HISTORY UNAVAILABLE")
+        print(f"    {verdict.reason}")
+        if verdict.provenance is not None:
+            print("    comparison receipt=" + git_comparison_receipt(verdict.provenance))
+        return 2 if args.mode == "report" else 0
     if not verdict.blocked:
         print(f"  silent-revert guard: ok ({verdict.reason})")
+        if verdict.provenance is not None:
+            print("    comparison receipt=" + git_comparison_receipt(verdict.provenance))
         return 0
 
     print("  silent-revert guard: BLOCKED")
     print(f"    {verdict.reason}")
+    if verdict.provenance is not None:
+        print("    comparison receipt=" + git_comparison_receipt(verdict.provenance))
     print(f"    landing: {verdict.merge_id}")
     print("    paths restored to their pre-landing bytes:")
     for path in verdict.reverted_paths:

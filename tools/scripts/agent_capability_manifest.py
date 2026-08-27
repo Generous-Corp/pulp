@@ -19,6 +19,7 @@ from typing import Any
 
 import agent_capability_surface as surface
 import json_schema_lite
+from gate_common import git_comparison_receipt as history_receipt
 from agent_capability_evolution import (
     contract_payload,
     manifest_evolution_problems as evolution_problems,
@@ -30,6 +31,7 @@ from agent_capability_history import (
     SNAPSHOT,
     _git_json,
     _git_output,
+    _resolve_protected_comparison,
     _resolve_protected_tip,
     append_only_history_problems,
     history_document,
@@ -818,7 +820,11 @@ def main() -> int:
         previous = _load_optional_json(snapshot)
         previous_surface = _load_optional_json(surface_snapshot)
         base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
-        protected_tip = _resolve_protected_tip(root, base_ref)
+        comparison = (
+            _resolve_protected_comparison(root, base_ref)
+            if (root / ".git").exists() else None
+        )
+        protected_tip = comparison.comparison_anchor if comparison else None
         initial_bootstrap = bool(
             protected_tip and _git_json(root, protected_tip, SNAPSHOT) is None
         )
@@ -852,7 +858,7 @@ def main() -> int:
         problems = history_problems(history, doc, surface_document)
         problems.extend(
             protected_base_problems(
-                root, history, doc, surface_document
+                root, history, doc, surface_document, comparison
             )
         )
         if problems:
@@ -872,6 +878,9 @@ def main() -> int:
             f"{HISTORY_FILE}, and {COMPILE_FIXTURE} "
             f"({len(doc['capabilities'])} capabilities)"
         )
+        if comparison is not None:
+            print("agent-capabilities: comparison receipt=" +
+                  history_receipt(comparison))
         return 0
     if args.check:
         stale: list[str] = []
@@ -887,10 +896,17 @@ def main() -> int:
         if not fixture.exists() or fixture.read_text() != compile_fixture():
             stale.append(f"{COMPILE_FIXTURE} differs from typed bindings")
         history = _load_optional_json(history_path)
+        base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
+        comparison = (
+            _resolve_protected_comparison(root, base_ref)
+            if (root / ".git").exists() else None
+        )
         history_issues = history_problems(history, doc, surface_document)
         if isinstance(history, dict):
             history_issues.extend(
-                protected_base_problems(root, history, doc, surface_document)
+                protected_base_problems(
+                    root, history, doc, surface_document, comparison
+                )
             )
         stale.extend(history_issues)
         if stale:
@@ -901,6 +917,9 @@ def main() -> int:
             f"agent-capabilities: fresh; {len(doc['capabilities'])} keys and "
             f"{surface_document['counts']['public_headers']} public headers checked"
         )
+        if comparison is not None:
+            print("agent-capabilities: comparison receipt=" +
+                  history_receipt(comparison))
         return 0
 
     print("Pulp agent capability manifest")

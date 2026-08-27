@@ -127,7 +127,9 @@ def _merge_head(root: pathlib.Path) -> str | None:
     return first[0] if first else None
 
 
-def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
+def _resolve_base(
+    root: pathlib.Path,
+) -> tuple[Any, Any, history.GitComparisonProvenance]:
     """Read the protected tip's two snapshots, or explain why we cannot."""
     inside = history._git_output(root, ["rev-parse", "--is-inside-work-tree"])
     if inside != "true":
@@ -136,12 +138,13 @@ def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
             "an addressable protected base"
         )
     base_ref = history.os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
-    tip = history._resolve_protected_tip(root, base_ref)
-    if tip is None:
+    comparison = history._resolve_protected_comparison(root, base_ref)
+    if comparison.status != "available" or comparison.comparison_anchor is None:
         raise DeriveError(
-            f"could not resolve the protected capability base {base_ref!r}; "
-            "set PULP_AGENT_CAPABILITY_BASE_REF to the CI base ref"
+            "protected capability history is unavailable; comparison receipt="
+            + history.git_comparison_receipt(comparison)
         )
+    tip = comparison.comparison_anchor
 
     # An UNCOMMITTED merge is the case this tool is most often reached for, and
     # the one where the resolver quietly answers the wrong question. Until the
@@ -159,10 +162,28 @@ def _resolve_base(root: pathlib.Path) -> tuple[Any, Any]:
             "counter. Commit the merge first, then re-run — or point "
             "PULP_AGENT_CAPABILITY_BASE_REF at the ref being merged."
         )
-    return (
-        history._git_json(root, tip, history.SNAPSHOT),
-        history._git_json(root, tip, surface.SURFACE_SNAPSHOT),
-    )
+    manifest_read = history.read_git_path(root, comparison, history.SNAPSHOT)
+    surface_read = history.read_git_path(root, comparison, surface.SURFACE_SNAPSHOT)
+    for item in (manifest_read, surface_read):
+        if item.status in {"history_unavailable", "command_failed"}:
+            raise DeriveError(
+                "protected capability history is unavailable; comparison receipt="
+                + history.git_comparison_receipt(item)
+            )
+        if item.status == "path_absent":
+            raise DeriveError(
+                "protected capability authority is invalid: required artifact is absent; "
+                "comparison receipt=" + history.git_comparison_receipt(item)
+            )
+    try:
+        base_manifest = history.json.loads(manifest_read.content or "")
+        base_surface = history.json.loads(surface_read.content or "")
+    except history.json.JSONDecodeError as error:
+        raise DeriveError(
+            f"protected capability authority is invalid JSON: {error}; "
+            "comparison receipt=" + history.git_comparison_receipt(comparison)
+        ) from error
+    return base_manifest, base_surface, comparison
 
 
 GENERATED_ARTIFACTS = (
@@ -172,7 +193,9 @@ GENERATED_ARTIFACTS = (
 )
 
 
-def _restore_generated_artifacts(root: pathlib.Path) -> list[str]:
+def _restore_generated_artifacts(
+    root: pathlib.Path, protected_tip: str | None = None
+) -> list[str]:
     """Reset the generated artifacts to the base before regenerating them.
 
     `--write` compares its output against the artifacts ON DISK, not against the
@@ -188,8 +211,12 @@ def _restore_generated_artifacts(root: pathlib.Path) -> list[str]:
     nothing that is not immediately recomputed.
     """
     restored: list[str] = []
-    base_ref = history.os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
-    tip = history._resolve_protected_tip(root, base_ref)
+    tip = protected_tip
+    if tip is None:
+        base_ref = history.os.environ.get(
+            "PULP_AGENT_CAPABILITY_BASE_REF", "origin/main"
+        )
+        tip = history._resolve_protected_tip(root, base_ref)
     if tip is None:
         return restored
     for artifact in GENERATED_ARTIFACTS:
@@ -218,7 +245,7 @@ def main(argv: list[str]) -> int:
 
     root = pathlib.Path(__file__).resolve().parents[2]
     try:
-        base_manifest, base_surface = _resolve_base(root)
+        base_manifest, base_surface, comparison = _resolve_base(root)
         current_surface, surface_problems = manifest.build_surface(root)
         if surface_problems:
             raise DeriveError(
@@ -244,6 +271,7 @@ def main(argv: list[str]) -> int:
 
     held_revision = current_manifest.get("manifest_revision")
     held_inventory = current_surface.get("inventory_version")
+    print("  comparison receipt " + history.git_comparison_receipt(comparison))
     print(f"  protected base   revision {base_manifest['manifest_revision']}"
           f"  inventory {base_surface['inventory_version']}")
     print(f"  this tree holds  revision {held_revision}  inventory {held_inventory}")
@@ -258,7 +286,7 @@ def main(argv: list[str]) -> int:
     if args.no_write:
         return 0
 
-    restored = _restore_generated_artifacts(root)
+    restored = _restore_generated_artifacts(root, comparison.comparison_anchor)
     if restored:
         print(f"  reset {len(restored)} generated artifact(s) to the protected base")
 
