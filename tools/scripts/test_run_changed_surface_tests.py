@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import copy
 import hashlib
@@ -772,6 +773,377 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         ):
             self.assertEqual(runner.run(args), 0)
         self.assertEqual(events, ["lock-enter", "run", "lock-exit"])
+
+    def test_shadow_refusal_runs_bare_full_authority_and_records_non_graduation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            results = root / "results"
+            build.mkdir()
+            receipt = selection_receipt(
+                selected_build_targets=["pulp-test-build-check"]
+            )
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            commands: list[list[str]] = []
+
+            def execute(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selected native CTest executable has no CMake producer"
+                    ),
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                mock.patch.object(runner, "clear_build_sentinel", return_value=0),
+            ):
+                self.assertEqual(runner.run(args), 0)
+
+            self.assertEqual(len(commands), 2)
+            self.assertIn("cmake", commands[0])
+            self.assertNotIn("--target", commands[0])
+            self.assertNotIn("--tests-from-file", commands[1])
+            result_files = list(results.glob("result-*.json"))
+            self.assertEqual(len(result_files), 1)
+            fallback = json.loads(result_files[0].read_text(encoding="utf-8"))
+            self.assertEqual(fallback["schema_version"], 2)
+            self.assertEqual(fallback["head_sha"], receipt["head_sha"])
+            self.assertEqual(
+                fallback["selected_execution_disposition"],
+                "refused_fallback_full",
+            )
+            self.assertTrue(fallback["full_authoritative"])
+            self.assertFalse(fallback["graduation_eligible"])
+            self.assertEqual(fallback["full_returncode"], 0)
+            self.assertIsNone(fallback["selected_registration_count"])
+            self.assertIsNone(fallback["full_registration_count"])
+            self.assertIsNone(fallback["selected_returncode"])
+
+    def test_authoritative_mode_refusal_never_uses_shadow_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            args = mock.Mock(
+                build_dir=build,
+                _changed_surface_full_authority_started=False,
+            )
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "0"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError("ambiguous producer"),
+                ),
+                mock.patch.object(runner, "run_full_fallback") as fallback,
+            ):
+                with self.assertRaisesRegex(
+                    runner.SelectionExecutionError, "ambiguous producer"
+                ):
+                    runner.run(args)
+            fallback.assert_not_called()
+
+    def test_shadow_fallback_requires_immutable_receipt_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            receipt = selection_receipt(
+                selected_build_targets=["pulp-test-build-check"]
+            )
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    clear=True,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selected native CTest executable has no CMake producer"
+                    ),
+                ),
+                mock.patch.object(runner.subprocess, "run") as execute,
+            ):
+                with self.assertRaisesRegex(
+                    runner.FullAuthorityExecutionError,
+                    "requires an immutable result receipt directory",
+                ):
+                    runner.run(args)
+            execute.assert_not_called()
+
+    def test_successful_fallback_fails_closed_when_receipt_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            result_file = root / "not-a-directory"
+            build.mkdir()
+            result_file.write_text("occupied\n", encoding="utf-8")
+            receipt = selection_receipt()
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(result_file),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selected CTest registration differs from request"
+                    ),
+                ),
+                mock.patch.object(
+                    runner.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0),
+                ),
+            ):
+                with self.assertRaises(runner.FullAuthorityExecutionError):
+                    runner.run(args)
+
+    def test_unverified_provenance_cannot_enter_full_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            build.mkdir()
+            receipt = selection_receipt(
+                selected_build_targets=["pulp-test-build-check"]
+            )
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=False,
+                _changed_surface_receipt_identity_verified=False,
+            )
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selection receipt does not match checkout HEAD and tree"
+                    ),
+                ),
+                mock.patch.object(runner, "run_full_fallback") as fallback,
+            ):
+                with self.assertRaisesRegex(
+                    runner.SelectionExecutionError, "HEAD and tree"
+                ):
+                    runner.run(args)
+            fallback.assert_not_called()
+
+    def test_fallback_full_build_failure_is_authoritative_and_skips_ctest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            results = root / "results"
+            build.mkdir()
+            receipt = selection_receipt(
+                selected_build_targets=["pulp-test-build-check"]
+            )
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            commands: list[list[str]] = []
+
+            def fail_build(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 17)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selected native CTest executable has no CMake producer"
+                    ),
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=fail_build),
+                mock.patch.object(runner, "clear_build_sentinel") as clear_sentinel,
+            ):
+                self.assertEqual(runner.run(args), 17)
+
+            self.assertEqual(len(commands), 1)
+            self.assertIn("cmake", commands[0])
+            clear_sentinel.assert_not_called()
+            fallback = json.loads(
+                next(results.glob("result-*.json")).read_text(encoding="utf-8")
+            )
+            self.assertEqual(fallback["full_build_returncode"], 17)
+            self.assertEqual(fallback["full_returncode"], 17)
+            self.assertTrue(fallback["full_authoritative"])
+
+    def test_schema_v1_fallback_preserves_full_ctest_without_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            results = root / "results"
+            build.mkdir()
+            receipt = selection_receipt()
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            commands: list[list[str]] = []
+
+            def execute(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError(
+                        "selected CTest registration differs from request"
+                    ),
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                mock.patch.object(runner, "clear_build_sentinel") as clear_sentinel,
+            ):
+                self.assertEqual(runner.run(args), 0)
+
+            self.assertEqual(len(commands), 1)
+            self.assertNotIn("cmake", commands[0])
+            self.assertNotIn("--tests-from-file", commands[0])
+            clear_sentinel.assert_not_called()
+            fallback = json.loads(
+                next(results.glob("result-*.json")).read_text(encoding="utf-8")
+            )
+            self.assertIsNone(fallback["full_build_returncode"])
+            self.assertIsNone(fallback["full_build_is_incremental_after_selected"])
+            self.assertEqual(fallback["full_returncode"], 0)
+
+    def test_failure_after_full_authority_started_never_reenters_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            args = mock.Mock(
+                build_dir=build,
+                _changed_surface_full_authority_started=False,
+            )
+
+            def fail_after_full_started(
+                namespace: argparse.Namespace, _build_dir: Path
+            ) -> int:
+                namespace._changed_surface_full_authority_started = True
+                raise runner.SelectionExecutionError(
+                    "full build left provenance-backed CTest placeholders unresolved"
+                )
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner, "run_locked", side_effect=fail_after_full_started
+                ),
+                mock.patch.object(runner, "run_full_fallback") as fallback,
+            ):
+                with self.assertRaisesRegex(
+                    runner.FullAuthorityExecutionError, "placeholders unresolved"
+                ):
+                    runner.run(args)
+            fallback.assert_not_called()
+
+    def test_real_subprocess_target_closure_fallback_canary(self) -> None:
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "changed_surface_fallback_canary.py"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, str(fixture), directory],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["commands"], ["cmake", "sentinel", "ctest"])
+        self.assertEqual(summary["disposition"], "refused_fallback_full")
+        self.assertFalse(summary["graduation_eligible"])
 
 
 if __name__ == "__main__":
