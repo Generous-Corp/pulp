@@ -1601,6 +1601,47 @@
           "rationale": "The example validates SDK linkage and plugin behavior rather than advertising an offline algorithm capability."
         }
       }
+    },
+    {
+      "id": "sequencer-api-docs-diagnostic-privacy",
+      "title": "Private-path-safe Sequencer API documentation diagnostics",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "codeql-alert-124-20260827",
+      "owned_paths": [
+        "tools/scripts/timeline_api_docs_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/timeline_api_docs_check.py",
+          "needles": [
+            "diagnostic_path=\"<trusted-api-baseline>\"",
+            "diagnostic_privacy_self_test"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Diagnostic redaction is repository CI policy and adds no installed SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The API documentation checker is not an offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The API documentation checker is not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "CI diagnostic handling creates no live product capability or grant."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Diagnostic redaction does not describe an offline authoring capability."
+        }
+      }
     }
   ],
   "tombstones": []
