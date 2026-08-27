@@ -125,7 +125,9 @@ class SdkProvenanceTests(unittest.TestCase):
         shared.mkdir(parents=True)
         binary.mkdir()
         (binary / "pulp-import-design").write_bytes(b"importer fixture")
-        for value in provenance._importer_runtime_paths():
+        for value in provenance._importer_runtime_paths(
+            self.prefix, "linux-x64"
+        ):
             path = Path(value)
             (self.prefix / path).parent.mkdir(parents=True, exist_ok=True)
             (self.prefix / path).write_bytes(f"fixture {path.name}".encode())
@@ -176,6 +178,28 @@ class SdkProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(emitted["sdk_source_sha"], self.sha)
         self.assertEqual(emitted["agent_capabilities"]["content"], capabilities)
+
+    def test_importer_runtime_paths_include_private_node_at_floor(self) -> None:
+        (self.prefix / "version.txt").write_text("0.813.0\n", encoding="utf-8")
+        before = provenance._importer_runtime_paths(self.prefix, "darwin-arm64")
+        self.assertNotIn("bin/browser_capture-v1/node", before)
+        (self.prefix / "version.txt").write_text("0.813.1\n", encoding="utf-8")
+        at_floor = provenance._importer_runtime_paths(self.prefix, "darwin-arm64")
+        self.assertIn("bin/browser_capture-v1/node", at_floor)
+        self.assertIn("bin/browser_capture-v1/node.LICENSE", at_floor)
+        windows = provenance._importer_runtime_paths(self.prefix, "windows-x64")
+        self.assertIn("bin/browser_capture-v1/node.exe", windows)
+        self.assertNotIn("bin/browser_capture-v1/node", windows)
+
+    def test_historical_matrix_without_node_floor_remains_supported(self) -> None:
+        matrix = self.root / "historical-release-product-matrix.json"
+        matrix.write_text(
+            json.dumps({"common_cli_members": ["browser_capture/capture.mjs"]}),
+            encoding="utf-8",
+        )
+        with mock.patch.object(provenance, "PRODUCT_MATRIX", matrix):
+            paths = provenance._importer_runtime_paths(self.prefix, "darwin-arm64")
+        self.assertEqual(paths, {"bin/browser_capture-v1/capture.mjs"})
 
     def test_stamp_succeeds_without_posix_fchmod(self) -> None:
         marker = self.marker()

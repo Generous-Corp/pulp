@@ -874,6 +874,18 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "checked-out tag can predate the release-pipeline fixes.",
         )
 
+    def test_private_node_runtime_is_optional_for_historical_backfills(self) -> None:
+        prepare = self._find_step_block(
+            "Prepare pinned Node runtime for design import"
+        )
+        self.assertIn(
+            "hashFiles('tools/scripts/prepare_node_runtime.py') != ''", prepare
+        )
+        unix_package = self._find_step_run("Package CLI (Unix)")
+        windows_package = self._find_step_run("Package CLI (Windows)")
+        self.assertIn('${PULP_NODE_RUNTIME_EXECUTABLE:-}', unix_package)
+        self.assertIn("if ($env:PULP_NODE_RUNTIME_EXECUTABLE)", windows_package)
+
     def test_marker_era_backfill_refuses_current_main_source_overlays(self) -> None:
         step_block = self._find_step_block(
             "Overlay latest release-pipeline files (workflow_dispatch backfill)"

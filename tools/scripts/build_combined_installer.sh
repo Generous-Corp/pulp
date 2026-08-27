@@ -187,6 +187,17 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
       # something codesign should be handed.
       if file -b "$x" 2>/dev/null | grep -q "Mach-O"; then
         [[ "$x" == "$b/Contents/MacOS/$(basename "$b" .app)" ]] && continue
+        if [[ "$(basename "$x")" == node ]]; then
+          # Preserve the official Node Foundation hardened-runtime signature
+          # and its V8 JIT entitlements. Generic Developer-ID re-signing here
+          # produces a valid-looking executable that fails during capture.
+          codesign --verify --strict --verbose=2 "$x"
+          codesign -d --entitlements :- "$x" 2>/dev/null \
+            | grep -q 'com.apple.security.cs.allow-jit' \
+            || { echo "error: bundled Node JIT entitlement missing" >&2; exit 2; }
+          echo "  preserving verified Node runtime signature: ${x#"$b/"}"
+          continue
+        fi
         echo "  signing nested executable: ${x#"$b/"}"
         codesign --force --options runtime --timestamp -s "$APP_ID" "$x"
       fi

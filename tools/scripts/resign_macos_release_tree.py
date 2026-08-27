@@ -42,6 +42,16 @@ def macho_files(root: Path) -> list[Path]:
 def resign(root: Path) -> list[Path]:
     signed = macho_files(root)
     for path in signed:
+        # The official nodejs.org executable already carries a Developer ID
+        # hardened-runtime signature plus the V8 JIT entitlements it needs.
+        # Generic ad-hoc re-signing strips those entitlements and produces an
+        # SDK that passes `node --version` but dies during browser capture.
+        if path.name == "node":
+            subprocess.run(
+                ["codesign", "--verify", "--strict", "--verbose=2", str(path)],
+                check=True,
+            )
+            continue
         subprocess.run(["codesign", "--force", "--sign", "-", str(path)], check=True)
         subprocess.run(
             ["codesign", "--verify", "--strict", "--verbose=2", str(path)],

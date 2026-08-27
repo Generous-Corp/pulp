@@ -25,8 +25,27 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import json
+import re
 import sys
 from pathlib import Path
+
+
+VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    if not VERSION_RE.fullmatch(value):
+        raise ValueError(f"invalid SDK version: {value!r}")
+    return tuple(int(part) for part in value.split("."))  # type: ignore[return-value]
+
+
+def _node_runtime_required(prefix: Path, source: Path) -> bool:
+    version = (prefix / "version.txt").read_text(encoding="utf-8").strip()
+    matrix_path = source / "tools/scripts/release_product_matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    floor = str(matrix.get("node_runtime_floor", "999999.0.0"))
+    return _version_tuple(version) >= _version_tuple(floor)
 
 
 def check(prefix: Path, source: Path) -> list[str]:
@@ -35,10 +54,22 @@ def check(prefix: Path, source: Path) -> list[str]:
 
     importer = prefix / "bin" / "pulp-import-design"
     runtime = prefix / "bin" / "browser_capture-v1"
+    node = runtime / ("node.exe" if sys.platform == "win32" else "node")
+    node_license = runtime / "node.LICENSE"
     src_runtime = source / "tools" / "import-design" / "browser_capture"
+
+    try:
+        require_node = _node_runtime_required(prefix, source)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        problems.append(f"cannot determine bundled Node requirement: {exc}")
+        return problems
 
     if not importer.exists():
         problems.append(f"missing importer binary: {importer}")
+    if require_node and not node.is_file():
+        problems.append(f"missing bundled Node runtime: {node}")
+    if require_node and not node_license.is_file():
+        problems.append(f"missing bundled Node license: {node_license}")
     if not runtime.is_dir():
         problems.append(f"missing capture runtime directory: {runtime}")
     if problems:

@@ -621,27 +621,23 @@ class MainTests(unittest.TestCase):
             runtime = root / "browser_capture"
             pulp.write_text("rust", encoding="utf-8")
             importer.write_text("importer", encoding="utf-8")
+            node_runtime = root / "node"
+            node_runtime.write_text("node", encoding="utf-8")
+            node_license = root / "node.LICENSE"
+            node_license.write_text("license", encoding="utf-8")
             runtime.mkdir()
             source_runtime = (
                 pathlib.Path(__file__).parents[1]
                 / "import-design" / "browser_capture"
             )
-            for name in (
-                "browser_process.mjs",
-                "capture.mjs",
-                "health.mjs",
-                "interaction_executor.mjs",
-                "interaction_plan.mjs",
-                "interaction_plan_protocol.json",
-                "lifecycle.mjs",
-                "network_dependencies.mjs",
-                "platform_fonts.mjs",
-                "renderers.mjs",
-                "security.mjs",
-                "semantics.mjs",
-                "settle.mjs",
-                "tokens.mjs",
-            ):
+            runtime_names = tuple(
+                name.strip()
+                for name in (source_runtime / "runtime_manifest.txt").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if name.strip() and not name.lstrip().startswith("#")
+            )
+            for name in runtime_names:
                 shutil.copy2(source_runtime / name, runtime / name)
             wgpu = root / "libwgpu_native.so"
             wgpu.write_text("wgpu", encoding="utf-8")
@@ -658,6 +654,10 @@ class MainTests(unittest.TestCase):
                             str(importer),
                             "--import-design-runtime-dir",
                             str(runtime),
+                            "--node-runtime",
+                            str(node_runtime),
+                            "--node-license",
+                            str(node_license),
                             "--build-dir",
                             str(root / "build"),
                             "--platform",
@@ -673,28 +673,15 @@ class MainTests(unittest.TestCase):
             with tarfile.open(out, "r:gz") as tar:
                 names = sorted(tar.getnames())
                 tar.extractall(extracted, filter="data")
-            self.assertEqual(
-                names,
-                [
-                    "browser_capture/browser_process.mjs",
-                    "browser_capture/capture.mjs",
-                    "browser_capture/health.mjs",
-                    "browser_capture/interaction_executor.mjs",
-                    "browser_capture/interaction_plan.mjs",
-                    "browser_capture/interaction_plan_protocol.json",
-                    "browser_capture/lifecycle.mjs",
-                    "browser_capture/network_dependencies.mjs",
-                    "browser_capture/platform_fonts.mjs",
-                    "browser_capture/renderers.mjs",
-                    "browser_capture/security.mjs",
-                    "browser_capture/semantics.mjs",
-                    "browser_capture/settle.mjs",
-                    "browser_capture/tokens.mjs",
-                    "libwgpu_native.so",
-                    "pulp",
-                    "pulp-import-design",
-                ],
-            )
+            expected = [f"browser_capture/{name}" for name in runtime_names]
+            expected += [
+                "browser_capture/node",
+                "browser_capture/node.LICENSE",
+                "libwgpu_native.so",
+                "pulp",
+                "pulp-import-design",
+            ]
+            self.assertEqual(names, sorted(expected))
             node = shutil.which("node")
             if node:
                 probe = subprocess.run(
@@ -713,6 +700,36 @@ class MainTests(unittest.TestCase):
                 )
                 self.assertNotEqual(probe.returncode, 0)
                 self.assertNotIn("ERR_MODULE_NOT_FOUND", probe.stderr)
+
+    def test_main_rejects_bundled_node_without_importer(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp"
+            node = root / "node"
+            license_file = root / "node.LICENSE"
+            for path in (pulp, node, license_file):
+                path.write_text("fixture", encoding="utf-8")
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary",
+                    str(pulp),
+                    "--node-runtime",
+                    str(node),
+                    "--node-license",
+                    str(license_file),
+                    "--build-dir",
+                    str(root / "build"),
+                    "--platform",
+                    "linux-x64",
+                    "--out",
+                    str(root / "pulp.tar.gz"),
+                ]
+            ), contextlib.redirect_stderr(err):
+                rc = pc.main()
+            self.assertEqual(rc, 2)
+            self.assertIn("requires --import-design-binary", err.getvalue())
 
     def test_main_packages_without_mcp_when_flag_omitted(self) -> None:
         # Pre-#2067 release lanes still call package_cli.py with only

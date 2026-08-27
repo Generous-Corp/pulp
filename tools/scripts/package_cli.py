@@ -292,6 +292,10 @@ def main() -> int:
                    help="Optional pulp-import-design delegate binary.")
     p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
                    help="Browser-capture .mjs runtime directory bundled with import-design.")
+    p.add_argument("--node-runtime", required=False, type=Path, default=None,
+                   help="Self-contained Node runtime bundled with import-design.")
+    p.add_argument("--node-license", required=False, type=Path, default=None,
+                   help="License file accompanying the bundled Node runtime.")
     p.add_argument("--build-dir", required=True, type=Path)
     p.add_argument("--platform", required=True)
     p.add_argument("--out", required=True, type=Path)
@@ -338,6 +342,20 @@ def main() -> int:
             (args.import_design_runtime_dir is None)):
         print("FAIL: import-design binary and runtime directory must be supplied together",
               file=sys.stderr)
+        return 2
+    if (args.node_runtime is None) != (args.node_license is None):
+        print("FAIL: --node-runtime and --node-license must be supplied together",
+              file=sys.stderr)
+        return 2
+    if args.node_runtime is not None and args.import_design_binary is None:
+        print("FAIL: bundled Node runtime requires --import-design-binary",
+              file=sys.stderr)
+        return 2
+    if args.node_runtime is not None and not args.node_runtime.is_file():
+        print(f"FAIL: --node-runtime not at {args.node_runtime}", file=sys.stderr)
+        return 2
+    if args.node_license is not None and not args.node_license.is_file():
+        print(f"FAIL: --node-license not at {args.node_license}", file=sys.stderr)
         return 2
     if (args.import_design_runtime_dir is not None and
             not args.import_design_runtime_dir.is_dir()):
@@ -419,6 +437,19 @@ def main() -> int:
                 args.import_design_binary, stage, import_name, is_windows)
             files.append(staged_import)
             names.append(import_name)
+            if args.node_runtime is not None:
+                node_name = "node.exe" if is_windows else "node"
+                node_dir = stage / "browser_capture"
+                node_dir.mkdir(parents=True, exist_ok=True)
+                staged_node = stage_binary(
+                    args.node_runtime, node_dir, node_name, is_windows
+                )
+                files.append(staged_node)
+                names.append(f"browser_capture/{node_name}")
+                staged_node_license = node_dir / "node.LICENSE"
+                shutil.copy2(args.node_license, staged_node_license)
+                files.append(staged_node_license)
+                names.append("browser_capture/node.LICENSE")
             runtime_manifest = (
                 Path(__file__).resolve().parents[1]
                 / "import-design" / "browser_capture" / "runtime_manifest.txt"

@@ -92,6 +92,42 @@ add_custom_target(pulp-browser-capture-runtime
     COMMENT "Staging browser-capture runtime beside pulp-import-design")
 add_dependencies(pulp-import-design pulp-browser-capture-runtime)
 
+set(PULP_NODE_RUNTIME_EXECUTABLE "" CACHE FILEPATH
+    "Self-contained target-architecture Node executable staged with design import")
+if(PULP_NODE_RUNTIME_EXECUTABLE)
+    if(NOT EXISTS "${PULP_NODE_RUNTIME_EXECUTABLE}")
+        message(FATAL_ERROR "PULP_NODE_RUNTIME_EXECUTABLE does not exist: ${PULP_NODE_RUNTIME_EXECUTABLE}")
+    endif()
+    get_filename_component(_pulp_node_runtime_dir
+        "${PULP_NODE_RUNTIME_EXECUTABLE}" DIRECTORY)
+    set(_pulp_node_runtime_license "${_pulp_node_runtime_dir}/node.LICENSE")
+    if(NOT EXISTS "${_pulp_node_runtime_license}")
+        message(FATAL_ERROR "Bundled Node license does not exist: ${_pulp_node_runtime_license}")
+    endif()
+    if(WIN32)
+        set(_pulp_node_runtime_name node.exe)
+    else()
+        set(_pulp_node_runtime_name node)
+    endif()
+    add_custom_target(pulp-node-runtime
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:pulp-import-design>/browser_capture-v1"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PULP_NODE_RUNTIME_EXECUTABLE}"
+            "$<TARGET_FILE_DIR:pulp-import-design>/browser_capture-v1/${_pulp_node_runtime_name}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_pulp_node_runtime_license}"
+            "$<TARGET_FILE_DIR:pulp-import-design>/browser_capture-v1/node.LICENSE"
+        DEPENDS "${PULP_NODE_RUNTIME_EXECUTABLE}"
+        COMMENT "Staging self-contained Node runtime beside pulp-import-design")
+    add_dependencies(pulp-node-runtime pulp-browser-capture-runtime)
+    add_dependencies(pulp-import-design pulp-node-runtime)
+    install(PROGRAMS "${PULP_NODE_RUNTIME_EXECUTABLE}"
+        DESTINATION bin/browser_capture-v1 RENAME "${_pulp_node_runtime_name}")
+    install(FILES "${_pulp_node_runtime_license}"
+        DESTINATION bin/browser_capture-v1)
+endif()
+
 # Keep source-prefix/SDK installs equivalent to release archives: the Rust
 # `pulp` frontend delegates design import to this sibling executable, which in
 # turn requires the JavaScript capture runtime beside it.

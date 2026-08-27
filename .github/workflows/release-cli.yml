@@ -742,6 +742,17 @@ jobs:
         run: rustup target add x86_64-apple-darwin
         shell: bash
 
+      - name: Prepare pinned Node runtime for design import
+        if: ${{ hashFiles('tools/scripts/prepare_node_runtime.py') != '' }}
+        shell: bash
+        run: |
+          node_name=node
+          [[ "${{ matrix.platform }}" == windows-* ]] && node_name=node.exe
+          node_path="$RUNNER_TEMP/pulp-node-runtime/$node_name"
+          python3 tools/scripts/prepare_node_runtime.py \
+            --platform "${{ matrix.platform }}" --output "$node_path"
+          echo "PULP_NODE_RUNTIME_EXECUTABLE=$node_path" >> "$GITHUB_ENV"
+
       # Build the CLI binary WITHOUT WebView; the SDK build below
       # reconfigures with WebView=ON so plugin authors still get the
       # WebView code in the SDK tarball.
@@ -798,6 +809,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
             $EXTRA_ARCH \
@@ -958,6 +970,12 @@ jobs:
               --import-design-binary build/tools/import-design/pulp-import-design
               --import-design-runtime-dir build/tools/import-design/browser_capture-v1
             )
+            if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
+              import_design_args+=(
+                --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
+                --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE"
+              )
+            fi
           fi
           if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
@@ -996,6 +1014,14 @@ jobs:
               '--import-design-runtime-dir',
               'build/tools/import-design/Release/browser_capture-v1'
             )
+            if ($env:PULP_NODE_RUNTIME_EXECUTABLE) {
+              $importDesignArgs += @(
+                '--node-runtime',
+                $env:PULP_NODE_RUNTIME_EXECUTABLE,
+                '--node-license',
+                (Join-Path (Split-Path $env:PULP_NODE_RUNTIME_EXECUTABLE) 'node.LICENSE')
+              )
+            }
           }
           python $env:PULP_RELEASE_PACKAGER `
             --binary build/pulp.exe `
@@ -1042,6 +1068,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON

@@ -124,6 +124,21 @@ BrowserHtmlImportResult import_browser_html(
     for (const auto directory : {
              browser_capture::kBrowserCaptureRuntimeDirectory,
              browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
+        const auto sibling_node = executable.parent_path() / directory /
+#ifdef _WIN32
+            "node.exe";
+#else
+            "node";
+#endif
+        if (!ec && fs::is_regular_file(sibling_node)) {
+            discovery.node_executable = sibling_node;
+            capture.node_executable = sibling_node;
+            break;
+        }
+    }
+    for (const auto directory : {
+             browser_capture::kBrowserCaptureRuntimeDirectory,
+             browser_capture::kLegacyBrowserCaptureRuntimeDirectory}) {
         const auto sibling =
             executable.parent_path() / directory / "capture.mjs";
         if (!ec && fs::is_regular_file(sibling)) {

@@ -284,7 +284,7 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
                     }
                     for member in sorted(
                         rac.sdk_import_design_runtime_members(
-                            rac.DEFAULT_MATRIX, VERSION
+                            platform, rac.DEFAULT_MATRIX, VERSION
                         )
                     )
                 ],
@@ -404,6 +404,56 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         self.assertIn("pulp-import-design.exe", windows_members)
         self.assertIn("pulp-control-broker", unix_members)
         self.assertNotIn("pulp-control-broker", windows_members)
+
+    def test_node_runtime_contract_is_platform_named_and_version_floored(self) -> None:
+        for platform, executable in (
+            ("darwin-arm64", "node"),
+            ("linux-x64", "node"),
+            ("windows-x64", "node.exe"),
+        ):
+            with self.subTest(platform=platform):
+                cli_before = rac.cli_members(
+                    platform, rac.DEFAULT_MATRIX, "0.813.0"
+                )
+                cli_at_floor = rac.cli_members(
+                    platform, rac.DEFAULT_MATRIX, "0.813.1"
+                )
+                sdk_at_floor = rac.required_sdk_members(
+                    platform, rac.DEFAULT_MATRIX, "0.813.1"
+                )
+                self.assertNotIn(f"browser_capture/{executable}", cli_before)
+                self.assertNotIn("browser_capture/node.LICENSE", cli_before)
+                self.assertIn(f"browser_capture/{executable}", cli_at_floor)
+                self.assertIn("browser_capture/node.LICENSE", cli_at_floor)
+                self.assertIn(
+                    f"pulp-sdk/bin/browser_capture-v1/{executable}", sdk_at_floor
+                )
+                self.assertIn(
+                    "pulp-sdk/bin/browser_capture-v1/node.LICENSE", sdk_at_floor
+                )
+
+    def test_large_private_node_runtime_is_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive_path = root / "runtime.tar.gz"
+            node_payload = b"n" * (2 * 1024 * 1024)
+            write_archive(
+                archive_path,
+                {"pulp-sdk/bin/browser_capture-v1/node"},
+                as_zip=False,
+                platform="linux-x64",
+                payload_overrides={
+                    "pulp-sdk/bin/browser_capture-v1/node": node_payload
+                },
+            )
+            with rac.Archive(archive_path) as archive:
+                self.assertEqual(
+                    archive.read(
+                        "pulp-sdk/bin/browser_capture-v1/node",
+                        limit=256 * 1024 * 1024,
+                    ),
+                    node_payload,
+                )
 
     def test_control_broker_contract_is_darwin_only_and_version_floored(self) -> None:
         self.assertNotIn(
@@ -583,11 +633,17 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "browser-capture runtime manifest and release product matrix drifted",
         )
         self.assertEqual(
-            rac.sdk_import_design_runtime_members(rac.DEFAULT_MATRIX, VERSION),
+            rac.sdk_import_design_runtime_members(
+                "linux-x64", rac.DEFAULT_MATRIX, VERSION
+            ),
             {
                 "pulp-sdk/bin/browser_capture-v1/"
                 + member.removeprefix("browser_capture/")
                 for member in runtime_members
+            }
+            | {
+                "pulp-sdk/bin/browser_capture-v1/node",
+                "pulp-sdk/bin/browser_capture-v1/node.LICENSE",
             },
             "SDK importer runtime and release product matrix drifted",
         )

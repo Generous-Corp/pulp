@@ -5,6 +5,7 @@
   "inspector_sdk_floor": "0.772.0",
   "control_broker_floor": "0.795.0",
   "control_standalone_host_floor": "0.803.1",
+  "node_runtime_floor": "0.813.1",
   "platforms": [
     "darwin-arm64",
     "darwin-x64",
