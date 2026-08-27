@@ -15,6 +15,15 @@ import sys
 import tempfile
 
 import json_schema_lite
+from agent_capability_installed_sdk_consumers import (
+    ConsumerProof,
+    binding_identity,
+    binding_source,
+    capability_source,
+    positive_consumer_proofs,
+    validate_positive_proof_coverage,
+    write_consumer_suite,
+)
 
 
 SCHEMA = "pulp.agent-capabilities.v1"
@@ -205,33 +214,6 @@ def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dic
     return document
 
 
-def binding_identity(row: dict, binding: dict) -> tuple[str, str, str]:
-    return row["key"], binding["role"], binding["qualified_name"]
-
-
-def binding_source(
-    row: dict,
-    binding: dict,
-    addresses: dict[tuple[str, str, str], str],
-    operational_probe: str | None = None,
-) -> str:
-    name = binding["qualified_name"]
-    reference = (
-        f"static_assert(sizeof({name}) > 0);"
-        if binding["kind"] == "cpp_type"
-        else (
-            "auto volatile binding = "
-            f"{addresses[binding_identity(row, binding)]}; (void)binding;"
-        )
-    )
-    probe = f"\n    {operational_probe}" if operational_probe else ""
-    return (
-        f"#include <{binding['include']}>\n\n"
-        f"int main() {{\n    // {row['key']} / {binding['role']}\n"
-        f"    {reference}{probe}\n    return 0;\n}}\n"
-    )
-
-
 def load_source_contract(
     source_root: pathlib.Path,
 ) -> tuple[
@@ -274,53 +256,16 @@ def load_source_contract(
     return probes, binding_probes, dict(module.REVIEWED_MINIMAL_TARGETS), addresses
 
 
-def capability_source(
-    row: dict,
-    probe: str,
-    addresses: dict[tuple[str, str, str], str],
-) -> str:
-    includes = sorted({binding["include"] for binding in row["bindings"]})
-    lines = [*(f"#include <{include}>" for include in includes), "", "int main() {"]
-    for index, binding in enumerate(row["bindings"]):
-        name = binding["qualified_name"]
-        if binding["kind"] == "cpp_type":
-            lines.append(f"    static_assert(sizeof({name}) > 0);")
-        else:
-            address = addresses[binding_identity(row, binding)]
-            lines.append(
-                f"    auto volatile binding_{index} = {address}; (void)binding_{index};"
-            )
-    lines.append(f"    {probe}")
-    lines.extend(["    return 0;", "}", ""])
-    return "\n".join(lines)
-
-
-def configure_consumer(
+def _configure_project(
     cmake: str,
     prefix: pathlib.Path,
     project: pathlib.Path,
     *,
-    source: str,
-    target: str,
     generator: str | None,
     generator_options: list[str],
     configuration: str | None,
-    use_pulp_dir: bool = True,
+    use_pulp_dir: bool,
 ) -> subprocess.CompletedProcess[str]:
-    project.mkdir(parents=True, exist_ok=True)
-    (project / "main.cpp").write_text(source)
-    (project / "CMakeLists.txt").write_text(
-        "cmake_minimum_required(VERSION 3.20)\n"
-        "project(pulp_agent_capability_consumer LANGUAGES CXX)\n"
-        "find_package(Pulp CONFIG REQUIRED)\n"
-        f"if(NOT TARGET {target})\n"
-        f"  message(FATAL_ERROR \"Declared capability target is absent: {target}\")\n"
-        "endif()\n"
-        "add_executable(consumer main.cpp)\n"
-        f"target_link_libraries(consumer PRIVATE {target})\n"
-        "file(GENERATE OUTPUT \"${CMAKE_BINARY_DIR}/consumer-path-$<CONFIG>.txt\" "
-        "CONTENT \"$<TARGET_FILE:consumer>\")\n"
-    )
     query = project / "build/.cmake/api/v1/query/codemodel-v2"
     query.parent.mkdir(parents=True, exist_ok=True)
     query.write_text("")
@@ -354,6 +299,65 @@ def configure_consumer(
     return run(command, cwd=project)
 
 
+def configure_consumer(
+    cmake: str,
+    prefix: pathlib.Path,
+    project: pathlib.Path,
+    *,
+    source: str,
+    target: str,
+    generator: str | None,
+    generator_options: list[str],
+    configuration: str | None,
+    use_pulp_dir: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "main.cpp").write_text(source)
+    (project / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(pulp_agent_capability_consumer LANGUAGES CXX)\n"
+        "find_package(Pulp CONFIG REQUIRED)\n"
+        f"if(NOT TARGET {target})\n"
+        f"  message(FATAL_ERROR \"Declared capability target is absent: {target}\")\n"
+        "endif()\n"
+        "add_executable(consumer main.cpp)\n"
+        f"target_link_libraries(consumer PRIVATE {target})\n"
+        "file(GENERATE OUTPUT \"${CMAKE_BINARY_DIR}/consumer-path-$<CONFIG>.txt\" "
+        "CONTENT \"$<TARGET_FILE:consumer>\")\n"
+    )
+    return _configure_project(
+        cmake,
+        prefix,
+        project,
+        generator=generator,
+        generator_options=generator_options,
+        configuration=configuration,
+        use_pulp_dir=use_pulp_dir,
+    )
+
+
+def configure_consumer_suite(
+    cmake: str,
+    prefix: pathlib.Path,
+    project: pathlib.Path,
+    *,
+    proofs: list[ConsumerProof],
+    generator: str | None,
+    generator_options: list[str],
+    configuration: str | None,
+) -> subprocess.CompletedProcess[str]:
+    write_consumer_suite(project, proofs)
+    return _configure_project(
+        cmake,
+        prefix,
+        project,
+        generator=generator,
+        generator_options=generator_options,
+        configuration=configuration,
+        use_pulp_dir=True,
+    )
+
+
 def build_consumer(
     cmake: str, project: pathlib.Path, configuration: str | None
 ) -> subprocess.CompletedProcess[str]:
@@ -365,16 +369,24 @@ def build_consumer(
 
 
 def executable_path(
-    project: pathlib.Path, configuration: str | None
+    project: pathlib.Path, configuration: str | None, target_name: str = "consumer"
 ) -> pathlib.Path:
-    candidates = sorted((project / "build").glob("consumer-path-*.txt"))
+    candidates = sorted(
+        (project / "build").glob(f"consumer-path-{target_name}-*.txt")
+        if target_name != "consumer"
+        else (project / "build").glob("consumer-path-*.txt")
+    )
     if not candidates:
         raise RuntimeError("consumer target path was not generated")
     configured = (
         [
             path
             for path in candidates
-            if path.name == f"consumer-path-{configuration}.txt"
+            if path.name == f"consumer-path-{target_name}-{configuration}.txt"
+            or (
+                target_name == "consumer"
+                and path.name == f"consumer-path-{configuration}.txt"
+            )
         ]
         if configuration
         else []
@@ -391,6 +403,7 @@ def inspect_isolation(
     project: pathlib.Path,
     configuration_name: str | None,
     forbidden_roots: list[pathlib.Path],
+    target_name: str = "consumer",
 ) -> None:
     reply = project / "build/.cmake/api/v1/reply"
     indexes = sorted(reply.glob("index-*.json"))
@@ -416,11 +429,15 @@ def inspect_isolation(
     if not isinstance(configuration, dict):
         raise AssertionError("CMake File API codemodel has no configuration")
     target_ref = next(
-        (item for item in configuration.get("targets", []) if item.get("name") == "consumer"),
+        (
+            item
+            for item in configuration.get("targets", [])
+            if item.get("name") == target_name
+        ),
         None,
     )
     if not isinstance(target_ref, dict) or not isinstance(target_ref.get("jsonFile"), str):
-        raise AssertionError("CMake File API codemodel has no consumer target")
+        raise AssertionError(f"CMake File API codemodel has no {target_name} target")
     target = json.loads((reply / target_ref["jsonFile"]).read_text())
     includes = [
         include
@@ -535,6 +552,54 @@ def configure_build_run(
     executed = run([str(executable_path(project, configuration))], cwd=project)
     if executed.returncode != 0:
         raise RuntimeError(f"installed consumer exited {executed.returncode}")
+
+
+def configure_build_run_suite(
+    cmake: str,
+    prefix: pathlib.Path,
+    project: pathlib.Path,
+    proofs: list[ConsumerProof],
+    generator: str | None,
+    generator_options: list[str],
+    configuration: str | None,
+    forbidden_roots: list[pathlib.Path],
+) -> None:
+    configured = configure_consumer_suite(
+        cmake,
+        prefix,
+        project,
+        proofs=proofs,
+        generator=generator,
+        generator_options=generator_options,
+        configuration=configuration,
+    )
+    if configured.returncode != 0:
+        raise RuntimeError(
+            "installed consumer suite configure failed:\n"
+            f"{configured.stdout}\n{configured.stderr}"
+        )
+    for proof in proofs:
+        inspect_isolation(
+            prefix,
+            project,
+            configuration,
+            forbidden_roots,
+            proof.name,
+        )
+    built = build_consumer(cmake, project, configuration)
+    if built.returncode != 0:
+        raise RuntimeError(
+            f"installed consumer suite build failed:\n{built.stdout}\n{built.stderr}"
+        )
+    for proof in proofs:
+        executed = run(
+            [str(executable_path(project, configuration, proof.name))],
+            cwd=project,
+        )
+        if executed.returncode != 0:
+            raise RuntimeError(
+                f"installed consumer {proof.identity} exited {executed.returncode}"
+            )
 
 
 def main() -> int:
@@ -969,49 +1034,25 @@ def main() -> int:
         finally:
             held_targets.rename(targets)
 
-        proofs = 0
-        for row_index, row in enumerate(document["capabilities"]):
-            targets_for_row = {binding["target"] for binding in row["bindings"]}
-            if len(targets_for_row) != 1:
-                raise RuntimeError(
-                    f"{row['key']} spans multiple minimal targets; split its capability contract"
-                )
-            target = next(iter(targets_for_row))
-            configure_build_run(
-                args.cmake,
-                prefix,
-                root / f"capability-{row_index}",
-                capability_source(row, probes[row["key"]], addresses),
-                target,
-                generator,
-                generator_options,
-                configuration,
-                forbidden,
-            )
-            proofs += 1
-            for binding_index, binding in enumerate(row["bindings"]):
-                configure_build_run(
-                    args.cmake,
-                    prefix,
-                    root / f"binding-{row_index}-{binding_index}",
-                    binding_source(
-                        row,
-                        binding,
-                        addresses,
-                        binding_probes[binding_identity(row, binding)],
-                    ),
-                    binding["target"],
-                    generator,
-                    generator_options,
-                    configuration,
-                    forbidden,
-                )
-                proofs += 1
+        positive_proofs = positive_consumer_proofs(
+            document, probes, binding_probes, addresses
+        )
+        configure_build_run_suite(
+            args.cmake,
+            prefix,
+            root / "positive-consumers",
+            positive_proofs,
+            generator,
+            generator_options,
+            configuration,
+            forbidden,
+        )
 
     print(
         "agent-capabilities-installed-sdk: "
-        f"16 negative/install controls and {proofs} independent capability/binding "
-        f"configure-build-run proofs passed with {generator or 'default generator'} "
+        f"16 negative/install controls and {len(positive_proofs)} independent "
+        "capability/binding compile-link-run proofs passed in one positive "
+        f"configure/build batch with {generator or 'default generator'} "
         f"in {configuration or 'the default single configuration'}"
     )
     return 0

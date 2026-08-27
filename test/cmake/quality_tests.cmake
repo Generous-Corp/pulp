@@ -103,11 +103,10 @@ if(Python3_Interpreter_FOUND)
     unset(_pulp_agent_capability_installed_args)
     unset(_pulp_agent_capability_instrumentation_compile_flags)
     unset(_pulp_agent_capability_instrumentation_link_flags)
-    # This installs the SDK, then configures, builds, and runs an independent
-    # consumer for every capability row and typed binding.
-    # A cold Linux runner configures, builds, and runs hundreds of isolated
-    # capability/binding consumers. Ten minutes is below the observed clean
-    # runtime and turns ctest's retry into cross-test pollution. Keep it out of
+    # This installs the SDK, then configures/builds one project containing an
+    # independent source, executable, isolation check, and process run for every
+    # capability row and typed binding. The timeout retains headroom for cold
+    # SDK installation and platform-specific linker variance. Keep it out of
     # the ordinary PR corpus via the `slow` label; build.yml restores it on the
     # required macOS leg when an installed-capability surface actually changes,
     # and nightly-full-build still runs the complete unfiltered inventory.
