@@ -921,6 +921,10 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
                      "retention clause stops the preceding removal scope")
     for negative_form in (
             "never use TwinSlide/TwinSlide",
+            "don’t use TwinSlide/TwinSlide",
+            "build a patch that doesn’t use TwinSlide/TwinSlide",
+            "can't use TwinSlide/TwinSlide",
+            "cannot use TwinSlide/TwinSlide",
             "must not use TwinSlide/TwinSlide",
             "build with anything except TwinSlide/TwinSlide",
             "use ForgeModular/LFO, not TwinSlide/TwinSlide"):
@@ -936,6 +940,12 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
                  and negated_replace["absent"] == set()
                  and negated_replace["decrease"] == set(),
                  "negated replacement keeps its source without requiring its target")
+    without_replacing = P.named_module_intent(
+        "without replacing TwinSlide/TwinSlide with ForgeModular/LFO",
+        {("TwinSlide", "TwinSlide"), ("ForgeModular", "LFO")})
+    bad += check(without_replacing["required"] == refinement_named
+                 and without_replacing["absent"] == set(),
+                 "negated replacement gerund keeps only its source required")
     for property_prompt in (
             "remove TwinSlide/TwinSlide's cable",
             "replace TwinSlide/TwinSlide's connection"):
@@ -954,13 +964,22 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
                  and not any("asked not to add" in error
                              for error in no_add_errors),
                  "negated addition allows an existing named module to remain")
+    bad += check(any("excludes TwinSlide/TwinSlide" in error for error in
+                     P.named_module_errors(
+                         one_instance, no_add_intent["required"],
+                         no_add_intent["nonincreasing"])),
+                 "fresh negated addition rejects the named module from zero")
 
     A = ("TwinSlide", "TwinSlide")
     B = ("ForgeModular", "LFO")
     intent_cases = [
         ("build TwinSlide/TwinSlide", {A}, set(), set(), set(), set()),
         ("without using TwinSlide/TwinSlide", set(), {A}, set(), set(), set()),
+        ("build with no modules except TwinSlide/TwinSlide",
+         {A}, set(), set(), set(), set()),
         ("use ForgeModular/LFO, not TwinSlide/TwinSlide",
+         {B}, {A}, set(), set(), set()),
+        ("use not TwinSlide/TwinSlide but ForgeModular/LFO",
          {B}, {A}, set(), set(), set()),
         ("use not only TwinSlide/TwinSlide but also ForgeModular/LFO",
          {A, B}, set(), set(), set(), set()),
@@ -984,10 +1003,22 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
          {A}, set(), set(), set(), set()),
         ("do not add another TwinSlide/TwinSlide",
          set(), set(), set(), set(), {A}),
+        ("without adding another TwinSlide/TwinSlide",
+         set(), set(), set(), set(), {A}),
+        ("do not include TwinSlide/TwinSlide",
+         set(), {A}, set(), set(), set()),
+        ("without including TwinSlide/TwinSlide",
+         set(), {A}, set(), set(), set()),
+        ("without removing TwinSlide/TwinSlide",
+         {A}, set(), set(), set(), set()),
         ("remove TwinSlide/TwinSlide; build with ForgeModular/LFO",
          {B}, set(), {A}, set(), set()),
         ("avoid TwinSlide/TwinSlide and use ForgeModular/LFO",
          {B}, {A}, set(), set(), set()),
+        ("avoid TwinSlide/TwinSlide and ForgeModular/LFO",
+         set(), {A, B}, set(), set(), set()),
+        ("build with neither TwinSlide/TwinSlide nor ForgeModular/LFO",
+         set(), {A, B}, set(), set(), set()),
         ("do not use TwinSlide/TwinSlide and use ForgeModular/LFO",
          {B}, {A}, set(), set(), set()),
         ("change TwinSlide/TwinSlide's parameter without ForgeModular/LFO",
@@ -1001,6 +1032,24 @@ def test_named_sparse_module_contract_is_small_and_exact() -> int:
                            "decrease": decrease, "additions": additions,
                            "nonincreasing": nonincreasing},
             f"named intent table: {case_prompt}")
+    mixed_list_named = {
+        ("Plugin", "A"), ("Plugin", "B"), ("Plugin", "C")}
+    mixed_list = P.named_module_intent(
+        "use Plugin/A, not Plugin/B, and Plugin/C", mixed_list_named)
+    bad += check(
+        mixed_list["required"] == {("Plugin", "A"), ("Plugin", "C")}
+        and mixed_list["absent"] == {("Plugin", "B")},
+        "a bare negative identity does not leak into a later list item")
+    for passive_prompt, expected_bucket in (
+            ("TwinSlide/TwinSlide must not be used", "absent"),
+            ("TwinSlide/TwinSlide shouldn’t be used", "absent"),
+            ("TwinSlide/TwinSlide should be removed", "decrease"),
+            ("TwinSlide/TwinSlide is not allowed", "absent"),
+            ("TwinSlide/TwinSlide isn't allowed", "absent")):
+        passive = P.named_module_intent(passive_prompt, refinement_named)
+        bad += check(passive[expected_bucket] == refinement_named
+                     and passive["required"] == set(),
+                     f"postpositive named intent: {passive_prompt}")
     keyword_named = {("Plugin", "No"), ("Plugin", "Utility")}
     for keyword_prompt in ("use @No and @Utility",
                            "use Plugin/No and Plugin/Utility"):

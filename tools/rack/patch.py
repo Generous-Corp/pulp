@@ -5848,11 +5848,15 @@ def named_module_intent(
             events.append((match.start(), match.end(), "identity", key,
                            match.group(0)))
     words = re.compile(
-        r"[.;:\n]|don't|\b(?:do|must|not|only|never|without|avoid|no|except|"
-        r"instead|rather|remove|delete|drop|exclude|omit|replace|swap|add|"
-        r"insert|include|use|using|build|keep|retain|leave|preserve|with|for|"
+        r"[.;:\n]|(?:don|doesn|can|aren|isn|wasn|weren|won|wouldn|shouldn|"
+        r"couldn|mustn|needn|hasn|haven|hadn|ain)['’]t|\b(?:cannot|do|must|not|"
+        r"only|never|neither|nor|without|avoid|no|except|"
+        r"instead|rather|remove|removing|delete|deleting|drop|dropping|exclude|excluding|"
+        r"omit|omitting|replace|replacing|swap|swapping|add|adding|insert|inserting|"
+        r"include|including|use|using|used|build|building|keep|keeping|retain|retaining|"
+        r"leave|leaving|preserve|preserving|with|for|"
         r"by|cable|cables|connection|connections|wire|wires|parameter|"
-        r"parameters|setting|settings|knob|knobs)\b",
+        r"parameters|setting|settings|knob|knobs|but|removed|allowed)\b",
         re.I)
     for match in words.finditer(prompt):
         if any(start < match.end() and match.start() < end
@@ -5869,6 +5873,8 @@ def named_module_intent(
     negated_replacement = False
     property_scope = False
     skip_not = False
+    single_negative = False
+    last_identity = None
     property_words = {"cable", "cables", "connection", "connections",
                       "wire", "wires", "parameter", "parameters",
                       "setting", "settings", "knob", "knobs"}
@@ -5896,17 +5902,36 @@ def named_module_intent(
                 following, re.I)
             action = "required" if property_scope or owns_property else mode
             apply(value, action)
+            last_identity = value
             if negative_scope:
                 negative_scope = False
                 negated = False
+            if single_negative:
+                mode = "required"
+                single_negative = False
             continue
 
-        word = value
+        word = value.replace("’", "'")
+        if word in {
+                "doesn't", "can't", "cannot", "aren't", "isn't", "wasn't",
+                "weren't", "won't", "wouldn't", "shouldn't", "couldn't",
+                "mustn't", "needn't", "hasn't", "haven't", "hadn't", "ain't"}:
+            word = "don't"
+        word = {
+            "removing": "remove", "deleting": "delete", "dropping": "drop",
+            "excluding": "exclude", "omitting": "omit", "replacing": "replace",
+            "swapping": "swap", "adding": "add", "inserting": "insert",
+            "including": "include", "building": "build", "keeping": "keep",
+            "retaining": "retain", "leaving": "leave", "preserving": "preserve",
+            "used": "use", "removed": "remove",
+        }.get(word, word)
         next_word = events[index + 1][3] if index + 1 < len(events) and \
             events[index + 1][2] == "word" else None
         if word in {".", ";", ":", "\n"}:
             mode, negated, negative_scope = "required", False, False
-            replacement = negated_replacement = property_scope = False
+            replacement = negated_replacement = property_scope = \
+                single_negative = False
+            last_identity = None
         elif word == "not" and next_word == "only":
             mode, negated, negative_scope, skip_not = \
                 "required", False, False, True
@@ -5915,17 +5940,30 @@ def named_module_intent(
         elif word in {"do", "must"} and next_word == "not":
             mode, negated, negative_scope = "absent", True, True
             property_scope = False
+            single_negative = False
             skip_not = True
         elif word == "not" and skip_not:
             skip_not = False
-        elif word in {"not", "never", "don't"}:
+        elif word == "not":
             mode, negated, negative_scope = "absent", True, True
             property_scope = False
-        elif word in {"without", "avoid", "no", "except", "instead", "rather"}:
-            mode, negative_scope = "absent", True
-            property_scope = False
+            single_negative = True
+        elif word in {"never", "neither", "nor", "don't"}:
+            mode, negated, negative_scope = "absent", True, True
+            property_scope = single_negative = False
+        elif word == "except":
+            if mode == "absent":
+                mode, negated, negative_scope = "required", False, False
+            else:
+                mode, negated, negative_scope = "absent", True, True
+            property_scope = single_negative = False
+        elif word in {"without", "avoid", "no", "instead", "rather"}:
+            mode, negated, negative_scope = "absent", True, True
+            property_scope = single_negative = False
         elif word in {"remove", "delete", "drop"}:
             mode = "required" if negated else "decrease"
+            if raw.casefold() == "removed" and last_identity is not None:
+                apply(last_identity, mode)
             negative_scope = False
             property_scope = False
             negated = False
@@ -5942,7 +5980,11 @@ def named_module_intent(
         elif word in {"with", "for", "by"} and replacement:
             mode = "neutral" if negated_replacement else "required"
             replacement = negated_replacement = False
-        elif word in {"add", "insert", "include"}:
+        elif word == "include":
+            mode = "absent" if negated else "addition"
+            negated = negative_scope = False
+            property_scope = False
+        elif word in {"add", "insert"}:
             if negated:
                 mode = "nonincreasing"
             else:
@@ -5950,13 +5992,26 @@ def named_module_intent(
             negated = negative_scope = False
             property_scope = False
         elif word in {"use", "using", "build"}:
+            if raw.casefold() == "used" and last_identity is not None:
+                apply(last_identity,
+                      "absent" if negated or mode == "absent" else "required")
             if not negative_scope:
                 mode = "absent" if negated else "required"
                 negated = False
             property_scope = False
+        elif word == "allowed":
+            if last_identity is not None:
+                apply(last_identity,
+                      "absent" if negated or mode == "absent" else "required")
+            mode, negated, negative_scope = "required", False, False
+            single_negative = False
         elif word in {"keep", "retain", "leave", "preserve"}:
             mode, negated, negative_scope = "required", False, False
             replacement = negated_replacement = property_scope = False
+        elif word == "but":
+            mode, negated, negative_scope = "required", False, False
+            replacement = negated_replacement = property_scope = \
+                single_negative = False
         elif word in property_words:
             property_scope = True
             mode = "required"
@@ -7380,7 +7435,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         named_errors = named_module_errors(
             patch, named_intent["required"],
             named_intent["absent"] |
-            (named_intent["decrease"] if base_patch is None else set()))
+            ((named_intent["decrease"] | named_intent["nonincreasing"])
+             if base_patch is None else set()))
         if named_errors:
             keep_attempt(patch, "rejected by the named module contract:\n" +
                          "\n".join(named_errors), attempt + 1, "rejected")
