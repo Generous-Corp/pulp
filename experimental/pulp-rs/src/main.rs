@@ -367,7 +367,7 @@ fn main() -> ExitCode {
 /// launch the optional broker even if future clap parsing recognizes it.
 fn cpp_only_authority_fallthrough() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    match pulp_rs::fallthrough::delegate(&argv) {
+    match pulp_rs::fallthrough::delegate_silent(&argv) {
         Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) => {
             ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1))
         }

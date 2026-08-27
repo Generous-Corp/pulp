@@ -182,6 +182,7 @@ fn unknown_subcommand_falls_through_to_pulp_cpp_when_on_path() {
             .env_remove("PULP_USE_CPP")
             .env_remove("PULP_RS_CPP_BINARY")
             .env_remove("PULP_RS_FALLTHROUGH")
+            .env("PULP_DEBUG", if argv[0] == "authority" { "1" } else { "" })
             .output()
             .expect("run");
 
@@ -190,6 +191,12 @@ fn unknown_subcommand_falls_through_to_pulp_cpp_when_on_path() {
             String::from_utf8(output.stdout).expect("utf8").trim(),
             expected
         );
+        if argv[0] == "authority" {
+            assert!(
+                output.stderr.is_empty(),
+                "authority delegation must remain machine-readable under PULP_DEBUG"
+            );
+        }
         assert_eq!(
             fs::read_dir(observational_home.path())
                 .expect("read observational home")

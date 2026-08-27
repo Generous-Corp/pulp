@@ -64,9 +64,15 @@ int cmd_authority(const std::vector<std::string>& args) {
     const bool list = positional.size() == 1 && positional[0] == "list";
     const bool query = positional.size() == 2 && positional[0] == "query";
     if (!list && !query) {
-        std::cerr << "Error: expected `pulp authority list` or "
-                     "`pulp authority query <id-or-alias>`\n\n";
-        print_authority_usage();
+        if (json) {
+            print_authority_error(json, "invalid_arguments",
+                                  "expected `pulp authority list` or "
+                                  "`pulp authority query <id-or-alias>`");
+        } else {
+            std::cerr << "Error: expected `pulp authority list` or "
+                         "`pulp authority query <id-or-alias>`\n\n";
+            print_authority_usage();
+        }
         return 2;
     }
 

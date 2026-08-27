@@ -1549,6 +1549,17 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
     REQUIRE(bad_args.stderr_output.find("expected `pulp authority list`") != std::string::npos);
     REQUIRE(bad_args.stdout_output.find("Usage:") != std::string::npos);
 
+    auto bad_json_args = run_pulp({"authority", "list", "extra", "--json"});
+    REQUIRE(bad_json_args.exit_code == 2);
+    REQUIRE(bad_json_args.stdout_output.empty());
+    pulp::cli::pkg::JsonParser bad_json_parser{bad_json_args.stderr_output, 0};
+    const auto bad_json_error = bad_json_parser.parse();
+    bad_json_parser.skip_ws();
+    REQUIRE(bad_json_parser.pos == bad_json_args.stderr_output.size());
+    REQUIRE(bad_json_error.get("error") != nullptr);
+    REQUIRE(bad_json_error.get("error")->get("code") != nullptr);
+    REQUIRE(bad_json_error.get("error")->get("code")->as_string() == "invalid_arguments");
+
     auto cold = unique_temp_dir("pulp-authority-cold");
     auto cold_binary = cold / "bin" / pulp_binary().filename();
     fs::create_directories(cold_binary.parent_path());
