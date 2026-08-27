@@ -63,7 +63,7 @@ def _doxy_assignments(text: str) -> dict[str, str]:
         )
     assignments: dict[str, str] = {}
     for key, operator, value in re.findall(
-        r"(?m)^([A-Z][A-Z0-9_]*)\s*(\+?=)\s*(.*)$", logical
+        r"(?m)^[ \t]*([A-Z][A-Z0-9_]*)\s*(\+?=)\s*(.*)$", logical
     ):
         if operator != "=":
             raise ValueError(f"Doxyfile has unsupported {key} accumulation")
@@ -110,6 +110,11 @@ def _doxygen_roots(root: Path) -> list[str]:
 def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
     raw_text = (root / INSTALL_RULES).read_text()
     text = "\n".join(line.split("#", 1)[0] for line in raw_text.splitlines())
+    includes = re.findall(r"(?i)(?<![A-Za-z0-9_])include\s*\(\s*([^\s)]+)", text)
+    if sorted(includes) != ["CMakePackageConfigHelpers", "GNUInstallDirs"]:
+        raise ValueError(
+            "install rules may include only GNUInstallDirs and CMakePackageConfigHelpers"
+        )
     consumers = re.findall(
         r"(?ms)foreach\(subsystem\s+IN\s+LISTS\s+_pulp_sdk_header_subsystems\)(.*?)endforeach\(\)",
         text,
@@ -117,12 +122,18 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
     if len(consumers) != 1:
         raise ValueError("install rules must have exactly one SDK header subsystem consumer")
     consumer = consumers[0]
-    required_consumer_fragments = (
-        'set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")',
-        'install(DIRECTORY "${_inc_dir}/pulp/"',
-        'FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"',
+    canonical_consumers = re.findall(
+        r'''(?msx)
+        set\(_inc_dir\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}/core/\$\{subsystem\}/include"\)\s*
+        if\(EXISTS\s+"\$\{_inc_dir\}"\)\s*
+        install\(DIRECTORY\s+"\$\{_inc_dir\}/pulp/"\s+
+          DESTINATION\s+"\$\{CMAKE_INSTALL_INCLUDEDIR\}/pulp"\s+
+          FILES_MATCHING\s+PATTERN\s+"\*\.hpp"\s+PATTERN\s+"\*\.h"\s*\)\s*
+        endif\(\)
+        ''',
+        consumer,
     )
-    if any(fragment not in consumer for fragment in required_consumer_fragments):
+    if len(canonical_consumers) != 1:
         raise ValueError("SDK header subsystem consumer is not the canonical install loop")
     if text.count('install(DIRECTORY "${_inc_dir}/pulp/"') != 1:
         raise ValueError("install rules must have one canonical SDK header directory install")
@@ -142,11 +153,21 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
         raise ValueError("SDK header subsystem authority contains duplicates")
     install_blocks = re.findall(r"(?ms)install\((?:DIRECTORY|FILES)\s+(.*?)\)", text)
     for block in install_blocks:
-        if not re.search(r"(?:include|_inc_dir\})/pulp", block):
+        if not re.search(
+            r'DESTINATION\s+"?\$\{CMAKE_INSTALL_INCLUDEDIR\}/pulp(?:/[^"\s)]*)?"?',
+            block,
+        ):
             continue
-        if ('"${_inc_dir}/pulp/"' in block or
-                '"${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"' in block or
-                '"${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/' in block):
+        source_text = block.split("DESTINATION", 1)[0]
+        sources = re.findall(r'"([^"]+)"', source_text)
+        if sources == ["${_inc_dir}/pulp/"]:
+            continue
+        if sources == ["${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"]:
+            continue
+        if sources and all(
+            source.startswith("${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/")
+            for source in sources
+        ):
             continue
         raise ValueError("unsupported independent public-header install authority (possibly dynamic)")
     public_install_sources = set().union(*(

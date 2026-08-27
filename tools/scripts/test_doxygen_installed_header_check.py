@@ -45,7 +45,9 @@ RECURSIVE = YES
 FILE_PATTERNS = *.hpp *.h *.inc *.hpp.in
 EXCLUDE_PATTERNS = */src/* */detail/*
 """)
-    write(root / "tools/cmake/PulpInstallRules.cmake", """set(_pulp_sdk_header_subsystems a runtime)
+    write(root / "tools/cmake/PulpInstallRules.cmake", """include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+set(_pulp_sdk_header_subsystems a runtime)
 foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
   set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
   if(EXISTS "${_inc_dir}")
@@ -108,6 +110,9 @@ def main() -> int:
         doxy.write_text(original + "INPUT += ../../core/a/include\n")
         require(any("unsupported INPUT accumulation" in item for item in checker.check(root)),
                 "Doxygen INPUT accumulation escaped")
+        doxy.write_text(original + "  INPUT += ../../core/a/include\n")
+        require(any("unsupported INPUT accumulation" in item for item in checker.check(root)),
+                "indented Doxygen INPUT accumulation escaped")
         doxy.write_text(original + "EXCLUDE = ../../core/a/include/pulp/a/a.hpp\n")
         require(any("EXCLUDE must be empty" in item for item in checker.check(root)),
                 "nonempty Doxygen EXCLUDE escaped")
@@ -255,6 +260,17 @@ def main() -> int:
             "missing canonical SDK subsystem consumer escaped")
     temporary.cleanup()
 
+    def disable_consumer_guard(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text().replace(
+            'if(EXISTS "${_inc_dir}")', "if(FALSE)",
+        ))
+
+    temporary, root, errors = mutated(disable_consumer_guard)
+    require(any("canonical install loop" in item for item in errors),
+            "disabled SDK subsystem consumer guard escaped")
+    temporary.cleanup()
+
     def add_independent_install(root: Path) -> None:
         write(root / "core/b/include/pulp/b/b.hpp")
         rules = root / checker.INSTALL_RULES
@@ -268,6 +284,29 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/b/include/pulp/"
     require(any("unsupported independent public-header install authority" in item
                 for item in errors),
             "independent Pulp public-header install escaped")
+    temporary.cleanup()
+
+    def add_variable_install(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text() + '''
+install(DIRECTORY "${_extra_public_root}/pulp/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+  FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+''')
+
+    temporary, root, errors = mutated(add_variable_install)
+    require(any("unsupported independent public-header install authority" in item
+                for item in errors),
+            "variable-based public-header install escaped")
+    temporary.cleanup()
+
+    def add_local_include(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text() + "\ninclude(extra-public.cmake)\n")
+
+    temporary, root, errors = mutated(add_local_include)
+    require(any("may include only" in item for item in errors),
+            "local CMake include authority escaped")
     temporary.cleanup()
 
     temporary, root, errors = mutated(
@@ -324,7 +363,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/b/include/pulp/"
     require(not errors, f"recursive new installed headers were not covered: {errors}")
     temporary.cleanup()
 
-    print("doxygen installed-header parity selftest: OK (40 controls)")
+    print("doxygen installed-header parity selftest: OK (44 controls)")
     return 0
 
 
