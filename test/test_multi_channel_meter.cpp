@@ -671,6 +671,40 @@ TEST_CASE("MultiChannelMeter loudness is invariant to process block partitioning
                  WithinAbs(contiguous.snapshot().lufs_integrated, 1e-6f));
 }
 
+TEST_CASE("MultiChannelMeter reports EBU short-term loudness and loudness range",
+          "[signal][meter][loudness][lra]") {
+    constexpr int sample_rate = 48000;
+    // Constant programme: the independent sorted short-term vector has equal
+    // 10th and 95th percentiles, so LRA is exactly zero within histogram width.
+    auto constant = pulp::test::audio::make_sine(1, sample_rate * 4, 997.0f,
+                                                 sample_rate, 0.2f);
+    const float* constant_channels[] = {constant.channel(0).data()};
+    MultiChannelMeter constant_meter;
+    constant_meter.prepare(sample_rate, 1);
+    constant_meter.process(constant_channels, 1, static_cast<int>(constant.num_samples()));
+    const auto constant_snapshot = constant_meter.snapshot();
+    REQUIRE(constant_snapshot.short_term_valid);
+    REQUIRE(constant_snapshot.loudness_range_valid);
+    REQUIRE_THAT(constant_snapshot.loudness_range_lu, WithinAbs(0.0f, 0.02f));
+
+    // Two stable programme levels produce different sorted short-term values;
+    // the LRA must expose their distribution instead of just integrated LUFS.
+    auto quiet = pulp::test::audio::make_sine(1, sample_rate * 4, 997.0f,
+                                              sample_rate, 0.04f);
+    auto loud = pulp::test::audio::make_sine(1, sample_rate * 4, 997.0f,
+                                             sample_rate, 0.4f);
+    MultiChannelMeter distributed;
+    distributed.prepare(sample_rate, 1);
+    const float* quiet_channels[] = {quiet.channel(0).data()};
+    const float* loud_channels[] = {loud.channel(0).data()};
+    distributed.process(quiet_channels, 1, static_cast<int>(quiet.num_samples()));
+    distributed.process(loud_channels, 1, static_cast<int>(loud.num_samples()));
+    const auto distributed_snapshot = distributed.snapshot();
+    REQUIRE(distributed_snapshot.short_term_valid);
+    REQUIRE(distributed_snapshot.loudness_range_valid);
+    REQUIRE(distributed_snapshot.loudness_range_lu > 10.0f);
+}
+
 TEST_CASE("MultiChannelMeter prepare clamps channel count and reset clears snapshot", "[signal][meter][issue-645]") {
     MultiChannelMeter meter;
     meter.prepare(100.0f, kMaxMeterChannels + 4);
