@@ -34,7 +34,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
     steps:
       # Resolve before checkout: queued pull_request_target payloads can outlive
       # the PR they describe, so live API state is authoritative for both event
@@ -70,42 +70,34 @@ jobs:
             echo "PR #$number targets $base_repository:$base_ref; only $GITHUB_REPOSITORY:main is trusted" >&2
             exit 1
           fi
-          # `pulls/:number.base.sha` is the base snapshot recorded for the PR,
-          # not necessarily the current protected-branch tip. Resolve main only
-          # after proving the PR targets this repository's protected branch.
-          # The post-checkout comparison below closes the remaining race before
-          # any secret is minted.
-          base="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
           {
             echo "active=true"
-            echo "base_sha=$base"
             echo "head_sha=$head"
             echo "number=$number"
           } >> "$GITHUB_OUTPUT"
-          echo "evaluating PR #$number: base=$base head=$head" >&2
+          echo "evaluating PR #$number: head=$head" >&2
 
       - name: Check out trusted base controls
         if: steps.pr.outputs.active == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # This exact SHA came from the protected ref only after the PR target
-          # was verified above. Do not re-resolve the moving branch here: main
-          # advancing between these steps must not wedge the required gate.
-          ref: ${{ steps.pr.outputs.base_sha }}
+          # Keep the privileged checkout literal. Even a SHA resolved from the
+          # API is tainted data to Actions security analysis; checking out the
+          # protected branch directly prevents a PR from selecting executable
+          # controls while still resolving the latest main at job execution.
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify trusted controls match live PR base
+      - name: Bind checked-out protected base
         if: steps.pr.outputs.active == 'true'
-        env:
-          EXPECTED_BASE: ${{ steps.pr.outputs.base_sha }}
+        id: trusted-base
         run: |
-          actual_base="$(git rev-parse HEAD)"
-          if [ "$actual_base" != "$EXPECTED_BASE" ]; then
-            echo "trusted checkout does not match the resolved protected-main commit" >&2
-            echo "expected=$EXPECTED_BASE actual=$actual_base" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          base="$(git rev-parse HEAD)"
+          git cat-file -e "$base^{commit}"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+          echo "trusted protected-main base=$base" >&2
 
       - name: Install inventory parser dependency without secrets
         if: steps.pr.outputs.active == 'true'
@@ -139,7 +131,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
           VELLUM_READER_APP_JWT: ${{ steps.vellum-reader-jwt.outputs.app_jwt }}
-          PR_BASE: ${{ steps.pr.outputs.base_sha }}
+          PR_BASE: ${{ steps.trusted-base.outputs.base_sha }}
           PR_HEAD: ${{ steps.pr.outputs.head_sha }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           STATUS_REPOSITORY: ${{ github.repository }}
@@ -275,7 +267,7 @@ jobs:
   trusted-merge-group:
     name: Vellum trusted freeze
     if: github.event_name == 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
     steps:
       - name: Check out trusted base controls
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

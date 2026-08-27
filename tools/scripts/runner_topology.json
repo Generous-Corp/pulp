@@ -239,6 +239,25 @@
       ]
     },
     {
+      "variable": "PULP_VELLUM_TRUSTED_RUNS_ON_JSON",
+      "purpose": "Required Vellum trusted-gate executor. It may use the restricted, ephemeral Mac Pro Linux lane when explicitly configured and falls back to ubuntu-latest when unset, preserving a routable protected-checkout path without making local capacity mandatory.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "unset_fallback": "ubuntu-latest",
+      "provisioning": "ephemeral",
+      "trusted_workflow_only": true,
+      "severity": "required",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
       "variable": "PULP_LOCAL_GCC_RUNS_ON_JSON",
       "purpose": "GCC compile gate (advisory). Native x86_64 Linux on the macpro Proxmox host; falls back to ubuntu-latest when unset.",
       "expect": [

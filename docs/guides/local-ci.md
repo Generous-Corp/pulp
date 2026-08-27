@@ -2507,6 +2507,23 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_AUTO_LINUX_RUNS_ON_JSON` | Reserved selector for a separately reviewed protected-event routing change; installing the provider roles does not enable it | Do not set during provider-only activation |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
+### Protected Vellum trusted gate
+
+`PULP_VELLUM_TRUSTED_RUNS_ON_JSON` optionally routes both jobs in
+`vellum-trusted-gate.yml` to the restricted ephemeral Mac Pro Linux lane:
+
+```sh
+gh variable set PULP_VELLUM_TRUSTED_RUNS_ON_JSON \
+  --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
+```
+
+When the variable is unset, the workflow deliberately falls back to
+`ubuntu-latest`. This keeps the required trusted gate routable when local Linux
+capacity is unavailable. Do not point it at an unrestricted or persistent
+runner: the workflow handles `pull_request_target` and mints the narrowly scoped
+Vellum reader credential only after checking out and binding literal protected
+`main` controls.
+
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
 lane to one machine, so the supervisor serving them must carry it too — GitHub
 selects a runner only when it carries every requested label. Declare the machine

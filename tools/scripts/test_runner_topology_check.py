@@ -582,6 +582,33 @@ class TestShippedContract(unittest.TestCase):
         self.assertIn("pulp-gate-fast", gate_lane.expect)
         self.assertNotIn("pulp-build-studio", gate_lane.expect)
 
+    def test_vellum_trusted_lane_preserves_hosted_fallback(self):
+        lane = next(
+            ln
+            for ln in self.c.lanes
+            if ln.variable == "PULP_VELLUM_TRUSTED_RUNS_ON_JSON"
+        )
+        self.assertEqual(lane.severity, "required")
+        self.assertEqual(lane.provisioning, "ephemeral")
+        self.assertEqual(lane.unset_fallback, "ubuntu-latest")
+        self.assertEqual(
+            lane.expect,
+            [
+                "self-hosted",
+                "Linux",
+                "X64",
+                "pulp-build-linux-x64",
+                "pulp-host-macpro",
+            ],
+        )
+        raw_contract = json.loads((HERE / "runner_topology.json").read_text())
+        raw_lane = next(
+            item
+            for item in raw_contract["lanes"]
+            if item["variable"] == "PULP_VELLUM_TRUSTED_RUNS_ON_JSON"
+        )
+        self.assertTrue(raw_lane["trusted_workflow_only"])
+
     def test_namespace_paid_overflow_is_contracted_unset(self):
         self.assertIn("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
                       self.c.must_remain_unset)

@@ -149,6 +149,11 @@ class TrustedGateResolve(unittest.TestCase):
     def script(self) -> str:
         return _step_script("vellum-trusted-gate.yml", "trusted-gate", "pr")
 
+    def trusted_base_script(self) -> str:
+        return _step_script(
+            "vellum-trusted-gate.yml", "trusted-gate", "trusted-base"
+        )
+
     def test_event_path_refreshes_live_pr_state(self):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request_target",
@@ -158,17 +163,21 @@ class TrustedGateResolve(unittest.TestCase):
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out, {
-            "active": "true", "base_sha": "CURRENT_MAIN",
-            "head_sha": "HEAD_OPEN", "number": "111",
+            "active": "true", "head_sha": "HEAD_OPEN", "number": "111",
         })
 
-    def test_behind_pr_uses_protected_main_not_stale_pr_base(self):
+    def test_behind_pr_does_not_trust_stale_pr_base(self):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "workflow_dispatch", "DISPATCH_PR": "111",
         })
         self.assertEqual(rc, 0)
-        self.assertEqual(out["base_sha"], "CURRENT_MAIN")
-        self.assertNotEqual(out["base_sha"], "STALE_PR_BASE")
+        self.assertNotIn("base_sha", out)
+        self.assertNotIn("STALE_PR_BASE", out.values())
+
+    def test_checked_out_protected_main_is_bound_after_checkout(self):
+        rc, out, _ = _run(self.trusted_base_script(), {})
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, {"base_sha": "MERGE_COMMIT"})
 
     def test_delayed_event_for_closed_pr_is_an_inert_success(self):
         rc, out, err = _run(self.script(), {
@@ -186,7 +195,7 @@ class TrustedGateResolve(unittest.TestCase):
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out["active"], "true")
-        self.assertEqual(out["base_sha"], "CURRENT_MAIN")
+        self.assertNotIn("base_sha", out)
         self.assertEqual(out["head_sha"], "HEAD_OPEN")
         self.assertEqual(out["number"], "111")
 
