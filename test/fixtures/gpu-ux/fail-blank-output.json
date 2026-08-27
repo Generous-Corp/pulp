@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.gpu-health-result.v1",
+  "version": 1,
+  "run_id": "fixture-fail-blank-output",
+  "render_requested": true,
+  "verdict": "fail",
+  "health_state": "failed",
+  "probes": [{
+    "probe_id": "renderer3d",
+    "required": true,
+    "verdict": "fail",
+    "adapter": { "status": "authentic", "class": "hardware", "backend": "Metal", "name": "Fixture Hardware GPU", "vendor": null, "architecture": null, "device": null },
+    "measurements": { "command_submitted": true, "readback_completed": true, "pixel_output_produced": false, "content_floor_passed": false, "compute_initialized": null, "compute_oracle_passed": null, "device_lost": false, "non_transparent_pixel_count": null, "distinct_color_count": null, "rgba_fingerprint": null },
+    "events": [{ "sequence": 0, "stage": "content", "verdict": "fail", "code": "renderer3d_blank_output", "detail": "Submission and readback completed, but the deterministic content floor found no visible pixels." }]
+  }],
+  "recommendations": ["Inspect render-target clears, pass inputs, and final content before presentation."]
+}

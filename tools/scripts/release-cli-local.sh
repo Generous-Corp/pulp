@@ -20,6 +20,7 @@ VERSION_NUM="${VERSION#v}"  # strip leading v
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
 MAC_BUILD_DIR="$REPO_ROOT/build-release-cli"
+MAC_SDK_BUILD_DIR="$REPO_ROOT/build-release-sdk"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
@@ -34,6 +35,7 @@ step "Building macOS arm64"
 cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DPULP_BUILD_TESTS=OFF \
+    -DPULP_ENABLE_SCENE3D=ON \
     -DPULP_ENABLE_AUDIO_PROBES=OFF \
     -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5
 cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release 2>&1 | tail -3
@@ -53,7 +55,14 @@ step "Building macOS arm64 SDK"
 
 SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
 rm -rf "$SDK_STAGING"
-cmake --install "$MAC_BUILD_DIR" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
+cmake -S "$REPO_ROOT" -B "$MAC_SDK_BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_ENABLE_SCENE3D=OFF \
+    -DPULP_ENABLE_AUDIO_PROBES=OFF \
+    -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5
+cmake --build "$MAC_SDK_BUILD_DIR" --config Release 2>&1 | tail -3
+cmake --install "$MAC_SDK_BUILD_DIR" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
 if [ -f "$SDK_STAGING/version.txt" ]; then
     SDK_WEBVIEW_LIB="$SDK_STAGING/lib/libpulp-view-core.a" python3 - <<'PY'
 from pathlib import Path

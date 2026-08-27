@@ -62,6 +62,7 @@ RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
 RELEASE_DRY_RUN = REPO_ROOT / ".github" / "workflows" / "release-dry-run.yml"
 RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
+RELEASE_CLI_LOCAL = REPO_ROOT / "tools" / "scripts" / "release-cli-local.sh"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
 WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
@@ -224,6 +225,37 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
+    def test_gpu_release_builds_ship_direct_renderer_doctor_probe(self) -> None:
+        workflow = yaml.safe_load(self.text)
+        steps = {step.get("name"): step for step in
+                 workflow["jobs"]["build-cli"]["steps"]}
+        cli_configure = steps["Configure (CLI, no WebView on Linux)"]["run"]
+        linux_sdk = steps["Prepare SDK build dir (Linux)"]["run"]
+        mac_sdk = steps["Prepare SDK build dir (macOS)"]["run"]
+        self.assertIn('SCENE3D="-DPULP_ENABLE_SCENE3D=ON"', cli_configure)
+        self.assertIn("$SCENE3D", cli_configure)
+        self.assertIn("-DPULP_ENABLE_SCENE3D=OFF", linux_sdk)
+        self.assertNotIn("-DPULP_ENABLE_SCENE3D=ON", linux_sdk)
+        self.assertIn("-DPULP_ENABLE_SCENE3D=OFF", mac_sdk)
+        self.assertNotIn("-DPULP_ENABLE_SCENE3D=ON", mac_sdk)
+        self.assertIn("-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin", mac_sdk)
+
+    def test_release_rehearsals_compile_renderer_doctor_probe(self) -> None:
+        dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        path_gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        self.assertIn("-DPULP_ENABLE_SCENE3D=ON", dry_run)
+        self.assertIn('SCENE3D="-DPULP_ENABLE_SCENE3D=ON"', path_gate)
+        self.assertIn("$SCENE3D", path_gate)
+
+    def test_local_release_separates_scene3d_cli_from_sdk(self) -> None:
+        local = RELEASE_CLI_LOCAL.read_text(encoding="utf-8")
+        self.assertIn('MAC_SDK_BUILD_DIR="$REPO_ROOT/build-release-sdk"', local)
+        self.assertIn("-DPULP_ENABLE_SCENE3D=ON", local)
+        self.assertIn("-DPULP_ENABLE_SCENE3D=OFF", local)
+        self.assertIn('cmake --build "$MAC_SDK_BUILD_DIR"', local)
+        self.assertIn('cmake --install "$MAC_SDK_BUILD_DIR"', local)
+        self.assertNotIn('cmake --install "$MAC_BUILD_DIR"', local)
+
     def test_cli_and_sdk_build_ship_inspector_sdk(self) -> None:
         self.assertGreaterEqual(
             self.text.count("-DPULP_ENABLE_INSPECTOR=ON"),
@@ -264,6 +296,7 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         for step_name in (
             "Configure (CLI, no WebView on Linux)",
             "Prepare SDK build dir (Linux)",
+            "Prepare SDK build dir (macOS)",
         ):
             workflow = yaml.safe_load(self.text)
             step = next(
@@ -406,6 +439,10 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_disables_audio_probes(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+
+    def test_windows_release_gate_keeps_scene3d_off_without_gpu_assets(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_SCENE3D=OFF", run_block)
 
     def test_windows_release_gate_ships_inspector_sdk(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")

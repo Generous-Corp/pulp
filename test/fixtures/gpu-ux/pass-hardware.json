@@ -1,0 +1,109 @@
+{
+  "schema": "pulp.gpu-health-result.v1",
+  "version": 1,
+  "run_id": "fixture-pass-hardware",
+  "render_requested": true,
+  "verdict": "pass",
+  "health_state": "healthy",
+  "probes": [
+    {
+      "probe_id": "gpu-health",
+      "required": true,
+      "verdict": "pass",
+      "adapter": {
+        "status": "authentic",
+        "class": "hardware",
+        "backend": "Metal",
+        "name": "Fixture Hardware GPU",
+        "vendor": null,
+        "architecture": null,
+        "device": null
+      },
+      "measurements": {
+        "command_submitted": true,
+        "readback_completed": true,
+        "pixel_output_produced": true,
+        "content_floor_passed": true,
+        "compute_initialized": true,
+        "compute_oracle_passed": true,
+        "device_lost": false,
+        "non_transparent_pixel_count": 4096,
+        "distinct_color_count": 17,
+        "rgba_fingerprint": 81985529216486900
+      },
+      "events": [
+        {
+          "sequence": 0,
+          "stage": "configuration",
+          "verdict": "pass",
+          "code": "gpu.configuration.pass",
+          "detail": "configuration evidence recorded as pass."
+        },
+        {
+          "sequence": 1,
+          "stage": "adapter",
+          "verdict": "pass",
+          "code": "gpu.adapter.pass",
+          "detail": "adapter evidence recorded as pass."
+        },
+        {
+          "sequence": 2,
+          "stage": "shader_compile",
+          "verdict": "pass",
+          "code": "gpu.shader_compile.pass",
+          "detail": "shader_compile evidence recorded as pass."
+        },
+        {
+          "sequence": 3,
+          "stage": "pipeline_create",
+          "verdict": "pass",
+          "code": "gpu.pipeline_create.pass",
+          "detail": "pipeline_create evidence recorded as pass."
+        },
+        {
+          "sequence": 4,
+          "stage": "render",
+          "verdict": "pass",
+          "code": "gpu.render.pass",
+          "detail": "render evidence recorded as pass."
+        },
+        {
+          "sequence": 5,
+          "stage": "submit",
+          "verdict": "pass",
+          "code": "gpu.submit.pass",
+          "detail": "submit evidence recorded as pass."
+        },
+        {
+          "sequence": 6,
+          "stage": "readback",
+          "verdict": "pass",
+          "code": "gpu.readback.pass",
+          "detail": "readback evidence recorded as pass."
+        },
+        {
+          "sequence": 7,
+          "stage": "content",
+          "verdict": "pass",
+          "code": "gpu.content.pass",
+          "detail": "content evidence recorded as pass."
+        },
+        {
+          "sequence": 8,
+          "stage": "compute",
+          "verdict": "pass",
+          "code": "gpu.compute.pass",
+          "detail": "compute evidence recorded as pass."
+        },
+        {
+          "sequence": 9,
+          "stage": "device_state",
+          "verdict": "pass",
+          "code": "gpu.device_state.pass",
+          "detail": "device_state evidence recorded as pass."
+        }
+      ]
+    }
+  ],
+  "recommendations": []
+}

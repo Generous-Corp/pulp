@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.gpu-health-result.v1",
+  "version": 1,
+  "run_id": "fixture-fail-readback",
+  "render_requested": true,
+  "verdict": "fail",
+  "health_state": "failed",
+  "probes": [{
+    "probe_id": "renderer3d",
+    "required": true,
+    "verdict": "fail",
+    "adapter": { "status": "authentic", "class": "hardware", "backend": "Metal", "name": "Fixture Hardware GPU", "vendor": null, "architecture": null, "device": null },
+    "measurements": { "command_submitted": true, "readback_completed": false, "pixel_output_produced": false, "content_floor_passed": false, "compute_initialized": null, "compute_oracle_passed": null, "device_lost": false, "non_transparent_pixel_count": null, "distinct_color_count": null, "rgba_fingerprint": null },
+    "events": [{ "sequence": 0, "stage": "readback", "verdict": "fail", "code": "renderer3d_readback_failed", "detail": "Commands were submitted, but the bounded texture readback did not complete." }]
+  }],
+  "recommendations": ["Verify that the selected adapter supports bounded texture and buffer readback."]
+}

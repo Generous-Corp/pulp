@@ -103,6 +103,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Category | Tools |
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
+| GPU health | `pulp_gpu_doctor` performs the same bounded render/readback and compute/map checks as `pulp doctor gpu`, returning typed `pulp.gpu-health-result.v1` evidence for pass, completed failure, unavailable, or unverified outcomes. |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Development Inspector | `pulp_control_profiles` provides static in-process profile metadata. `pulp_inspect_profiles` is a compatibility alias until Pulp 0.800.0 on 2026-10-01. `pulp_trace_start` and `pulp_trace_stop` use canonical capability control. Legacy discovery/capability/doctor, raw inspect, and Motion wrappers are not exposed. |
 | Capability control | Generated `pulp_control_*` tools provide typed exact-instance operations, broker-owned grants/consent, progress, cancellation, subscriptions, resources, and ACL-checked artifact reads. See [Capability control over MCP](capability-control-mcp.md). |
@@ -117,6 +118,13 @@ Inspector discovery or RPC. The removed set-param, evaluation, and screenshot
 names have explicit grant-gated replacements; fixture-only screenshot/Motion
 tools and `pulp_create` stay outside live-instance authority for the reasons in
 the [MCP control guide](capability-control-mcp.md).
+
+`pulp_gpu_doctor` resolves the installed sibling Pulp CLI from the MCP server's
+own executable location, so it works outside a checkout and does not depend on
+the client's current directory. Its structured result remains available when
+the underlying diagnostic exits 1 or 2; clients must distinguish a completed
+measurement failure from unavailable or unverified evidence instead of
+collapsing every nonzero status into a generic tool failure.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

@@ -720,11 +720,11 @@ commands:
 
   - name: doctor
     status: usable
-    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, generated WidgetBridge API artifacts in source-tree mode, platform deps, an optional observational local control-broker row, and either the active checkout or the installed SDK workflow. Broker absence is nonfatal; the probe never starts or repairs a daemon, and an accepting socket without a trusted peer expectation is reachable-unverified rather than healthy. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints. `--versions` surfaces CLI/SDK/Plugin version skew. `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage. `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs; `--caches --fix` auto-heals user-owned drift without sudo.
+    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, generated WidgetBridge API artifacts in source-tree mode, platform deps, an optional observational local control-broker row, and either the active checkout or the installed SDK workflow. Broker absence is nonfatal; the probe never starts or repairs a daemon, and an accepting socket without a trusted peer expectation is reachable-unverified rather than healthy. Optional `android`, `ios`, and `gpu` subcommands run focused platform diagnostics. `gpu` performs bounded render and compute work and reports schema-versioned evidence; it never infers hardware identity from a backend name. `--versions` surfaces CLI/SDK/Plugin version skew. `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage. `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs; `--caches --fix` auto-heals user-owned drift without sudo.
     args:
       - name: target
         kind: positional
-        description: Optional `android` or `ios` to check the mobile dev environment instead of the default core checks.
+        description: Optional `android` or `ios` to check the mobile dev environment, or `gpu` to run bounded render and compute health probes, instead of the default core checks.
       - name: --fix
         kind: flag
         description: Auto-fix issues where possible (with confirmation). With --validators, removes broken user-owned validator copies; root-owned breakage prints a sudo one-liner instead of auto-elevating. With --caches, removes dangling symlinks and stale-commit entries the user owns; root-owned entries are reported but never auto-deleted.
@@ -748,7 +748,10 @@ commands:
         description: Audit the Pulp FetchContent shared-source cache (~/Library/Caches/Pulp/fetchcontent-src on macOS, equivalent paths elsewhere). Exits 1 on any dangling-symlink, stale-commit, or root-owned entry. Same discovery code runs as a preflight inside `pulp build` and `pulp test`; bypass via PULP_SKIP_CACHE_PREFLIGHT=1.
       - name: --json
         kind: flag
-        description: With --versions or --caches, emit the diagnostic as a single JSON object (stable schema — see reference/cli.md#doctor)
+        description: With --versions, --caches, or `gpu`, emit the diagnostic as a single JSON object. GPU results use `pulp.gpu-health-result.v1` and preserve pass, completed-fail, unavailable, and unverified states.
+      - name: --no-render
+        kind: flag
+        description: With `gpu`, run inventory/preflight only without acquiring a GPU device or performing render/compute work. The result is unverified rather than passed.
       - name: --host-quirks
         kind: flag
         description: Print only the host-quirks section — the effective runtime policy (off/validated-only/all) and its source (compile default / PULP_HOST_QUIRKS env / API), the detected DAW + version, and which accommodations are enforced. Also rendered at the bottom of the default doctor view. `pulp doctor quirks` is a synonym. Exits 0. Override the policy with the PULP_HOST_QUIRKS env var.

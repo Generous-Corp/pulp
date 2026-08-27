@@ -15,6 +15,14 @@
 #include <utility>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <pulp/platform/win32_sane.hpp>
+#else
+#include <unistd.h>
+#endif
+
 #if !defined(_WIN32)
 #include <sys/stat.h>
 #endif
@@ -81,6 +89,58 @@ fs::path source_build_cli_path(const fs::path& root) {
             return candidate;
     }
     return build_dir / "pulp";
+}
+
+fs::path current_process_executable_path(const fs::path& argv0) {
+    std::error_code ec;
+#if defined(__APPLE__)
+    std::uint32_t size = 0;
+    (void)_NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size + 1, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        const auto canonical = fs::canonical(buffer.data(), ec);
+        if (!ec) return canonical;
+        return fs::path(buffer.data());
+    }
+#elif defined(_WIN32)
+    std::vector<char> buffer(32768, '\0');
+    const auto size = GetModuleFileNameA(nullptr, buffer.data(),
+                                         static_cast<DWORD>(buffer.size()));
+    if (size > 0 && size < buffer.size()) {
+        const fs::path executable{std::string(buffer.data(), size)};
+        const auto canonical = fs::canonical(executable, ec);
+        if (!ec) return canonical;
+        return executable;
+    }
+#else
+    const auto canonical = fs::canonical("/proc/self/exe", ec);
+    if (!ec) return canonical;
+#endif
+    if (argv0.empty()) return {};
+    const auto fallback = fs::absolute(argv0, ec);
+    return ec ? argv0 : fallback;
+}
+
+fs::path sibling_pulp_cpp_path(const fs::path& executable_path) {
+#if defined(_WIN32)
+    constexpr auto executable_name = "pulp-cpp.exe";
+#else
+    constexpr auto executable_name = "pulp-cpp";
+#endif
+    const auto directory = executable_path.parent_path();
+    const auto installed = directory / executable_name;
+    if (fs::is_regular_file(installed)) return installed;
+
+    // CMake keeps source-built MCP and CLI binaries in adjacent subtrees.
+    // Resolve from the captured running image, never cwd or PATH.
+    const auto single_config = directory.parent_path() / "cli" / executable_name;
+    if (fs::is_regular_file(single_config)) return single_config;
+    if (directory.parent_path().filename() == "mcp") {
+        const auto multi_config = directory.parent_path().parent_path() / "cli" /
+                                  directory.filename() / executable_name;
+        if (fs::is_regular_file(multi_config)) return multi_config;
+    }
+    return installed;
 }
 
 std::string random_temp_suffix() {

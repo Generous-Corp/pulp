@@ -1,0 +1,111 @@
+{
+  "schema": "pulp.gpu-health-result.v1",
+  "version": 1,
+  "run_id": "fixture-unverified-no-render",
+  "render_requested": false,
+  "verdict": "unverified",
+  "health_state": "unverified",
+  "probes": [
+    {
+      "probe_id": "gpu-health",
+      "required": true,
+      "verdict": "unverified",
+      "adapter": {
+        "status": "unverified",
+        "class": "unknown",
+        "backend": null,
+        "name": null,
+        "vendor": null,
+        "architecture": null,
+        "device": null
+      },
+      "measurements": {
+        "command_submitted": null,
+        "readback_completed": null,
+        "pixel_output_produced": null,
+        "content_floor_passed": null,
+        "compute_initialized": null,
+        "compute_oracle_passed": null,
+        "device_lost": false,
+        "non_transparent_pixel_count": null,
+        "distinct_color_count": null,
+        "rgba_fingerprint": null
+      },
+      "events": [
+        {
+          "sequence": 0,
+          "stage": "configuration",
+          "verdict": "pass",
+          "code": "gpu.configuration.pass",
+          "detail": "GPU support is compiled in, but rendering was not requested."
+        },
+        {
+          "sequence": 1,
+          "stage": "adapter",
+          "verdict": "unverified",
+          "code": "gpu.adapter.unverified",
+          "detail": "adapter evidence recorded as unverified."
+        },
+        {
+          "sequence": 2,
+          "stage": "shader_compile",
+          "verdict": "unverified",
+          "code": "gpu.shader_compile.unverified",
+          "detail": "shader_compile evidence recorded as unverified."
+        },
+        {
+          "sequence": 3,
+          "stage": "pipeline_create",
+          "verdict": "unverified",
+          "code": "gpu.pipeline_create.unverified",
+          "detail": "pipeline_create evidence recorded as unverified."
+        },
+        {
+          "sequence": 4,
+          "stage": "render",
+          "verdict": "unverified",
+          "code": "gpu.render.unverified",
+          "detail": "render evidence recorded as unverified."
+        },
+        {
+          "sequence": 5,
+          "stage": "submit",
+          "verdict": "unverified",
+          "code": "gpu.submit.unverified",
+          "detail": "submit evidence recorded as unverified."
+        },
+        {
+          "sequence": 6,
+          "stage": "readback",
+          "verdict": "unverified",
+          "code": "gpu.readback.unverified",
+          "detail": "readback evidence recorded as unverified."
+        },
+        {
+          "sequence": 7,
+          "stage": "content",
+          "verdict": "unverified",
+          "code": "gpu.content.unverified",
+          "detail": "content evidence recorded as unverified."
+        },
+        {
+          "sequence": 8,
+          "stage": "compute",
+          "verdict": "unverified",
+          "code": "gpu.compute.unverified",
+          "detail": "compute evidence recorded as unverified."
+        },
+        {
+          "sequence": 9,
+          "stage": "device_state",
+          "verdict": "unverified",
+          "code": "gpu.device_state.unverified",
+          "detail": "device_state evidence recorded as unverified."
+        }
+      ]
+    }
+  ],
+  "recommendations": [
+    "Run again with render probing enabled."
+  ]
+}

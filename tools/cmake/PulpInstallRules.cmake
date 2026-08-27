@@ -433,6 +433,20 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
+# Stable machine-readable GPU health result contract. The CLI and MCP helper
+# emit this schema outside a source checkout, so consumers need the matching
+# versioned contract from the selected installed SDK rather than a floating
+# documentation URL or an inferred response shape.
+set(_pulp_gpu_health_result_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_health_result_schema}")
+    message(FATAL_ERROR
+        "Required GPU health result schema is missing: ${_pulp_gpu_health_result_schema}")
+endif()
+install(FILES "${_pulp_gpu_health_result_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_health_result_schema)
+
 # DSP capability registry.
 #
 # Ships the committed snapshot so a downstream consumer can discover the SDK's

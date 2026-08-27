@@ -1,0 +1,111 @@
+{
+  "schema": "pulp.gpu-health-result.v1",
+  "version": 1,
+  "run_id": "fixture-unavailable-no-adapter",
+  "render_requested": true,
+  "verdict": "unavailable",
+  "health_state": "unavailable",
+  "probes": [
+    {
+      "probe_id": "gpu-health",
+      "required": true,
+      "verdict": "unavailable",
+      "adapter": {
+        "status": "unavailable",
+        "class": "unknown",
+        "backend": null,
+        "name": null,
+        "vendor": null,
+        "architecture": null,
+        "device": null
+      },
+      "measurements": {
+        "command_submitted": null,
+        "readback_completed": null,
+        "pixel_output_produced": null,
+        "content_floor_passed": null,
+        "compute_initialized": null,
+        "compute_oracle_passed": null,
+        "device_lost": false,
+        "non_transparent_pixel_count": null,
+        "distinct_color_count": null,
+        "rgba_fingerprint": null
+      },
+      "events": [
+        {
+          "sequence": 0,
+          "stage": "configuration",
+          "verdict": "pass",
+          "code": "gpu.configuration.pass",
+          "detail": "GPU support is compiled in."
+        },
+        {
+          "sequence": 1,
+          "stage": "adapter",
+          "verdict": "unavailable",
+          "code": "gpu.adapter.unavailable",
+          "detail": "adapter evidence recorded as unavailable."
+        },
+        {
+          "sequence": 2,
+          "stage": "shader_compile",
+          "verdict": "unavailable",
+          "code": "gpu.shader_compile.unavailable",
+          "detail": "shader_compile evidence recorded as unavailable."
+        },
+        {
+          "sequence": 3,
+          "stage": "pipeline_create",
+          "verdict": "unavailable",
+          "code": "gpu.pipeline_create.unavailable",
+          "detail": "pipeline_create evidence recorded as unavailable."
+        },
+        {
+          "sequence": 4,
+          "stage": "render",
+          "verdict": "unavailable",
+          "code": "gpu.render.unavailable",
+          "detail": "render evidence recorded as unavailable."
+        },
+        {
+          "sequence": 5,
+          "stage": "submit",
+          "verdict": "unavailable",
+          "code": "gpu.submit.unavailable",
+          "detail": "submit evidence recorded as unavailable."
+        },
+        {
+          "sequence": 6,
+          "stage": "readback",
+          "verdict": "unavailable",
+          "code": "gpu.readback.unavailable",
+          "detail": "readback evidence recorded as unavailable."
+        },
+        {
+          "sequence": 7,
+          "stage": "content",
+          "verdict": "unavailable",
+          "code": "gpu.content.unavailable",
+          "detail": "content evidence recorded as unavailable."
+        },
+        {
+          "sequence": 8,
+          "stage": "compute",
+          "verdict": "unavailable",
+          "code": "gpu.compute.unavailable",
+          "detail": "compute evidence recorded as unavailable."
+        },
+        {
+          "sequence": 9,
+          "stage": "device_state",
+          "verdict": "unavailable",
+          "code": "gpu.device_state.unavailable",
+          "detail": "device_state evidence recorded as unavailable."
+        }
+      ]
+    }
+  ],
+  "recommendations": [
+    "Check driver installation and adapter availability."
+  ]
+}

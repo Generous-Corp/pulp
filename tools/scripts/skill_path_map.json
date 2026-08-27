@@ -179,6 +179,9 @@
       "paths": [
         "tools/cli/**",
         "tools/mcp/pulp_mcp.cpp",
+        "tools/mcp/mcp_gpu*",
+        "docs/contracts/gpu-health-result-v1.schema.json",
+        "test/fixtures/gpu-ux/**",
         "docs/status/cli-commands.yaml",
         "tools/scripts/cli_sync_check.py",
         "tools/scripts/check_cli_mcp_parity.py",
@@ -510,6 +513,11 @@
     },
     "skia-gpu-build": {
       "paths": [
+        "tools/cli/gpu_health/**",
+        "tools/mcp/mcp_gpu*",
+        "docs/contracts/gpu-health-result-v1.schema.json",
+        "test/fixtures/gpu-ux/**",
+        "docs/guides/gpu-validation-checklist.md",
         "tools/cmake/FindSkia.cmake",
         "tools/build-skia.sh",
         "tools/build-skia-android.sh",

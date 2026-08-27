@@ -1,0 +1,3 @@
+half4 main(float2 position) {
+    return half4(0.0);
+}

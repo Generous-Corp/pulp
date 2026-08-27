@@ -769,9 +769,11 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
+          SCENE3D="-DPULP_ENABLE_SCENE3D=OFF"
           case "${{ matrix.platform }}" in
             darwin-arm64|darwin-x64|linux-x64|linux-arm64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
+              SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;
           esac
           # Intel leg: cross-compile the x86_64 slice on the Apple-Silicon
@@ -812,6 +814,7 @@ jobs:
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
+            $SCENE3D \
             $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
@@ -1042,8 +1045,10 @@ jobs:
       # libwebkit2gtk during the reconfigure (which would defeat the
       # purpose of the split).
       #
-      # On macOS/Windows the CLI configure already used WebView=ON, so
-      # we just symlink the SDK build dir to the existing build dir.
+      # Scene3D is intentionally ON only in the packaged CLI build. The SDK
+      # does not currently export/install pulp-scene or its dependency closure,
+      # so every separate SDK build keeps Scene3D OFF rather than advertising
+      # an incomplete Pulp::render link interface to consumers.
       - name: Prepare SDK build dir (Linux)
         if: runner.os == 'Linux'
         # Same PULP_REQUIRE_GPU_FOR_SDK gating as the CLI configure above —
@@ -1068,6 +1073,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_SCENE3D=OFF \
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
@@ -1099,7 +1105,34 @@ jobs:
 
       - name: Prepare SDK build dir (macOS)
         if: runner.os == 'macOS'
-        run: ln -snf build build-sdk
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARCH=""
+          if [ "${{ matrix.platform }}" = "darwin-x64" ]; then
+            unset SKIA_DIR
+            EXTRA_ARCH="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin"
+          fi
+          INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
+            INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
+          fi
+          cmake -S . -B build-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_SKIA_AUTOFETCH=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_SCENE3D=OFF \
+            -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
+            -DPULP_REQUIRE_GPU_FOR_SDK=ON \
+            -DPULP_BUILD_WEBVIEW=ON \
+            $INSPECTOR \
+            $EXTRA_ARCH
+          jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+          echo "SDK build parallelism: --parallel ${jobs}"
+          cmake --build build-sdk --config Release --parallel "$jobs"
         shell: bash
 
       - name: Build SDK tarball (Unix)
@@ -1109,10 +1142,8 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
-          # build-sdk on Linux is the WebView=ON build (separate dir to
-          # avoid re-linking the CLI binary against libwebkit2gtk).
-          # build-sdk on macOS is a symlink to build (CLI was built with
-          # WebView=ON there).
+          # build-sdk is a Scene3D=OFF SDK-only configuration. On Linux it also
+          # turns WebView back ON without relinking the portable CLI.
           cmake --install build-sdk --prefix sdk-staging --config Release
           # CMake rewrites install RPATHs while copying executables into the SDK.
           # On Mach-O that invalidates the build-time code signature. Re-sign the

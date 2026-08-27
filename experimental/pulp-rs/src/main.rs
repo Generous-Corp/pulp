@@ -603,6 +603,9 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(cmd::version::run_system(&parsed, &mut out))
         }
         Command::Doctor(args) => {
+            if args.tail.first().is_some_and(|arg| arg == "gpu") {
+                return delegate_gpu_doctor();
+            }
             cmd::doctor::run(args.versions, args.json, &mut out).map_err(|e| map_err(&e))
         }
         Command::Projects(args) => {
@@ -1043,6 +1046,27 @@ fn map_exit(res: pulp_rs::error::Result<i32>) -> Result<(), ExitCode> {
         Ok(0) => Ok(()),
         Ok(code) => Err(ExitCode::from(u8::try_from(code).unwrap_or(1))),
         Err(e) => Err(map_err(&e)),
+    }
+}
+
+/// Keep the GPU diagnostic on the installed C++ companion, which owns Dawn,
+/// Skia, and the typed evidence contract. The silent delegation path prevents
+/// `PULP_DEBUG` wrapper text from contaminating machine-readable diagnostics.
+fn delegate_gpu_doctor() -> Result<(), ExitCode> {
+    let argv = pulp_rs::fallthrough::current_argv_tail();
+    match pulp_rs::fallthrough::delegate_silent(&argv) {
+        Ok(pulp_rs::fallthrough::Outcome::Delegated(0)) => Ok(()),
+        Ok(pulp_rs::fallthrough::Outcome::Delegated(code)) => {
+            Err(ExitCode::from(u8::try_from(code & 0xff).unwrap_or(1)))
+        }
+        Ok(pulp_rs::fallthrough::Outcome::Disabled | pulp_rs::fallthrough::Outcome::NotFound) => {
+            eprintln!("pulp: doctor gpu requires the installed pulp-cpp companion");
+            Err(ExitCode::from(2))
+        }
+        Err(error) => {
+            eprintln!("pulp: doctor gpu delegation failed: {error}");
+            Err(ExitCode::from(1))
+        }
     }
 }
 

@@ -416,6 +416,9 @@ pulp doctor --caches                 # FetchContent shared-source cache health
 pulp doctor --caches --fix           # heal user-owned dangling/stale-commit entries
 pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
+pulp doctor gpu                      # bounded render + compute health evidence
+pulp doctor gpu --json               # pulp.gpu-health-result.v1 JSON
+pulp doctor gpu --no-render --json   # unverified inventory; acquires no GPU device
 pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
 pulp doctor quirks                   # synonym for --host-quirks
 pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
@@ -427,6 +430,43 @@ The optional `Control broker` row never contributes to a failing doctor exit.
 It uses the same connection-only probe as `pulp status`, performs no daemon or
 authority mutation, and reports an accepting socket without a trusted peer
 expectation as `reachable-unverified`, not healthy or verified.
+
+#### `gpu`
+
+`pulp doctor gpu [--no-render] [--json]` performs bounded work through Pulp's
+existing Dawn/WebGPU rendering and compute paths. The render probe creates an
+offscreen surface, submits a known draw, reads pixels back, and verifies the
+result. The compute probe submits a known workload, maps the result, and checks
+the returned values. `--no-render` is an inventory/preflight mode that acquires
+no GPU device, performs no active probes, and returns `unverified` rather than
+treating omitted work as a pass.
+
+The JSON result follows the installed
+[`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
+contract. Each stage distinguishes `pass`, `fail`, `unavailable`, and
+`unverified`, and includes the measured facts and remediation needed to
+interpret it. Adapter identity is reported only from adapter metadata returned
+by Dawn. A Metal, D3D12, Vulkan, or other backend name does not prove that an
+adapter is discrete hardware, and the null/software backend is never reported
+as a hardware pass. Identities are per probe: independently acquired
+Renderer3D, HeadlessSurface, and GpuCompute devices are not asserted to be the
+same device. An aggregate pass requires authentic identity from at least one
+required probe plus real render/readback/content proof from the required probe
+set; inspect each probe when device correlation matters.
+
+Exit status is part of the result contract:
+
+| Exit | Meaning |
+|---:|---|
+| `0` | All required probes passed real-work checks, including render/readback/content, and at least one required probe reported authentic adapter identity. |
+| `1` | The requested work completed and a measured assertion failed. |
+| `2` | A requested stage was unavailable or its evidence could not be verified. |
+
+The installed `pulp` command delegates to its installed sibling `pulp-cpp`, so
+the diagnostic works from any current directory and does not depend on a source
+checkout. The `pulp_gpu_doctor` MCP tool exposes the same typed result and exit
+meaning through the installed sibling binaries; an MCP client receives the
+evidence even when the status is 1 or 2.
 
 `pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
 host-quirk accommodations and under which policy. It prints the effective

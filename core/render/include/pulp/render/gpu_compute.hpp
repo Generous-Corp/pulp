@@ -597,9 +597,26 @@ public:
     /// optional features (timestamp_query, shader_f16) and limits as runtime
     /// capabilities — select shader variants / sizes from these, never assume.
     struct CapabilityReport {
+        /// True when a usable compute device and queue are ready.
         bool available = false;
-        std::string backend;        // "Metal" / "D3D12" / "Vulkan" / "shared" / ...
+        /// True only when Dawn returned this adapter's own AdapterInfo.
+        bool adapter_info_authentic = false;
+        /// Backend family, for example "Metal", "D3D12", "Vulkan", or "shared".
+        std::string backend;
+        /// Stable class: "discrete-gpu", "integrated-gpu", "cpu", or "unknown".
+        std::string adapter_type;
+        /// Dawn-provided device name; empty when authentic identity is unavailable.
+        std::string name;
+        /// Dawn-provided vendor name; empty when unavailable.
         std::string vendor;
+        /// Dawn-provided architecture; empty when unavailable.
+        std::string architecture;
+        /// Dawn-provided adapter description; empty when unavailable.
+        std::string description;
+        /// PCI-style vendor identifier, or zero when unavailable.
+        uint32_t vendor_id = 0;
+        /// PCI-style device identifier, or zero when unavailable.
+        uint32_t device_id = 0;
         bool timestamp_query = false;   // compute-pass GPU timing available
         bool shader_f16 = false;        // half-precision in WGSL
         uint64_t max_storage_buffer_binding_size = 0;

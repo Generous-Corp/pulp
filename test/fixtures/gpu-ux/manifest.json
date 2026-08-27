@@ -1,0 +1,77 @@
+{
+  "schema": "pulp.gpu-health-fixture-manifest.v1",
+  "valid_fixtures": [
+    "pass-hardware.json",
+    "pass-software.json",
+    "fail-null-adapter.json",
+    "unavailable-no-adapter.json",
+    "unverified-no-render.json",
+    "fail-async-invalid-wgsl.json",
+    "fail-blank-output.json",
+    "fail-readback.json"
+  ],
+  "source_artifacts": {
+    "valid_sksl": { "path": "valid-ui.sksl", "sha256": "c50f51eb0f913651f5bcb552b816436b8f66c3ed062af2625dc14a41fc31b67d", "expected": "gpu.shader_compile.pass" },
+    "invalid_sksl": { "path": "invalid-ui.sksl", "sha256": "35220028489cbf7e92a7dee55c074d53f35f10450018bd937449106f47d6d5b5", "expected": "gpu.shader_compile.fail" },
+    "bounded_compute_wgsl": { "path": "valid-magnitude.wgsl", "sha256": "bede271886598c6b866d778ebc3dac556b7c3e03f07fa0285f405335f2644fa7", "expected": "gpu_compute_oracle_passed" },
+    "async_invalid_wgsl": { "path": "invalid-async.wgsl", "sha256": "3f81a349b5019a8428426fb11b017b5297a22079910153fd52768c9958d00487", "expected": "wgsl.async_uncaptured_error", "result": "fail-async-invalid-wgsl.json" },
+    "blank_output_sksl": { "path": "blank-output.sksl", "sha256": "ff2fe713f99cfa902e59f36db3ab52b1d620d600237425ce348a32f08fd7a5a6", "expected": "renderer3d_blank_output", "result": "fail-blank-output.json" }
+  },
+  "auxiliary_fixtures": {
+    "deterministic_mock_state": { "path": "deterministic-mock-state.json", "sha256": "dd14c6b2350b829db190dfa2c251c42d14a930ba8166b8a97b17bbf319d20537" },
+    "stage_outcomes": { "path": "stage-outcome-matrix.json", "sha256": "89d59589ea2a8c433916c9dbbcad93d1fbe652d08ec8a856c15a8a6992af7a7f" },
+    "failed_readback": { "path": "fail-readback.json", "sha256": "9cd608bd18d2667480161cee2867b09a13fc7d969c5522eae7b5633d9d126883" }
+  },
+  "coverage": {
+    "verdicts": [
+      "pass",
+      "fail",
+      "unavailable",
+      "unverified"
+    ],
+    "stages": [
+      "configuration",
+      "adapter",
+      "shader_compile",
+      "pipeline_create",
+      "render",
+      "submit",
+      "readback",
+      "content",
+      "compute",
+      "device_state"
+    ],
+    "adapter_classes": [
+      "hardware",
+      "software",
+      "null",
+      "unknown"
+    ],
+    "async_invalid_wgsl": "fail-async-invalid-wgsl.json",
+    "blank_output": "fail-blank-output.json",
+    "failed_readback": "fail-readback.json",
+    "stage_positive_negative": "stage-outcome-matrix.json"
+  },
+  "mutations": {
+    "each_required_field": [
+      "delete",
+      "rename"
+    ],
+    "each_enum": [
+      "unsupported-value"
+    ],
+    "each_stage": [
+      "fail-event"
+    ],
+    "semantic": [
+      "sequence-gap",
+      "probe-verdict-mismatch",
+      "top-verdict-mismatch",
+      "hardware-without-authentic-identity",
+      "null-adapter-pass",
+      "no-render-pass",
+      "lost-without-device-lost",
+      "pass-without-content-proof"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.gpu-health-stage-outcome-matrix.v1",
+  "outcomes": [
+    { "stage": "configuration", "positive_code": "gpu.configuration.pass", "negative_code": "gpu.configuration.fail" },
+    { "stage": "adapter", "positive_code": "gpu.adapter.pass", "negative_code": "gpu.adapter.fail" },
+    { "stage": "shader_compile", "positive_code": "gpu.shader_compile.pass", "negative_code": "gpu.shader_compile.fail" },
+    { "stage": "pipeline_create", "positive_code": "gpu.pipeline_create.pass", "negative_code": "gpu.pipeline_create.fail" },
+    { "stage": "render", "positive_code": "gpu.render.pass", "negative_code": "gpu.render.fail" },
+    { "stage": "submit", "positive_code": "gpu.submit.pass", "negative_code": "gpu.submit.fail" },
+    { "stage": "readback", "positive_code": "gpu.readback.pass", "negative_code": "gpu.readback.fail" },
+    { "stage": "content", "positive_code": "gpu.content.pass", "negative_code": "gpu.content.fail" },
+    { "stage": "compute", "positive_code": "gpu.compute.pass", "negative_code": "gpu.compute.fail" },
+    { "stage": "device_state", "positive_code": "gpu.device_state.pass", "negative_code": "gpu.device_state.fail" }
+  ]
+}

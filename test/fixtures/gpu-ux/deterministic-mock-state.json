@@ -1,0 +1,11 @@
+{
+  "schema": "pulp.gpu-health-mock-state.v1",
+  "dimensions": { "width": 64, "height": 64 },
+  "clear_rgba8": [19, 113, 197, 255],
+  "compute_input_complex": [3.0, 4.0],
+  "compute_expected_magnitude": 5.0,
+  "compute_bins": 64,
+  "seed": 0,
+  "clock_ns": 0,
+  "adapter_policy": "authentic-required-for-top-level-pass"
+}

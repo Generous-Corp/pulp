@@ -14,6 +14,32 @@ prebuilt Skia libraries*. If it can't, the build silently comes up **CPU-only**
 (CoreGraphics raster, `MacWindowHost`) with no hard error — that's the #1
 "GPU doesn't work" cause.
 
+## Start with installed GPU health evidence
+
+Before inspecting libraries or opening a window, run:
+
+```bash
+pulp doctor gpu --json
+```
+
+This performs bounded render/readback and compute/map work through the installed
+Pulp paths. Exit 0 means all required real-work proofs passed and at least one
+required probe has authentic identity; exit 1 is a completed measured failure, and
+exit 2 means requested evidence is unavailable or unverified. Use
+`pulp doctor gpu --no-render --json` for inventory/preflight without acquiring
+a GPU device; it returns unverified, never passed. The `pulp_gpu_doctor` MCP tool
+returns the same typed evidence and both installed surfaces work independently
+of the current directory.
+
+Record adapter identity exactly as Dawn reports it. A backend label such as
+Metal, D3D12, or Vulkan does not prove that the adapter is hardware or discrete,
+and null/software adapters are never hardware passes. Probe identities are
+independent; do not infer that separately acquired
+Renderer3D, HeadlessSurface, and GpuCompute devices are the same device.
+Continue with the manual
+bundle and symbol checks below when the result is unavailable/unverified or
+when a completed probe fails.
+
 ## The fresh-worktree trap (most common)
 
 `external/skia-build/` in a fresh worktree often contains **only headers** —

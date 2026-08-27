@@ -950,6 +950,20 @@ static const char* backend_name(wgpu::BackendType type) {
     }
 }
 
+static const char* adapter_type_name(wgpu::AdapterType type) {
+    switch (type) {
+        case wgpu::AdapterType::DiscreteGPU:   return "discrete-gpu";
+        case wgpu::AdapterType::IntegratedGPU: return "integrated-gpu";
+        case wgpu::AdapterType::CPU:           return "cpu";
+        default:                               return "unknown";
+    }
+}
+
+static std::string adapter_string(wgpu::StringView view) {
+    if (view.data == nullptr || view.length == 0) return {};
+    return std::string(view.data, view.length);
+}
+
 static double now_us() {
     using Clock = std::chrono::high_resolution_clock;
     return static_cast<double>(
@@ -2658,13 +2672,25 @@ public:
 
         if (adapter_) {
             wgpu::AdapterInfo info{};
-            adapter_.GetInfo(&info);
-            r.backend = backend_name(info.backendType);
-            r.vendor = std::string(info.vendor.data, info.vendor.length);
+            r.adapter_info_authentic =
+                adapter_.GetInfo(&info) == wgpu::Status::Success;
+            if (r.adapter_info_authentic) {
+                r.backend = backend_name(info.backendType);
+                r.adapter_type = adapter_type_name(info.adapterType);
+                r.name = adapter_string(info.device);
+                r.vendor = adapter_string(info.vendor);
+                r.architecture = adapter_string(info.architecture);
+                r.description = adapter_string(info.description);
+                r.vendor_id = info.vendorID;
+                r.device_id = info.deviceID;
+            } else {
+                r.adapter_type = "unknown";
+            }
         } else {
             // Shared-device mode borrows the surface's device; we don't hold
             // the adapter here.
             r.backend = "shared";
+            r.adapter_type = "unknown";
         }
 
         // Largest power-of-two complex FFT the storage-buffer limit admits,
