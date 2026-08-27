@@ -728,12 +728,15 @@ CaptureResult capture_document(
             capture_width, request.initial_height,
             request.device_scale_factor)
         || request.device_scale_factor != kDefaultDeviceScaleFactor
-        || request.timeout_ms <= 0) {
+        || request.timeout_ms <= 0
+        || (request.fit_authored_frame && request.pinned_width)
+        || (request.fit_authored_frame && request.interaction_plan)) {
         return capture_failure(
             "invalid-capture-options", "capture-setup",
             "capture dimensions must be positive and no larger than 8192px "
             "per axis or 64 megapixels at DPR 2; timeout must be positive, "
-            "and browser capture currently requires DPR 2",
+            "browser capture currently requires DPR 2, and authored-frame "
+            "fitting cannot be combined with a pinned width or interactions",
             request.output_directory);
     }
 
@@ -796,6 +799,7 @@ CaptureResult capture_document(
         "--timeout-ms", std::to_string(request.timeout_ms)};
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
+    if (request.fit_authored_frame) args.push_back("--fit-authored-frame");
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());

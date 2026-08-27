@@ -328,6 +328,36 @@ TEST_CASE("browser capture rejects unsafe viewport allocations before launch",
     CHECK(result.process.exit_code == -1);
 }
 
+TEST_CASE("authored viewport fitting rejects state that a reload would erase",
+          "[import-design][browser-capture]") {
+    TempTree tree("fit-conflicts");
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    SECTION("pinned width") {
+        auto request = fixture_request(tree, script);
+        request.fit_authored_frame = true;
+        request.pinned_width = 920;
+        const auto result =
+            capture::capture_document(fixture_browser(), request);
+        REQUIRE_FALSE(result.ok());
+        CHECK(result.diagnostic.code == "invalid-capture-options");
+        CHECK(result.process.exit_code == -1);
+    }
+
+    SECTION("interaction plan") {
+        auto request = fixture_request(tree, script);
+        request.fit_authored_frame = true;
+        request.interaction_plan = tree.write(
+            "interactions.json",
+            R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+        const auto result =
+            capture::capture_document(fixture_browser(), request);
+        REQUIRE_FALSE(result.ok());
+        CHECK(result.diagnostic.code == "invalid-capture-options");
+        CHECK(result.process.exit_code == -1);
+    }
+}
+
 TEST_CASE("browser discovery probes in order and never falls through an override",
           "[import-design][browser-capture]") {
     TempTree tree("probe-order");
@@ -860,6 +890,26 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     REQUIRE(result.artifacts->interaction_report);
     CHECK(*result.artifacts->interaction_report ==
           output / "interaction-report.json");
+}
+
+TEST_CASE("capture requests one authored-frame fit without pinning width",
+          "[import-design][browser-capture]") {
+    TempTree tree("fit-argv");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.fit_authored_frame = true;
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    INFO(result.diagnostic.message);
+    REQUIRE(result.ok());
+
+    const auto args = read_lines(
+        fs::canonical(request.output_directory) / "argv.txt");
+    CHECK(contains_line(args, "--fit-authored-frame"));
+    CHECK(contains_line(args, "--initial-width"));
+    CHECK_FALSE(contains_line(args, "--width"));
+    CHECK_FALSE(contains_line(args, "--interactions"));
 }
 
 TEST_CASE("capture preserves the runtime diagnostic code",

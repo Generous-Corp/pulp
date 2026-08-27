@@ -83,8 +83,9 @@ function parseArguments(argv) {
     if (!token.startsWith("--")) {
       throw new Error(`unexpected argument: ${token}`);
     }
-    if (token === "--allow-network" || token === "--allow-browser-network") {
-      flags.add("--allow-network");
+    if (token === "--allow-network" || token === "--allow-browser-network" ||
+        token === "--fit-authored-frame") {
+      flags.add(token === "--allow-browser-network" ? "--allow-network" : token);
       continue;
     }
     if (index + 1 >= argv.length) {
@@ -120,6 +121,61 @@ function positiveInteger(values, name, fallback) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function measureAuthoredFrame(cdp) {
+  const evaluated = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      if (!document.body) return null;
+      // A body-level style can be injected for origin correction. Select the
+      // first child that occupies layout space, not firstElementChild.
+      let element = null;
+      for (const child of document.body.children) {
+        const bounds = child.getBoundingClientRect();
+        if (bounds.width > 0 && bounds.height > 0) {
+          element = child;
+          break;
+        }
+      }
+      if (!element) return null;
+      const bounds = element.getBoundingClientRect();
+      return {
+        x: bounds.left + window.scrollX,
+        y: bounds.top + window.scrollY,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const frame = evaluated.result?.value;
+  if (!frame || ![frame.x, frame.y, frame.width, frame.height]
+      .every(Number.isFinite) || frame.width <= 0 || frame.height <= 0) {
+    return null;
+  }
+  return frame;
+}
+
+function verifyAuthoredViewport(frame, target) {
+  if (Math.ceil(frame.width) !== target.width ||
+      Math.ceil(frame.height) !== target.height) {
+    const error = new Error(
+      `authored frame changed from ${target.width}x${target.height} to ` +
+      `${frame.width}x${frame.height} after one same-target reload`);
+    error.code = "capture-authored-viewport-nonconvergent";
+    throw error;
+  }
+  const epsilon = 0.01;
+  if (frame.x < -epsilon || frame.y < -epsilon ||
+      frame.x + frame.width > target.width + epsilon ||
+      frame.y + frame.height > target.height + epsilon) {
+    const error = new Error(
+      `authored frame (${frame.x}, ${frame.y}, ${frame.width}, ` +
+      `${frame.height}) is not contained by derived viewport ` +
+      `${target.width}x${target.height}`);
+    error.code = "capture-authored-frame-not-contained";
+    throw error;
+  }
 }
 
 // The width correction grows the viewport so content the viewport centres is
@@ -1012,6 +1068,14 @@ async function runCapture(options) {
   const timeoutMs = positiveInteger(
     options.values, "--timeout-ms", 90000);
   const interactionPlanPath = options.values.get("--interactions");
+  const fitAuthoredFrame = options.flags.has("--fit-authored-frame");
+  if (fitAuthoredFrame && pinnedWidth !== undefined) {
+    throw new Error("--fit-authored-frame cannot be combined with --width");
+  }
+  if (fitAuthoredFrame && interactionPlanPath) {
+    throw new Error(
+      "--fit-authored-frame cannot be combined with --interactions");
+  }
   const interactionPlan = interactionPlanPath
     ? await readInteractionPlan(interactionPlanPath)
     : null;
@@ -1133,11 +1197,80 @@ async function runCapture(options) {
       // window before running completion hooks or freezing the page.
       minimumElapsedMs: 1000,
     });
-    const readiness = await awaitExplicitReadiness(cdp);
+    let readiness = await awaitExplicitReadiness(cdp);
     let rendererHooks = await finalizeKnownRenderers(cdp);
     const rendererSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
     });
+    let resolvedViewportWidth = initialWidth;
+    let resolvedViewportHeight = initialHeight;
+    let fitSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
+    let viewportResolution = null;
+    if (fitAuthoredFrame) {
+      progress.enterPhase("authored-viewport-discovery");
+      const discoveredFrame = await measureAuthoredFrame(cdp);
+      if (!discoveredFrame) {
+        const error = new Error(
+          "the first occupying body child did not resolve to a finite frame");
+        error.code = "capture-authored-frame-unavailable";
+        throw error;
+      }
+      const target = {
+        width: Math.ceil(discoveredFrame.width),
+        height: Math.ceil(discoveredFrame.height),
+      };
+      validateCaptureDimensions(
+        target.width, target.height, dpr, "derived authored viewport");
+      resolvedViewportWidth = target.width;
+      resolvedViewportHeight = target.height;
+      await cdp.call("Emulation.setDeviceMetricsOverride", {
+        width: target.width,
+        height: target.height,
+        deviceScaleFactor: dpr,
+        mobile: false,
+        screenWidth: target.width,
+        screenHeight: target.height,
+      });
+      progress.enterPhase("authored-viewport-reload");
+      const reloaded = cdp.waitFor("Page.loadEventFired");
+      await cdp.call("Page.reload", { ignoreCache: false });
+      await reloaded;
+      progress.enterPhase("page-settle");
+      await disableMotion(cdp);
+      const reloadSettle = await waitForStable(cdp, {
+        networkIdle: () => pendingNetwork.size === 0,
+        minimumElapsedMs: 1000,
+      });
+      readiness = await awaitExplicitReadiness(cdp);
+      rendererHooks = await finalizeKnownRenderers(cdp);
+      const reloadRendererSettle = await waitForStable(cdp, {
+        networkIdle: () => pendingNetwork.size === 0,
+      });
+      fitSettle = {
+        rounds: reloadSettle.rounds + reloadRendererSettle.rounds,
+        stableRounds:
+          reloadSettle.stableRounds + reloadRendererSettle.stableRounds,
+        elapsedMs: reloadSettle.elapsedMs + reloadRendererSettle.elapsedMs,
+      };
+      const verifiedFrame = await measureAuthoredFrame(cdp);
+      if (!verifiedFrame) {
+        const error = new Error(
+          "the authored frame disappeared after the same-target reload");
+        error.code = "capture-authored-frame-unavailable";
+        throw error;
+      }
+      verifyAuthoredViewport(verifiedFrame, target);
+      viewportResolution = {
+        mode: "authored-frame-fixed-point",
+        source: "first-occupying-body-child",
+        discovered_frame: discoveredFrame,
+        target,
+        verified_frame: verifiedFrame,
+        fixed_point: true,
+        contained: true,
+        reload_count: 1,
+      };
+    }
     let interactionReport = null;
     let interactionReadiness = null;
     let interactionNavigationGuard = null;
@@ -1174,10 +1307,8 @@ async function runCapture(options) {
     // CDP can capture content beyond the viewport directly, so one settled
     // layout is both more deterministic and more faithful.
     let finalExtent = await measureDocumentExtent(cdp);
-    let resolvedViewportWidth = initialWidth;
-    let resolvedViewportHeight = initialHeight;
     let widthSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
-    if (finalExtent.left < 0) {
+    if (!fitAuthoredFrame && finalExtent.left < 0) {
       if (pinnedWidth !== undefined) {
         // A pinned width is the caller's answer, and the layout was authored
         // at it before this measurement. Growing past it would replace that
@@ -1216,7 +1347,7 @@ async function runCapture(options) {
       }
     }
     let heightSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
-    if (finalExtent.top < 0) {
+    if (!fitAuthoredFrame && finalExtent.top < 0) {
       resolvedViewportHeight =
         initialHeight + Math.ceil(-2 * finalExtent.top);
       if (resolvedViewportHeight > MAX_LOGICAL_CAPTURE_DIMENSION) {
@@ -1362,26 +1493,15 @@ async function runCapture(options) {
     // than fail an otherwise good capture.
     let authoredFrame = null;
     try {
-      const frameEval = await cdp.call("Runtime.evaluate", {
-        expression: `(() => {
-          if (!document.body) return null;
-          // NOT firstElementChild: the harness injects a <style> into the body
-          // for the scroll-shift correction, and a style tag measures 0x0.
-          // Take the first child that actually occupies space.
-          let el = null;
-          for (const c of document.body.children) {
-            const b = c.getBoundingClientRect();
-            if (b.width > 0 && b.height > 0) { el = c; break; }
-          }
-          if (!el) return null;
-          const r = el.getBoundingClientRect();
-          return { x: r.left + window.scrollX, y: r.top + window.scrollY,
-                   width: r.width, height: r.height };
-        })()`,
-        returnByValue: true,
-      });
-      const box = frameEval.result?.value;
-      if (box && box.width > 0 && box.height > 0) {
+      const box = await measureAuthoredFrame(cdp);
+      if (box) {
+        if (fitAuthoredFrame) {
+          verifyAuthoredViewport(box, {
+            width: resolvedViewportWidth,
+            height: resolvedViewportHeight,
+          });
+          viewportResolution.verified_frame = box;
+        }
         // Relative to the capture origin — the document extent's top-left,
         // which is negative for content starting left of the viewport.
         authoredFrame = {
@@ -1391,7 +1511,8 @@ async function runCapture(options) {
           height: box.height,
         };
       }
-    } catch {
+    } catch (error) {
+      if (fitAuthoredFrame) throw error;
       authoredFrame = null;
     }
     validateCaptureDimensions(
@@ -1697,6 +1818,9 @@ async function runCapture(options) {
             width: resolvedViewportWidth,
             height: resolvedViewportHeight,
           },
+          ...(viewportResolution
+            ? { resolution: viewportResolution }
+            : {}),
           document: {
             width: captureWidth,
             height: captureHeight,
@@ -1712,15 +1836,17 @@ async function runCapture(options) {
           rounds:
             firstSettle.rounds + rendererSettle.rounds +
             interactionSettle.rounds +
-            widthSettle.rounds + heightSettle.rounds,
+            widthSettle.rounds + heightSettle.rounds + fitSettle.rounds,
           stable_rounds:
             firstSettle.stableRounds + rendererSettle.stableRounds +
             interactionSettle.stableRounds +
-            widthSettle.stableRounds + heightSettle.stableRounds,
+            widthSettle.stableRounds + heightSettle.stableRounds +
+            fitSettle.stableRounds,
           elapsed_ms:
             firstSettle.elapsedMs + rendererSettle.elapsedMs +
             interactionSettle.elapsedMs +
-            widthSettle.elapsedMs + heightSettle.elapsedMs,
+            widthSettle.elapsedMs + heightSettle.elapsedMs +
+            fitSettle.elapsedMs,
         },
         network: {
           external_allowed: allowedExternalOrigins.length > 0,
