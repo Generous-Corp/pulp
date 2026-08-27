@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 namespace pulp::timeline {
 
