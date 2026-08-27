@@ -38,6 +38,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/audio_matrix_mixer.hpp": "Pulp::signal",
     "pulp/signal/breakpoint_envelope.hpp": "Pulp::signal",
     "pulp/signal/beat_repeat_kernel.hpp": "Pulp::signal",
+    "pulp/signal/commuted_string_excitation.hpp": "Pulp::signal",
     "pulp/signal/cross_feedback_multitap_delay.hpp": "Pulp::signal",
     "pulp/signal/de_esser.hpp": "Pulp::signal",
     "pulp/signal/dither.hpp": "Pulp::signal",
@@ -574,7 +575,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:027d6cb42c8816b8b01b82510eaed6ee55507febc444b1dcfa1bce8257247875",
+        "fingerprint": "sha256:c277693da843c010c9ce9718425e2b03370c94ddda5ed9175cd0b70d60a35d45",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
