@@ -1703,12 +1703,16 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin \
             "$PR_BASE_SHA" "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/receipt-head"
+          # The pull-request merge ref can refresh after the event payload is
+          # created. Bind the receipt to the commit checkout actually built and
+          # tested, rather than the potentially stale GITHUB_SHA event value.
+          checkout_sha="$(git rev-parse --verify 'HEAD^{commit}')"
           receipt_dir="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}"
           mkdir -p "$receipt_dir"
           python3 tools/scripts/protected_merge_receipt.py issue \
             --repository "$GITHUB_REPOSITORY" --target "${{ matrix.key }}" \
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
-            --checkout-sha "$GITHUB_SHA" --workflow-sha "${{ github.workflow_sha }}" \
+            --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
           echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"

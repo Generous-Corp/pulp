@@ -54,6 +54,17 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn("steps.protected-receipt.outcome == 'success'", WORKFLOW)
         self.assertIn("retention-days: 2", WORKFLOW)
 
+    def test_receipt_uses_the_checkout_that_was_built_not_event_sha(self) -> None:
+        issuer = WORKFLOW.split(
+            "      - name: Issue exact protected-validation receipt", 1
+        )[1].split("      - name: Publish exact protected-validation receipt", 1)[0]
+        self.assertIn(
+            "checkout_sha=\"$(git rev-parse --verify 'HEAD^{commit}')\"", issuer
+        )
+        self.assertIn('--checkout-sha "$checkout_sha"', issuer)
+        self.assertNotIn('--checkout-sha "$GITHUB_SHA"', issuer)
+        self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
+
 
 if __name__ == "__main__":
     unittest.main()
