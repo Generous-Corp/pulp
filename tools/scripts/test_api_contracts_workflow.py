@@ -87,6 +87,12 @@ class ApiContractsWorkflowTests(unittest.TestCase):
         """The workflow's one command must be a mode the script actually has."""
         self.assertIn("--contract-only", SCRIPT.read_text(encoding="utf-8"))
 
+    def test_contract_pass_enforces_installed_header_parity(self) -> None:
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("doxygen_installed_header_check.py", script)
+        self.assertLess(script.index("doxygen_installed_header_check.py"),
+                        script.index('if [ "$CONTRACT_ONLY" -eq 1 ]'))
+
 
 if __name__ == "__main__":
     unittest.main()

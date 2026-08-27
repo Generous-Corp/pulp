@@ -21,7 +21,11 @@ on:
       - 'requirements-docs.txt'
       - 'tools/mkdocs_hooks.py'
       - 'tools/build-api-docs.sh'
+      - 'tools/scripts/doxygen_installed_header_check.py'
+      - 'tools/cmake/PulpInstallRules.cmake'
       - 'core/**/include/**'
+      - 'inspect/include/**'
+      - 'tools/audio/analysis/include/**'
       # `build-api-docs.sh` reads the version from CMakeLists.txt
       # (#591 / wave-4 sweep) — keep the preview lane in sync
       # with docs-deploy.yml.
@@ -34,7 +38,11 @@ on:
       - 'requirements-docs.txt'
       - 'tools/mkdocs_hooks.py'
       - 'tools/build-api-docs.sh'
+      - 'tools/scripts/doxygen_installed_header_check.py'
+      - 'tools/cmake/PulpInstallRules.cmake'
       - 'core/**/include/**'
+      - 'inspect/include/**'
+      - 'tools/audio/analysis/include/**'
       - 'CMakeLists.txt'
       - '.github/workflows/docs-material.yml'
   workflow_dispatch:
