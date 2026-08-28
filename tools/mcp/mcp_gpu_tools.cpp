@@ -8,12 +8,15 @@
 
 #include <pulp_tooling/gpu_health/health_result.hpp>
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace pulp_mcp {
 namespace {
@@ -126,8 +129,9 @@ std::string handle_gpu_doctor(const std::string& params_json) {
 }
 
 std::string handle_gpu_probe(const std::string& params_json) {
+    choc::value::Value params;
     try {
-        const auto params = choc::json::parse(params_json);
+        params = choc::json::parse(params_json);
         if (!params.isObject())
             return local_error(-1, "invalid-arguments", "arguments must be an object");
         bool unknown = false;
@@ -146,19 +150,22 @@ std::string handle_gpu_probe(const std::string& params_json) {
         return local_error(-1, "invalid-arguments", "arguments must be valid JSON");
     }
 
-    const auto recipe = extract_string(params_json, "recipe");
-    const auto artifacts = extract_string(params_json, "artifacts");
-    const auto negative_token = extract_raw(params_json, "negative_control");
-    if (recipe.empty())
+    if (!params.hasObjectMember("recipe") || !params["recipe"].isString() ||
+        params["recipe"].getString().empty())
         return local_error(-1, "invalid-arguments", "recipe is required");
+    const auto recipe = std::string(params["recipe"].getString());
     if (pulp::tooling::gpu_probe::find_recipe(recipe) == nullptr)
         return local_error(-1, "invalid-arguments", "recipe is not in the closed catalog");
-    if (artifacts.empty())
+    if (!params.hasObjectMember("artifacts") || !params["artifacts"].isString() ||
+        params["artifacts"].getString().empty())
         return local_error(-1, "invalid-arguments", "artifacts is required");
+    const auto artifacts = std::string(params["artifacts"].getString());
     if (!std::filesystem::path(artifacts).is_absolute())
         return local_error(-1, "invalid-arguments", "artifacts must be an absolute path");
-    if (!negative_token.empty() && negative_token != "true" && negative_token != "false")
+    if (params.hasObjectMember("negative_control") && !params["negative_control"].isBool())
         return local_error(-1, "invalid-arguments", "negative_control must be a boolean");
+    const bool negative_control =
+        params.hasObjectMember("negative_control") && params["negative_control"].getBool();
 
     std::filesystem::path executable;
     {
@@ -172,10 +179,15 @@ std::string handle_gpu_probe(const std::string& params_json) {
         return local_error(-1, "cli-unavailable",
                            "the sibling installed pulp-cpp executable was not found");
 
-    auto command = shell_quote(cli.string()) + " gpu probe --recipe " + shell_quote(recipe) +
-                   " --artifacts " + shell_quote(artifacts) + " --json";
-    if (negative_token == "true") command += " --negative-control";
-    const auto run = exec_with_status(command);
+    std::vector<std::string> arguments{
+        "gpu", "probe", "--recipe", recipe, "--artifacts", artifacts, "--json"};
+    if (negative_control) arguments.emplace_back("--negative-control");
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 5 * 60 * 1000;
+    options.max_output_bytes = 1 << 20;
+    const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
+    const ExecResult run{process.timed_out || process.was_cancelled ? -1 : process.exit_code,
+                         process.stdout_output};
 
     std::string parse_error;
     const auto evidence = pulp::tooling::gpu_probe::from_json(run.output, &parse_error);
@@ -183,8 +195,11 @@ std::string handle_gpu_probe(const std::string& params_json) {
         return local_error(run.status, "malformed-cli-output",
                            "pulp-cpp gpu probe returned invalid v1 evidence: " + parse_error,
                            run.output);
-    if (evidence->recipe_id != recipe ||
-        evidence->mutation.has_value() != (negative_token == "true"))
+    const auto* recipe_contract = pulp::tooling::gpu_probe::find_recipe(recipe);
+    const auto expected_mutation = negative_control
+        ? std::optional<std::string>{recipe_contract->negative_mutation}
+        : std::nullopt;
+    if (evidence->recipe_id != recipe || evidence->mutation != expected_mutation)
         return local_error(run.status, "incoherent-cli-output",
                            "pulp-cpp gpu probe evidence does not match the request", run.output);
     const auto expected_status = pulp::tooling::gpu_probe::exit_code(*evidence);

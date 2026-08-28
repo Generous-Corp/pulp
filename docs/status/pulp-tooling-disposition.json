@@ -1789,6 +1789,35 @@
         ]
       },
       {
+        "name": "gpu",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "probe",
+            "arguments": [
+              {
+                "name": "--recipe",
+                "required": true
+              },
+              {
+                "name": "--artifacts",
+                "required": true
+              },
+              {
+                "name": "--negative-control",
+                "kind": "flag"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -4447,6 +4476,10 @@
       },
       {
         "name": "pulp_gpu_doctor",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_gpu_probe",
         "disposition": "pulp-owned"
       },
       {

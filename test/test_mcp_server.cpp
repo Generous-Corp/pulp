@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -28,6 +29,7 @@
 #include <pulp/inspect/agent_request_queue.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
 #include <choc/text/choc_JSON.h>
 
 namespace {
@@ -35,6 +37,47 @@ namespace {
 using namespace mcp_test;
 using namespace pulp_mcp;
 using namespace pulp_mcp::server;
+namespace gp = pulp::tooling::gpu_probe;
+
+gp::ProbeResult gpu_probe_evidence(gp::Verdict verdict, bool negative_control = false) {
+    const auto* recipe = gp::find_recipe("gpu-compute.magnitude.v1");
+    if (recipe == nullptr) throw std::runtime_error("missing magnitude probe recipe");
+    gp::ProbeResult result;
+    result.gpu_evidence_id = "0123456789abcdef0123456789abcdef";
+    result.recipe_id = std::string(recipe->id);
+    result.source_digest = std::string(64, 'a');
+    result.signature_digest = std::string(64, 'b');
+    result.dimensions = recipe->dimensions;
+    result.seed = recipe->seed;
+    result.clock = std::string(recipe->clock);
+    result.input_format = std::string(recipe->input_format);
+    result.output_format = std::string(recipe->output_format);
+    result.encoding = std::string(recipe->encoding);
+    result.tolerance = recipe->tolerance;
+    result.adapter_policy = recipe->adapter_policy;
+    result.adapter.status = verdict == gp::Verdict::pass
+        ? gp::IdentityStatus::authentic : gp::IdentityStatus::unavailable;
+    result.adapter.classification = verdict == gp::Verdict::pass
+        ? gp::AdapterClass::hardware : gp::AdapterClass::unknown;
+    result.adapter.backend = "test-backend";
+    result.numeric_sample_count = 16;
+    result.verdict = verdict;
+    for (std::size_t i = 0; i < recipe->semantic_passes.size(); ++i) {
+        const auto pass_verdict = i + 1 == recipe->semantic_passes.size()
+            ? verdict : gp::Verdict::pass;
+        result.passes.push_back({static_cast<std::uint32_t>(i),
+                                 std::string(recipe->semantic_passes[i]),
+                                 pass_verdict, pass_verdict == gp::Verdict::pass,
+                                 {}, {}, {}, "gpu.probe.test"});
+    }
+    if (negative_control) result.mutation = std::string(recipe->negative_mutation);
+    result.artifacts.push_back({"values.json", gp::ArtifactKind::json,
+                                "application/json", 16, std::string(64, 'c')});
+    std::string error;
+    if (!gp::validate(result, &error))
+        throw std::runtime_error("invalid test GPU probe evidence: " + error);
+    return result;
+}
 
 class ScopedStreamRedirect {
   public:
@@ -842,6 +885,75 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
     const auto unsupported = handle_request(
         tool_call("57", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
     require_contains(unsupported, "malformed-cli-output");
+}
+
+TEST_CASE("MCP GPU probe preserves argv and typed status evidence",
+          "[mcp][tools][gpu-probe]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp-cpp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp-cpp";
+#endif
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    const auto evidence_path = install.path / "evidence.json";
+    const auto argv_path = install.path / "argv.txt";
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", evidence_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    configure_gpu_doctor_executable(mcp.string());
+
+    const auto artifacts = (install.path / "artifacts %PULP_MCP_EXPAND% & quoted").string();
+    const auto params = "{\"recipe\":\"gpu-compute.magnitude.v1\",\"artifacts\":" +
+                        json_string(artifacts) + ",\"negative_control\":false}";
+    struct Outcome { gp::Verdict verdict; int status; const char* name; };
+    const std::array<Outcome, 4> outcomes{{
+        {gp::Verdict::pass, 0, "pass"},
+        {gp::Verdict::fail, 1, "fail"},
+        {gp::Verdict::unavailable, 2, "unavailable"},
+        {gp::Verdict::unverified, 2, "unverified"},
+    }};
+    for (const auto& outcome : outcomes) {
+        std::ofstream(evidence_path, std::ios::trunc)
+            << gp::to_json(gpu_probe_evidence(outcome.verdict));
+        ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS",
+                                std::to_string(outcome.status));
+        const auto response = handle_request(tool_call("58", "pulp_gpu_probe", params));
+        require_contains(response, "\"exit_code\":" + std::to_string(outcome.status));
+        require_contains(response, "\"verdict\":\"" + std::string(outcome.name) + "\"");
+        if (outcome.status == 0)
+            REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        else
+            require_contains(response, R"JSON("isError":true)JSON");
+    }
+
+    std::ifstream recorded(argv_path);
+    const std::string argv{std::istreambuf_iterator<char>(recorded),
+                           std::istreambuf_iterator<char>()};
+    require_contains(argv, "gpu\nprobe\n--recipe\ngpu-compute.magnitude.v1\n");
+    require_contains(argv, "--artifacts\n" + artifacts + "\n--json\n");
+
+    std::ofstream(evidence_path, std::ios::trunc)
+        << gp::to_json(gpu_probe_evidence(gp::Verdict::fail, true));
+    ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "1");
+    const auto negative = handle_request(tool_call(
+        "59", "pulp_gpu_probe",
+        "{\"recipe\":\"gpu-compute.magnitude.v1\",\"artifacts\":" +
+            json_string(artifacts) + ",\"negative_control\":true}"));
+    require_contains(negative, R"JSON("mutation":"wgsl-imaginary-weight")JSON");
+    std::ifstream recorded_negative(argv_path);
+    const std::string negative_argv{std::istreambuf_iterator<char>(recorded_negative),
+                                    std::istreambuf_iterator<char>()};
+    require_contains(negative_argv, "--negative-control\n");
+
+    const auto threejs = handle_request(tool_call(
+        "60", "pulp_gpu_probe",
+        "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" +
+            json_string(artifacts) + "}"));
+    require_contains(threejs, "recipe is not in the closed catalog");
 }
 
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS

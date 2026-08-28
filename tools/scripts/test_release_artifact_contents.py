@@ -1113,6 +1113,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_probe_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-probe-result-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-probe-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_missing_threejs_runtime_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1364,6 +1380,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["sdk_provenance_floor"]
             del document["capability_handoff_floor"]
             del document["gpu_health_contract_floor"]
+            del document["gpu_probe_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1372,6 +1389,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_probe_contract_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
             self.assertEqual(
