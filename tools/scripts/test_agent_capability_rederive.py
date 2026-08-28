@@ -546,10 +546,10 @@ def exercise_git_unavailable_is_not_source_archive() -> int:
         (repo / "seed.txt").write_text("seed\n")
         subprocess.run(["git", "add", "."], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
-        with mock.patch.dict(rederive.history.os.environ, {"PATH": ""}):
-            rederive.history.os.environ.pop(
-                "PULP_AGENT_CAPABILITY_BASE_REF", None
-            )
+        git_path = rederive.history.os.environ.get("PATH", "")
+        with mock.patch.dict(
+            rederive.history.os.environ, {"PATH": ""}, clear=True
+        ):
             comparison = rederive.history._resolve_protected_comparison(repo, "HEAD")
             problems = rederive.history.protected_base_problems(
                 repo, history_document, manifest_document, surface_document,
@@ -558,7 +558,10 @@ def exercise_git_unavailable_is_not_source_archive() -> int:
         assert comparison.status == "command_failed", comparison
         assert problems and "history is unavailable" in problems[0], problems
         assert '"status":"command_failed"' in problems[0], problems
-        available = rederive.history._resolve_protected_comparison(repo, "HEAD")
+        with mock.patch.dict(
+            rederive.history.os.environ, {"PATH": git_path}, clear=True
+        ):
+            available = rederive.history._resolve_protected_comparison(repo, "HEAD")
         assert available.status == "available", available
         with mock.patch.object(
             rederive.history, "_git_output", return_value=None
