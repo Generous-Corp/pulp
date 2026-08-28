@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260828-pr7882-gpu-ux-horizon-a",
+  "created_at": "2026-08-28T22:21:04Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record Pulp-owned GPU probe recipes, first-visible-frame and DPR acceptance harnesses, Perfetto evidence projections, unified-control health reads, packaging checks, and existing-skill guidance. The change makes Pulp and Forge GPU failures actionable while retaining Dawn/WebGPU and existing Pulp integration seams; it does not add or alter generic rendering primitives, design-import authority, or Vellum source authority.",
+  "tests": [
+    "GPU probe, first-visible-frame, DPR, trace-overhead, control, CLI, MCP, release, and skill contract tests",
+    "CPU-only and GPU-enabled CTest registration proofs",
+    "Forge Modular exact-Pulp-SHA canary and bounded Perfetto acceptance evidence",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
