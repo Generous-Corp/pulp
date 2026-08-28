@@ -667,16 +667,16 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         member = "pulp-sdk/share/pulp/threejs/build/three.webgpu.js"
         self.assertNotIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
         )
         self.assertIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
         )
         self.assertTrue(
             rac.THREEJS_RUNTIME_SDK_MEMBERS.issubset(
                 rac.required_sdk_members(
-                    "linux-x64", rac.DEFAULT_MATRIX, "0.818.0"
+                    "linux-x64", rac.DEFAULT_MATRIX, "0.819.0"
                 )
             )
         )
@@ -688,22 +688,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         )
         self.assertNotIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
         )
         self.assertIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
         )
 
     def test_gpu_dpr_contract_is_required_from_its_release_floor(self) -> None:
         member = "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
         self.assertNotIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
         )
         self.assertIn(
             member,
-            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
         )
 
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
