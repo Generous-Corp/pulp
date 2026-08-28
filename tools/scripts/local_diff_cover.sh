@@ -742,14 +742,18 @@ PROFDATA="${BUILD_DIR}/coverage/pulp.profdata"
 mkdir -p "${BUILD_DIR}/coverage"
 echo "=== Merging profiles ==="
 MERGE_LOG="${BUILD_DIR}/coverage/llvm-profdata-merge.log"
-PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+PROFILE_INPUTS="${BUILD_DIR}/coverage/llvm-profdata-inputs.txt"
+# Keep this as one llvm-profdata invocation. xargs may split a large profile
+# set into multiple merges, and each later -o invocation overwrites the prior
+# result instead of accumulating it.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
+PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
 if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
     echo "[local_diff_cover] no raw profile shards were produced" >&2
     exit 1
 fi
-if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
-    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
-        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+if ! llvm-profdata merge -sparse --failure-mode=all \
+    --input-files="${PROFILE_INPUTS}" -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
     cat "${MERGE_LOG}" >&2
     exit 1
 fi
