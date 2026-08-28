@@ -483,3 +483,13 @@ Validate required categories from the DPR manifest before interpreting a run.
 Missing categories, unavailable real GPU timing where the question requires it,
 or a trace that cannot be bound to the trial artifact leaves the cell
 incomplete; it is not evidence that the cost was zero.
+
+## Correlating GPU-health startup snapshots
+
+`ControlGpuHealthProvider` may emit a GPU evidence ID from the observed frame,
+but it must not invent a trace ID. Keep `causal_attribution=unverified` and the
+startup verdict unverified until an A2T artifact supplies the required
+categories and is bound to the same product instance, build, frame identity,
+and trial. Dropped events, truncation, missing categories, timeout, or instance
+loss are fail-closed evidence, not zero-cost measurements. Perfetto production
+and provider mutation remain off the audio thread.

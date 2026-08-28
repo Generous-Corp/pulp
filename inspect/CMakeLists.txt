@@ -125,6 +125,7 @@ target_link_libraries(pulp-inspect-client
     PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
+    src/control_gpu_health_provider.cpp
     src/control_gpu_health_read_executor.cpp
     src/control_host_development_executor.cpp
     src/control_state_read_executor.cpp
@@ -171,6 +172,7 @@ target_link_libraries(pulp-inspect-standalone-runtime
 # Exact-target UI capture/input remains an optional adapter so the common
 # control runtime does not acquire a renderer dependency.
 add_library(pulp-inspect-ui-runtime
+    src/control_gpu_health_view_adapter.cpp
     src/control_standalone_ui_adapter.cpp)
 add_library(pulp::inspect-ui-runtime ALIAS pulp-inspect-ui-runtime)
 target_include_directories(pulp-inspect-ui-runtime

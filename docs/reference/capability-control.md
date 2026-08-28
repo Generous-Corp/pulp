@@ -191,14 +191,24 @@ pulp control call --instance "$INSTANCE_ID" dev.pulp.gpu/health.read@1 \
   --profile inspect-readonly --params '{}' --json
 ```
 
-Registry and MCP presence do not imply host availability. A host must not
-declare this capability until its product adapter has real first-visible-frame
-and trace producers and returns a typed, validated snapshot for that exact
-registration, instance, and publication. The current CMake shipping helper
-rejects that declaration explicitly; A2/A2T removes the gate only with the
-bound product provider. Until then, capability status and grant requests fail
-closed. This runtime operation is intentionally absent from the design-time
-agent capability manifest.
+Registry and MCP presence do not imply host availability. Control-enabled
+Standalone products now compose `ControlGpuHealthProvider` with a UI-thread
+view adapter and advertise the operation only when that editor surface exists.
+The adapter captures the host back buffer after ordinary event/render work,
+records authentic `GpuSurface::adapter_info()` when present, applies the shared
+PNG content floor, and publishes an immutable snapshot for the exact admitted
+registration, instance, and publication. Reads are atomic and never render,
+block, compile, trace, or touch the audio thread.
+
+This first implementation is intentionally conservative: a capture-confirmed
+frame is an upper bound, not proof of the generic native present boundary.
+Until Vellum-owned frame-lifecycle/source/shader identity and a correlated A2T
+trace are available, the versioned `pulp.editor-first-visible.v1` budget remains
+`unratified`, startup remains `incomplete`/`unverified`, and no B4 disposition
+is legal. `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` provides the deterministic blank
+first-frame negative control. Timeout, instance loss, event loss, invalid PNG,
+blank content, and missing adapter identity all fail closed. This runtime
+operation remains absent from the design-time agent capability manifest.
 
 ## Diagnose and audit
 

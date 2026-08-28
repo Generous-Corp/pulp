@@ -221,3 +221,13 @@ way and say plainly that this rung is unproven.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
   personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
   Macs (m1/m3/m5) are already serialized; local is the primary lane.
+
+## GPU-health DAW evidence
+
+For a product declaring `gpu.health.read`, bind the response to the exact DAW
+instance/publication and preserve the returned snapshot. A valid response is
+not automatically a passing startup trial: the current host-capture endpoint
+is an upper bound and remains unverified without exact present/source/shader
+and correlated A2T trace evidence. Run the seeded blank control separately with
+`PULP_GPU_HEALTH_SEED_BLANK_FRAME=1`; a pass there is a harness failure. Keep
+SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.

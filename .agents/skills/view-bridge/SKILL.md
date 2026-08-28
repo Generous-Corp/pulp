@@ -2124,3 +2124,14 @@ If you are reordering members in either adapter, the tracing attachment must
 destroy LAST (after the bridge and the editor host), because the final detach
 flushes the trace and joins the auto-flush timer — it has to outlive every span
 those objects can still emit.
+
+## GPU first-visible-frame health
+
+A control-enabled Standalone that declares `gpu.health.read` now requires an
+attached ViewBridge/window. Its Pulp-owned health adapter polls only on the UI
+thread, captures the existing back buffer, and publishes an immutable snapshot;
+the control worker only reads that snapshot. Do not move capture or provider
+writes to the audio thread. The current capture time is an upper bound, so keep
+startup unverified until an exact generic present producer and trace binding
+exist. Use `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` for the blank-frame negative
+control.
