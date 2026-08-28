@@ -24,6 +24,7 @@
 #import <pulp/view/window_host.hpp>
 
 #include <chrono>
+#include <cmath>
 
 namespace {
 
@@ -206,6 +207,43 @@ make_test_window(pulp::view::View& root, pulp::view::WindowOptions options) {
     }
 }
 
+bool resize_content_view(pulp::view::WindowHost& host,
+                         float width, float height) {
+    if (!is_main_thread() || width <= 0.0f || height <= 0.0f) return false;
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        if (!window) return false;
+        [window setContentSize:NSMakeSize(width, height)];
+        const NSSize applied = window.contentView.bounds.size;
+        return std::fabs(applied.width - width) < 0.5
+            && std::fabs(applied.height - height) < 0.5;
+    }
+}
+
+LiveResizeCoverState simulate_live_resize_cover(
+    pulp::view::WindowHost& host, float width, float height) {
+    LiveResizeCoverState state;
+    if (!is_main_thread() || width <= 0.0f || height <= 0.0f) return state;
+
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!view || ![view.layer isKindOfClass:[CAMetalLayer class]]) return state;
+
+        CAMetalLayer* layer = (CAMetalLayer*)view.layer;
+        state.cover_before = [layer.contentsGravity isEqualToString:kCAGravityResize];
+        [view viewWillStartLiveResize];
+        state.resize_applied = resize_content_view(host, width, height);
+        state.cover_after_present =
+            [layer.contentsGravity isEqualToString:kCAGravityResize];
+        [view viewDidEndLiveResize];
+        [[NSRunLoop currentRunLoop]
+            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.10]];
+        state.cover_after_compositor_interval =
+            [layer.contentsGravity isEqualToString:kCAGravityResize];
+    }
+    return state;
+}
+
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     if (!is_main_thread()) return false;
 
@@ -267,6 +305,48 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
         drain_main_queue_once();
         return true;
     }
+}
+
+bool simulate_app_key(pulp::view::WindowHost& host,
+                      pulp::view::KeyCode key,
+                      bool is_down,
+                      uint16_t modifiers) {
+    if (!is_main_thread()) return false;
+    NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+    if (window == nil || key == pulp::view::KeyCode::unknown)
+        return false;
+
+    CGKeyCode key_code = 0;
+    NSString* characters = @"";
+    switch (key) {
+        case pulp::view::KeyCode::left:   key_code = 123; characters = @"\uF702"; break;
+        case pulp::view::KeyCode::right:  key_code = 124; characters = @"\uF703"; break;
+        case pulp::view::KeyCode::down:   key_code = 125; characters = @"\uF701"; break;
+        case pulp::view::KeyCode::up:     key_code = 126; characters = @"\uF700"; break;
+        case pulp::view::KeyCode::enter:  key_code = 36; characters = @"\r"; break;
+        case pulp::view::KeyCode::escape: key_code = 53; characters = @"\x1b"; break;
+        default: return false;
+    }
+    NSEventModifierFlags flags = 0;
+    if (modifiers & pulp::view::kModShift) flags |= NSEventModifierFlagShift;
+    if (modifiers & pulp::view::kModCtrl) flags |= NSEventModifierFlagControl;
+    if (modifiers & pulp::view::kModAlt) flags |= NSEventModifierFlagOption;
+    if (modifiers & pulp::view::kModCmd) flags |= NSEventModifierFlagCommand;
+    NSEvent* event = [NSEvent keyEventWithType:(is_down ? NSEventTypeKeyDown
+                                                        : NSEventTypeKeyUp)
+                                      location:NSZeroPoint
+                                 modifierFlags:flags
+                                     timestamp:0
+                                  windowNumber:window.windowNumber
+                                       context:nil
+                                    characters:characters
+                   charactersIgnoringModifiers:characters
+                                     isARepeat:NO
+                                       keyCode:key_code];
+    if (event == nil)
+        return false;
+    [NSApp sendEvent:event];
+    return true;
 }
 
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {

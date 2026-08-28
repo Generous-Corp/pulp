@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/gesture.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -19,7 +20,10 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/state/store.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -507,6 +511,163 @@ TEST_CASE("mac harness constructs a hidden GPU-backed window",
     REQUIRE(host->gpu_surface() != nullptr);
 }
 
+TEST_CASE("standalone local key monitor gives owning navigation root priority",
+          "[mac][platform-harness][keyboard][navigation-focus]") {
+    class NavigationRoot final : public View {
+    public:
+        bool accepts_navigation_input() const override { return true; }
+    } root;
+    int navigation_hits = 0;
+    int app_hits = 0;
+    root.on_navigation_key = [&](const pulp::view::KeyEvent& event) {
+        ++navigation_hits;
+        return event.key == pulp::view::KeyCode::down;
+    };
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    host->set_app_key_monitor([&](const pulp::view::KeyEvent&) {
+        ++app_hits;
+        return true;
+    });
+
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(navigation_hits == 1);
+    REQUIRE(app_hits == 0);
+}
+
+TEST_CASE("standalone local key monitor dismisses a semantic popup through its owning bridge",
+          "[mac][platform-harness][keyboard][popup-default]") {
+    pulp::view::ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 320, 200});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup = null;
+        var selected = 'A';
+        var triggerClicks = 0;
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'mac-popup');
+        trigger.textContent = 'A';
+        trigger.style.position = 'absolute';
+        trigger.style.left = '8px';
+        trigger.style.top = '8px';
+        trigger.style.width = '80px';
+        trigger.style.height = '24px';
+        trigger.addEventListener('click', function() {
+            ++triggerClicks;
+            if (popup) {
+                popup.parentNode.removeChild(popup);
+                popup = null;
+                trigger.setAttribute('aria-expanded', 'false');
+                return;
+            }
+            popup = document.createElement('div');
+            popup.id = 'mac-popup';
+            popup.setAttribute('role', 'listbox');
+            popup.style.position = 'absolute';
+            popup.style.left = '8px';
+            popup.style.top = '36px';
+            popup.style.width = '100px';
+            popup.style.height = '64px';
+            ['A', 'B'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.textContent = label;
+                option.addEventListener('click', function() {
+                    selected = label;
+                    trigger.textContent = label;
+                    if (popup) popup.parentNode.removeChild(popup);
+                    popup = null;
+                    trigger.setAttribute('aria-expanded', 'false');
+                });
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+            trigger.setAttribute('aria-expanded', 'true');
+        });
+        document.body.appendChild(trigger);
+        trigger.focus();
+    )");
+    REQUIRE(root.accepts_navigation_input());
+    int underlay_presses = 0;
+    auto underlay = std::make_unique<pulp::view::TextButton>();
+    auto* underlay_view = underlay.get();
+    // WindowHost performs a real root layout during construction. Give the
+    // control an actual absolute-layout contract instead of relying on the
+    // pre-layout bounds below; otherwise Yoga collapses it and the supposed
+    // positive control never receives an AppKit click.
+    underlay->set_position(View::Position::absolute);
+    underlay->set_left(0.0f);
+    underlay->set_top(0.0f);
+    underlay->flex().preferred_width = 320.0f;
+    underlay->flex().preferred_height = 200.0f;
+    underlay->set_bounds({0, 0, 320, 200});
+    underlay->set_hit_testable(true);
+    underlay->on_click = [&] { ++underlay_presses; };
+    root.add_child(std::move(underlay));
+    REQUIRE(root.hit_test({200, 150}) == underlay_view);
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    REQUIRE(root.hit_test({200, 150}) == underlay_view);
+    // Installing an app monitor exercises the same NSApplication-local
+    // precedence path a standalone uses when it has an app-level key handler.
+    host->set_app_key_monitor([](const pulp::view::KeyEvent&) { return false; });
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                      .x = 200, .y = 150}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                      .x = 200, .y = 150}));
+    REQUIRE(underlay_presses == 1);
+    underlay_presses = 0;
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(engine.evaluate("!!document.getElementById('mac-popup')")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("!!globalThis.__pulpPopupDefaultState__")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 0")
+                .getWithDefault<bool>(false));
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 1 && "
+        "globalThis.__pulpPopupDefaultState__.options[1]."
+        "getAttribute('data-pulp-popup-active') === 'true'")
+                .getWithDefault<bool>(false));
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::enter));
+    REQUIRE(engine.evaluate(
+        "selected === 'B' && trigger.textContent === 'B' && popup === null && "
+        "document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+    // Focus returns to the trigger. It intentionally retains the root-scoped
+    // navigation claim so a closed popup can reopen from ArrowUp/ArrowDown.
+    REQUIRE(root.accepts_navigation_input());
+
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(root.accepts_navigation_input());
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::escape));
+    REQUIRE(engine.evaluate(
+        "selected === 'B' && popup === null && document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+    REQUIRE(root.accepts_navigation_input());
+
+    // The production AppKit pointer route must dismiss and consume the whole
+    // initiating outside sequence so the graph/control underneath cannot
+    // mutate. A second press at the same point is the positive control.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                      .x = 200, .y = 150}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                      .x = 200, .y = 150}));
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(underlay_presses == 0);
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                      .x = 200, .y = 150}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                      .x = 200, .y = 150}));
+    REQUIRE(underlay_presses == 1);
+}
+
 TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
           "[mac][platform-harness][issue-2001]") {
     View root;
@@ -532,6 +693,54 @@ TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
     REQUIRE(png[3] == 0x47);  // 'G'
 
     require_content_floor("single-frame gpu capture", png);
+}
+
+class ResizePaintProbe final : public View {
+public:
+    void paint(pulp::canvas::Canvas& canvas) override {
+        ++paint_count;
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(32, 96, 192, 255));
+        canvas.fill_rect(0.0f, 0.0f, bounds().width, bounds().height);
+    }
+
+    int paint_count = 0;
+};
+
+TEST_CASE("mac GPU resize keeps a pinned root and presents before returning",
+          "[view][hosts][gpu][resize]") {
+    ResizePaintProbe root;
+    WindowOptions options;
+    options.width = 320.0f;
+    options.height = 240.0f;
+    options.resizable = true;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    host->set_design_viewport(640.0f, 480.0f);
+    REQUIRE_FALSE(pt::capture_back_buffer_png(*host).empty());
+    REQUIRE(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+
+    Rect callback_bounds{};
+    int resize_callbacks = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) {
+        ++resize_callbacks;
+        callback_bounds = root.bounds();
+    });
+    const int paints_before = root.paint_count;
+    const auto layouts_before = View::layout_pass_count();
+
+    const auto live_resize =
+        pt::simulate_live_resize_cover(*host, 400.0f, 300.0f);
+    REQUIRE(live_resize.resize_applied);
+    CHECK_FALSE(live_resize.cover_before);
+    CHECK(live_resize.cover_after_present);
+    CHECK_FALSE(live_resize.cover_after_compositor_interval);
+    CHECK(callback_bounds == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+    CHECK(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+    CHECK(root.paint_count > paints_before);
+    REQUIRE(resize_callbacks > 0);
+    CHECK(View::layout_pass_count() - layouts_before
+          == static_cast<std::uint64_t>(root.paint_count - paints_before));
 }
 
 TEST_CASE("standalone GPU host resyncs the first frame after a Retina backing change",

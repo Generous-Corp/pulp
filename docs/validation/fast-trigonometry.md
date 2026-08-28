@@ -4,6 +4,25 @@ This note records why Pulp ships bounded-cycle minimax sine profiles, where
 they help, and where they do not. It is evidence for maintainers, not a promise
 that every `sin` call should change. Reference math remains the default.
 
+## Why fast trigonometry can matter
+
+An oscillator may evaluate sine once per output sample; additive and FM voices
+multiply that cost by every active partial or operator. At 48 kHz, a 64-partial
+bank can therefore request more than three million sine values per second for
+one voice. A bounded normalized phase also gives an implementation more useful
+information than a general `sin(x)`: the input is already finite, periodic, and
+in a small known interval, so range reduction and a general-purpose library
+call may be avoidable.
+
+That arithmetic does not prove a product win. A real voice also advances phase,
+ramps parameters, reads modulation, updates envelopes and filters, mixes lanes,
+and may use double precision for continuity. The useful question is therefore
+not "which sine expression is fastest?" but "which qualified implementation
+makes this named consumer materially faster without changing its sound or state
+contract?" Pulp first checks numerical error, then primitive shape, and finally
+the complete consumer. Reference math remains the compatibility baseline and
+the default when that chain of evidence is absent.
+
 ## Selected paths
 
 Pulp adapts the degree-5 and degree-9 normalized-cycle sine expressions from
@@ -33,7 +52,7 @@ attributed as described in [Licensing and acknowledgements](../reference/licensi
 | Float additive banks | Opt-in degree 9; reference default | Apple arm64 four-wide evaluation cleared performance and audio gates; other targets preserve semantics without a speed claim |
 | Double FM6 drum voices | `deferred_no_win` | The actual voice improved, but missed the 10% whole-consumer gate |
 | FM8 drums | Reference; `deferred_quality_no_go` | Degree 13 cleared performance, but a broadened 0.75-second hit corpus found a −38.63% peak change, outside the predeclared ±25% bound |
-| Other kick, snare, clap, cymbal, and percussion voices | Reference; not evaluated | FM6 did not clear its gate and FM8's distinct density does not authorize a call-site cascade |
+| Other kick, snare, clap, cymbal, and percussion voices | Reference; [opportunity not yet measured](#why-the-remaining-drum-voices-stayed-on-reference-math) | FM6 did not clear its gate and FM8's distinct density does not authorize a call-site cascade; profile each complete voice before choosing sine or another math target |
 | SSB/frequency shifting | `deferred_more_evidence` | A paired degree-13 experiment screened well, but lacks a second primary target and a platform paired/vector baseline |
 | Non-Apple CPU and WebAssembly additive paths | Reference or scalar profile semantics | No whole-consumer acceleration has been established on those targets |
 | GPU kernels | Native shader trig | CPU evidence does not establish a shader/device win; two named backend/device families are required |
@@ -49,6 +68,36 @@ duplicate it, so the executable benchmarks and this decision record are the
 maintenance surface. Production degree-5/9 attribution lives in `NOTICE.md`;
 its source and permission details live in
 [Licensing and acknowledgements](../reference/licensing.md).
+
+### Why the remaining drum voices stayed on reference math
+
+This is a stop-rule result, not a finding that alternative math cannot help
+drums. The double FM6 actual-voice pilot improved by only 6.8–7.1% at the
+median, below the predeclared 10% whole-consumer gate. That made a blind cascade
+into lower-density or differently structured voices unjustified. FM8 received a
+separate experiment because its harmonic reader is unusually dense; it cleared
+the speed gate but failed the broadened hit-quality gate. Neither result proves
+anything universal about kick, snare, clap, cymbal, hat, tom, membrane, string,
+or zap voices.
+
+The current implementations contain several distinct possible hot paths:
+
+| Voice family | Candidate work visible in the realtime path | What to establish before changing it |
+|---|---|---|
+| Kick and tom | Carrier/modulator sine, pitch-sweep `exp2`, and optional nonlinear output stages | Profile representative hits and isolate the share of time in each math family |
+| Snare | Two body sines, rattle modulation, and pitch/noise `exp2` sweeps | Measure the complete transient and tail; preserve body/noise balance and peak behavior |
+| Clap, hat, and cymbal | Body, grit, or strike sine plus noise/filter/resonator work | Prove trig is material rather than assuming one visible call dominates the voice |
+| Membrane and string | Sub/modulation sine, pitch response, and modal/string state updates | Separate per-sample work from trigger/setup coefficient construction |
+| Zap and shared output stages | Pitch `exp2`, a ring cosine, and optional sine/`tanh` shaping | Compare alternative math only in enabled product configurations |
+
+A follow-up should start with a Release whole-voice profile across named presets,
+sample rates, and block sizes. Advance only a math family whose measured share
+can plausibly yield more than a 10% voice win. Then test the smallest relevant
+candidate—bounded sine, `exp2`, nonlinear shaping, or coefficient preparation—
+against hit peaks, envelopes, spectra, tails, determinism, state continuity,
+and allocation behavior. This avoids spending a cycle optimizing a sine call in
+a voice dominated by filters, noise, or nonlinear processing, while keeping the
+drum opportunity explicitly open.
 
 ## How the additive decision was tested
 
@@ -225,18 +274,26 @@ preserve a current actual-consumer experiment under the audio-harness contract.
 
 ## Alternatives and reopen rules
 
+The alternatives below are not all the same kind of thing. `simd::sinpi` and
+vForce are Apple execution APIs; Chebyshev and minimax describe ways to choose a
+polynomial; Horner and Estrin describe how to schedule a polynomial's arithmetic;
+oscillator recurrence changes the algorithm and carries accumulated state; and
+RLIBM-ALL targets correctly rounded library results. Compare alternatives only
+when they solve the same consumer problem, precision contract, phase domain, and
+batching shape.
+
 | Alternative | Result | Reconsider only when |
 |---|---|---|
-| Apple `simd::sinpi` | Correct but much smaller gain in the float-additive screen than degree 9 | A compiler/platform change reverses that actual-consumer result; the SSB paired/vector baseline remains unmeasured |
-| Accelerate/vForce batch | Slower for a per-sample 64-partial batch | Batching spans a materially different consumer layout |
+| Apple [`simd::sinpi`](https://developer.apple.com/documentation/simd/sinpi%28_%3A%29-524r6) | Apple's small fixed-width SIMD `sin(pi*x)` API was correct but produced a much smaller gain in the float-additive screen than degree 9 | A compiler/platform change reverses that actual-consumer result; the SSB paired/vector baseline remains unmeasured |
+| Accelerate [`vForce`](https://developer.apple.com/documentation/accelerate/vforce-library) batch | Apple's arbitrary-length array transcendental API was slower for a per-sample 64-partial batch | Batching spans a materially different consumer layout |
 | [Swift Surge at `ac638794`](https://github.com/Jounce/Surge/blob/ac638794d4b02377e3628c1c8b1e07c2a15f1d52/Sources/Surge/Trigonometry/Trigonometric.swift) | Convenience façade over Accelerate/vForce, with array allocation and unit-stride batch APIs; no new approximation or C++ realtime advantage | A named Swift-owned offline/batch consumer needs its broader ergonomic API; benchmark direct Accelerate first |
 | Oscillator recurrence | Fast, but short-run drift missed the quality objective | A bounded renormalization scheme clears long-hold and consumer gates |
 | Scalar degree 9 additive | Slower than reference in prior 64-partial tests | New scalar target/compiler evidence exists |
 | Degree-13 double FM6 | Median whole-voice gain only 6.8–7.1%, below the 10% gate | A materially new vectorized double design is proposed |
 | Degree-13 double FM8 | Strong speed win, but recursive hit peak changed −38.63% in the broadened corpus | A materially different implementation or explicitly different timbral product contract declares a new quality gate before measurement |
-| 2017 Chebyshev approximation | No current Pulp role after the selected degree-9 path won on both speed and quality objectives | A new objective or target demonstrates a whole-consumer advantage over the selected path |
+| [2017 Chebyshev approximation](https://mooooo.ooo/chebyshev-sine-approximation/) | A bounded `f32` polynomial reported within 4.58 ULP over its stated interval; it has no current Pulp role after the selected degree-9 path won on Pulp's speed and quality objectives | A new objective or target demonstrates a whole-consumer advantage over the selected path |
 | 2026 root-factored degree-11 Horner/Estrin | Pulp reproduced the published Horner peak-error scale, but Horner and Estrin both failed the existing precise budget under normal Release flags | Materially changed coefficients/evaluation first clear the same error gate; only then may a named consumer seek the 10% whole-consumer gate |
-| RLIBM-ALL | Correct-rounding general-purpose scope exceeds realtime bounded-phase need | Correct rounding becomes a stated requirement, or an applicable double-pair design enters an actual-consumer screen |
+| [RLIBM-ALL](https://github.com/rutgers-apl/rlibm-all) | Its correctly rounded, multi-representation and multi-rounding-mode goal is broader than Pulp's realtime bounded-phase need | Correct rounding becomes a stated requirement, or an applicable design enters an actual-consumer screen |
 | Integer SIMD or assembly | Not required to establish the portable/Apple SIMD win | A portable integer prototype first clears conversion and accuracy gates, then target assembly demonstrates enough additional consumer value to justify its maintenance cost |
 | Compiler-wide fast-math | Rejected; changes unrelated floating-point contracts | Never as part of this facility; benchmark only as separately labeled research |
 

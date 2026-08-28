@@ -18,8 +18,16 @@ ScriptEngine::ScriptEngine(JsEngineType engine_type)
 
 ScriptEngine::~ScriptEngine() = default;
 
-ScriptEngine::ScriptEngine(ScriptEngine&&) noexcept = default;
-ScriptEngine& ScriptEngine::operator=(ScriptEngine&&) noexcept = default;
+ScriptEngine::ScriptEngine(ScriptEngine&& other) noexcept
+    : engine_(std::move(other.engine_)), choc_context_(other.choc_context_) {}
+
+ScriptEngine& ScriptEngine::operator=(ScriptEngine&& other) noexcept {
+    if (this != &other) {
+        engine_ = std::move(other.engine_);
+        choc_context_ = other.choc_context_;
+    }
+    return *this;
+}
 
 choc::value::Value ScriptEngine::evaluate(const std::string& code) {
     return engine_->evaluate(code);

@@ -16,6 +16,71 @@
 
 namespace pulp::view {
 
+namespace {
+
+bool dimensions_equal(const Dimension& a, const Dimension& b) {
+    return a.value == b.value && a.unit == b.unit;
+}
+
+bool flex_styles_equal(const FlexStyle& a, const FlexStyle& b) {
+    return a.direction == b.direction &&
+           a.align_items == b.align_items &&
+           a.align_self == b.align_self &&
+           a.align_content == b.align_content &&
+           a.align_content_space == b.align_content_space &&
+           a.justify_content == b.justify_content &&
+           a.gap == b.gap &&
+           a.row_gap == b.row_gap &&
+           a.column_gap == b.column_gap &&
+           a.padding == b.padding &&
+           a.padding_top == b.padding_top &&
+           a.padding_right == b.padding_right &&
+           a.padding_bottom == b.padding_bottom &&
+           a.padding_left == b.padding_left &&
+           a.margin == b.margin &&
+           a.margin_top == b.margin_top &&
+           a.margin_right == b.margin_right &&
+           a.margin_bottom == b.margin_bottom &&
+           a.margin_left == b.margin_left &&
+           a.flex_grow == b.flex_grow &&
+           a.flex_shrink == b.flex_shrink &&
+           a.flex_basis == b.flex_basis &&
+           a.min_width == b.min_width &&
+           a.min_height == b.min_height &&
+           a.preferred_width == b.preferred_width &&
+           a.preferred_height == b.preferred_height &&
+           a.max_width == b.max_width &&
+           a.max_height == b.max_height &&
+           dimensions_equal(a.dim_width, b.dim_width) &&
+           dimensions_equal(a.dim_height, b.dim_height) &&
+           dimensions_equal(a.dim_min_width, b.dim_min_width) &&
+           dimensions_equal(a.dim_min_height, b.dim_min_height) &&
+           dimensions_equal(a.dim_max_width, b.dim_max_width) &&
+           dimensions_equal(a.dim_max_height, b.dim_max_height) &&
+           dimensions_equal(a.dim_flex_basis, b.dim_flex_basis) &&
+           dimensions_equal(a.dim_margin_top, b.dim_margin_top) &&
+           dimensions_equal(a.dim_margin_right, b.dim_margin_right) &&
+           dimensions_equal(a.dim_margin_bottom, b.dim_margin_bottom) &&
+           dimensions_equal(a.dim_margin_left, b.dim_margin_left) &&
+           dimensions_equal(a.dim_padding_top, b.dim_padding_top) &&
+           dimensions_equal(a.dim_padding_right, b.dim_padding_right) &&
+           dimensions_equal(a.dim_padding_bottom, b.dim_padding_bottom) &&
+           dimensions_equal(a.dim_padding_left, b.dim_padding_left) &&
+           dimensions_equal(a.dim_margin_start, b.dim_margin_start) &&
+           dimensions_equal(a.dim_margin_end, b.dim_margin_end) &&
+           dimensions_equal(a.dim_padding_start, b.dim_padding_start) &&
+           dimensions_equal(a.dim_padding_end, b.dim_padding_end) &&
+           dimensions_equal(a.dim_start, b.dim_start) &&
+           dimensions_equal(a.dim_end, b.dim_end) &&
+           a.writing_direction == b.writing_direction &&
+           a.flex_wrap == b.flex_wrap &&
+           a.box_sizing == b.box_sizing &&
+           a.order == b.order &&
+           a.aspect_ratio == b.aspect_ratio;
+}
+
+}  // namespace
+
 void BridgeRegistrars::register_layout_grid_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
@@ -172,6 +237,7 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
         View* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
+        const auto previous = f;
         auto val = args.get<double>(2, 0);
         // Slider/drag jitter diagnostic. When PULP_DEBUG_FLEX_THRASH is set to
         // any value, log every setFlex call so per-frame style churn during a
@@ -637,9 +703,27 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
             else if (j=="space-evenly"||j=="space_evenly")    f.justify_content=FlexJustify::space_evenly;
             else                                              f.justify_content=FlexJustify::start;
         }
-        v->invalidate_layout();  // auto-invalidation on flex property change
+        // Materialized React commits may replay an element's complete style
+        // object when only paint state changed. Treating an identical flex
+        // write as geometry dirt makes every following getBoundingClientRect
+        // pay for another full-tree Yoga pass during the same pointer event.
+        // Real changes still advance View's global layout generation.
+        if (!flex_styles_equal(previous, f)) v->invalidate_layout();
         return choc::value::Value();
     });
+}
+
+void WidgetBridge::ensure_layout() {
+    const auto generation = View::layout_generation();
+    if (generation == last_layout_generation_) return;
+    root_.layout_children();
+    // Record the generation AFTER the pass, not the value sampled before it.
+    // `layout_children()` assigns child bounds, and `set_bounds` bumps the
+    // generation, so the counter reliably moves DURING a layout. Storing the
+    // pre-pass value would leave generation != last on every subsequent read
+    // and elide nothing — the optimisation would silently do nothing while
+    // still looking correct.
+    last_layout_generation_ = View::layout_generation();
 }
 
 void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
@@ -648,6 +732,9 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     register_bridge_function(api, "layout", [&self](choc::javascript::ArgumentList) {
         self.root_.clear_layout_dirty();
         self.root_.layout_children();
+        // Explicit "lay out now" still always forces — but record the
+        // generation so the geometry reads that typically follow it are elided.
+        self.last_layout_generation_ = View::layout_generation();
         self.request_repaint();
         return choc::value::Value();
     });
@@ -669,7 +756,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // changed, so the cost is bounded to one tree walk per call.
     register_bridge_function(api, "getLayoutRect", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_rect_value(v);
     });
@@ -681,7 +768,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // owner-relative captured evidence onto generated native paint children.
     register_bridge_function(api, "getLayoutBoxMetrics", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_box_metrics_value(v);
     });
@@ -692,7 +779,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     // parent chain included so validation can localize coordinate drift.
     register_bridge_function(api, "getLayoutAncestorRects", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        self.root_.layout_children();
+        self.ensure_layout();
         View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_ancestor_chain_value(v);
     });

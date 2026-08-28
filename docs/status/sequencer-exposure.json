@@ -1603,6 +1603,77 @@
       }
     },
     {
+      "id": "p0-39-writer-capability-masks",
+      "title": "DocumentSession writer capability masks and quotas",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "fccf4eba-0c01-467d-84f8-8bc39e936d58",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/transaction.hpp",
+        "core/timeline/src/document_session.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_timeline_transactions.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "release": {
+        "pr": 7863,
+        "accepted_head": "02a1ae224f096ca2835a69fd84adf006ebac9830",
+        "merge_sha": "8058986abca7836d221da68b28711dc4dc20ea55",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "enum class CommandClass",
+            "struct WriterCapabilityMask",
+            "register_writer(WriterCapabilityMask mask)"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The installed public DocumentSession header exposes bounded writer command-class masks and retained-byte quotas.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "enum class CommandClass",
+                "struct WriterCapabilityMask",
+                "register_writer(WriterCapabilityMask mask)"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The offline Timeline CLI does not yet issue proposal-safe commands through restricted writer identities.",
+          "dependencies": ["P0-40"],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The offline Timeline MCP server does not yet bind sessions to restricted writer masks and quotas.",
+          "dependencies": ["P0-40"],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no live Timeline document-session authority that consumes these writer masks.",
+          "dependencies": ["product-a-timeline-document-session"],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Document mutation authority is a runtime Timeline session contract, not a design-time SDK-composition capability."
+        }
+      }
+    },
+    {
       "id": "sequencer-api-docs-diagnostic-privacy",
       "title": "Private-path-safe Sequencer API documentation diagnostics",
       "classification": "ci_test_only",

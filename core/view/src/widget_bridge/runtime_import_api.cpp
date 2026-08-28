@@ -216,20 +216,19 @@ void WidgetBridge::install_runtime_import_handlers() {
 
     // __pulpRuntimeSettle__(rounds) → void
     //
-    // Pump the bridge's message loop + service_frame_callbacks the
-    // requested number of times. Used by the JS shim to drain
-    // useEffect callbacks, rAF queues, and timers after React commits.
+    // Request bounded host-frame settling after React commits. Never evaluate
+    // or pump QuickJS recursively from this native callback: the callback is
+    // itself executing inside QuickJS, and re-entering evaluate() here can run
+    // React commits against C++ widget strings whose outer native call has not
+    // returned yet. The host frame pump is the safe outer boundary.
     register_bridge_function(api, "__pulpRuntimeSettle__",
         [this](choc::javascript::ArgumentList args) -> choc::value::Value {
             int rounds = static_cast<int>(args.get<double>(0, 8.0));
             if (rounds < 1) rounds = 1;
             if (rounds > 64) rounds = 64;  // sanity cap
-            for (int i = 0; i < rounds; ++i) {
-                try {
-                    engine_.pump_message_loop();
-                    service_frame_callbacks();
-                } catch (...) { /* swallow — best-effort settle */ }
-            }
+            pending_runtime_settle_rounds_ =
+                std::max(pending_runtime_settle_rounds_, rounds);
+            request_repaint();
             return choc::value::Value();
         });
 }

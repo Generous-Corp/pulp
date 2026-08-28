@@ -1071,9 +1071,10 @@ add or edit a host/routing path:
 
 Still process-wide and unscoped, so do not reach for them from a plugin host:
 `WidgetBridge::dispatch_global_key` / `dispatch_document_event` fan out to EVERY
-registered bridge in the process. Only the STANDALONE window host calls them
-today; wiring either into the plugin host would fire one keystroke into every
-open editor's JS runtime.
+registered bridge in the process. The standalone window host may use that
+fan-out. A plugin host must use `WidgetBridge::dispatch_key_for_root`, which
+returns whether the owning bridge consumed the event and cannot reach another
+editor's JS runtime.
 
 ## Keyboard-focus host etiquette — never hold the host's first responder when idle
 
@@ -1093,8 +1094,11 @@ days to find — see the `au-xpc-shared-process-crash` debug note.
 Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
 `PulpPluginView` and GPU `PulpGpuPluginView` classes — shared by AU/VST3/CLAP):
 
-- `acceptsFirstResponder` returns true **only while** `View::focused_input_`
-  is set (a widget is in active text input), not unconditionally.
+- `acceptsFirstResponder` returns true only while the root-scoped focused view
+  accepts text input or explicitly reports `accepts_navigation_input()`. The
+  latter is a temporary capability, not general focusability: `ComboBox`
+  reports it only while open. Plugin navigation is restricted to arrows,
+  Home/End, Enter, and Escape; every other key remains with the DAW.
 - After every `mouseDown:`/`mouseUp:`/`keyDown:`, call `syncKeyFocus`:
   `makeFirstResponder:self` when a widget wants keys; the instant it doesn't,
   **restore the host's PRIOR first responder** (saved at claim time), not
@@ -1114,8 +1118,9 @@ Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
   is removed; it soft-skips only when the host proves that no display-link tick
   fired (supported headless macOS).
 - **The host's grab wins**: `resignFirstResponder` must end the focused
-  widget's text input (`pulp_plugin_end_text_input`: clear the slot, then
-  `on_focus_changed(false)` so the widget commits/closes its type-in).
+  widget's bounded key interaction (`pulp_plugin_end_key_input`: clear the
+  slot, then `on_focus_changed(false)` so a text field commits or a navigation
+  control closes).
   Otherwise a type-in left open when the user clicks a host control keeps
   `acceptsFirstResponder` true and re-steals the keyboard on the next event.
   Widgets with type-in UIs should override `on_focus_changed(false)` to
@@ -1134,8 +1139,15 @@ Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
   single- and two-editor, CPU host).
 - Editors must NOT set a focusable ROOT. Claim focus per-field:
   `claim_input_focus()` in `enter_typein()`, `release_input_focus()` in
-  `commit_typein()`/`cancel_typein()`. This is the JUCE default
-  (`wantsKeyboardFocus = false`; grab only for an active text field).
+  `commit_typein()`/`cancel_typein()`, or for the lifetime of a bounded open
+  navigation control. Text input has priority. Clear the root slot when the
+  owning subtree detaches or is destroyed. This is the JUCE default
+  (`wantsKeyboardFocus = false`; grab only for an active interaction).
+- A control that opens navigation programmatically must enter through
+  `transfer_input_focus(root, control)`, not overwrite the slot with
+  `claim_input_focus()`. The transfer blurs and commits the previous text
+  editor exactly once, is scoped to the owning root, and tolerates that blur
+  synchronously unmounting the requested control.
 
 ## GPU view host auto-selection — never hardcode `use_gpu=false`
 

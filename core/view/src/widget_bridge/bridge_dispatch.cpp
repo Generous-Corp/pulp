@@ -1,5 +1,7 @@
 #include "bridge_dispatch.hpp"
 
+#include <pulp/runtime/trace.hpp>
+
 #include <choc/text/choc_JSON.h>
 
 #include <exception>
@@ -33,6 +35,12 @@ void BridgeCallbackState::detach_retirement_queues() noexcept {
     collectable_widgets_ = nullptr;
 }
 
+void BridgeCallbackState::retire_dispatch() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
+    alive.store(false, std::memory_order_release);
+    detach_retirement_queues();
+}
+
 BridgeCallbackScope::BridgeCallbackScope(
     const std::shared_ptr<BridgeCallbackState>& state) noexcept
     : state_(state) {
@@ -51,15 +59,24 @@ void safe_dispatch_eval(const std::shared_ptr<BridgeCallbackState>& alive,
                         ScriptEngine* engine,
                         const std::string& js,
                         const char* context) {
-    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
+    PULP_TRACE_SCOPE_NAMED("js", "dom_event_dispatch");
+    if (!alive || engine == nullptr) return;
+    std::lock_guard<std::recursive_mutex> lock(alive->dispatch_mutex());
+    if (!alive->load(std::memory_order_acquire) || !alive->engine_alive()) return;
     try {
         if (!static_cast<bool>(*engine)) return;
-        engine->evaluate(js);
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "dom_event_evaluate");
+            engine->evaluate(js);
+        }
         // Pump microtasks so React setState commits (and any queueMicrotask /
         // Promise.then continuations scheduled by the handler) before the next
         // event arrives. Without this, drag-style interactions see stale state
         // on the immediately-following pointermove and silently bail.
-        engine->pump_message_loop();
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "dom_event_microtask_pump");
+            engine->pump_message_loop();
+        }
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
     } catch (...) {

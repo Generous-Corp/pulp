@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 40,
+  "manifest_revision": 41,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 57
+        "capabilities": 59
       },
       "timebase": {
         "state": "partial",
@@ -1946,6 +1946,67 @@
         }
       },
       "contract_digest": "sha256:dabad14b890bce07b4a8fe22e622e3bf9d9e67da3634c98a0ec96cd396d9cee7"
+    },
+    {
+      "key": "signal.bandlimited-impulse-train",
+      "domain": "signal",
+      "summary": "Discrete-summation band-limited impulse train with Nyquist-bounded harmonics.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed scalar phase, frequency, sample-rate, and harmonic-count state.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite sample rate, positive sub-Nyquist frequency, and normalized phase",
+      "output_domain": "normalized band-limited impulse train",
+      "units": [
+        "hertz",
+        "cycles",
+        "harmonic count",
+        "normalized amplitude"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/blit_oscillator.hpp",
+          "qualified_name": "pulp::signal::BlitOscillatorT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:07b420f7707c0406408d2adb1eb4899762d3a9d417e3c9e067e07a5328348fb7"
     },
     {
       "key": "signal.beat-repeat-kernel",
@@ -5310,6 +5371,66 @@
       "contract_digest": "sha256:26c1dee5d8d61731db112932e558664d08d15d5a58c69373a762dbdd53af6246"
     },
     {
+      "key": "signal.sub-oscillator",
+      "domain": "signal",
+      "summary": "Parent-phase-locked one- or two-octave divider with square or sine output.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "none",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed parent-cycle divider state and waveform selection.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "normalized parent phase and explicit parent-cycle edges",
+      "output_domain": "normalized sub-octave waveform",
+      "units": [
+        "cycles",
+        "octaves",
+        "normalized amplitude"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/sub_oscillator.hpp",
+          "qualified_name": "pulp::signal::SubOscillatorT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:5c38ee6ffadc37a1003b10ab09464e7ccf2756905adf9586ec5d83573eda16d3"
+    },
+    {
       "key": "signal.tilt-eq",
       "domain": "signal",
       "summary": "Multi-channel tilt equalizer trading low- against high-shelf gain around a pivot frequency from a single control.",
@@ -6413,14 +6534,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 90,
+    "total": 92,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 57,
+      "signal": 59,
       "timebase": 9
     }
   },
@@ -6804,6 +6925,25 @@
                 ]
               ]
             ]
+          }
+        ],
+        "blit_oscillator.hpp": [
+          {
+            "class": "BlitOscillatorT",
+            "qualified_name": "pulp::signal::BlitOscillatorT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(SampleType sample_rate)",
+              "prepare(SampleType sample_rate, SampleType frequency_hz)",
+              "set_frequency(SampleType frequency_hz)",
+              "sample_rate()",
+              "frequency()",
+              "harmonic_count()",
+              "reset_phase(SampleType phase = SampleType{0})",
+              "phase()",
+              "next()"
+            ],
+            "enums": []
           }
         ],
         "breakpoint_envelope.hpp": [
@@ -12446,6 +12586,25 @@
               "num_bins()",
               "center_magnitude()",
               "latency_frames()"
+            ],
+            "enums": []
+          }
+        ],
+        "sub_oscillator.hpp": [
+          {
+            "class": "SubOscillatorT",
+            "qualified_name": "pulp::signal::SubOscillatorT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "reset(std::uint32_t completed_parent_cycles = 0)",
+              "set_octave(int octave)",
+              "octave()",
+              "set_waveform(SubOscillatorWaveform waveform)",
+              "waveform()",
+              "on_parent_cycle()",
+              "next(SampleType parent_phase)",
+              "next(SampleType parent_phase, bool parent_cycle_edge)",
+              "phase()"
             ],
             "enums": []
           }

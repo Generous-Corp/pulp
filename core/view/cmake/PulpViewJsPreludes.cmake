@@ -44,6 +44,9 @@ set(PULP_JS_PRELUDES
     # event helpers, and style reflection; resolves rAF lazily at play time.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-animation.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
+    # Generation-safe live gesture state with a single committed publication.
+    # Loaded after document.js so the shared window.pulp namespace exists.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-transient-interaction.js
     # CSS selector engine. Loaded AFTER the parent so document + Element
     # are in scope when underscore-prefixed selector helpers are
     # dispatched from document.querySelector / .querySelectorAll.

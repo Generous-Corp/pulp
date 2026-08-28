@@ -137,6 +137,14 @@ enum class ConflictCode : std::uint8_t {
     /// Never produced deliberately. A TransactionError carrying it was returned
     /// without its cause being assigned, which is a Pulp bug.
     Unspecified,
+    /// The submitting writer's capability mask does not permit the class of one
+    /// named command. command identifies the first command refused; nothing in
+    /// the transaction was applied.
+    CapabilityDenied,
+    /// The transaction's retained size exceeds the writer's per-transaction
+    /// budget, or would carry its cumulative session total past the writer's
+    /// ceiling. Nothing was applied, so a smaller transaction may still commit.
+    WriterQuotaExhausted,
 };
 
 /// Structured transaction rejection.

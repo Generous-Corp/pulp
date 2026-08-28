@@ -3,6 +3,8 @@
 #include "pulp/view/script_engine.hpp"
 #include "pulp/view/scripted_ui.hpp"
 
+#include <pulp/runtime/trace.hpp>
+
 #include <choc/text/choc_JSON.h>
 
 #include <cstddef>
@@ -54,8 +56,10 @@ std::string EditorBridge::dispatch(std::string_view type,
 }
 
 std::string EditorBridge::dispatch_json(std::string_view json) const noexcept {
+    PULP_TRACE_SCOPE_NAMED("state", "editor_bridge_dispatch_json");
     choc::value::Value root;
     try {
+        PULP_TRACE_SCOPE_NAMED("state", "editor_bridge_json_parse");
         root = choc::json::parse(json);
     } catch (...) {
         return err_response("malformed JSON");

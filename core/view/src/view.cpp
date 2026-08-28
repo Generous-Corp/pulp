@@ -6,6 +6,7 @@
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -302,6 +303,12 @@ void View::simulate_click(Point root_pos) {
 }
 
 void View::simulate_click(Point root_pos, const SimulatedPointer& pointer) {
+    if (auto* overlay = interaction().active_overlay;
+        overlay && !overlay->overlay_contains(root_pos)) {
+        const bool consume = overlay->overlay_consumes_outside_click();
+        overlay->dismiss_claimed_overlay();
+        if (consume) return;
+    }
     auto* target = hit_test(root_pos);
     // Record the synthetic input into the active motion fixture before
     // dispatch so replay sees the same target lookup the original recording
@@ -541,9 +548,19 @@ View* View::focus_prev(View& root, View* current) {
     return focusable.back();
 }
 
+std::atomic<std::uint64_t> View::layout_generation_{1};
+std::atomic<std::uint64_t> View::layout_pass_count_{0};
+
 void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
+    // Geometry changed without necessarily going through invalidate_layout() —
+    // a host resize, a widget positioning itself, or the layout pass placing a
+    // child. Every one of those changes what a geometry query would return, so
+    // the generation moves. This is also why a reader must record the
+    // generation AFTER its layout pass: the pass itself sets child bounds and
+    // therefore bumps this counter.
+    bump_layout_generation();
     // Resize/move re-records: the recording was captured at the old size (and a
     // parent's recording placed this view at its old box). Stale this view and
     // its cached ancestors before on_resized() drives the repaint.
@@ -715,6 +732,42 @@ std::unique_ptr<View> View::remove_child(View* child) {
     View* structure_root = this;
     while (structure_root->parent_) structure_root = structure_root->parent_;
 
+    // An open navigation control temporarily owns the root focus slot. Retire
+    // that state while the subtree is still attached: after parent_ is severed,
+    // existing_interaction() resolves to the detached fallback and neither the
+    // control destructor nor the host can safely clear the old root pointer.
+    auto belongs_to_removed_subtree = [child](View* candidate) {
+        for (View* view = candidate; view; view = view->parent_)
+            if (view == child) return true;
+        return false;
+    };
+    if (ComboBox* popup = ComboBox::active_popup_in(*structure_root);
+        popup && belongs_to_removed_subtree(popup)) {
+        ComboBox::close_active_popup(*structure_root);
+    }
+    if (RootInteractionState* state = structure_root->interaction_state_.get();
+        state && belongs_to_removed_subtree(state->focused_input)) {
+        View* focused = state->focused_input;
+        state->focused_input = nullptr;
+        if (focused_input_ == focused) focused_input_ = nullptr;
+        // The subtree is leaving this interaction realm, so its base visual
+        // focus must leave with it. Qualify the base implementation: invoking
+        // an arbitrary derived blur/commit callback while remove_child still
+        // owns the subtree would permit re-entrant structural mutation.
+        focused->View::on_focus_changed(false);
+    }
+    if (RootInteractionState* state = structure_root->interaction_state_.get();
+        state && belongs_to_removed_subtree(state->active_overlay)) {
+        View* overlay = state->active_overlay;
+        state->active_overlay = nullptr;
+        if (active_overlay_ == overlay) active_overlay_ = nullptr;
+        // Structural removal is already the dismissal outcome. Do not invoke
+        // on_overlay_dismissed here: that callback may synchronously mutate the
+        // same tree while remove_child owns its iterators. Clearing the root
+        // slot while parent links are still valid is the lifecycle operation;
+        // it also prevents a callback-retired overlay from being reused by the
+        // next synthetic or platform click.
+    }
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.
     set_subtree_detaching(*child, true);
@@ -1159,19 +1212,20 @@ View* View::focused_input_ = nullptr;
 // replacement popover doesn't immediately get nulled out by our subsequent
 // clear.
 void View::dismiss_active_overlay() {
-    // Static entry point (ESC / outside-click) has no root in hand, so it acts
-    // on the process-global shim mirror: the most-recently-claimed overlay. Clear
-    // BOTH the mirror and the victim's root-owned slot (S11) BEFORE the callback,
-    // so a replacement popover the callback claims survives our clears.
     View* victim = active_overlay_;
     if (!victim) return;
-    active_overlay_ = nullptr;
-    if (RootInteractionState* s = victim->existing_interaction();
-        s && s->active_overlay == victim)
-        s->active_overlay = nullptr;
-    if (victim->on_overlay_dismissed) {
-        victim->on_overlay_dismissed();
-    }
+    victim->dismiss_claimed_overlay();
+}
+
+void View::dismiss_claimed_overlay() {
+    // Clear ownership before invoking user code. The callback may synchronously
+    // destroy this view or claim a replacement overlay.
+    RootInteractionState* state = existing_interaction();
+    if (!state || state->active_overlay != this) return;
+    state->active_overlay = nullptr;
+    if (active_overlay_ == this) active_overlay_ = nullptr;
+    auto dismissed = on_overlay_dismissed;
+    if (dismissed) dismissed();
 }
 
 void View::dismiss_active_overlay(View& scope) {
@@ -1396,6 +1450,7 @@ void View::release_overlay() {
         s && s->active_overlay == this)
         s->active_overlay = nullptr;
     if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
+    overlay_consumes_outside_click_ = false;
 }
 
 void View::set_painter(std::shared_ptr<WidgetPainter> p) {
@@ -1672,6 +1727,7 @@ float View::scalar_value() const {
 }
 
 void View::request_repaint() {
+    PULP_TRACE_SCOPE_NAMED("render", "view_repaint_request");
     // A repaint request is the canonical "my content changed" signal, so it is
     // also where the subtree scene cache stales: clear this view and every
     // cached ancestor (their recordings include this view). Cheap no-op when no
@@ -1871,6 +1927,10 @@ void View::layout_children() {
     // subtree in one shot, so this reads as one span per frame; grid / custom
     // subtrees that recurse show as nested layout spans.
     PULP_TRACE_SCOPE_NAMED("layout", "layout_children");
+
+    // Counted before the early-outs: the quantity under test is how many times
+    // a caller ASKED for a layout, which is the cost being eliminated.
+    layout_pass_count_.fetch_add(1, std::memory_order_relaxed);
 
     if (children_.empty()) return;
 

@@ -11,6 +11,192 @@
 
 using namespace pulp::view;
 
+TEST_CASE("ScrollView derives its content extent from visible descendants",
+          "[scrollview][layout][auto-content]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 80});
+    scroll.flex().padding_right = 7.0f;
+    scroll.flex().padding_bottom = 9.0f;
+
+    auto container = std::make_unique<View>();
+    container->set_position(View::Position::absolute);
+    container->set_left(10.0f);
+    container->set_top(15.0f);
+    container->flex().preferred_width = 60.0f;
+    container->flex().preferred_height = 70.0f;
+
+    auto descendant = std::make_unique<View>();
+    auto* descendant_ptr = descendant.get();
+    descendant->set_position(View::Position::absolute);
+    descendant->set_left(70.0f);
+    descendant->set_top(80.0f);
+    descendant->flex().preferred_width = 20.0f;
+    descendant->flex().preferred_height = 30.0f;
+    container->add_child(std::move(descendant));
+    scroll.add_child(std::move(container));
+
+    auto hidden = std::make_unique<View>();
+    hidden->set_position(View::Position::absolute);
+    hidden->set_left(500.0f);
+    hidden->set_top(500.0f);
+    hidden->flex().preferred_width = 100.0f;
+    hidden->flex().preferred_height = 100.0f;
+    hidden->set_visible(false);
+    scroll.add_child(std::move(hidden));
+
+    scroll.layout_children();
+
+    CHECK(scroll.content_size().width == Catch::Approx(107.0f));
+    CHECK(scroll.content_size().height == Catch::Approx(134.0f));
+    CHECK(scroll.wants_wheel_scroll());
+
+    SECTION("unchanged layout does not cancel an in-flight scroll animation") {
+        scroll.scroll_by(0.0f, 20.0f);
+        REQUIRE(scroll.scroll_animating());
+        REQUIRE(scroll.scroll_y() < scroll.target_scroll_y());
+
+        scroll.layout_children();
+
+        CHECK(scroll.scroll_animating());
+        CHECK(scroll.scroll_y() < scroll.target_scroll_y());
+    }
+
+    SECTION("a later shrink clamps both the target and visible offset") {
+        scroll.scroll_by(1000.0f, 1000.0f, /*animate=*/false);
+        REQUIRE(scroll.scroll_x() > 0.0f);
+        REQUIRE(scroll.scroll_y() > 0.0f);
+
+        descendant_ptr->set_visible(false);
+        scroll.layout_children();
+
+        CHECK(scroll.content_size().width == Catch::Approx(100.0f));
+        CHECK(scroll.content_size().height == Catch::Approx(94.0f));
+        CHECK(scroll.scroll_x() == Catch::Approx(0.0f));
+        CHECK(scroll.target_scroll_y() == Catch::Approx(14.0f));
+        CHECK(scroll.scroll_y() == Catch::Approx(14.0f));
+    }
+}
+
+TEST_CASE("ScrollView suppresses rounding-only overflow",
+          "[scrollview][layout][auto-content]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 80});
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_left(0.0f);
+    child->set_top(0.0f);
+    child->flex().preferred_width = 100.5f;
+    child->flex().preferred_height = 80.5f;
+    scroll.add_child(std::move(child));
+
+    scroll.layout_children();
+
+    CHECK(scroll.content_size().width == Catch::Approx(100.0f));
+    CHECK(scroll.content_size().height == Catch::Approx(80.0f));
+    CHECK_FALSE(scroll.wants_wheel_scroll());
+    scroll.scroll_by(10.0f, 10.0f, /*animate=*/false);
+    CHECK(scroll.scroll_x() == Catch::Approx(0.0f));
+    CHECK(scroll.scroll_y() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("ScrollView treats nested scrollers as auto-extent boundaries",
+          "[scrollview][layout][auto-content][nested]") {
+    ScrollView outer;
+    outer.set_bounds({0, 0, 100, 80});
+
+    auto inner = std::make_unique<ScrollView>();
+    auto* inner_ptr = inner.get();
+    inner->set_position(View::Position::absolute);
+    inner->set_left(5.0f);
+    inner->set_top(5.0f);
+    inner->flex().preferred_width = 90.0f;
+    inner->flex().preferred_height = 60.0f;
+    inner->set_content_size({90.0f, 340.0f});
+
+    auto private_overflow = std::make_unique<View>();
+    private_overflow->set_position(View::Position::absolute);
+    private_overflow->set_left(0.0f);
+    private_overflow->set_top(300.0f);
+    private_overflow->flex().preferred_width = 90.0f;
+    private_overflow->flex().preferred_height = 40.0f;
+    inner->add_child(std::move(private_overflow));
+    outer.add_child(std::move(inner));
+
+    outer.layout_children();
+
+    REQUIRE(inner_ptr->content_size().height == Catch::Approx(340.0f));
+    REQUIRE(inner_ptr->wants_wheel_scroll());
+    CHECK(outer.content_size().width == Catch::Approx(100.0f));
+    CHECK(outer.content_size().height == Catch::Approx(80.0f));
+    CHECK_FALSE(outer.wants_wheel_scroll());
+}
+
+TEST_CASE("ScrollView auto extent does not feed back into percent layout",
+          "[scrollview][layout][auto-content][percent]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 80});
+    scroll.flex().padding_right = 7.0f;
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_left(0.0f);
+    child->set_top(0.0f);
+    child->flex().dim_width = {100.0f, DimensionUnit::percent};
+    child->flex().preferred_height = 20.0f;
+    scroll.add_child(std::move(child));
+
+    scroll.layout_children();
+    const float first_width = scroll.content_size().width;
+    CHECK(first_width == Catch::Approx(107.0f));
+
+    // Repeated layout must be idempotent. The old expanded second pass made
+    // this 114px instead of the viewport-derived 107px.
+    scroll.layout_children();
+    CHECK(scroll.content_size().width == Catch::Approx(first_width));
+}
+
+TEST_CASE("ScrollView explicit content extent remains caller-owned",
+          "[scrollview][layout][manual-content]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 80});
+    scroll.set_content_size({100, 120});
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_left(0.0f);
+    child->set_top(0.0f);
+    child->flex().preferred_width = 500.0f;
+    child->flex().preferred_height = 500.0f;
+    scroll.add_child(std::move(child));
+
+    scroll.layout_children();
+
+    CHECK(scroll.content_size().width == Catch::Approx(100.0f));
+    CHECK(scroll.content_size().height == Catch::Approx(120.0f));
+}
+
+TEST_CASE("ScrollView explicit extent remains the percent layout basis",
+          "[scrollview][layout][manual-content][percent]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 80});
+    scroll.set_content_size({200, 120});
+
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    child->set_position(View::Position::absolute);
+    child->set_left(0.0f);
+    child->set_top(0.0f);
+    child->flex().dim_width = {100.0f, DimensionUnit::percent};
+    child->flex().preferred_height = 20.0f;
+    scroll.add_child(std::move(child));
+
+    scroll.layout_children();
+
+    CHECK(child_ptr->bounds().width == Catch::Approx(200.0f));
+    CHECK(scroll.content_size().width == Catch::Approx(200.0f));
+}
+
 TEST_CASE("ScrollView: scroll_by changes offset", "[scrollview]") {
     ScrollView sv;
     sv.set_bounds({0, 0, 200, 100});
@@ -147,6 +333,28 @@ TEST_CASE("ScrollView: paint_all renders without crash", "[scrollview]") {
 
     sv.paint(rc);
     REQUIRE(rc.commands().size() > 0);
+}
+
+TEST_CASE("ScrollView keeps direct sticky chrome above scrolled content",
+          "[scrollview][sticky][hit-test]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+    scroll.set_content_size({200, 300});
+
+    auto sticky = std::make_unique<View>();
+    auto* sticky_ptr = sticky.get();
+    sticky->set_position(View::Position::sticky);
+    sticky->set_bounds({0, 0, 200, 30});
+    sticky->set_hit_testable(true);
+    scroll.add_child(std::move(sticky));
+
+    auto content = std::make_unique<View>();
+    content->set_bounds({0, 50, 200, 80});
+    content->set_hit_testable(true);
+    scroll.add_child(std::move(content));
+
+    scroll.set_scroll(0, 50);
+    REQUIRE(scroll.hit_test({10, 10}) == sticky_ptr);
 }
 
 TEST_CASE("ScrollView: paint and hit testing share its fitted scale",

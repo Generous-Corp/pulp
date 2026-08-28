@@ -25,7 +25,11 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include "support/thread_progress.hpp"
+#include "../core/view/src/widget_bridge/bridge_dispatch.hpp"
+#include <atomic>
 #include <chrono>
+#include <future>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
@@ -44,6 +48,42 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
     return dynamic_cast<pulp::view::CanvasWidget*>(bridge.widget(nativeId));
 }
 } // namespace
+
+TEST_CASE("Bridge callback retirement waits for in-flight engine dispatch",
+          "[view][bridge][events][lifetime]") {
+    auto state = std::make_shared<BridgeCallbackState>(nullptr, nullptr);
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> release_wait_timed_out{false};
+
+    std::thread dispatch([&] {
+        std::lock_guard<std::recursive_mutex> lock(state->dispatch_mutex());
+        entered.store(true, std::memory_order_release);
+        if (!pulp::test::wait_for_condition(
+                [&] { return release.load(std::memory_order_acquire); })) {
+            release_wait_timed_out.store(true, std::memory_order_release);
+        }
+    });
+    if (!pulp::test::wait_for_condition(
+            [&] { return entered.load(std::memory_order_acquire); })) {
+        release.store(true, std::memory_order_release);
+        dispatch.join();
+        FAIL("dispatch thread did not enter before the progress deadline");
+    }
+
+    auto retirement = std::async(std::launch::async, [&] {
+        state->retire_dispatch();
+    });
+    CHECK(retirement.wait_for(std::chrono::milliseconds(10)) ==
+          std::future_status::timeout);
+
+    release.store(true, std::memory_order_release);
+    dispatch.join();
+    CHECK_FALSE(release_wait_timed_out.load(std::memory_order_acquire));
+    REQUIRE(retirement.wait_for(std::chrono::seconds(1)) ==
+            std::future_status::ready);
+    CHECK_FALSE(state->load(std::memory_order_acquire));
+}
 
 // ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
 //
@@ -669,6 +709,325 @@ TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __glo
     bridge.forward_key_event(static_cast<int>(KeyCode::a),      0, true);
 
     REQUIRE(engine.evaluate("win_keys.join(',')").toString() == "Escape,a");
+}
+
+TEST_CASE("Event contract: root-scoped key dispatch cannot cross plugin editors",
+          "[view][bridge][events][root-scope]") {
+    ScriptEngine engine_a;
+    ScriptEngine engine_b;
+    View root_a;
+    View root_b;
+    StateStore store_a;
+    StateStore store_b;
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+
+    bridge_a.load_script(R"(
+        var root_hits = 0;
+        window.addEventListener('keydown', function(e) {
+            root_hits++;
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+    )");
+    bridge_b.load_script(R"(
+        var root_hits = 0;
+        window.addEventListener('keydown', function() { root_hits++; });
+    )");
+
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine_a.evaluate("root_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine_b.evaluate("root_hits").getWithDefault<int>(0) == 0);
+
+    // Negative controls: an unclaimed key and key-up are not consumed, and
+    // neither may leak into the other root.
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::a), 0, true));
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, false));
+    REQUIRE(engine_a.evaluate("root_hits").getWithDefault<int>(0) == 2);
+    REQUIRE(engine_b.evaluate("root_hits").getWithDefault<int>(0) == 0);
+}
+
+TEST_CASE("Materialized document navigation focus is explicit, root-scoped, and bounded",
+          "[view][bridge][events][navigation-focus]") {
+    struct FocusCommitView final : View {
+        int blur_count = 0;
+        bool accepts_text_input() const override { return true; }
+        void on_focus_changed(bool focused) override {
+            View::on_focus_changed(focused);
+            if (!focused) ++blur_count;
+        }
+    };
+
+    ScriptEngine engine_a;
+    ScriptEngine engine_b;
+    View root_a;
+    View root_b;
+    StateStore store_a;
+    StateStore store_b;
+    auto text = std::make_unique<FocusCommitView>();
+    auto* text_ptr = text.get();
+    root_a.add_child(std::move(text));
+    text_ptr->claim_input_focus();
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+    bridge_a.load_script(R"(
+        var nav_hits = 0;
+        window.addEventListener('keydown', function(e) {
+            nav_hits++;
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+    )");
+    bridge_b.load_script(R"(
+        var nav_hits = 0;
+        window.addEventListener('keydown', function() { nav_hits++; });
+    )");
+
+    REQUIRE_FALSE(root_a.accepts_navigation_input());
+    REQUIRE(engine_a.evaluate("claimDocumentNavigationFocus()")
+                .getWithDefault<bool>(false));
+    REQUIRE(root_a.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root_a) == &root_a);
+    REQUIRE(text_ptr->blur_count == 1);
+
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine_a.evaluate("nav_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine_b.evaluate("nav_hits").getWithDefault<int>(0) == 0);
+    // The root capability does not make unrelated keys handled, and another
+    // editor cannot observe this root's delivery.
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::a), 0, true));
+    REQUIRE(engine_a.evaluate("nav_hits").getWithDefault<int>(0) == 2);
+    REQUIRE(engine_b.evaluate("nav_hits").getWithDefault<int>(0) == 0);
+
+    engine_a.evaluate("releaseDocumentNavigationFocus()");
+    REQUIRE_FALSE(root_a.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root_a) == nullptr);
+    REQUIRE(text_ptr->blur_count == 1);
+}
+
+TEST_CASE("Materialized document navigation claim clears on bridge teardown",
+          "[view][bridge][events][navigation-focus][lifecycle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    {
+        WidgetBridge bridge(engine, root, store);
+        REQUIRE(engine.evaluate("claimDocumentNavigationFocus()")
+                    .getWithDefault<bool>(false));
+        REQUIRE(root.accepts_navigation_input());
+        REQUIRE(focused_input_under_root(root) == &root);
+    }
+    REQUIRE_FALSE(root.accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
+}
+
+TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal",
+          "[view][bridge][events][popup-default]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup_selected = 'A';
+        var popup = null;
+        var replace_trigger_on_select = false;
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'popup-under-test');
+        trigger.textContent = popup_selected;
+        var outside = document.createElement('button');
+        outside.textContent = 'outside';
+        var outside_pointerdowns = 0;
+        var outside_clicks = 0;
+        outside.addEventListener('pointerdown', function() { outside_pointerdowns++; });
+        outside.addEventListener('click', function() { outside_clicks++; });
+        function closePopup() {
+            if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
+            popup = null;
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+        function togglePopup() {
+            if (popup) { closePopup(); return; }
+            popup = document.createElement('div');
+            popup.setAttribute('id', 'popup-under-test');
+            popup.setAttribute('role', 'listbox');
+            ['A', 'B', 'C'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.textContent = label;
+                option.style.background = label === 'A' ? 'rgb(1,2,3)' : '';
+                option.addEventListener('click', function() {
+                    popup_selected = label;
+                    if (replace_trigger_on_select) {
+                        var previous = trigger;
+                        trigger = document.createElement('button');
+                        trigger.setAttribute('aria-haspopup', 'listbox');
+                        trigger.setAttribute('aria-controls', 'popup-under-test');
+                        trigger.textContent = label;
+                        trigger.addEventListener('click', togglePopup);
+                        document.body.insertBefore(trigger, previous);
+                        document.body.removeChild(previous);
+                    } else {
+                        trigger.textContent = label;
+                    }
+                    closePopup();
+                });
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+            trigger.setAttribute('aria-expanded', 'true');
+        }
+        trigger.addEventListener('click', togglePopup);
+        document.body.appendChild(trigger);
+        document.body.appendChild(outside);
+        trigger.focus();
+    )");
+
+    REQUIRE(root.accepts_navigation_input());
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 0);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::end_), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 2);
+    REQUIRE(engine.evaluate(
+        "__pulpPopupDefaultState__.options[2].style.backgroundColor")
+                .toString() == "rgba(120,180,255,0.18)");
+    const auto active_option_id = engine.evaluate(
+        "__pulpPopupDefaultState__.options[2]._id").toString();
+    auto* active_option = bridge.widget(active_option_id);
+    REQUIRE(active_option != nullptr);
+    REQUIRE(active_option->has_background_color());
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.options[0].style.background")
+                .toString() == "rgb(1,2,3)");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::home), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 0);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::enter), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::up), 0, true));
+    REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                .getWithDefault<int>(-1) == 2);
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::escape), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    engine.evaluate("__dispatch__(outside._id, 'pointerdown', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'mousedown', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'pointerup', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'mouseup', {clientX:1,clientY:1})");
+    engine.evaluate("__dispatch__(outside._id, 'click', {clientX:1,clientY:1})");
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("outside_pointerdowns").getWithDefault<int>(-1) == 0);
+    REQUIRE(engine.evaluate("outside_clicks").getWithDefault<int>(-1) == 0);
+
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::up), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::space), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "C");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "C");
+    REQUIRE(engine.evaluate("document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+
+    // React-style selection may synchronously replace the trigger while the
+    // option callback closes its popup. Core cleanup must finish before that
+    // callback and then focus the replacement without clearing its new text.
+    engine.evaluate("replace_trigger_on_select = true; trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::enter), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+    engine.evaluate("replace_trigger_on_select = false");
+
+    // Native hosts dismiss the exact root-owned overlay rather than emitting
+    // a DOM pointer sequence. That callback must still reach addEventListener
+    // so the authored trigger closes its popup.
+    engine.evaluate("trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    auto* claimed_popup = root.interaction().active_overlay;
+    REQUIRE(claimed_popup != nullptr);
+    claimed_popup->dismiss_claimed_overlay();
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(root.interaction().active_overlay == nullptr);
+
+    engine.evaluate("trigger.setAttribute('data-pulp-popup-default','off'); trigger.focus()");
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+
+    engine.evaluate(R"(
+        trigger.setAttribute('data-pulp-popup-default', 'on');
+        document.addEventListener('keydown', function overridePopup(e) {
+            if (e.key === 'ArrowDown') e.preventDefault();
+        });
+        trigger.focus();
+    )");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+}
+
+TEST_CASE("Materialized ComboBox exposes bounded navigation focus and native keys",
+          "[view][bridge][combo][navigation-focus]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 300, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createCombo('mode', '');
+        setItems('mode', ['A', 'B', 'C']);
+    )");
+
+    auto* combo = dynamic_cast<ComboBox*>(bridge.widget("mode"));
+    REQUIRE(combo != nullptr);
+    combo->set_bounds({0, 0, 120, 24});
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == combo);
+
+    KeyEvent end{.key = KeyCode::end_, .is_down = true};
+    REQUIRE(combo->on_key_event(end));
+    REQUIRE(combo->hovered_index() == 2);
+    REQUIRE_FALSE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::a), 0, true));
+
+    KeyEvent commit{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(commit));
+    REQUIRE(combo->selected() == 2);
+    REQUIRE_FALSE(combo->accepts_navigation_input());
+    REQUIRE(focused_input_under_root(root) == nullptr);
 }
 
 TEST_CASE("Classic-script window aliases share one browser global property bag",

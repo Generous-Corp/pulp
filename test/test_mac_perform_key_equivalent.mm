@@ -32,6 +32,9 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/state/store.hpp>
 
 #include <memory>
 
@@ -93,6 +96,19 @@ NSEvent* make_tab_event(NSUInteger modifier_flags = 0) {
                              keyCode:48];
 }
 
+NSEvent* make_down_event() {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:0
+                           timestamp:0
+                        windowNumber:0
+                             context:nil
+                          characters:@"\uF701"
+         charactersIgnoringModifiers:@"\uF701"
+                           isARepeat:NO
+                             keyCode:125];
+}
+
 NSEvent* make_cmd_shift_option_v_event() {
     return [NSEvent keyEventWithType:NSEventTypeKeyDown
                             location:NSZeroPoint
@@ -146,6 +162,33 @@ PulpPluginView* make_pulp_plugin_view(pulp::view::View* root) {
 }
 
 }  // namespace
+
+TEST_CASE("standalone keyDown routes a claimed materialized navigation root",
+          "[mac][platform][keyboard][navigation-focus]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"JS(
+        var navigation_hits = 0;
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowDown') {
+                navigation_hits += 1;
+                event.preventDefault();
+            }
+        });
+        claimDocumentNavigationFocus();
+    )JS");
+    REQUIRE(root.accepts_navigation_input());
+
+    PulpView* view = make_pulp_view(&root);
+    REQUIRE(view != nil);
+    [view keyDown:make_down_event()];
+
+    REQUIRE(engine.evaluate("navigation_hits").getWithDefault<int>(0) == 1);
+}
 
 TEST_CASE("performKeyEquivalent: routes Cmd-modified chord to rootView->on_global_key",
           "[mac][platform][keyboard][wireup][2128]") {
