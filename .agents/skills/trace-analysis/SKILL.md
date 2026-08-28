@@ -473,3 +473,13 @@ validation on every machine whose adapter happened to offer timestamps.
 If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
+
+## DPR experiment traces reuse A2T
+
+A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.
+They must answer the named A2T Perfetto questions and carry the A3 budget
+receipt referenced by `docs/contracts/gpu-dpr-experiment-v1.schema.json`.
+Validate required categories from the DPR manifest before interpreting a run.
+Missing categories, unavailable real GPU timing where the question requires it,
+or a trace that cannot be bound to the trial artifact leaves the cell
+incomplete; it is not evidence that the cost was zero.

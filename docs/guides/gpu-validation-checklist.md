@@ -38,6 +38,31 @@ to inspect bundle discovery and ABI details. If it reports a completed failure,
 preserve the JSON result and reproduce with the focused render/compute tests
 before moving to a live application.
 
+## DPR experiment evidence (A4 foundation)
+
+The committed A4 corpus defines a reproducible matrix; it does not change
+Pulp's scale policy. Validate and expand it before scheduling hardware work:
+
+```bash
+python3 tools/scripts/gpu_dpr_experiment.py validate-manifest
+python3 tools/scripts/gpu_dpr_experiment.py emit-plan --output /tmp/pulp-dpr-plan.json
+```
+
+The plan covers DPR 1, 1.5, 2, and 3 in exact, configured-max, and explicitly
+nonshipping adaptive modes. A complete measured result must cover every matrix
+cell, bind the Pulp and Forge revisions and artifacts, preserve identical
+logical content and input coordinates, and include the required frame, memory,
+fidelity, and interaction observations. Dense text must have a legibility
+oracle; a content-floor pass alone is insufficient.
+
+A2T named Perfetto-question coverage and an A3 budget receipt are hard
+prerequisites for a complete result. Missing trace categories, absent Forge or
+web canaries, changed logical input, an unavailable small-text oracle, SKIP, or
+INCONCLUSIVE leaves the experiment incomplete. Planned or synthetic evidence
+may test automation but cannot justify `configured-max-candidate` or
+`adaptive-candidate`. Those dispositions identify later Vellum policy work;
+they do not authorize a Pulp render-policy change.
+
 ## Verified (Real Hardware)
 
 | Platform | Backend | Surface | Rendering | Status |
