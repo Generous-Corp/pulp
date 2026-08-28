@@ -1429,10 +1429,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         layer.opaque = YES;
         layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
 
-        // Keep a settled drawable at native scale. During live resize the view
-        // switches CAMetalLayer to transactional presentation, so the new
-        // drawable and AppKit's new layer bounds commit atomically instead of
-        // exposing the background while drawable acquisition waits for vsync.
+        // Keep a settled drawable at native scale. During a live expansion,
+        // setFrameSize: temporarily selects Resize gravity only until the host
+        // synchronously presents the exact new-size GPU frame. That one-frame
+        // cover avoids exposing background strips while drawable acquisition
+        // waits for vsync, without restoring the old whole-gesture zoom.
         // Non-flipped NSView layer: max-Y is visually the top, so TopLeft is
         // the upper-left corner where our (0,0)-origin UI begins.
         layer.contentsGravity = kCAGravityTopLeft;
@@ -1471,25 +1472,22 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)setFrameSize:(NSSize)newSize {
+    const NSSize oldSize = self.frame.size;
+    const BOOL expandingLiveResize =
+        self.inLiveResize &&
+        (newSize.width > oldSize.width || newSize.height > oldSize.height);
+    // AppKit commits the layer bounds before windowDidResize can acquire and
+    // paint the matching Metal drawable. Cover that sub-frame expansion gap
+    // with the retained drawable; handle_resize restores TopLeft immediately
+    // after the exact-size frame has presented.
+    self.metalLayer.contentsGravity = expandingLiveResize
+        ? kCAGravityResize
+        : kCAGravityTopLeft;
     [super setFrameSize:newSize];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
-}
-
-- (void)viewWillStartLiveResize {
-    [super viewWillStartLiveResize];
-    // windowDidResize paints and presents synchronously. Holding the present
-    // for the enclosing Core Animation transaction makes that exact drawable
-    // visible in the same commit as AppKit's enlarged layer bounds.
-    self.metalLayer.presentsWithTransaction = YES;
-}
-
-- (void)viewDidEndLiveResize {
-    [super viewDidEndLiveResize];
-    self.metalLayer.presentsWithTransaction = NO;
-    self.metalLayer.contentsGravity = kCAGravityTopLeft;
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -2698,6 +2696,10 @@ private:
         // timing and may harmlessly coalesce a later requested frame.
         if (gpu_surface_ && skia_surface_) {
             render_frame();
+            // setFrameSize: may use Resize gravity to cover a live expansion's
+            // pre-present gap. The drawable now matches the committed bounds,
+            // so return to native-scale retention before the next transaction.
+            metal_view_.metalLayer.contentsGravity = kCAGravityTopLeft;
         }
     }
 

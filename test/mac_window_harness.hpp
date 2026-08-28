@@ -56,13 +56,6 @@ struct BackBufferFrameCapture {
     std::vector<uint8_t> png;
 };
 
-struct LiveResizePresentationState {
-    bool transactional_before = false;
-    bool transactional_during = false;
-    bool transactional_after = false;
-    bool resize_applied = false;
-};
-
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
 /// unit tests. Must be called on the main thread. Forces
 /// `options.use_gpu = true` and
@@ -117,15 +110,6 @@ pulp::view::WindowHost::ContentSize content_view_bounds(
 /// replacement content synchronously.
 bool resize_content_view(pulp::view::WindowHost& host,
                          float width, float height);
-
-/// Exercise the production NSView live-resize lifecycle around a real AppKit
-/// content-size change and report the CAMetalLayer presentation policy at each
-/// phase. This makes the compositor contract testable without showing a window:
-/// live resize must commit the new drawable in the same Core Animation
-/// transaction as AppKit's enlarged layer bounds, then restore normal
-/// low-latency presentation when the gesture ends.
-LiveResizePresentationState simulate_live_resize(
-    pulp::view::WindowHost& host, float width, float height);
 
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a

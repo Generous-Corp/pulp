@@ -220,26 +220,6 @@ bool resize_content_view(pulp::view::WindowHost& host,
     }
 }
 
-LiveResizePresentationState simulate_live_resize(
-    pulp::view::WindowHost& host, float width, float height) {
-    LiveResizePresentationState state;
-    if (!is_main_thread() || width <= 0.0f || height <= 0.0f) return state;
-
-    @autoreleasepool {
-        NSView* view = (__bridge NSView*)host.native_content_view_handle();
-        if (!view || ![view.layer isKindOfClass:[CAMetalLayer class]]) return state;
-
-        CAMetalLayer* layer = (CAMetalLayer*)view.layer;
-        state.transactional_before = layer.presentsWithTransaction;
-        [view viewWillStartLiveResize];
-        state.transactional_during = layer.presentsWithTransaction;
-        state.resize_applied = resize_content_view(host, width, height);
-        [view viewDidEndLiveResize];
-        state.transactional_after = layer.presentsWithTransaction;
-    }
-    return state;
-}
-
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     if (!is_main_thread()) return false;
 
