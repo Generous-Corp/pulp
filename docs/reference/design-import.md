@@ -40,6 +40,7 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
 | `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides path env, mode, managed, and system selection. | — |
+| `--fit-authored-frame` | For standard runnable browser-backed HTML imports, derive a bounded viewport from the first occupying body child and accept only a contained authored-frame fixed point after one reload. Cannot be combined with an explicit `--render-size`, `--browser-interactions`, `--offline`, token export, or detect/report modes; non-browser input is rejected. | off |
 | `--browser-interactions <json>` | Apply a versioned bounded click/context-click/type/wait plan before browser evidence capture. | initial state |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. | off |
 | `--allow-browser-network` | Permit only the source document's declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. | off |
@@ -66,6 +67,33 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
+
+For a self-sizing runnable HTML panel, opt into authored-frame fitting through
+the normal CLI:
+
+```bash
+pulp import-design --file design.html --fit-authored-frame
+```
+
+Pulp settles the document, measures its first occupying body child, derives a
+bounded viewport, reloads that same Chromium target exactly once, and repeats
+the readiness and stability checks. It accepts the capture only when the
+authored frame reaches the same fixed point and is fully contained. An absent,
+changing, or uncontained authored frame is a safe refusal with a stable
+diagnostic (`capture-authored-frame-unavailable`,
+`capture-authored-viewport-nonconvergent`, or
+`capture-authored-frame-not-contained`); no ambiguous fitted capture is
+accepted. Rerun without `--fit-authored-frame` to use the existing viewport
+workflow.
+
+This opt-in is mutually exclusive with an explicit `--render-size`, because
+that option pins the viewport, with `--browser-interactions`, because an
+interaction plan intentionally captures a selected state rather than the
+single authored-frame fixed point, and with `--offline`, because fitting needs
+Chromium layout evidence. Non-browser input is rejected rather than silently
+ignoring the flag, and token export plus detect/report command modes reject it
+because they do not run the import pipeline. `import-design` has no MCP command
+surface; agent workflows invoke the same `pulp import-design ...` CLI directly.
 
 For a secondary prototype screen, pass
 `--browser-interactions <plan.json>`. The versioned

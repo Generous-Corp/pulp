@@ -163,7 +163,8 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
 
 ## CLI Alternative
 
-The deterministic import tool is also available:
+The deterministic import tool is the supported agent route; `import-design`
+has no MCP command surface, so invoke the CLI directly:
 ```bash
 pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
@@ -173,6 +174,7 @@ pulp import-design --from claude --file design.html   # writes ui.js + tokens.js
 pulp import-design --from designmd --file DESIGN.md --tokens tokens.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --snapshot-semantics accept --output imported_ui.cpp
+pulp import-design --file design.html --fit-authored-frame
 
 # With validation
 pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png
@@ -180,6 +182,16 @@ pulp import-design --from pencil --file design.json --validate --reference sourc
 # Skip the bridge scaffold (claude only)
 pulp import-design --from claude --file design.html --no-bridge-scaffold
 ```
+
+Use `--fit-authored-frame` only for runnable browser-backed HTML whose first
+occupying body child defines the panel. It derives a bounded viewport, reloads
+the same Chromium target once, and accepts only a fully contained fixed point.
+It is incompatible with an explicit `--render-size`, `--browser-interactions`,
+and `--offline`; non-browser inputs and non-import command modes are rejected.
+If fitting safely refuses
+because the authored frame is absent, changes after reload, or is not contained,
+do not accept the pixels; rerun without the flag to use the normal viewport
+workflow.
 
 Artifact flags:
 - `--output <path>` selects the primary artifact destination.

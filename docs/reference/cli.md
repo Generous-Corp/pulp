@@ -1544,6 +1544,7 @@ pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.j
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
 pulp import-design --file design.html --output ui.js
+pulp import-design --file design.html --fit-authored-frame --output ui.js
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
@@ -1584,6 +1585,7 @@ exit codes, diagnostics, and current limitations).
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
 | `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides `PULP_DESIGN_BROWSER`, browser mode, managed Chrome for Testing, and system discovery. |
+| `--fit-authored-frame` | For standard runnable browser-backed HTML imports, derive a bounded viewport from the first occupying body child, reload the same Chromium target once, and accept only a contained authored-frame fixed point. This explicit opt-in cannot be combined with an explicit `--render-size`, `--browser-interactions`, `--offline`, token export, or detect/report modes; non-browser input is rejected. |
 | `--browser-interactions <json>` | Apply a `pulp-browser-interactions-v1` click/context-click/type/wait plan before browser evidence capture. Without it, capture remains on the settled initial state. |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
 | `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
@@ -1601,6 +1603,13 @@ exit codes, diagnostics, and current limitations).
 | `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--format {w3c\|css-variables\|tailwind\|json-tailwind\|css-tailwind}` | Token export format. `w3c` (DTCG JSON) is the default; `css-variables` emits CSS custom properties (`.dark` modes → `@media (prefers-color-scheme: dark)`); the `tailwind` variants require `--from designmd`. Unknown values exit 2. |
+
+`--fit-authored-frame` is intentionally fail-closed. After the single reload,
+the authored root must resolve to the same bounded frame and be fully contained;
+otherwise import refuses with a stable authored-frame diagnostic instead of
+accepting ambiguous pixels. Rerun without the flag to use the existing viewport
+workflow. The `import-design` command is not an MCP surface: agents use this
+same `pulp import-design ...` CLI route directly.
 
 With `--emit ir-json`, relative asset references from a `--url` import resolve
 against the source URL. The manifest keeps the authored relative URI and also

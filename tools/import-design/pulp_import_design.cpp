@@ -1584,7 +1584,7 @@ struct CliOptions {
     bool materialized_canvas_composition = false;
     std::string browser_path;
     std::string browser_interactions_path;
-    bool offline = false;
+    bool fit_authored_frame = false, offline = false;
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
     std::unordered_map<std::string, std::string> expected_asset_hashes;
@@ -1869,6 +1869,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
                 return 2;
             }
             opt.browser_interactions_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--fit-authored-frame") == 0) {
+            opt.fit_authored_frame = true;
         } else if (std::strcmp(argv[i], "--offline") == 0) {
             opt.offline = true;
         } else if (std::strcmp(argv[i], "--asset-cache") == 0 && i + 1 < argc) {
@@ -1911,6 +1913,12 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
         }
     }
 
+    if (auto code = pulp::import_design::validate_browser_import_cli_options(
+            opt.fit_authored_frame, opt.render_size_explicit,
+            !opt.browser_interactions_path.empty(), opt.offline,
+            opt.export_tokens_mode, opt.detect_only, opt.native_panel_lowering,
+            opt.materialized_canvas_composition))
+        return *code;
     return std::nullopt;
 }
 
@@ -2036,14 +2044,6 @@ int main(int argc, char* argv[]) {
     auto& snapshot_semantics = cli.snapshot_semantics;
     auto& allow_network_fetch = cli.allow_network_fetch;
     auto& allow_browser_network = cli.allow_browser_network;
-    const bool native_panel_lowering = cli.native_panel_lowering;
-    const bool materialized_canvas_composition =
-        cli.materialized_canvas_composition;
-    if (native_panel_lowering && materialized_canvas_composition) {
-        std::cerr << "Error: --native-panel-lowering and "
-                     "--materialized-canvas-composition are mutually exclusive\n";
-        return 2;
-    }
     auto& browser_path = cli.browser_path;
     auto& browser_interactions_path = cli.browser_interactions_path;
     auto& offline = cli.offline;
@@ -2267,7 +2267,7 @@ int main(int argc, char* argv[]) {
         pulp::import_design::print_usage();
         return 1;
     }
-
+    if (auto code = pulp::import_design::validate_fit_authored_frame_source_cli(cli.fit_authored_frame, source_str)) return *code;
     // `--from fig`: decode a local Figma save file offline. The lane either
     // prints a read-only outline and returns, or rewrites source_str/input_file
     // to the decoded figma-plugin envelope and lets the rest of the pipeline run.
@@ -2505,6 +2505,7 @@ int main(int argc, char* argv[]) {
              browser_interactions_path.empty()
                  ? std::optional<fs::path>{}
                  : std::optional<fs::path>{browser_interactions_path},
+         .fit_authored_frame = cli.fit_authored_frame,
          .source = *source,
          // An explicit --render-size is the user's authored viewport, not a
          // seed the capture may silently replace during width correction.
@@ -2523,9 +2524,8 @@ int main(int argc, char* argv[]) {
          .dry_run = dry_run,
          .supports_faithful_capture =
              artifact_emit != ArtifactEmit::swiftui,
-         .native_panel_lowering = native_panel_lowering,
-         .materialized_canvas_composition =
-             materialized_canvas_composition,
+         .native_panel_lowering = cli.native_panel_lowering,
+         .materialized_canvas_composition = cli.materialized_canvas_composition,
          .validate = validate},
         content);
     if (const auto* failure =

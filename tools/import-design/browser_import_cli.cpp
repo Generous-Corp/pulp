@@ -274,6 +274,47 @@ bool collect_staged_asset_publications(
 
 }  // namespace
 
+std::optional<int> validate_browser_import_cli_options(
+    bool fit_authored_frame, bool render_size_explicit,
+    bool has_browser_interactions, bool offline, bool export_tokens,
+    bool detect_only, bool native_panel_lowering,
+    bool materialized_canvas_composition) {
+    if (fit_authored_frame) {
+        const char* conflict =
+            render_size_explicit ? "--render-size" :
+            has_browser_interactions ? "--browser-interactions" :
+            offline ? "--offline" :
+            export_tokens ? "--export-tokens" : nullptr;
+        if (conflict) {
+            std::cerr << "Error: --fit-authored-frame cannot be combined with "
+                      << conflict << "\n";
+            return 2;
+        }
+        if (detect_only) {
+            std::cerr << "Error: --fit-authored-frame cannot be combined with "
+                         "--detect-only or --report-new-format\n";
+            return 2;
+        }
+    }
+    if (native_panel_lowering && materialized_canvas_composition) {
+        std::cerr << "Error: --native-panel-lowering and "
+                     "--materialized-canvas-composition are mutually exclusive\n";
+        return 2;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> validate_fit_authored_frame_source_cli(
+    bool fit_authored_frame, std::string_view source) {
+    if (!fit_authored_frame || source == "html" || source == "claude" ||
+        source == "stitch") {
+        return std::nullopt;
+    }
+    std::cerr << "Error: --fit-authored-frame applies only to browser-solved "
+                 "runnable HTML\n";
+    return 2;
+}
+
 class BrowserCapturedImport::EvidenceTransaction {
 public:
     EvidenceTransaction() = default;
@@ -610,6 +651,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .importer_executable = request.importer_executable,
          .browser_executable = request.browser_executable,
          .browser_interactions = request.browser_interactions,
+         .fit_authored_frame = request.fit_authored_frame,
          .source = request.source,
          .pinned_width = request.pinned_width,
          .initial_width = request.initial_width,
@@ -681,6 +723,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         return BrowserImportFailure{failure->exit_code};
     } else if (std::holds_alternative<BrowserHtmlLegacyFallback>(
                    browser_import)) {
+        if (request.fit_authored_frame) {
+            std::cerr
+                << "Error: --fit-authored-frame requires browser-solved "
+                   "runnable HTML and cannot be combined with --offline\n";
+            return BrowserImportFailure{2};
+        }
         if (request.browser_interactions) {
             std::cerr
                 << "Error: --browser-interactions requires browser-solved "
@@ -693,6 +741,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                "not match the browser.\n";
         return BrowserImportNotApplicable{};
     } else {
+        if (request.fit_authored_frame) {
+            std::cerr
+                << "Error: --fit-authored-frame applies only to "
+                   "browser-solved runnable HTML\n";
+            return BrowserImportFailure{2};
+        }
         if (request.browser_interactions) {
             std::cerr
                 << "Error: --browser-interactions applies only to "

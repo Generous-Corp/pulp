@@ -307,6 +307,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
+        REQUIRE(r.stdout_output.find("--fit-authored-frame") != std::string::npos);
         REQUIRE(r.stdout_output.find("Precompiled React JSX runtime bundle") != std::string::npos);
         REQUIRE(r.stdout_output.find("baked emits IR or C++ artifacts") != std::string::npos);
         REQUIRE(r.stdout_output.find("Built-in default is --mode live --emit js") != std::string::npos);
@@ -330,6 +331,66 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.exit_code != 0);
         REQUIRE(r.stderr_output.find("unknown source 'not-a-source'") != std::string::npos);
         REQUIRE(r.stderr_output.find("Valid sources") != std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects an explicit render size") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--render-size", "640x480"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --render-size") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects browser interactions") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--browser-interactions", "plan.json"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --browser-interactions") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects the offline parser") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--offline"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --offline") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects token export mode") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--export-tokens", "--dry-run"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --export-tokens") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects detect mode") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--detect-only"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --detect-only") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects a non-browser source") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--from", "figma", "--file", "missing.json"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame applies only to browser-solved runnable HTML") !=
+                std::string::npos);
     }
 }
 

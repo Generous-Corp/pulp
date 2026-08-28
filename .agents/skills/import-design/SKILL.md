@@ -3777,6 +3777,19 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   export-shape incantation is needed. Pulp distinguishes project bundles,
   design components, standalone bundles, and generic HTML for diagnostics, but
   all runnable HTML uses the same authoritative Chromium evaluator.
+- When the runnable page's first occupying body child is the authored panel,
+  agents may call `pulp import-design --file <path> --fit-authored-frame`
+  directly. `import-design` has no MCP command surface; the CLI is the supported
+  agent route. The opt-in derives a bounded viewport, reloads the same Chromium
+  target exactly once, and accepts only a contained authored-frame fixed point.
+  It is mutually exclusive with an explicit `--render-size`,
+  `--browser-interactions`, and `--offline`; non-browser inputs and non-import
+  command modes are rejected. If the root is absent, changes after reload, or is
+  not contained, the importer refuses safely with
+  `capture-authored-frame-unavailable`,
+  `capture-authored-viewport-nonconvergent`, or
+  `capture-authored-frame-not-contained`; rerun without the flag to use the
+  existing viewport workflow rather than accepting ambiguous pixels.
 - Chromium captures the settled visual at DPR 2, CSS custom-property tokens,
   semantic candidates, and provenance. The portable DesignIR uses the captured
   visual as a `faithful_capture` backing and Pulp immediately renders it through
@@ -4691,6 +4704,7 @@ pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
 pulp import-design --file design.html                 # auto-detects HTML shape, Chromium → DesignIR → Skia A/B
+pulp import-design --file design.html --fit-authored-frame  # opt-in self-sizing panel; CLI-only agent route
 pulp import-design --file design.html --allow-browser-network  # reviewed opt-in for CDN-dependent exports
 pulp import-design --file design.html --offline       # explicit lower-fidelity fallback
 

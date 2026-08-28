@@ -86,6 +86,7 @@ id::BrowserHtmlImportResult captured_import(
         std::move(durable_capture),
         transient / "browser.png",
         {},
+        {},
         {}};
 }
 
@@ -144,10 +145,9 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
           "[import-design][browser-capture][cli-adapter]") {
     TempTree tree;
     auto request = request_for(tree);
-    request.browser_interactions = tree.root / "interactions.json";
-    request.pinned_width = 1440;
     std::optional<fs::path> observed;
     std::optional<int> observed_width;
+    bool observed_fit_authored_frame = false;
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -155,6 +155,8 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
             std::string_view) {
             observed = capture_request.browser_interactions;
             observed_width = capture_request.pinned_width;
+            observed_fit_authored_frame =
+                capture_request.fit_authored_frame;
             return id::BrowserHtmlNotApplicable{};
         };
     operations.validate_capture =
@@ -169,23 +171,44 @@ TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
             return false;
         };
 
-    const auto result =
-        id::internal::run_browser_import_cli_with_operations(
-            request, "not html", operations);
-    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
-    REQUIRE(failure);
-    CHECK(failure->exit_code == 2);
-    REQUIRE(observed);
-    CHECK(observed_width == 1440);
-    CHECK(*observed == *request.browser_interactions);
+    SECTION("forwards an interaction plan and pinned width") {
+        request.browser_interactions = tree.root / "interactions.json";
+        request.pinned_width = 1440;
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(
+                request, "not html", operations);
+        const auto* failure =
+            std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+        REQUIRE(observed);
+        CHECK(observed_width == 1440);
+        CHECK(*observed == *request.browser_interactions);
+        CHECK_FALSE(observed_fit_authored_frame);
+    }
+
+    SECTION("forwards authored-frame fitting") {
+        request.fit_authored_frame = true;
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(
+                request, "not html", operations);
+        const auto* failure =
+            std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+        CHECK_FALSE(observed);
+        CHECK_FALSE(observed_width);
+        CHECK(observed_fit_authored_frame);
+    }
 }
 
-TEST_CASE("browser interactions cannot select the offline parser",
+TEST_CASE("browser-only capture policy cannot select the offline parser",
           "[import-design][browser-capture][cli-adapter]") {
     TempTree tree;
     auto request = request_for(tree);
     request.offline = true;
-    request.browser_interactions = tree.root / "interactions.json";
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -204,12 +227,29 @@ TEST_CASE("browser interactions cannot select the offline parser",
             return false;
         };
 
-    const auto result =
-        id::internal::run_browser_import_cli_with_operations(
-            request, "<html>", operations);
-    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
-    REQUIRE(failure);
-    CHECK(failure->exit_code == 2);
+    SECTION("rejects browser interactions") {
+        request.browser_interactions = tree.root / "interactions.json";
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(
+                request, "<html>", operations);
+        const auto* failure =
+            std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+    }
+
+    SECTION("rejects authored-frame fitting") {
+        request.fit_authored_frame = true;
+
+        const auto result =
+            id::internal::run_browser_import_cli_with_operations(
+                request, "<html>", operations);
+        const auto* failure =
+            std::get_if<id::BrowserImportFailure>(&result);
+        REQUIRE(failure);
+        CHECK(failure->exit_code == 2);
+    }
 }
 
 TEST_CASE("browser import session preserves non-capture result policy",
