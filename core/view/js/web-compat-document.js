@@ -669,8 +669,8 @@ globalThis.self = window;
         globalThis.__pulpPopupDefaultState__ = null;
         if (typeof releaseDocumentNavigationFocus === "function")
             releaseDocumentNavigationFocus();
-        if (returnFocus && trigger) {
-            trigger.focus();
+        if (returnFocus) {
+            if (trigger) trigger.focus();
             requestAnimationFrame(function() {
                 var replacement = currentTrigger(dismissedState);
                 if (replacement && replacement !== trigger) replacement.focus();
@@ -758,9 +758,21 @@ globalThis.self = window;
             state.options[state.activeIndex].focus();
         } else if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
+            var selectedState = state;
             var option = state.options[state.activeIndex];
+            // Selection callbacks commonly replace both the popup and its
+            // trigger (for example a React commit that paints the selected
+            // value). Retire ownership while the authored nodes are still
+            // attached so cleanup cannot mutate a detached pre-commit tree.
+            dismiss(false);
             option.click();
-            dismiss(true);
+            var replacement = currentTrigger(selectedState);
+            if (replacement) replacement.focus();
+            requestAnimationFrame(function() {
+                var settledTrigger = currentTrigger(selectedState);
+                if (settledTrigger && settledTrigger !== replacement)
+                    settledTrigger.focus();
+            });
         }
     };
 })();

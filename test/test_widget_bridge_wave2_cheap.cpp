@@ -833,6 +833,7 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
     bridge.load_script(R"(
         var popup_selected = 'A';
         var popup = null;
+        var replace_trigger_on_select = false;
         var trigger = document.createElement('button');
         trigger.setAttribute('aria-haspopup', 'listbox');
         trigger.setAttribute('aria-controls', 'popup-under-test');
@@ -848,7 +849,7 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
             popup = null;
             trigger.setAttribute('aria-expanded', 'false');
         }
-        trigger.addEventListener('click', function() {
+        function togglePopup() {
             if (popup) { closePopup(); return; }
             popup = document.createElement('div');
             popup.setAttribute('id', 'popup-under-test');
@@ -860,14 +861,26 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
                 option.style.background = label === 'A' ? 'rgb(1,2,3)' : '';
                 option.addEventListener('click', function() {
                     popup_selected = label;
-                    trigger.textContent = label;
+                    if (replace_trigger_on_select) {
+                        var previous = trigger;
+                        trigger = document.createElement('button');
+                        trigger.setAttribute('aria-haspopup', 'listbox');
+                        trigger.setAttribute('aria-controls', 'popup-under-test');
+                        trigger.textContent = label;
+                        trigger.addEventListener('click', togglePopup);
+                        document.body.insertBefore(trigger, previous);
+                        document.body.removeChild(previous);
+                    } else {
+                        trigger.textContent = label;
+                    }
                     closePopup();
                 });
                 popup.appendChild(option);
             });
             document.body.appendChild(popup);
             trigger.setAttribute('aria-expanded', 'true');
-        });
+        }
+        trigger.addEventListener('click', togglePopup);
         document.body.appendChild(trigger);
         document.body.appendChild(outside);
         trigger.focus();
@@ -936,6 +949,23 @@ TEST_CASE("Semantic popup defaults own bounded keyboard selection and dismissal"
     REQUIRE(engine.evaluate("trigger.textContent").toString() == "C");
     REQUIRE(engine.evaluate("document.activeElement === trigger")
                 .getWithDefault<bool>(false));
+
+    // React-style selection may synchronously replace the trigger while the
+    // option callback closes its popup. Core cleanup must finish before that
+    // callback and then focus the replacement without clearing its new text.
+    engine.evaluate("replace_trigger_on_select = true; trigger.focus()");
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::down), 0, true));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::enter), 0, true));
+    REQUIRE(engine.evaluate("popup_selected").toString() == "B");
+    REQUIRE(engine.evaluate("trigger.textContent").toString() == "B");
+    REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("document.activeElement === trigger")
+                .getWithDefault<bool>(false));
+    engine.evaluate("replace_trigger_on_select = false");
 
     // Native hosts dismiss the exact root-owned overlay rather than emitting
     // a DOM pointer sequence. That callback must still reach addEventListener
