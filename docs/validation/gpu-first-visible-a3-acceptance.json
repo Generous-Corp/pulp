@@ -1,0 +1,104 @@
+{
+  "schema": "dev.pulp.gpu-first-visible-a3-acceptance",
+  "version": 1,
+  "recorded_at": "2026-08-27T23:41:55-07:00",
+  "pulp_base_revision": "c6ecab06a373bdae61aea9e3b8f804fbfa1db5d2",
+  "headless_constrained": {
+    "status": "passed",
+    "build_type": "Release",
+    "capture_backend": "CoreGraphics",
+    "adapter_identity": "unavailable",
+    "cold_trials": 10,
+    "warm_trials": 10,
+    "content_floor_passed_trials": 20,
+    "performance_claim": false,
+    "test_case": "GPU health view adapter completes a real constrained 20-trial campaign"
+  },
+  "negative_controls": {
+    "real_blank_capture": "passed",
+    "seeded_blank_provider": "passed",
+    "old_single_shot_adapter_mutation": "caught"
+  },
+  "standalone": {
+    "status": "incomplete",
+    "product": "Pulp Control Standalone Host",
+    "build_id": "build:cf7bca05e0380033c8c95f57b8a5280e",
+    "manifest_digest": "475c53934715f1c928f2ae4daad9fac30499d8393e70823b6894f8096eae55df",
+    "audit_verdict": "pass",
+    "audit_sha256": "7cf5ed370c0dca039a6163e916ee72fd374511c94babaf0342df405f92056b20",
+    "default_macos_tmpdir": "passed_after_generated-root-canonicalization",
+    "unseeded_control_response": {
+      "receipt_state": "completed",
+      "response_sha256": "821b63400db05a7d5ecaa9910b867539b9fa500380fbc05e700d8153b8cb7ad4",
+      "health_verdict": "fail",
+      "diagnostic_code": "gpu.startup.blank",
+      "reason": "The installed canonical host owns a headless AutoUi surface, but its back-buffer capture was unavailable. No acceptance-only content was painted to turn this into a false positive."
+    },
+    "seeded_blank_control_response": {
+      "environment": "PULP_GPU_HEALTH_SEED_BLANK_FRAME=1",
+      "receipt_state": "completed",
+      "response_sha256": "7cb00f64046e6434454e3c57f06cd6988aee77295a822d6498a151ab3573dbd7",
+      "health_verdict": "fail",
+      "diagnostic_code": "gpu.startup.blank",
+      "status": "passed"
+    },
+    "positive_gate": "not_passed"
+  },
+  "forge_modular_au": {
+    "status": "incomplete",
+    "forge_base_revision": "154ced5eda43848c0fb05f81a4b9daea0d943da4",
+    "artifact_directory": "/Volumes/Workshop/Code/agent-artifacts/forge-modular-0171-154ced5/reaper-au-module",
+    "auval_sha256": "b732c54b3927678c516a8b20d0e9670bb51623fddc1ae2c996543d3e81ab97b6",
+    "reaper_log_sha256": "b22489b3419867434df745064d9f26bc9636f6c24c9722ee8987fa0221981f30",
+    "chrome_proof_log_sha256": "ac8e916bdfde0eacabd2c57759887b3c82a1b0bdc79c77f8110f5ec55bafa38b",
+    "observed": [
+      "AU validation succeeded",
+      "REAPER opened the AU editor",
+      "the editor initialized a presentable Metal and Skia Graphite surface",
+      "the durable chrome proof stopped at ReadBundle without a final acceptance receipt",
+      "no dev.pulp.gpu/health.read@1 response was captured"
+    ],
+    "newer_external_run": {
+      "status": "active-not-consumed",
+      "artifact_directory": "/Volumes/Workshop/Code/agent-artifacts/forge-modular-0171-aa7d6b0/reaper-au-module-state-fix",
+      "owner_boundary": "This A3 lane did not inspect or interfere with the active external REAPER process."
+    }
+  },
+  "same_instance_a2t": {
+    "status": "blocked",
+    "missing_trace_categories": [
+      "frame_lifecycle",
+      "a2t_correlation"
+    ],
+    "reason": "No trace is bound to the same product instance, build, frame identity, and trial campaign."
+  },
+  "budget": {
+    "id": "pulp.editor-first-visible.v1",
+    "version": 1,
+    "status": "unratified",
+    "performance_verdict": "unverified"
+  },
+  "b4": {
+    "disposition": null,
+    "status": "withheld",
+    "reason": "A queue-B4, queue-B4-investigation, or no-change disposition is not legal until a ratified budget and same-instance causal trace exist."
+  },
+  "confirmed_followups": {
+    "installed_host_ready_publication_window": {
+      "status": "confirmed-not-changed",
+      "reason": "The broker can publish after accepting host-ready but before the installed host observes the ready response; both the local active gate and transport host-open gate can reject an immediate dispatch. A partial local-only ordering change was intentionally not retained."
+    },
+    "standalone_first_call_consent_latency": {
+      "status": "observed-not-attributed",
+      "reason": "The first inspect-readonly call in each fresh broker state timed out or reported consent-required before a later call completed; no causal claim is made without a focused consent trace."
+    }
+  },
+  "consent_ux": {
+    "status": "implemented-and-focused-tested",
+    "gpu_health_primary_message": "Read GPU startup health once for dev.pulp.control-standalone-host",
+    "approve_label": "Allow GPU Health Once",
+    "scope": "The broker derives the exact operation set, signed caller, target registration, instance, build, and artifact. Grants remain process-local and are revoked on client, host, or broker lifecycle termination.",
+    "technical_details": "Requester executable and publisher plus target publisher, instance, build, artifact digest, and selector are displayed below the action.",
+    "security": "No requester-supplied purpose or agent identity is displayed because the current request contract carries no such separately labeled field. Existing replay, broader-capability, disconnect, expiry, and restart rejection tests remain passing."
+  }
+}

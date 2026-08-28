@@ -75,7 +75,7 @@ std::string safe_display_token(std::string_view input) {
 }
 
 ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
-    return {
+    ControlConsentPrompt prompt{
         .request = request,
         .client_executable_display = safe_display_token(request.client_peer.executable_identity),
         .client_publisher_display = safe_display_token(request.client_peer.publisher_id),
@@ -86,6 +86,29 @@ ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
         .artifact_digest_display = safe_display_token(request.registration.artifact_digest),
         .selector_display = safe_display_token(request.selector_id),
     };
+    for (const auto capability : request.grant.capabilities) {
+        if (!prompt.requested_operations_display.empty())
+            prompt.requested_operations_display.append(", ");
+        prompt.requested_operations_display.append(capability_contract_id(capability));
+    }
+    const bool gpu_health_only = request.grant.capabilities.size() == 1 &&
+                                 request.grant.capabilities.front() ==
+                                     InspectorCapability::GpuHealthRead;
+    prompt.primary_message = gpu_health_only
+                                 ? "Read GPU startup health once for " + prompt.plugin_display
+                                 : "Allow " +
+                                       std::to_string(request.grant.capabilities.size()) +
+                                       " requested operation(s) once for " +
+                                       prompt.plugin_display;
+    prompt.approve_label = gpu_health_only ? "Allow GPU Health Once" : "Allow Once";
+    prompt.technical_details_display =
+        "Requester executable: " + prompt.client_executable_display +
+        "\nRequester publisher: " + prompt.client_publisher_display +
+        "\nTarget publisher: " + prompt.target_publisher_display +
+        "\nInstance: " + prompt.instance_display + "\nBuild: " + prompt.build_display +
+        "\nArtifact sha256: " + prompt.artifact_digest_display +
+        "\nGrant selector: " + prompt.selector_display;
+    return prompt;
 }
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
@@ -98,18 +121,13 @@ ControlConsentPromptResult native_prompt(const ControlConsentPrompt& prompt,
                                          std::chrono::milliseconds timeout) {
     const auto bounded_ms = std::clamp<std::int64_t>(timeout.count(), 1, 60'000);
     const std::string title = "Pulp control permission";
-    const std::string selector = prompt.request.selector_kind == ControlGrantSelectorKind::Operation
-                                     ? "operation " + prompt.selector_display
-                                     : "profile " + prompt.selector_display;
-    const std::string message = "Allow " + prompt.client_executable_display + " (publisher " +
-                                prompt.client_publisher_display + ") to use " + selector + " on " +
-                                prompt.plugin_display + " (instance " + prompt.instance_display +
-                                ", publisher " + prompt.target_publisher_display + ", build " +
-                                prompt.build_display + ", artifact sha256 " +
-                                prompt.artifact_digest_display + ")?";
+    const std::string message = prompt.primary_message +
+                                "?\n\nRequested operations: " +
+                                prompt.requested_operations_display +
+                                "\n\nTechnical details\n" + prompt.technical_details_display;
     auto* title_cf = make_cf_string(title);
     auto* message_cf = make_cf_string(message);
-    auto* approve_cf = make_cf_string("Allow Once");
+    auto* approve_cf = make_cf_string(prompt.approve_label);
     auto* deny_cf = make_cf_string("Deny");
     if (!title_cf || !message_cf || !approve_cf || !deny_cf) {
         if (title_cf)

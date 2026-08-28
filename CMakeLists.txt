@@ -526,7 +526,9 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
     target_link_options(pulp-control-standalone-host PRIVATE
         "LINKER:-dead_strip_dylibs")
     _pulp_cache_control_declarations(pulp-control-standalone-host
-        developer-local "dev.pulp.instance/read@1;dev.pulp.state/read@1" FALSE)
+        developer-local
+        "dev.pulp.instance/read@1;dev.pulp.state/read@1;dev.pulp.gpu/health.read@1"
+        FALSE)
     _pulp_configure_control_shipping(pulp-control-standalone-host
         "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
     _pulp_attach_control_shipping(pulp-control-standalone-host

@@ -122,9 +122,9 @@ _authoring_case(production-with-capability
 _authoring_case(support-with-mutation
     "set(PULP_ControlFixture_CONTROL_PROFILE support-diagnostics)\nset(PULP_ControlFixture_CONTROL_CAPABILITIES dev.pulp.session/control@1;dev.pulp.state/parameter-gesture@1)\n_pulp_configure_inspector_shipping(ControlFixture com.pulp.control ControlFixture)"
     FALSE)
-_authoring_case(gpu-health-without-provider
+_authoring_case(gpu-health-with-product-provider
     "set(PULP_ControlFixture_CONTROL_PROFILE support-diagnostics)\nset(PULP_ControlFixture_CONTROL_CAPABILITIES dev.pulp.gpu/health.read@1)\n_pulp_configure_inspector_shipping(ControlFixture com.pulp.control ControlFixture)"
-    FALSE)
+    TRUE)
 _authoring_case(eval-without-acknowledgement
     "set(PULP_ControlFixture_CONTROL_PROFILE research-unsafe)\nset(PULP_ControlFixture_CONTROL_CAPABILITIES dev.pulp.session/control@1;dev.pulp.runtime/evaluate@1)\n_pulp_configure_inspector_shipping(ControlFixture com.pulp.control ControlFixture)"
     FALSE)

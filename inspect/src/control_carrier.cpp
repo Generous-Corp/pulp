@@ -165,7 +165,10 @@ std::filesystem::path default_control_runtime_directory(const std::filesystem::p
 
 std::filesystem::path default_control_runtime_directory() {
     std::error_code error;
-    const auto runtime_root = std::filesystem::temp_directory_path(error);
+    const auto temporary_root = std::filesystem::temp_directory_path(error);
+    if (error)
+        return {};
+    const auto runtime_root = std::filesystem::weakly_canonical(temporary_root, error);
     if (error)
         return {};
     return default_control_runtime_directory(runtime_root);

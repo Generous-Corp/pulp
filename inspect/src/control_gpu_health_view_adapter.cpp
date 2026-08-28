@@ -57,7 +57,8 @@ void ControlGpuHealthViewAdapter::poll(std::chrono::steady_clock::time_point now
                              .vendor = adapter.vendor,
                              .architecture = adapter.architecture};
         }
-        (void)impl_->config.provider->record_presented_frame(frame);
+        if (impl_->config.provider->record_presented_frame(frame))
+            impl_->capture_attempted = false;
     } catch (...) {
         (void)impl_->config.provider->record_dropped_events(1);
     }
