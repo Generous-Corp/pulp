@@ -5,6 +5,7 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/command_registry.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <functional>
@@ -187,6 +188,28 @@ inline view::WindowOptions make_standalone_window_options(
     opts.resizable = true;
     opts.use_gpu = use_gpu;
     return opts;
+}
+
+inline void add_standalone_settings_menu_command(
+    view::WindowOptions& options, StandaloneEditorChrome& chrome) {
+    if (!chrome.settings_panel()) return;
+    options.menu_commands.push_back({
+        .menu = {},
+        .title = "Settings…",
+        .key = view::kKeyComma,
+        .modifiers = view::kOpenSettingsModifiers,
+        .action = [&chrome] {
+            view::KeyEvent event{
+                .key = view::kKeyComma,
+                .modifiers = view::kOpenSettingsModifiers,
+                .is_down = true,
+            };
+            auto& root = chrome.window_root();
+            if (root.on_global_key && root.on_global_key(event)) return;
+            if (auto* tabs = chrome.tab_panel())
+                tabs->set_active_tab("Settings");
+        },
+    });
 }
 
 inline view::WindowHost::ContentSize standalone_editor_content_size(

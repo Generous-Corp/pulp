@@ -24,6 +24,10 @@
 @property (nonatomic, assign) pulp::view::HostFramePump* framePump;
 @property (nonatomic, strong) NSTimer* animationTimer;
 @property (nonatomic, strong) NSTrackingArea* trackingArea;
+// The CPU view owns root layout directly in setFrameSize:. The Metal subclass
+// delegates it to MacGpuWindowHost, which may pin an authored design viewport;
+// letting both paths lay out would expose a transient window-sized tree.
+@property (nonatomic, assign) BOOL hostOwnsRootLayout;
 // Inverse design-viewport transform applied to every window-space input
 // point before hit_test. Set by WindowHost::set_design_viewport; nil
 // when no design viewport is in effect (identity).

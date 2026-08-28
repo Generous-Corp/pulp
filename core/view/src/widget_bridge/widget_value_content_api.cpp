@@ -92,9 +92,11 @@ void BridgeRegistrars::register_widget_value_content_api(WidgetBridge& self) {
     });
 
     register_bridge_function(api, "setScrollContentSize", [&self](choc::javascript::ArgumentList args) {
-        if (auto* s = dynamic_cast<ScrollView*>(self.widget(args.get<std::string>(0, ""))))
-            s->set_content_size({static_cast<float>(args.get<double>(1,0)),
-                                static_cast<float>(args.get<double>(2,0))});
+        if (auto* s = dynamic_cast<ScrollView*>(self.widget(args.get<std::string>(0, "")))) {
+            if (args.numArgs == 1) s->use_automatic_content_size();
+            else s->set_content_size({static_cast<float>(args.get<double>(1,0)),
+                                      static_cast<float>(args.get<double>(2,0))});
+        }
         return choc::value::Value();
     });
 }

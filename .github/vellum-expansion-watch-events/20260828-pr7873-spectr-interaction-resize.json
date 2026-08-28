@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260828-pr7873-spectr-interaction-resize",
+  "created_at": "2026-08-28T05:46:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned native interaction defaults, transient gesture dispatch, automatic scroll sizing, trace auditing, and macOS compositor presentation behavior used by Spectr. The change improves shared Pulp runtime and validation behavior without changing Vellum source authority, the accepted expansion boundary, or design-import ownership.",
+  "tests": [
+    "pulp-test-combo-dropdown",
+    "pulp-test-interaction-multiinstance",
+    "pulp-test-mac-perform-key-equivalent",
+    "pulp-test-mac-platform-harness",
+    "pulp-test-plugin-view-host-design-viewport",
+    "pulp-test-scroll-view",
+    "pulp-test-standalone-editor-chrome",
+    "pulp-test-widget-bridge",
+    "pulp-test-widget-bridge-removal-lifetime",
+    "pulp-test-widget-bridge-runtime-import",
+    "pulp-test-widget-bridge-wave2-cheap",
+    "pulp-test-win-plugin-input-router",
+    "pulp-test-web-compat-events",
+    "jsx-contract-audit.test.mjs",
+    "test_check_transient_interaction_trace",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

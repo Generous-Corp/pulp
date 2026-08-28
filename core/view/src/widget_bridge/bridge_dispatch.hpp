@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,6 +35,17 @@ struct BridgeCallbackState {
     void leave_callback() noexcept;
     void retire(std::unique_ptr<View> widget);
     void detach_retirement_queues() noexcept;
+    void retire_dispatch() noexcept;
+
+    void track_engine(std::weak_ptr<const void> token) noexcept {
+        engine_token_ = std::move(token);
+        engine_tracked_ = true;
+    }
+    bool engine_alive() const noexcept {
+        return !engine_tracked_ || !engine_token_.expired();
+    }
+
+    std::recursive_mutex& dispatch_mutex() noexcept { return dispatch_mutex_; }
 
 private:
     std::size_t callback_depth_ = 0;
@@ -43,6 +55,12 @@ private:
     // std::function::operator(). Move completed batches here and collect them
     // at the start of the next outer callback, after the prior one returned.
     std::vector<std::unique_ptr<View>>* collectable_widgets_ = nullptr;
+    // Native input may race an owner-driven realm teardown. Serialize the
+    // alive check and engine evaluation with retirement so no callback can
+    // dereference the borrowed ScriptEngine after its bridge is retired.
+    std::recursive_mutex dispatch_mutex_;
+    std::weak_ptr<const void> engine_token_;
+    bool engine_tracked_ = false;
 };
 
 class BridgeCallbackScope {

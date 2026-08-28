@@ -6,6 +6,7 @@
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <cstddef>
@@ -1907,4 +1908,62 @@ TEST_CASE("make_standalone_window_options extends min_height when chrome adds ro
     REQUIRE(opts.height == Catch::Approx(860.0f));  // preferred_height + 0 chrome
     REQUIRE(opts.min_width == Catch::Approx(800.0f));
     REQUIRE(opts.min_height == Catch::Approx(600.0f));  // min unchanged (no chrome height)
+}
+
+TEST_CASE("standalone Settings menu routes the standard chord before host fallback",
+          "[standalone][chrome][settings][commands]") {
+    int app_hits = 0;
+    auto editor_root = std::make_unique<View>();
+    editor_root->on_global_key = [&](const KeyEvent& event) {
+        ++app_hits;
+        return event.key == kKeyComma
+            && event.modifiers == kOpenSettingsModifiers;
+    };
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), StandaloneConfig{.show_settings_tab = true},
+        nullptr, nullptr, nullptr, {});
+    pulp::format::ViewSize hints;
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    add_standalone_settings_menu_command(options, chrome);
+
+    REQUIRE(options.menu_commands.size() == 1);
+    const auto& command = options.menu_commands.front();
+    REQUIRE(command.menu.empty());
+    REQUIRE(command.title == "Settings…");
+    REQUIRE(command.key == kKeyComma);
+    REQUIRE(command.modifiers == kOpenSettingsModifiers);
+    command.action();
+    REQUIRE(app_hits == 1);
+    REQUIRE(chrome.tab_panel()->active_tab() ==
+            chrome.tab_panel()->find_tab("Editor"));
+
+    chrome.window_root().on_global_key = [](const KeyEvent&) { return false; };
+    command.action();
+    REQUIRE(chrome.tab_panel()->active_tab() ==
+            chrome.tab_panel()->find_tab("Settings"));
+}
+
+TEST_CASE("standalone stop flushes an active environment trace",
+          "[standalone][tracing][lifecycle]") {
+#if PULP_TRACING_ENABLED
+    const auto path = std::filesystem::temp_directory_path()
+        / "pulp-standalone-close-flush.pftrace";
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ScopedEnv trace_path("PULP_TRACE_PATH");
+    ScopedEnv trace_seconds("PULP_TRACE_SECONDS");
+    trace_path.set(path.string());
+    trace_seconds.unset();
+
+    counted_null_processor_factory_calls = 0;
+    StandaloneApp app(counted_null_processor_factory);
+    { PULP_TRACE_SCOPE_NAMED("render", "standalone_close_flush_probe"); }
+    app.stop();
+
+    REQUIRE(std::filesystem::exists(path));
+    REQUIRE(std::filesystem::file_size(path) > 0);
+    std::filesystem::remove(path, ec);
+#else
+    SUCCEED("tracing disabled in this configuration");
+#endif
 }

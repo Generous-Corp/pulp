@@ -78,6 +78,48 @@ Element.prototype.removeEventListener = function(type, fn, opts) {
 Element.prototype.dispatchEvent = function(event) {
     event.target = this;
     _dispatchEvent(this, event);
+    return !event.defaultPrevented;
+};
+
+Element.prototype.click = function() {
+    if (!this.__pulpProgrammaticActivation
+        && typeof globalThis.__pulpActivateMaterializedElement__ === "function") {
+        var sequence = (globalThis.__pulpProgrammaticClickSequence__ || 0) + 1;
+        globalThis.__pulpProgrammaticClickSequence__ = sequence;
+        var token = "pulp-click-" + sequence;
+        this.setAttribute("data-pulp-programmatic-click", token);
+        this.__pulpProgrammaticActivation = true;
+        try {
+            if (globalThis.__pulpActivateMaterializedElement__(
+                    '[data-pulp-programmatic-click="' + token + '"]',
+                    "click", null)) return;
+        } finally {
+            this.__pulpProgrammaticActivation = false;
+            this.removeAttribute("data-pulp-programmatic-click");
+        }
+    }
+    if (typeof __dispatch__ === "function") {
+        __dispatch__(this._id, "click",
+            { bubbles: true, cancelable: true, button: 0, buttons: 0 });
+        return;
+    }
+    this.dispatchEvent(_makeEvent("click", this,
+        { bubbles: true, cancelable: true, button: 0, buttons: 0 }));
+};
+
+Element.prototype.focus = function() {
+    if (typeof document !== "undefined") document.activeElement = this;
+    if (this.getAttribute && this.getAttribute("aria-haspopup")
+        && this.getAttribute("data-pulp-popup-default") !== "off"
+        && typeof claimDocumentNavigationFocus === "function")
+        claimDocumentNavigationFocus();
+    this.dispatchEvent(_makeEvent("focus", this, { bubbles: false }));
+};
+
+Element.prototype.blur = function() {
+    if (typeof document !== "undefined" && document.activeElement === this)
+        document.activeElement = null;
+    this.dispatchEvent(_makeEvent("blur", this, { bubbles: false }));
 };
 
 Element.prototype._registerNativeEvent = function(type) {

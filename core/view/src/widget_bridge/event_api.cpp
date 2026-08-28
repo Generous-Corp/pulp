@@ -147,6 +147,8 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 dispatch_event(alive, engine, id, "dismiss", "0");
             };
             it->second->claim_overlay();
+            it->second->set_overlay_consumes_outside_click(
+                args.size() > 1 && args.get<bool>(1, false));
         }
         return choc::value::Value();
     });
@@ -161,6 +163,24 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         }
         return choc::value::Value();
     });
+
+    // A materialized document may borrow host navigation only while a bounded
+    // interaction (for example, a custom listbox) is open. The claim is scoped
+    // to this bridge's root and transfers any prior text focus through the
+    // canonical blur/commit path. Key delivery still returns handled only when
+    // the document listener calls preventDefault().
+    register_bridge_function(
+        api, "claimDocumentNavigationFocus",
+        [&self](choc::javascript::ArgumentList) {
+            return choc::value::createBool(
+                self.claim_document_navigation_focus());
+        });
+    register_bridge_function(
+        api, "releaseDocumentNavigationFocus",
+        [&self](choc::javascript::ArgumentList) {
+            self.release_document_navigation_focus();
+            return choc::value::Value();
+        });
 
     // registerPointer(id) - enables pointer event dispatch for a widget.
     register_bridge_function(api, "registerPointer", [&self](choc::javascript::ArgumentList args) {

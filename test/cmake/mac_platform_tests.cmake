@@ -19,6 +19,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     )
     target_link_libraries(pulp-test-mac-platform-harness PRIVATE
         pulp::view
+        pulp::view-script
         Catch2::Catch2WithMain
         "-framework AppKit"
         "-framework Metal"

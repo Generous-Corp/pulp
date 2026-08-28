@@ -37,13 +37,15 @@ if(_PULP_NODE_FOR_TESTS)
     list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
          ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
 
-    # Canonicalization invokes esbuild. The required Linux lane installs this
-    # directory's locked dependencies; source-only/offline configurations keep
-    # the dependency-free suite available without pretending esbuild exists.
-    set(_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST
-        ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs)
+    # Canonicalization invokes esbuild and the JSX contract audit imports the
+    # locked Babel parser. The required Linux lane installs this directory's
+    # dependencies; source-only/offline configurations keep the dependency-free
+    # suite available without pretending either package exists.
+    set(_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS
+        ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs
+        ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs)
     list(REMOVE_ITEM _PULP_MATERIALIZED_RUNTIME_NODE_TESTS
-         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST})
+         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
 
     add_test(NAME pulp-browser-capture-node-unit
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
@@ -60,10 +62,11 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 600
         LABELS "parser-import;browser-capture;node")
 
-    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json"
+       AND EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/@babel/parser/package.json")
         add_test(NAME pulp-materialized-runtime-node-dependencies
                  COMMAND ${_PULP_NODE_FOR_TESTS} --test
-                         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TEST})
+                         ${_PULP_MATERIALIZED_RUNTIME_DEPENDENCY_TESTS})
         set_tests_properties(pulp-materialized-runtime-node-dependencies PROPERTIES
             TIMEOUT 60
             LABELS "parser-import;browser-capture;node")

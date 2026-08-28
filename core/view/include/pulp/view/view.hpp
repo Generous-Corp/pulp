@@ -626,8 +626,46 @@ public:
         return {};
     }
 
+    // ── Layout generation ───────────────────────────────────────────────
+    //
+    // A process-wide monotonic counter bumped by ANY mutation that can change
+    // computed geometry. It exists so a reader (the JS bridge's geometry
+    // queries) can answer "has anything moved since I last laid out?" without
+    // running a tree walk to find out.
+    //
+    // Why not the per-View `layout_dirty_` flag: invalidation does NOT
+    // propagate upward. `invalidate_layout()` marks the view it is called on,
+    // so a flex change on a deep child leaves `root.layout_dirty()` FALSE while
+    // the tree is genuinely stale. A guard reading the root's flag would skip a
+    // needed pass and hand back stale (often 0x0) bounds — the exact failure
+    // `getLayoutRect`'s comment exists to prevent.
+    //
+    // The bump lives inside the invalidators themselves rather than at the
+    // bridge's entry points, so any mutation path is automatically correct —
+    // including host resizes, C++-side widget code, and invalidators written
+    // after this. OVER-invalidating costs one redundant layout; UNDER-
+    // invalidating is a correctness bug, so the counter is deliberately eager.
+    //
+    // Starts at 1 so a reader initialised to 0 always lays out once.
+    static std::uint64_t layout_generation() noexcept {
+        return layout_generation_.load(std::memory_order_relaxed);
+    }
+    static void bump_layout_generation() noexcept {
+        layout_generation_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// Number of `layout_children()` calls since process start. A test seam:
+    /// the property under test is "how many tree walks did that read loop
+    /// cost", which timing cannot answer reliably and this can.
+    static std::uint64_t layout_pass_count() noexcept {
+        return layout_pass_count_.load(std::memory_order_relaxed);
+    }
+
     /// Mark layout as needing recalculation (auto-invalidation)
-    void invalidate_layout() { layout_dirty_ = true; }
+    void invalidate_layout() {
+        layout_dirty_ = true;
+        bump_layout_generation();
+    }
     bool layout_dirty() const { return layout_dirty_; }
     void clear_layout_dirty() { layout_dirty_ = false; }
 
@@ -1292,6 +1330,12 @@ public:
     /// AND the process-global shim mirror. Defined out-of-line (needs tree_root).
     void claim_input_focus();
     void claim_overlay();
+    void set_overlay_consumes_outside_click(bool consume) {
+        overlay_consumes_outside_click_ = consume;
+    }
+    bool overlay_consumes_outside_click() const {
+        return overlay_consumes_outside_click_;
+    }
     /// Guarded release — clears the root slot AND the shim mirror only when
     /// `this` currently holds them. A non-holder is a no-op, so one widget's
     /// teardown cannot blur an unrelated focused widget.
@@ -1301,8 +1345,15 @@ public:
     /// Does NOT fire `on_overlay_dismissed` — used by JSX unmount and the
     /// View destructor where React already knows the popover is closing.
     void release_overlay();
-    /// Dismiss the active overlay and fire `on_overlay_dismissed` so React state
-    /// stays synchronized. Used by platform ESC and outside-click paths.
+    /// Dismiss this exact overlay when it owns its root's overlay slot. Unlike
+    /// the legacy process-global entry point, this cannot dismiss an overlay
+    /// belonging to another hosted editor whose claim happened more recently.
+    void dismiss_claimed_overlay();
+    /// Dismiss-path release. Releases the active overlay (if any) and fires its
+    /// `on_overlay_dismissed` callback so React state can flip `setOpen(false)`
+    /// to keep the JSX tree in sync. Called by the platform window host from
+    /// the ESC keypath and the outside-click path. No-op if nothing claimed the
+    /// slot.
     static void dismiss_active_overlay();
     /// Hosted variant acts only on `scope`'s interaction slot.
     static void dismiss_active_overlay(View& scope);
@@ -1323,6 +1374,9 @@ public:
     /// Global key callback. If set on root, called before normal key dispatch.
     /// Return true to consume the event.
     std::function<bool(const KeyEvent&)> on_global_key;
+    /// Root-scoped callback installed only while a materialized document owns
+    /// the bounded navigation-focus capability.
+    std::function<bool(const KeyEvent&)> on_navigation_key;
 
     /// CSS position property
     enum class Position { static_, relative, absolute, fixed, sticky };
@@ -1912,6 +1966,18 @@ public:
     virtual void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
 
+    /// Does this widget temporarily need host-delivered navigation keys?
+    ///
+    /// Plugin roots must not become general keyboard sinks: doing so steals
+    /// transport and musical-typing keys from the DAW. Interactive controls
+    /// may opt in while a bounded navigation interaction is active (for
+    /// example, ComboBox returns true only while its menu is open).
+    /// Appended after the pre-existing View virtual surface so older slots do
+    /// not move for installed-SDK consumers.
+    virtual bool accepts_navigation_input() const {
+        return scripted_navigation_input_;
+    }
+
     /// The runtime host-parameter accessor for this view tree, or nullptr in
     /// previews/screenshots (a view degrades to local state when null, exactly
     /// like a sandboxed native view). Set by the host that owns the tree —
@@ -2384,13 +2450,21 @@ private:
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;
+    static std::atomic<std::uint64_t> layout_generation_;
+    static std::atomic<std::uint64_t> layout_pass_count_;
     bool has_focus_ = false;
+    // WidgetBridge may lend the root focus slot to a materialized document
+    // while that document has an explicit, bounded navigation interaction.
+    // This is intentionally private: ordinary roots must never become general
+    // keyboard sinks, and the bridge clears the capability on release/teardown.
+    bool scripted_navigation_input_ = false;
     bool hovered_ = false;
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
+    bool overlay_consumes_outside_click_ = false;
     FrameClock* frame_clock_ = nullptr;
     // Lazily allocated on the first set_meter_source / set_scalar_source, so a
     // view that shows no live value costs one null pointer.
