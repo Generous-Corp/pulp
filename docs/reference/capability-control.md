@@ -164,12 +164,14 @@ intersection, missing consent, stale publication, or a dead session denies the
 request.
 
 Interactive grants from the trusted Pulp CLI, host UI, or broker-owned prompt
-are one-shot for new operations. Approval admits at most one fresh idempotency
-identity; reconnecting or changing the request ID may only replay that
-operation's existing durable receipt. Different params, operation identity,
-target lineage, or idempotency identity require new consent. Reusable grants
-exist only when an explicit existing-user policy, rather than an interactive
-decision, authorizes them.
+keep their established reusable operation behavior except for GPU startup-health
+reads. An interactive `dev.pulp.gpu/health.read@1` approval admits at most one
+fresh idempotency identity; reconnecting or changing the request ID may only
+replay that operation's existing durable receipt. Different params, operation
+identity, target lineage, or idempotency identity require new consent. The
+interactive decision ID itself remains single-use for every capability, and
+runtime evaluation still requires interactive consent. An explicit existing-user
+policy may authorize reusable GPU-health reads.
 
 ### GPU startup-health snapshots
 

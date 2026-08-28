@@ -158,10 +158,12 @@ public:
                     const ControlClientId& client_id,
                     const ControlRegistrationId& registration_id,
                     InspectorCapability capability);
-    /// Atomically reserves an interactive-consent grant for its first durable
-    /// idempotency identity. Once selected, a failed provisional admission may
-    /// retry only that identity; once committed, only operation-store replay is
-    /// eligible. The durable store remains the replay authority.
+    /// Atomically reserves the GPU-health capability of an interactive-consent
+    /// grant for its first durable idempotency identity. Other capabilities on
+    /// the same grant remain reusable. Once selected, a failed provisional
+    /// admission may retry only that identity; once committed, only
+    /// operation-store replay is eligible. The durable store remains the replay
+    /// authority.
     std::optional<ControlOperationAuthorization> authorize_operation(
         const ControlGrantId& grant_id,
         const ControlClientId& client_id,

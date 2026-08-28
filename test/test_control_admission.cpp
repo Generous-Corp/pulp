@@ -49,6 +49,7 @@ ControlRegistrationRequest registration_request() {
     manifest.capabilities = {
         InspectorCapability::SessionDescribe,
         InspectorCapability::StateRead,
+        InspectorCapability::GpuHealthRead,
         InspectorCapability::CaptureImage,
     };
     return {
@@ -216,21 +217,23 @@ struct AdmissionFixture {
         REQUIRE(registered.registration);
         registration = *registered.registration;
 
-        // Most admission tests exercise a durable policy grant across several
-        // operations. Interactive CLI, host-UI, and broker-prompt decisions are
-        // intentionally operation-one-shot and are covered by dedicated tests.
         auto grant_consent = consent("admission-consent");
-        grant_consent.authority = ControlConsentAuthority::ExistingUserPolicy;
         if (broker_prompt) {
             grant_consent.authority = ControlConsentAuthority::BrokerUserPrompt;
             grant_consent.expires_at = std::chrono::steady_clock::now() + 5min;
         }
+        std::vector grant_capabilities{
+            InspectorCapability::StateRead,
+            InspectorCapability::CaptureImage,
+        };
+        if (broker_prompt)
+            grant_capabilities.push_back(InspectorCapability::GpuHealthRead);
         auto granted = broker.issue_grant(
             client,
             ControlGrantRequest{
                 client_identity.client_id,
                 registration.registration_id,
-                {InspectorCapability::StateRead, InspectorCapability::CaptureImage},
+                std::move(grant_capabilities),
                 5min,
             },
             std::move(grant_consent));
@@ -268,6 +271,15 @@ struct AdmissionFixture {
         auto envelope = state_read(std::move(request_id), std::move(idempotency_key));
         envelope.operation_id = "dev.pulp.ui/capture@1";
         envelope.params_json = R"({"target":"window","format":"png"})";
+        rehash(envelope);
+        return envelope;
+    }
+
+    ControlRequestEnvelope gpu_health_read(
+        std::string request_id = "request-gpu-health",
+        std::string idempotency_key = "idempotency-gpu-health") const {
+        auto envelope = state_read(std::move(request_id), std::move(idempotency_key));
+        envelope.operation_id = "dev.pulp.gpu/health.read@1";
         rehash(envelope);
         return envelope;
     }
@@ -865,12 +877,12 @@ TEST_CASE("Control broker durably deduplicates before dispatch",
     CHECK_FALSE(finished.receipt->result.result_code);
 }
 
-TEST_CASE("broker-prompt grant permits one admission and only durable replay",
+TEST_CASE("broker-prompt GPU-health grant permits one admission and only durable replay",
           "[inspect][control][admission][grant][one-shot][idempotency]") {
     AdmissionFixture fixture{
         allow_all_policy(), [] { return std::chrono::system_clock::now(); },
         std::chrono::hours{24}, std::chrono::hours{24 * 7}, true};
-    const auto request = fixture.state_read();
+    const auto request = fixture.gpu_health_read();
     const auto first = fixture.broker.admit_operation(fixture.client, request);
     REQUIRE(first.plan);
     REQUIRE(first.receipt);
@@ -878,33 +890,34 @@ TEST_CASE("broker-prompt grant permits one admission and only durable replay",
 
     const auto reconnect = fixture.broker.admit_operation(
         fixture.client,
-        fixture.state_read("request-reconnect", "idempotency-admission"));
+        fixture.gpu_health_read("request-reconnect", "idempotency-gpu-health"));
     REQUIRE(reconnect.receipt);
     CHECK_FALSE(reconnect.should_dispatch);
     CHECK(reconnect.receipt->receipt_id == first.receipt->receipt_id);
 
-    auto content_conflict = fixture.state_read(
-        "request-content-conflict", "idempotency-admission");
-    content_conflict.params_json = R"({"include_sensitive":true})";
+    auto content_conflict = fixture.gpu_health_read(
+        "request-content-conflict", "idempotency-gpu-health");
+    ++content_conflict.expected_state_generation;
     rehash(content_conflict);
     CHECK(fixture.broker.admit_operation(fixture.client, content_conflict).status ==
           ControlAdmissionStatus::IdempotencyConflict);
 
-    auto request_conflict = fixture.state_read(
+    auto request_conflict = fixture.gpu_health_read(
         request.request_id, "different-idempotency-key");
     CHECK(fixture.broker.admit_operation(fixture.client, request_conflict).status ==
           ControlAdmissionStatus::RequestIdConflict);
 
     const auto before_denied_request = store_snapshot(fixture.store_path);
     const auto denied = fixture.broker.admit_operation(
-        fixture.client, fixture.state_read("request-b", "idempotency-b"));
+        fixture.client, fixture.gpu_health_read("request-b", "idempotency-b"));
     CHECK(denied.status == ControlAdmissionStatus::PermissionDenied);
     CHECK_FALSE(denied.receipt);
     CHECK(store_snapshot(fixture.store_path) == before_denied_request);
 
     const auto replay_after_conflicts = fixture.broker.admit_operation(
         fixture.client,
-        fixture.state_read("request-reconnect-again", "idempotency-admission"));
+        fixture.gpu_health_read("request-reconnect-again",
+                                "idempotency-gpu-health"));
     REQUIRE(replay_after_conflicts.receipt);
     CHECK(replay_after_conflicts.receipt->receipt_id == first.receipt->receipt_id);
     CHECK_FALSE(replay_after_conflicts.should_dispatch);

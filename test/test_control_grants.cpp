@@ -70,6 +70,7 @@ struct GrantFixture {
                     InspectorCapability::SessionDescribe,
                     InspectorCapability::SessionControl,
                     InspectorCapability::StateRead,
+                    InspectorCapability::GpuHealthRead,
                     InspectorCapability::RuntimeEval,
                 };
                 return ControlRegistrationRequest{
@@ -207,13 +208,14 @@ TEST_CASE("interactive consent decisions are single-use while policy is reusable
           ControlGrantStatus::Granted);
 }
 
-TEST_CASE("one-shot grants authorize one fresh request and preserve its replay",
+TEST_CASE("one-shot GPU health grants authorize one fresh request and preserve its replay",
           "[inspect][control][grants][one-shot]") {
     GrantFixture fixture;
     auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
                                          "one-shot-prompt");
     consent.expires_at = fixture.now + 5s;
-    auto issued = fixture.grants.issue(fixture.request(), consent);
+    auto issued = fixture.grants.issue(
+        fixture.request({InspectorCapability::GpuHealthRead}), consent);
     REQUIRE(issued.grant);
 
     std::atomic<int> ready{0};
@@ -227,7 +229,8 @@ TEST_CASE("one-shot grants authorize one fresh request and preserve its replay",
                 return std::optional<ControlOperationAuthorization>{};
             return fixture.grants.authorize_operation(
                 issued.grant->grant_id, fixture.client.client_id,
-                fixture.registration.registration_id, InspectorCapability::StateRead,
+                fixture.registration.registration_id,
+                InspectorCapability::GpuHealthRead,
                 "operation-" + std::to_string(index));
         });
     }
@@ -253,35 +256,36 @@ TEST_CASE("one-shot grants authorize one fresh request and preserve its replay",
         issued.grant->grant_id, winner_identity, winner.reservation_token));
     const auto replay = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         winner_identity);
     REQUIRE(replay);
     CHECK(replay->kind == ControlOperationAuthorizationKind::CommittedOneShot);
     const auto store_adjudicated_replay = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "different-operation");
     REQUIRE(store_adjudicated_replay);
     CHECK(store_adjudicated_replay->kind ==
           ControlOperationAuthorizationKind::CommittedOneShot);
 }
 
-TEST_CASE("one-shot release cannot clear a concurrent or committed reservation",
+TEST_CASE("one-shot GPU health release cannot clear a concurrent or committed reservation",
           "[inspect][control][grants][one-shot][race]") {
     GrantFixture fixture;
     auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
                                          "one-shot-race");
     consent.expires_at = fixture.now + 5s;
-    const auto issued = fixture.grants.issue(fixture.request(), consent);
+    const auto issued = fixture.grants.issue(
+        fixture.request({InspectorCapability::GpuHealthRead}), consent);
     REQUIRE(issued.grant);
 
     const auto first = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "stable-operation");
     const auto second = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "stable-operation");
     REQUIRE(first);
     REQUIRE(second);
@@ -290,7 +294,7 @@ TEST_CASE("one-shot release cannot clear a concurrent or committed reservation",
         issued.grant->grant_id, "stable-operation", first->reservation_token));
     CHECK_FALSE(fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "competing-operation"));
     REQUIRE(fixture.grants.commit_operation_authorization(
         issued.grant->grant_id, "stable-operation", second->reservation_token));
@@ -298,13 +302,13 @@ TEST_CASE("one-shot release cannot clear a concurrent or committed reservation",
         issued.grant->grant_id, "stable-operation", second->reservation_token));
     const auto committed = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "competing-operation");
     REQUIRE(committed);
     CHECK(committed->kind == ControlOperationAuthorizationKind::CommittedOneShot);
 }
 
-TEST_CASE("interactive consent authorities always create one-shot operation authorization",
+TEST_CASE("interactive consent authorities create one-shot GPU health authorization",
           "[inspect][control][grants][one-shot][authority]") {
     for (const auto authority : {ControlConsentAuthority::BrokerUserPrompt,
                                  ControlConsentAuthority::TrustedPulpCli,
@@ -312,11 +316,13 @@ TEST_CASE("interactive consent authorities always create one-shot operation auth
         GrantFixture fixture;
         auto prompt = GrantFixture::consent(authority, "forced-one-shot");
         prompt.expires_at = fixture.now + 5s;
-        const auto issued = fixture.grants.issue(fixture.request(), prompt);
+        const auto issued = fixture.grants.issue(
+            fixture.request({InspectorCapability::GpuHealthRead}), prompt);
         REQUIRE(issued.grant);
         const auto authorization = fixture.grants.authorize_operation(
             issued.grant->grant_id, fixture.client.client_id,
-            fixture.registration.registration_id, InspectorCapability::StateRead,
+            fixture.registration.registration_id,
+            InspectorCapability::GpuHealthRead,
             "operation");
         REQUIRE(authorization);
         CHECK(authorization->kind ==
@@ -324,29 +330,65 @@ TEST_CASE("interactive consent authorities always create one-shot operation auth
     }
 }
 
-TEST_CASE("one-shot release preserves the selected operation identity",
+TEST_CASE("interactive one-shot scope is limited to GPU health capability",
+          "[inspect][control][grants][one-shot][scope]") {
+    GrantFixture fixture;
+    const auto decision = GrantFixture::consent(
+        ControlConsentAuthority::TrustedPulpCli, "mixed-capability-consent");
+    const auto request = fixture.request({InspectorCapability::StateRead,
+                                          InspectorCapability::GpuHealthRead});
+    const auto issued = fixture.grants.issue(request, decision);
+    REQUIRE(issued.grant);
+
+    for (const auto identity : {"state-read-a", "state-read-b"}) {
+        const auto state_read = fixture.grants.authorize_operation(
+            issued.grant->grant_id, fixture.client.client_id,
+            fixture.registration.registration_id, InspectorCapability::StateRead,
+            identity);
+        REQUIRE(state_read);
+        CHECK(state_read->kind == ControlOperationAuthorizationKind::Reusable);
+    }
+
+    const auto gpu_health = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
+        "gpu-health-a");
+    REQUIRE(gpu_health);
+    CHECK(gpu_health->kind ==
+          ControlOperationAuthorizationKind::ProvisionalOneShot);
+    CHECK_FALSE(fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
+        "gpu-health-b"));
+
+    CHECK(fixture.grants.issue(request, decision).status ==
+          ControlGrantStatus::ConsentReplay);
+}
+
+TEST_CASE("one-shot GPU health release preserves the selected operation identity",
           "[inspect][control][grants][one-shot][retry]") {
     GrantFixture fixture;
     auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
                                          "one-shot-retry");
     consent.expires_at = fixture.now + 5s;
-    const auto issued = fixture.grants.issue(fixture.request(), consent);
+    const auto issued = fixture.grants.issue(
+        fixture.request({InspectorCapability::GpuHealthRead}), consent);
     REQUIRE(issued.grant);
 
     const auto first = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "selected-operation");
     REQUIRE(first);
     REQUIRE(fixture.grants.release_operation_authorization(
         issued.grant->grant_id, "selected-operation", first->reservation_token));
     CHECK_FALSE(fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "different-operation"));
     const auto retry = fixture.grants.authorize_operation(
         issued.grant->grant_id, fixture.client.client_id,
-        fixture.registration.registration_id, InspectorCapability::StateRead,
+        fixture.registration.registration_id, InspectorCapability::GpuHealthRead,
         "selected-operation");
     REQUIRE(retry);
     CHECK(retry->kind == ControlOperationAuthorizationKind::ProvisionalOneShot);
