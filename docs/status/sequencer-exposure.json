@@ -1606,7 +1606,7 @@
       "id": "p0-39-writer-capability-masks",
       "title": "DocumentSession writer capability masks and quotas",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "fccf4eba-0c01-467d-84f8-8bc39e936d58",
       "owned_paths": [
         ".agents/skills/timeline/SKILL.md",
@@ -1617,6 +1617,12 @@
         "test/test_timeline_transactions.cpp",
         "test/test_timeline_writer_capabilities.cpp"
       ],
+      "release": {
+        "pr": 7863,
+        "accepted_head": "02a1ae224f096ca2835a69fd84adf006ebac9830",
+        "merge_sha": "8058986abca7836d221da68b28711dc4dc20ea55",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/document_session.hpp",
