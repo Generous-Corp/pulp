@@ -2084,6 +2084,10 @@
             "kind": "option"
           },
           {
+            "name": "--fit-authored-frame",
+            "kind": "flag"
+          },
+          {
             "name": "--browser-interactions",
             "kind": "option"
           },
