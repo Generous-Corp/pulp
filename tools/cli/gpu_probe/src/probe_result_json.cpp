@@ -444,7 +444,13 @@ std::string render_human(const ProbeResult& result) {
 }
 
 int exit_code(const ProbeResult& result) {
-    return result.verdict == Verdict::pass ? 0 : 1;
+    switch (result.verdict) {
+        case Verdict::pass: return 0;
+        case Verdict::fail: return 1;
+        case Verdict::unavailable:
+        case Verdict::unverified: return 2;
+    }
+    return 2;
 }
 
 } // namespace pulp::tooling::gpu_probe
