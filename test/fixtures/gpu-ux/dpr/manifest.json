@@ -32,7 +32,7 @@
       "id": "dense-text-thin-strokes",
       "kind": "pulp_screenshot",
       "source": "dense-text-thin-strokes.ui.js",
-      "source_sha256": "6935c3e6bf02b587143256009aa6a8b7465bbeeb5af16a1df036a4b4fdb476e5",
+      "source_sha256": "0a9560595a1b622f3a098298c4b46ce592eea686633f31f988cdfaf9eec8d6c7",
       "logical_size": { "width": 640, "height": 360 },
       "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input"]
     },

@@ -23,5 +23,5 @@ canvasFillRect("thin-strokes", 0, 0, 592, 140);
     canvasSetLineWidth("thin-strokes", width);
     canvasMoveTo("thin-strokes", 18, y);
     canvasLineTo("thin-strokes", 574, y);
-    canvasStroke("thin-strokes");
+    canvasStrokePath("thin-strokes");
 });

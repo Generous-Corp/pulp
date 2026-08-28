@@ -96,6 +96,27 @@ Three.js, Forge-native, real-DAW, browser, logical-input, and A2T tools may be
 wrapped as scenario adapters, but no generic adapter is implied: absent product
 legs remain explicit dependencies.
 
+The checked-in Pulp-native adapter is a safe first rung for the three frozen
+native fixtures. Point it at an exact-SHA `pulp-screenshot` build:
+
+```bash
+PULP_DPR_SCREENSHOT_BIN=/absolute/exact-build/tools/screenshot/pulp-screenshot \
+python3 tools/scripts/gpu_dpr_runner.py run \
+  --run-dir /tmp/pulp-dpr-run \
+  --adapter dense-text-thin-strokes="$PWD/tools/scripts/gpu_dpr_pulp_native_adapter.py" \
+  --adapter shader-heavy-controls="$PWD/tools/scripts/gpu_dpr_pulp_native_adapter.py" \
+  --adapter meters-waveforms="$PWD/tools/scripts/gpu_dpr_pulp_native_adapter.py"
+```
+
+It performs a real Skia/GPU capture, verifies frozen source bytes and physical
+dimensions, and preserves binary/machine identity plus a capture digest in each
+cell. It deliberately returns `INCONCLUSIVE`: a subprocess PNG cannot truthfully
+provide same-process adapter identity, correlated A2T spans, A3 budget evidence,
+GPU/frame/memory/upload measurements, logical-input delivery, or independent
+text/stroke/reference oracles. The durable dependency list is the handoff to a
+product-specific measured adapter; subprocess wall time is recorded only as
+preflight context and is never relabeled as frame time.
+
 `ingest` accepts an independently produced cell receipt and applies the same
 fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
 checks. `finalize` requires all 84 cells plus exact A2T and A3 receipts. A
