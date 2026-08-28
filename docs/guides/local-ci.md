@@ -1245,12 +1245,19 @@ fsyncs both the file and containing directory.
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
-require the full suite; unknown paths fail safely to full as well. The first
-bounded family covers only Forge/DSP catalog projection commands, with explicit
-affected and extended tests. The declared inventory is tied to the required
+require the full suite; unknown paths fail safely to full as well. Reviewed
+bounded families cover Forge/DSP catalog projection commands, the isolated
+ChildProcess test source, and the Forge Rack module generator plus its safety
+contract. Each family names literal affected tests and any required extended
+tests; neighboring paths remain full. The declared inventory is tied to the required
 macOS Debug configuration, which enables
 `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
 that platform-specific cardinality.
+
+Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
+and `docs/validation/**` selects only that mandatory kernel and is independently
+authorized to omit the mobile compile gate. Generated or authoritative state
+under `docs/status/**` remains fail-closed rather than inheriting this rule.
 
 The required Build-and-Test workflow also uses a separate, narrower mobile-safe
 allowlist to avoid an unrelated mobile compile tax. On pull requests and merge
@@ -1268,7 +1275,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-20,787 registrations but only 20,728 unique names. The inventory validator
+20,788 registrations but only 20,729 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned

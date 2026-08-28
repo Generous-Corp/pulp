@@ -74,6 +74,16 @@ CHILD_PROCESS_TESTS = [
     "POSIX wait consumes cached fast-exit status after polling",
 ]
 
+FORGE_RACK_GENERATOR_TESTS = [
+    "rack-generator-safety",
+    "rack-generator-endings",
+]
+
+FORGE_RACK_GENERATOR_EXTENDED_TESTS = [
+    "rack-generation-eligibility",
+    "rack-inert-input-cause",
+]
+
 
 def load_config() -> dict:
     with CONFIG_PATH.open("rb") as config_file:
@@ -222,6 +232,10 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
     def test_only_reviewed_narrow_surfaces_are_bounded(self) -> None:
         self.assertEqual(disposition(self.policy, "docs/guides/local-ci.md"), "mandatory")
         self.assertEqual(
+            disposition(self.policy, "docs/validation/fast-trigonometry.md"),
+            "mandatory",
+        )
+        self.assertEqual(
             disposition(self.policy, "docs/status/forge-catalog.json"), "unknown_full"
         )
         self.assertEqual(
@@ -230,6 +244,14 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(disposition(self.policy, "tools/cli/cmd_forge.cpp"), "bounded")
         self.assertEqual(disposition(self.policy, "tools/cli/cmd_misc.cpp"), "unknown_full")
         self.assertEqual(disposition(self.policy, "tools/cli/new_command.cpp"), "unknown_full")
+
+    def test_validation_docs_are_mobile_skip_safe_without_widening_status_data(self) -> None:
+        self.assertIn("docs/validation/**", self.policy["baseline_only_paths"])
+        self.assertIn("docs/validation/**", self.policy["ios_compile_skip_safe_paths"])
+        self.assertEqual(
+            disposition(self.policy, "docs/status/sequencer-exposure.json"),
+            "unknown_full",
+        )
 
     def test_child_process_family_is_exact_and_deduplicates_mandatory_work(self) -> None:
         family = next(
@@ -272,6 +294,54 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "full",
         )
 
+    def test_forge_rack_generator_family_is_exact_and_keeps_neighbors_full(self) -> None:
+        family = next(
+            family
+            for family in self.policy["families"]
+            if family["name"] == "forge-rack-generator"
+        )
+        self.assertEqual(
+            family["paths"],
+            [
+                "tools/rack/generate.py",
+                "tools/rack/test_generate_safety.py",
+                ".agents/skills/forge-modular/SKILL.md",
+            ],
+        )
+        self.assertEqual(family["tests"], FORGE_RACK_GENERATOR_TESTS)
+        self.assertEqual(
+            family["extended_tests"], FORGE_RACK_GENERATOR_EXTENDED_TESTS
+        )
+        self.assertEqual(family["build_targets"], ["pulp-cli"])
+        self.assertEqual(family["supported_build_types"], ["debug", "release"])
+        self.assertEqual(family["risk_class"], "medium")
+
+        for path in family["paths"]:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "bounded")
+
+        neighboring_paths = [
+            "tools/rack/patch.py",
+            "tools/rack/provenance_check.py",
+            "tools/rack/test_acid_preflight.py",
+            ".agents/skills/forge-app-delivery/SKILL.md",
+        ]
+        for path in neighboring_paths:
+            with self.subTest(path=path):
+                self.assertNotEqual(disposition(self.policy, path), "bounded")
+
+        self.assertEqual(
+            selection_mode(self.policy, family["paths"]),
+            "bounded",
+        )
+        self.assertEqual(
+            selection_mode(
+                self.policy,
+                ["tools/rack/generate.py", "tools/rack/patch.py"],
+            ),
+            "full",
+        )
+
     def test_test_topology_is_narrow_and_precedes_family_matching(self) -> None:
         topology_paths = {
             "CMakeLists.txt",
@@ -304,9 +374,9 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
     def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
         self.assertEqual(self.contract["schema_version"], 1)
-        self.assertEqual(self.contract["registration_count"], 20_787)
-        self.assertEqual(self.contract["unique_name_count"], 20_728)
-        self.assertEqual(self.contract["unique_composite_count"], 20_787)
+        self.assertEqual(self.contract["registration_count"], 20_788)
+        self.assertEqual(self.contract["unique_name_count"], 20_729)
+        self.assertEqual(self.contract["unique_composite_count"], 20_788)
         self.assertEqual(self.contract["duplicate_name_group_count"], 55)
         self.assertEqual(self.contract["duplicate_name_excess_count"], 59)
         self.assertEqual(self.contract["duplicate_composite_group_count"], 0)

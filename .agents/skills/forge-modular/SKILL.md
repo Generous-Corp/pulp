@@ -973,9 +973,10 @@ across its FULL range, where such a law does move, so the knob reads as live.
 Only the default position is dead.
 
 So the gate re-probes with params pushed to 0.75 of range and says which it is:
-a wired jack whose default is at fault, or a genuinely dead one. `--retries`
-defaults to 1 so the model can act on that; before the message was actionable a
-retry only reproduced the same failure at the price of a model call.
+a wired jack whose default is at fault, or a genuinely dead one. That diagnosis
+is retained for an explicit `--retries 1` follow-up. The default remains zero:
+pressing Build authorizes one model call, not a second hidden call, even when
+the rejection is actionable.
 
 **Proving a fix here needs the real gate, not a filter probe.** Driving
 `AnalogVcfT` directly proves the FILTER responds; it says nothing about whether
