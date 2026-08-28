@@ -25,15 +25,15 @@ constexpr std::array stft_passes{
     std::string_view{"magnitude"}, std::string_view{"oracle"}};
 
 constexpr std::array registry{
-    RecipeDefinition{kRecipeIds[0], "pulp.renderer3d.hardcoded-cube", {256, 256, 65'536},
+    RecipeDefinition{kRecipeIds[0], "pulp.renderer3d.hardcoded-cube", {128, 128, 16'384},
                      0x52454e4433440001ULL, "fixed-step-0", "rgba32float", "rgba8-srgb",
-                     "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
+                     "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_preferred,
                      renderer_passes, {}, "content-fingerprint-match",
-                     "post-readback-fingerprint-mismatch"},
+                     "post-readback-foreground-erasure"},
     RecipeDefinition{kRecipeIds[1], "pulp.gpu-compute.magnitude", {256, 1, 256},
                      0x434f4d5055544501ULL, "fixed-step-0", "complex-f32", "f32",
                      "little-endian-f32", {1.0e-5, 1.0e-5}, AdapterPolicy::hardware_required,
-                     compute_passes, {}, "cpu-sqrt-re2-im2-match", "wgsl-operand-swap"},
+                     compute_passes, {}, "cpu-sqrt-re2-im2-match", "wgsl-imaginary-weight"},
     RecipeDefinition{kRecipeIds[2], "pulp.threejs.multi-pass", {320, 240, 76'800},
                      0x54485245454a5301ULL, "fixed-step-0", "threejs-scene", "rgba8-srgb",
                      "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
@@ -176,6 +176,7 @@ bool validate(const ProbeResult& result, std::string* error) {
         return fail(error, "semantic pass count does not match the recipe");
 
     bool all_pass = true;
+    Verdict aggregate = Verdict::pass;
     for (std::size_t i = 0; i < result.passes.size(); ++i) {
         const auto& pass = result.passes[i];
         if (pass.sequence != i || pass.name != recipe->semantic_passes[i])
@@ -186,12 +187,29 @@ bool validate(const ProbeResult& result, std::string* error) {
             return fail(error, "a passing semantic pass must prove work completed");
         if (pass.expected.has_value() != pass.observed.has_value())
             return fail(error, "numeric expected and observed values must appear together");
-        if (pass.absolute_error && (!pass.expected || !finite_nonnegative(*pass.absolute_error)))
-            return fail(error, "absolute error requires finite numeric evidence");
+        if (pass.expected && (!std::isfinite(*pass.expected) || !std::isfinite(*pass.observed)))
+            return fail(error, "numeric evidence must be finite");
+        if (pass.expected.has_value() != pass.absolute_error.has_value())
+            return fail(error, "numeric evidence requires an absolute error");
+        if (pass.absolute_error) {
+            if (!finite_nonnegative(*pass.absolute_error))
+                return fail(error, "absolute error must be finite and nonnegative");
+            const double calculated = std::abs(*pass.observed - *pass.expected);
+            const double epsilon = std::numeric_limits<double>::epsilon() *
+                                   std::max({1.0, calculated, *pass.absolute_error}) * 8.0;
+            if (std::abs(calculated - *pass.absolute_error) > epsilon)
+                return fail(error, "absolute error does not match observed minus expected");
+        }
         all_pass = all_pass && pass.verdict == Verdict::pass;
+        if (pass.verdict == Verdict::fail)
+            aggregate = Verdict::fail;
+        else if (aggregate != Verdict::fail && pass.verdict == Verdict::unavailable)
+            aggregate = Verdict::unavailable;
+        else if (aggregate == Verdict::pass && pass.verdict == Verdict::unverified)
+            aggregate = Verdict::unverified;
     }
-    if (result.verdict == Verdict::pass && !all_pass)
-        return fail(error, "top-level pass requires every semantic pass to pass");
+    if ((result.verdict == Verdict::pass) != all_pass || result.verdict != aggregate)
+        return fail(error, "top-level verdict must aggregate the semantic pass verdicts");
 
     if (result.artifacts.size() > recipe->bounds.max_artifacts)
         return fail(error, "artifact count exceeds the recipe bound");

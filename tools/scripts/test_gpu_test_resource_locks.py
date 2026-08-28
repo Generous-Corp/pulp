@@ -31,6 +31,8 @@ DEVICE_MARKERS = (
     "GraphiteContext",
     "graphite_context",
     "GpuSurface",
+    "run_renderer3d_recipe",
+    "run_gpu_compute_magnitude_recipe",
 )
 
 # Deliberately NOT a marker: the bare word "Dawn". It appears in prose — one
@@ -44,6 +46,11 @@ INTENTIONALLY_PARALLEL = {
     "pulp-test-gpu-audio-transport",
     "pulp-test-flow-pans",
 }
+
+# Explicitly invoked acceptance executables are not registered with CTest, so
+# they cannot contend under parallel CTest scheduling and have no test property
+# on which RESOURCE_LOCK could be set.
+MANUAL_ONLY_TARGETS = {"pulp-gpu-probe-native-acceptance"}
 
 # Sources that name a GPU type without standing up a device: they SUBCLASS the
 # interface to supply a mock. Referencing `GpuSurface` is not the same as
@@ -59,7 +66,9 @@ LOCK_VIA_VARIABLE = "PULP_GPU_TEST_DISCOVERY_ARGS"
 
 
 def manifests() -> list[Path]:
-    return sorted(MANIFEST_DIR.glob("*.cmake"))
+    paths = list(MANIFEST_DIR.glob("*.cmake"))
+    paths.extend((REPO_ROOT / "tools" / "cli").glob("**/CMakeLists.txt"))
+    return sorted(paths)
 
 
 def gpu_device_sources() -> set[str]:
@@ -141,7 +150,7 @@ class GpuResourceLockTests(unittest.TestCase):
         regs = registrations()
         checked = 0
         for target, (body, manifest) in regs.items():
-            if target in INTENTIONALLY_PARALLEL:
+            if target in INTENTIONALLY_PARALLEL or target in MANUAL_ONLY_TARGETS:
                 continue
             used = {s for s in sources if s in body}
             if not used:
@@ -170,6 +179,7 @@ class GpuResourceLockTests(unittest.TestCase):
             "test_partial_repaint_gpu.cpp",
             "test_plugin_editor_headless_gpu.cpp",
             "test_font_rendering_goldens_gpu.cpp",
+            "test_gpu_probe_native_recipes.cpp",
         ):
             with self.subTest(source=name):
                 self.assertIn(name, sources)
