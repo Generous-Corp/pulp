@@ -42,7 +42,7 @@ from typing import Iterable, Literal
 GitComparisonStatus = Literal[
     "available", "history_unavailable", "path_absent", "command_failed"
 ]
-GitComparisonMode = Literal["base_tip", "merge_base", "unresolved"]
+GitComparisonMode = Literal["base_tip", "merge_base", "exact_base", "unresolved"]
 
 
 @dataclass(frozen=True)

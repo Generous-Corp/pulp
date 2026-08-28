@@ -455,6 +455,65 @@ def test_e2e_blocks_silent_revert() -> None:
         check("names both paths", "a.txt" in r.stdout and "b.txt" in r.stdout)
 
 
+def test_e2e_blocks_revert_of_two_parent_merge() -> None:
+    print("\n[e2e] blocks a byte-exact revert of a two-parent PR merge")
+    with tempfile.TemporaryDirectory() as repo:
+        audio_path = "é.txt"
+        _git_in(repo, "init", "-q", "-b", "main")
+        _git_in(repo, "config", "user.email", "t@example.com")
+        _git_in(repo, "config", "user.name", "t")
+        _git_in(repo, "config", "commit.gpgsign", "false")
+        _git_in(repo, "config", "core.quotePath", "true")
+        _write(repo, audio_path, "original\n")
+        _git_in(repo, "add", audio_path)
+        _git_in(repo, "commit", "-q", "-m", "base")
+        root_sha = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+        _git_in(repo, "checkout", "-q", "-b", "topic")
+        _write(repo, audio_path, "improved\n")
+        _git_in(repo, "commit", "-qam", "improve a")
+        _git_in(repo, "checkout", "-q", "main")
+        _write(repo, "main.txt", "independent main work\n")
+        _git_in(repo, "add", "main.txt")
+        _git_in(repo, "commit", "-q", "-m", "advance main independently")
+        _git_in(repo, "merge", "-q", "--no-ff", "topic", "-m", "merge topic")
+        merge_sha = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+
+        legacy = _run(
+            [
+                "git", "diff-tree", "--root", "--no-commit-id", "--name-only",
+                "-r", merge_sha,
+            ],
+            repo,
+        )
+        check("legacy merge diff is blind", legacy.stdout.strip() == "")
+        landing = G.landing_record(repo, merge_sha)
+        check(
+            "first-parent merge diff records the changed path",
+            landing is not None and set(landing.changes) == {audio_path},
+        )
+        root_landing = G.landing_record(repo, root_sha)
+        check(
+            "root commit keeps explicit empty-tree behavior",
+            root_landing is not None
+            and root_landing.changes[audio_path]["pre"] is None,
+        )
+        quoted = _run(
+            [
+                "git", "diff", "--raw", "--no-abbrev", merge_sha + "^1",
+                merge_sha,
+            ],
+            repo,
+        )
+        check("legacy line format quotes the Unicode path", audio_path not in quoted.stdout)
+
+        _git_in(repo, "checkout", "-q", "-b", "feature")
+        _write(repo, audio_path, "original\n")
+        _git_in(repo, "commit", "-qam", "silently restore old bytes")
+        verdict = G.check_push(repo, "main", "feature")
+        check("two-parent landing is blocked", verdict.blocked)
+        check("verdict names the merge landing", verdict.merge_id == merge_sha)
+
+
 def test_e2e_hint_mode_downgrades_content_block() -> None:
     print("\n[e2e] hint mode downgrades a content block after history resolves")
     with tempfile.TemporaryDirectory() as repo:
@@ -780,6 +839,40 @@ def test_e2e_shallow_history_fails_only_for_nonempty_diff() -> None:
               locally_complete.stdout)
 
 
+def test_prepush_blocks_unavailable_history() -> None:
+    print("\n[e2e] pre-push blocks an unavailable-history verdict")
+    hook_path = os.path.join(REPO_ROOT, ".githooks", "pre-push")
+    with open(hook_path, encoding="utf-8") as hook:
+        source = hook.read()
+    start = source.index('if [ -f "$SRG" ]; then', source.index("# Silent-revert guard"))
+    end = source.index("\nfi\n", start) + len("\nfi\n")
+    block = source[start:end]
+
+    def resulting_fail(case_block: str, status: int) -> int:
+        script = "\n".join(
+            (
+                "fail=0",
+                f"SRG={os.path.join(REPO_ROOT, 'tools/scripts/silent_revert_guard.py')!r}",
+                f"PYTHON={sys.executable!r}",
+                "BASE=origin/main",
+                f"run_gate_captured() {{ return {status}; }}",
+                case_block,
+                'printf "%s" "$fail"',
+            )
+        )
+        completed = subprocess.run(
+            ["bash", "-c", script], text=True, capture_output=True, check=True
+        )
+        return int(completed.stdout)
+
+    check("history-unavailable exit 2 blocks", resulting_fail(block, 2) == 1)
+    mutated = block.replace("2) fail=1 ;;", "2) ;;")
+    check(
+        "mutation without exit-2 wiring would allow the push",
+        mutated != block and resulting_fail(mutated, 2) == 0,
+    )
+
+
 def main() -> int:
     test_predicate_blocks_wholesale_revert()
     test_predicate_revert_disguised_by_real_work()
@@ -794,6 +887,7 @@ def main() -> int:
     test_real_incident_end_to_end()
     test_real_branch_would_have_been_blocked_at_push()
     test_e2e_blocks_silent_revert()
+    test_e2e_blocks_revert_of_two_parent_merge()
     test_e2e_hint_mode_downgrades_content_block()
     test_e2e_behind_base_is_clean()
     test_e2e_explicit_revert_is_clean()
@@ -803,6 +897,7 @@ def main() -> int:
     test_e2e_intent_cannot_bypass_unavailable_base()
     test_post_resolution_failure_receipt_is_consistent()
     test_e2e_shallow_history_fails_only_for_nonempty_diff()
+    test_prepush_blocks_unavailable_history()
 
     print("")
     if _failures:

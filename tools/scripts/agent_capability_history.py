@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import subprocess
+from dataclasses import replace
 from typing import Any
 
 import agent_capability_surface as surface
@@ -254,13 +255,39 @@ def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
     return comparison.comparison_anchor if comparison.status == "available" else None
 
 
+def _use_exact_base_authority(
+    comparison: GitComparisonProvenance,
+) -> GitComparisonProvenance:
+    """Anchor a protected-content comparison to its exact resolved base tip.
+
+    Capability evolution reads the protected document; it does not compute a
+    branch diff. Substituting a merge-base would therefore omit protected
+    changes made after the branch point and turn stale history into authority.
+    """
+    if (
+        comparison.status == "command_failed"
+        or comparison.resolved_base_tip is None
+        or comparison.resolved_head is None
+    ):
+        return comparison
+    return replace(
+        comparison,
+        comparison_anchor=comparison.resolved_base_tip,
+        comparison_mode="exact_base",
+        status="available",
+        stderr="",
+    )
+
+
 def _resolve_protected_comparison(
     root: pathlib.Path, base_ref: str
 ) -> GitComparisonProvenance:
     explicit_ref = "PULP_AGENT_CAPABILITY_BASE_REF" in os.environ
     if explicit_ref:
-        return resolve_git_comparison(
-            root, base_ref, source="environment_base_ref"
+        return _use_exact_base_authority(
+            resolve_git_comparison(
+                root, base_ref, source="environment_base_ref"
+            )
         )
     candidate: str | None = None
     event_path = (
@@ -308,12 +335,17 @@ def _resolve_protected_comparison(
             )
     if isinstance(candidate, str) and re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
         candidate = candidate.lower()
-        comparison = resolve_git_comparison(root, candidate, source="github_event")
+        comparison = _use_exact_base_authority(
+            resolve_git_comparison(root, candidate, source="github_event")
+        )
         if comparison.status == "available":
             return comparison
-        if comparison.resolved_head is None or comparison.resolved_base_tip is not None:
+        if (
+            comparison.status != "history_unavailable"
+            or comparison.resolved_head is None
+        ):
             return comparison
-        if _git_output(root, ["cat-file", "-e", f"{candidate}^{{commit}}"]) is None:
+        if comparison.resolved_base_tip is None:
             try:
                 fetched = subprocess.run(
                     ["git", "fetch", "--no-tags", "--depth=1", "origin", candidate],
@@ -329,8 +361,28 @@ def _resolve_protected_comparison(
                 return git_comparison_authority_unavailable(
                     comparison, fetched.stderr or "git fetch failed"
                 )
-        return resolve_git_comparison(root, candidate, source="github_event")
-    return resolve_git_comparison(root, base_ref, source="local_ref")
+            comparison = _use_exact_base_authority(
+                resolve_git_comparison(
+                    root, candidate, source="github_event"
+                )
+            )
+            if comparison.status == "available":
+                return comparison
+            if (
+                comparison.status != "history_unavailable"
+                or comparison.resolved_head is None
+                or comparison.resolved_base_tip is None
+            ):
+                return comparison
+
+        return comparison
+    comparison = resolve_git_comparison(root, base_ref, source="local_ref")
+    if (
+        event_path is not None
+        and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    ):
+        return _use_exact_base_authority(comparison)
+    return comparison
 
 def _resolve_local_base(root: pathlib.Path, base_ref: str) -> str | None:
     """Resolve the protected base for a checkout with no CI event to read.

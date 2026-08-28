@@ -355,6 +355,176 @@ def exercise_github_event_failures_preserve_resolved_head() -> int:
     return 16
 
 
+def exercise_github_event_repairs_exact_shallow_merge() -> int:
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        origin = root / "origin.git"
+        source = root / "source"
+        pr_checkout = root / "pr-checkout"
+        dispatch_checkout = root / "dispatch-checkout"
+        subprocess.run(["git", "init", "-q", "--bare", origin], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", source], check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=source, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=source, check=True)
+        (source / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "."], cwd=source, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=source, check=True)
+        common_base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=source, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", "-qb", "feature"], cwd=source, check=True)
+        (source / "feature.txt").write_text("feature\n")
+        subprocess.run(["git", "add", "."], cwd=source, check=True)
+        subprocess.run(["git", "commit", "-qm", "feature"], cwd=source, check=True)
+        feature_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=source, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", "-q", "main"], cwd=source, check=True)
+        (source / "main.txt").write_text("main\n")
+        subprocess.run(["git", "add", "."], cwd=source, check=True)
+        subprocess.run(["git", "commit", "-qm", "protected main"], cwd=source, check=True)
+        protected_base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=source, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", "-qb", "synthetic"], cwd=source, check=True)
+        subprocess.run(
+            ["git", "merge", "-q", "--no-ff", "feature", "-m", "synthetic"],
+            cwd=source, check=True,
+        )
+        synthetic_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=source, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(origin)],
+            cwd=source,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-q", "origin", "main", "feature", "synthetic"],
+            cwd=source, check=True,
+        )
+        subprocess.run(
+            [
+                "git", "clone", "-q", "--no-local", "--depth=1", "--no-tags",
+                "--branch", "synthetic", str(origin), str(pr_checkout),
+            ],
+            check=True,
+        )
+        event = pr_checkout / "event.json"
+        event.write_text(
+            '{"pull_request":{"base":{"sha":"' + protected_base + '"}}}'
+        )
+        subprocess.run(
+            [
+                "git", "fetch", "-q", "--no-tags", "--depth=1", "origin",
+                protected_base,
+            ],
+            cwd=pr_checkout,
+            check=True,
+        )
+        unrepaired = rederive.history.resolve_git_comparison(
+            pr_checkout, protected_base, source="github_event"
+        )
+        assert unrepaired.status == "history_unavailable", unrepaired
+        assert unrepaired.comparison_anchor is None, unrepaired
+        env = {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_EVENT_PATH": str(event),
+        }
+        with mock.patch.dict(rederive.history.os.environ, env, clear=False):
+            rederive.history.os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+            comparison = rederive.history._resolve_protected_comparison(
+                pr_checkout, "missing-local"
+            )
+        assert comparison.status == "available", comparison
+        assert comparison.source == "github_event", comparison
+        assert comparison.resolved_base_tip == protected_base, comparison
+        assert comparison.resolved_head == synthetic_head, comparison
+        assert comparison.comparison_anchor == protected_base, comparison
+        assert comparison.comparison_mode == "exact_base", comparison
+
+        subprocess.run(
+            [
+                "git", "clone", "-q", "--no-local", "--depth=1", "--no-tags",
+                "--branch", "feature", str(origin), str(dispatch_checkout),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git", "fetch", "-q", "--no-tags", "--depth=1", "origin",
+                "+" + protected_base + ":refs/remotes/origin/main",
+            ],
+            cwd=dispatch_checkout,
+            check=True,
+        )
+        unrepaired = rederive.history.resolve_git_comparison(
+            dispatch_checkout, "origin/main", source="local_ref"
+        )
+        assert unrepaired.status == "history_unavailable", unrepaired
+        assert unrepaired.comparison_anchor is None, unrepaired
+        dispatch_event = dispatch_checkout / "event.json"
+        dispatch_event.write_text("{}")
+        dispatch_env = {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_EVENT_PATH": str(dispatch_event),
+        }
+        with mock.patch.dict(
+            rederive.history.os.environ, dispatch_env, clear=False
+        ):
+            rederive.history.os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+            comparison = rederive.history._resolve_protected_comparison(
+                dispatch_checkout, "origin/main"
+            )
+        assert comparison.status == "available", comparison
+        assert comparison.source == "local_ref", comparison
+        assert comparison.requested_base == "origin/main", comparison
+        assert comparison.resolved_base_tip == protected_base, comparison
+        assert comparison.resolved_head == feature_head, comparison
+        assert comparison.comparison_anchor == protected_base, comparison
+        assert comparison.comparison_anchor != common_base, comparison
+        assert comparison.comparison_mode == "exact_base", comparison
+
+        dispatch_event.write_text(
+            '{"pull_request":{"base":{"sha":"' + protected_base + '"}}}'
+        )
+        event_env = {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_EVENT_PATH": str(dispatch_event),
+        }
+        with mock.patch.dict(rederive.history.os.environ, event_env, clear=False):
+            rederive.history.os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+            event_comparison = rederive.history._resolve_protected_comparison(
+                dispatch_checkout, "missing-local"
+            )
+        assert event_comparison.status == "available", event_comparison
+        assert event_comparison.source == "github_event", event_comparison
+        assert event_comparison.comparison_anchor == protected_base, event_comparison
+        assert event_comparison.comparison_anchor != common_base, event_comparison
+        assert event_comparison.comparison_mode == "exact_base", event_comparison
+
+        explicit_env = {"PULP_AGENT_CAPABILITY_BASE_REF": protected_base}
+        with mock.patch.dict(
+            rederive.history.os.environ, explicit_env, clear=False
+        ):
+            explicit_comparison = rederive.history._resolve_protected_comparison(
+                dispatch_checkout, protected_base
+            )
+        assert explicit_comparison.status == "available", explicit_comparison
+        assert explicit_comparison.source == "environment_base_ref", explicit_comparison
+        assert explicit_comparison.comparison_anchor == protected_base, explicit_comparison
+        assert explicit_comparison.comparison_anchor != common_base, explicit_comparison
+        assert explicit_comparison.comparison_mode == "exact_base", explicit_comparison
+    return 28
+
+
 def exercise_git_unavailable_is_not_source_archive() -> int:
     history_document = rederive.history.json.loads(
         (ROOT / rederive.history.HISTORY_FILE).read_text()
@@ -414,6 +584,7 @@ def main() -> int:
     checks += exercise_prints_comparison_receipt()
     checks += exercise_proven_commit_absent_vs_malformed_authority()
     checks += exercise_github_event_failures_preserve_resolved_head()
+    checks += exercise_github_event_repairs_exact_shallow_merge()
     checks += exercise_git_unavailable_is_not_source_archive()
     checks += exercise_refuses_mid_merge()
     checks += exercise_no_change()

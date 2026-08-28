@@ -311,12 +311,18 @@ def landing_record(
         except Exception:
             return None
     try:
+        parent = _first_parent(repo, sha)
+        revisions = [sha] if parent is None else [parent, sha]
         names = _git(
-            ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd=repo
+            [
+                "diff-tree", "--root", "--no-commit-id", "--name-only", "-z",
+                "-r", *revisions,
+            ],
+            cwd=repo,
         )
     except Exception:
         return None
-    touched = [p.strip() for p in names.splitlines() if p.strip()]
+    touched = [path for path in names.split("\0") if path]
     if only_within is not None and not set(touched).issubset(only_within):
         return None
     changes: dict = {}
@@ -326,6 +332,17 @@ def landing_record(
             "post": _blob_sha(repo, sha, path),
         }
     return MergeRecord(merge_id=sha, merged_at=merged_at, changes=changes)
+
+
+def _first_parent(
+    repo: str, sha: str, env: Optional[dict[str, str]] = None
+) -> Optional[str]:
+    """Return the exact first parent, or None only for a proven root commit."""
+    line = _git(["rev-list", "--parents", "-n", "1", sha], cwd=repo, env=env)
+    parts = line.strip().split()
+    if not parts or parts[0] != sha:
+        raise RuntimeError(f"malformed parent record for {sha}: {line!r}")
+    return parts[1] if len(parts) > 1 else None
 
 
 def proposed_from_git(repo: str, base_ref: str, head_ref: str = "HEAD") -> dict:
@@ -351,13 +368,12 @@ def proposed_from_git(repo: str, base_ref: str, head_ref: str = "HEAD") -> dict:
         return {}
     try:
         names = _git(
-            ["diff", "--name-only", base_sha, head_ref], cwd=repo
+            ["diff", "--name-only", "-z", base_sha, head_ref], cwd=repo
         )
     except Exception:
         return {}
     proposed: dict = {}
-    for path in names.splitlines():
-        path = path.strip()
+    for path in names.split("\0"):
         if path:
             proposed[path] = _blob_sha(repo, head_ref, path)
     return proposed
@@ -370,7 +386,7 @@ def _proposed_from_comparison(
         return {}, "comparison anchor is unavailable"
     try:
         raw = _git(
-            ["diff", "--raw", "--no-abbrev", "--no-renames",
+            ["diff", "--raw", "-z", "--no-abbrev", "--no-renames",
              comparison.comparison_anchor,
              comparison.resolved_head], cwd=repo
         )
@@ -383,19 +399,21 @@ def _proposed_from_comparison(
 
 
 def _parse_raw_changes(raw: str) -> tuple[dict[str, tuple[Optional[str], Optional[str]]], str]:
-    """Parse --raw --no-renames output into path -> (old blob, new blob)."""
+    """Parse --raw -z --no-renames output into exact path/blob pairs."""
     changes: dict[str, tuple[Optional[str], Optional[str]]] = {}
-    for line in raw.splitlines():
-        if not line:
-            continue
+    fields = raw.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        return {}, f"malformed NUL-delimited raw Git diff: {raw[:420]!r}"[:512]
+    for metadata, path in zip(fields[0::2], fields[1::2]):
         try:
-            metadata, path = line.split("\t", 1)
-            fields = metadata.split()
-            if len(fields) != 5 or not fields[0].startswith(":") or not path:
+            record = metadata.split()
+            if len(record) != 5 or not record[0].startswith(":") or not path:
                 raise ValueError
-            old_blob, new_blob = fields[2], fields[3]
+            old_blob, new_blob = record[2], record[3]
         except ValueError:
-            return {}, f"malformed raw Git diff record: {line!r}"[:512]
+            return {}, f"malformed raw Git diff record: {(metadata, path)!r}"[:512]
         changes[path] = (
             None if not old_blob.strip("0") else old_blob,
             None if not new_blob.strip("0") else new_blob,
@@ -502,9 +520,13 @@ def _recent_landings_checked(
         if merged_at < cutoff:
             continue
         try:
+            parent = _first_parent(repo, sha, history_env)
+            revisions = [sha] if parent is None else [parent, sha]
             raw = _git(
-                ["diff-tree", "--root", "--no-commit-id", "--raw",
-                 "--no-abbrev", "--no-renames", "-r", sha],
+                [
+                    "diff-tree", "--root", "--no-commit-id", "--raw", "-z",
+                    "--no-abbrev", "--no-renames", "-r", *revisions,
+                ],
                 cwd=repo, env=history_env,
             )
         except Exception as error:
