@@ -12,7 +12,6 @@ setFlex("root", "gap", 10);
     setFontSize(id, size);
     setTextColor(id, index % 2 ? "#d5dde8" : "#f2f5f8");
 });
-
 const strokes = createCanvas("thin-strokes", "root");
 setFlex("thin-strokes", "width", 592);
 setFlex("thin-strokes", "height", 140);
@@ -26,4 +25,3 @@ canvasFillRect("thin-strokes", 0, 0, 592, 140);
     canvasLineTo("thin-strokes", 574, y);
     canvasStroke("thin-strokes");
 });
-

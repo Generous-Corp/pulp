@@ -19,4 +19,3 @@ for (let i = 0; i < 8; ++i) {
     setFlex("meter-" + i, "height", 210);
     setMeterLevel("meter-" + i, 0.18 + i * 0.09, 0.12 + i * 0.075);
 }
-
