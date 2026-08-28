@@ -21,6 +21,7 @@ canvasFillRect("thin-strokes", 0, 0, 592, 140);
     const y = 22 + index * 28;
     canvasSetStrokeColor("thin-strokes", index % 2 ? "#5ce1cc" : "#f6b847");
     canvasSetLineWidth("thin-strokes", width);
+    canvasBeginPath("thin-strokes");
     canvasMoveTo("thin-strokes", 18, y);
     canvasLineTo("thin-strokes", 574, y);
     canvasStrokePath("thin-strokes");
