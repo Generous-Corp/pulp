@@ -2,6 +2,7 @@
   "schema": "pulp.gpu-vellum-handoff.v1",
   "catalog": "docs/status/gpu-recipes.yaml",
   "ownership_projection": ".github/vellum-ownership.json",
+  "expansion_id": "full-design-import-render-v1",
   "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
   "boundary_change_authorized": false,
   "cutover_trigger": "The separately reviewed Vellum adoption owner records an adopted Vellum revision and begins B0 refresh-and-route.",

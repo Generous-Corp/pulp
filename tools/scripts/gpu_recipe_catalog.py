@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import pathlib
 import re
@@ -194,6 +195,7 @@ def validate_handoff(document: Any) -> list[str]:
         "schema",
         "catalog",
         "ownership_projection",
+        "expansion_id",
         "route_set_sha256",
         "boundary_change_authorized",
         "cutover_trigger",
@@ -237,10 +239,33 @@ def validate_handoff(document: Any) -> list[str]:
         for path in paths if isinstance(paths, list) else []:
             if not isinstance(path, str) or not _safe_relative(path):
                 problems.append(f"handoff entries[{index}] contains unsafe path {path!r}")
+        owner = entry["current_owner"]
         action = entry["cutover_action"]
-        if action != "retain-pulp" and not entry["delete_after"]:
-            problems.append(f"handoff entries[{index}] needs an exact delete-after proof")
-        if entry["current_owner"] not in {"Generous-Corp/pulp", "Generous-Corp/vellum"}:
+        phase = entry["vellum_phase"]
+        delete_after = entry["delete_after"]
+        allowed = {
+            "retain-pulp": ("Generous-Corp/pulp", None, False),
+            "replace-pulp-adapter-consumption": ("Generous-Corp/vellum", "B1", True),
+            "adopt-when-proven": ("Generous-Corp/vellum", "B2", True),
+            "adopt-only-if-a3-evidence-queues": ("Generous-Corp/vellum", "B4", True),
+            "adopt-only-if-a4-evidence-queues": ("Generous-Corp/vellum", "B5", True),
+            "move-generic-guidance": ("Generous-Corp/vellum", "B6", True),
+        }
+        if action not in allowed:
+            problems.append(f"handoff entries[{index}] has an unknown cutover action")
+        else:
+            expected_owner, expected_phase, needs_delete_gate = allowed[action]
+            if owner != expected_owner or phase != expected_phase:
+                problems.append(
+                    f"handoff entries[{index}] owner/phase does not match cutover action"
+                )
+            if needs_delete_gate != isinstance(delete_after, str):
+                problems.append(
+                    f"handoff entries[{index}] delete-after nullability does not match action"
+                )
+            elif isinstance(delete_after, str) and not delete_after.strip():
+                problems.append(f"handoff entries[{index}] has an empty delete-after proof")
+        if owner not in {"Generous-Corp/pulp", "Generous-Corp/vellum"}:
             problems.append(f"handoff entries[{index}] has an unknown current owner")
     if len(ids) != len(set(ids)):
         problems.append("handoff entries must have unique ids")
@@ -248,6 +273,58 @@ def validate_handoff(document: Any) -> list[str]:
         values = document.get(field)
         if not isinstance(values, list) or not values or len(values) != len(set(values)):
             problems.append(f"handoff {field} must be nonempty and unique")
+    return problems
+
+
+def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> list[str]:
+    """Bind handoff paths and digest to the frozen authoritative routing helper."""
+
+    projection_value = document.get("ownership_projection")
+    if not isinstance(projection_value, str) or not _safe_relative(projection_value):
+        return ["handoff ownership_projection must be a safe relative path"]
+    projection_path = root / projection_value
+    helper_path = (
+        root
+        / ".agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py"
+    )
+    try:
+        spec = importlib.util.spec_from_file_location("gpu_recipe_routing_evidence", helper_path)
+        if spec is None or spec.loader is None:
+            raise ValueError("cannot load routing helper module")
+        routing = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(routing)
+        projection, expansion = routing.load_projection(
+            projection_path, require_expansion=True
+        )
+        if expansion is None:
+            raise ValueError("ownership projection has no exact expansion")
+    except Exception as exc:  # The authority helper owns detailed parse errors.
+        return [f"handoff ownership projection is invalid: {exc}"]
+
+    problems = []
+    if document.get("expansion_id") != expansion["id"]:
+        problems.append("handoff expansion_id differs from the authoritative projection")
+    if document.get("route_set_sha256") != expansion["route_set_sha256"]:
+        problems.append("handoff route_set_sha256 differs from the authoritative projection")
+    for index, entry in enumerate(document.get("entries", [])):
+        if not isinstance(entry, dict) or not isinstance(entry.get("paths"), list):
+            continue
+        for path in entry["paths"]:
+            if not isinstance(path, str):
+                continue
+            try:
+                result = routing.route_changes(
+                    projection, expansion, [("Generous-Corp/pulp", path)]
+                )
+            except Exception as exc:
+                problems.append(f"handoff entries[{index}] path cannot be routed: {exc}")
+                continue
+            routed_owner = result["changes"][0]["owner"]
+            if routed_owner != entry.get("current_owner"):
+                problems.append(
+                    f"handoff entries[{index}] owner {entry.get('current_owner')!r} "
+                    f"differs from routed owner {routed_owner!r} for {path!r}"
+                )
     return problems
 
 
@@ -280,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symptom", action="append", default=[], help="select exact symptom tag")
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
+    if args.show and args.symptom:
+        print("gpu-recipe-catalog: --show and --symptom are mutually exclusive", file=sys.stderr)
+        return 2
     try:
         document = load_and_validate(args.catalog, args.schema)
         registry_ids = probe_registry_ids(args.registry_header.read_text(encoding="utf-8"))
@@ -288,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
             problems.extend(validate_repository_references(document, ROOT))
             handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
             problems.extend(validate_handoff(handoff))
+            problems.extend(validate_handoff_routing(handoff, ROOT))
         if problems:
             raise ValueError("\n".join(problems))
     except (OSError, json.JSONDecodeError, ValueError, json_schema_lite.UnsupportedKeyword) as exc:
