@@ -1,0 +1,105 @@
+{
+  "schema": "pulp.gpu-dpr-a4-gap-report.v1",
+  "generated_date": "2026-08-28",
+  "experiment_id": "a4-m3-preflight-20260828-319a64a1",
+  "result": {
+    "status": "incomplete",
+    "disposition": null,
+    "eligible_for_policy": false,
+    "total_cells": 84,
+    "measured_complete_cells": 0,
+    "real_capture_preflights": 36,
+    "product_cells_without_exact_runnable_artifact": 48
+  },
+  "identity": {
+    "pulp_sha": "319a64a11602e417404bfe2b592fdaf6b846d7cb",
+    "forge_sha_planned": "36ed776426a137397f5ad02187d3bb00bf49c661",
+    "plan_revision": "0758a1d45c37fb8d6ae31245e62996b8214d5948",
+    "machine_model": "Mac15,14",
+    "machine_chip": "Apple M3 Ultra",
+    "architecture": "arm64",
+    "pulp_screenshot_sha256": "7082fabf7eaaea8956889ebb9821db3ff6d6f69b0c9c0bdfbd8f56ef6191f83b"
+  },
+  "fixed_defects": [
+    {
+      "fixture": "dense-text-thin-strokes",
+      "defect": "called nonexistent canvasStroke bridge function",
+      "fix_commit": "0acb2e559ff3fece0cd6930850280ea68c71e6e0"
+    },
+    {
+      "fixture": "dense-text-thin-strokes",
+      "defect": "did not begin a path, so the thin-stroke oracle region was blank",
+      "fix_commit": "319a64a11602e417404bfe2b592fdaf6b846d7cb"
+    }
+  ],
+  "capture_preflight": {
+    "scenarios": {
+      "dense-text-thin-strokes": 12,
+      "shader-heavy-controls": 12,
+      "meters-waveforms": 12
+    },
+    "backends": {
+      "skia": 12,
+      "gpu": 24
+    },
+    "capture_artifacts": 36,
+    "preflight_receipts": 36,
+    "physical_sizes": {
+      "640x360": 9,
+      "960x540": 9,
+      "1280x720": 12,
+      "1920x1080": 6
+    },
+    "manual_representative_review": {
+      "dense_text_thin_strokes_exact_dpr_1": "text and four strokes visible",
+      "dense_text_thin_strokes_exact_dpr_3": "text and four strokes visible",
+      "scope": "visual preflight only; not an independent automated fidelity oracle"
+    }
+  },
+  "ratified_measured_cell_contract_gaps": [
+    "30 samples per cell for cpu_frame_time, gpu_frame_time, interaction_latency, render_target_bytes, resident_bytes, and upload_bytes",
+    "20 fresh-process samples per cell for first_frame_time",
+    "hashed capture, trace, raw_samples, and input_receipt artifacts per cell",
+    "independent content-floor, capture-similarity, text/stroke where required, and logical-input oracles",
+    "same-process hardware adapter identity for authentic GPU scenarios",
+    "correlated render, gpu, text, js, and layout trace categories with gpu-startup, gpu-health, and gpu-probe evidence IDs",
+    "ratified A3 budget receipt bound to this experiment"
+  ],
+  "available_evidence_not_substituted": {
+    "a2t": "saved-trace offline analyzer acceptance is not a correlated product-cell trace",
+    "subprocess_wall_time": "recorded as preflight context only and not relabeled as frame time",
+    "manual_visual_review": "not relabeled as an independent automated oracle"
+  },
+  "smallest_followup_by_scenario_class": {
+    "pulp_native": {
+      "cell_count": 36,
+      "resume_when": [
+        "A3 budget receipt is integrated",
+        "a same-process measured WindowHost adapter exposes the seven raw metrics and hardware identity",
+        "A2T capture produces correlated five-category trace question receipts",
+        "the adapter injects logical coordinates and records observed target/coordinates",
+        "independent reference, text, and stroke oracles consume the retained PNG"
+      ]
+    },
+    "threejs_native": {
+      "cell_count": 12,
+      "external_state_blocker": "the exact-head focused target built, but its auto/QuickJS executable exits because V8 is required; prior A2 V8 binaries were intentionally not retained",
+      "smallest_adapter": "build the exact planned Pulp SHA with the pinned V8 runtime, add requested logical-size/DPR capture and input-receipt flags to the maintained demo, and emit the common same-process metric/trace receipt"
+    },
+    "forge_native_and_daw": {
+      "cell_count": 24,
+      "external_state_blocker": "the only checkout at planned Forge SHA has five unresolved index entries and no trustworthy exact modular binary; no format-qualified exact plugin artifact was available",
+      "smallest_adapter": "produce a clean exact-Pulp/exact-Forge native modular shell and AU/VST3/CLAP artifact, reuse Forge capture/input hooks plus REAPER format-qualified scan/load receipt, and emit the common same-process metric/trace receipt"
+    },
+    "web_canary": {
+      "cell_count": 12,
+      "external_state_blocker": "the maintained validator source exists, but no exact-head assembled wasm UI artifact was available",
+      "smallest_adapter": "assemble the exact-head web UI, run the maintained real-Chrome WebGL2 validator at requested DPR, record unmasked hardware WebGL identity and pointer oracle, and add browser timing/memory/upload plus correlated trace artifacts"
+    }
+  },
+  "b5": {
+    "status": "waiting-trigger",
+    "trigger": "B0-adopted-vellum-api-refresh",
+    "reason": "A4 has no legally reproducible disposition; no policy recommendation was manufactured"
+  }
+}

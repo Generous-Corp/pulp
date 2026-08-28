@@ -1,0 +1,143 @@
+{
+  "schema": "pulp.gpu-dpr-a4-capture-index.v1",
+  "version": 1,
+  "experiment_id": "a4-m3-preflight-20260828-319a64a1",
+  "status": "preflight-only-non-release-evidence",
+  "pulp_sha": "319a64a11602e417404bfe2b592fdaf6b846d7cb",
+  "binary_sha256": "7082fabf7eaaea8956889ebb9821db3ff6d6f69b0c9c0bdfbd8f56ef6191f83b",
+  "capture_count": 36,
+  "captures": [
+    {
+      "scenario_id": "dense-text-thin-strokes",
+      "observed_dpr": 1,
+      "physical_size": { "width": 640, "height": 360 },
+      "capture_sha256": "b013bbfcf864da456ee6fcd8ba0168c7b027baa8ebc8a4a7747897d996005613",
+      "cell_keys": [
+        "dense-text-thin-strokes__adaptive_simulation__dpr-1",
+        "dense-text-thin-strokes__configured_max__dpr-1",
+        "dense-text-thin-strokes__exact__dpr-1"
+      ]
+    },
+    {
+      "scenario_id": "dense-text-thin-strokes",
+      "observed_dpr": 1.5,
+      "physical_size": { "width": 960, "height": 540 },
+      "capture_sha256": "eb7d9c2a18e910e16c74bb2cedaacdb877bf4de6b3bb25a0ef1de1afcc8ae5b7",
+      "cell_keys": [
+        "dense-text-thin-strokes__adaptive_simulation__dpr-1.5",
+        "dense-text-thin-strokes__configured_max__dpr-1.5",
+        "dense-text-thin-strokes__exact__dpr-1.5"
+      ]
+    },
+    {
+      "scenario_id": "dense-text-thin-strokes",
+      "observed_dpr": 2,
+      "physical_size": { "width": 1280, "height": 720 },
+      "capture_sha256": "326c27eb133e70e001523aa2d54c7f3057d7c7bc6e26238a848425bdf9723c3f",
+      "cell_keys": [
+        "dense-text-thin-strokes__adaptive_simulation__dpr-2",
+        "dense-text-thin-strokes__configured_max__dpr-2",
+        "dense-text-thin-strokes__configured_max__dpr-3",
+        "dense-text-thin-strokes__exact__dpr-2"
+      ]
+    },
+    {
+      "scenario_id": "dense-text-thin-strokes",
+      "observed_dpr": 3,
+      "physical_size": { "width": 1920, "height": 1080 },
+      "capture_sha256": "516b547a127324814981a8aba65cf6c2bed5856e11b34202a37f420492bfbfd9",
+      "cell_keys": [
+        "dense-text-thin-strokes__adaptive_simulation__dpr-3",
+        "dense-text-thin-strokes__exact__dpr-3"
+      ]
+    },
+    {
+      "scenario_id": "meters-waveforms",
+      "observed_dpr": 1,
+      "physical_size": { "width": 640, "height": 360 },
+      "capture_sha256": "dc857efda6bc7c45e04ee04fed9aad9750179bff87364a221dd00a1fc538b72d",
+      "cell_keys": [
+        "meters-waveforms__adaptive_simulation__dpr-1",
+        "meters-waveforms__configured_max__dpr-1",
+        "meters-waveforms__exact__dpr-1"
+      ]
+    },
+    {
+      "scenario_id": "meters-waveforms",
+      "observed_dpr": 1.5,
+      "physical_size": { "width": 960, "height": 540 },
+      "capture_sha256": "dc96885d09f8ad7d0b2d07b24a2c94ac423d6393c9838f275849ddcd469586c6",
+      "cell_keys": [
+        "meters-waveforms__adaptive_simulation__dpr-1.5",
+        "meters-waveforms__configured_max__dpr-1.5",
+        "meters-waveforms__exact__dpr-1.5"
+      ]
+    },
+    {
+      "scenario_id": "meters-waveforms",
+      "observed_dpr": 2,
+      "physical_size": { "width": 1280, "height": 720 },
+      "capture_sha256": "d98f627aa7dff726e92c0717b73b54b0de0aeadaaa594c88a2c9e4fb9e454a7b",
+      "cell_keys": [
+        "meters-waveforms__adaptive_simulation__dpr-2",
+        "meters-waveforms__configured_max__dpr-2",
+        "meters-waveforms__configured_max__dpr-3",
+        "meters-waveforms__exact__dpr-2"
+      ]
+    },
+    {
+      "scenario_id": "meters-waveforms",
+      "observed_dpr": 3,
+      "physical_size": { "width": 1920, "height": 1080 },
+      "capture_sha256": "4d5412cd3d51a3e9c35057b46378705c67dbd491d33da137e7a176ebdc04a584",
+      "cell_keys": [
+        "meters-waveforms__adaptive_simulation__dpr-3",
+        "meters-waveforms__exact__dpr-3"
+      ]
+    },
+    {
+      "scenario_id": "shader-heavy-controls",
+      "observed_dpr": 1,
+      "physical_size": { "width": 640, "height": 360 },
+      "capture_sha256": "680c9173064e2457adf1d749543a0f8a902f3805bcf1cd6d50520306dc794e20",
+      "cell_keys": [
+        "shader-heavy-controls__adaptive_simulation__dpr-1",
+        "shader-heavy-controls__configured_max__dpr-1",
+        "shader-heavy-controls__exact__dpr-1"
+      ]
+    },
+    {
+      "scenario_id": "shader-heavy-controls",
+      "observed_dpr": 1.5,
+      "physical_size": { "width": 960, "height": 540 },
+      "capture_sha256": "f057a1f75a66a17effe6f43e28ea518907981b28c12d4dc5277c51b0e224f51a",
+      "cell_keys": [
+        "shader-heavy-controls__adaptive_simulation__dpr-1.5",
+        "shader-heavy-controls__configured_max__dpr-1.5",
+        "shader-heavy-controls__exact__dpr-1.5"
+      ]
+    },
+    {
+      "scenario_id": "shader-heavy-controls",
+      "observed_dpr": 2,
+      "physical_size": { "width": 1280, "height": 720 },
+      "capture_sha256": "e64e14d9eb167ae74503d60fac85b0881c22e3354f29ea78a79b3631aa8d03f0",
+      "cell_keys": [
+        "shader-heavy-controls__adaptive_simulation__dpr-2",
+        "shader-heavy-controls__configured_max__dpr-2",
+        "shader-heavy-controls__configured_max__dpr-3",
+        "shader-heavy-controls__exact__dpr-2"
+      ]
+    },
+    {
+      "scenario_id": "shader-heavy-controls",
+      "observed_dpr": 3,
+      "physical_size": { "width": 1920, "height": 1080 },
+      "capture_sha256": "fba0dfd4f6fe5560ad02b20b9afeb5ffc9b1c19b5473e5f10d06a9cfd4b942e7",
+      "cell_keys": [
+        "shader-heavy-controls__adaptive_simulation__dpr-3",
+        "shader-heavy-controls__exact__dpr-3"
+      ]
+    }
+  ]
+}
