@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+  "title": "Pulp GPU first-visible A3 acceptance receipt",
+  "type": "object",
+  "required": ["$schema", "schema", "version", "status", "recorded_at", "plan", "identity", "budget", "campaigns", "same_instance_a2t", "blank_negative", "audio_thread_exclusion", "b4", "observations", "missing_evidence"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "../contracts/gpu-first-visible-a3-acceptance-v1.schema.json" },
+    "schema": { "const": "dev.pulp.gpu-first-visible-a3-acceptance" },
+    "version": { "const": 1 },
+    "status": { "enum": ["incomplete", "complete"] },
+    "recorded_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+$" },
+    "plan": {
+      "type": "object",
+      "required": ["document", "revision", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "required": ["pulp_revision", "forge_revision", "build_id", "product_id", "product_name", "plugin_format", "machine_id", "instance_id", "campaign_id"],
+      "additionalProperties": false,
+      "properties": {
+        "pulp_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "forge_revision": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "build_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "product_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "plugin_format": { "enum": ["standalone", "headless", "auv2", "vst3", "clap"] },
+        "machine_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "instance_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "campaign_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": ["id", "version", "status", "receipt", "raw_cold", "raw_warm"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "const": "pulp.editor-first-visible.v1" },
+        "version": { "const": 1 },
+        "status": { "enum": ["unratified", "ratified"] },
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "raw_cold": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "raw_warm": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "campaigns": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["role", "status", "identity", "health_result", "raw_cold", "raw_warm", "product_artifact", "host_artifact", "trace", "trace_analysis"],
+        "additionalProperties": false,
+        "properties": {
+          "role": { "enum": ["standalone", "headless-constrained", "daw", "forge"] },
+          "status": { "enum": ["incomplete", "pass", "fail"] },
+          "identity": {
+            "type": "object",
+            "required": ["pulp_revision", "forge_revision", "build_id", "product_id", "product_name", "plugin_format", "machine_id", "instance_id", "campaign_id"],
+            "additionalProperties": false,
+            "properties": {
+              "pulp_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+              "forge_revision": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+              "build_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "product_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "plugin_format": { "enum": ["standalone", "headless", "auv2", "vst3", "clap"] },
+              "machine_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "instance_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "campaign_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          },
+          "health_result": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "raw_cold": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "raw_warm": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "product_artifact": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "host_artifact": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "trace": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "trace_analysis": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+        }
+      }
+    },
+    "same_instance_a2t": {
+      "type": "object",
+      "required": ["status", "campaign_id", "instance_id", "build_id", "gpu_evidence_id", "trace_evidence_id", "a2t_receipt", "analyzer", "trace", "trace_analysis", "binding_receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["blocked", "pass", "fail"] },
+        "campaign_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "instance_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "build_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "gpu_evidence_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "trace_evidence_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "a2t_receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "analyzer": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "trace": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "trace_analysis": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "binding_receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "blank_negative": {
+      "type": "object",
+      "required": ["status", "diagnostic_code", "receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "caught", "not-caught"] },
+        "diagnostic_code": { "type": ["string", "null"], "enum": ["gpu.startup.blank", null] },
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "audio_thread_exclusion": {
+      "type": "object",
+      "required": ["status", "receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "pass", "fail"] },
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "b4": {
+      "type": "object",
+      "required": ["disposition", "status", "reason", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "disposition": { "type": ["string", "null"], "enum": ["queue-B4", "queue-B4-investigation", "no-change", null] },
+        "status": { "enum": ["withheld", "queued", "queued-investigation", "closed-no-change"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "evidence": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "detail", "artifact_sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "status": { "enum": ["observed", "partial", "invalidated", "confirmed"] },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "artifact_sha256": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "missing_evidence": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    }
+  }
+}

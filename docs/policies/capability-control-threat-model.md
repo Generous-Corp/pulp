@@ -81,6 +81,13 @@ peer-bound, and wiped. Registrations validate a canonical manifest plus the
 exact artifact digest and expose only that manifest's bounded capability set.
 Interactive trusted-consent decisions reject replay, while an existing user
 policy may be deliberately reusable.
+An operation grant created by a broker-owned user prompt is not reusable for
+new work: the broker atomically reserves one fresh idempotency identity and,
+after its durable receipt exists, accepts only operation-store replay of that
+identity. Concurrent admission cannot spend the prompt on two different
+operations, and releasing one provisional admission cannot reopen another
+reservation or a committed grant. A separately configured user policy may
+still issue reusable grants.
 
 Control envelopes are closed, versioned, size-bounded, valid UTF-8 JSON with a
 canonical request hash. Every `ControlService::Session` negotiates its own

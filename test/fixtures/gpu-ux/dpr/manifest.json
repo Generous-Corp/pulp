@@ -16,6 +16,7 @@
     "warmups": 5,
     "measured_trials": 30,
     "fresh_process_first_frame_trials": 20,
+    "capture_similarity_minimum": 0.99,
     "required_trace_categories": ["render", "gpu", "text", "js", "layout"],
     "required_metrics": [
       "cpu_frame_time", "gpu_frame_time", "first_frame_time",

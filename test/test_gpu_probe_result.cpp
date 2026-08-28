@@ -42,6 +42,20 @@ gp::ProbeResult passing_result(std::string_view id = gp::kRecipeIds[1]) {
     return result;
 }
 
+gp::ProbeResult renderer_negative_result() {
+    auto result = passing_result(gp::kRecipeIds[0]);
+    const auto* recipe = gp::find_recipe(result.recipe_id);
+    REQUIRE(recipe != nullptr);
+    result.mutation = std::string(recipe->negative_mutation);
+    result.dimensions = {32, 32, 1'024};
+    result.passes.back().verdict = gp::Verdict::fail;
+    result.verdict = gp::Verdict::fail;
+    result.artifacts = {{"observed.rgba8", gp::ArtifactKind::image,
+                         "application/octet-stream", 32 * 32 * 4,
+                         std::string(64, 'c')}};
+    return result;
+}
+
 } // namespace
 
 TEST_CASE("GPU probe registry exposes only runnable versioned recipes",
@@ -146,6 +160,37 @@ TEST_CASE("GPU probe mutation identity is absent or exactly recipe-bound",
     result.mutation = std::string{};
     REQUIRE_FALSE(gp::validate(result, &error));
     CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
+}
+
+TEST_CASE("Renderer3D negative binds its actual pre-submit dimensions and RGBA size",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = renderer_negative_result();
+    REQUIRE(gp::validate(result, &error));
+
+    result.dimensions = {128, 128, 16'384};
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("execution identity") != std::string::npos);
+
+    result = renderer_negative_result();
+    result.dimensions.width = 31;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("execution identity") != std::string::npos);
+
+    result = renderer_negative_result();
+    result.mutation.reset();
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("execution identity") != std::string::npos);
+
+    result = renderer_negative_result();
+    result.artifacts.front().bytes--;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("RGBA artifact") != std::string::npos);
+
+    result = renderer_negative_result();
+    result.artifacts.front().kind = gp::ArtifactKind::numeric_samples;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("RGBA artifact") != std::string::npos);
 }
 
 TEST_CASE("GPU probe artifacts are confined, unique, and bounded",

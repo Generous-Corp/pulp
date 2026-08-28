@@ -46,6 +46,7 @@ def request(root: Path, expected_digest: str) -> dict:
     return {
         "schema": "pulp.gpu-dpr-cell-request.v1",
         "version": 1,
+        "attempt_nonce": "1" * 32,
         "cell_key": "dense-text-thin-strokes__exact__dpr-1.5",
         "scenario": {
             "id": "dense-text-thin-strokes",
@@ -84,6 +85,7 @@ def main() -> int:
         assert completed.returncode == 3, completed
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         assert receipt["outcome"] == "inconclusive"
+        assert receipt["attempt_nonce"] == document["attempt_nonce"]
         assert "a2t:correlated-cell-trace" in receipt["dependencies"]
         assert "small-text-legibility-oracle:dense-text-thin-strokes" in receipt["dependencies"]
         preflight = json.loads((tmp / "preflight.json").read_text(encoding="utf-8"))
@@ -103,6 +105,7 @@ def main() -> int:
         )
         assert completed.returncode == 3
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt["attempt_nonce"] == document["attempt_nonce"]
         assert "source digest differs" in receipt["reason"]
         assert "native-capture:dense-text-thin-strokes" in receipt["dependencies"]
         assert not (tmp / "capture.png").exists()

@@ -24,12 +24,14 @@ constexpr std::array threejs_passes{
     std::string_view{"background-pass"}, std::string_view{"left-swatch-pass"},
     std::string_view{"final-swatch-pass"}, std::string_view{"oracle"}};
 
+constexpr Dimensions renderer_negative_dimensions{32, 32, 1'024};
+
 constexpr std::array registry{
     RecipeDefinition{kRecipeIds[0], "pulp.renderer3d.hardcoded-cube", {128, 128, 16'384},
                      0x52454e4433440001ULL, "fixed-step-0", "rgba32float", "rgba8-srgb",
                      "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_preferred,
                      renderer_passes, {}, "content-fingerprint-match",
-                     "post-readback-foreground-erasure"},
+                     "pre-submit-framebuffer-downscale"},
     RecipeDefinition{kRecipeIds[1], "pulp.gpu-compute.magnitude", {256, 1, 256},
                      0x434f4d5055544501ULL, "fixed-step-0", "complex-f32", "f32",
                      "little-endian-f32", {1.0e-5, 1.0e-5}, AdapterPolicy::hardware_required,
@@ -146,9 +148,16 @@ bool validate(const ProbeResult& result, std::string* error) {
 
     const auto* recipe = find_recipe(result.recipe_id);
     if (!recipe) return fail(error, "recipe_id is not registered");
-    if (result.dimensions.width != recipe->dimensions.width ||
-        result.dimensions.height != recipe->dimensions.height ||
-        result.dimensions.work_items != recipe->dimensions.work_items ||
+    if (result.mutation &&
+        (result.mutation->empty() || result.mutation->size() > 128 ||
+         *result.mutation != recipe->negative_mutation))
+        return fail(error, "mutation must be absent or the exact bounded recipe mutation");
+    const bool renderer_negative = recipe->id == kRecipeIds[0] && result.mutation;
+    const auto& expected_dimensions = renderer_negative
+        ? renderer_negative_dimensions : recipe->dimensions;
+    if (result.dimensions.width != expected_dimensions.width ||
+        result.dimensions.height != expected_dimensions.height ||
+        result.dimensions.work_items != expected_dimensions.work_items ||
         result.seed != recipe->seed || result.clock != recipe->clock ||
         result.input_format != recipe->input_format || result.output_format != recipe->output_format ||
         result.encoding != recipe->encoding || result.adapter_policy != recipe->adapter_policy)
@@ -162,10 +171,6 @@ bool validate(const ProbeResult& result, std::string* error) {
         result.tolerance.absolute != recipe->tolerance.absolute ||
         result.tolerance.relative != recipe->tolerance.relative)
         return fail(error, "tolerance must be finite, nonnegative, and recipe-bound");
-    if (result.mutation &&
-        (result.mutation->empty() || result.mutation->size() > 128 ||
-         *result.mutation != recipe->negative_mutation))
-        return fail(error, "mutation must be absent or the exact bounded recipe mutation");
     if (result.adapter_policy == AdapterPolicy::hardware_required &&
         result.verdict == Verdict::pass &&
         (result.adapter.status != IdentityStatus::authentic ||
@@ -242,6 +247,19 @@ bool validate(const ProbeResult& result, std::string* error) {
         if (total > recipe->bounds.max_total_artifact_bytes - artifact.bytes)
             return fail(error, "artifacts exceed the total byte bound");
         total += artifact.bytes;
+    }
+    if (recipe->id == kRecipeIds[0]) {
+        const auto rgba = std::find_if(result.artifacts.begin(), result.artifacts.end(),
+                                       [](const auto& artifact) {
+                                           return artifact.name == "observed.rgba8";
+                                       });
+        if (rgba != result.artifacts.end()) {
+            const auto expected_bytes = result.dimensions.work_items * 4;
+            if (rgba->kind != ArtifactKind::image ||
+                rgba->mime != "application/octet-stream" ||
+                rgba->bytes != expected_bytes)
+                return fail(error, "observed RGBA artifact must match declared dimensions");
+        }
     }
     if (result.recommendations.size() > 16)
         return fail(error, "recommendation count exceeds the bound");

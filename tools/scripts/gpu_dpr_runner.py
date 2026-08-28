@@ -4,14 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
-import statistics
+import secrets
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,90 +17,47 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_dpr_experiment as experiment  # noqa: E402
+from gpu_dpr_evidence import (  # noqa: E402
+    A2T_RECEIPT_SCHEMA, A3_RECEIPT_SCHEMA, ALL_OUTCOMES, ARTIFACT_KINDS,
+    COMPLETE_OUTCOMES, EvidenceError, INCOMPLETE_OUTCOMES, METRIC_UNITS,
+    NONCE_HEX_LENGTH, RAW_SCHEMA, RECEIPT_SCHEMA, TRACE_ANALYSIS_SCHEMA,
+    atomic_json, cell_directory, cell_key, checked_cell_directory,
+    exact_executable, load_json, parse_cell_key, receipt_observation,
+    regular_json, scenario_map, sha256_file, snapshot_file,
+    snapshot_receipt_bundle, source_digest, valid_attempt_nonce,
+    validated_dependency_receipts,
+)
 
 RUN_SCHEMA = "pulp.gpu-dpr-run-state.v1"
 REQUEST_SCHEMA = "pulp.gpu-dpr-cell-request.v1"
-RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v1"
-RAW_SCHEMA = "pulp.gpu-dpr-raw-samples.v1"
 B5_SCHEMA = "pulp.gpu-dpr-b5-gate.v1"
-COMPLETE_OUTCOMES = {"pass", "fail"}
-INCOMPLETE_OUTCOMES = {"skip", "inconclusive"}
-ALL_OUTCOMES = COMPLETE_OUTCOMES | INCOMPLETE_OUTCOMES
-ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
-TRACE_QUESTIONS = {"gpu-startup", "gpu-health", "gpu-probe"}
-METRIC_UNITS = {
-    "cpu_frame_time": "ms",
-    "gpu_frame_time": "ms",
-    "first_frame_time": "ms",
-    "interaction_latency": "ms",
-    "render_target_bytes": "bytes",
-    "resident_bytes": "bytes",
-    "upload_bytes": "bytes",
-}
-
-
-class EvidenceError(ValueError):
-    """A receipt exists but cannot support a measured A4 cell."""
-
-
-def load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def atomic_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, sort_keys=True, indent=2) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        handle.write(payload)
-        temporary = Path(handle.name)
-    os.replace(temporary, path)
-
-
-def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def cell_key(scenario_id: str, mode: str, dpr: float) -> str:
-    rendered_dpr = str(int(dpr)) if float(dpr).is_integer() else str(dpr)
-    return f"{scenario_id}__{mode}__dpr-{rendered_dpr}"
-
-
-def parse_cell_key(key: str) -> tuple[str, str, float]:
-    scenario, mode, dpr = key.rsplit("__", 2)
-    return scenario, mode, float(dpr.removeprefix("dpr-"))
-
-
-def scenario_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {item["id"]: item for item in manifest["scenarios"]}
-
-
-def source_digest(
-    scenario: dict[str, Any], manifest_path: Path, forge_sha: str | None
-) -> str:
-    if scenario.get("source_sha256"):
-        return scenario["source_sha256"]
-    identity = scenario["source"]
-    if scenario["kind"].startswith("external_forge"):
-        if forge_sha is None:
-            raise EvidenceError(f"{scenario['id']}: exact Forge SHA is required")
-        identity += f"@{forge_sha}"
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def initial_state(
-    plan: dict[str, Any], manifest: dict[str, Any], manifest_path: Path
+    plan: dict[str, Any], manifest: dict[str, Any], manifest_path: Path,
+    trace_analyzer: dict[str, str],
 ) -> dict[str, Any]:
     if plan.get("schema") != "pulp.gpu-dpr-experiment.v1":
         raise EvidenceError("plan is not a Pulp A4 DPR experiment document")
     if plan.get("status") != "planned" or plan.get("observations"):
         raise EvidenceError("runner initialization requires an empty planned result")
+    similarity_minimum = manifest.get("trial_contract", {}).get(
+        "capture_similarity_minimum"
+    )
+    if (
+        isinstance(similarity_minimum, bool)
+        or not isinstance(similarity_minimum, (int, float))
+        or not 0 <= similarity_minimum <= 1
+    ):
+        raise EvidenceError("manifest lacks a ratified capture-similarity minimum")
     expected_digest = experiment.canonical_sha256(manifest)
     if plan["matrix"]["manifest_sha256"] != expected_digest:
         raise EvidenceError("plan and corpus manifest digests differ")
     if plan["matrix"]["scenario_ids"] != [item["id"] for item in manifest["scenarios"]]:
         raise EvidenceError("plan scenario ordering differs from the corpus")
+    analyzer_path, analyzer_digest = exact_executable(
+        trace_analyzer, "runner-pinned trace analyzer"
+    )
 
     cells: dict[str, Any] = {}
     scenarios = scenario_map(manifest)
@@ -126,9 +81,30 @@ def initial_state(
         "plan_sha256": experiment.canonical_sha256(plan),
         "manifest_sha256": expected_digest,
         "manifest_path": str(manifest_path.resolve()),
+        "trace_analyzer": {
+            "path": str(analyzer_path.resolve()),
+            "sha256": analyzer_digest,
+        },
+        "issued_attempts": {},
         "plan": plan,
         "cells": cells,
     }
+
+
+def initialize_run(
+    run_dir: Path, plan: dict[str, Any], manifest: dict[str, Any],
+    manifest_path: Path, analyzer_source: Path,
+) -> dict[str, Any]:
+    if not analyzer_source.is_absolute():
+        raise EvidenceError("trace analyzer must be an absolute executable path")
+    pinned = run_dir / "tooling" / "trace-analyzer"
+    digest = snapshot_file(
+        analyzer_source, pinned, "trace analyzer", executable=True,
+    )
+    return initial_state(
+        plan, manifest, manifest_path,
+        {"path": str(pinned.resolve()), "sha256": digest},
+    )
 
 
 def run_paths(run_dir: Path) -> tuple[Path, Path, Path]:
@@ -174,295 +150,13 @@ def load_state(run_dir: Path) -> dict[str, Any]:
     return state
 
 
-def cell_directory(run_dir: Path, key: str) -> Path:
-    return run_dir / "cells" / key
-
-
-def safe_artifact(cell_dir: Path, relative: str) -> Path:
-    candidate = (cell_dir / relative).resolve()
-    root = cell_dir.resolve()
-    if candidate != root and root not in candidate.parents:
-        raise EvidenceError(f"artifact escapes its cell directory: {relative}")
-    if not candidate.is_file():
-        raise EvidenceError(f"artifact is missing: {relative}")
-    return candidate
-
-
-def nearest_rank_p95(samples: list[float]) -> float:
-    ordered = sorted(samples)
-    return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
-
-
-def metric_statistic(name: str, samples: Any, manifest: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(samples, list) or not samples:
-        raise EvidenceError(f"raw metric {name} has no samples")
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in samples):
-        raise EvidenceError(f"raw metric {name} contains a non-number")
-    values = [float(value) for value in samples]
-    if any(not math.isfinite(value) or value < 0 for value in values):
-        raise EvidenceError(f"raw metric {name} contains an invalid value")
-    trial = manifest["trial_contract"]
-    minimum = (
-        trial["fresh_process_first_frame_trials"]
-        if name == "first_frame_time"
-        else trial["measured_trials"]
-    )
-    if len(values) < minimum:
-        raise EvidenceError(f"raw metric {name} has {len(values)} samples; needs {minimum}")
-    median = statistics.median(values)
-    return {
-        "unit": METRIC_UNITS[name],
-        "median": median,
-        "p95": max(median, nearest_rank_p95(values)),
-        "sample_count": len(values),
-    }
-
-
-def validate_logical_input(raw: dict[str, Any]) -> bool:
-    trials = raw.get("logical_input_trials")
-    if not isinstance(trials, list) or not trials:
-        raise EvidenceError("logical-input oracle has no trials")
-    passed = True
-    for trial in trials:
-        expected = trial.get("expected_logical")
-        observed = trial.get("observed_logical")
-        if not (
-            isinstance(expected, list)
-            and isinstance(observed, list)
-            and len(expected) == 2
-            and len(observed) == 2
-            and all(isinstance(value, (int, float)) for value in [*expected, *observed])
-        ):
-            raise EvidenceError("logical-input trial is malformed")
-        coordinate_match = all(
-            math.isclose(float(left), float(right), abs_tol=1e-6)
-            for left, right in zip(expected, observed)
-        )
-        target_match = trial.get("expected_target") == trial.get("observed_target")
-        passed = passed and coordinate_match and target_match
-    return passed
-
-
-def validate_trace(raw: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
-    trace = raw.get("trace")
-    if not isinstance(trace, dict) or trace.get("complete") is not True:
-        raise EvidenceError("trace receipt is absent or incomplete")
-    categories = set(trace.get("categories", []))
-    missing = set(manifest["trial_contract"]["required_trace_categories"]) - categories
-    if missing:
-        raise EvidenceError(f"trace categories are missing: {sorted(missing)}")
-    questions = trace.get("questions")
-    if not isinstance(questions, list):
-        raise EvidenceError("trace named-question receipts are missing")
-    by_id = {item.get("id"): item for item in questions}
-    if set(by_id) != TRACE_QUESTIONS:
-        raise EvidenceError("trace named-question coverage must be gpu-startup/health/probe")
-    for question in ("gpu-health", "gpu-probe"):
-        if by_id[question].get("status") != "pass":
-            raise EvidenceError(f"trace question {question} did not pass")
-    if by_id["gpu-startup"].get("status") not in {"pass", "unverified"}:
-        raise EvidenceError("trace question gpu-startup is unavailable or failed")
-    evidence_ids = [item.get("evidence_id") for item in questions]
-    if any(not isinstance(item, str) or not item for item in evidence_ids):
-        raise EvidenceError("trace named-question evidence id is missing")
-    if len(evidence_ids) != len(set(evidence_ids)):
-        raise EvidenceError("trace evidence ids are not unique")
-    return evidence_ids
-
-
-def validate_identity(
-    receipt: dict[str, Any], scenario: dict[str, Any], plan: dict[str, Any]
-) -> None:
-    machine = receipt.get("machine")
-    adapter = receipt.get("adapter")
-    if not isinstance(machine, dict) or not machine.get("id"):
-        raise EvidenceError("machine receipt lacks an id")
-    if not machine.get("os") or not machine.get("architecture"):
-        raise EvidenceError("machine receipt lacks OS/architecture identity")
-    if not isinstance(adapter, dict) or adapter.get("class") not in {
-        "hardware", "software", "unknown"
-    }:
-        raise EvidenceError("adapter receipt lacks a valid class")
-    if not all(adapter.get(field) for field in ("name", "backend", "driver")):
-        raise EvidenceError("adapter receipt lacks name/backend/driver identity")
-    build = receipt.get("build_identity")
-    if not isinstance(build, dict) or build.get("pulp_sha") != plan["pulp_sha"]:
-        raise EvidenceError("receipt is not bound to the planned Pulp SHA")
-
-    requirements = set(scenario["required_oracles"])
-    if "authentic_gpu" in requirements:
-        if adapter["class"] != "hardware" or adapter.get("authentic_identity") is not True:
-            raise EvidenceError("scenario requires an authentic hardware GPU adapter")
-    if "authentic_webgl" in requirements:
-        if adapter["class"] != "hardware" or adapter.get("api") != "webgl2":
-            raise EvidenceError("web canary requires authentic WebGL2 hardware evidence")
-    if "exact_binary_identity" in requirements:
-        binary = build.get("binary")
-        if not isinstance(binary, dict) or not binary.get("path") or not binary.get("sha256"):
-            raise EvidenceError("Forge receipt lacks exact binary identity")
-        if build.get("forge_sha") != plan["forge_sha"] or plan["forge_sha"] is None:
-            raise EvidenceError("Forge receipt is not bound to the planned Forge SHA")
-    if "exact_plugin_format" in requirements:
-        if receipt.get("plugin_format") not in {"au", "vst3", "clap"}:
-            raise EvidenceError("DAW receipt lacks an exact plugin format")
-        if receipt.get("format_qualified") is not True or receipt.get("scan_cache_confirmed") is not True:
-            raise EvidenceError("DAW receipt did not prove format-qualified scan/load")
-    if "audio_thread_excluded" in requirements and receipt.get("audio_thread_excluded") is not True:
-        raise EvidenceError("scenario did not prove audio-thread exclusion")
-
-
-def receipt_observation(
-    receipt_path: Path,
-    state: dict[str, Any],
-    manifest: dict[str, Any],
-    manifest_path: Path,
-    run_dir: Path,
-) -> tuple[str, dict[str, Any] | None, list[str]]:
-    receipt = load_json(receipt_path)
-    if receipt.get("schema") != RECEIPT_SCHEMA or receipt.get("version") != 1:
-        raise EvidenceError("unsupported DPR cell receipt schema")
-    outcome = receipt.get("outcome")
-    if outcome not in ALL_OUTCOMES:
-        raise EvidenceError("receipt outcome must be pass/fail/skip/inconclusive")
-    requested = receipt.get("requested_dpr")
-    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
-        raise EvidenceError("receipt requested DPR is not numeric")
-    key = cell_key(receipt.get("scenario_id", ""), receipt.get("mode", ""), float(requested))
-    if key not in state["cells"]:
-        raise EvidenceError(f"receipt names an unexpected matrix cell: {key}")
-    cell = state["cells"][key]
-    scenario = scenario_map(manifest)[cell["scenario_id"]]
-    if receipt.get("scenario_kind") != scenario["kind"]:
-        raise EvidenceError("receipt scenario kind differs from the corpus")
-
-    reason = receipt.get("reason")
-    dependencies = receipt.get("dependencies", [])
-    if outcome in INCOMPLETE_OUTCOMES:
-        if not isinstance(reason, str) or not reason:
-            raise EvidenceError(f"{outcome} receipt requires a reason")
-        if (
-            not isinstance(dependencies, list)
-            or not dependencies
-            or any(not isinstance(item, str) or not item for item in dependencies)
-        ):
-            raise EvidenceError(f"{outcome} receipt requires explicit dependencies")
-        return key, None, dependencies
-
-    validate_identity(receipt, scenario, state["plan"])
-    cell_dir = cell_directory(run_dir, key)
-    artifacts = receipt.get("artifacts")
-    if not isinstance(artifacts, list):
-        raise EvidenceError("receipt artifact list is missing")
-    by_kind: dict[str, dict[str, Any]] = {}
-    for artifact in artifacts:
-        if not isinstance(artifact, dict):
-            raise EvidenceError("receipt contains a malformed artifact")
-        kind = artifact.get("kind")
-        if kind not in ARTIFACT_KINDS or kind in by_kind:
-            raise EvidenceError("artifact kinds must be unique capture/trace/raw_samples/input_receipt")
-        path = safe_artifact(cell_dir, artifact.get("path", ""))
-        digest = artifact.get("sha256")
-        if sha256_file(path) != digest:
-            raise EvidenceError(f"{kind} artifact digest does not match its bytes")
-        by_kind[kind] = {
-            "kind": kind,
-            "path": f"cells/{key}/{artifact['path']}",
-            "sha256": digest,
-        }
-    if set(by_kind) != ARTIFACT_KINDS:
-        raise EvidenceError("cell requires capture/trace/raw_samples/input_receipt artifacts")
-
-    raw_artifact = next(item for item in artifacts if item["kind"] == "raw_samples")
-    raw_path = safe_artifact(cell_dir, raw_artifact["path"])
-    raw = load_json(raw_path)
-    if raw.get("schema") != RAW_SCHEMA or raw.get("version") != 1:
-        raise EvidenceError("unsupported raw-sample schema")
-    metrics_raw = raw.get("metrics")
-    if not isinstance(metrics_raw, dict) or set(metrics_raw) != set(METRIC_UNITS):
-        raise EvidenceError("raw samples do not cover the exact metric set")
-    metrics = {
-        name: metric_statistic(name, metrics_raw[name], manifest)
-        for name in METRIC_UNITS
-    }
-    trace_ids = validate_trace(raw, manifest)
-
-    logical_input_passed = validate_logical_input(raw)
-    fidelity_raw = raw.get("fidelity")
-    if not isinstance(fidelity_raw, dict):
-        raise EvidenceError("fidelity oracle receipt is missing")
-    fidelity = {
-        "content_floor_passed": fidelity_raw.get("content_floor_passed") is True,
-        "capture_similarity": fidelity_raw.get("capture_similarity"),
-        "small_text_legible": fidelity_raw.get("small_text_legible") is True,
-        "thin_strokes_preserved": fidelity_raw.get("thin_strokes_preserved") is True,
-        "logical_input_correct": logical_input_passed,
-    }
-    if not isinstance(fidelity["capture_similarity"], (int, float)) or not 0 <= fidelity["capture_similarity"] <= 1:
-        raise EvidenceError("capture similarity is outside 0..1")
-    all_fidelity = all(
-        fidelity[name]
-        for name in (
-            "content_floor_passed", "small_text_legible",
-            "thin_strokes_preserved", "logical_input_correct"
-        )
-    )
-    if outcome == "pass" and not all_fidelity:
-        raise EvidenceError("pass receipt contains a failing fidelity oracle")
-    if outcome == "fail" and all_fidelity:
-        raise EvidenceError("fail receipt contains no failing fidelity oracle")
-
-    observed_dpr = receipt.get("observed_dpr")
-    if not isinstance(observed_dpr, (int, float)) or observed_dpr <= 0:
-        raise EvidenceError("receipt lacks a positive observed DPR")
-    requested_dpr = float(cell["requested_dpr"])
-    configured_max: float | None = None
-    adaptive: str | None = None
-    if cell["mode"] == "exact":
-        expected_dpr = requested_dpr
-    elif cell["mode"] == "configured_max":
-        configured_max = float(manifest["configured_max_dpr"])
-        expected_dpr = min(requested_dpr, configured_max)
-    else:
-        adaptive = manifest["adaptive_profile"]["id"]
-        expected_dpr = requested_dpr
-    if not math.isclose(float(observed_dpr), expected_dpr, abs_tol=1e-9):
-        raise EvidenceError("observed DPR differs from the requested experiment mode")
-    logical = scenario["logical_size"]
-    physical = receipt.get("physical_size")
-    expected_physical = {
-        "width": round(logical["width"] * expected_dpr),
-        "height": round(logical["height"] * expected_dpr),
-    }
-    if physical != expected_physical:
-        raise EvidenceError("physical size does not equal logical size x observed DPR")
-    expected_content = source_digest(scenario, manifest_path, state["plan"]["forge_sha"])
-    if receipt.get("content_digest") != expected_content:
-        raise EvidenceError("receipt content digest differs from the frozen scenario")
-
-    observation = {
-        "scenario_id": cell["scenario_id"],
-        "mode": cell["mode"],
-        "requested_dpr": cell["requested_dpr"],
-        "observed_dpr": observed_dpr,
-        "configured_max_dpr": configured_max,
-        "adaptive_profile_id": adaptive,
-        "logical_size": logical,
-        "physical_size": physical,
-        "content_digest": expected_content,
-        "machine_id": receipt["machine"]["id"],
-        "adapter_class": receipt["adapter"]["class"],
-        "metrics": metrics,
-        "fidelity": fidelity,
-        "trace_evidence_ids": trace_ids,
-        "artifacts": [by_kind[kind] for kind in sorted(by_kind)],
-    }
-    return key, observation, []
-
-
 def record_attempt(
     state: dict[str, Any], key: str, outcome: str, receipt_path: str | None,
-    reason: str | None, dependencies: list[str], observation: dict[str, Any] | None
+    reason: str | None, dependencies: list[str], observation: dict[str, Any] | None,
+    nonce: str | None = None,
 ) -> None:
+    if nonce is not None:
+        state.setdefault("issued_attempts", {}).pop(nonce, None)
     cell = state["cells"][key]
     cell["attempts"].append({
         "number": len(cell["attempts"]) + 1,
@@ -470,24 +164,30 @@ def record_attempt(
         "receipt": receipt_path,
         "reason": reason,
         "dependencies": dependencies,
+        "nonce": nonce,
     })
     cell["dependencies"] = dependencies
     cell["observation"] = observation
     cell["status"] = "complete" if outcome in COMPLETE_OUTCOMES else outcome
 
 
-def ingest_receipt(run_dir: Path, receipt_path: Path) -> str:
+def ingest_receipt(run_dir: Path, receipt_path: Path, attempt_nonce: str) -> str:
+    if not valid_attempt_nonce(attempt_nonce):
+        raise EvidenceError("ingest requires a valid runner attempt nonce")
     state = load_state(run_dir)
     manifest_path = Path(state["manifest_path"])
     manifest = load_json(manifest_path)
-    receipt = load_json(receipt_path)
+    receipt_path, nonce = snapshot_receipt_bundle(
+        run_dir, state, receipt_path, attempt_nonce
+    )
+    receipt = regular_json(receipt_path, "snapshotted cell receipt")
     outcome = receipt.get("outcome", "inconclusive")
     key, observation, dependencies = receipt_observation(
         receipt_path, state, manifest, manifest_path, run_dir
     )
     record_attempt(
         state, key, outcome, str(receipt_path.resolve()), receipt.get("reason"),
-        dependencies, observation
+        dependencies, observation, nonce
     )
     save_state(run_dir, state)
     return key
@@ -507,7 +207,8 @@ def adapter_map(values: list[str]) -> dict[str, Path]:
 
 
 def write_request(
-    state: dict[str, Any], manifest: dict[str, Any], key: str, cell_dir: Path
+    state: dict[str, Any], manifest: dict[str, Any], key: str, cell_dir: Path,
+    attempt_nonce: str,
 ) -> Path:
     scenario = scenario_map(manifest)[state["cells"][key]["scenario_id"]]
     request = {
@@ -515,9 +216,15 @@ def write_request(
         "version": 1,
         "experiment_id": state["experiment_id"],
         "cell_key": key,
+        "attempt_nonce": attempt_nonce,
         "scenario": scenario,
         "mode": state["cells"][key]["mode"],
         "requested_dpr": state["cells"][key]["requested_dpr"],
+        "adaptive_profile": (
+            manifest["adaptive_profile"]
+            if state["cells"][key]["mode"] == "adaptive_simulation"
+            else None
+        ),
         "expected_content_digest": source_digest(
             scenario, Path(state["manifest_path"]), state["plan"]["forge_sha"]
         ),
@@ -529,6 +236,19 @@ def write_request(
     path = cell_dir / "request.json"
     atomic_json(path, request)
     return path
+
+
+def issue_attempt(
+    run_dir: Path, state: dict[str, Any], manifest: dict[str, Any], key: str,
+) -> tuple[str, Path]:
+    if key not in state["cells"]:
+        raise EvidenceError(f"unknown cell selector: {key}")
+    cell_dir = checked_cell_directory(run_dir, key, create=True)
+    nonce = secrets.token_hex(NONCE_HEX_LENGTH // 2)
+    state.setdefault("issued_attempts", {})[nonce] = key
+    request = write_request(state, manifest, key, cell_dir, nonce)
+    save_state(run_dir, state)
+    return nonce, request
 
 
 def terminate_adapter(process: subprocess.Popen[str]) -> tuple[str, str]:
@@ -575,8 +295,7 @@ def run_cells(
     for key in selected:
         state = load_state(run_dir)
         cell = state["cells"][key]
-        cell_dir = cell_directory(run_dir, key)
-        cell_dir.mkdir(parents=True, exist_ok=True)
+        cell_dir = checked_cell_directory(run_dir, key, create=True)
         executable = adapters.get(cell["scenario_id"])
         if executable is None:
             record_attempt(
@@ -586,10 +305,25 @@ def run_cells(
             )
             save_state(run_dir, state)
             continue
-        request = write_request(state, manifest, key, cell_dir)
-        receipt = cell_dir / "receipt.json"
+        attempt_nonce, request = issue_attempt(
+            run_dir, state, manifest, key
+        )
+        pinned_adapter = run_dir / "tooling" / "adapters" / key / attempt_nonce
+        snapshot_file(
+            executable, pinned_adapter, f"adapter:{cell['scenario_id']}",
+            executable=True,
+        )
+        # Each attempt gets a new pathname and the legacy fixed receipt is
+        # removed. A crashed/timeout adapter therefore cannot make a later
+        # attempt ingest stale bytes that merely happen to remain in the cell.
+        legacy_receipt = cell_dir / "receipt.json"
+        if legacy_receipt.exists():
+            legacy_receipt.unlink()
+        receipt = cell_dir / f"receipt-attempt-{len(cell['attempts']) + 1}.json"
+        if receipt.exists():
+            receipt.unlink()
         process = subprocess.Popen(
-            [str(executable), "--request", str(request), "--receipt", str(receipt)],
+            [str(pinned_adapter), "--request", str(request), "--receipt", str(receipt)],
             cwd=cell_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, start_new_session=True,
         )
@@ -603,7 +337,7 @@ def run_cells(
             record_attempt(
                 state, key, "inconclusive", None,
                 f"adapter exceeded the {timeout_seconds:g}s bounded runtime",
-                [f"adapter:{cell['scenario_id']}:timeout"], None,
+                [f"adapter:{cell['scenario_id']}:timeout"], None, attempt_nonce,
             )
             save_state(run_dir, state)
             continue
@@ -614,12 +348,16 @@ def run_cells(
         (cell_dir / "adapter.stderr.log").write_text(completed.stderr, encoding="utf-8")
         if receipt.is_file():
             try:
-                declared = load_json(receipt).get("outcome")
-            except (OSError, json.JSONDecodeError, AttributeError) as error:
+                receipt_document = regular_json(receipt, "adapter cell receipt")
+                declared = receipt_document.get("outcome")
+                if receipt_document.get("attempt_nonce") != attempt_nonce:
+                    raise EvidenceError("adapter receipt attempt nonce does not match request")
+            except (EvidenceError, OSError, json.JSONDecodeError, AttributeError) as error:
                 state = load_state(run_dir)
                 record_attempt(
                     state, key, "inconclusive", str(receipt.resolve()),
                     f"adapter receipt rejected: {error}", ["valid-cell-receipt"], None,
+                    attempt_nonce,
                 )
                 save_state(run_dir, state)
                 continue
@@ -630,16 +368,21 @@ def run_cells(
                     state, key, "inconclusive", str(receipt.resolve()),
                     f"adapter exit {completed.returncode} disagrees with receipt outcome {declared}",
                     [f"adapter:{cell['scenario_id']}:exit-contract"], None,
+                    attempt_nonce,
                 )
                 save_state(run_dir, state)
                 continue
             try:
-                ingest_receipt(run_dir, receipt)
-            except (EvidenceError, OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+                ingest_receipt(run_dir, receipt, attempt_nonce)
+            except (
+                EvidenceError, OSError, json.JSONDecodeError, KeyError, TypeError,
+                subprocess.TimeoutExpired,
+            ) as error:
                 state = load_state(run_dir)
                 record_attempt(
                     state, key, "inconclusive", str(receipt.resolve()),
                     f"adapter receipt rejected: {error}", ["valid-cell-receipt"], None,
+                    attempt_nonce,
                 )
                 save_state(run_dir, state)
         else:
@@ -655,6 +398,7 @@ def run_cells(
             record_attempt(
                 state, key, outcome, None, reason,
                 [f"adapter:{cell['scenario_id']}:receipt"], None,
+                attempt_nonce,
             )
             save_state(run_dir, state)
     return 0
@@ -679,26 +423,62 @@ def status_document(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def revalidate_complete_state(
+    run_dir: Path, state: dict[str, Any]
+) -> dict[str, Any]:
+    if experiment.canonical_sha256(state.get("plan")) != state.get("plan_sha256"):
+        raise EvidenceError("embedded plan digest changed after initialization")
+    manifest_path = Path(state["manifest_path"])
+    manifest = load_json(manifest_path)
+    problems = experiment.manifest_errors(manifest, manifest_path)
+    if problems:
+        raise EvidenceError("; ".join(problems))
+    manifest_digest = experiment.canonical_sha256(manifest)
+    if (
+        manifest_digest != state.get("manifest_sha256")
+        or state["plan"]["matrix"]["manifest_sha256"] != manifest_digest
+    ):
+        raise EvidenceError("manifest digest changed after initialization")
+
+    for key, cell in state["cells"].items():
+        if cell.get("status") != "complete" or not cell.get("attempts"):
+            raise EvidenceError(f"cannot finalize: cell is incomplete: {key}")
+        receipt_value = cell["attempts"][-1].get("receipt")
+        if not isinstance(receipt_value, str) or not receipt_value:
+            raise EvidenceError(f"complete cell lacks a durable receipt: {key}")
+        derived_key, observation, dependencies = receipt_observation(
+            Path(receipt_value), state, manifest, manifest_path, run_dir
+        )
+        if (
+            derived_key != key
+            or dependencies
+            or observation is None
+            or observation != cell.get("observation")
+        ):
+            raise EvidenceError(f"cell evidence changed after ingestion: {key}")
+    return manifest
+
+
 def finalize(
     run_dir: Path, disposition: str, a2t: str, a3_budget: str, a3: str
 ) -> dict[str, Any]:
     state = load_state(run_dir)
-    incomplete = [key for key, cell in state["cells"].items() if cell["status"] != "complete"]
-    if incomplete:
-        raise EvidenceError(f"cannot finalize: {len(incomplete)} matrix cells are incomplete")
-    if not all(isinstance(value, str) and value for value in (a2t, a3_budget, a3)):
-        raise EvidenceError("A2T receipt, A3 budget id, and A3 receipt must be non-empty")
+    dependencies = validated_dependency_receipts(
+        a2t, a3_budget, a3, state["plan"]
+    )
+    manifest = revalidate_complete_state(run_dir, state)
     result = project_result(state)
-    result["dependencies"] = {
-        "a2t_receipt": a2t,
-        "a3_budget_id": a3_budget,
-        "a3_receipt": a3,
-    }
+    result["dependencies"] = dependencies
+    similarity_minimum = manifest["trial_contract"]["capture_similarity_minimum"]
     fidelity_passed = all(
-        item["fidelity"][gate]
+        (
+            item["fidelity"][gate]
+            if gate != "capture_similarity"
+            else item["fidelity"][gate] >= similarity_minimum
+        )
         for item in result["observations"]
         for gate in (
-            "content_floor_passed", "small_text_legible",
+            "content_floor_passed", "capture_similarity", "small_text_legible",
             "thin_strokes_preserved", "logical_input_correct"
         )
     )
@@ -707,7 +487,6 @@ def finalize(
     result["status"] = "complete"
     result["disposition"] = disposition
     result["eligible_for_policy"] = fidelity_passed
-    manifest = load_json(Path(state["manifest_path"]))
     schema_problems = experiment.json_schema_lite.validate(
         result,
         experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA)),
@@ -752,15 +531,20 @@ def main() -> int:
     init.add_argument("--plan", type=Path, required=True)
     init.add_argument("--run-dir", type=Path, required=True)
     init.add_argument("--manifest", type=Path, default=experiment.DEFAULT_MANIFEST)
+    init.add_argument("--trace-analyzer", type=Path, required=True)
     run = sub.add_parser("run")
     run.add_argument("--run-dir", type=Path, required=True)
     run.add_argument("--adapter", action="append", default=[])
     run.add_argument("--cell", action="append", default=[])
     run.add_argument("--limit", type=int)
     run.add_argument("--timeout-seconds", type=float, default=900)
+    issue = sub.add_parser("issue")
+    issue.add_argument("--run-dir", type=Path, required=True)
+    issue.add_argument("--cell", required=True)
     ingest = sub.add_parser("ingest")
     ingest.add_argument("--run-dir", type=Path, required=True)
     ingest.add_argument("--receipt", type=Path, required=True)
+    ingest.add_argument("--attempt-nonce", required=True)
     status = sub.add_parser("status")
     status.add_argument("--run-dir", type=Path, required=True)
     status.add_argument("--json", action="store_true")
@@ -780,7 +564,10 @@ def main() -> int:
             if args.run_dir.exists() and any(args.run_dir.iterdir()):
                 raise EvidenceError("run directory must be absent or empty")
             args.run_dir.mkdir(parents=True, exist_ok=True)
-            state = initial_state(load_json(args.plan), manifest, args.manifest)
+            state = initialize_run(
+                args.run_dir, load_json(args.plan), manifest, args.manifest,
+                args.trace_analyzer,
+            )
             save_state(args.run_dir, state)
             print(f"gpu_dpr_run_initialized=true cells={len(state['cells'])}")
         elif args.command == "run":
@@ -789,8 +576,20 @@ def main() -> int:
                 args.timeout_seconds,
             )
             print(json.dumps(status_document(load_state(args.run_dir)), sort_keys=True))
+        elif args.command == "issue":
+            state = load_state(args.run_dir)
+            manifest = load_json(Path(state["manifest_path"]))
+            nonce, request = issue_attempt(
+                args.run_dir, state, manifest, args.cell
+            )
+            print(json.dumps({
+                "attempt_nonce": nonce,
+                "request": str(request.resolve()),
+            }, sort_keys=True))
         elif args.command == "ingest":
-            key = ingest_receipt(args.run_dir, args.receipt)
+            key = ingest_receipt(
+                args.run_dir, args.receipt, args.attempt_nonce
+            )
             print(f"gpu_dpr_cell_ingested=true cell={key}")
         elif args.command == "status":
             document = status_document(load_state(args.run_dir))

@@ -1,29 +1,37 @@
 #pragma once
 
+#include <pulp/inspect/control_gpu_health_provider.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <vector>
 
-namespace pulp::render { class GpuSurface; }
-
 namespace pulp::inspect {
-
-class ControlGpuHealthProvider;
 
 /// Pulp-owned UI-thread bridge from a concrete Standalone/plugin/constrained
 /// host to ControlGpuHealthProvider. The callbacks also make the same adapter
 /// usable by headless and Forge canaries without depending on a native window
-/// implementation. It deliberately records a capture-confirmed upper bound;
-/// exact present and trace identities remain unverified until supplied by the
-/// generic render lifecycle.
+/// implementation. Capture completion bounds back-buffer readiness but is not
+/// a first-visible/present endpoint; exact present and trace identities remain
+/// unverified until supplied by the native render lifecycle.
 class ControlGpuHealthViewAdapter final {
   public:
     struct Config {
         std::shared_ptr<ControlGpuHealthProvider> provider;
         std::function<std::vector<std::uint8_t>()> capture_back_buffer_png;
-        std::function<render::GpuSurface*()> gpu_surface;
+        /// Returns optional native lifecycle evidence without making this
+        /// Pulp-owned adapter depend on the generic GPU surface implementation.
+        /// A capture-only host may return adapter identity alone; exact product
+        /// adapters can additionally prove submission, native present with an
+        /// independently sourced presentation timestamp, lifecycle/cache
+        /// identity, hitch, stage timing, and same-instance trace correlation.
+        std::function<ControlGpuHealthProvider::FrameObservation()> frame_evidence;
+        /// Samples the observation boundary immediately after capture/readback
+        /// returns, before PNG analysis. Tests may inject a deterministic
+        /// monotonic clock.
+        std::function<std::chrono::steady_clock::time_point()> capture_completed_at;
     };
 
     static std::unique_ptr<ControlGpuHealthViewAdapter> create(Config config);

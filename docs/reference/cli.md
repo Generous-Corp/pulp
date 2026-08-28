@@ -1476,9 +1476,12 @@ Subcommands:
 
 Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
 completeness, ranked contributors, stable evidence IDs, concrete next actions,
-and a Perfetto UI open command/search terms. Missing categories, unfinished
-slices, and invalid probe correlation return `unavailable` with exit 2; they do
-not silently pass. `gpu-health` and `gpu-probe` use exit 0/1 for pass/fail.
+and a Perfetto UI open command/search terms. `observed_categories` is derived
+independently from the parsed trace, never supplied by a scenario adapter, so
+acceptance tools can reject a capture that omitted required categories.
+Missing categories, unfinished slices, and invalid probe correlation return
+`unavailable` with exit 2; they do not silently pass. `gpu-health` and
+`gpu-probe` use exit 0/1 for pass/fail.
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a

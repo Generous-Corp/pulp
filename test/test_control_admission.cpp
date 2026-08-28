@@ -12,6 +12,7 @@
 #include <future>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -58,9 +59,9 @@ ControlRegistrationRequest registration_request() {
 
 ControlConsentDecision consent(std::string decision_id) {
     return {
-        true,
-        ControlConsentAuthority::TrustedPulpCli,
-        std::move(decision_id),
+        .approved = true,
+        .authority = ControlConsentAuthority::TrustedPulpCli,
+        .decision_id = std::move(decision_id),
     };
 }
 
@@ -92,6 +93,22 @@ std::filesystem::path unique_store_path() {
     REQUIRE(random);
     return std::filesystem::temp_directory_path() /
            ("pulp-control-admission-" + pulp::runtime::hex_encode(*random));
+}
+
+std::map<std::string, std::string> store_snapshot(const std::filesystem::path& root) {
+    std::map<std::string, std::string> snapshot;
+    if (!std::filesystem::exists(root))
+        return snapshot;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (!entry.is_regular_file())
+            continue;
+        std::ifstream stream(entry.path(), std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(stream),
+                                std::istreambuf_iterator<char>()};
+        snapshot.emplace(std::filesystem::relative(entry.path(), root).generic_string(),
+                         pulp::runtime::sha256_hex(bytes));
+    }
+    return snapshot;
 }
 
 ControlBrokerConfig broker_config(
@@ -182,7 +199,8 @@ struct AdmissionFixture {
         ControlOperationStore::WallClock wall_clock =
             [] { return std::chrono::system_clock::now(); },
         std::chrono::milliseconds replay_window = std::chrono::hours{24},
-        std::chrono::milliseconds retention = std::chrono::hours{24 * 7})
+        std::chrono::milliseconds retention = std::chrono::hours{24 * 7},
+        bool broker_prompt = false)
         : broker(broker_config(std::move(policy), store_path, std::move(wall_clock), replay_window,
                                retention)) {
         REQUIRE(broker.operation_store_ready());
@@ -198,6 +216,15 @@ struct AdmissionFixture {
         REQUIRE(registered.registration);
         registration = *registered.registration;
 
+        // Most admission tests exercise a durable policy grant across several
+        // operations. Interactive CLI, host-UI, and broker-prompt decisions are
+        // intentionally operation-one-shot and are covered by dedicated tests.
+        auto grant_consent = consent("admission-consent");
+        grant_consent.authority = ControlConsentAuthority::ExistingUserPolicy;
+        if (broker_prompt) {
+            grant_consent.authority = ControlConsentAuthority::BrokerUserPrompt;
+            grant_consent.expires_at = std::chrono::steady_clock::now() + 5min;
+        }
         auto granted = broker.issue_grant(
             client,
             ControlGrantRequest{
@@ -206,7 +233,7 @@ struct AdmissionFixture {
                 {InspectorCapability::StateRead, InspectorCapability::CaptureImage},
                 5min,
             },
-            consent("admission-consent"));
+            std::move(grant_consent));
         REQUIRE(granted.grant);
         grant = *granted.grant;
     }
@@ -836,6 +863,51 @@ TEST_CASE("Control broker durably deduplicates before dispatch",
     REQUIRE(finished.receipt);
     CHECK(finished.receipt->state == ControlReceiptState::Completed);
     CHECK_FALSE(finished.receipt->result.result_code);
+}
+
+TEST_CASE("broker-prompt grant permits one admission and only durable replay",
+          "[inspect][control][admission][grant][one-shot][idempotency]") {
+    AdmissionFixture fixture{
+        allow_all_policy(), [] { return std::chrono::system_clock::now(); },
+        std::chrono::hours{24}, std::chrono::hours{24 * 7}, true};
+    const auto request = fixture.state_read();
+    const auto first = fixture.broker.admit_operation(fixture.client, request);
+    REQUIRE(first.plan);
+    REQUIRE(first.receipt);
+    REQUIRE(first.should_dispatch);
+
+    const auto reconnect = fixture.broker.admit_operation(
+        fixture.client,
+        fixture.state_read("request-reconnect", "idempotency-admission"));
+    REQUIRE(reconnect.receipt);
+    CHECK_FALSE(reconnect.should_dispatch);
+    CHECK(reconnect.receipt->receipt_id == first.receipt->receipt_id);
+
+    auto content_conflict = fixture.state_read(
+        "request-content-conflict", "idempotency-admission");
+    content_conflict.params_json = R"({"include_sensitive":true})";
+    rehash(content_conflict);
+    CHECK(fixture.broker.admit_operation(fixture.client, content_conflict).status ==
+          ControlAdmissionStatus::IdempotencyConflict);
+
+    auto request_conflict = fixture.state_read(
+        request.request_id, "different-idempotency-key");
+    CHECK(fixture.broker.admit_operation(fixture.client, request_conflict).status ==
+          ControlAdmissionStatus::RequestIdConflict);
+
+    const auto before_denied_request = store_snapshot(fixture.store_path);
+    const auto denied = fixture.broker.admit_operation(
+        fixture.client, fixture.state_read("request-b", "idempotency-b"));
+    CHECK(denied.status == ControlAdmissionStatus::PermissionDenied);
+    CHECK_FALSE(denied.receipt);
+    CHECK(store_snapshot(fixture.store_path) == before_denied_request);
+
+    const auto replay_after_conflicts = fixture.broker.admit_operation(
+        fixture.client,
+        fixture.state_read("request-reconnect-again", "idempotency-admission"));
+    REQUIRE(replay_after_conflicts.receipt);
+    CHECK(replay_after_conflicts.receipt->receipt_id == first.receipt->receipt_id);
+    CHECK_FALSE(replay_after_conflicts.should_dispatch);
 }
 
 TEST_CASE("Control broker reports terminal replay-window expiry without redispatch",

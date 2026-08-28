@@ -121,6 +121,7 @@ def incomplete_receipt(
     return {
         "schema": RECEIPT_SCHEMA,
         "version": 1,
+        "attempt_nonce": request["attempt_nonce"],
         "scenario_id": scenario["id"],
         "scenario_kind": scenario["kind"],
         "mode": request["mode"],
