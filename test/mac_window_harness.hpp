@@ -104,6 +104,13 @@ std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 pulp::view::WindowHost::ContentSize content_view_bounds(
     pulp::view::WindowHost& host);
 
+/// Apply a real AppKit content-size change and return only after
+/// windowDidResize has run. Unlike capture_back_buffer_png this does not pump a
+/// later frame, so callers can assert whether the resize path itself presented
+/// replacement content synchronously.
+bool resize_content_view(pulp::view::WindowHost& host,
+                         float width, float height);
+
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a
 /// test-only seam for same-logical-size Retina transitions, which cannot be

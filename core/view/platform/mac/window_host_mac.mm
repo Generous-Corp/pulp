@@ -1362,7 +1362,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // AppKit resizes us during a window resize. Push the new
     // bounds into the root View immediately and relayout so hit testing,
     // tracking-area updates, and the next paint all see the new geometry.
-    if (self.rootView) {
+    if (self.rootView && !self.hostOwnsRootLayout) {
         self.rootView->set_bounds({0, 0,
             static_cast<float>(newSize.width),
             static_cast<float>(newSize.height)});
@@ -1400,6 +1400,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        self.hostOwnsRootLayout = YES;
         self.wantsLayer = YES;
 
         CAMetalLayer* layer = [CAMetalLayer layer];
@@ -2636,6 +2637,7 @@ private:
     }
 
     void handle_resize(float width, float height) {
+        PULP_TRACE_SCOPE_NAMED("render", "window_resize");
         width_ = width;
         height_ = height;
 
@@ -2652,12 +2654,19 @@ private:
                                    static_cast<float>(scale));
         }
         configured_scale_ = static_cast<float>(scale);
-        // Relayout the root view synchronously so hit testing
-        // and any user resize callback both see the new geometry. paint_scene
-        // also calls set_bounds + layout_children, but that runs at the next
-        // vsync — too late for input handlers fired during the resize drag.
-        root_.set_bounds({0, 0, width, height});
-        root_.layout_children();
+        // Keep hit testing and the user callback on the SAME geometry paint
+        // will use. A pinned design viewport must never pass through a
+        // window-sized root between AppKit's resize and the next GPU frame:
+        // that transient layout exposes cleared bottom/right bands during a
+        // live drag, then snaps back to the authored box on release.
+        const Rect desired_root_bounds =
+            design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f
+                ? Rect{0, 0, design_viewport_w_, design_viewport_h_}
+                : Rect{0, 0, width, height};
+        if (!(root_.bounds() == desired_root_bounds)) {
+            root_.set_bounds(desired_root_bounds);
+            root_.layout_children();
+        }
         if (resize_callback_) {
             auto alive_token = render_dispatch_alive_;
             resize_callback_(
@@ -2669,6 +2678,16 @@ private:
         needs_repaint_ = true;
         tracker_.set_viewport(width, height);
         tracker_.invalidate_all();
+
+        // AppKit runs live resize in an event-tracking loop. The CVDisplayLink
+        // callback reaches the main queue, but that queue is not guaranteed to
+        // present before AppKit exposes the newly enlarged CAMetalLayer. Waiting
+        // for the next ordinary dispatch therefore shows the layer's cleared
+        // edge during the drag and batches the real frame at mouse-up. Paint the
+        // just-committed size now; the display-link gate still owns animation
+        // timing and may harmlessly coalesce a later requested frame.
+        if (gpu_surface_ && skia_surface_)
+            render_frame();
     }
 
     // A backing-scale (DPI) change at the SAME logical size — display move,

@@ -695,6 +695,49 @@ TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
     require_content_floor("single-frame gpu capture", png);
 }
 
+class ResizePaintProbe final : public View {
+public:
+    void paint(pulp::canvas::Canvas& canvas) override {
+        ++paint_count;
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(32, 96, 192, 255));
+        canvas.fill_rect(0.0f, 0.0f, bounds().width, bounds().height);
+    }
+
+    int paint_count = 0;
+};
+
+TEST_CASE("mac GPU resize keeps a pinned root and presents before returning",
+          "[view][hosts][gpu][resize]") {
+    ResizePaintProbe root;
+    WindowOptions options;
+    options.width = 320.0f;
+    options.height = 240.0f;
+    options.resizable = true;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    host->set_design_viewport(640.0f, 480.0f);
+    REQUIRE_FALSE(pt::capture_back_buffer_png(*host).empty());
+    REQUIRE(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+
+    Rect callback_bounds{};
+    int resize_callbacks = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) {
+        ++resize_callbacks;
+        callback_bounds = root.bounds();
+    });
+    const int paints_before = root.paint_count;
+    const auto layouts_before = View::layout_pass_count();
+
+    REQUIRE(pt::resize_content_view(*host, 400.0f, 300.0f));
+    CHECK(callback_bounds == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+    CHECK(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
+    CHECK(root.paint_count > paints_before);
+    REQUIRE(resize_callbacks > 0);
+    CHECK(View::layout_pass_count() - layouts_before
+          == static_cast<std::uint64_t>(root.paint_count - paints_before));
+}
+
 TEST_CASE("standalone GPU host resyncs the first frame after a Retina backing change",
           "[mac][gpu][platform-harness][backing-scale]") {
     // The shipping default is full repaint. The original regression incorrectly

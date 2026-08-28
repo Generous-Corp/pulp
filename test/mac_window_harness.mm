@@ -24,6 +24,7 @@
 #import <pulp/view/window_host.hpp>
 
 #include <chrono>
+#include <cmath>
 
 namespace {
 
@@ -203,6 +204,19 @@ make_test_window(pulp::view::View& root, pulp::view::WindowOptions options) {
         }
 
         return host;
+    }
+}
+
+bool resize_content_view(pulp::view::WindowHost& host,
+                         float width, float height) {
+    if (!is_main_thread() || width <= 0.0f || height <= 0.0f) return false;
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        if (!window) return false;
+        [window setContentSize:NSMakeSize(width, height)];
+        const NSSize applied = window.contentView.bounds.size;
+        return std::fabs(applied.width - width) < 0.5
+            && std::fabs(applied.height - height) < 0.5;
     }
 }
 
