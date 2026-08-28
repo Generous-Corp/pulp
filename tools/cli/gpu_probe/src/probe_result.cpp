@@ -16,10 +16,6 @@ constexpr std::array renderer_passes{
 constexpr std::array compute_passes{
     std::string_view{"adapter"}, std::string_view{"dispatch"},
     std::string_view{"oracle"}};
-constexpr std::array threejs_passes{
-    std::string_view{"scene"}, std::string_view{"geometry"},
-    std::string_view{"lighting"}, std::string_view{"composite"},
-    std::string_view{"readback"}};
 constexpr std::array stft_passes{
     std::string_view{"prepare"}, std::string_view{"forward"},
     std::string_view{"magnitude"}, std::string_view{"oracle"}};
@@ -34,11 +30,7 @@ constexpr std::array registry{
                      0x434f4d5055544501ULL, "fixed-step-0", "complex-f32", "f32",
                      "little-endian-f32", {1.0e-5, 1.0e-5}, AdapterPolicy::hardware_required,
                      compute_passes, {}, "cpu-sqrt-re2-im2-match", "wgsl-imaginary-weight"},
-    RecipeDefinition{kRecipeIds[2], "pulp.threejs.multi-pass", {320, 240, 76'800},
-                     0x54485245454a5301ULL, "fixed-step-0", "threejs-scene", "rgba8-srgb",
-                     "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
-                     threejs_passes, {}, "named-pass-values-match", "lighting-pass-seed"},
-    RecipeDefinition{kRecipeIds[3], "pulp.gpu-audio.GpuStft.analyze/fft_stockham",
+    RecipeDefinition{kRecipeIds[2], "pulp.gpu-audio.GpuStft.analyze/fft_stockham",
                      {1024, 1, 1024}, 0x535446544f464601ULL,
                      "offline-sample-index@48000Hz", "f32-mono", "complex-f32",
                      "little-endian-f32", {1.0e-2, 1.0e-2},
@@ -156,6 +148,10 @@ bool validate(const ProbeResult& result, std::string* error) {
         result.tolerance.absolute != recipe->tolerance.absolute ||
         result.tolerance.relative != recipe->tolerance.relative)
         return fail(error, "tolerance must be finite, nonnegative, and recipe-bound");
+    if (result.mutation &&
+        (result.mutation->empty() || result.mutation->size() > 128 ||
+         *result.mutation != recipe->negative_mutation))
+        return fail(error, "mutation must be absent or the exact bounded recipe mutation");
     if (result.adapter_policy == AdapterPolicy::hardware_required &&
         result.verdict == Verdict::pass &&
         (result.adapter.status != IdentityStatus::authentic ||

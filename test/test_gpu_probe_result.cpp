@@ -44,7 +44,8 @@ gp::ProbeResult passing_result(std::string_view id = gp::kRecipeIds[1]) {
 
 } // namespace
 
-TEST_CASE("GPU probe registry freezes four versioned recipes", "[gpu][probe][contract]") {
+TEST_CASE("GPU probe registry exposes only runnable versioned recipes",
+          "[gpu][probe][contract]") {
     const auto recipes = gp::recipes();
     REQUIRE(recipes.size() == gp::kRecipeIds.size());
     for (std::size_t i = 0; i < recipes.size(); ++i) {
@@ -56,6 +57,7 @@ TEST_CASE("GPU probe registry freezes four versioned recipes", "[gpu][probe][con
         CHECK(recipes[i].dimensions.height <= gp::kMaxDimension);
         CHECK(recipes[i].dimensions.work_items <= gp::kMaxWorkItems);
     }
+    CHECK(gp::find_recipe("threejs.multi-pass.v1") == nullptr);
 }
 
 TEST_CASE("GPU probe result binds execution identity and correctness to its recipe",
@@ -115,6 +117,31 @@ TEST_CASE("GPU probe verdict and numeric evidence aggregate coherently",
     result.passes.back().verdict = gp::Verdict::unverified;
     result.verdict = gp::Verdict::unverified;
     REQUIRE(gp::validate(result, &error));
+}
+
+TEST_CASE("GPU probe mutation identity is absent or exactly recipe-bound",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = passing_result();
+    const auto* recipe = gp::find_recipe(result.recipe_id);
+    REQUIRE(recipe != nullptr);
+
+    result.passes.back().verdict = gp::Verdict::fail;
+    result.verdict = gp::Verdict::fail;
+    result.mutation = std::string(recipe->negative_mutation);
+    REQUIRE(gp::validate(result, &error));
+
+    result.mutation = "different-mutation";
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
+
+    result.mutation = std::string(129, 'x');
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
+
+    result.mutation = std::string{};
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
 }
 
 TEST_CASE("GPU probe artifacts are confined, unique, and bounded",
@@ -193,6 +220,14 @@ TEST_CASE("GPU probe JSON and human projections preserve typed evidence",
     failed.passes.back().verdict = gp::Verdict::fail;
     failed.verdict = gp::Verdict::fail;
     CHECK(gp::exit_code(failed) == 1);
+
+    failed.passes.back().verdict = gp::Verdict::unavailable;
+    failed.verdict = gp::Verdict::unavailable;
+    CHECK(gp::exit_code(failed) == 2);
+
+    failed.passes.back().verdict = gp::Verdict::unverified;
+    failed.verdict = gp::Verdict::unverified;
+    CHECK(gp::exit_code(failed) == 2);
 }
 
 TEST_CASE("GPU probe JSON parser round-trips and rejects schema drift",
@@ -221,4 +256,15 @@ TEST_CASE("GPU probe JSON parser round-trips and rejects schema drift",
                        R"JSON("version":"1")JSON");
     CHECK_FALSE(gp::from_json(wrong_type, &error).has_value());
     CHECK(error.find("non-negative integer") != std::string::npos);
+
+    auto wrong_mutation = expected;
+    wrong_mutation.passes.back().verdict = gp::Verdict::fail;
+    wrong_mutation.verdict = gp::Verdict::fail;
+    wrong_mutation.mutation = "different-mutation";
+    CHECK_FALSE(gp::from_json(gp::to_json(wrong_mutation), &error).has_value());
+    CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
+
+    wrong_mutation.mutation = std::string(129, 'x');
+    CHECK_FALSE(gp::from_json(gp::to_json(wrong_mutation), &error).has_value());
+    CHECK(error.find("exact bounded recipe mutation") != std::string::npos);
 }

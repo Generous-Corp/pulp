@@ -452,7 +452,7 @@ RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
     constexpr std::uint32_t count = 1024;
     constexpr std::uint64_t input_field = 0x53544654ULL;
 
-    const auto& recipe = *find_recipe(kRecipeIds[3]);
+    const auto& recipe = *find_recipe(kRecipeIds[2]);
     auto gpu = render::GpuCompute::create();
     const char* builtin = gpu ? gpu->kernel_source("fft_stockham") : nullptr;
     std::string actual_source = builtin ? std::string{builtin}
