@@ -229,13 +229,21 @@ ControlGrantResult ControlGrantStore::issue(
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
     }
-    const bool one_shot_consent =
+    const bool interactive_consent =
         consent.authority == ControlConsentAuthority::TrustedPulpCli ||
         consent.authority == ControlConsentAuthority::TrustedHostUi ||
         consent.authority == ControlConsentAuthority::BrokerUserPrompt;
+    // Decision replay and operation reuse are separate policies: every
+    // interactive decision is consumed once, while only GPU-health reads spend
+    // their grant on one fresh operation identity.
+    const bool one_shot_gpu_health =
+        interactive_consent &&
+        std::ranges::find(request.capabilities,
+                          InspectorCapability::GpuHealthRead) !=
+            request.capabilities.end();
     if (std::ranges::find(request.capabilities, InspectorCapability::RuntimeEval) !=
             request.capabilities.end() &&
-        !one_shot_consent) {
+        !interactive_consent) {
         result.status = ControlGrantStatus::ConsentRequired;
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
@@ -260,7 +268,7 @@ ControlGrantResult ControlGrantStore::issue(
                                 control_grant_status_id(result.status));
             return result;
         }
-        if (one_shot_consent &&
+        if (interactive_consent &&
             impl_->consumed_consent_decisions.contains(
                 grant.consent_decision_id)) {
             result.status = ControlGrantStatus::ConsentReplay;
@@ -268,7 +276,7 @@ ControlGrantResult ControlGrantStore::issue(
                                 control_grant_status_id(result.status));
             return result;
         }
-        if (one_shot_consent &&
+        if (interactive_consent &&
             impl_->consumed_consent_decisions.size() >=
                 impl_->config.max_consumed_consent_decisions) {
             result.status = ControlGrantStatus::ResourceExhausted;
@@ -300,10 +308,10 @@ ControlGrantResult ControlGrantStore::issue(
                                 control_grant_status_id(result.status));
             return result;
         }
-        if (one_shot_consent)
+        if (one_shot_gpu_health)
             impl_->one_shot_authorizations.emplace(grant.grant_id.value,
                                                    Impl::OneShotAuthorization{});
-        if (one_shot_consent)
+        if (interactive_consent)
             impl_->consumed_consent_decisions.emplace(
                 grant.consent_decision_id);
     }
@@ -441,6 +449,9 @@ std::optional<ControlOperationAuthorization> ControlGrantStore::authorize_operat
         std::find(found->second.capabilities.begin(), found->second.capabilities.end(),
                   capability) == found->second.capabilities.end())
         return std::nullopt;
+    if (capability != InspectorCapability::GpuHealthRead)
+        return ControlOperationAuthorization{
+            .kind = ControlOperationAuthorizationKind::Reusable};
     const auto authorization = impl_->one_shot_authorizations.find(grant_id.value);
     if (authorization == impl_->one_shot_authorizations.end())
         return ControlOperationAuthorization{
