@@ -1814,6 +1814,61 @@
               }
             ],
             "subcommands": []
+          },
+          {
+            "name": "recipes",
+            "arguments": [],
+            "subcommands": [
+              {
+                "name": "list",
+                "arguments": [
+                  {
+                    "name": "--symptom",
+                    "kind": "option"
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              },
+              {
+                "name": "show",
+                "arguments": [
+                  {
+                    "name": "recipe-id",
+                    "kind": "positional",
+                    "required": true
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              },
+              {
+                "name": "scaffold",
+                "arguments": [
+                  {
+                    "name": "recipe-id",
+                    "kind": "positional",
+                    "required": true
+                  },
+                  {
+                    "name": "--output",
+                    "kind": "option",
+                    "required": true
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              }
+            ]
           }
         ]
       },
@@ -3807,6 +3862,39 @@
             "subcommands": []
           },
           {
+            "name": "gpu-startup",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "gpu-health",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "gpu-probe",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "query",
             "arguments": [
               {
@@ -4479,6 +4567,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "pulp_gpu_recipes",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "pulp_inspect_pending_requests",
         "disposition": "candidate-shared-later"
       },
@@ -4548,6 +4640,10 @@
       },
       {
         "name": "pulp_test",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_analyze",
         "disposition": "candidate-shared-later"
       },
       {

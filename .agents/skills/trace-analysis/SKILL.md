@@ -498,3 +498,25 @@ categories and is bound to the same product instance, build, frame identity,
 and trial. Dropped events, truncation, missing categories, timeout, or instance
 loss are fail-closed evidence, not zero-cost measurements. Perfetto production
 and provider mutation remain off the audio thread.
+
+## Correlate a catalog recipe with Perfetto
+
+Begin with `pulp gpu recipes list --symptom <exact-token> --json`, run the
+selected baseline twice, then its seeded negative control. Carry the emitted
+`gpu_evidence_id` into the closed `gpu-probe` trace question so a scheduling or
+frame contributor can be tied to the exact oracle evidence rather than to a
+filename guess. Exit 2 remains unavailable/unverified and cannot be interpreted
+as zero cost. The separate exact-instance `dev.pulp.gpu/health.read@1` control
+operation is a cheap live snapshot; it neither starts a trace nor proves an
+offline catalog recipe callable.
+
+Perfetto localizes a stage; it does not automatically prove a platform event
+race. A useful trace may show inexpensive paint work (about 1 ms) alongside
+resize spans clustered near a 60 Hz frame (about 15.7 ms p50 and 18.7 ms p99),
+which focuses the next test on acquire, present, compositor, or callback order.
+Then use a deterministic AppKit/GPU event-order harness and a planted old-
+behavior negative control to prove whether a redundant same-size resize or
+retained-cover lifetime caused the symptom. Finish with real product proof,
+such as a 60 fps recording plus interaction/feel validation. Report those as
+three distinct links: trace localization, platform-race proof, and product
+acceptance. Never describe Perfetto alone as having found the root cause.

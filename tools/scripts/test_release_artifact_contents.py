@@ -197,6 +197,10 @@ def standalone_host_payload() -> bytes:
 
 
 def member_payload(name: str, platform: str = "linux-x64") -> bytes:
+    if name == "pulp-sdk/share/pulp/gpu-recipes.yaml":
+        return (ROOT / "docs/status/gpu-recipes.yaml").read_bytes()
+    if name == "pulp-sdk/share/pulp/gpu-recipes.schema.json":
+        return (ROOT / "docs/status/gpu-recipes.schema.json").read_bytes()
     if name in {
         rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
         rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
@@ -1143,6 +1147,104 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_recipe_catalog_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/share/pulp/gpu-recipes.yaml")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "gpu-recipes.yaml"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_corrupt_gpu_recipe_catalog_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            member = "pulp-sdk/share/pulp/gpu-recipes.yaml"
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides={member: b"corrupt\n"},
+            )
+            with self.assertRaisesRegex(rac.ContentError, "selected release catalog digest"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_gpu_recipe_catalog_matrix_digests_match_source(self) -> None:
+        sources = {
+            "pulp-sdk/share/pulp/gpu-recipes.yaml": ROOT
+            / "docs/status/gpu-recipes.yaml",
+            "pulp-sdk/share/pulp/gpu-recipes.schema.json": ROOT
+            / "docs/status/gpu-recipes.schema.json",
+        }
+        self.assertEqual(set(rac.DEFAULT_MATRIX.gpu_recipe_catalog_sha256), set(sources))
+        for member, source in sources.items():
+            self.assertEqual(
+                rac.DEFAULT_MATRIX.gpu_recipe_catalog_sha256[member],
+                hashlib.sha256(source.read_bytes()).hexdigest(),
+            )
+
+    def test_selected_release_matrix_owns_gpu_recipe_catalog_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            selected_payloads = {
+                "pulp-sdk/share/pulp/gpu-recipes.yaml": b"selected-tag-catalog\n",
+                "pulp-sdk/share/pulp/gpu-recipes.schema.json": b"selected-tag-schema\n",
+            }
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides=selected_payloads,
+            )
+
+            matrix_document = json.loads(
+                rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
+            )
+            matrix_document["gpu_recipe_catalog_sha256"] = {
+                member: hashlib.sha256(payload).hexdigest()
+                for member, payload in selected_payloads.items()
+            }
+            selected_matrix_path = root / "selected-tag-product-matrix.json"
+            selected_matrix_path.write_text(
+                json.dumps(matrix_document), encoding="utf-8"
+            )
+
+            self.assertEqual(
+                rac.main(
+                    [
+                        str(root),
+                        "--platform",
+                        "linux-x64",
+                        "--version",
+                        VERSION,
+                        "--source-sha",
+                        SOURCE_SHA,
+                        "--matrix",
+                        str(selected_matrix_path),
+                    ]
+                ),
+                0,
+            )
+            with self.assertRaisesRegex(
+                rac.ContentError, "selected release catalog digest"
+            ):
+                rac.verify_platform(
+                    root,
+                    "linux-x64",
+                    VERSION,
+                    SOURCE_SHA,
+                    native_signatures=False,
+                )
+
     def test_negative_control_missing_gpu_dpr_contract_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1428,6 +1530,8 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["capability_handoff_floor"]
             del document["gpu_health_contract_floor"]
             del document["gpu_probe_contract_floor"]
+            del document["gpu_recipe_catalog_floor"]
+            del document["gpu_recipe_catalog_sha256"]
             del document["threejs_runtime_floor"]
             del document["gpu_health_read_contract_floor"]
             del document["gpu_dpr_experiment_contract_floor"]
@@ -1440,6 +1544,8 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
             self.assertEqual(historical.gpu_probe_contract_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_recipe_catalog_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_recipe_catalog_sha256, {})
             self.assertEqual(historical.threejs_runtime_floor, "999999.0.0")
             self.assertEqual(
                 historical.gpu_health_read_contract_floor, "999999.0.0"

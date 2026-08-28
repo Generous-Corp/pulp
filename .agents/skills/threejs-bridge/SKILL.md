@@ -244,8 +244,9 @@ pulp gpu probe --recipe threejs.multi-pass.v1 \
 ```
 
 These commands require a build configured with V8 and the pinned Three.js
-runtime. Other builds omit `threejs.multi-pass.v1` from CLI discovery and the
-MCP enum. Default standalone releases remain QuickJS-only; exposing this recipe
+runtime. Other builds expose its metadata row as `callable: false`, while
+omitting it from probe help, the callable registry, and the MCP probe enum.
+Default standalone releases remain QuickJS-only; executing this recipe
 there is follow-up work that must ship sealed V8 and preserve the nested runtime
 through Rust self-upgrades.
 
@@ -331,6 +332,13 @@ new `PerfCounters` fields (`base64_decode_total_us`,
 merged for future workload-specific re-evaluations.
 
 ## JSC iOS lane
+
+Before invoking `threejs.multi-pass.v1`, inspect it with `pulp gpu recipes show
+threejs.multi-pass.v1 --json`. The canonical row remains discoverable on
+QuickJS, but `callable:false` is expected unless the matched native build has
+both V8 and the pinned Three.js runtime. Do not treat catalog presence or an
+installed runtime directory as callable capability; only the native registry
+controls `pulp gpu probe` and its MCP enum.
 
 Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no V8 build). The full bring-up is in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`.
 

@@ -287,6 +287,17 @@ must be registered and then *proven* to draw.
 
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
+## Start debugging from the installed recipe catalog
+
+Use `pulp gpu recipes list --json` or an exact `--symptom` filter before
+choosing a probe. The catalog always explains all four canonical workflows,
+while `callable` is derived from the matched native registry. In particular,
+Three.js metadata can be visible in a QuickJS release without claiming that
+the V8-only recipe can run. `pulp_gpu_recipes` is the read-only MCP equivalent;
+use CLI `recipes scaffold` only when an explicit local evidence workspace is
+wanted. Run two baselines and the seeded negative control before treating a
+pass as useful localization evidence.
+
 A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
 copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
 the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the

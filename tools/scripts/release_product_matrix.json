@@ -8,6 +8,11 @@
   "node_runtime_floor": "0.813.1",
   "gpu_health_contract_floor": "0.817.0",
   "gpu_probe_contract_floor": "0.819.0",
+  "gpu_recipe_catalog_floor": "0.819.0",
+  "gpu_recipe_catalog_sha256": {
+    "pulp-sdk/share/pulp/gpu-recipes.yaml": "d1b42bc7015153e92f3bb33801e91d89da2f9038a43e05fbc37b946aa5c23439",
+    "pulp-sdk/share/pulp/gpu-recipes.schema.json": "dceb222837361e0fa255ae628989754c3afe5c3f17398e1c5b823202f99b7a4c"
+  },
   "threejs_runtime_floor": "0.818.0",
   "gpu_health_read_contract_floor": "0.818.0",
   "gpu_dpr_experiment_contract_floor": "0.818.0",

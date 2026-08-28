@@ -7,6 +7,17 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
+# Embed the closed GPU recipe catalog in the release CLI. The same authoritative
+# bytes are installed as share/pulp/gpu-recipes.yaml for direct inspection.
+file(READ "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    PULP_GPU_RECIPE_CATALOG_JSON)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu_recipe_catalog_data.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/gpu_recipe_catalog_data.h"
+    @ONLY)
+
 # ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML
@@ -151,8 +162,11 @@ add_executable(pulp-cli
     "${_pulp_migration_index_src}")
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-cli PRIVATE cmd_seq.cpp)
+    target_link_libraries(pulp-cli PRIVATE pulp::project-package)
 endif()
-target_include_directories(pulp-cli PRIVATE ${CMAKE_SOURCE_DIR}/inspect/include)
+target_include_directories(pulp-cli PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include)
 # The C++ CLI was historically the user-facing `pulp` binary. The Rust
 # binary now takes the `pulp` slot and this target emits `pulp-cpp`.
 # Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
@@ -366,6 +380,7 @@ if(PULP_BUILD_TESTS)
             COMMAND ${CMAKE_COMMAND}
                 -DPULP_CLI=$<TARGET_FILE:pulp-cli>
                 -DARTIFACT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/gpu-probe-contract-artifacts
+                -DPULP_ENABLE_PROJECT_PACKAGE=${PULP_ENABLE_PROJECT_PACKAGE}
                 -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_probe_cli_tests.cmake)
         set_tests_properties(cli-gpu-probe-contract PROPERTIES
             LABELS "gpu;gpu-probe;cli"

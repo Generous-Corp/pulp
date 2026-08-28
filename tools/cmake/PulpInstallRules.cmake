@@ -476,6 +476,23 @@ install(FILES "${_pulp_gpu_probe_result_schema}"
     DESTINATION "share/pulp/contracts")
 unset(_pulp_gpu_probe_result_schema)
 
+# The canonical GPU recipe catalog and its closed schema remain inspectable in
+# an installed SDK. pulp-cpp embeds these exact catalog bytes for standalone
+# CLI releases; this installed copy is the data interchange surface.
+set(_pulp_gpu_recipe_catalog_files
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/gpu-recipes.schema.json")
+foreach(_pulp_gpu_recipe_catalog_file IN LISTS _pulp_gpu_recipe_catalog_files)
+    if(NOT EXISTS "${_pulp_gpu_recipe_catalog_file}")
+        message(FATAL_ERROR
+            "Required GPU recipe catalog file is missing: ${_pulp_gpu_recipe_catalog_file}")
+    endif()
+endforeach()
+install(FILES ${_pulp_gpu_recipe_catalog_files}
+    DESTINATION "share/pulp")
+unset(_pulp_gpu_recipe_catalog_file)
+unset(_pulp_gpu_recipe_catalog_files)
+
 # Pinned native Three.js ESM runtime. Keep the upstream directory layout intact:
 # Pulp's V8 module resolver maps these exact specifiers and installed consumers
 # must not fall back to a test-only FetchContent checkout.

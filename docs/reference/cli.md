@@ -2506,6 +2506,30 @@ pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/mutat
   --negative-control --json
 ```
 
+Discover the canonical catalog before choosing a probe, including recipes that
+this matched build cannot currently run:
+
+```bash
+pulp gpu recipes list
+pulp gpu recipes list --symptom compute-readback-mismatch --json
+pulp gpu recipes show threejs.multi-pass.v1 --json
+mkdir -p "$PWD/artifacts/gpu"
+pulp gpu recipes scaffold gpu-compute.magnitude.v1 \
+  --output "$PWD/artifacts/gpu/magnitude-workspace" --json
+```
+
+An unfiltered `list` includes the four canonical IDs; filtered lists and `show`
+return only their matched subset. Every row reports `callable` from the matched
+native recipe registry. Thus a standard QuickJS release explains
+the V8 plus pinned-runtime requirements for `threejs.multi-pass.v1` without
+advertising it as runnable. `show` of a known conditional row succeeds because
+metadata availability is not execution evidence. Bad arguments, unknown IDs,
+and unknown symptom tokens return 2; catalog or scaffold I/O failures return 1.
+The scaffold command accepts only an absolute, nonexistent, symlink-free output
+path whose parent directory already exists. It generates an evidence-workspace
+receipt, README, and empty artifacts directory from the catalog row. It does
+not copy a renderer or create another recipe authority.
+
 Every recipe declares deterministic inputs, dimensions, clock, source and
 signature digests, semantic pass names, tolerances, adapter policy, and strict
 artifact byte/count bounds. The result uses
@@ -2519,7 +2543,9 @@ claims cross-backend pixel identity.
 Every build exposes `renderer3d.hardcoded-cube.v1`,
 `gpu-compute.magnitude.v1`, and `gpu-audio.stft.v1`. A build configured with
 both V8 and the pinned Three.js runtime also exposes `threejs.multi-pass.v1`;
-other builds omit that ID from CLI discovery and the MCP enum. The Three.js
+other builds omit that ID from probe help, the callable registry, and the MCP
+probe enum. Recipe metadata discovery still returns the conditional row with
+`callable: false`. The Three.js
 recipe evaluates the SDK's hash-verified
 pinned `three.webgpu.js` runtime through V8 and the native Dawn bridge. It
 captures background, intermediate swatch, and final swatch passes from one
@@ -2546,6 +2572,14 @@ Use `pulp doctor gpu` first for broad environment and adapter health. Use
 artifact. These commands remain Pulp tooling over Dawn/WebGPU; they do not add
 a second renderer or change Vellum's future authority over generic rendering
 primitives.
+
+For an already-running exact product instance, the separate unified-control
+snapshot is `pulp control call --instance <exact-id>
+dev.pulp.gpu/health.read@1 --profile inspect-readonly --params '{}' --json`
+(or MCP `pulp_control_gpu_health_read`). It reports live first-frame health but
+does not run a recipe, render, trace, or prove that a canonical recipe is
+callable. Conversely, a callable catalog row does not prove that a host exposes
+the live operation.
 
 ### clean
 

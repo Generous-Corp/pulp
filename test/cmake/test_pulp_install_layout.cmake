@@ -117,6 +117,31 @@ if(NOT _gpu_probe_schema_compare_rc EQUAL 0)
         "Installed GPU probe result schema differs from the source contract.")
 endif()
 
+foreach(_gpu_recipe_catalog_name IN ITEMS gpu-recipes.yaml gpu-recipes.schema.json)
+    set(_installed_gpu_recipe_catalog_file
+        "${_prefix}/share/pulp/${_gpu_recipe_catalog_name}")
+    set(_source_gpu_recipe_catalog_file
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/status/${_gpu_recipe_catalog_name}")
+    if(NOT EXISTS "${_installed_gpu_recipe_catalog_file}")
+        message(FATAL_ERROR
+            "GPU recipe catalog file is missing from the installed SDK:\n"
+            "${_installed_gpu_recipe_catalog_file}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_recipe_catalog_file}"
+                "${_installed_gpu_recipe_catalog_file}"
+        RESULT_VARIABLE _gpu_recipe_catalog_compare_rc)
+    if(NOT _gpu_recipe_catalog_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed ${_gpu_recipe_catalog_name} differs from the source catalog.")
+    endif()
+endforeach()
+unset(_gpu_recipe_catalog_compare_rc)
+unset(_gpu_recipe_catalog_name)
+unset(_installed_gpu_recipe_catalog_file)
+unset(_source_gpu_recipe_catalog_file)
+
 set(_installed_gpu_health_read_schema
     "${_prefix}/share/pulp/contracts/gpu-health-read-result-v1.schema.json")
 if(NOT EXISTS "${_installed_gpu_health_read_schema}")

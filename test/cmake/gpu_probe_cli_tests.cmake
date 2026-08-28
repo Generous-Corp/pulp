@@ -3,6 +3,104 @@ if(NOT DEFINED PULP_CLI OR NOT DEFINED ARTIFACT_ROOT)
 endif()
 
 file(REMOVE_RECURSE "${ARTIFACT_ROOT}")
+file(MAKE_DIRECTORY "${ARTIFACT_ROOT}")
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes list --json
+    RESULT_VARIABLE catalog_rc
+    OUTPUT_VARIABLE catalog_json
+    ERROR_VARIABLE catalog_stderr)
+if(NOT catalog_rc EQUAL 0)
+    message(FATAL_ERROR "GPU recipe discovery failed (${catalog_rc}): ${catalog_stderr}")
+endif()
+foreach(recipe_id IN ITEMS
+        renderer3d.hardcoded-cube.v1
+        gpu-compute.magnitude.v1
+        gpu-audio.stft.v1
+        threejs.multi-pass.v1)
+    string(FIND "${catalog_json}" "${recipe_id}" recipe_position)
+    if(recipe_position EQUAL -1)
+        message(FATAL_ERROR "canonical discovery omitted ${recipe_id}")
+    endif()
+endforeach()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes list
+        --symptom compute-readback-mismatch --json
+    RESULT_VARIABLE symptom_rc
+    OUTPUT_VARIABLE symptom_json)
+if(NOT symptom_rc EQUAL 0 OR
+   NOT symptom_json MATCHES "gpu-compute.magnitude.v1" OR
+   symptom_json MATCHES "renderer3d.hardcoded-cube.v1")
+    message(FATAL_ERROR "symptom discovery did not return the exact recipe")
+endif()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes list --symptom not-a-symptom --json
+    RESULT_VARIABLE unknown_symptom_rc)
+if(NOT unknown_symptom_rc EQUAL 2)
+    message(FATAL_ERROR "unknown symptom must return exit 2, got ${unknown_symptom_rc}")
+endif()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes list --symptom "" --json
+    RESULT_VARIABLE empty_symptom_rc)
+if(NOT empty_symptom_rc EQUAL 2)
+    message(FATAL_ERROR "empty symptom must return exit 2, got ${empty_symptom_rc}")
+endif()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes show not-a-recipe --json
+    RESULT_VARIABLE unknown_show_rc)
+if(NOT unknown_show_rc EQUAL 2)
+    message(FATAL_ERROR "unknown catalog recipe must return exit 2, got ${unknown_show_rc}")
+endif()
+
+if(PULP_ENABLE_PROJECT_PACKAGE)
+set(scaffold_dir "${ARTIFACT_ROOT}/workspace")
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes scaffold gpu-compute.magnitude.v1
+        --output "${scaffold_dir}" --json
+    RESULT_VARIABLE scaffold_rc
+    OUTPUT_VARIABLE scaffold_json
+    ERROR_VARIABLE scaffold_stderr)
+if(NOT scaffold_rc EQUAL 0 OR
+   NOT EXISTS "${scaffold_dir}/gpu-recipe.json" OR
+   NOT EXISTS "${scaffold_dir}/README.md" OR
+   NOT IS_DIRECTORY "${scaffold_dir}/artifacts")
+    message(FATAL_ERROR "recipe scaffold failed (${scaffold_rc}): ${scaffold_stderr}")
+endif()
+file(READ "${scaffold_dir}/gpu-recipe.json" scaffold_receipt)
+string(JSON scaffold_receipt_schema ERROR_VARIABLE scaffold_receipt_error
+    GET "${scaffold_receipt}" schema)
+if(scaffold_receipt_error OR
+   NOT scaffold_receipt_schema STREQUAL "pulp.gpu-recipe-selection.v1")
+    message(FATAL_ERROR "recipe scaffold did not write a versioned selection receipt")
+endif()
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes scaffold gpu-compute.magnitude.v1
+        --output "${scaffold_dir}"
+    RESULT_VARIABLE existing_scaffold_rc)
+if(NOT existing_scaffold_rc EQUAL 1)
+    message(FATAL_ERROR "existing scaffold destination must return exit 1")
+endif()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes scaffold gpu-compute.magnitude.v1
+        --output "${ARTIFACT_ROOT}/trailing-workspace/"
+    RESULT_VARIABLE trailing_scaffold_rc)
+if(NOT trailing_scaffold_rc EQUAL 0)
+    message(FATAL_ERROR "scaffold destination with a trailing separator must succeed")
+endif()
+
+execute_process(
+    COMMAND "${PULP_CLI}" gpu recipes scaffold gpu-compute.magnitude.v1
+        --output "${ARTIFACT_ROOT}/./dot-workspace"
+    RESULT_VARIABLE dot_scaffold_rc)
+if(NOT dot_scaffold_rc EQUAL 1)
+    message(FATAL_ERROR "scaffold path with a dot component must return exit 1")
+endif()
+endif()
 
 execute_process(
     COMMAND "${PULP_CLI}" gpu probe

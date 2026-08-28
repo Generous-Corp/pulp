@@ -37,6 +37,10 @@ from sdk_provenance import ProvenanceError, verify_build_info_text
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
+GPU_RECIPE_CATALOG_MEMBERS = (
+    "pulp-sdk/share/pulp/gpu-recipes.yaml",
+    "pulp-sdk/share/pulp/gpu-recipes.schema.json",
+)
 LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
 IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
 PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS = LEGACY_CLI_BINARY_STEMS | {
@@ -157,6 +161,8 @@ class ProductMatrix:
     node_runtime_floor: str
     gpu_health_contract_floor: str
     gpu_probe_contract_floor: str
+    gpu_recipe_catalog_floor: str
+    gpu_recipe_catalog_sha256: dict[str, str]
     threejs_runtime_floor: str
     gpu_health_read_contract_floor: str
     gpu_dpr_experiment_contract_floor: str
@@ -226,6 +232,13 @@ class ProductMatrix:
                 gpu_probe_contract_floor=str(
                     doc.get("gpu_probe_contract_floor", "999999.0.0")
                 ),
+                gpu_recipe_catalog_floor=str(
+                    doc.get("gpu_recipe_catalog_floor", "999999.0.0")
+                ),
+                gpu_recipe_catalog_sha256={
+                    str(key): str(value)
+                    for key, value in doc.get("gpu_recipe_catalog_sha256", {}).items()
+                },
                 threejs_runtime_floor=str(
                     doc.get("threejs_runtime_floor", "999999.0.0")
                 ),
@@ -617,6 +630,16 @@ def required_sdk_members(
         )
     if (
         version is not None
+        and version_tuple(version) >= version_tuple(matrix.gpu_recipe_catalog_floor)
+    ):
+        required.update(
+            {
+                "pulp-sdk/share/pulp/gpu-recipes.yaml",
+                "pulp-sdk/share/pulp/gpu-recipes.schema.json",
+            }
+        )
+    if (
+        version is not None
         and version_tuple(version) >= version_tuple(matrix.threejs_runtime_floor)
     ):
         required.update(THREEJS_RUNTIME_SDK_MEMBERS)
@@ -833,6 +856,15 @@ def verify_sdk_archive(
         missing = sorted(required - names)
         if missing:
             raise ContentError(f"{path.name}: missing SDK product(s): {missing}")
+        if version_tuple(version) >= version_tuple(matrix.gpu_recipe_catalog_floor):
+            if set(matrix.gpu_recipe_catalog_sha256) != set(GPU_RECIPE_CATALOG_MEMBERS):
+                raise ContentError("GPU recipe catalog digests are missing from the product matrix")
+            for member in GPU_RECIPE_CATALOG_MEMBERS:
+                actual = hashlib.sha256(archive.read(member)).hexdigest()
+                if actual != matrix.gpu_recipe_catalog_sha256[member]:
+                    raise ContentError(
+                        f"{path.name}: {member} differs from the selected release catalog digest"
+                    )
         if (
             CONTROL_BROKER_SDK_MEMBER in names
             and not control_broker_required(platform, matrix, version)

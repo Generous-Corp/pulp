@@ -161,6 +161,42 @@ SkCanvas → View tree painting
 
 ## Test Coverage
 
+Start a clean-agent investigation with catalog discovery, not a remembered
+recipe ID:
+
+```bash
+pulp gpu recipes list --json
+pulp gpu recipes list --symptom compute-readback-mismatch --json
+mkdir -p "$PWD/artifacts/gpu"
+pulp gpu recipes scaffold gpu-compute.magnitude.v1 \
+  --output "$PWD/artifacts/gpu/magnitude-workspace"
+```
+
+The scaffold destination itself must not exist; its parent must already exist.
+
+Run the scaffolded baseline twice, then its negative control. Baseline exit 0
+means verified pass; the deliberate mutation must produce exit 1; exit 2 means
+the requested evidence was unavailable or unverified and must not be counted as
+a pass. Correlate the emitted `gpu_evidence_id` with the `gpu-probe` Perfetto
+question when the wrong value is downstream of scheduling or frame work.
+
+For a live product, query the exact instance separately with
+`dev.pulp.gpu/health.read@1` under `inspect-readonly`. That cheap snapshot is a
+first-frame/control-plane signal, not a replacement for an offline oracle or a
+Perfetto capture. The catalog's `callable` field is compile/runtime capability;
+it does not claim that a host published the live operation.
+
+Treat trace localization, platform-race proof, and product acceptance as three
+separate gates. For example, a trace can show paint averaging about 1 ms while
+resize spans remain near one 60 Hz frame (roughly 15.7 ms median and 18.7 ms at
+p99), narrowing the investigation to acquire, present, or compositor ordering.
+It cannot by itself prove the root cause. Use an AppKit/GPU event-order harness
+with a planted-old-behavior negative control to prove a redundant same-size
+resize callback or retained-cover lifetime race, then close the loop with a
+60 fps recording and human interaction/feel validation. Trace evidence narrows
+the stage; the deterministic harness proves the platform race; product proof
+shows the fix solved the user-visible problem.
+
 - 13 cross-platform render tests (GpuSurface + SkiaSurface)
 - GPU demo validates continuous animation, vector drawing, resize
 - Headless tests verify surface creation and texture lifecycle

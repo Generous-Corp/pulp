@@ -16,8 +16,8 @@
 #include <future>
 #include <iostream>
 #include <limits>
-#include <optional>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -37,10 +37,10 @@
 
 #include <choc/text/choc_JSON.h>
 
-#include "mcp_compat.hpp"
-#include "mcp_control_tools.hpp"
 #include "gpu_health_result_schema.h"
 #include "gpu_probe_result_schema.h"
+#include "mcp_compat.hpp"
+#include "mcp_control_tools.hpp"
 #include "mcp_json.hpp"
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
@@ -87,9 +87,6 @@ using pulp_mcp::handle_audio_read_bundle;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_build;
-using pulp_mcp::handle_gpu_doctor;
-using pulp_mcp::handle_gpu_probe;
-using pulp_mcp::handle_trace_analyze;
 using pulp_mcp::handle_content;
 using pulp_mcp::handle_content_install;
 using pulp_mcp::handle_content_list;
@@ -99,6 +96,9 @@ using pulp_mcp::handle_content_rescan;
 using pulp_mcp::handle_content_reveal;
 using pulp_mcp::handle_content_update;
 using pulp_mcp::handle_content_validate;
+using pulp_mcp::handle_gpu_doctor;
+using pulp_mcp::handle_gpu_probe;
+using pulp_mcp::handle_gpu_recipes;
 using pulp_mcp::handle_inspect_pending_requests;
 using pulp_mcp::handle_kit;
 using pulp_mcp::handle_kit_apply;
@@ -114,6 +114,7 @@ using pulp_mcp::handle_kit_verify;
 using pulp_mcp::handle_minos;
 using pulp_mcp::handle_status;
 using pulp_mcp::handle_test;
+using pulp_mcp::handle_trace_analyze;
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
 #endif
@@ -150,8 +151,8 @@ format_inspector_command_result(pulp::inspect::InspectorClientResult result) {
 InspectorCommandResult run_control_trace_command(const std::string& method,
                                                  const std::string& params_json = "{}") {
     if (g_trace_session_opener)
-        return format_inspector_command_result(pulp::inspect::request_control_inspector(
-            *g_trace_session_opener, method, params_json));
+        return format_inspector_command_result(
+            pulp::inspect::request_control_inspector(*g_trace_session_opener, method, params_json));
     return format_inspector_command_result(
         pulp::inspect::request_control_inspector(method, params_json));
 }
@@ -343,11 +344,10 @@ parse_inspector_tool_arguments(const choc::value::ValueView& request,
 
         InspectorToolArguments parsed;
         parsed.arguments = choc::value::Value(arguments);
-        parsed.has_legacy_selector = arguments.hasObjectMember("session_id") ||
-                                     arguments.hasObjectMember("instance_id") ||
-                                     arguments.hasObjectMember("publication_id") ||
-                                     arguments.hasObjectMember("host") ||
-                                     arguments.hasObjectMember("port");
+        parsed.has_legacy_selector =
+            arguments.hasObjectMember("session_id") || arguments.hasObjectMember("instance_id") ||
+            arguments.hasObjectMember("publication_id") || arguments.hasObjectMember("host") ||
+            arguments.hasObjectMember("port");
 
         return parsed;
     } catch (...) {
@@ -479,6 +479,8 @@ std::string pulp_mcp::server::tools_list_json() {
         R"JSON({"name":"pulp_gpu_doctor","description":"Run the installed native GPU health doctor and return its typed JSON evidence. Exit 0 is healthy, 1 is an observed failure, and 2 is unavailable or unverified.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"no_render":{"type":"boolean","description":"Skip the active render probe and report it as unverified"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1,2],"description":"Native pulp-cpp process exit code"},"evidence":)JSON";
     out += pulp_mcp::kGpuHealthResultSchemaJson;
     out += R"JSON(}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_gpu_recipes","description":"Discover the canonical installed GPU evidence recipes by id or symptom. All four canonical rows are visible; callable reports whether the matched native CLI build can run each row. This tool never runs GPU work or scaffolds files.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["list","show"],"description":"Discovery action; defaults to list"},"recipe":{"type":"string","description":"Canonical recipe id; required for show"},"symptom":{"type":"string","description":"Exact symptom token filter; valid for list"}}}},)JSON";
 #if PULP_GPU_PROBE_THREEJS_CALLABLE
     out +=
         R"JSON({"name":"pulp_gpu_probe","description":"Run one installed deterministic GPU evidence recipe and return its typed result. The artifact directory must be absolute and may not traverse symlinks. Non-passing evidence remains an MCP error carrying the result.","inputSchema":{"type":"object","additionalProperties":false,"required":["recipe","artifacts"],"properties":{"recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","gpu-audio.stft.v1","threejs.multi-pass.v1"]},"artifacts":{"type":"string","description":"Absolute output directory for bounded hash-declared artifacts"},"negative_control":{"type":"boolean","description":"Apply the recipe's seeded detectable mutation"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1,2],"description":"Native pulp-cpp process exit code: 0 pass, 1 completed failure, 2 unavailable or unverified"},"evidence":)JSON";
@@ -580,7 +582,8 @@ std::string pulp_mcp::server::tools_list_json() {
     // This offline tool intentionally does not participate in Inspector's
     // pulp_trace_* lifecycle registry: it reads a flushed artifact via the
     // sibling installed CLI and has no live-selection authority.
-    out.insert(out.size() - 2,
+    out.insert(
+        out.size() - 2,
         R"JSON(,{"name":"pulp_trace_analyze","description":"Ask one closed GPU question over an already-flushed Perfetto trace. This offline operation does not use canonical capability-control or select a live target. It uses the same checked-in PerfettoSQL view and typed result as the CLI and accepts no free-form SQL.","inputSchema":{"type":"object","required":["question","trace"],"additionalProperties":false,"properties":{"question":{"type":"string","enum":["gpu-startup","gpu-health","gpu-probe"]},"trace":{"type":"string","description":"Path to an already-flushed .pftrace artifact"}}}})JSON");
     return out;
 }
@@ -665,8 +668,7 @@ static std::string handle_request_raw(const std::string& json) {
     if (method == "resources/read") {
         if (!request.hasObjectMember("params") || !request["params"].isObject() ||
             !has_unique_object_members(request["params"]) ||
-            !request["params"].hasObjectMember("uri") ||
-            !request["params"]["uri"].isString())
+            !request["params"].hasObjectMember("uri") || !request["params"]["uri"].isString())
             return json_error(id, -32602, "Invalid control resource params");
         const auto uri = std::string(request["params"]["uri"].getString());
         return control_resource_result(id, pulp_mcp::control_mcp_resource_read_payload(uri));
@@ -740,6 +742,8 @@ static std::string handle_request_raw(const std::string& json) {
             result = handle_validate(args_json);
         else if (name == "pulp_gpu_doctor")
             result = handle_gpu_doctor(args_json);
+        else if (name == "pulp_gpu_recipes")
+            result = handle_gpu_recipes(args_json);
         else if (name == "pulp_gpu_probe")
             result = handle_gpu_probe(args_json);
         else if (name == "pulp_minos")
@@ -955,8 +959,8 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
     }
     std::mutex output_mutex;
     std::atomic_bool content_length_mode{false};
-    pulp_mcp::set_control_mcp_notification_sink(
-        [&output_mutex, &content_length_mode](std::string notification) {
+    pulp_mcp::set_control_mcp_notification_sink([&output_mutex,
+                                                 &content_length_mode](std::string notification) {
         std::lock_guard lock(output_mutex);
         if (content_length_mode.load())
             std::cout << "Content-Length: " << notification.size() << "\r\n\r\n" << notification;
@@ -999,8 +1003,7 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
     std::condition_variable request_condition;
     std::deque<std::pair<std::string, bool>> requests;
     bool input_finished = false;
-    const auto write_response = [&output_mutex](std::string response,
-                                                 bool content_length_framed) {
+    const auto write_response = [&output_mutex](std::string response, bool content_length_framed) {
         if (response.empty())
             return;
         std::lock_guard lock(output_mutex);
@@ -1043,9 +1046,9 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
                 std::lock_guard lock(request_mutex);
                 if (requests.size() >= 64) {
                     auto id = extract_raw(body, "id");
-                    write_response(json_error(id.empty() ? "null" : id, -32001,
-                                              "MCP request queue is full"),
-                                   content_length_framed);
+                    write_response(
+                        json_error(id.empty() ? "null" : id, -32001, "MCP request queue is full"),
+                        content_length_framed);
                     return;
                 }
                 requests.emplace_back(std::move(body), content_length_framed);
