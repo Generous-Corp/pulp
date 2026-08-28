@@ -75,6 +75,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/path_switcher.hpp": "Pulp::signal",
     "pulp/signal/particle_collision_exciter.hpp": "Pulp::signal",
     "pulp/signal/particle_percussion_voice.hpp": "Pulp::signal",
+    "pulp/signal/drum/tom.hpp": "Pulp::signal",
     "pulp/signal/rise_fall_generator.hpp": "Pulp::signal",
     "pulp/signal/reed_waveguide_loop.hpp": "Pulp::signal",
     "pulp/signal/scope_capture.hpp": "Pulp::signal",
@@ -514,13 +515,23 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:419c6e831cfe4aa999c21f918ad453ecf03ae07ea8317c8def0be9cd4d67e698",
+        "fingerprint": "sha256:6fb9907ba6984a2b76af66bd3a8f9a4e3008f4f0f29526beb6fbed64cafa6400",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "FastMath is shared scalar/SIMD implementation infrastructure rather "
             "than a standalone semantic DSP unit. Its bounded trig profiles are "
             "advertised through accepted consumer capabilities, not as raw math."
+        ),
+    },
+    {
+        "include": "pulp/signal/ladder_filter.hpp",
+        "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.drum-tom-voice"],
+        "rationale": (
+            "The generic ladder owns the compile-time saturation dispatch used by "
+            "the measured tom consumer; it is not independently advertised."
         ),
     },
     {

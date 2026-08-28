@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <string_view>
 
 namespace pulp::signal::drum {
@@ -47,6 +48,11 @@ namespace pulp::signal::drum {
 /// `note_on` and `process`, allocates nothing and takes no locks.
 class TomVoice : public Voice {
 public:
+    enum class LadderMathProfile : std::uint8_t {
+        reference,
+        realtime_efficient,
+    };
+
     /// Body waveform. Triangle is the authentic choice for the analogue
     /// electronic voices -- their oscillators were triangle cores -- and it
     /// carries odd harmonics that survive a small speaker where a sine does
@@ -138,6 +144,22 @@ public:
     }
 
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
+
+    /// Selects the noise ladder's saturation curve between hits. Reference is
+    /// the default; realtime_efficient uses Pulp's bounded Padé tanh.
+    bool set_ladder_math_profile(LadderMathProfile profile) noexcept {
+        if (profile != LadderMathProfile::reference &&
+            profile != LadderMathProfile::realtime_efficient)
+            return false;
+        if (is_active()) return false;
+        if (profile != ladder_math_profile_) noise_filter_.reset();
+        ladder_math_profile_ = profile;
+        return true;
+    }
+
+    LadderMathProfile ladder_math_profile() const noexcept {
+        return ladder_math_profile_;
+    }
 
     /// The beater. Short and highpassed: a tom's attack is the stick, not the
     /// head.
@@ -252,6 +274,15 @@ protected:
     }
 
     void render_add(float* out, int num_samples) override {
+        if (ladder_math_profile_ == LadderMathProfile::realtime_efficient)
+            render_add_profiled<true>(out, num_samples);
+        else
+            render_add_profiled<false>(out, num_samples);
+    }
+
+private:
+    template <bool RealtimeEfficient>
+    void render_add_profiled(float* out, int num_samples) {
         const double oscillator_mix = 1.0 - noise_balance_;
 
         for (int i = 0; i < num_samples; ++i) {
@@ -279,7 +310,9 @@ protected:
             double hiss = 0.0;
             if (noise_balance_ > 0.0) {
                 hiss = noise_balance_ *
-                       static_cast<double>(noise_filter_.process(noise_.process()));
+                       static_cast<double>(RealtimeEfficient
+                           ? noise_filter_.process_realtime_efficient(noise_.process())
+                           : noise_filter_.process_reference(noise_.process()));
             }
             hiss = static_cast<double>(noise_lofi_.process(static_cast<float>(hiss)));
 
@@ -293,7 +326,6 @@ protected:
         }
     }
 
-private:
     double tune_hz_ = 120.0;
     double bend_octaves_ = 1.0;
     double bend_ms_ = 30.0;
@@ -302,6 +334,7 @@ private:
     double noise_balance_ = 0.15;
     double noise_cutoff_hz_ = 1500.0;
     double noise_resonance_ = 0.3;
+    LadderMathProfile ladder_math_profile_ = LadderMathProfile::reference;
 
     NoiseSource noise_;
     DecayEnvelope64 amp_env_;

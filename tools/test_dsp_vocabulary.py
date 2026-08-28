@@ -181,6 +181,35 @@ class CharacterAdjacent {
         print(f"FAIL: adjacent character literal corrupted the class body: {methods!r}")
         return 1
 
+    tom_fixture = """
+class TomVoice {
+  public:
+    void a();
+    void b();
+    void c();
+    void d();
+    void e();
+    void f();
+    void g();
+    void h();
+    void i();
+    void j();
+    void k();
+    void l();
+    void apply_preset();
+    void body_lofi();
+    void set_ladder_math_profile();
+    void ladder_math_profile();
+    void crowded_out();
+};
+"""
+    methods = extractor.public_methods(tom_fixture, "TomVoice")
+    if len(methods) != 16 or methods[-4:] != [
+            "apply_preset()", "body_lofi()",
+            "set_ladder_math_profile()", "ladder_math_profile()"]:
+        print(f"FAIL: Tom compatibility extension displaced established APIs: {methods!r}")
+        return 1
+
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],
                        capture_output=True, text=True)
     if r.returncode != 0:

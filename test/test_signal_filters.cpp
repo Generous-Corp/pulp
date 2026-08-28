@@ -352,6 +352,36 @@ TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]
 #endif
 }
 
+TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
+          "[signal][ladder][fast_math]") {
+    constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.7f;
+    LadderFilter reference;
+    LadderFilter efficient;
+    for (auto* ladder : {&reference, &efficient}) {
+        ladder->set_sample_rate(kSr);
+        ladder->set_frequency(kFc);
+        ladder->set_resonance(kRes);
+    }
+
+    std::vector<float> drive;
+    drive.reserve(2048);
+    float reference_output = 0.0f;
+    float efficient_output = 0.0f;
+    for (int i = 0; i < 2048; ++i) {
+        const float sample =
+            3.0f * std::sin(2.0f * 3.14159265f * 220.0f * static_cast<float>(i) / kSr);
+        drive.push_back(sample);
+        reference_output = reference.process_reference(sample);
+        efficient_output = efficient.process_realtime_efficient(sample);
+    }
+
+    REQUIRE_THAT(reference_output,
+                 WithinAbs(ladder_reference_std_tanh(drive, kSr, kFc, kRes), 1e-5f));
+    REQUIRE_THAT(efficient_output,
+                 WithinAbs(ladder_reference_fast_tanh(drive, kSr, kFc, kRes), 1e-3f));
+    REQUIRE(std::abs(reference_output - efficient_output) > 1e-5f);
+}
+
 TEST_CASE("LadderFilter double instantiation still uses libm tanh", "[signal][ladder]") {
     // FastMath::tanh is float-only; the double path must remain exact enough
     // that a strict tanh-based reference matches to double tolerance.
