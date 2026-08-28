@@ -202,6 +202,8 @@ set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
 add_test(NAME cmake-pulp-install-layout
     COMMAND ${CMAKE_COMMAND}
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_EXPECT_GPU_CLI=$<BOOL:$<TARGET_EXISTS:pulp-cli>>
+        -DPULP_EXPECT_RUST_CLI=$<BOOL:$<TARGET_EXISTS:pulp-rust-cli>>
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_install_layout.cmake)
 set_tests_properties(cmake-pulp-install-layout PROPERTIES
     # `slow`: runs `cmake --install` from this build into a

@@ -141,6 +141,7 @@ class ProductMatrix:
     control_broker_floor: str
     control_standalone_host_floor: str
     node_runtime_floor: str
+    gpu_health_contract_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
     # `platforms` stays the full historical inventory (per-platform archive
@@ -200,6 +201,9 @@ class ProductMatrix:
                 ),
                 node_runtime_floor=str(
                     doc.get("node_runtime_floor", "999999.0.0")
+                ),
+                gpu_health_contract_floor=str(
+                    doc.get("gpu_health_contract_floor", "999999.0.0")
                 ),
                 platforms=tuple(doc["platforms"]),
                 active_platforms=tuple(
@@ -566,6 +570,13 @@ def required_sdk_members(
         )
         required.update(
             sdk_import_design_runtime_members(platform, matrix, version)
+        )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.gpu_health_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
         )
     return frozenset(required)
 

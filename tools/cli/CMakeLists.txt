@@ -76,6 +76,7 @@ add_executable(pulp-cli
     cmd_design.cpp
     cmd_design_subcommands.cpp
     cmd_doctor.cpp
+    cmd_doctor_gpu.cpp
     cmd_docs.cpp
     cmd_authority.cpp
     authority_navigation.cpp
@@ -161,7 +162,8 @@ set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
-    pulp::ship pulp::view pulp::render pulp::format pulp::host)
+    pulp::ship pulp::view pulp::render pulp::format pulp::host
+    pulp::tool-gpu-health-probes)
 target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)

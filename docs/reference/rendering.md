@@ -215,6 +215,34 @@ style.line_thickness = 2.0f;
 canvas.draw_waveform(samples, count, x, y, w, h, style);
 ```
 
+## GPU Health Evidence
+
+Use `pulp doctor gpu --json` for a bounded, machine-readable check of the
+installed render and compute paths. It creates an offscreen Dawn/Skia surface,
+submits a known draw, reads back pixels, then submits and maps a known compute
+result. `pulp doctor gpu --no-render --json` is an inventory/preflight mode that
+acquires no GPU device, performs no render or compute work, and reports the run
+as unverified.
+
+The diagnostic emits the versioned
+[`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
+contract and exits 0 for a real pass, 1 for a completed measured failure, or 2
+when requested evidence is unavailable or unverified. Backend selection and
+adapter identity are separate facts: never infer a hardware or discrete adapter
+from a Metal, D3D12, Vulkan, or other backend label. A null/software adapter is
+not hardware proof. Probe identities are independent and do not assert
+same-device correlation. Exit 0 requires authentic identity from at least one
+required probe plus required render/readback/content proof; use the per-probe
+fields when correlation matters.
+
+The render check consumes the existing `Renderer3D` and `HeadlessSurface`
+interfaces; it does not create another renderer. `HeadlessSurface` is a
+Vellum-authoritative framework surface, so Pulp's diagnostic may consume it but
+must not change its generic API. A required `HeadlessSurface` change stops the
+Pulp implementation and is routed to Vellum through the ownership projection.
+The compute check remains offline/background work and does not enter the audio
+callback.
+
 ## GPU-Assisted Audio Analysis
 
 GPU-assisted audio work is an offline/background analysis capability, not a

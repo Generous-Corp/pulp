@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace pulp_mcp {
+
+inline constexpr std::string_view kGpuHealthResultSchemaJson =
+    R"GPU_HEALTH_V1(@PULP_GPU_HEALTH_RESULT_SCHEMA_JSON@)GPU_HEALTH_V1";
+
+} // namespace pulp_mcp

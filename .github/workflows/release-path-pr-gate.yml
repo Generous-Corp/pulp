@@ -142,9 +142,11 @@ jobs:
       - name: Configure (CLI, no WebView on Linux, GPU required)
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
+          SCENE3D="-DPULP_ENABLE_SCENE3D=OFF"
           case "${{ matrix.platform }}" in
             darwin-arm64|linux-x64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
+              SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;
           esac
           # Examples OFF to match release-cli.yml, whose build steps this gate
@@ -157,6 +159,7 @@ jobs:
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             -DPULP_ENABLE_INSPECTOR=ON \
             $REQUIRE_GPU \
+            $SCENE3D \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
 

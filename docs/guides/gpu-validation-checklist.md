@@ -2,6 +2,42 @@
 
 Status of GPU rendering verification across platforms and configurations.
 
+## Start With the Bounded Health Probe
+
+Run the installed diagnostic before inspecting build files or opening a live
+window:
+
+```bash
+pulp doctor gpu --json
+```
+
+The command performs a known offscreen draw plus pixel readback and a known
+compute submission plus mapped-result verification. Use
+`pulp doctor gpu --no-render --json` only for inventory/preflight when device
+acquisition itself must be avoided; it performs no active render or compute
+work and returns unverified. Both commands work outside a source checkout.
+Agents can request the same typed evidence with the
+`pulp_gpu_doctor` MCP tool.
+
+Interpret the exit status with the JSON evidence:
+
+- `0` means all required real-work proofs passed and at least one required
+  probe reported authentic adapter identity.
+- `1` means the work completed but a measured assertion failed.
+- `2` means a requested stage was unavailable or could not be verified.
+
+Do not turn exit 2 into a skipped pass. Likewise, do not infer a discrete or
+hardware adapter from a Metal, D3D12, Vulkan, or other backend label. Trust only
+the adapter identity returned by Dawn; a null/software adapter is useful for
+negative coverage but is never hardware proof. Identities are per probe and do
+not claim Renderer3D, HeadlessSurface, and GpuCompute acquired the same device.
+
+If the diagnostic reports unavailable or unverified, follow the remediation in
+the result, then use the [Skia GPU build skill](../../.agents/skills/skia-gpu-build/SKILL.md)
+to inspect bundle discovery and ABI details. If it reports a completed failure,
+preserve the JSON result and reproduce with the focused render/compute tests
+before moving to a live application.
+
 ## Verified (Real Hardware)
 
 | Platform | Backend | Surface | Rendering | Status |
@@ -63,3 +99,5 @@ SkCanvas → View tree painting
 - 13 cross-platform render tests (GpuSurface + SkiaSurface)
 - GPU demo validates continuous animation, vector drawing, resize
 - Headless tests verify surface creation and texture lifecycle
+- `pulp doctor gpu` verifies bounded render/readback and compute/map work using
+  the same public rendering primitives an installed consumer uses

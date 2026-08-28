@@ -19,6 +19,7 @@
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
+#include "mcp_tools_internal.hpp"
 #include "pulp_mcp_version.h"
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 #include "timeline_mcp_tools.h"
@@ -447,6 +448,48 @@ TEST_CASE("MCP inspector CLI resolver selects pulp-cpp over the Rust CLI",
     REQUIRE(pulp_mcp::resolve_inspect_cli_binary(project.path) == inspect_cli);
 }
 
+TEST_CASE("MCP GPU doctor resolver selects deterministic installed and build peers",
+          "[mcp][shell][gpu-doctor]") {
+    TempDir install;
+#if defined(_WIN32)
+    const auto mcp = install.path / "bin" / "pulp-mcp.exe";
+    const auto expected = install.path / "bin" / "pulp-cpp.exe";
+#else
+    const auto mcp = install.path / "bin" / "pulp-mcp";
+    const auto expected = install.path / "bin" / "pulp-cpp";
+#endif
+    REQUIRE(sibling_pulp_cpp_path(mcp) == expected);
+
+#if defined(_WIN32)
+    const auto source_mcp = install.path / "build" / "tools" / "mcp" / "pulp-mcp.exe";
+    const auto source_cli = install.path / "build" / "tools" / "cli" / "pulp-cpp.exe";
+    const auto multi_mcp = install.path / "multi" / "tools" / "mcp" / "Release" / "pulp-mcp.exe";
+    const auto multi_cli = install.path / "multi" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
+#else
+    const auto source_mcp = install.path / "build" / "tools" / "mcp" / "pulp-mcp";
+    const auto source_cli = install.path / "build" / "tools" / "cli" / "pulp-cpp";
+    const auto multi_mcp = install.path / "multi" / "tools" / "mcp" / "Release" / "pulp-mcp";
+    const auto multi_cli = install.path / "multi" / "tools" / "cli" / "Release" / "pulp-cpp";
+#endif
+    std::filesystem::create_directories(source_cli.parent_path());
+    std::ofstream(source_cli) << "fake";
+    REQUIRE(sibling_pulp_cpp_path(source_mcp) == source_cli);
+    std::filesystem::create_directories(multi_cli.parent_path());
+    std::ofstream(multi_cli) << "fake";
+    REQUIRE(sibling_pulp_cpp_path(multi_mcp) == multi_cli);
+}
+
+TEST_CASE("MCP resolves the running image independently of argv0 and cwd",
+          "[mcp][shell][gpu-doctor]") {
+    TempDir unrelated;
+    ScopedCurrentPath cwd(unrelated.path);
+    const auto executable = current_process_executable_path("pulp-mcp");
+    REQUIRE(executable.is_absolute());
+    REQUIRE(std::filesystem::is_regular_file(executable));
+    REQUIRE(executable.filename().string().find("pulp-test-mcp-server") !=
+            std::string::npos);
+}
+
 TEST_CASE("MCP shell exec returns stdout and failure diagnostics", "[mcp][shell]") {
 #if defined(_WIN32)
     auto ok = exec("cmd /c echo|set /p=pulp-mcp");
@@ -641,6 +684,12 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_plugin_inspect")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
+    require_contains(tools, R"JSON("name":"pulp_gpu_doctor")JSON");
+    require_contains(tools, R"JSON("no_render":{"type":"boolean")JSON");
+    require_contains(tools, R"JSON("outputSchema":{"type":"object")JSON");
+    require_contains(tools, R"JSON("exit_code":{"type":"integer","enum":[0,1,2])JSON");
+    require_contains(tools, R"JSON("schema": { "const": "pulp.gpu-health-result.v1")JSON");
+    require_contains(tools, R"JSON("required": { "type": "boolean")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     REQUIRE(tools.find(R"JSON("name":"pulp_inspect_audio")JSON") == std::string::npos);
     require_contains(tools, R"JSON("name":"pulp_kit")JSON");
@@ -684,6 +733,112 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(unknown, R"JSON("id":5)JSON");
     require_contains(unknown, R"JSON("code":-32601)JSON");
     require_contains(unknown, "Unknown tool: pulp_does_not_exist");
+}
+
+TEST_CASE("MCP GPU doctor preserves typed evidence and status",
+          "[mcp][tools][gpu-doctor]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp-cpp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp-cpp";
+#endif
+    const auto evidence_path = bin / "gpu-health-evidence.json";
+    const auto write_cli = [&](int status, const std::string& fixture_name) {
+        std::ifstream fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" /
+                              fixture_name);
+        REQUIRE(fixture);
+        std::ofstream evidence(evidence_path, std::ios::trunc);
+        evidence << fixture.rdbuf();
+        evidence.close();
+        std::ofstream script(cli, std::ios::trunc);
+#if defined(_WIN32)
+        script << "@echo off\r\n"
+               << "type \"" << evidence_path.string() << "\"\r\n"
+               << "exit /b " << status << "\r\n";
+#else
+        script << "#!/bin/sh\n"
+               << "cat " << pulp_mcp::shell_quote(evidence_path.string()) << "\n"
+               << "exit " << status << "\n";
+#endif
+        script.close();
+        std::filesystem::permissions(cli,
+                                     std::filesystem::perms::owner_exec |
+                                         std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::add);
+    };
+
+    configure_gpu_doctor_executable(mcp.string());
+    const auto unrelated_cwd = install.path / "unrelated" / "working-directory";
+    std::filesystem::create_directories(unrelated_cwd);
+    ScopedCurrentPath cwd(unrelated_cwd);
+    struct Outcome { int status; const char* fixture; const char* verdict; bool no_render; };
+    const std::array<Outcome, 3> outcomes = {
+        Outcome{0, "pass-hardware.json", "pass", false},
+        Outcome{1, "fail-async-invalid-wgsl.json", "fail", false},
+        Outcome{2, "unverified-no-render.json", "unverified", true},
+    };
+    for (const auto& outcome : outcomes) {
+        write_cli(outcome.status, outcome.fixture);
+        const auto response =
+            handle_request(tool_call("51", "pulp_gpu_doctor",
+                                     outcome.no_render ? R"JSON({"no_render":true})JSON"
+                                                       : R"JSON({"no_render":false})JSON"));
+        require_contains(response, "\"exit_code\":" + std::to_string(outcome.status));
+        require_contains(response, R"JSON("schema":"pulp.gpu-health-result.v1")JSON");
+        require_contains(response, "\"verdict\":\"" + std::string(outcome.verdict) + "\"");
+        if (outcome.status == 0)
+            REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        else
+            require_contains(response, R"JSON("isError":true)JSON");
+    }
+
+    const auto invalid =
+        handle_request(tool_call("52", "pulp_gpu_doctor", R"JSON({"no_render":"yes"})JSON"));
+    require_contains(invalid, "invalid-arguments");
+    require_contains(invalid, R"JSON("isError":true)JSON");
+    REQUIRE(invalid.find(R"JSON("structuredContent")JSON") == std::string::npos);
+
+    const auto unknown =
+        handle_request(tool_call("53", "pulp_gpu_doctor", R"JSON({"bogus":true})JSON"));
+    require_contains(unknown, "invalid-arguments");
+    REQUIRE(unknown.find(R"JSON("structuredContent")JSON") == std::string::npos);
+
+    write_cli(2, "pass-hardware.json");
+    const auto exit_mismatch = handle_request(
+        tool_call("54", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(exit_mismatch, "incoherent-cli-output");
+    REQUIRE(exit_mismatch.find(R"JSON("structuredContent")JSON") == std::string::npos);
+
+    write_cli(0, "pass-hardware.json");
+    const auto mode_mismatch = handle_request(
+        tool_call("55", "pulp_gpu_doctor", R"JSON({"no_render":true})JSON"));
+    require_contains(mode_mismatch, "incoherent-cli-output");
+
+    std::ofstream(evidence_path, std::ios::trunc) << "{}\n";
+    const auto malformed = handle_request(
+        tool_call("56", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(malformed, "malformed-cli-output");
+    REQUIRE(malformed.find(R"JSON("structuredContent")JSON") == std::string::npos);
+
+    auto wrong_version = std::ifstream(repo_root_path() / "test" / "fixtures" /
+                                       "gpu-ux" / "pass-hardware.json");
+    REQUIRE(wrong_version);
+    std::string wrong_json{std::istreambuf_iterator<char>(wrong_version),
+                           std::istreambuf_iterator<char>()};
+    const auto version_offset = wrong_json.find("\"version\": 1");
+    REQUIRE(version_offset != std::string::npos);
+    wrong_json.replace(version_offset, std::string("\"version\": 1").size(),
+                       "\"version\": 2");
+    std::ofstream(evidence_path, std::ios::trunc) << wrong_json;
+    const auto unsupported = handle_request(
+        tool_call("57", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(unsupported, "malformed-cli-output");
 }
 
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS

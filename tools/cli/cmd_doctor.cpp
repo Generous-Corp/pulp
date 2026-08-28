@@ -159,6 +159,11 @@ void render_host_quirks_section(std::ostream& os, bool color) {
 }  // namespace
 
 int cmd_doctor(const std::vector<std::string>& args) {
+    if (!args.empty() && args.front() == "gpu") {
+        return cmd_doctor_gpu(
+            std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+
     bool standalone_mode = false;
     auto active_root = resolve_active_project_root(&standalone_mode);
     auto root = standalone_mode ? fs::path{} : active_root;

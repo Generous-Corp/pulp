@@ -1682,6 +1682,10 @@
             "kind": "flag"
           },
           {
+            "name": "--no-render",
+            "kind": "flag"
+          },
+          {
             "name": "--host-quirks",
             "kind": "flag"
           },
@@ -4436,6 +4440,10 @@
       {
         "name": "pulp_get_view_tree",
         "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_gpu_doctor",
+        "disposition": "pulp-owned"
       },
       {
         "name": "pulp_inspect_pending_requests",

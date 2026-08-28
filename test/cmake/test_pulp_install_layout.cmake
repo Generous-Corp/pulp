@@ -78,6 +78,50 @@ if(NOT _header_parity_rc EQUAL 0)
         "${_header_parity_stdout}${_header_parity_stderr}")
 endif()
 
+# Installed CLI/MCP consumers must be able to locate the exact versioned
+# machine contract without a Pulp checkout. Check both presence and bytes so a
+# stale generated copy cannot silently diverge from the implementation corpus.
+set(_installed_gpu_health_schema
+    "${_prefix}/share/pulp/contracts/gpu-health-result-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_health_schema}")
+    message(FATAL_ERROR
+        "GPU health result schema is missing from the installed SDK:\n"
+        "${_installed_gpu_health_schema}")
+endif()
+set(_source_gpu_health_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-health-result-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_health_schema}" "${_installed_gpu_health_schema}"
+    RESULT_VARIABLE _gpu_health_schema_compare_rc)
+if(NOT _gpu_health_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health result schema differs from the source contract.")
+endif()
+
+set(_gpu_health_front_args
+    --prefix "${_prefix}")
+if(PULP_EXPECT_GPU_CLI)
+    list(APPEND _gpu_health_front_args --require-cpp)
+endif()
+if(PULP_EXPECT_RUST_CLI)
+    list(APPEND _gpu_health_front_args --require-rust)
+endif()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONDONTWRITEBYTECODE=1"
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_LIST_DIR}/../../tools/scripts/test_gpu_health_installed_fronts.py"
+            ${_gpu_health_front_args}
+    RESULT_VARIABLE _gpu_health_fronts_rc
+    OUTPUT_VARIABLE _gpu_health_fronts_stdout
+    ERROR_VARIABLE _gpu_health_fronts_stderr)
+if(NOT _gpu_health_fronts_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health CLI/MCP fronts failed:\n"
+        "${_gpu_health_fronts_stdout}${_gpu_health_fronts_stderr}")
+endif()
+unset(_gpu_health_front_args)
+
 # Locate the installed PulpUtils.cmake — Pulp installs into
 # ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp, which is libdir/cmake/Pulp on
 # every platform. libdir varies (lib vs lib64); glob both.
@@ -295,4 +339,5 @@ message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
     "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
     "min_os.json bundled and wired into PulpConfig.cmake, pulp::osc header + "
-    "target exported; Ableton Link header, target, and SDK path absent. All present.")
+    "target exported; GPU health contract installed byte-exactly; Ableton Link "
+    "header, target, and SDK path absent. All present.")

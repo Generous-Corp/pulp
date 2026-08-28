@@ -648,6 +648,17 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "SDK importer runtime and release product matrix drifted",
         )
 
+    def test_gpu_health_contract_is_required_from_its_release_floor(self) -> None:
+        member = "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.816.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+        )
+
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
         legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
         self.assertEqual(
@@ -1057,6 +1068,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_health_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-health-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_missing_sdk_importer_runtime_fires_at_new_floor(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1295,6 +1322,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             document = json.loads(rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8"))
             del document["sdk_provenance_floor"]
             del document["capability_handoff_floor"]
+            del document["gpu_health_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1302,6 +1330,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
             self.assertEqual(

@@ -51,6 +51,17 @@ authorizes maintenance routing only; it does not authorize Pulp consumption,
 downstream cutover, or implementation before the corresponding Vellum
 acknowledgement.
 
+## GPU doctor boundary
+
+Pulp owns the `pulp doctor gpu` CLI/MCP adapters, typed GPU-health evidence,
+fixtures, tests, documentation, and skills. Those adapters may consume the
+existing `Renderer3D`, `GpuCompute`, and `HeadlessSurface` interfaces.
+`HeadlessSurface` itself is in the Vellum-authoritative transferred rendering
+slice: do not change its header, implementation, or generic contract as part of
+a Pulp GPU-doctor change. If the diagnostic cannot be implemented through the
+existing interface, stop and route the required framework change to
+`Generous-Corp/vellum`; do not add a Pulp-side duplicate or compatibility API.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:

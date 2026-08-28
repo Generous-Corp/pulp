@@ -1,0 +1,5 @@
+uniform half4 color
+
+half4 main(float2 position) {
+    return missing_symbol;
+}

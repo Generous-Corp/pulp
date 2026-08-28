@@ -364,6 +364,20 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
 
+    # Closed-schema and semantic negative controls for the shared GPU health
+    # envelope. This is intentionally GPU-free so every platform proves the
+    # contract even when no real adapter is available.
+    add_test(NAME gpu-health-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_contract.py")
+    if(UNIX AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME gpu-health-cpu-only-configure
+            COMMAND bash
+                "${CMAKE_SOURCE_DIR}/test/cmake/test_gpu_health_cpu_only_configure.sh"
+                "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(gpu-health-cpu-only-configure PROPERTIES
+            LABELS "slow;gpu-health")
+    endif()
+
     # PR-check triage: comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
     # diagnostic), plus the CLI's paginated check-run decoding.

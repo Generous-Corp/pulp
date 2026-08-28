@@ -47,6 +47,42 @@ Equally, do not fix it by configuring the secret on more hosts — that makes th
 test pass without making the behaviour correct, and spreads a release credential
 to machines with no use for it.
 
+### `pulp doctor gpu` is a typed diagnostic subcommand
+
+`pulp doctor gpu [--no-render] [--json]` performs bounded render/readback and
+compute/map work. It is not another row in the default `DoctorCheck` registry:
+its four-state evidence and exit contract are distinct. Exit 0 means every
+requested stage passed, exit 1 means requested work completed and a measured
+assertion failed, and exit 2 means a requested stage was unavailable or its
+evidence could not be verified. `--no-render` is an inventory/preflight mode:
+it acquires no GPU device, runs no render or compute work, and returns
+`unverified` rather than passed.
+
+Keep adapter identity authentic. Backend selection is not hardware identity;
+never infer a discrete or hardware adapter from Metal, D3D12, Vulkan, or another
+backend name, and never call a null/software adapter a hardware pass. JSON uses
+the installed `pulp.gpu-health-result.v1` contract.
+
+The installed Rust `pulp` delegates this leaf to its installed sibling
+`pulp-cpp`. The `pulp_gpu_doctor` MCP sub-tool resolves that installed sibling
+from the MCP executable location, preserves exit 0/1/2 with the typed evidence,
+and works from a directory with no Pulp checkout. Do not link the GPU render
+stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
+
+- `tools/cli/gpu_health/**`, `tools/cli/cmd_doctor.cpp`, and Rust doctor help and
+  delegation coverage
+- `tools/mcp/mcp_gpu*`, tools-list/dispatch coverage, and
+  `tools/scripts/cli_mcp_parity_baseline.json`
+- `docs/contracts/gpu-health-result-v1.schema.json`,
+  `test/fixtures/gpu-ux/**`, `docs/status/cli-commands.yaml`,
+  `docs/reference/cli.md`, `docs/guides/gpu-validation-checklist.md`, and
+  `.claude/commands/doctor.md`
+- the `skia-gpu-build` and Pulp–Vellum routing skills plus
+  `tools/scripts/skill_path_map.json`
+
+This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
+skills; adding a separate GPU-doctor skill would duplicate their ownership.
+
 ### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
 
 These checks query live GitHub state, so a test asserting "the command succeeds"

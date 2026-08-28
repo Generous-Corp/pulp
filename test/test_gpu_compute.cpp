@@ -1468,7 +1468,9 @@ TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
 
     const auto caps = compute->capabilities();
     REQUIRE(caps.available);
+    REQUIRE(caps.adapter_info_authentic);
     REQUIRE_FALSE(caps.backend.empty());
+    REQUIRE_FALSE(caps.adapter_type.empty());
     REQUIRE(caps.max_storage_buffer_binding_size > 0);
     REQUIRE(caps.max_buffer_size > 0);
     // Our compute kernels dispatch at workgroup_size(256).
