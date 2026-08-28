@@ -15,7 +15,7 @@
 #include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
-#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/accessibility.hpp>
@@ -635,7 +635,7 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     if (!fv->accepts_text_input() && fv->accepts_navigation_input()) {
         if (!pulp_is_navigation_key(ke.key, ke.modifiers)) return false;
         const bool consumed = fv->on_key_event(ke) ||
-            pulp::view::WidgetBridge::dispatch_key_for_root(
+            pulp::view::script_events::dispatch_key_for_root(
                 *root, static_cast<int>(ke.key), ke.modifiers, true);
         if (consumed) root->request_repaint();
         return consumed;

@@ -31,7 +31,7 @@
 // host or behind an `InputRouterHost` method — not in this file.
 
 #include <pulp/view/pointer_dispatch.hpp>
-#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/view.hpp>
@@ -392,7 +392,7 @@ public:
             if (!allowed) return false;
             consumed = focused->on_key_event(event);
             if (!consumed) {
-                consumed = WidgetBridge::dispatch_key_for_root(
+                consumed = script_events::dispatch_key_for_root(
                     host_.input_root(), static_cast<int>(key), modifiers, is_down);
             }
         } else {

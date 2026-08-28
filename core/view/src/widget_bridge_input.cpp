@@ -84,13 +84,14 @@ bool shortcut_key_matches(KeyCode registered_key, int incoming_key_code) noexcep
     return false;
 }
 
-struct ScriptGlobalKeyDispatcherRegistrar {
-    ScriptGlobalKeyDispatcherRegistrar() {
+struct ScriptKeyDispatcherRegistrar {
+    ScriptKeyDispatcherRegistrar() {
         script_events::set_global_key_dispatcher(&WidgetBridge::dispatch_global_key);
+        script_events::set_root_key_dispatcher(&WidgetBridge::dispatch_key_for_root);
     }
 };
 
-const ScriptGlobalKeyDispatcherRegistrar script_global_key_dispatcher_registrar;
+const ScriptKeyDispatcherRegistrar script_key_dispatcher_registrar;
 
 } // namespace
 

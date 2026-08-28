@@ -202,3 +202,37 @@ TEST_CASE("core script global-key dispatcher reaches the WidgetBridge fan-out",
     REQUIRE(engine.evaluate("count()").getWithDefault<int>(-1) == 1);
     REQUIRE(engine.evaluate("at(0)").toString() == "s");
 }
+
+TEST_CASE("core root-key dispatcher reaches only the matching WidgetBridge",
+          "[view][widget-bridge][keyboard][wireup]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine_a;
+    View root_a;
+    StateStore store_a;
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    bridge_a.load_script(R"JS(
+        var events = [];
+        window.addEventListener('keydown', function(e) {
+            events.push(e.key);
+            e.preventDefault();
+        });
+        function count() { return events.length; }
+    )JS");
+
+    ScriptEngine engine_b;
+    View root_b;
+    StateStore store_b;
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+    bridge_b.load_script(R"JS(
+        var events = [];
+        window.addEventListener('keydown', function(e) { events.push(e.key); });
+        function count() { return events.length; }
+    )JS");
+
+    REQUIRE(script_events::dispatch_key_for_root(
+        root_a, static_cast<int>(KeyCode::down), 0, /*is_down=*/true));
+    REQUIRE(engine_a.evaluate("count()").getWithDefault<int>(-1) == 1);
+    REQUIRE(engine_b.evaluate("count()").getWithDefault<int>(-1) == 0);
+}
