@@ -21,6 +21,10 @@ curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 irm https://www.generouscorp.com/pulp/install.ps1 | iex
 ```
 
+The macOS/Linux installer normally adds the matching SDK after the CLI; the
+Windows installer currently installs the CLI only. Before SDK-backed builds,
+check `pulp sdk status` and run `pulp sdk install` if no matching SDK is listed.
+
 <details>
 <summary><strong>Optional: Verify before installation</strong> (click to expand)</summary>
 
@@ -110,6 +114,10 @@ uses `PULP_MCP_BINARY` to select your build-tree executable. See
 </details>
 
 See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
+
+To find an area's native source of truth, run `pulp authority list`, then query
+an exact ID or alias such as `pulp authority query dsp` or
+`pulp authority query timeline`.
 
 ## Features
 

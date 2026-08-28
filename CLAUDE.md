@@ -149,12 +149,18 @@ it through the governor), not the machine's core count.
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
 ./build/pulp forge catalog export --json  # emit selected-SDK Forge metadata
+./build/pulp authority list              # list native source-of-truth routes
+./build/pulp authority query dsp         # route one area to its owning registry/command
 ./build/pulp sdk install --local --profile forge-dev --print-path
                                 # immutable arm64 SDK for local Forge iteration
                                 # Forge configure must opt in; ship/release refuses it
 ./build/pulp dev --test          # watch + rebuild + test loop
 ./build/pulp build --watch       # watch + rebuild loop
 ```
+
+For a cold task, use `pulp authority list` and then query an exact ID or alias;
+the command points to the native authority without duplicating its capability
+rows.
 
 ### Non-interactive signing + notarization (no keychain / 1Password prompt)
 
