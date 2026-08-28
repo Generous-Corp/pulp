@@ -374,7 +374,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
             self.assertEqual(
                 rac._control_registry_digest(),
-                "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+                "cadceb3fd22155bf19a4de3026ba554e16726039ce58ab2bbe0a63deb6bff7ab",
             )
 
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
@@ -675,6 +675,20 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     "linux-x64", rac.DEFAULT_MATRIX, "0.818.0"
                 )
             )
+        )
+
+    def test_gpu_health_read_contract_is_required_from_its_release_floor(self) -> None:
+        member = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-health-read-result-v1.schema.json"
+        )
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
         )
 
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
@@ -1118,6 +1132,23 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_health_read_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/"
+                "gpu-health-read-result-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-health-read-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_missing_threejs_runtime_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1370,6 +1401,8 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["capability_handoff_floor"]
             del document["gpu_health_contract_floor"]
             del document["gpu_probe_contract_floor"]
+            del document["threejs_runtime_floor"]
+            del document["gpu_health_read_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1379,6 +1412,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
             self.assertEqual(historical.gpu_probe_contract_floor, "999999.0.0")
+            self.assertEqual(historical.threejs_runtime_floor, "999999.0.0")
+            self.assertEqual(
+                historical.gpu_health_read_contract_floor, "999999.0.0"
+            )
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
             self.assertEqual(

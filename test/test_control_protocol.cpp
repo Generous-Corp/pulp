@@ -607,6 +607,21 @@ TEST_CASE("control JSON Schema validator rejects hostile documents and schemas",
         &diagnostics));
     CHECK(diagnostics.code == ControlJsonSchemaError::UnsupportedKeyword);
 
+    CHECK(validate_control_json_schema("null", R"({"type":["string","null"]})",
+                                       &diagnostics));
+    CHECK(validate_control_json_schema(R"("text")", R"({"type":["string","null"]})",
+                                       &diagnostics));
+    CHECK_FALSE(validate_control_json_schema("false", R"({"type":["string","null"]})",
+                                             &diagnostics));
+    CHECK(diagnostics.code == ControlJsonSchemaError::ValidationFailed);
+    CHECK_FALSE(validate_control_json_schema("{}", R"({"type":[]})", &diagnostics));
+    CHECK(diagnostics.code == ControlJsonSchemaError::InvalidSchema);
+    CHECK_FALSE(validate_control_json_schema("{}", R"({"type":["object","object"]})",
+                                             &diagnostics));
+    CHECK(diagnostics.code == ControlJsonSchemaError::InvalidSchema);
+    CHECK_FALSE(validate_control_json_schema("{}", R"({"type":["object","future"]})",
+                                             &diagnostics));
+    CHECK(diagnostics.code == ControlJsonSchemaError::InvalidSchema);
     CHECK_FALSE(validate_control_json_schema("{}", R"({"type":["object"],"required":"value"})",
                                              &diagnostics));
     CHECK(diagnostics.code == ControlJsonSchemaError::InvalidSchema);

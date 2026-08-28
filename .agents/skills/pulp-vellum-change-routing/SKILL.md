@@ -62,6 +62,17 @@ a Pulp GPU-doctor change. If the diagnostic cannot be implemented through the
 existing interface, stop and route the required framework change to
 `Generous-Corp/vellum`; do not add a Pulp-side duplicate or compatibility API.
 
+The same ownership split applies to first-visible-frame GPU health. Pulp owns
+the product measurement budget, closed result schema, capability-control
+operation and executor adapter, CLI/MCP projection, Forge/DAW acceptance, and
+Perfetto evidence interpretation. Generic frame-lifecycle spans, render-stage
+identity, shader/pipeline cache instrumentation, or prewarm implementation are
+Vellum work when their projected slice is framework-authoritative-transferred.
+Keep nullable Vellum/source/shader and GPU/trace correlation seams in Pulp until
+those producers exist; do not manufacture identities, promote incomplete event
+captures, or advertise a live host capability before the exact product adapter
+can return a validated snapshot.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:

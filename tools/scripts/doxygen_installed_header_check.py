@@ -14,6 +14,7 @@ GENERATED_HEADER = "core/runtime/include/pulp/runtime/build_info.hpp"
 POLICY = Path("docs/doxygen/installed-public-header-policy.json")
 DOXYFILE = Path("docs/doxygen/Doxyfile")
 INSTALL_RULES = Path("tools/cmake/PulpInstallRules.cmake")
+GPU_HEALTH_TOOLING_ROOT = "tools/cli/gpu_health/include"
 
 
 def _reject_symlink_components(root: Path, relative: Path) -> None:
@@ -153,13 +154,26 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
         raise ValueError("SDK header subsystem authority contains duplicates")
     install_blocks = re.findall(r"(?ms)install\((?:DIRECTORY|FILES)\s+(.*?)\)", text)
     for block in install_blocks:
-        if not re.search(
+        pulp_destination = re.search(
             r'DESTINATION\s+"?\$\{CMAKE_INSTALL_INCLUDEDIR\}/pulp(?:/[^"\s)]*)?"?',
             block,
-        ):
+        )
+        tooling_destination = re.search(
+            r'DESTINATION\s+"?\$\{CMAKE_INSTALL_INCLUDEDIR\}/pulp_tooling"?',
+            block,
+        )
+        if not pulp_destination and not tooling_destination:
             continue
         source_text = block.split("DESTINATION", 1)[0]
         sources = re.findall(r'"([^"]+)"', source_text)
+        if tooling_destination:
+            if sources == [
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/cli/gpu_health/include/pulp_tooling/"
+            ]:
+                continue
+            raise ValueError(
+                "unsupported independent pulp_tooling public-header install authority"
+            )
         if sources == ["${_inc_dir}/pulp/"]:
             continue
         if sources == ["${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"]:
@@ -170,20 +184,20 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
         ):
             continue
         raise ValueError("unsupported independent public-header install authority (possibly dynamic)")
-    public_install_sources = set().union(*(
-        set(re.findall(
-            r'"\$\{CMAKE_CURRENT_SOURCE_DIR\}/([^"\n]*include/pulp(?:/[^"\n]*)?)"',
-            block,
-        ))
-        for block in install_blocks
-    ))
+    public_install_sources = set().union(*(set(re.findall(
+        r'"\$\{CMAKE_CURRENT_SOURCE_DIR\}/([^"\n]*include/(?:pulp|pulp_tooling)(?:/[^"\n]*)?)"',
+        block,
+    )) for block in install_blocks))
     for source in public_install_sources:
         if not (source.startswith("inspect/include/pulp/") or
-                source == "tools/audio/analysis/include/pulp/"):
+                source == "tools/audio/analysis/include/pulp/" or
+                source == "tools/cli/gpu_health/include/pulp_tooling/"):
             raise ValueError(f"unsupported independent public-header install authority: {source}")
     roots = [f"core/{name}/include" for name in subsystems]
     if 'tools/audio/analysis/include/pulp/' in text:
         roots.append("tools/audio/analysis/include")
+    if 'tools/cli/gpu_health/include/pulp_tooling/' in text:
+        roots.append(GPU_HEALTH_TOOLING_ROOT)
     roots.append("inspect/include")
 
     marker = "elseif(TARGET pulp-inspect-protocol)"
@@ -221,7 +235,7 @@ def check(root: Path, installed_prefix: Path | None = None,
             item: _headers(
                 root, item,
                 HEADER_SUFFIXES if item == "inspect/include" else {".h", ".hpp"},
-                pulp_only=True,
+                pulp_only=item != GPU_HEALTH_TOOLING_ROOT,
             )
             for item in install_roots
         }
@@ -252,26 +266,48 @@ def check(root: Path, installed_prefix: Path | None = None,
         errors.append("inspector-off authority contains headers absent from inspector-on authority")
 
     if installed_prefix is not None:
-        include = installed_prefix / "include" / "pulp"
+        include = installed_prefix / "include"
         if installed_prefix.is_symlink():
             errors.append(f"installed prefix root is a symlink: {installed_prefix}")
             return errors
         try:
-            _reject_symlink_components(installed_prefix, Path("include/pulp"))
+            _reject_symlink_components(installed_prefix, Path("include"))
         except ValueError as error:
             errors.append(f"installed prefix contains a symlink component: {error}")
             return errors
-        if not include.is_dir():
-            errors.append(f"installed prefix has no include/pulp directory: {installed_prefix}")
-        else:
-            symlinks = [path for path in include.rglob("*") if path.is_symlink()]
-            if include.is_symlink() or symlinks:
-                shown = include if include.is_symlink() else symlinks[0]
-                errors.append(f"installed prefix contains a symlink: {shown}")
+        namespace_roots = [include / "pulp", include / "pulp_tooling"]
+        for namespace_root in namespace_roots:
+            relative = namespace_root.relative_to(installed_prefix)
+            try:
+                _reject_symlink_components(installed_prefix, relative)
+            except ValueError as error:
+                errors.append(f"installed prefix contains a symlink component: {error}")
                 return errors
+        missing_namespaces = [
+            path.relative_to(installed_prefix).as_posix()
+            for path in namespace_roots
+            if not path.is_dir()
+        ]
+        symlinks = [
+            path
+            for namespace_root in namespace_roots
+            if namespace_root.is_dir()
+            for path in namespace_root.rglob("*")
+            if path.is_symlink()
+        ]
+        if symlinks:
+            errors.append(f"installed prefix contains a symlink: {symlinks[0]}")
+            return errors
+        if missing_namespaces:
+            for path in missing_namespaces:
+                errors.append(
+                    f"installed prefix has no {path} directory: {installed_prefix}"
+                )
+        else:
             live = {
-                "pulp/" + path.relative_to(include).as_posix()
-                for path in include.rglob("*")
+                path.relative_to(include).as_posix()
+                for namespace_root in namespace_roots
+                for path in namespace_root.rglob("*")
                 if path.is_file() and path.suffix in HEADER_SUFFIXES
             }
             selected = set(installed_on)
@@ -281,17 +317,26 @@ def check(root: Path, installed_prefix: Path | None = None,
                 selected |= inspector_off_allowed
             else:
                 required = set(selected)
-            authority = {
-                path.split("/include/pulp/", 1)[1]
-                for path in selected if "/include/pulp/" in path
-            }
-            authority = {"pulp/" + path for path in authority}
+            authority = set()
+            for path in selected:
+                if "/include/pulp/" in path:
+                    authority.add("pulp/" + path.split("/include/pulp/", 1)[1])
+                elif "/include/pulp_tooling/" in path:
+                    authority.add(
+                        "pulp_tooling/" + path.split("/include/pulp_tooling/", 1)[1]
+                    )
             for path in sorted(live - authority):
                 errors.append(f"installed prefix contains unsupported public header: {path}")
-            required_authority = {
-                "pulp/" + path.split("/include/pulp/", 1)[1]
-                for path in required if "/include/pulp/" in path
-            }
+            required_authority = set()
+            for path in required:
+                if "/include/pulp/" in path:
+                    required_authority.add(
+                        "pulp/" + path.split("/include/pulp/", 1)[1]
+                    )
+                elif "/include/pulp_tooling/" in path:
+                    required_authority.add(
+                        "pulp_tooling/" + path.split("/include/pulp_tooling/", 1)[1]
+                    )
             for path in sorted(required_authority - live):
                 errors.append(f"installed prefix is missing authority header: {path}")
     return errors

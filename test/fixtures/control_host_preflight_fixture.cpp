@@ -25,7 +25,7 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_b3513732fe4129c90efd17c120dda913c0e7fc79a2551a82d93950f8c522e367_"
+    "PULP_CONTROL_MANIFEST_SHA256_e100528f944235eba130b234552d15257d583a18b3433c695304a63c83b359ef_"
     "V1";
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 

@@ -11,6 +11,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     session.describe
     session.control
     state.read
+    gpu.health.read
     render.offline
     ui.read
     diagnostics.read
@@ -32,6 +33,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.instance/read@1
     dev.pulp.session/control@1
     dev.pulp.state/read@1
+    dev.pulp.gpu/health.read@1
     dev.pulp.render/offline@1
     dev.pulp.ui/observe@1
     dev.pulp.diagnostics/read@1
@@ -49,10 +51,16 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.artifact/read@1
     dev.pulp.unavailable/operation@1)
 
+# Registry presence pre-stages schema/client compatibility but is not permission
+# for a product to advertise an operation whose host adapter does not exist yet.
+# A2/A2T must remove this gate only when they bind the exact product provider.
+set(_PULP_CONTROL_UNWIRED_CAPABILITIES
+    dev.pulp.gpu/health.read@1)
+
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc")
+    "cadceb3fd22155bf19a4de3026ba554e16726039ce58ab2bbe0a63deb6bff7ab")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
@@ -119,6 +127,10 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): unknown control capability '${_declared_cap}'")
         endif()
+        if(_control_cap IN_LIST _PULP_CONTROL_UNWIRED_CAPABILITIES)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): '${_control_cap}' has no product provider yet")
+        endif()
         list(APPEND _control_caps "${_control_cap}")
     endforeach()
     list(REMOVE_DUPLICATES _control_caps)
@@ -177,7 +189,8 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
             "pulp_add_plugin(${target}): ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL does not grant dev.pulp.runtime/evaluate@1")
     endif()
     if(_profile STREQUAL "support-diagnostics")
-        set(_support_caps session.describe state.read diagnostics.read logs.read)
+        set(_support_caps
+            session.describe state.read gpu.health.read diagnostics.read logs.read)
         foreach(_control_cap IN LISTS _control_caps)
             list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
             list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)

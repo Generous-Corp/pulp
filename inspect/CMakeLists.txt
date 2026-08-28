@@ -1,3 +1,19 @@
+set(_pulp_gpu_health_read_schema
+    "${PULP_ROOT_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_health_read_schema}")
+    message(FATAL_ERROR
+        "Required GPU health-read schema is missing: ${_pulp_gpu_health_read_schema}")
+endif()
+file(READ "${_pulp_gpu_health_read_schema}" PULP_GPU_HEALTH_READ_SCHEMA_JSON)
+configure_file(
+    src/control_gpu_health_read_result_schema.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/control_gpu_health_read_result_schema.hpp
+    @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_pulp_gpu_health_read_schema}")
+unset(PULP_GPU_HEALTH_READ_SCHEMA_JSON)
+unset(_pulp_gpu_health_read_schema)
+
 add_library(pulp-inspect-protocol
     src/authentication.cpp
     src/capabilities.cpp
@@ -17,6 +33,8 @@ target_include_directories(pulp-inspect-protocol
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
 
@@ -107,6 +125,7 @@ target_link_libraries(pulp-inspect-client
     PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
+    src/control_gpu_health_read_executor.cpp
     src/control_host_development_executor.cpp
     src/control_state_read_executor.cpp
     src/control_state_write_executor.cpp
@@ -125,7 +144,9 @@ target_link_libraries(pulp-inspect-runtime
         pulp::inspect-control
         pulp::inspect-protocol
         pulp::events
-        pulp::state)
+        pulp::state
+    PRIVATE
+        pulp::tool-gpu-health-model)
 
 # The canonical ordinary-Standalone host bridge is isolated from both the base
 # Standalone archive and every production-stripped plugin artifact. Only an

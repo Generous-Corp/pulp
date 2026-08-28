@@ -1,14 +1,16 @@
 add_library(pulp-tool-gpu-health-model STATIC
-    src/health_result_json.cpp)
+    src/health_result_json.cpp
+    src/health_read_result_json.cpp)
 add_library(pulp::tool-gpu-health-model ALIAS pulp-tool-gpu-health-model)
 target_compile_features(pulp-tool-gpu-health-model PUBLIC cxx_std_20)
 target_include_directories(pulp-tool-gpu-health-model
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
     PRIVATE
         $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
 
-if(PULP_ENABLE_GPU)
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_library(pulp-tool-gpu-health-probes STATIC
         src/gpu_health.cpp)
     add_library(pulp::tool-gpu-health-probes ALIAS pulp-tool-gpu-health-probes)
@@ -31,12 +33,18 @@ if(PULP_ENABLE_GPU)
     endif()
 endif()
 
-if(PULP_BUILD_TESTS)
+if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_executable(pulp-test-gpu-health-result
         ${CMAKE_SOURCE_DIR}/test/test_gpu_health_result.cpp)
     target_link_libraries(pulp-test-gpu-health-result PRIVATE
         pulp::tool-gpu-health-model Catch2::Catch2WithMain)
     add_test(NAME gpu-health-result COMMAND pulp-test-gpu-health-result)
+
+    add_executable(pulp-test-gpu-health-read-result
+        ${CMAKE_SOURCE_DIR}/test/test_gpu_health_read_result.cpp)
+    target_link_libraries(pulp-test-gpu-health-read-result PRIVATE
+        pulp::tool-gpu-health-model Catch2::Catch2WithMain)
+    add_test(NAME gpu-health-read-result COMMAND pulp-test-gpu-health-read-result)
 
     if(PULP_ENABLE_GPU)
         add_executable(pulp-test-gpu-health-provider

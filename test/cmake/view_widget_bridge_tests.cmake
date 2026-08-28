@@ -525,6 +525,13 @@ target_link_libraries(pulp-test-control-state-write-executor PRIVATE
 catch_discover_tests(pulp-test-control-state-write-executor
     PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
 
+add_executable(pulp-test-control-gpu-health-read-executor
+    test_control_gpu_health_read_executor.cpp)
+target_link_libraries(pulp-test-control-gpu-health-read-executor PRIVATE
+    pulp::inspect-runtime pulp::tool-gpu-health-model Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-gpu-health-read-executor
+    PROPERTIES LABELS "inspect;control;gpu;read")
+
 add_executable(pulp-test-control-trace-session-executor
     test_control_trace_session_executor.cpp)
 target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
