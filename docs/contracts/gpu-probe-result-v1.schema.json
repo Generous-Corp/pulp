@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-probe-result-v1.schema.json",
+  "title": "Pulp GPU probe result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "gpu_evidence_id", "recipe_id", "source_digest", "signature_digest", "dimensions", "seed", "clock", "input_format", "output_format", "encoding", "tolerance", "adapter_policy", "adapter", "numeric_sample_count", "mutation", "verdict", "passes", "artifacts", "recommendations"],
+  "properties": {
+    "schema": { "const": "pulp.gpu-probe-result.v1" },
+    "version": { "const": 1 },
+    "gpu_evidence_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "recipe_id": { "enum": ["renderer3d.hardcoded-cube.v1", "gpu-compute.magnitude.v1", "threejs.multi-pass.v1", "gpu-audio.stft.v1"] },
+    "source_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dimensions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["width", "height", "work_items"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "work_items": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+      }
+    },
+    "seed": { "type": "integer", "minimum": 0 },
+    "clock": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "input_format": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "output_format": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "encoding": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "tolerance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["absolute", "relative"],
+      "properties": {
+        "absolute": { "type": "number", "minimum": 0 },
+        "relative": { "type": "number", "minimum": 0 }
+      }
+    },
+    "adapter_policy": { "enum": ["hardware-required", "hardware-preferred", "any-supported"] },
+    "adapter": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "class", "backend", "name", "vendor", "architecture", "device"],
+      "properties": {
+        "status": { "enum": ["authentic", "unverified", "unavailable"] },
+        "class": { "enum": ["hardware", "software", "null", "unknown"] },
+        "backend": { "type": ["string", "null"], "maxLength": 256 },
+        "name": { "type": ["string", "null"], "maxLength": 256 },
+        "vendor": { "type": ["string", "null"], "maxLength": 256 },
+        "architecture": { "type": ["string", "null"], "maxLength": 256 },
+        "device": { "type": ["string", "null"], "maxLength": 256 }
+      }
+    },
+    "numeric_sample_count": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "mutation": { "type": ["string", "null"], "maxLength": 128 },
+    "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+    "passes": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sequence", "name", "verdict", "work_completed", "expected", "observed", "absolute_error", "code"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 0, "maximum": 15 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+          "work_completed": { "type": "boolean" },
+          "expected": { "type": ["number", "null"] },
+          "observed": { "type": ["number", "null"] },
+          "absolute_error": { "type": ["number", "null"], "minimum": 0 },
+          "code": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array", "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "kind", "mime", "bytes", "sha256"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "kind": { "enum": ["json", "image", "numeric-samples", "trace"] },
+          "mime": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 16777216 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array", "maxItems": 16,
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    }
+  }
+}

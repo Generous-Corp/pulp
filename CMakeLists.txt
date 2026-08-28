@@ -580,6 +580,7 @@ endif()
 # its closed result parser must not be hidden behind the native CLI/GPU guard.
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli/gpu_health)
+    add_subdirectory(tools/cli/gpu_probe)
 endif()
 
 # ── CLI Tool (desktop only) ────────────────────────────────────────────────
