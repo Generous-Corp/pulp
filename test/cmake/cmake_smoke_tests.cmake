@@ -212,6 +212,14 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
+add_test(NAME cmake-pulp-gpu-recipe-catalog-install-layout
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_gpu_recipe_catalog_install_layout.cmake)
+set_tests_properties(cmake-pulp-gpu-recipe-catalog-install-layout PROPERTIES
+    LABELS "cmake;gpu;install")
+
 # Installed Creative Timeline Engine consumer. The fixture requests the
 # optional project-package component, so a package-stripped SDK correctly omits
 # this consumer while the compile-out gate proves that requesting the missing

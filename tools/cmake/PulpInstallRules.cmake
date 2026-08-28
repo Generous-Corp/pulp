@@ -489,7 +489,8 @@ foreach(_pulp_gpu_recipe_catalog_file IN LISTS _pulp_gpu_recipe_catalog_files)
     endif()
 endforeach()
 install(FILES ${_pulp_gpu_recipe_catalog_files}
-    DESTINATION "share/pulp")
+    DESTINATION "share/pulp"
+    COMPONENT gpu-recipe-catalog)
 unset(_pulp_gpu_recipe_catalog_file)
 unset(_pulp_gpu_recipe_catalog_files)
 
