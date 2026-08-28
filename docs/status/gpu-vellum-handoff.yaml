@@ -1,0 +1,101 @@
+{
+  "schema": "pulp.gpu-vellum-handoff.v1",
+  "catalog": "docs/status/gpu-recipes.yaml",
+  "ownership_projection": ".github/vellum-ownership.json",
+  "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
+  "boundary_change_authorized": false,
+  "cutover_trigger": "The separately reviewed Vellum adoption owner records an adopted Vellum revision and begins B0 refresh-and-route.",
+  "entries": [
+    {
+      "id": "gpu-diagnostic-contracts",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "docs/contracts/gpu-health-result-v1.schema.json",
+        "docs/contracts/gpu-probe-result-v1.schema.json",
+        "tools/cli/gpu_health",
+        "tools/cli/gpu_probe"
+      ],
+      "cutover_action": "retain-pulp",
+      "vellum_phase": null,
+      "delete_after": null,
+      "reason": "Pulp owns product diagnosis schemas, recipe execution, and installed CLI adaptation."
+    },
+    {
+      "id": "gpu-recipe-projection",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "docs/status/gpu-recipes.schema.json",
+        "docs/status/gpu-recipes.yaml",
+        "tools/scripts/gpu_recipe_catalog.py"
+      ],
+      "cutover_action": "retain-pulp",
+      "vellum_phase": null,
+      "delete_after": null,
+      "reason": "The catalog projects Pulp product workflows and remains the local discovery authority."
+    },
+    {
+      "id": "generic-gpu-health-lifecycle",
+      "current_owner": "Generous-Corp/vellum",
+      "paths": [
+        "core/render/include/pulp/render/headless_surface.hpp"
+      ],
+      "cutover_action": "replace-pulp-adapter-consumption",
+      "vellum_phase": "B1",
+      "delete_after": "Delete only compatibility glue named by B0 after an installed Vellum prefix proves authentic identity, ordered health/error/loss events, bounded drops, teardown, and real work through Pulp's unchanged v1 result.",
+      "reason": "The generic lifecycle is transferred Vellum authority; horizon A consumes existing interfaces without moving ownership."
+    },
+    {
+      "id": "generic-shader-diagnostics",
+      "current_owner": "Generous-Corp/vellum",
+      "paths": [],
+      "cutover_action": "adopt-when-proven",
+      "vellum_phase": "B2",
+      "delete_after": "Delete only Pulp compatibility parsing explicitly inventoried by B0 after installed Vellum structured diagnostics preserve language, stage, source location, fix, and validation truth.",
+      "reason": "No horizon-A generic shader API is introduced in Pulp."
+    },
+    {
+      "id": "generic-render-tracing-and-prewarm",
+      "current_owner": "Generous-Corp/vellum",
+      "paths": [],
+      "cutover_action": "adopt-only-if-a3-evidence-queues",
+      "vellum_phase": "B4",
+      "delete_after": "Delete only temporary Pulp instrumentation named by the A3 receipt after equivalent installed Vellum spans preserve trace correlation and the same causal rerun passes.",
+      "reason": "A3 measurement, not vGPU analogy, decides whether a generic Vellum seam is needed."
+    },
+    {
+      "id": "generic-dpr-policy",
+      "current_owner": "Generous-Corp/vellum",
+      "paths": [
+        "core/render/include/pulp/render/skia_surface.hpp"
+      ],
+      "cutover_action": "adopt-only-if-a4-evidence-queues",
+      "vellum_phase": "B5",
+      "delete_after": "Delete only temporary experiment adapters named by the A4 disposition after installed Vellum preserves logical input, fidelity gates, and the ratified bound or hysteresis.",
+      "reason": "Horizon A measures DPR without changing transferred surface policy."
+    },
+    {
+      "id": "generic-vellum-agent-guidance",
+      "current_owner": "Generous-Corp/vellum",
+      "paths": [],
+      "cutover_action": "move-generic-guidance",
+      "vellum_phase": "B6",
+      "delete_after": "Delete obsolete Pulp-only generic instructions only after the adopted Vellum revision has an owning render or tracing skill and clean-agent parity passes; retain Pulp CLI, MCP, Forge, DAW, and product-adapter guidance.",
+      "reason": "A new Vellum skill is conditional; do not create a catch-all or duplicate Pulp product instructions."
+    }
+  ],
+  "b0_required_inputs": [
+    "adopted Vellum protected-tip SHA and installed-prefix identity",
+    "current Pulp protected-tip SHA and gpu-recipes catalog digest",
+    "fresh exact-route results for every candidate path",
+    "A3 budget receipt and queue/no-change disposition",
+    "A4 corpus digest and DPR disposition",
+    "inventory of every temporary adapter with replacement and deletion proof",
+    "clean-agent CLI, MCP, Perfetto, Forge, and DAW workflow evidence"
+  ],
+  "stop_rules": [
+    "Do not move, widen, narrow, or reverse authority during horizon A.",
+    "Do not delete compatibility code before the replacement is installed and equivalent proof passes.",
+    "Do not infer Vellum APIs or skills before B0 inspects the adopted revision.",
+    "Do not close unavailable or unverified evidence as pass."
+  ]
+}
