@@ -67,6 +67,8 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/mid_side.hpp": "Pulp::signal",
     "pulp/signal/modulation_curve.hpp": "Pulp::signal",
     "pulp/signal/multi_channel_meter.hpp": "Pulp::signal",
+    "pulp/signal/sub_oscillator.hpp": "Pulp::signal",
+    "pulp/signal/blit_oscillator.hpp": "Pulp::signal",
     "pulp/signal/nlms_adaptive_filter.hpp": "Pulp::signal",
     "pulp/signal/noise_tilt.hpp": "Pulp::signal",
     "pulp/signal/nonlinear_shaping.hpp": "Pulp::signal",
@@ -586,7 +588,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:c277693da843c010c9ce9718425e2b03370c94ddda5ed9175cd0b70d60a35d45",
+        "fingerprint": "sha256:0d3538c3925bfb69da24958a73ee0f723514e62959e1dab02d7658d3fbd8db30",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
