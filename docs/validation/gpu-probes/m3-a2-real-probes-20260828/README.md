@@ -49,7 +49,7 @@ python3 tools/scripts/test_verify_gpu_probe_acceptance.py
 ```
 
 The 2026-08-28 GPU-side negative-control refresh was rebuilt and replayed from
-exact source commit `e4170505b970b919f9cef9ac027338224872e7c4` after the final source rebase.
+exact source commit `146716041f20e9cd5e599f11f4697369d3218519` after the final source rebase.
 `receipt.json` binds that commit, the installed Rust/C++/MCP binary digests, all
 13 newly replayed raw results, recipe blob
 `ecdcf9505e02ba4134ded2bb6b8bbdb21de933eb`, and model blob
