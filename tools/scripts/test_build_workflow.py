@@ -2,13 +2,20 @@
 """Structural invariants for exact protected receipt reuse in build.yml."""
 
 from pathlib import Path
+import json
 import re
 import unittest
+
+import yaml
 
 
 WORKFLOW = (Path(__file__).parents[2] / ".github/workflows/build.yml").read_text(
     encoding="utf-8"
 )
+
+
+def _workflow() -> dict[str, object]:
+    return yaml.safe_load(WORKFLOW)
 
 
 class ProtectedReceiptWorkflowTest(unittest.TestCase):
@@ -67,6 +74,73 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn('--checkout-sha "$checkout_sha"', issuer)
         self.assertNotIn('--checkout-sha "$GITHUB_SHA"', issuer)
         self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
+
+
+class LocalProofWorkflowTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workflow = _workflow()
+        self.jobs = self.workflow["jobs"]
+
+    def test_local_proof_is_default_off_and_dispatch_only(self) -> None:
+        triggers = self.workflow.get("on", self.workflow.get(True, {}))
+        local_proof = triggers["workflow_dispatch"]["inputs"]["local_proof"]
+        self.assertIs(local_proof["default"], False)
+        self.assertEqual(local_proof["type"], "boolean")
+
+        job = self.jobs["local-proof"]
+        condition = job["if"]
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
+        self.assertIn("inputs.local_proof", condition)
+        self.assertEqual(job["permissions"], {})
+
+    def test_local_proof_requests_exact_protected_m1_assignment(self) -> None:
+        runs_on = self.jobs["local-proof"]["runs-on"]
+        self.assertEqual(runs_on["group"], "pulp-trusted-build")
+        self.assertEqual(
+            runs_on["labels"],
+            [
+                "self-hosted",
+                "macOS",
+                "ARM64",
+                "pulp-build",
+                "pulp-build-vm",
+                "pulp-build-merge-group",
+            ],
+        )
+
+    def test_local_proof_executes_no_repository_source_and_is_bounded(self) -> None:
+        job = self.jobs["local-proof"]
+        self.assertEqual(job["timeout-minutes"], 12)
+        self.assertEqual(len(job["steps"]), 1)
+        step = job["steps"][0]
+        self.assertNotIn("uses", step)
+        self.assertIn("sleep 600", step["run"])
+        text = json.dumps(job, sort_keys=True)
+        for forbidden in (
+            "actions/checkout",
+            "github.token",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "git ",
+            "cmake",
+            "python",
+        ):
+            self.assertNotIn(forbidden, text)
+
+    def test_local_proof_has_a_unique_non_cancelling_concurrency_domain(self) -> None:
+        concurrency = self.workflow["concurrency"]
+        self.assertIn("inputs.local_proof", concurrency["group"])
+        self.assertIn("github.run_id", concurrency["group"])
+        self.assertIn("github.ref", concurrency["group"])
+        self.assertIn("!inputs.local_proof", concurrency["cancel-in-progress"])
+
+    def test_local_proof_structurally_suppresses_every_ordinary_job(self) -> None:
+        ordinary = set(self.jobs) - {"local-proof"}
+        self.assertTrue(ordinary)
+        for name in sorted(ordinary):
+            with self.subTest(job=name):
+                self.assertIn("!inputs.local_proof", str(self.jobs[name].get("if", "")))
 
 
 if __name__ == "__main__":

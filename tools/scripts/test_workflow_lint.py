@@ -86,6 +86,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             config,
             r"(?m)^\s{4}-\s+pulp-queue-authority-studio\s*$",
         )
+        self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build\s*$")
+        self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build-vm\s*$")
+        self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build-merge-group\s*$")
 
     def test_post_tag_sync_runs_on_the_authority_runner(self) -> None:
         self.assertTrue(
@@ -175,6 +178,10 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "python3 tools/scripts/test_workflow_build_dirs.py",
+            step,
+        )
+        self.assertIn(
+            "python3 tools/scripts/test_build_workflow.py",
             step,
         )
         self.assertIn(
