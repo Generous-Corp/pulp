@@ -17,6 +17,96 @@ SPEC.loader.exec_module(MODULE)
 
 
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
+    def human_review_receipt(self, trace_digest="1" * 64):
+        return {
+            "protocol": {"question": "gpu-startup"},
+            "acceptance": {"human_perfetto_ui_correlation": "pass"},
+            "artifacts": {"trace": {"sha256": trace_digest}},
+            "human_perfetto_ui_correlation": {
+                "artifact_sha256": trace_digest,
+                "reviewer": "human reviewer",
+                "reviewed_utc": "2026-08-28T05:34:54Z",
+                "ui_revision": "v58.3-11fbaed8",
+                "delivery": "official localhost embedding protocol",
+                "observed_spans": [{"name": "gpu_pipeline_prepare"}],
+            },
+        }
+
+    def test_preserves_exact_passing_human_review_for_same_startup_trace(self):
+        receipt = self.human_review_receipt()
+        result = MODULE.preserve_human_perfetto_ui_correlation(
+            receipt, question="gpu-startup", trace_sha256="1" * 64
+        )
+        self.assertEqual(result, receipt["human_perfetto_ui_correlation"])
+
+    def test_human_review_rejects_different_trace_digest(self):
+        with self.assertRaisesRegex(ValueError, "not bound to the measured trace"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                self.human_review_receipt(),
+                question="gpu-startup", trace_sha256="2" * 64,
+            )
+
+    def test_human_review_rejects_mismatched_prior_trace_artifact(self):
+        receipt = self.human_review_receipt()
+        receipt["artifacts"]["trace"]["sha256"] = "2" * 64
+        with self.assertRaisesRegex(ValueError, "not bound to its receipt trace"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                receipt, question="gpu-startup", trace_sha256="1" * 64
+            )
+
+    def test_human_review_rejects_non_startup_question(self):
+        with self.assertRaisesRegex(ValueError, "only to gpu-startup"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                self.human_review_receipt(),
+                question="gpu-health", trace_sha256="1" * 64,
+            )
+
+    def test_human_review_rejects_missing_acceptance_or_root_object(self):
+        missing_acceptance = self.human_review_receipt()
+        del missing_acceptance["acceptance"]
+        with self.assertRaisesRegex(ValueError, "lacks passing"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                missing_acceptance, question="gpu-startup", trace_sha256="1" * 64
+            )
+        missing_root = self.human_review_receipt()
+        del missing_root["human_perfetto_ui_correlation"]
+        with self.assertRaisesRegex(ValueError, "lacks the root correlation object"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                missing_root, question="gpu-startup", trace_sha256="1" * 64
+            )
+
+    def test_human_review_rejects_non_passing_prior_acceptance(self):
+        receipt = self.human_review_receipt()
+        receipt["acceptance"]["human_perfetto_ui_correlation"] = "unverified"
+        with self.assertRaisesRegex(ValueError, "lacks passing"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                receipt, question="gpu-startup", trace_sha256="1" * 64
+            )
+
+    def test_human_review_rejects_stripped_visual_review_fields(self):
+        for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
+            with self.subTest(field=field):
+                receipt = self.human_review_receipt()
+                del receipt["human_perfetto_ui_correlation"][field]
+                with self.assertRaisesRegex(ValueError, f"lacks nonempty {field}"):
+                    MODULE.preserve_human_perfetto_ui_correlation(
+                        receipt, question="gpu-startup", trace_sha256="1" * 64
+                    )
+        receipt = self.human_review_receipt()
+        receipt["human_perfetto_ui_correlation"]["observed_spans"] = []
+        with self.assertRaisesRegex(ValueError, "lacks observed span details"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                receipt, question="gpu-startup", trace_sha256="1" * 64
+            )
+
+    def test_human_review_rejects_prior_non_startup_receipt(self):
+        receipt = self.human_review_receipt()
+        receipt["protocol"]["question"] = "gpu-health"
+        with self.assertRaisesRegex(ValueError, "must be for gpu-startup"):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                receipt, question="gpu-startup", trace_sha256="1" * 64
+            )
+
     def test_plan_binding_requires_exact_lowercase_hex(self):
         self.assertTrue(MODULE.valid_lower_hex("a" * 40, 40))
         self.assertTrue(MODULE.valid_lower_hex("0" * 64, 64))
@@ -44,6 +134,23 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertEqual(disposition["formal_plan_status"], "accepted-canonical-plan")
         self.assertTrue(MODULE.valid_lower_hex(disposition["formal_plan_revision"], 40))
         self.assertTrue(MODULE.valid_lower_hex(disposition["formal_plan_sha256"], 64))
+
+    def test_checked_in_receipt_preserves_a3_human_review_binding(self):
+        receipt = json.loads(
+            (ROOT / "docs" / "validation" / "gpu-trace-overhead" /
+             "m3-a2t-offline-analysis-20260828.json").read_text(encoding="utf-8")
+        )
+        trace_digest = receipt["artifacts"]["trace"]["sha256"]
+        correlation = MODULE.preserve_human_perfetto_ui_correlation(
+            receipt, question=receipt["protocol"]["question"],
+            trace_sha256=trace_digest,
+        )
+        self.assertEqual(receipt["protocol"]["question"], "gpu-startup")
+        self.assertEqual(
+            receipt["acceptance"]["human_perfetto_ui_correlation"], "pass"
+        )
+        self.assertEqual(correlation, receipt["human_perfetto_ui_correlation"])
+        self.assertEqual(correlation["artifact_sha256"], trace_digest)
 
     def test_percentile_interpolates(self):
         self.assertEqual(MODULE.percentile([1.0, 2.0, 3.0], 0.5), 2.0)

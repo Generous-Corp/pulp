@@ -311,6 +311,44 @@ def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bo
     return bool(mcp_source_revision) and mcp_source_revision == source_revision
 
 
+def preserve_human_perfetto_ui_correlation(
+    prior_receipt: Any, *, question: str, trace_sha256: str
+) -> dict[str, Any]:
+    """Carry an already accepted visual review across an exact-trace rerun."""
+    if question != "gpu-startup":
+        raise ValueError("human Perfetto UI correlation applies only to gpu-startup")
+    if not isinstance(prior_receipt, dict):
+        raise ValueError("prior human-review receipt must be an object")
+    protocol = prior_receipt.get("protocol")
+    acceptance = prior_receipt.get("acceptance")
+    artifacts = prior_receipt.get("artifacts")
+    human = prior_receipt.get("human_perfetto_ui_correlation")
+    if not isinstance(protocol, dict) or protocol.get("question") != "gpu-startup":
+        raise ValueError("prior human-review receipt must be for gpu-startup")
+    if (
+        not isinstance(acceptance, dict)
+        or acceptance.get("human_perfetto_ui_correlation") != "pass"
+    ):
+        raise ValueError("prior human-review receipt lacks passing human Perfetto UI acceptance")
+    if not isinstance(human, dict):
+        raise ValueError("prior human-review receipt lacks the root correlation object")
+    human_digest = human.get("artifact_sha256")
+    prior_trace = artifacts.get("trace") if isinstance(artifacts, dict) else None
+    prior_trace_digest = prior_trace.get("sha256") if isinstance(prior_trace, dict) else None
+    if not isinstance(human_digest, str) or not valid_lower_hex(human_digest, 64):
+        raise ValueError("prior human-review receipt has an invalid artifact SHA-256")
+    if prior_trace_digest != human_digest:
+        raise ValueError("prior human review is not bound to its receipt trace artifact")
+    if human_digest != trace_sha256:
+        raise ValueError("prior human-review receipt is not bound to the measured trace")
+    for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
+        if not isinstance(human.get(field), str) or not human[field].strip():
+            raise ValueError(f"prior human-review receipt lacks nonempty {field}")
+    if not isinstance(human.get("observed_spans"), list) or not human["observed_spans"]:
+        raise ValueError("prior human-review receipt lacks observed span details")
+    return human
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", type=Path, required=True)
@@ -334,6 +372,13 @@ def main() -> int:
     parser.add_argument("--plan-revision", required=True)
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--routing-inventory", type=Path)
+    parser.add_argument(
+        "--prior-human-review-receipt", type=Path,
+        help=(
+            "Prior accepted gpu-startup A2T receipt whose exact root visual-review "
+            "object is carried forward only when its trace SHA-256 matches"
+        ),
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -357,6 +402,19 @@ def main() -> int:
             "mcp-source-revision must equal source-revision; the measured CLI and "
             "MCP must come from one source checkout"
         )
+
+    trace_sha256 = sha256(trace)
+    human_perfetto_ui_correlation = None
+    if args.prior_human_review_receipt:
+        try:
+            prior_receipt = json.loads(
+                args.prior_human_review_receipt.read_text(encoding="utf-8")
+            )
+            human_perfetto_ui_correlation = preserve_human_perfetto_ui_correlation(
+                prior_receipt, question=args.question, trace_sha256=trace_sha256
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            parser.error(f"invalid prior-human-review-receipt: {error}")
 
     environment = os.environ.copy()
     environment["PULP_TRACE_PROCESSOR"] = str(processor)
@@ -510,7 +568,7 @@ def main() -> int:
             "cli": {"role": "installed-prefix/bin/pulp", "sha256": sha256(cli), "bytes": cli.stat().st_size},
             "mcp": {"role": "installed-prefix/bin/pulp-mcp", "sha256": sha256(mcp), "bytes": mcp.stat().st_size},
             "trace": {"role": "repository/test/fixtures/perfetto-gpu/" + trace.name,
-                      "sha256": sha256(trace), "bytes": trace.stat().st_size},
+                      "sha256": trace_sha256, "bytes": trace.stat().st_size},
             "trace_processor": {"role": "pulp-home pinned v57.2 trace_processor_shell",
                                 "sha256": sha256(processor),
                                 "bytes": processor.stat().st_size},
@@ -529,6 +587,7 @@ def main() -> int:
             "interpretation": "shared-host contention is retained in raw samples; no latency budget is inferred",
         },
         "semantic_result": reference_projection,
+        "human_perfetto_ui_correlation": human_perfetto_ui_correlation,
         "measured": {
             "cli": cli_summary, "persistent_mcp_request": mcp_summary,
             "confidence": confidence, "raw_samples": rows,
@@ -540,6 +599,10 @@ def main() -> int:
         },
         "acceptance": {
             "semantic_parity": "pass", "same_installed_prefix": "pass",
+            "human_perfetto_ui_correlation": (
+                "pass" if human_perfetto_ui_correlation is not None
+                else "unverified-no-human-perfetto-ui-correlation"
+            ),
             "offline_latency_budget": "unverified-no-ratified-budget",
             "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
             "xrun_check": "not-applicable-offline-no-audio-thread",
