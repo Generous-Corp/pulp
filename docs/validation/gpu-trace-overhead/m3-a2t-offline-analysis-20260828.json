@@ -38,144 +38,144 @@
   "fresh_start": {
     "cli": {
       "count": 20,
-      "mad_ms": 0.600541,
-      "max_ms": 30.449375,
-      "median_ms": 24.09625,
-      "min_ms": 21.655083,
-      "p95_ms": 25.738009
+      "mad_ms": 1.195687,
+      "max_ms": 31.249917,
+      "median_ms": 23.717146,
+      "min_ms": 21.718333,
+      "p95_ms": 27.419912
     },
     "mcp_process_initialize_request_shutdown": {
       "count": 20,
-      "mad_ms": 0.816395,
-      "max_ms": 33.043125,
-      "median_ms": 31.295583,
-      "min_ms": 29.528583,
-      "p95_ms": 32.933717
+      "mad_ms": 0.844791,
+      "max_ms": 33.017625,
+      "median_ms": 30.581834,
+      "min_ms": 28.869709,
+      "p95_ms": 32.406537
     },
     "raw_samples": [
       {
-        "cli_duration_ns": 23486792,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30927917,
+        "cli_duration_ns": 24486792,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30947208,
         "order": "cli-first",
         "trial": 1
       },
       {
-        "cli_duration_ns": 24068500,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29759875,
+        "cli_duration_ns": 23479375,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30585125,
         "order": "mcp-first",
         "trial": 2
       },
       {
-        "cli_duration_ns": 22777167,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31689084,
+        "cli_duration_ns": 22514500,
+        "mcp_process_initialize_request_shutdown_duration_ns": 33017625,
         "order": "cli-first",
         "trial": 3
       },
       {
-        "cli_duration_ns": 21655083,
-        "mcp_process_initialize_request_shutdown_duration_ns": 32600333,
+        "cli_duration_ns": 25067166,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29796834,
         "order": "mcp-first",
         "trial": 4
       },
       {
-        "cli_duration_ns": 24492166,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30147917,
+        "cli_duration_ns": 25009583,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30049959,
         "order": "cli-first",
         "trial": 5
       },
       {
-        "cli_duration_ns": 24863875,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29528583,
+        "cli_duration_ns": 22528417,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32374375,
         "order": "mcp-first",
         "trial": 6
       },
       {
-        "cli_duration_ns": 24520125,
-        "mcp_process_initialize_request_shutdown_duration_ns": 32177083,
+        "cli_duration_ns": 24931833,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30683750,
         "order": "cli-first",
         "trial": 7
       },
       {
-        "cli_duration_ns": 23286542,
-        "mcp_process_initialize_request_shutdown_duration_ns": 33043125,
+        "cli_duration_ns": 27218333,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32150084,
         "order": "mcp-first",
         "trial": 8
       },
       {
-        "cli_duration_ns": 30449375,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30598875,
+        "cli_duration_ns": 31249917,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30053000,
         "order": "cli-first",
         "trial": 9
       },
       {
-        "cli_duration_ns": 24124000,
-        "mcp_process_initialize_request_shutdown_duration_ns": 32927959,
+        "cli_duration_ns": 22061375,
+        "mcp_process_initialize_request_shutdown_duration_ns": 28869709,
         "order": "mcp-first",
         "trial": 10
       },
       {
-        "cli_duration_ns": 23504625,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31530000,
+        "cli_duration_ns": 24077541,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30184041,
         "order": "cli-first",
         "trial": 11
       },
       {
-        "cli_duration_ns": 24418166,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31061167,
+        "cli_duration_ns": 23333833,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29592333,
         "order": "mcp-first",
         "trial": 12
       },
       {
-        "cli_duration_ns": 24211292,
-        "mcp_process_initialize_request_shutdown_duration_ns": 32103083,
+        "cli_duration_ns": 24261709,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30639583,
         "order": "cli-first",
         "trial": 13
       },
       {
-        "cli_duration_ns": 23327666,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31738083,
+        "cli_duration_ns": 23988584,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31795917,
         "order": "mcp-first",
         "trial": 14
       },
       {
-        "cli_duration_ns": 25490042,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30958708,
+        "cli_duration_ns": 23364750,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30271958,
         "order": "cli-first",
         "trial": 15
       },
       {
-        "cli_duration_ns": 23413291,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30470292,
+        "cli_duration_ns": 22369083,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29013458,
         "order": "mcp-first",
         "trial": 16
       },
       {
-        "cli_duration_ns": 23548833,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31711000,
+        "cli_duration_ns": 23488542,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31536292,
         "order": "cli-first",
         "trial": 17
       },
       {
-        "cli_duration_ns": 23908917,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30713000,
+        "cli_duration_ns": 21878042,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29392459,
         "order": "mcp-first",
         "trial": 18
       },
       {
-        "cli_duration_ns": 24229458,
-        "mcp_process_initialize_request_shutdown_duration_ns": 32134083,
+        "cli_duration_ns": 21718333,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30578542,
         "order": "cli-first",
         "trial": 19
       },
       {
-        "cli_duration_ns": 25210792,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29950667,
+        "cli_duration_ns": 23945750,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31486416,
         "order": "mcp-first",
         "trial": 20
       }
     ]
   },
-  "generated_utc": "2026-08-28T09:36:11Z",
+  "generated_utc": "2026-08-28T09:41:07Z",
   "human_perfetto_ui_correlation": {
     "artifact_sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334",
     "delivery": "official localhost embedding protocol; localOnly browser-memory trace",
@@ -218,212 +218,212 @@
     "operating_system": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
     "python": "3.13.7"
   },
-  "mcp_source_revision": "e4170505b970b919f9cef9ac027338224872e7c4",
+  "mcp_source_revision": "146716041f20e9cd5e599f11f4697369d3218519",
   "measured": {
     "cli": {
       "count": 30,
-      "mad_ms": 0.51723,
-      "max_ms": 28.276625,
-      "median_ms": 24.091146,
-      "min_ms": 22.29275,
-      "p95_ms": 25.597404
+      "mad_ms": 0.649416,
+      "max_ms": 26.295708,
+      "median_ms": 23.820062,
+      "min_ms": 22.370959,
+      "p95_ms": 25.109821
     },
     "confidence": {
-      "ci_high_ms": -0.43,
-      "ci_low_ms": -1.874562,
+      "ci_high_ms": -0.565458,
+      "ci_low_ms": -1.302958,
       "confidence_level": 0.95,
       "delta_interpretation": "measurable",
-      "mcp_minus_cli_median_ms": -1.226771,
+      "mcp_minus_cli_median_ms": -0.977645,
       "method": "paired bootstrap median delta, 10000 resamples, deterministic seed 0xA2",
       "noise_floor_method": "maximum within-surface median absolute deviation",
-      "noise_floor_ms": 0.870416
+      "noise_floor_ms": 0.649416
     },
     "persistent_mcp_request": {
       "count": 30,
-      "mad_ms": 0.870416,
-      "max_ms": 25.823667,
-      "median_ms": 22.643,
-      "min_ms": 20.600042,
-      "p95_ms": 25.158872
+      "mad_ms": 0.455395,
+      "max_ms": 25.461959,
+      "median_ms": 22.730542,
+      "min_ms": 20.305708,
+      "p95_ms": 24.769575
     },
     "raw_samples": [
       {
-        "cli_duration_ns": 24211791,
-        "mcp_duration_ns": 21737959,
+        "cli_duration_ns": 23238291,
+        "mcp_duration_ns": 22718958,
         "order": "cli-first",
         "trial": 1
       },
       {
-        "cli_duration_ns": 28276625,
-        "mcp_duration_ns": 24784625,
+        "cli_duration_ns": 24038917,
+        "mcp_duration_ns": 22742125,
         "order": "mcp-first",
         "trial": 2
       },
       {
-        "cli_duration_ns": 24755083,
-        "mcp_duration_ns": 22304250,
+        "cli_duration_ns": 22950000,
+        "mcp_duration_ns": 22548958,
         "order": "cli-first",
         "trial": 3
       },
       {
-        "cli_duration_ns": 24928375,
-        "mcp_duration_ns": 23260500,
+        "cli_duration_ns": 24476625,
+        "mcp_duration_ns": 23444125,
         "order": "mcp-first",
         "trial": 4
       },
       {
-        "cli_duration_ns": 23144000,
-        "mcp_duration_ns": 21157916,
+        "cli_duration_ns": 24789000,
+        "mcp_duration_ns": 22068042,
         "order": "cli-first",
         "trial": 5
       },
       {
-        "cli_duration_ns": 26144792,
-        "mcp_duration_ns": 24345167,
+        "cli_duration_ns": 25318208,
+        "mcp_duration_ns": 25461959,
         "order": "mcp-first",
         "trial": 6
       },
       {
-        "cli_duration_ns": 24710125,
-        "mcp_duration_ns": 24275708,
+        "cli_duration_ns": 22633500,
+        "mcp_duration_ns": 23504166,
         "order": "cli-first",
         "trial": 7
       },
       {
-        "cli_duration_ns": 22651375,
-        "mcp_duration_ns": 22513500,
+        "cli_duration_ns": 24652375,
+        "mcp_duration_ns": 20305708,
         "order": "mcp-first",
         "trial": 8
       },
       {
-        "cli_duration_ns": 24011792,
-        "mcp_duration_ns": 23449875,
+        "cli_duration_ns": 26295708,
+        "mcp_duration_ns": 23067625,
         "order": "cli-first",
         "trial": 9
       },
       {
-        "cli_duration_ns": 23613667,
-        "mcp_duration_ns": 25059666,
+        "cli_duration_ns": 23177792,
+        "mcp_duration_ns": 22390417,
         "order": "mcp-first",
         "trial": 10
       },
       {
-        "cli_duration_ns": 24173875,
-        "mcp_duration_ns": 25240041,
+        "cli_duration_ns": 24717417,
+        "mcp_duration_ns": 22780333,
         "order": "cli-first",
         "trial": 11
       },
       {
-        "cli_duration_ns": 23549833,
-        "mcp_duration_ns": 23829208,
+        "cli_duration_ns": 23660584,
+        "mcp_duration_ns": 24327833,
         "order": "mcp-first",
         "trial": 12
       },
       {
-        "cli_duration_ns": 24148042,
-        "mcp_duration_ns": 21888958,
+        "cli_duration_ns": 23760333,
+        "mcp_duration_ns": 23054375,
         "order": "cli-first",
         "trial": 13
       },
       {
-        "cli_duration_ns": 23911916,
-        "mcp_duration_ns": 20854208,
+        "cli_duration_ns": 24855125,
+        "mcp_duration_ns": 22956000,
         "order": "mcp-first",
         "trial": 14
       },
       {
-        "cli_duration_ns": 24118833,
-        "mcp_duration_ns": 23693250,
+        "cli_duration_ns": 24502834,
+        "mcp_duration_ns": 25131000,
         "order": "cli-first",
         "trial": 15
       },
       {
-        "cli_duration_ns": 24584292,
-        "mcp_duration_ns": 23765959,
+        "cli_duration_ns": 23549333,
+        "mcp_duration_ns": 22474625,
         "order": "mcp-first",
         "trial": 16
       },
       {
-        "cli_duration_ns": 23704708,
-        "mcp_duration_ns": 21837750,
+        "cli_duration_ns": 23749875,
+        "mcp_duration_ns": 21138875,
         "order": "cli-first",
         "trial": 17
       },
       {
-        "cli_duration_ns": 24374250,
-        "mcp_duration_ns": 25823667,
+        "cli_duration_ns": 24392584,
+        "mcp_duration_ns": 21464458,
         "order": "mcp-first",
         "trial": 18
       },
       {
-        "cli_duration_ns": 24262791,
-        "mcp_duration_ns": 23911500,
+        "cli_duration_ns": 23793500,
+        "mcp_duration_ns": 22620292,
         "order": "cli-first",
         "trial": 19
       },
       {
-        "cli_duration_ns": 24105042,
-        "mcp_duration_ns": 22753958,
+        "cli_duration_ns": 23846625,
+        "mcp_duration_ns": 22537500,
         "order": "mcp-first",
         "trial": 20
       },
       {
-        "cli_duration_ns": 22403417,
-        "mcp_duration_ns": 22532042,
+        "cli_duration_ns": 24204250,
+        "mcp_duration_ns": 20487583,
         "order": "cli-first",
         "trial": 21
       },
       {
-        "cli_duration_ns": 22512458,
-        "mcp_duration_ns": 21410000,
+        "cli_duration_ns": 22370959,
+        "mcp_duration_ns": 23179833,
         "order": "mcp-first",
         "trial": 22
       },
       {
-        "cli_duration_ns": 22292750,
-        "mcp_duration_ns": 23478792,
+        "cli_duration_ns": 23098291,
+        "mcp_duration_ns": 22175500,
         "order": "cli-first",
         "trial": 23
       },
       {
-        "cli_duration_ns": 24781750,
-        "mcp_duration_ns": 22222417,
+        "cli_duration_ns": 24171083,
+        "mcp_duration_ns": 22269042,
         "order": "mcp-first",
         "trial": 24
       },
       {
-        "cli_duration_ns": 23867458,
-        "mcp_duration_ns": 22507667,
+        "cli_duration_ns": 24103833,
+        "mcp_duration_ns": 22978917,
         "order": "cli-first",
         "trial": 25
       },
       {
-        "cli_duration_ns": 22445541,
-        "mcp_duration_ns": 22798459,
+        "cli_duration_ns": 22742666,
+        "mcp_duration_ns": 22150042,
         "order": "mcp-first",
         "trial": 26
       },
       {
-        "cli_duration_ns": 24077250,
-        "mcp_duration_ns": 22195083,
+        "cli_duration_ns": 24277458,
+        "mcp_duration_ns": 23954584,
         "order": "cli-first",
         "trial": 27
       },
       {
-        "cli_duration_ns": 24005250,
-        "mcp_duration_ns": 20600042,
+        "cli_duration_ns": 23572750,
+        "mcp_duration_ns": 22832083,
         "order": "mcp-first",
         "trial": 28
       },
       {
-        "cli_duration_ns": 22994333,
-        "mcp_duration_ns": 21946875,
+        "cli_duration_ns": 22482375,
+        "mcp_duration_ns": 23447292,
         "order": "cli-first",
         "trial": 29
       },
       {
-        "cli_duration_ns": 24646042,
-        "mcp_duration_ns": 22452292,
+        "cli_duration_ns": 22864125,
+        "mcp_duration_ns": 22325833,
         "order": "mcp-first",
         "trial": 30
       }
@@ -432,14 +432,14 @@
   "measurement_environment": {
     "interpretation": "shared-host contention is retained in raw samples; no latency budget is inferred",
     "load_average_end": [
-      38.43017578125,
-      33.1640625,
-      29.99853515625
+      26.0966796875,
+      31.47802734375,
+      30.291015625
     ],
     "load_average_start": [
-      38.380859375,
-      33.06591796875,
-      29.94580078125
+      27.32421875,
+      31.80712890625,
+      30.39892578125
     ]
   },
   "producer_overhead_disposition": {
@@ -845,5 +845,5 @@
     },
     "verdict": "unverified"
   },
-  "source_revision": "e4170505b970b919f9cef9ac027338224872e7c4"
+  "source_revision": "146716041f20e9cd5e599f11f4697369d3218519"
 }

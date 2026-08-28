@@ -1,7 +1,7 @@
 {
   "schema": "pulp.gpu-probe-result.v1",
   "version": 1,
-  "gpu_evidence_id": "2a35ebba788e65cafb40328c719a44e7",
+  "gpu_evidence_id": "a3ad194d4c6962b1918a0dee00f68763",
   "recipe_id": "gpu-audio.stft.v1",
   "source_digest": "8275969f135a4024fb78bf0a9efe1795ac55b252803aaad7b3321b7aa0b35faa",
   "signature_digest": "17ee578402b57a5cf4a2cf3b136761b6955c82569b2f5e2d9a994ea27a4c12ed",

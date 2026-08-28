@@ -1,7 +1,7 @@
 {
   "schema": "pulp.gpu-probe-acceptance-receipt.v1",
-  "recorded_at_utc": "2026-08-28T09:23:08Z",
-  "integration_head": "e4170505b970b919f9cef9ac027338224872e7c4",
+  "recorded_at_utc": "2026-08-28T09:45:24Z",
+  "integration_head": "146716041f20e9cd5e599f11f4697369d3218519",
   "source_blobs": {
     "core/render/include/pulp/render/gpu_compute.hpp": "d2977e840d7439e219b9b69fd66aa0a584c64ff9",
     "core/render/include/pulp/render/renderer3d.hpp": "b56ccebe6e1b955613b688dac35a1e999d958dbe",
@@ -37,19 +37,19 @@
     "threejs": {"recipe": "threejs.multi-pass.v1", "binary_role": "v8_threejs_cpp_cli"}
   },
   "raw_sha256": {
-    "compute-negative.json": "e0d5b54438748435961c9dcf5e14cb86396f7757f209bc7c448fc39b8c83f895",
-    "compute-run1.json": "cd41547306bb74a5717dbb8ae9f244ef44d5a2a1a2fbdd6b69bb32f6c324bc37",
-    "compute-run2.json": "09abda211c22bddad123d9c50882ef9010c5910faefa9615eddbcee2da6dfca3",
-    "mcp-transcript.jsonl": "e57f5131b66256b02fb13d74f3ab4d4f8dac975e182eac36b13c4d0570c3869a",
-    "renderer-negative.json": "7d0583a5f700b4f1aea0bfac30a3d2329e60221cd943e0a86e04a3f2bcc549d1",
-    "renderer-run1.json": "ecd7c39ce5f0dc7d674a4cacf60493cbf577ba1d7848417ccfe6250d0746086a",
-    "renderer-run2.json": "4acd334324ee09acc07d07eab2e8c30182a5eaface8f8884822d545e1a59b8af",
-    "stft-negative.json": "d1485d7907b2a59a8a953e8fec3165b0de19bee5d2a5e47f896651eace1baceb",
-    "stft-run1.json": "e5dc77d6fc1fb8d84c3751b250a1cd1632aac65c39c0f0d83ab14b603eeab36a",
-    "stft-run2.json": "847182dbbcba21ffe15a1adcd97c88cf4449b0c406feeee64c8ff0ddb4adcf31",
-    "threejs-negative.json": "d6dedf2091eedb79ab88445a5305bcb0dc42fcef3afbf0f9c90e3386dde25283",
-    "threejs-run1.json": "9cd82fd9860c6102f6cfac3449e467c97cf966c53eeeb3e86c54e19c5e02e322",
-    "threejs-run2.json": "87100dad5d9b9495ee330217d5565ab735ca80b0bf577e6ed0f97ed9b8994bb8"
+    "compute-negative.json": "99b2b4658ced77495cf1abc50b13481e55ec28a469586e2d505a3bc5b0068237",
+    "compute-run1.json": "8ba914c3cbcb8688be5e7c2bbddd023a752eca4549f72d0ef6856071a8d62fd3",
+    "compute-run2.json": "c62a185a4919c8edd134c6fe509f0e47bdb09907548a94b97b5e07da7a7f0697",
+    "mcp-transcript.jsonl": "98a317a54e381e5d8d4f7497419e0e33ba9b2d15442989c91140a74f0d1ac532",
+    "renderer-negative.json": "f7452643bc90a084d9a465f12bd8bbc5856eb4cc65e1fc229769c70fd6ef3663",
+    "renderer-run1.json": "1b3e23a9c15e1ed0e77102952abb8d14582aa2462cea00303c0426fecbba4ecb",
+    "renderer-run2.json": "3d193703c1ef9d46d2d4fd001a021add6a7feaa5b24f9dae7600b76cba5deeee",
+    "stft-negative.json": "d059768e583676f80927a84130c9d6fe2953348812b62e6fc848e50aeeb0f8cd",
+    "stft-run1.json": "d6bb0a8b30624d1a2a3dedb4536055749a83b3f5329a43c88e784247cf32b495",
+    "stft-run2.json": "a97045b4128ef9da66d8016c5911be22c8c604b84983fd894b448f60c183cae0",
+    "threejs-negative.json": "c515cc5f52b4ca13dbb9480c954a85a0e467989095e65b42d2496b5936fc9dd9",
+    "threejs-run1.json": "28d02d856aaa5030c0ee751f18feedb0313462a729cea49e33f8d158795304cc",
+    "threejs-run2.json": "f36752c6c2c7b64575e0aa20abdaed693337df81c0376f6297002f234e347814"
   },
   "dispositions": {
     "positive_repeat_negative": "pass",
