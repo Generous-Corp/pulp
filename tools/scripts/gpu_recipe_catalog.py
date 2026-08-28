@@ -102,6 +102,14 @@ def validate_document(document: Any, schema: Any) -> list[str]:
                     problems.append(
                         f"{prefix}.entrypoints.cli.command recipe id must equal the catalog recipe id"
                     )
+                if not isinstance(recipe.get("native_registry_index"), int):
+                    problems.append(
+                        f"{prefix}.native_registry_index must bind a native probe recipe"
+                    )
+            elif recipe.get("native_registry_index") is not None:
+                problems.append(
+                    f"{prefix}.native_registry_index must be null for a non-probe recipe"
+                )
 
         mcp = entrypoints.get("mcp")
         if isinstance(mcp, dict) and mcp.get("recipe_id") != recipe_id:
@@ -143,19 +151,22 @@ def probe_registry_ids(header_text: str) -> list[str]:
 def catalog_probe_ids(document: dict[str, Any]) -> list[str]:
     """Return catalog rows that project the native `pulp gpu probe` registry."""
 
-    ids = []
+    indexed_ids = []
     for recipe in document["recipes"]:
         command = recipe["entrypoints"]["cli"]["command"]
         if command[:4] == ["pulp", "gpu", "probe", "--recipe"]:
-            ids.append(recipe["id"])
-    return ids
+            indexed_ids.append((recipe["native_registry_index"], recipe["id"]))
+    indices = [index for index, _ in indexed_ids]
+    if sorted(indices) != list(range(len(indexed_ids))):
+        raise ValueError("catalog native_registry_index values must be unique and contiguous")
+    return [recipe_id for _, recipe_id in sorted(indexed_ids)]
 
 
 def validate_registry_projection(document: dict[str, Any], registry_ids: list[str]) -> list[str]:
     """Require exact equality so a newly callable recipe cannot remain undiscoverable."""
 
     catalog_ids = catalog_probe_ids(document)
-    native_ids = sorted(registry_ids)
+    native_ids = registry_ids
     if catalog_ids == native_ids:
         return []
     missing = sorted(set(native_ids) - set(catalog_ids))
@@ -320,6 +331,12 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
             continue
         for path in entry["paths"]:
             if not isinstance(path, str):
+                continue
+            candidate = root / path
+            if not candidate.exists() or not candidate.resolve().is_relative_to(root.resolve()):
+                problems.append(
+                    f"handoff entries[{index}] path does not exist inside the repository: {path!r}"
+                )
                 continue
             try:
                 result = routing.route_changes(
