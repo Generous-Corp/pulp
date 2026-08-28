@@ -167,15 +167,47 @@ class CatalogContract(unittest.TestCase):
     def test_unknown_recipe_and_symptom_use_unavailable_exit_two(self) -> None:
         self.assertEqual(catalog.main(["--show", "missing.recipe"]), 2)
         self.assertEqual(catalog.main(["--symptom", "missing-symptom"]), 2)
+        self.assertEqual(
+            catalog.main(
+                [
+                    "--show",
+                    "gpu-audio.stft.v1",
+                    "--symptom",
+                    "blank-gpu-output",
+                ]
+            ),
+            2,
+        )
 
     def test_vellum_handoff_is_closed_and_cannot_authorize_cutover(self) -> None:
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         self.assertEqual(catalog.validate_handoff(handoff), [])
+        self.assertEqual(catalog.validate_handoff_routing(handoff, catalog.ROOT), [])
         handoff["boundary_change_authorized"] = True
         self.assertIn(
             "must not authorize",
             "\n".join(catalog.validate_handoff(handoff)),
         )
+
+    def test_vellum_handoff_rejects_action_and_authority_drift(self) -> None:
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["entries"][2]["cutover_action"] = "delete-now"
+        self.assertIn("unknown cutover action", "\n".join(catalog.validate_handoff(handoff)))
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["route_set_sha256"] = "0" * 64
+        self.assertIn(
+            "differs from the authoritative projection",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["entries"][0]["current_owner"] = "Generous-Corp/vellum"
+        problems = [
+            *catalog.validate_handoff(handoff),
+            *catalog.validate_handoff_routing(handoff, catalog.ROOT),
+        ]
+        self.assertIn("differs from routed owner", "\n".join(problems))
 
 
 if __name__ == "__main__":
