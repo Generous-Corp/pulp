@@ -374,6 +374,11 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_contract.py")
     add_test(NAME gpu-health-read-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_read_contract.py")
+    # Typed, GPU-free negative controls for the DPR experiment evidence
+    # envelope. Real trials remain separately gated on A2T trace coverage and
+    # A3 budget receipts; this test proves only the portable contract.
+    add_test(NAME gpu-dpr-experiment-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_experiment.py")
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash

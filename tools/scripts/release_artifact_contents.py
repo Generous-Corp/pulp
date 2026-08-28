@@ -159,6 +159,7 @@ class ProductMatrix:
     gpu_probe_contract_floor: str
     threejs_runtime_floor: str
     gpu_health_read_contract_floor: str
+    gpu_dpr_experiment_contract_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
     # `platforms` stays the full historical inventory (per-platform archive
@@ -230,6 +231,9 @@ class ProductMatrix:
                 ),
                 gpu_health_read_contract_floor=str(
                     doc.get("gpu_health_read_contract_floor", "999999.0.0")
+                ),
+                gpu_dpr_experiment_contract_floor=str(
+                    doc.get("gpu_dpr_experiment_contract_floor", "999999.0.0")
                 ),
                 platforms=tuple(doc["platforms"]),
                 active_platforms=tuple(
@@ -623,6 +627,14 @@ def required_sdk_members(
     ):
         required.add(
             "pulp-sdk/share/pulp/contracts/gpu-health-read-result-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version)
+        >= version_tuple(matrix.gpu_dpr_experiment_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
         )
     return frozenset(required)
 

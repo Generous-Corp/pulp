@@ -1,0 +1,91 @@
+{
+  "schema": "pulp.gpu-dpr-corpus.v1",
+  "version": 1,
+  "requested_dprs": [1, 1.5, 2, 3],
+  "modes": ["exact", "configured_max", "adaptive_simulation"],
+  "configured_max_dpr": 2,
+  "adaptive_profile": {
+    "id": "a4-latency-guard-simulation-v1",
+    "shipping": false,
+    "scale_ladder": [1, 1.5, 2, 3],
+    "downshift_after_over_budget_frames": 5,
+    "upshift_after_under_budget_frames": 120,
+    "upshift_budget_fraction": 0.7
+  },
+  "trial_contract": {
+    "warmups": 5,
+    "measured_trials": 30,
+    "fresh_process_first_frame_trials": 20,
+    "required_trace_categories": ["render", "gpu", "text", "js", "layout"],
+    "required_metrics": [
+      "cpu_frame_time", "gpu_frame_time", "first_frame_time",
+      "interaction_latency", "render_target_bytes", "resident_bytes",
+      "upload_bytes"
+    ],
+    "fidelity_gates": [
+      "content_floor_passed", "capture_similarity", "small_text_legible",
+      "thin_strokes_preserved", "logical_input_correct"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "dense-text-thin-strokes",
+      "kind": "pulp_screenshot",
+      "source": "dense-text-thin-strokes.ui.js",
+      "source_sha256": "5841bfc4fff1694be83680b26ecaab28c603d46b08dc0482f83b3664cbfbfe85",
+      "logical_size": { "width": 640, "height": 360 },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input"]
+    },
+    {
+      "id": "shader-heavy-controls",
+      "kind": "pulp_screenshot_gpu",
+      "source": "shader-heavy-controls.ui.js",
+      "source_sha256": "b46d113e7355d75e032f92f100765fada81f7befaabe755cb70be2b979d7b6c4",
+      "logical_size": { "width": 640, "height": 360 },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu"]
+    },
+    {
+      "id": "meters-waveforms",
+      "kind": "pulp_screenshot_gpu",
+      "source": "meters-waveforms.ui.js",
+      "source_sha256": "d806d68a378d4892eb72bc4c466267c337151d88df2a1722e873846de804df23",
+      "logical_size": { "width": 640, "height": 360 },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu"]
+    },
+    {
+      "id": "threejs-audio-reactive",
+      "kind": "maintained_native_canary",
+      "source": "examples/threejs-native-demo/main.cpp",
+      "logical_size": { "width": 900, "height": 600 },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu", "audio_thread_excluded"]
+    },
+    {
+      "id": "forge-modular-native",
+      "kind": "external_forge_canary",
+      "source": "Generous-Corp/Forge:modular",
+      "logical_size": { "width": 1280, "height": 820 },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input", "authentic_gpu", "exact_binary_identity"]
+    },
+    {
+      "id": "forge-modular-daw",
+      "kind": "external_forge_daw_canary",
+      "source": "Generous-Corp/Forge:modular",
+      "logical_size": { "width": 1280, "height": 820 },
+      "required_oracles": ["content_floor", "logical_input", "authentic_gpu", "exact_binary_identity", "exact_plugin_format", "audio_thread_excluded"]
+    },
+    {
+      "id": "super-convolver-web",
+      "kind": "maintained_web_canary",
+      "source": "examples/web-demos/super-convolver-ui/browser-test/validate.mjs",
+      "logical_size": { "width": 760, "height": 520 },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input", "authentic_webgl"]
+    }
+  ],
+  "stop_rules": [
+    "a2t-receipt-missing", "a3-budget-missing", "a3-receipt-missing",
+    "content-digest-drift", "logical-size-drift", "trace-category-missing",
+    "trace-incomplete", "cpu-gpu-substitution", "small-text-oracle-missing",
+    "logical-input-oracle-missing", "forge-identity-unverified",
+    "daw-format-unverified", "audio-thread-work-detected"
+  ]
+}
