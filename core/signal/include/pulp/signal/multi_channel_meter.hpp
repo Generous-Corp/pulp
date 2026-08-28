@@ -113,6 +113,10 @@ struct MultiChannelMeterData {
     // Appended after the legacy aggregate fields so positional aggregate
     // initialization continues to bind its fourth value to lufs_integrated.
     float lufs_momentary = -std::numeric_limits<float>::infinity(); // BS.1770 K-weighted, 400 ms
+    float short_term_lufs = -std::numeric_limits<float>::infinity(); // EBU 3 s, 100 ms hop
+    bool short_term_valid = false;
+    float loudness_range_lu = 0.0f;
+    bool loudness_range_valid = false;
 };
 
 /// Configurable ballistics for multi-channel meter display (UI thread).
@@ -251,8 +255,8 @@ struct MultiChannelBallistics {
 /// whether the prepared sample rate and layout have an honest BS.1770
 /// interpretation; peak, RMS, correlation, and clip metering remain available
 /// when they do not.
-/// This is not a complete EBU Mode meter: it does not expose 3-second
-/// short-term loudness, loudness range, scale/UI behavior, or true peak.
+/// This supplies the EBU short-term (3 s) and loudness-range core. Scale/UI
+/// behavior and true peak remain outside this processor.
 ///
 /// Call process() from the audio callback. Read results via snapshot().
 template <typename SampleType = float>
@@ -287,6 +291,8 @@ public:
         gate_energy_tree_.assign(kGateBinCount + 1, 0.0);
         gate_count_tree_.assign(kGateBinCount + 1, 0);
         gate_node_epoch_.assign(kGateBinCount + 1, 0);
+        lra_count_tree_.assign(kGateBinCount + 1, 0);
+        lra_node_epoch_.assign(kGateBinCount + 1, 0);
         gate_epoch_ = 0;
         gate_epoch_active_ = true;
 
@@ -447,6 +453,7 @@ private:
     static constexpr double kGateBinWidthLu = 0.01;
     static constexpr std::size_t kGateBinCount = 21001;
     static constexpr double kGateMaximumEnergy = 1.0e14;
+    static constexpr std::size_t kShortTermHopCount = 30;
 
     struct Biquad {
         double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
@@ -582,12 +589,18 @@ private:
         for (auto& filter : k_filters_) filter.reset();
         loudness_hop_energy_.fill(0.0);
         for (auto& hop : loudness_energy_ring_) hop.fill(0.0);
+        loudness_short_term_ring_.fill(0.0);
         channel_momentary_.fill(-std::numeric_limits<float>::infinity());
         loudness_hop_position_ = 0;
         loudness_hops_completed_ = 0;
         loudness_ring_position_ = 0;
+        loudness_short_term_position_ = 0;
         snapshot_.lufs_momentary = -std::numeric_limits<float>::infinity();
         snapshot_.lufs_integrated = -std::numeric_limits<float>::infinity();
+        snapshot_.short_term_lufs = -std::numeric_limits<float>::infinity();
+        snapshot_.short_term_valid = false;
+        snapshot_.loudness_range_lu = 0.0f;
+        snapshot_.loudness_range_valid = false;
         gate_nodes_initialized_ = 0;
         // A 64-bit epoch cannot wrap in a practical process lifetime. If it
         // nevertheless exhausts, stop accumulating integrated loudness until
@@ -599,6 +612,13 @@ private:
     }
 
     void finish_loudness_hop(int num_channels) {
+        double hop_program_energy = 0.0;
+        for (int ch = 0; ch < num_channels; ++ch)
+            hop_program_energy += channel_weights_[ch] * loudness_hop_energy_[ch]
+                                  / static_cast<double>(loudness_hop_samples_);
+        loudness_short_term_ring_[loudness_short_term_position_] = std::min(
+            hop_program_energy, kGateMaximumEnergy);
+        loudness_short_term_position_ = (loudness_short_term_position_ + 1) % kShortTermHopCount;
         loudness_energy_ring_[loudness_ring_position_] = loudness_hop_energy_;
         loudness_hop_energy_.fill(0.0);
         loudness_hop_position_ = 0;
@@ -623,6 +643,7 @@ private:
             add_gating_block(program_energy);
             update_integrated_loudness();
         }
+        update_short_term_and_range();
     }
 
     void add_gating_block(double energy) {
@@ -685,6 +706,64 @@ private:
             : -std::numeric_limits<float>::infinity();
     }
 
+    void update_short_term_and_range() {
+        if (loudness_hops_completed_ < kShortTermHopCount) return;
+        double energy = 0.0;
+        for (const double hop : loudness_short_term_ring_) energy += hop;
+        snapshot_.short_term_lufs = energy_to_lufs(energy / kShortTermHopCount);
+        snapshot_.short_term_valid = std::isfinite(snapshot_.short_term_lufs);
+        if (!snapshot_.short_term_valid) return;
+        if (snapshot_.short_term_lufs > kAbsoluteGateLufs)
+            add_lra_block(snapshot_.short_term_lufs);
+        update_loudness_range();
+    }
+
+    void add_lra_block(double loudness) {
+        const auto bin = std::min(kGateBinCount - 1, static_cast<std::size_t>(
+            (std::clamp(loudness, kAbsoluteGateLufs, kGateMaximumLufs)
+             - kAbsoluteGateLufs) / kGateBinWidthLu));
+        for (std::size_t index = bin + 1; index <= kGateBinCount; index += low_bit(index)) {
+            if (lra_node_epoch_[index] != gate_epoch_) {
+                lra_node_epoch_[index] = gate_epoch_;
+                lra_count_tree_[index] = 0;
+            }
+            ++lra_count_tree_[index];
+        }
+    }
+
+    std::uint64_t lra_prefix_count(std::size_t exclusive_bin) const {
+        std::uint64_t count = 0;
+        for (std::size_t index = exclusive_bin; index > 0; index -= low_bit(index))
+            if (lra_node_epoch_[index] == gate_epoch_) count += lra_count_tree_[index];
+        return count;
+    }
+
+    float lra_value_at_rank(std::size_t first_bin, std::uint64_t rank) const {
+        const std::uint64_t target = lra_prefix_count(first_bin) + rank;
+        std::size_t low = 0, high = kGateBinCount - 1;
+        while (low < high) {
+            const auto mid = low + (high - low) / 2;
+            if (lra_prefix_count(mid + 1) >= target) high = mid;
+            else low = mid + 1;
+        }
+        return static_cast<float>(kAbsoluteGateLufs + low * kGateBinWidthLu);
+    }
+
+    void update_loudness_range() {
+        if (!std::isfinite(snapshot_.lufs_integrated)) return;
+        const double gate = std::max(kAbsoluteGateLufs,
+            static_cast<double>(snapshot_.lufs_integrated) - 20.0);
+        const auto first_bin = gate <= kAbsoluteGateLufs ? 0 : std::min(kGateBinCount,
+            static_cast<std::size_t>((gate - kAbsoluteGateLufs) / kGateBinWidthLu) + 1);
+        const auto count = lra_prefix_count(kGateBinCount) - lra_prefix_count(first_bin);
+        if (count == 0) return;
+        const auto p10 = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(std::ceil(count * 0.10)));
+        const auto p95 = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(std::ceil(count * 0.95)));
+        snapshot_.loudness_range_lu = lra_value_at_rank(first_bin, p95)
+                                   - lra_value_at_rank(first_bin, p10);
+        snapshot_.loudness_range_valid = true;
+    }
+
     double sample_rate_ = 44100.0;
     int num_channels_ = 2;
 
@@ -705,6 +784,8 @@ private:
     std::array<double, kMaxMeterChannels> channel_weights_{};
     std::array<double, kMaxMeterChannels> loudness_hop_energy_{};
     std::array<std::array<double, kMaxMeterChannels>, 4> loudness_energy_ring_{};
+    std::array<double, kShortTermHopCount> loudness_short_term_ring_{};
+    std::size_t loudness_short_term_position_ = 0;
     std::array<float, kMaxMeterChannels> channel_momentary_{};
 
     // Correlation accumulators
@@ -716,6 +797,8 @@ private:
     std::vector<double> gate_energy_tree_;
     std::vector<std::uint64_t> gate_count_tree_;
     std::vector<std::uint64_t> gate_node_epoch_;
+    std::vector<std::uint64_t> lra_count_tree_;
+    std::vector<std::uint64_t> lra_node_epoch_;
     std::uint64_t gate_epoch_ = 0;
     std::size_t gate_nodes_initialized_ = 0;
     bool gate_epoch_active_ = true;

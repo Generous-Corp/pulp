@@ -11,6 +11,8 @@
 #include <pulp/signal/sos_cascade.hpp>
 #include <pulp/signal/tilt_eq.hpp>
 #include <pulp/signal/oscillator.hpp>
+#include <pulp/signal/sub_oscillator.hpp>
+#include <pulp/signal/blit_oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
 #include <pulp/signal/diffusion_network.hpp>
