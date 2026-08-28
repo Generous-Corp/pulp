@@ -32,8 +32,15 @@ cd my-plugin
 pulp run
 ```
 
-Everything works — `pulp build`, `pulp test`, `pulp ship`, the lot.
-Type-completion and AI assistance are whatever your editor provides.
+The macOS/Linux installer normally adds the matching SDK after the CLI; the
+Windows installer currently installs the CLI only. Check `pulp sdk status` and
+run `pulp sdk install` if no matching SDK is listed. With that SDK present,
+`pulp build`, `pulp test`, `pulp run`, and `pulp ship` are available; type
+completion and AI assistance are whatever your editor provides.
+
+When a task spans subsystems, start with `pulp authority list`, then route an
+exact ID or alias with `pulp authority query dsp` or
+`pulp authority query timeline`.
 
 ### Codex
 
