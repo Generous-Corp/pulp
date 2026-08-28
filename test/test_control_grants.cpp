@@ -2,6 +2,8 @@
 
 #include <pulp/inspect/control_grants.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <chrono>
 #include <algorithm>
 #include <array>
@@ -220,14 +222,18 @@ TEST_CASE("one-shot grants authorize one fresh request and preserve its replay",
     for (std::size_t index = 0; index < attempts.size(); ++index) {
         attempts[index] = std::async(std::launch::async, [&, index] {
             ready.fetch_add(1, std::memory_order_release);
-            while (!start.load(std::memory_order_acquire)) {}
+            if (!pulp::test::wait_for_condition(
+                    [&] { return start.load(std::memory_order_acquire); }))
+                return std::optional<ControlOperationAuthorization>{};
             return fixture.grants.authorize_operation(
                 issued.grant->grant_id, fixture.client.client_id,
                 fixture.registration.registration_id, InspectorCapability::StateRead,
                 "operation-" + std::to_string(index));
         });
     }
-    while (ready.load(std::memory_order_acquire) != static_cast<int>(attempts.size())) {}
+    REQUIRE(pulp::test::wait_for_condition([&] {
+        return ready.load(std::memory_order_acquire) == static_cast<int>(attempts.size());
+    }));
     start.store(true, std::memory_order_release);
 
     std::size_t authorized = 0;
