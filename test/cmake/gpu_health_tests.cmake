@@ -1,3 +1,24 @@
+if(TARGET pulp-test-gpu-health-result
+        AND TARGET pulp-test-gpu-health-read-result)
+    add_test(NAME gpu-health-result COMMAND pulp-test-gpu-health-result)
+    set_tests_properties(gpu-health-result PROPERTIES
+        LABELS "gpu;gpu-health;contract")
+
+    add_test(NAME gpu-health-read-result COMMAND pulp-test-gpu-health-read-result)
+    set_tests_properties(gpu-health-read-result PROPERTIES
+        LABELS "gpu;gpu-health;read;contract")
+endif()
+
+if(TARGET pulp-test-gpu-health-provider)
+    add_test(NAME gpu-health-provider COMMAND pulp-test-gpu-health-provider)
+    set_tests_properties(gpu-health-provider PROPERTIES
+        LABELS "gpu;gpu-health")
+    if(PULP_ENABLE_SCENE3D)
+        set_tests_properties(gpu-health-provider PROPERTIES
+            LABELS "gpu;gpu-health;scene3d-required")
+    endif()
+endif()
+
 add_executable(pulp-test-control-gpu-health-read-executor
     test_control_gpu_health_read_executor.cpp)
 target_link_libraries(pulp-test-control-gpu-health-read-executor PRIVATE
