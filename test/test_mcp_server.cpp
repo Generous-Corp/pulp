@@ -685,6 +685,9 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
     require_contains(tools, R"JSON("name":"pulp_gpu_doctor")JSON");
+    require_contains(tools, R"JSON("name":"pulp_gpu_probe")JSON");
+    require_contains(tools, R"JSON("gpu-compute.magnitude.v1")JSON");
+    require_contains(tools, R"JSON("artifacts":{"type":"string")JSON");
     require_contains(tools, R"JSON("no_render":{"type":"boolean")JSON");
     require_contains(tools, R"JSON("outputSchema":{"type":"object")JSON");
     require_contains(tools, R"JSON("exit_code":{"type":"integer","enum":[0,1,2])JSON");

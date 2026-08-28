@@ -131,6 +131,7 @@ std::span<const RecipeDefinition> recipes();
 
 bool validate(const ProbeResult& result, std::string* error = nullptr);
 std::string to_json(const ProbeResult& result, bool pretty = false);
+std::optional<ProbeResult> from_json(std::string_view json, std::string* error = nullptr);
 std::string render_human(const ProbeResult& result);
 int exit_code(const ProbeResult& result);
 

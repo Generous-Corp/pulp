@@ -7,6 +7,7 @@
 #include "mcp_tools_internal.hpp"
 
 #include <pulp_tooling/gpu_health/health_result.hpp>
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <filesystem>
@@ -122,6 +123,78 @@ std::string handle_gpu_doctor(const std::string& params_json) {
     const auto normalized = pulp::tooling::gpu_health::to_json(*evidence);
 
     return tool_result(run.status, normalized, run.status != 0);
+}
+
+std::string handle_gpu_probe(const std::string& params_json) {
+    try {
+        const auto params = choc::json::parse(params_json);
+        if (!params.isObject())
+            return local_error(-1, "invalid-arguments", "arguments must be an object");
+        bool unknown = false;
+        std::string unknown_name;
+        params.getView().visitObjectMembers([&](std::string_view name,
+                                                 const choc::value::ValueView&) {
+            if (name != "recipe" && name != "artifacts" &&
+                name != "negative_control" && !unknown) {
+                unknown = true;
+                unknown_name = name;
+            }
+        });
+        if (unknown)
+            return local_error(-1, "invalid-arguments", "unknown argument: " + unknown_name);
+    } catch (...) {
+        return local_error(-1, "invalid-arguments", "arguments must be valid JSON");
+    }
+
+    const auto recipe = extract_string(params_json, "recipe");
+    const auto artifacts = extract_string(params_json, "artifacts");
+    const auto negative_token = extract_raw(params_json, "negative_control");
+    if (recipe.empty())
+        return local_error(-1, "invalid-arguments", "recipe is required");
+    if (pulp::tooling::gpu_probe::find_recipe(recipe) == nullptr)
+        return local_error(-1, "invalid-arguments", "recipe is not in the closed catalog");
+    if (artifacts.empty())
+        return local_error(-1, "invalid-arguments", "artifacts is required");
+    if (!std::filesystem::path(artifacts).is_absolute())
+        return local_error(-1, "invalid-arguments", "artifacts must be an absolute path");
+    if (!negative_token.empty() && negative_token != "true" && negative_token != "false")
+        return local_error(-1, "invalid-arguments", "negative_control must be a boolean");
+
+    std::filesystem::path executable;
+    {
+        std::lock_guard lock(g_executable_mutex);
+        executable = g_mcp_executable;
+    }
+    if (executable.empty())
+        return local_error(-1, "cli-unavailable", "pulp-mcp executable identity is unavailable");
+    const auto cli = sibling_pulp_cpp_path(executable);
+    if (!std::filesystem::is_regular_file(cli))
+        return local_error(-1, "cli-unavailable",
+                           "the sibling installed pulp-cpp executable was not found");
+
+    auto command = shell_quote(cli.string()) + " gpu probe --recipe " + shell_quote(recipe) +
+                   " --artifacts " + shell_quote(artifacts) + " --json";
+    if (negative_token == "true") command += " --negative-control";
+    const auto run = exec_with_status(command);
+
+    std::string parse_error;
+    const auto evidence = pulp::tooling::gpu_probe::from_json(run.output, &parse_error);
+    if (!evidence)
+        return local_error(run.status, "malformed-cli-output",
+                           "pulp-cpp gpu probe returned invalid v1 evidence: " + parse_error,
+                           run.output);
+    if (evidence->recipe_id != recipe ||
+        evidence->mutation.has_value() != (negative_token == "true"))
+        return local_error(run.status, "incoherent-cli-output",
+                           "pulp-cpp gpu probe evidence does not match the request", run.output);
+    const auto expected_status = pulp::tooling::gpu_probe::exit_code(*evidence);
+    if (run.status != expected_status)
+        return local_error(run.status, "incoherent-cli-output",
+                           "pulp-cpp gpu probe exit status does not match its typed verdict",
+                           run.output);
+
+    return tool_result(run.status, pulp::tooling::gpu_probe::to_json(*evidence),
+                       run.status != 0);
 }
 
 } // namespace pulp_mcp

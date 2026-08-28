@@ -40,6 +40,7 @@
 #include "mcp_compat.hpp"
 #include "mcp_control_tools.hpp"
 #include "gpu_health_result_schema.h"
+#include "gpu_probe_result_schema.h"
 #include "mcp_json.hpp"
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
@@ -87,6 +88,7 @@ using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_build;
 using pulp_mcp::handle_gpu_doctor;
+using pulp_mcp::handle_gpu_probe;
 using pulp_mcp::handle_content;
 using pulp_mcp::handle_content_install;
 using pulp_mcp::handle_content_list;
@@ -477,6 +479,10 @@ std::string pulp_mcp::server::tools_list_json() {
     out += pulp_mcp::kGpuHealthResultSchemaJson;
     out += R"JSON(}}},)JSON";
     out +=
+        R"JSON({"name":"pulp_gpu_probe","description":"Run one installed deterministic GPU evidence recipe and return its typed result. The artifact directory must be absolute and may not traverse symlinks. Non-passing evidence remains an MCP error carrying the result.","inputSchema":{"type":"object","additionalProperties":false,"required":["recipe","artifacts"],"properties":{"recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","threejs.multi-pass.v1","gpu-audio.stft.v1"]},"artifacts":{"type":"string","description":"Absolute output directory for bounded hash-declared artifacts"},"negative_control":{"type":"boolean","description":"Apply the recipe's seeded detectable mutation"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1],"description":"Native pulp-cpp process exit code"},"evidence":)JSON";
+    out += pulp_mcp::kGpuProbeResultSchemaJson;
+    out += R"JSON(}}},)JSON";
+    out +=
         R"JSON({"name":"pulp_kit","description":"Umbrella wrapper for kit subcommands. Use search/validate/inspect/plan/verify/apply/remove/pack/init/publish for local Pulp kit manifests or .pulpkit archives; search also discovers verified local .pulpcontent archives; no package code is executed before apply/verify approval.","inputSchema":{"type":"object","required":["subcommand"],"properties":{"subcommand":{"type":"string","enum":["search","validate","inspect","show","plan","verify","apply","remove","uninstall","pack","publish","publish-check","init"],"description":"Kit subcommand to run"},"query":{"type":"string","description":"Search query for local package manifests or archives"},"root":{"type":"string","description":"Search root override for kit search"},"lane":{"type":"string","enum":["kit","content"],"description":"Optional kit search lane filter"},"path":{"type":"string","description":"Path for validate/inspect/plan/verify/apply/pack/publish; consuming commands accept .pulpkit archives"},"output":{"type":"string","description":"Archive output path for pack"},"registry_manifest":{"type":"string","description":"Optional local signed registry manifest for publish dry-run"},"yes":{"type":"boolean","description":"Required for apply/remove after reviewing the plan or ownership"},"strict":{"type":"boolean","description":"Validate in strict mode"},"id":{"type":"string","description":"Package id for init or installed kit id for remove"},"kit_id":{"type":"string","description":"Installed kit id for remove"},"kind":{"type":"string","description":"Kind filter for search, or kind for init"},"name":{"type":"string","description":"Display name for init"},"dir":{"type":"string","description":"Directory for init"},"force":{"type":"boolean","description":"Overwrite existing manifest for init"}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_kit_search","description":"Search local Pulp package manifests and verified local .pulpkit/.pulpcontent archives without executing package code. Results are classified into kit vs content lanes so arbitrary artifacts do not look like curated pulp add dependencies.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Optional search query"},"root":{"type":"string","description":"Directory, archive, or pulp.package.json file to search"},"kind":{"type":"string","description":"Optional package kind filter, e.g. ui-kit or content-pack"},"lane":{"type":"string","enum":["kit","content"],"description":"Optional trust/workflow lane filter"}}}},)JSON";
@@ -723,6 +729,8 @@ static std::string handle_request_raw(const std::string& json) {
             result = handle_validate(args_json);
         else if (name == "pulp_gpu_doctor")
             result = handle_gpu_doctor(args_json);
+        else if (name == "pulp_gpu_probe")
+            result = handle_gpu_probe(args_json);
         else if (name == "pulp_minos")
             result = handle_minos(args_json);
         else if (name == "pulp_kit")

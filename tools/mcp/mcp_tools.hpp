@@ -30,6 +30,7 @@ std::string handle_test(const std::string& params_json);
 std::string handle_status(const std::string& params_json);
 std::string handle_validate(const std::string& params_json);
 std::string handle_gpu_doctor(const std::string& params_json);
+std::string handle_gpu_probe(const std::string& params_json);
 /// Capture pulp-mcp's launch identity before a tool call can change cwd.
 void configure_gpu_doctor_executable(std::string executable_path);
 std::string handle_minos(const std::string& params_json);

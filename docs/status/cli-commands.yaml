@@ -760,6 +760,27 @@ commands:
         description: Refresh macOS Audio Unit registration metadata by stopping AudioComponentRegistrar; `--dry-run` prints the command. On non-macOS hosts this is an accepted no-op that exits 0.
     docs: reference/cli.md#doctor
 
+  - name: gpu
+    status: usable
+    summary: Run bounded deterministic GPU evidence recipes through Pulp's existing Dawn/WebGPU, Renderer3D, Three.js, GpuCompute, and offline GPU-audio seams. Each recipe has an independent oracle, declared tolerances and artifact bounds, authentic adapter identity, and a seeded negative control; unavailable work never becomes a pass.
+    subcommands:
+      - name: probe
+        summary: Run one closed-catalog recipe and atomically publish its hash-declared artifacts.
+        args:
+          - name: --recipe
+            required: true
+            description: Closed recipe id. Use `pulp gpu probe --help` to list the recipes compiled into the matched CLI.
+          - name: --artifacts
+            required: true
+            description: Output directory for bounded evidence artifacts. Symlinked destinations or parent paths are refused.
+          - name: --negative-control
+            kind: flag
+            description: Apply the recipe's seeded mutation. The GPU work must complete and the independent oracle must detect the changed result; the command exits 1 with typed failure evidence.
+          - name: --json
+            kind: flag
+            description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass; every fail, unavailable, or unverified result remains nonzero with its typed evidence.
+    docs: reference/cli.md#gpu
+
   - name: clean
     status: usable
     summary: Remove the build directory.
