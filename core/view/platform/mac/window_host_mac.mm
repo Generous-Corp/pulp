@@ -1392,7 +1392,6 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // display move/hotplug at the same logical size — which does not go through
 // windowDidResize. The host recreates the GPU surfaces at the new physical size.
 @property (nonatomic, copy) dispatch_block_t backingChangedBlock;
-@property (nonatomic) BOOL liveResizePresentation;
 // C++ render state is managed by MacGpuWindowHost, not the view
 @end
 
@@ -1489,24 +1488,6 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
-}
-
-- (void)viewWillStartLiveResize {
-    [super viewWillStartLiveResize];
-    // The normal FIFO/vsync path can block nextDrawable for almost one display
-    // interval. During an interactive resize that leaves AppKit's enlarged
-    // bounds visible before the exact-size GPU frame arrives. Let Metal present
-    // resize frames immediately; normal display synchronization is restored as
-    // soon as the gesture ends.
-    self.liveResizePresentation = YES;
-    self.metalLayer.displaySyncEnabled = NO;
-}
-
-- (void)viewDidEndLiveResize {
-    [super viewDidEndLiveResize];
-    self.liveResizePresentation = NO;
-    self.metalLayer.displaySyncEnabled = YES;
-    self.metalLayer.contentsGravity = kCAGravityTopLeft;
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -2674,11 +2655,6 @@ private:
 
         if (gpu_surface_) {
             gpu_surface_->resize(phys_w, phys_h);
-            // Dawn reconfigures the native surface on every size change and
-            // may restore FIFO display sync. Reassert the live-resize policy
-            // before render_frame acquires the replacement drawable.
-            if (metal_view_.liveResizePresentation)
-                metal_view_.metalLayer.displaySyncEnabled = NO;
         }
         if (skia_surface_) {
             skia_surface_->resize(static_cast<uint32_t>(width),
