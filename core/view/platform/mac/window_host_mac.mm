@@ -1392,6 +1392,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // display move/hotplug at the same logical size — which does not go through
 // windowDidResize. The host recreates the GPU surfaces at the new physical size.
 @property (nonatomic, copy) dispatch_block_t backingChangedBlock;
+@property (nonatomic) BOOL pulpLiveResizeActive;
+@property (nonatomic) NSUInteger resizeCoverGeneration;
+- (void)releaseResizeCoverAfterPresent;
 // C++ render state is managed by MacGpuWindowHost, not the view
 @end
 
@@ -1473,21 +1476,55 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
 - (void)setFrameSize:(NSSize)newSize {
     const NSSize oldSize = self.frame.size;
+    self.resizeCoverGeneration += 1;
     const BOOL expandingLiveResize =
-        self.inLiveResize &&
+        (self.inLiveResize || self.pulpLiveResizeActive) &&
         (newSize.width > oldSize.width || newSize.height > oldSize.height);
+    const BOOL unchangedLiveResize =
+        (self.inLiveResize || self.pulpLiveResizeActive) &&
+        newSize.width == oldSize.width && newSize.height == oldSize.height;
     // AppKit commits the layer bounds before windowDidResize can acquire and
     // paint the matching Metal drawable. Cover that sub-frame expansion gap
     // with the retained drawable; handle_resize restores TopLeft immediately
     // after the exact-size frame has presented.
-    self.metalLayer.contentsGravity = expandingLiveResize
-        ? kCAGravityResize
-        : kCAGravityTopLeft;
+    if (expandingLiveResize) {
+        self.metalLayer.contentsGravity = kCAGravityResize;
+    } else if (!unchangedLiveResize) {
+        // AppKit commonly follows an expansion with a redundant same-size
+        // setFrameSize:. Preserve the cover for that callback; treating it as
+        // a contraction releases the cover before the queued drawable lands.
+        self.metalLayer.contentsGravity = kCAGravityTopLeft;
+    }
     [super setFrameSize:newSize];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+}
+
+- (void)viewWillStartLiveResize {
+    [super viewWillStartLiveResize];
+    self.pulpLiveResizeActive = YES;
+}
+
+- (void)viewDidEndLiveResize {
+    [super viewDidEndLiveResize];
+    self.pulpLiveResizeActive = NO;
+    [self releaseResizeCoverAfterPresent];
+}
+
+- (void)releaseResizeCoverAfterPresent {
+    const NSUInteger generation = self.resizeCoverGeneration;
+    PulpMetalView* view = self;
+    // GpuSurface::end_frame queues the drawable; it does not mean Core
+    // Animation has displayed it. Keep the retained-frame cover through the
+    // next compositor opportunity. A newer resize increments the generation,
+    // invalidating this release so a stale callback cannot expose the edge.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        if (view.resizeCoverGeneration == generation)
+            view.metalLayer.contentsGravity = kCAGravityTopLeft;
+    });
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -2696,10 +2733,10 @@ private:
         // timing and may harmlessly coalesce a later requested frame.
         if (gpu_surface_ && skia_surface_) {
             render_frame();
-            // setFrameSize: may use Resize gravity to cover a live expansion's
-            // pre-present gap. The drawable now matches the committed bounds,
-            // so return to native-scale retention before the next transaction.
-            metal_view_.metalLayer.contentsGravity = kCAGravityTopLeft;
+            // Present() only queues the replacement drawable. Keep the retained
+            // cover until Core Animation has had a compositor interval to show
+            // it; releasing here races that display and exposes the background.
+            [metal_view_ releaseResizeCoverAfterPresent];
         }
     }
 

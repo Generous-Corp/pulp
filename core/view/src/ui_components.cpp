@@ -1314,14 +1314,23 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     }
     canvas.restore();
 
-    canvas.save();
-    canvas.clip_rect(0, 0, b.width, b.height);
-    canvas.translate(-sx, 0.0f);
+    bool has_sticky_child = false;
     for (size_t i = 0; i < child_count(); ++i) {
-        if (child_at(i)->position() == View::Position::sticky)
-            child_at(i)->paint_all(canvas);
+        if (child_at(i)->position() == View::Position::sticky) {
+            has_sticky_child = true;
+            break;
+        }
     }
-    canvas.restore();
+    if (has_sticky_child) {
+        canvas.save();
+        canvas.clip_rect(0, 0, b.width, b.height);
+        canvas.translate(-sx, 0.0f);
+        for (size_t i = 0; i < child_count(); ++i) {
+            if (child_at(i)->position() == View::Position::sticky)
+                child_at(i)->paint_all(canvas);
+        }
+        canvas.restore();
+    }
 
     // Paint scrollbar indicators AFTER children so they render on top
     paint(canvas);

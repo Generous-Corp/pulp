@@ -25,6 +25,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include "support/thread_progress.hpp"
 #include "../core/view/src/widget_bridge/bridge_dispatch.hpp"
 #include <atomic>
 #include <chrono>
@@ -53,15 +54,22 @@ TEST_CASE("Bridge callback retirement waits for in-flight engine dispatch",
     auto state = std::make_shared<BridgeCallbackState>(nullptr, nullptr);
     std::atomic<bool> entered{false};
     std::atomic<bool> release{false};
+    std::atomic<bool> release_wait_timed_out{false};
 
     std::thread dispatch([&] {
         std::lock_guard<std::recursive_mutex> lock(state->dispatch_mutex());
         entered.store(true, std::memory_order_release);
-        while (!release.load(std::memory_order_acquire))
-            std::this_thread::yield();
+        if (!pulp::test::wait_for_condition(
+                [&] { return release.load(std::memory_order_acquire); })) {
+            release_wait_timed_out.store(true, std::memory_order_release);
+        }
     });
-    while (!entered.load(std::memory_order_acquire))
-        std::this_thread::yield();
+    if (!pulp::test::wait_for_condition(
+            [&] { return entered.load(std::memory_order_acquire); })) {
+        release.store(true, std::memory_order_release);
+        dispatch.join();
+        FAIL("dispatch thread did not enter before the progress deadline");
+    }
 
     auto retirement = std::async(std::launch::async, [&] {
         state->retire_dispatch();
@@ -71,6 +79,7 @@ TEST_CASE("Bridge callback retirement waits for in-flight engine dispatch",
 
     release.store(true, std::memory_order_release);
     dispatch.join();
+    CHECK_FALSE(release_wait_timed_out.load(std::memory_order_acquire));
     REQUIRE(retirement.wait_for(std::chrono::seconds(1)) ==
             std::future_status::ready);
     CHECK_FALSE(state->load(std::memory_order_acquire));

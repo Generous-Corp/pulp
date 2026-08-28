@@ -56,6 +56,13 @@ struct BackBufferFrameCapture {
     std::vector<uint8_t> png;
 };
 
+struct LiveResizeCoverState {
+    bool resize_applied = false;
+    bool cover_before = false;
+    bool cover_after_present = false;
+    bool cover_after_compositor_interval = false;
+};
+
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
 /// unit tests. Must be called on the main thread. Forces
 /// `options.use_gpu = true` and
@@ -110,6 +117,12 @@ pulp::view::WindowHost::ContentSize content_view_bounds(
 /// replacement content synchronously.
 bool resize_content_view(pulp::view::WindowHost& host,
                          float width, float height);
+
+/// Exercise the production live-resize lifecycle and report whether the
+/// CAMetalLayer retained-frame cover survives Present() long enough for the
+/// compositor to display the replacement drawable, then releases.
+LiveResizeCoverState simulate_live_resize_cover(
+    pulp::view::WindowHost& host, float width, float height);
 
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a

@@ -220,6 +220,30 @@ bool resize_content_view(pulp::view::WindowHost& host,
     }
 }
 
+LiveResizeCoverState simulate_live_resize_cover(
+    pulp::view::WindowHost& host, float width, float height) {
+    LiveResizeCoverState state;
+    if (!is_main_thread() || width <= 0.0f || height <= 0.0f) return state;
+
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!view || ![view.layer isKindOfClass:[CAMetalLayer class]]) return state;
+
+        CAMetalLayer* layer = (CAMetalLayer*)view.layer;
+        state.cover_before = [layer.contentsGravity isEqualToString:kCAGravityResize];
+        [view viewWillStartLiveResize];
+        state.resize_applied = resize_content_view(host, width, height);
+        state.cover_after_present =
+            [layer.contentsGravity isEqualToString:kCAGravityResize];
+        [view viewDidEndLiveResize];
+        [[NSRunLoop currentRunLoop]
+            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.10]];
+        state.cover_after_compositor_interval =
+            [layer.contentsGravity isEqualToString:kCAGravityResize];
+    }
+    return state;
+}
+
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     if (!is_main_thread()) return false;
 
