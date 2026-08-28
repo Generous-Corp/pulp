@@ -525,9 +525,15 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp::inspect-standalone-runtime pulp::standalone)
     target_link_options(pulp-control-standalone-host PRIVATE
         "LINKER:-dead_strip_dylibs")
+    set(_pulp_control_standalone_capabilities
+        "dev.pulp.instance/read@1;dev.pulp.state/read@1")
+    if(PULP_ENABLE_GPU)
+        list(APPEND _pulp_control_standalone_capabilities
+            "dev.pulp.gpu/health.read@1")
+    endif()
     _pulp_cache_control_declarations(pulp-control-standalone-host
         developer-local
-        "dev.pulp.instance/read@1;dev.pulp.state/read@1;dev.pulp.gpu/health.read@1"
+        "${_pulp_control_standalone_capabilities}"
         FALSE)
     _pulp_configure_control_shipping(pulp-control-standalone-host
         "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
