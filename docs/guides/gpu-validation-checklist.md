@@ -45,8 +45,15 @@ Pulp's scale policy. Validate and expand it before scheduling hardware work:
 
 ```bash
 python3 tools/scripts/gpu_dpr_experiment.py validate-manifest
-python3 tools/scripts/gpu_dpr_experiment.py emit-plan --output /tmp/pulp-dpr-plan.json
+python3 tools/scripts/gpu_dpr_experiment.py emit-plan \
+  --experiment-id "a4-YYYYMMDD-NNN" \
+  --plan-revision "$PULP_DPR_PLAN_REVISION" \
+  --pulp-sha "$(git rev-parse HEAD)" \
+  --forge-sha "$PULP_DPR_FORGE_SHA" > /tmp/pulp-dpr-plan.json
 ```
+
+Export `PULP_DPR_PLAN_REVISION` and `PULP_DPR_FORGE_SHA` as the exact 40-hex
+commits under test first; placeholder or branch names are rejected.
 
 The plan covers DPR 1, 1.5, 2, and 3 in exact, configured-max, and explicitly
 nonshipping adaptive modes. A complete measured result must cover every matrix
