@@ -209,6 +209,22 @@ class CatalogContract(unittest.TestCase):
         ]
         self.assertIn("differs from routed owner", "\n".join(problems))
 
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["ownership_projection"] = "docs/status/alternate-ownership.json"
+        self.assertIn(
+            "must be the authoritative",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+        for invalid in (False, 0, [], {}):
+            with self.subTest(retain_delete_after=invalid):
+                handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+                handoff["entries"][0]["delete_after"] = invalid
+                self.assertIn(
+                    "must be null for retained Pulp work",
+                    "\n".join(catalog.validate_handoff(handoff)),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
