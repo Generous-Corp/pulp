@@ -25,8 +25,9 @@ SELECT
     EXTRACT_ARG(arg_set_id, 'args.debug.frame_index')) AS INT) AS frame_index,
   dur = -1 AS is_incomplete,
   COALESCE(
-    CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
-    CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT), '') != '' AS is_failure
+    CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),
+    CAST(EXTRACT_ARG(arg_set_id, 'args.debug.health_state') AS TEXT), '')
+    IN ('failed', 'lost') AS is_failure
 FROM slice
 WHERE category GLOB 'gpu*'
   AND (name GLOB 'gpu_probe*' OR name GLOB 'gpu_readback*' OR name GLOB 'gpu_submit*')

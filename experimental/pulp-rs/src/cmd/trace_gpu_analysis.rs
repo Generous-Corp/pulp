@@ -1,6 +1,7 @@
 //! Closed GPU questions over checked-in PerfettoSQL definitions.
 
-use std::io::Write;
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -136,14 +137,41 @@ struct RawRow {
     failure: bool,
 }
 
-fn sql_temp_path() -> PathBuf {
+fn create_exclusive_sql(path: &Path, sql: &str) -> io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(sql.as_bytes())
+}
+
+fn write_sql_temp(sql: &str) -> io::Result<PathBuf> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "pulp-trace-gpu-analysis-{}-{n}.sql",
-        std::process::id()
+    for _ in 0..128 {
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "pulp-trace-gpu-analysis-{}-{n}.sql",
+            std::process::id()
+        ));
+        match create_exclusive_sql(&path, sql) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not reserve an exclusive GPU-analysis SQL file",
     ))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn decode_hex(value: &str) -> Option<String> {
@@ -273,7 +301,11 @@ fn result_from_rows(
     });
     let missing_probe_evidence =
         question == GpuQuestion::GpuProbe && rows.iter().any(|row| row.evidence_id.is_none());
+    let missing_startup_gpu_stage =
+        question == GpuQuestion::GpuStartup && !rows.iter().any(|row| row.stage != "frame");
     let unavailable_reason = if rows.is_empty() {
+        Some("missing-question-category")
+    } else if missing_startup_gpu_stage {
         Some("missing-question-category")
     } else if incomplete {
         Some("incomplete-capture")
@@ -351,7 +383,10 @@ fn result_from_rows(
         evidence_ids,
         next_actions,
         ui_correlation: UiCorrelation {
-            open_command: format!("pulp trace open {}", trace.display()),
+            open_command: format!(
+                "pulp trace open -- {}",
+                shell_quote(&trace.to_string_lossy())
+            ),
             search_terms,
         },
     }
@@ -418,13 +453,13 @@ pub(crate) fn run_gpu_analysis_with_processor(
                 .to_owned(),
         )
     })?;
-    let sql_path = sql_temp_path();
     let sql = format!(
         "{}\n{}\n",
         args.question.sql(),
         ROW_QUERY.replace("{view}", args.question.view())
     );
-    std::fs::write(&sql_path, sql).map_err(|error| CliError::io(&sql_path, error))?;
+    let sql_path = write_sql_temp(&sql)
+        .map_err(|error| CliError::io(Path::new("<exclusive GPU-analysis SQL>"), error))?;
     let output = Command::new(tp_path)
         .args([
             "-q",
@@ -520,6 +555,67 @@ mod tests {
         );
         assert_eq!(result.verdict, "unverified");
         assert!(result.capture_complete);
+    }
+
+    #[test]
+    fn render_only_startup_capture_fails_closed() {
+        let row = RawRow {
+            stage: "frame".to_owned(),
+            duration_ns: 300_000,
+            evidence_id: Some("55555555555555555555555555555555".to_owned()),
+            diagnostic_code: None,
+            health_state: Some("healthy".to_owned()),
+            sequence: Some(1),
+            frame_index: Some(0),
+            incomplete: false,
+            failure: false,
+        };
+        let result = result_from_rows(
+            GpuQuestion::GpuStartup,
+            Path::new("/tmp/render-only.pftrace"),
+            vec![row],
+        );
+        assert_eq!(result.verdict, "unavailable");
+        assert_eq!(result.unavailable_reason, Some("missing-question-category"));
+        assert!(!result.capture_complete);
+    }
+
+    #[test]
+    fn perfetto_open_command_shell_quotes_untrusted_paths() {
+        let result = result_from_rows(
+            GpuQuestion::GpuHealth,
+            Path::new("/tmp/a; touch PWNED ' $(false).pftrace"),
+            vec![],
+        );
+        assert_eq!(
+            result.ui_correlation.open_command,
+            "pulp trace open -- '/tmp/a; touch PWNED '\"'\"' $(false).pftrace'"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_sql_creation_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "pulp-gpu-analysis-exclusive-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir(&root);
+        std::fs::create_dir(&root).unwrap();
+        let victim = root.join("victim.txt");
+        let candidate = root.join("candidate.sql");
+        std::fs::write(&victim, b"preserve-me").unwrap();
+        symlink(&victim, &candidate).unwrap();
+
+        let error = create_exclusive_sql(&candidate, "SELECT 1;").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&victim).unwrap(), b"preserve-me");
+
+        std::fs::remove_file(candidate).unwrap();
+        std::fs::remove_file(victim).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 
     #[test]

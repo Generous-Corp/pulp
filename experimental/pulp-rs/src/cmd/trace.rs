@@ -389,6 +389,19 @@ fn parse_open(args: &[String]) -> Result<Sub> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--" => {
+                i += 1;
+                let value = args.get(i).ok_or_else(|| {
+                    CliError::BadUsage("pulp trace open: -- requires <file.pftrace>".to_owned())
+                })?;
+                if file.is_some() || i + 1 != args.len() {
+                    return Err(CliError::BadUsage(
+                        "pulp trace open: only one .pftrace file is allowed".to_owned(),
+                    ));
+                }
+                file = Some(PathBuf::from(value));
+                break;
+            }
             "--no-browser" => no_browser = true,
             "--keep-alive-seconds" => {
                 i += 1;
