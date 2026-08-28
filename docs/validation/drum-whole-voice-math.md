@@ -1,5 +1,11 @@
 # Drum whole-voice math validation
 
+**Status:** Implemented and landed in [Pulp PR #7869](https://github.com/Generous-Corp/pulp/pull/7869)
+
+**Scope:** `TomVoice` only; no kick, snare, hat, clap, cymbal, membrane, string, zap, FM6, or FM8 behavior changed
+
+**Canonical execution plan:** [Drum Whole-Voice Math Profiling and Bounded Optimization](https://github.com/danielraffel/pulp-planning/blob/main/2026-08-27-drum-whole-voice-math-profiling-execution.md)
+
 Pulp chooses drum math alternatives from complete production-voice evidence,
 not from isolated transcendental benchmarks. The 2026-08-27 census measured 13
 non-FM percussion scenarios at 44.1, 48, and 96 kHz with block sizes 32, 64,
@@ -36,6 +42,25 @@ block partitions were bit-exact within each profile.
 `TomVoice::LadderMathProfile::reference` remains the default. Select
 `realtime_efficient` only while the voice is idle; the setter rejects a change
 during an active hit so one hit never crosses saturation curves.
+
+## Enable the measured Tom profile
+
+Include `<pulp/signal/drum/tom.hpp>` and link `Pulp::signal`. Select the profile
+during setup or between hits:
+
+```cpp
+pulp::signal::drum::TomVoice tom;
+tom.prepare(sample_rate);
+
+const bool accepted = tom.set_ladder_math_profile(
+    pulp::signal::drum::TomVoice::LadderMathProfile::realtime_efficient);
+```
+
+`accepted` is `false` if a hit is active. The selection applies to the noise
+ladder inside every `TomVoice` preset, including the generic and SDS-V-family
+presets. It does not alter other drum voice classes. Omit the setter, or select
+`LadderMathProfile::reference`, to retain reference math. Use
+`ladder_math_profile()` to inspect the current selection.
 
 The earlier FM6 and FM8 conclusions are unchanged. FM6 remains a measured
 whole-voice performance NO-GO, and FM8 remains a quality NO-GO under its

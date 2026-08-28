@@ -648,6 +648,11 @@ docs:
     kind: reference
     summary: Reproducible fast-sine consumer benchmarks, quality gates, selected paths, rejected alternatives, and reopen rules
 
+  - slug: drum-whole-voice-math
+    path: validation/drum-whole-voice-math.md
+    kind: reference
+    summary: Tom-only whole-voice profiling result, measured fast-ladder opt-in, quality evidence, and direct usage
+
   # Policies
   - slug: code-style
     path: policies/code-style.md
