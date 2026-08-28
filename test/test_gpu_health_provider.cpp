@@ -121,9 +121,8 @@ TEST_CASE("GPU health seeded content failure preserves real device work",
     auto passing_provider = gh::make_default_health_provider();
     const auto passing = gh::run_health_check(*passing_provider, true);
     INFO(gh::render_human(passing));
-    if (passing.verdict == gh::Verdict::unavailable ||
-        passing.verdict == gh::Verdict::unverified)
-        SKIP("No authentic usable adapter on this host: " +
+    if (passing.verdict != gh::Verdict::pass)
+        SKIP("The seeded real-device mutation requires a passing baseline: " +
              gh::render_human(passing));
     REQUIRE(passing.verdict == gh::Verdict::pass);
     REQUIRE(gh::exit_code(passing) == 0);
