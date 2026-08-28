@@ -2882,6 +2882,15 @@ bounds what a writer adds to the document; replaying history adds no new
 content, and charging it there would let a writer that hit its ceiling become
 unable to undo its own work.
 
+Gesture admission must remain closable at the quota boundary. A commandless
+`End` or `Cancel` is the one empty-transaction exception: after normal
+writer/group/revision/transaction-ID validation it closes only the ephemeral
+gesture lifecycle, returns the current publication, and is cached for exact
+retry. It publishes and journals no document revision, consumes no command ID,
+requires no command-class authority, and carries no retained-byte quota charge.
+Every other empty transaction that passes the existing
+identity/revision/gesture validation still reports `EmptyTransaction`.
+
 Two smaller traps in the same area:
 
 - `Transaction` has no member `retained_size()`. The shipped accounting is the

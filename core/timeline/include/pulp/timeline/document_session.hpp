@@ -230,7 +230,9 @@ static_assert(kCommandClassCount * kCommandIntentCount < 64,
 /// quota. The no-argument registration overload explicitly uses
 /// `unrestricted_capabilities()` so existing trusted callers retain their prior
 /// authority. Quotas use the complete envelope-aware
-/// `retained_size(const Transaction&)` estimate.
+/// `retained_size(const Transaction&)` estimate. A commandless End/Cancel may
+/// close only the ephemeral gesture lifecycle without document publication,
+/// journaling, capability admission, or quota charge.
 struct WriterCapabilityMask {
     /// One bit per class/intent pair, indexed by `capability_bit`.
     std::uint64_t allowed = [] {
@@ -445,7 +447,10 @@ class DocumentSession {
     /// The transaction must target the current revision and use strictly
     /// increasing writer-scoped IDs. Equivalent retries within the result cache
     /// return their original CommitResult without applying twice. Successful
-    /// commits advance the revision by one and invalidate the redo stack.
+    /// document commits advance the revision by one and invalidate the redo
+    /// stack. A commandless End/Cancel closes the matching open gesture without
+    /// changing the document revision or journal; other empty transactions are
+    /// rejected.
     ///
     /// @return The published commit, or a TransactionError describing identity,
     ///         revision, gesture, quota, model, or durability rejection.

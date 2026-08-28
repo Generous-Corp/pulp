@@ -4,12 +4,39 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
+#include <memory>
 #include <utility>
 #include <variant>
 
 using namespace timeline_test;
 
 namespace {
+
+class ToggleJournalSink final : public JournalSink {
+  public:
+    pulp::runtime::Result<bool, JournalSinkError>
+    append_batch(const JournalEntry&) noexcept override {
+        ++append_calls;
+        if (fail_append)
+            return pulp::runtime::Result<bool, JournalSinkError>(
+                pulp::runtime::Err(JournalSinkError::IoError));
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    checkpoint(const Project&, DocumentRevision) noexcept override {
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    validate_restore(const Project&, DocumentRevision) noexcept override {
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    bool fail_append = false;
+    std::size_t append_calls = 0;
+};
 
 MediaAsset make_asset(ItemId id) {
     return MediaAsset{id,
@@ -156,6 +183,138 @@ TEST_CASE("session quota exhaustion rejects transaction with no partial apply") 
     auto expired_retry = session->submit(agent, first);
     REQUIRE_FALSE(expired_retry);
     REQUIRE(expired_retry.error().code == ConflictCode::AlreadyAppliedResultExpired);
+}
+
+TEST_CASE("quota exhaustion still permits a commandless gesture close") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    const auto tempo_before = session->snapshot()->tempo_map();
+
+    auto measure = std::move(session->register_writer()).value();
+    auto probe = session_transaction(measure, session->revision(),
+                                     {SetTempoMap{tempo_before, make_tempo_map(88.0)}});
+    probe.undo_group = measure.allocate_undo_group_id();
+    probe.gesture_phase = GesturePhase::Begin;
+
+    const auto one_phase = retained_size(probe);
+    WriterCapabilityMask mask;
+    mask.max_transaction_retained_bytes = one_phase;
+    mask.max_session_retained_bytes = one_phase;
+    auto agent = std::move(session->register_writer(mask)).value();
+    const auto group = agent.allocate_undo_group_id();
+
+    auto begin = session_transaction(agent, session->revision(),
+                                     {SetTempoMap{tempo_before, make_tempo_map(88.0)}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(retained_size(begin) == one_phase);
+    REQUIRE(session->submit(agent, std::move(begin)));
+
+    const auto revision_after_begin = session->revision();
+    auto close = session_transaction(agent, revision_after_begin, {});
+    close.undo_group = group;
+    close.gesture_phase = GesturePhase::Cancel;
+    REQUIRE(retained_size(close) > 0);
+    auto closed = session->submit(agent, close);
+    REQUIRE(closed);
+    REQUIRE(closed->revision == revision_after_begin);
+    REQUIRE(closed->applied_commands.empty());
+    REQUIRE(session->revision() == revision_after_begin);
+    REQUIRE(session->journal().entries().back().transaction.commands.size() == 1);
+
+    // The lifecycle-only close is idempotent and consumes no second quota
+    // charge. A real follow-up edit reaches quota admission, not GestureState.
+    auto close_retry = session->submit(agent, close);
+    REQUIRE(close_retry);
+    REQUIRE(close_retry->revision == closed->revision);
+    auto empty_at_quota =
+        session->submit(agent, session_transaction(agent, session->revision(), {}));
+    REQUIRE_FALSE(empty_at_quota);
+    REQUIRE(empty_at_quota.error().code == ConflictCode::EmptyTransaction);
+    auto over_quota = session->submit(
+        agent, session_transaction(agent, session->revision(),
+                                   {SetTempoMap{make_tempo_map(88.0), make_tempo_map(99.0)}}));
+    REQUIRE_FALSE(over_quota);
+    REQUIRE(over_quota.error().code == ConflictCode::WriterQuotaExhausted);
+
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(agent));
+    REQUIRE(session->snapshot()->tempo_map() == tempo_before);
+
+    // A lifecycle-only close neither publishes nor journals, so revision-space
+    // exhaustion cannot strand the gesture it is closing.
+    auto max_sink = std::make_shared<ToggleJournalSink>();
+    constexpr auto before_max = std::numeric_limits<std::uint64_t>::max() - 1;
+    auto max_session = std::move(DocumentSession::restore(
+                                     make_project(), DocumentRevision{before_max}, {}, max_sink))
+                           .value();
+    auto max_writer = std::move(max_session->register_writer()).value();
+    const auto max_group = max_writer.allocate_undo_group_id();
+    auto max_begin = session_transaction(
+        max_writer, max_session->revision(),
+        {SetTempoMap{max_session->snapshot()->tempo_map(), make_tempo_map(88.0)}});
+    max_begin.undo_group = max_group;
+    max_begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(max_session->submit(max_writer, std::move(max_begin)));
+    REQUIRE(max_session->revision().value == std::numeric_limits<std::uint64_t>::max());
+    auto max_close = session_transaction(max_writer, max_session->revision(), {});
+    max_close.undo_group = max_group;
+    max_close.gesture_phase = GesturePhase::End;
+    REQUIRE(max_session->submit(max_writer, std::move(max_close)));
+    REQUIRE_FALSE(max_session->is_gesture_open(max_writer.provenance(), max_group));
+    REQUIRE(max_sink->append_calls == 1);
+    auto empty_at_max = max_session->submit(
+        max_writer, session_transaction(max_writer, max_session->revision(), {}));
+    REQUIRE_FALSE(empty_at_max);
+    REQUIRE(empty_at_max.error().code == ConflictCode::EmptyTransaction);
+    auto max_write = max_session->submit(
+        max_writer,
+        session_transaction(max_writer, max_session->revision(),
+                            {SetTempoMap{make_tempo_map(88.0), make_tempo_map(99.0)}}));
+    REQUIRE_FALSE(max_write);
+    REQUIRE(max_write.error().code == ConflictCode::SequenceExhausted);
+    REQUIRE(max_session->revision().value == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(max_sink->append_calls == 1);
+
+    // A failed document append remains a permanent durability failure for
+    // later writes, but cannot block an unjournaled lifecycle-only close.
+    auto failing_sink = std::make_shared<ToggleJournalSink>();
+    auto durable_session =
+        std::move(DocumentSession::create(make_project(), {}, failing_sink)).value();
+    auto durable_writer = std::move(durable_session->register_writer()).value();
+    const auto durable_group = durable_writer.allocate_undo_group_id();
+    auto durable_begin = session_transaction(
+        durable_writer, durable_session->revision(),
+        {SetTempoMap{durable_session->snapshot()->tempo_map(), make_tempo_map(88.0)}});
+    durable_begin.undo_group = durable_group;
+    durable_begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(durable_session->submit(durable_writer, std::move(durable_begin)));
+    failing_sink->fail_append = true;
+    auto failed_update = session_transaction(
+        durable_writer, durable_session->revision(),
+        {SetTempoMap{make_tempo_map(88.0), make_tempo_map(99.0)}});
+    failed_update.undo_group = durable_group;
+    failed_update.gesture_phase = GesturePhase::Update;
+    auto durability_failure = durable_session->submit(durable_writer, std::move(failed_update));
+    REQUIRE_FALSE(durability_failure);
+    REQUIRE(durability_failure.error().code == ConflictCode::JournalDurability);
+    auto durability_close = session_transaction(durable_writer, durable_session->revision(), {});
+    durability_close.undo_group = durable_group;
+    durability_close.gesture_phase = GesturePhase::Cancel;
+    REQUIRE(durable_session->submit(durable_writer, std::move(durability_close)));
+    REQUIRE_FALSE(
+        durable_session->is_gesture_open(durable_writer.provenance(), durable_group));
+    REQUIRE(failing_sink->append_calls == 2);
+    auto empty_after_failure = durable_session->submit(
+        durable_writer,
+        session_transaction(durable_writer, durable_session->revision(), {}));
+    REQUIRE_FALSE(empty_after_failure);
+    REQUIRE(empty_after_failure.error().code == ConflictCode::EmptyTransaction);
+    auto later_write = durable_session->submit(
+        durable_writer,
+        session_transaction(durable_writer, durable_session->revision(),
+                            {SetTempoMap{make_tempo_map(88.0), make_tempo_map(110.0)}}));
+    REQUIRE_FALSE(later_write);
+    REQUIRE(later_write.error().code == ConflictCode::JournalDurability);
 }
 
 TEST_CASE("mask is immutable after writer registration") {

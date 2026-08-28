@@ -258,14 +258,26 @@ std::optional<TransactionError> refuse_by_class(const WriterState& writer,
 
 // A quota bounds what a writer adds to the document, so it is charged when that
 // writer submits and not when history replays content already accounted for.
+bool is_commandless_gesture_close(const Transaction& transaction) noexcept {
+    return transaction.commands.empty() &&
+           (transaction.gesture_phase == GesturePhase::End ||
+            transaction.gesture_phase == GesturePhase::Cancel);
+}
+
 std::optional<TransactionError> refuse_by_quota(const WriterState& writer,
                                                 const Transaction& transaction,
                                                 DocumentRevision current) {
+    // Empty envelopes add no document content. Gesture validation and the
+    // lifecycle-only close exception are resolved in commit_locked; every
+    // other otherwise-admissible empty transaction remains EmptyTransaction.
+    if (transaction.commands.empty())
+        return std::nullopt;
     const auto size = retained_size(transaction);
     if (size > writer.capabilities.max_transaction_retained_bytes ||
         saturated_add(writer.session_retained_bytes, size) >
             writer.capabilities.max_session_retained_bytes)
         return error(ConflictCode::WriterQuotaExhausted, transaction, current);
+
     return std::nullopt;
 }
 
@@ -333,15 +345,9 @@ struct DocumentSession::Impl {
         if (transaction.id.sequence <= writer->transaction_watermark)
             return failure<CommitResult>(
                 error(ConflictCode::AlreadyAppliedResultExpired, transaction, current_revision));
-        if (journal_sink_failed)
-            return failure<CommitResult>(
-                error(ConflictCode::JournalDurability, transaction, current_revision));
         if (transaction.expected_revision != current_revision)
             return failure<CommitResult>(
                 error(ConflictCode::StaleRevision, transaction, current_revision));
-        if (current_revision.value == std::numeric_limits<std::uint64_t>::max())
-            return failure<CommitResult>(
-                error(ConflictCode::SequenceExhausted, transaction, current_revision));
         if (transaction.undo_group && (!transaction.undo_group->valid() ||
                                        transaction.undo_group->writer != transaction.id.writer))
             return failure<CommitResult>(
@@ -379,6 +385,40 @@ struct DocumentSession::Impl {
                                                    current_revision, envelope.id));
             previous_command = envelope.id.sequence;
         }
+
+        // End/Cancel may carry no document command when a caller only needs to
+        // close the ephemeral gesture lifecycle. This control transaction is
+        // validated and cached like any other writer operation, but it neither
+        // publishes nor journals a document revision and therefore consumes no
+        // writer retained-byte quota or command-class authority.
+        if (is_commandless_gesture_close(transaction)) {
+            if (undo.empty() || undo.back().writer != transaction.id.writer ||
+                undo.back().group != transaction.undo_group)
+                return failure<CommitResult>(
+                    error(ConflictCode::GestureState, transaction, current_revision));
+            CommitResult result{current->snapshot, current_revision, DirtySet{}, {},
+                                current->snapshot};
+            writer->transaction_watermark = transaction.id.sequence;
+            undo.back().closed = true;
+            open_gesture.reset();
+            if (limits.max_cached_results > 0) {
+                if (cache.size() == limits.max_cached_results)
+                    cache.erase(cache.begin());
+                cache.push_back(CachedCommit{std::move(transaction), result});
+            }
+            return runtime::Result<CommitResult, TransactionError>(runtime::Ok(std::move(result)));
+        }
+
+        if (transaction.commands.empty())
+            return failure<CommitResult>(
+                error(ConflictCode::EmptyTransaction, transaction, current_revision));
+
+        if (journal_sink_failed)
+            return failure<CommitResult>(
+                error(ConflictCode::JournalDurability, transaction, current_revision));
+        if (current_revision.value == std::numeric_limits<std::uint64_t>::max())
+            return failure<CommitResult>(
+                error(ConflictCode::SequenceExhausted, transaction, current_revision));
 
         auto reduced = detail::reduce_transaction(*current->snapshot, transaction,
                                                   kind == CommitKind::History);
@@ -713,7 +753,8 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::submit(WriterTo
             return failure<CommitResult>(*refusal);
         if (auto refusal = refuse_by_quota(*state, transaction, view.revision))
             return failure<CommitResult>(*refusal);
-        charge = retained_size(transaction);
+        if (!is_commandless_gesture_close(transaction))
+            charge = retained_size(transaction);
     }
     auto result = impl_->commit_locked(std::move(transaction), true, true, CommitKind::Ordinary);
     if (result && state != nullptr)
