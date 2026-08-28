@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 from typing import Any
 
@@ -13,7 +14,12 @@ import json_schema_lite
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+DEFAULT_CATALOG = ROOT / "docs/status/gpu-recipes.yaml"
 DEFAULT_SCHEMA = ROOT / "docs/status/gpu-recipes.schema.json"
+DEFAULT_REGISTRY_HEADER = (
+    ROOT / "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp"
+)
+DEFAULT_HANDOFF = ROOT / "docs/status/gpu-vellum-handoff.yaml"
 FORBIDDEN_COMMAND_TOKENS = frozenset(
     {
         "--host",
@@ -90,6 +96,11 @@ def validate_document(document: Any, schema: Any) -> list[str]:
                 problems.append(
                     f"{prefix}.entrypoints.cli.command uses a retired live selector or authority path"
                 )
+            if command[:4] == ["pulp", "gpu", "probe", "--recipe"]:
+                if len(command) < 5 or command[4] != recipe_id:
+                    problems.append(
+                        f"{prefix}.entrypoints.cli.command recipe id must equal the catalog recipe id"
+                    )
 
         mcp = entrypoints.get("mcp")
         if isinstance(mcp, dict) and mcp.get("recipe_id") != recipe_id:
@@ -105,6 +116,148 @@ def validate_document(document: Any, schema: Any) -> list[str]:
     return problems
 
 
+def probe_registry_ids(header_text: str) -> list[str]:
+    """Read the closed native recipe-id array; refuse an ambiguous source shape."""
+
+    match = re.search(
+        r"inline\s+constexpr\s+std::array\s+kRecipeIds\s*\{(?P<body>.*?)\};",
+        header_text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        raise ValueError("native kRecipeIds registry was not found exactly once")
+    if re.search(
+        r"inline\s+constexpr\s+std::array\s+kRecipeIds\s*\{",
+        header_text[match.end() :],
+    ):
+        raise ValueError("native kRecipeIds registry is ambiguous")
+    body = match.group("body")
+    ids = re.findall(r'std::string_view\{"([a-z][a-z0-9.-]+)"\}', body)
+    remainder = re.sub(r'std::string_view\{"[a-z][a-z0-9.-]+"\}', "", body)
+    if remainder.replace(",", "").strip() or not ids or len(ids) != len(set(ids)):
+        raise ValueError("native kRecipeIds registry has an unsupported or duplicate entry")
+    return ids
+
+
+def catalog_probe_ids(document: dict[str, Any]) -> list[str]:
+    """Return catalog rows that project the native `pulp gpu probe` registry."""
+
+    ids = []
+    for recipe in document["recipes"]:
+        command = recipe["entrypoints"]["cli"]["command"]
+        if command[:4] == ["pulp", "gpu", "probe", "--recipe"]:
+            ids.append(recipe["id"])
+    return ids
+
+
+def validate_registry_projection(document: dict[str, Any], registry_ids: list[str]) -> list[str]:
+    """Require exact equality so a newly callable recipe cannot remain undiscoverable."""
+
+    catalog_ids = catalog_probe_ids(document)
+    native_ids = sorted(registry_ids)
+    if catalog_ids == native_ids:
+        return []
+    missing = sorted(set(native_ids) - set(catalog_ids))
+    extra = sorted(set(catalog_ids) - set(native_ids))
+    return [
+        "catalog/native probe registry drift: "
+        f"missing={missing or '[]'} extra={extra or '[]'}; "
+        "every kRecipeIds entry must be added to gpu-recipes.yaml explicitly"
+    ]
+
+
+def validate_repository_references(document: dict[str, Any], root: pathlib.Path) -> list[str]:
+    """Reject stale docs, skill mappings, or scaffold paths in the source catalog."""
+
+    problems = []
+    for recipe in document["recipes"]:
+        prefix = f"recipe {recipe['id']}"
+        for relative in recipe["docs"]:
+            if not (root / relative).is_file():
+                problems.append(f"{prefix} references missing doc {relative!r}")
+        for skill in recipe["skills"]:
+            skill_path = root / ".agents/skills" / skill / "SKILL.md"
+            if not skill_path.is_file():
+                problems.append(f"{prefix} references missing skill {skill!r}")
+        scaffold = recipe["scaffold_template"]
+        if scaffold is not None and not (root / scaffold).is_dir():
+            problems.append(f"{prefix} references missing scaffold {scaffold!r}")
+    return problems
+
+
+def validate_handoff(document: Any) -> list[str]:
+    """Validate the exact, non-authorizing Vellum restart/deletion inventory."""
+
+    if not isinstance(document, dict):
+        return ["handoff root must be an object"]
+    required = {
+        "schema",
+        "catalog",
+        "ownership_projection",
+        "route_set_sha256",
+        "boundary_change_authorized",
+        "cutover_trigger",
+        "entries",
+        "b0_required_inputs",
+        "stop_rules",
+    }
+    problems = []
+    if set(document) != required:
+        problems.append("handoff top-level fields must match the closed v1 contract")
+    if document.get("schema") != "pulp.gpu-vellum-handoff.v1":
+        problems.append("handoff schema must be pulp.gpu-vellum-handoff.v1")
+    if document.get("boundary_change_authorized") is not False:
+        problems.append("horizon-A handoff must not authorize an ownership boundary change")
+    route_digest = document.get("route_set_sha256")
+    if not isinstance(route_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", route_digest):
+        problems.append("handoff route_set_sha256 must be lowercase SHA-256")
+
+    entries = document.get("entries")
+    if not isinstance(entries, list) or not entries:
+        problems.append("handoff entries must be a nonempty array")
+        return problems
+    expected_fields = {
+        "id",
+        "current_owner",
+        "paths",
+        "cutover_action",
+        "vellum_phase",
+        "delete_after",
+        "reason",
+    }
+    ids = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or set(entry) != expected_fields:
+            problems.append(f"handoff entries[{index}] fields must match the closed v1 contract")
+            continue
+        ids.append(entry["id"])
+        paths = entry["paths"]
+        if not isinstance(paths, list) or paths != sorted(set(paths)):
+            problems.append(f"handoff entries[{index}].paths must be bytewise sorted and unique")
+        for path in paths if isinstance(paths, list) else []:
+            if not isinstance(path, str) or not _safe_relative(path):
+                problems.append(f"handoff entries[{index}] contains unsafe path {path!r}")
+        action = entry["cutover_action"]
+        if action != "retain-pulp" and not entry["delete_after"]:
+            problems.append(f"handoff entries[{index}] needs an exact delete-after proof")
+        if entry["current_owner"] not in {"Generous-Corp/pulp", "Generous-Corp/vellum"}:
+            problems.append(f"handoff entries[{index}] has an unknown current owner")
+    if len(ids) != len(set(ids)):
+        problems.append("handoff entries must have unique ids")
+    for field in ("b0_required_inputs", "stop_rules"):
+        values = document.get(field)
+        if not isinstance(values, list) or not values or len(values) != len(set(values)):
+            problems.append(f"handoff {field} must be nonempty and unique")
+    return problems
+
+
+def recipes_for_symptoms(document: dict[str, Any], symptoms: list[str]) -> list[dict[str, Any]]:
+    """Return deterministic exact-tag matches for clean-agent discovery."""
+
+    wanted = set(symptoms)
+    return [recipe for recipe in document["recipes"] if wanted.intersection(recipe["symptoms"])]
+
+
 def load_and_validate(catalog_path: pathlib.Path, schema_path: pathlib.Path = DEFAULT_SCHEMA) -> dict[str, Any]:
     """Load JSON-compatible YAML bytes and reject every schema or semantic violation."""
 
@@ -118,14 +271,52 @@ def load_and_validate(catalog_path: pathlib.Path, schema_path: pathlib.Path = DE
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog", type=pathlib.Path, required=True)
+    parser.add_argument("--catalog", type=pathlib.Path, default=DEFAULT_CATALOG)
     parser.add_argument("--schema", type=pathlib.Path, default=DEFAULT_SCHEMA)
+    parser.add_argument("--registry-header", type=pathlib.Path, default=DEFAULT_REGISTRY_HEADER)
+    parser.add_argument("--handoff", type=pathlib.Path, default=DEFAULT_HANDOFF)
+    parser.add_argument("--list", action="store_true", help="print recipe ids")
+    parser.add_argument("--show", metavar="ID", help="print one recipe as JSON")
+    parser.add_argument("--symptom", action="append", default=[], help="select exact symptom tag")
+    parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
     try:
         document = load_and_validate(args.catalog, args.schema)
+        registry_ids = probe_registry_ids(args.registry_header.read_text(encoding="utf-8"))
+        problems = validate_registry_projection(document, registry_ids)
+        if args.catalog.resolve() == DEFAULT_CATALOG.resolve():
+            problems.extend(validate_repository_references(document, ROOT))
+            handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
+            problems.extend(validate_handoff(handoff))
+        if problems:
+            raise ValueError("\n".join(problems))
     except (OSError, json.JSONDecodeError, ValueError, json_schema_lite.UnsupportedKeyword) as exc:
         print(f"gpu-recipe-catalog: INVALID: {exc}", file=sys.stderr)
         return 1
+    selected = document["recipes"]
+    if args.show:
+        selected = [recipe for recipe in selected if recipe["id"] == args.show]
+        if not selected:
+            print(f"gpu-recipe-catalog: unknown recipe {args.show!r}", file=sys.stderr)
+            return 2
+    if args.symptom:
+        selected = recipes_for_symptoms(document, args.symptom)
+        if not selected:
+            print("gpu-recipe-catalog: no recipe matches the supplied symptoms", file=sys.stderr)
+            return 2
+    if args.list:
+        if args.json:
+            print(json.dumps({"schema": document["schema"], "recipes": [r["id"] for r in selected]}))
+        else:
+            print("\n".join(recipe["id"] for recipe in selected))
+        return 0
+    if args.show or args.symptom:
+        payload: Any = selected[0] if args.show else {
+            "schema": document["schema"],
+            "recipes": selected,
+        }
+        print(json.dumps(payload, indent=2 if args.json else None, sort_keys=True))
+        return 0
     print(
         "gpu-recipe-catalog: OK: "
         f"revision {document['catalog_revision']}, {len(document['recipes'])} recipes"

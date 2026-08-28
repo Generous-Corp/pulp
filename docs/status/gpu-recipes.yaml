@@ -1,0 +1,144 @@
+{
+  "$schema": "gpu-recipes.schema.json",
+  "schema": "pulp.gpu-recipes.v1",
+  "catalog_revision": 1,
+  "recipes": [
+    {
+      "id": "gpu-audio.stft.v1",
+      "version": 1,
+      "title": "Offline GPU STFT oracle",
+      "summary": "Compare bounded Dawn STFT output with an independent CPU FFT oracle without touching the audio callback.",
+      "symptoms": [
+        "gpu-audio-spectrum-mismatch",
+        "gpu-compute-stage-error",
+        "stft-bin-mismatch"
+      ],
+      "kind": "offline",
+      "entrypoints": {
+        "cli": {
+          "command": [
+            "pulp",
+            "gpu",
+            "probe",
+            "--recipe",
+            "gpu-audio.stft.v1",
+            "--artifacts",
+            "<absolute-artifact-dir>",
+            "--json"
+          ]
+        },
+        "mcp": {
+          "tool": "pulp_gpu_probe",
+          "recipe_id": "gpu-audio.stft.v1"
+        },
+        "control": null,
+        "trace": {
+          "question": "gpu-probe"
+        }
+      },
+      "evidence_schema": "pulp.gpu-probe-result.v1",
+      "docs": [
+        "docs/guides/claude-code-plugin.md",
+        "docs/reference/cli.md",
+        "docs/reports/webgpu-compute-feasibility.md"
+      ],
+      "skills": [
+        "audio-harness",
+        "trace-analysis",
+        "trace-sql"
+      ],
+      "scaffold_template": null
+    },
+    {
+      "id": "gpu-compute.magnitude.v1",
+      "version": 1,
+      "title": "GPU compute magnitude oracle",
+      "summary": "Localize a WGSL compute or map/readback error with a bounded complex-magnitude kernel and independent CPU oracle.",
+      "symptoms": [
+        "compute-readback-mismatch",
+        "gpu-compute-stage-error",
+        "wgsl-numeric-error"
+      ],
+      "kind": "offline",
+      "entrypoints": {
+        "cli": {
+          "command": [
+            "pulp",
+            "gpu",
+            "probe",
+            "--recipe",
+            "gpu-compute.magnitude.v1",
+            "--artifacts",
+            "<absolute-artifact-dir>",
+            "--json"
+          ]
+        },
+        "mcp": {
+          "tool": "pulp_gpu_probe",
+          "recipe_id": "gpu-compute.magnitude.v1"
+        },
+        "control": null,
+        "trace": {
+          "question": "gpu-probe"
+        }
+      },
+      "evidence_schema": "pulp.gpu-probe-result.v1",
+      "docs": [
+        "docs/guides/claude-code-plugin.md",
+        "docs/guides/gpu-validation-checklist.md",
+        "docs/reference/cli.md"
+      ],
+      "skills": [
+        "skia-gpu-build",
+        "trace-analysis",
+        "trace-sql"
+      ],
+      "scaffold_template": null
+    },
+    {
+      "id": "renderer3d.hardcoded-cube.v1",
+      "version": 1,
+      "title": "Renderer3D hardcoded cube",
+      "summary": "Prove native Dawn rendering, readback, and nonblank content with a deterministic cube fingerprint.",
+      "symptoms": [
+        "blank-gpu-output",
+        "renderer3d-content-mismatch",
+        "renderer3d-readback-error"
+      ],
+      "kind": "offline",
+      "entrypoints": {
+        "cli": {
+          "command": [
+            "pulp",
+            "gpu",
+            "probe",
+            "--recipe",
+            "renderer3d.hardcoded-cube.v1",
+            "--artifacts",
+            "<absolute-artifact-dir>",
+            "--json"
+          ]
+        },
+        "mcp": {
+          "tool": "pulp_gpu_probe",
+          "recipe_id": "renderer3d.hardcoded-cube.v1"
+        },
+        "control": null,
+        "trace": {
+          "question": "gpu-probe"
+        }
+      },
+      "evidence_schema": "pulp.gpu-probe-result.v1",
+      "docs": [
+        "docs/guides/gpu-validation-checklist.md",
+        "docs/reference/cli.md"
+      ],
+      "skills": [
+        "screenshot",
+        "skia-gpu-build",
+        "trace-analysis"
+      ],
+      "scaffold_template": null
+    }
+  ]
+}
