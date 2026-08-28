@@ -97,6 +97,31 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
             self.assertTrue(any("digest mismatch" in error for error in errors))
             self.assertTrue(any("isError=true" in error for error in errors))
 
+    def test_digest_rebound_role_swap_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            receipt_path = copied / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["run_groups"]["compute"]["binary_role"] = "scene3d_cpp_cli"
+            receipt_path.write_text(json.dumps(receipt))
+            errors = MODULE.verify(copied)
+            self.assertTrue(any("wrong executable role" in error for error in errors))
+
+    def test_digest_rebound_unrelated_mcp_evidence_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            transcript_path = copied / "mcp-transcript.jsonl"
+            rows = [json.loads(line) for line in transcript_path.read_text().splitlines()]
+            evidence = rows[1]["result"]["structuredContent"]["evidence"]
+            evidence["numeric_sample_count"] = 255
+            rows[1]["result"]["content"][0]["text"] = json.dumps(evidence)
+            transcript_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            self._rebind(copied, "mcp-transcript.jsonl")
+            errors = MODULE.verify(copied)
+            self.assertTrue(any("not the installed CLI recipe result" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,14 +17,14 @@ WITH candidates AS (
       ELSE 'frame'
     END AS stage
   FROM slice
-  WHERE (category GLOB 'gpu*' OR category GLOB 'render*')
-    AND (name GLOB 'gpu_shader_compile*'
-      OR name GLOB 'gpu_pipeline_prepare*'
-      OR name GLOB 'gpu_resource_upload*'
-      OR name GLOB 'gpu_acquire*'
-      OR name GLOB 'gpu_submit*'
-      OR name GLOB 'gpu_present*'
-      OR name GLOB 'frame*')
+  WHERE (category GLOB 'gpu*'
+      AND (name GLOB 'gpu_shader_compile*'
+        OR name GLOB 'gpu_pipeline_prepare*'
+        OR name GLOB 'gpu_resource_upload*'
+        OR name GLOB 'gpu_acquire*'
+        OR name GLOB 'gpu_submit*'
+        OR name GLOB 'gpu_present*'))
+    OR (category GLOB 'render*' AND name GLOB 'frame*')
 )
 SELECT
   stage,
@@ -46,6 +46,7 @@ SELECT
     EXTRACT_ARG(arg_set_id, 'args.debug.frame_index')) AS INT) AS frame_index,
   dur = -1 AS is_incomplete,
   COALESCE(
-    CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
-    CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT), '') != '' AS is_failure
+    CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),
+    CAST(EXTRACT_ARG(arg_set_id, 'args.debug.health_state') AS TEXT), '')
+    IN ('failed', 'lost') AS is_failure
 FROM candidates;

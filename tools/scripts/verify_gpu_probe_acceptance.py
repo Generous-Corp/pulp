@@ -30,6 +30,12 @@ EXPECTED_SAMPLE_COUNTS = {
     "renderer": 0,
     "threejs": 5,
 }
+EXPECTED_BINARY_ROLES = {
+    "compute": "installed_rust_cli",
+    "stft": "installed_rust_cli",
+    "renderer": "scene3d_cpp_cli",
+    "threejs": "v8_threejs_cpp_cli",
+}
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
     / "docs/contracts/gpu-probe-result-v1.schema.json"
@@ -91,9 +97,15 @@ def verify(root: Path) -> list[str]:
         if observed != digest:
             errors.append(f"raw digest mismatch for {name}")
 
+    run_groups = receipt.get("run_groups", {})
+    if set(run_groups) != set(GROUPS):
+        errors.append("receipt does not bind the exact four run groups")
     for group, recipe in GROUPS.items():
-        if receipt.get("run_groups", {}).get(group, {}).get("recipe") != recipe:
+        if run_groups.get(group, {}).get("recipe") != recipe:
             errors.append(f"receipt run group {group} does not bind recipe {recipe}")
+        role = run_groups.get(group, {}).get("binary_role")
+        if role != EXPECTED_BINARY_ROLES[group] or role not in receipt.get("binaries", {}):
+            errors.append(f"receipt run group {group} has the wrong executable role")
         runs: dict[str, dict[str, Any]] = {}
         for suffix in ("run1", "run2", "negative"):
             path = root / f"{group}-{suffix}.json"
@@ -156,10 +168,27 @@ def verify(root: Path) -> list[str]:
     elif transcript[1].get("result", {}).get("structuredContent", {}).get("exit_code") != 0:
         errors.append("MCP positive result did not preserve exit 0")
     else:
+        mcp_evidence: dict[str, Any] = {}
         for label, row in (("positive", transcript[1]), ("negative", transcript[2])):
             evidence = row.get("result", {}).get("structuredContent", {}).get("evidence")
             for problem in json_schema_lite.validate(evidence, result_schema):
                 errors.append(f"MCP {label} evidence schema: {problem}")
+            if isinstance(evidence, dict):
+                mcp_evidence[label] = evidence
+            content = row.get("result", {}).get("content", [])
+            try:
+                text_evidence = json.loads(content[0]["text"])
+            except (IndexError, KeyError, TypeError, json.JSONDecodeError):
+                errors.append(f"MCP {label} text evidence is missing or malformed")
+            else:
+                if text_evidence != evidence:
+                    errors.append(f"MCP {label} text and structured evidence disagree")
+        for label, raw_name in (("positive", "compute-run1.json"), ("negative", "compute-negative.json")):
+            if label not in mcp_evidence:
+                continue
+            raw = _load(root / raw_name)
+            if _canonical_repeat(mcp_evidence[label]) != _canonical_repeat(raw):
+                errors.append(f"MCP {label} evidence is not the installed CLI recipe result")
         negative_result = transcript[2].get("result", {})
         if negative_result.get("isError") is not True:
             errors.append("MCP completed failure did not preserve isError=true")

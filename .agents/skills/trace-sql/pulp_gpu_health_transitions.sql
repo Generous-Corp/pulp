@@ -28,10 +28,7 @@ SELECT
     OR COALESCE(
          CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),
          CAST(EXTRACT_ARG(arg_set_id, 'args.debug.health_state') AS TEXT), '')
-       GLOB 'lost*'
-    OR COALESCE(
-         CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
-         CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT), '') != '')
+       IN ('failed', 'lost'))
       AS is_failure
 FROM slice
 WHERE category GLOB 'gpu*'

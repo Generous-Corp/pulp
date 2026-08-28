@@ -178,6 +178,12 @@ fn parse_offline_utility_verbs() {
     };
     assert_eq!(args.file, Path::new("/tmp/x.pftrace"));
     assert!(args.no_browser);
+
+    let (sub, _) = parse(&s(&["open", "--", "--shell-looking.pftrace"])).unwrap();
+    let Sub::Open(args) = sub else {
+        panic!("expected open")
+    };
+    assert_eq!(args.file, Path::new("--shell-looking.pftrace"));
 }
 
 #[test]

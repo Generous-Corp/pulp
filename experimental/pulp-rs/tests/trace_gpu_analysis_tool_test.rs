@@ -109,6 +109,22 @@ fn incomplete_and_wrong_category_fixtures_are_unavailable() {
     let wrong = run("gpu-health", "wrong-category.pftrace", 2);
     assert_eq!(wrong["verdict"], "unavailable");
     assert_eq!(wrong["unavailable_reason"], "missing-question-category");
+
+    let render_only = run("gpu-startup", "render-only.pftrace", 2);
+    assert_eq!(render_only["verdict"], "unavailable");
+    assert_eq!(
+        render_only["unavailable_reason"],
+        "missing-question-category"
+    );
+}
+
+#[test]
+fn healthy_diagnostic_codes_do_not_become_failures() {
+    for question in ["gpu-health", "gpu-probe"] {
+        let result = run(question, "healthy-diagnostic.pftrace", 0);
+        assert_eq!(result["verdict"], "pass");
+        assert_eq!(result["capture_complete"], true);
+    }
 }
 
 #[test]
@@ -118,7 +134,10 @@ fn blank_readback_failure_names_the_bounded_oracle_fix() {
     assert_eq!(result["capture_complete"], true);
     assert_eq!(result["dominant_stage"], "readback");
     assert_eq!(result["next_actions"][0]["code"], "inspect-readback-oracle");
-    assert_eq!(result["evidence_ids"][0], "11111111111111111111111111111111");
+    assert_eq!(
+        result["evidence_ids"][0],
+        "11111111111111111111111111111111"
+    );
 }
 
 #[test]
@@ -128,7 +147,10 @@ fn device_loss_names_the_recreation_fix() {
     assert_eq!(result["capture_complete"], true);
     assert_eq!(result["dominant_stage"], "device-loss");
     assert_eq!(result["next_actions"][0]["code"], "recreate-lost-device");
-    assert_eq!(result["evidence_ids"][0], "22222222222222222222222222222222");
+    assert_eq!(
+        result["evidence_ids"][0],
+        "22222222222222222222222222222222"
+    );
 }
 
 #[test]
@@ -137,8 +159,14 @@ fn acquire_present_blocking_names_surface_blocking() {
     assert_eq!(result["verdict"], "unverified");
     assert_eq!(result["capture_complete"], true);
     assert_eq!(result["dominant_stage"], "acquire");
-    assert_eq!(result["next_actions"][0]["code"], "inspect-surface-blocking");
-    assert_eq!(result["evidence_ids"][0], "33333333333333333333333333333333");
+    assert_eq!(
+        result["next_actions"][0]["code"],
+        "inspect-surface-blocking"
+    );
+    assert_eq!(
+        result["evidence_ids"][0],
+        "33333333333333333333333333333333"
+    );
 }
 
 #[test]
@@ -156,5 +184,8 @@ fn first_frame_stall_ranks_pipeline_before_upload() {
         "inspect-pipeline-signature"
     );
     assert_eq!(result["contributors"][1]["stage"], "resource-upload");
-    assert_eq!(result["evidence_ids"][0], "44444444444444444444444444444444");
+    assert_eq!(
+        result["evidence_ids"][0],
+        "44444444444444444444444444444444"
+    );
 }
