@@ -779,6 +779,39 @@ commands:
           - name: --json
             kind: flag
             description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass, exit 1 is a completed measured failure, and exit 2 is unavailable or unverified.
+      - name: recipes
+        summary: Discover the four canonical recipes with an unfiltered list, filter or show a matched subset, distinguish metadata from build-callable capability, and create a bounded evidence workspace without copying implementation authority.
+        subcommands:
+          - name: list
+            args:
+              - name: --symptom
+                kind: option
+                description: Filter by one exact catalog symptom token.
+              - name: --json
+                kind: flag
+                description: Emit `pulp.gpu-recipes-discovery.v1` with each row's callable status.
+          - name: show
+            args:
+              - name: recipe-id
+                kind: positional
+                required: true
+                description: Canonical recipe id, including a conditionally unavailable row.
+              - name: --json
+                kind: flag
+                description: Emit the selected versioned discovery row.
+          - name: scaffold
+            args:
+              - name: recipe-id
+                kind: positional
+                required: true
+                description: Canonical recipe id.
+              - name: --output
+                kind: option
+                required: true
+                description: Absolute new directory for a receipt, README, and empty artifact directory; existing or symlink-traversing destinations are refused.
+              - name: --json
+                kind: flag
+                description: Emit a versioned scaffold receipt.
     docs: reference/cli.md#gpu
 
   - name: clean

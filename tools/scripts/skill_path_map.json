@@ -180,6 +180,8 @@
         "tools/cli/**",
         "tools/mcp/pulp_mcp.cpp",
         "tools/mcp/mcp_gpu*",
+        "docs/status/gpu-recipes.yaml",
+        "docs/status/gpu-recipes.schema.json",
         "docs/contracts/gpu-health-result-v1.schema.json",
         "test/fixtures/gpu-ux/**",
         "docs/status/cli-commands.yaml",

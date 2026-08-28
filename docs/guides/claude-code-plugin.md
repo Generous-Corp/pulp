@@ -103,7 +103,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Category | Tools |
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
-| GPU diagnosis | `pulp_gpu_doctor` performs the same bounded render/readback and compute/map checks as `pulp doctor gpu`. `pulp_gpu_probe` runs one callable deterministic Renderer3D, compute, or offline STFT recipe; builds carrying V8 plus the pinned Three.js runtime also advertise the Three.js multi-pass recipe. It returns typed `pulp.gpu-probe-result.v1` evidence plus hash-declared artifacts. Both preserve pass, completed failure, unavailable, and unverified outcomes. |
+| GPU diagnosis | `pulp_gpu_recipes` discovers all four canonical recipes by id or symptom and reports whether the matched native build can call each one; it performs no GPU work or file mutation. `pulp_gpu_doctor` performs bounded render/readback and compute/map checks. `pulp_gpu_probe` runs one callable deterministic recipe and returns typed evidence plus hash-declared artifacts. The execution tools preserve pass, completed failure, unavailable, and unverified outcomes. |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Development Inspector | `pulp_control_profiles` provides static in-process profile metadata. `pulp_inspect_profiles` is a compatibility alias until Pulp 0.800.0 on 2026-10-01. `pulp_trace_start` and `pulp_trace_stop` use canonical capability control. Legacy discovery/capability/doctor, raw inspect, and Motion wrappers are not exposed. |
 | Capability control | Generated `pulp_control_*` tools provide typed exact-instance operations, broker-owned grants/consent, progress, cancellation, subscriptions, resources, and ACL-checked artifact reads. See [Capability control over MCP](capability-control-mcp.md). |
@@ -137,6 +137,13 @@ independent color-region oracle and seeded material mutation preserve the same
 typed exit contract. Default QuickJS standalone releases omit the ID. Their
 eventual exposure also requires sealed V8 delivery and Rust self-upgrades that
 preserve the nested runtime.
+
+`pulp_gpu_recipes` uses that same matched sibling with an argv API. Its `list`
+action optionally filters one exact symptom token; `show` requires a canonical
+recipe id. A QuickJS install still returns the Three.js metadata row with
+`callable:false`, while `pulp_gpu_probe` continues to omit that ID from its
+callable enum. Use CLI `pulp gpu recipes scaffold` for the explicit local
+workspace mutation; MCP discovery is read-only.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

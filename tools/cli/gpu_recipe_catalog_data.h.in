@@ -1,0 +1,11 @@
+#pragma once
+
+#include <string_view>
+
+namespace pulp::cli::gpu_recipes {
+
+// Generated directly from docs/status/gpu-recipes.yaml. Do not copy recipe
+// identifiers here: the catalog validator binds that file to native kRecipeIds.
+inline constexpr std::string_view kCatalogJson = R"PULP_GPU_RECIPES(@PULP_GPU_RECIPE_CATALOG_JSON@)PULP_GPU_RECIPES";
+
+} // namespace pulp::cli::gpu_recipes

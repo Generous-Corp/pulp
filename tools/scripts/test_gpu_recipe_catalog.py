@@ -143,6 +143,17 @@ class CatalogContract(unittest.TestCase):
         self.assertEqual(catalog.validate_repository_references(document, catalog.ROOT), [])
         self.assertEqual(catalog.main([]), 0)
 
+    def test_release_cli_embedding_reads_authoritative_bytes_without_copied_ids(self) -> None:
+        cmake = (catalog.ROOT / "tools/cli/CMakeLists.txt").read_text(encoding="utf-8")
+        template = (
+            catalog.ROOT / "tools/cli/gpu_recipe_catalog_data.h.in"
+        ).read_text(encoding="utf-8")
+        self.assertIn('docs/status/gpu-recipes.yaml"', cmake)
+        self.assertIn("PULP_GPU_RECIPE_CATALOG_JSON", cmake)
+        self.assertEqual(template.count("@PULP_GPU_RECIPE_CATALOG_JSON@"), 1)
+        for recipe in catalog.load_and_validate(catalog.DEFAULT_CATALOG)["recipes"]:
+            self.assertNotIn(recipe["id"], template)
+
     def test_new_native_recipe_fails_closed_until_catalog_is_explicitly_updated(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
         native = catalog.probe_registry_ids(

@@ -109,9 +109,17 @@ surfaces synchronized:
   MCP table, and the Pulp-Vellum tooling disposition
 
 The top-level `gpu` command intentionally has no slash command: its agentic
-surface is the typed `pulp_gpu_probe` MCP tool. This stays in the existing CLI,
-GPU build, Three.js, trace, and routing skills; do not add a duplicate generic
-GPU-probe skill.
+surface is the typed `pulp_gpu_recipes` discovery tool plus `pulp_gpu_probe`.
+An unfiltered `pulp gpu recipes list` projects all four canonical rows from the
+exact configure-time embedded `docs/status/gpu-recipes.yaml` bytes; filtered
+lists and `show` project their matched subset. Every row derives
+`callable` only from the native registry; `scaffold` creates a new bounded
+evidence workspace beneath an existing parent, never a copied implementation
+authority. Install the
+catalog and schema byte-for-byte under `share/pulp`, keep the release floor and
+missing-member negative control current, and preserve unknown-input exit 2.
+This stays in the existing CLI, GPU build, Three.js, trace, and routing skills;
+do not add a duplicate generic GPU-probe skill.
 
 ### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
 
