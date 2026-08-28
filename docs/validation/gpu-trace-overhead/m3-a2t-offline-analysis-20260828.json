@@ -1,5 +1,6 @@
 {
   "acceptance": {
+    "human_perfetto_ui_correlation": "pass",
     "offline_latency_budget": "unverified-no-ratified-budget",
     "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
     "same_installed_prefix": "pass",
@@ -175,6 +176,33 @@
     ]
   },
   "generated_utc": "2026-08-28T05:28:45Z",
+  "human_perfetto_ui_correlation": {
+    "artifact_sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334",
+    "delivery": "official localhost embedding protocol; localOnly browser-memory trace",
+    "observed_spans": [
+      {
+        "category": "gpu",
+        "duration_ns": 1800000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_pipeline_prepare",
+        "sequence": 1
+      },
+      {
+        "category": "gpu",
+        "duration_ns": 900000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_resource_upload",
+        "sequence": 2
+      }
+    ],
+    "reviewed_utc": "2026-08-28T05:34:54Z",
+    "reviewer": "Codex visual acceptance agent",
+    "ui_revision": "v58.3-11fbaed836361258f23604daf67c837f3034e663"
+  },
   "machine": {
     "architecture": "arm64",
     "chip": "Apple M3 Ultra",
