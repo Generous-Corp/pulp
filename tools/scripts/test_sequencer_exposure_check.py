@@ -496,6 +496,24 @@ def main() -> int:
                     f"checker infrastructure path was governed: "
                     f"{infrastructure_path}: {transition_errors}"
                 )
+        shared_control_doc = "docs/reference/capability-control.md"
+        transition_errors = validate_transition(valid, valid, [shared_control_doc])
+        if transition_errors:
+            raise AssertionError(
+                f"non-sequencer shared control documentation was governed: "
+                f"{transition_errors}"
+            )
+        transition_errors = validate_transition(
+            valid,
+            valid,
+            [shared_control_doc],
+            semantic_added_paths={shared_control_doc},
+        )
+        if not any(shared_control_doc in error for error in transition_errors):
+            raise AssertionError(
+                f"sequencer semantics in shared control documentation escaped governance: "
+                f"{transition_errors}"
+            )
         adjacent_checker = "tools/scripts/sequencer_release_check.py"
         transition_errors = validate_transition(valid, valid, [adjacent_checker])
         if not any(adjacent_checker in error for error in transition_errors):
