@@ -1320,6 +1320,7 @@ def _run_script(root: pathlib.Path, env_extra: dict | None = None,
     env.pop("PULP_DIFF_COVER_LIB_ONLY", None)
     env.pop("PULP_SKIP_DIFF_COVER", None)
     env.pop("PULP_DIFF_COVER_MIN_FREE_GIB", None)
+    env.pop("PULP_DIFF_COVER_COMPARE_BRANCH", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
