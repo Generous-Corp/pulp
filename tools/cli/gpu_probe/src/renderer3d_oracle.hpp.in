@@ -1,0 +1,23 @@
+#pragma once
+
+#include <cstdint>
+#include <string_view>
+
+namespace pulp::tooling::gpu_probe::renderer3d_oracle {
+
+// Generated from the existing Renderer3D golden authority and the complete
+// translation unit at configure time. The source digest deliberately
+// over-invalidates: a tooling receipt must never miss a shader, geometry,
+// texture, pipeline, or clear-state change hidden inside the implementation.
+inline constexpr std::string_view kTranslationUnitSha256 =
+    "@PULP_RENDERER3D_TRANSLATION_UNIT_SHA256@";
+inline constexpr std::uint64_t kMacosDefaultMetalFingerprint =
+    @PULP_RENDERER3D_METAL_FINGERPRINT@ULL;
+inline constexpr std::uint32_t kWidth = 128;
+inline constexpr std::uint32_t kHeight = 128;
+inline constexpr std::uint32_t kMinForegroundPixels = 1500;
+inline constexpr std::uint32_t kMinDistinctColors = 64;
+inline constexpr std::uint32_t kMinNonTransparentPixels = 1024;
+inline constexpr std::uint32_t kForegroundDelta = 18;
+
+} // namespace pulp::tooling::gpu_probe::renderer3d_oracle

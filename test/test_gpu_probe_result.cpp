@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <string>
 
 namespace gp = pulp::tooling::gpu_probe;
@@ -75,7 +76,7 @@ TEST_CASE("GPU probe result binds execution identity and correctness to its reci
     result = passing_result();
     result.passes.back().verdict = gp::Verdict::fail;
     REQUIRE_FALSE(gp::validate(result, &error));
-    CHECK(error.find("top-level pass") != std::string::npos);
+    CHECK(error.find("aggregate") != std::string::npos);
 
     result = passing_result();
     result.adapter.status = gp::IdentityStatus::unverified;
@@ -86,6 +87,34 @@ TEST_CASE("GPU probe result binds execution identity and correctness to its reci
     result.adapter.classification = gp::AdapterClass::null_adapter;
     REQUIRE_FALSE(gp::validate(result, &error));
     CHECK(error.find("hardware") != std::string::npos);
+}
+
+TEST_CASE("GPU probe verdict and numeric evidence aggregate coherently",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = passing_result();
+    result.verdict = gp::Verdict::fail;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("aggregate") != std::string::npos);
+
+    result = passing_result();
+    result.passes.back().expected = std::numeric_limits<double>::infinity();
+    result.passes.back().observed = 1.0;
+    result.passes.back().absolute_error = 1.0;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("finite") != std::string::npos);
+
+    result = passing_result();
+    result.passes.back().expected = 2.0;
+    result.passes.back().observed = 5.0;
+    result.passes.back().absolute_error = 2.0;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("observed minus expected") != std::string::npos);
+
+    result = passing_result();
+    result.passes.back().verdict = gp::Verdict::unverified;
+    result.verdict = gp::Verdict::unverified;
+    REQUIRE(gp::validate(result, &error));
 }
 
 TEST_CASE("GPU probe artifacts are confined, unique, and bounded",

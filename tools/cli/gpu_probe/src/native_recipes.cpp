@@ -1,0 +1,426 @@
+#include <pulp_tooling/gpu_probe/recipes.hpp>
+
+#include <pulp/render/gpu_compute.hpp>
+#include <pulp/render/headless_surface.hpp>
+#include <pulp/runtime/crypto.hpp>
+#include "renderer3d_oracle.hpp"
+#if defined(PULP_ENABLE_SCENE3D)
+#include <pulp/render/renderer3d.hpp>
+#endif
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+
+namespace pulp::tooling::gpu_probe {
+namespace {
+
+std::string digest(std::span<const std::uint8_t> bytes) {
+    return runtime::sha256_hex(bytes.data(), bytes.size());
+}
+
+std::string digest(std::string_view text) {
+    return runtime::sha256_hex(text);
+}
+
+std::string evidence_id(const RunOptions& options, std::string_view fallback) {
+    if (options.gpu_evidence_id) return *options.gpu_evidence_id;
+    if (auto bytes = runtime::secure_random_bytes(16); bytes && bytes->size() == 16)
+        return runtime::hex_encode(*bytes);
+    (void)fallback;
+    throw std::runtime_error("GPU probe could not allocate a unique evidence identifier");
+}
+
+std::optional<std::string> bounded(std::string_view value) {
+    if (value.empty()) return std::nullopt;
+    return std::string(value.substr(0, 256));
+}
+
+AdapterClass adapter_class(std::string_view value) {
+    if (value == "discrete-gpu" || value == "integrated-gpu")
+        return AdapterClass::hardware;
+    if (value == "cpu") return AdapterClass::software;
+    return AdapterClass::unknown;
+}
+
+ProbeResult base_result(const RecipeDefinition& recipe, const RunOptions& options,
+                        std::string_view source, bool source_is_digest = false) {
+    ProbeResult result;
+    result.recipe_id = std::string(recipe.id);
+    result.source_digest = source_is_digest ? std::string(source) : digest(source);
+    std::ostringstream signature;
+    signature << recipe.id << '\n' << result.source_digest << '\n'
+              << recipe.dimensions.width << 'x' << recipe.dimensions.height << ':'
+              << recipe.dimensions.work_items << '\n' << recipe.seed << '\n'
+              << recipe.clock << '\n' << recipe.input_format << '\n'
+              << recipe.output_format << '\n' << recipe.encoding << '\n'
+              << (options.apply_negative_mutation ? recipe.negative_mutation
+                                                   : recipe.positive_control);
+    result.signature_digest = digest(signature.str());
+    result.gpu_evidence_id = evidence_id(options, result.signature_digest);
+    result.dimensions = recipe.dimensions;
+    result.seed = recipe.seed;
+    result.clock = std::string(recipe.clock);
+    result.input_format = std::string(recipe.input_format);
+    result.output_format = std::string(recipe.output_format);
+    result.encoding = std::string(recipe.encoding);
+    result.tolerance = recipe.tolerance;
+    result.adapter_policy = recipe.adapter_policy;
+    if (options.apply_negative_mutation)
+        result.mutation = std::string(recipe.negative_mutation);
+    return result;
+}
+
+PassResult pass(std::uint32_t sequence, std::string_view name, Verdict verdict,
+                bool work_completed, std::string code) {
+    PassResult out;
+    out.sequence = sequence;
+    out.name = std::string(name);
+    out.verdict = verdict;
+    out.work_completed = work_completed;
+    out.code = std::move(code);
+    return out;
+}
+
+ArtifactPayload artifact(std::string name, ArtifactKind kind, std::string mime,
+                         std::vector<std::uint8_t> bytes) {
+    ArtifactPayload out;
+    out.artifact.name = std::move(name);
+    out.artifact.kind = kind;
+    out.artifact.mime = std::move(mime);
+    out.artifact.bytes = bytes.size();
+    out.artifact.sha256 = digest(bytes);
+    out.bytes = std::move(bytes);
+    return out;
+}
+
+void attach(RecipeRun& run, ArtifactPayload payload) {
+    run.result.artifacts.push_back(payload.artifact);
+    run.payloads.push_back(std::move(payload));
+}
+
+void unavailable_passes(ProbeResult& result, const RecipeDefinition& recipe,
+                        std::string code) {
+    result.verdict = Verdict::unavailable;
+    for (std::uint32_t i = 0; i < recipe.semantic_passes.size(); ++i)
+        result.passes.push_back(pass(i, recipe.semantic_passes[i], Verdict::unavailable,
+                                     false, code));
+}
+
+void failed_passes(ProbeResult& result, const RecipeDefinition& recipe,
+                   std::string code) {
+    result.verdict = Verdict::fail;
+    for (std::uint32_t i = 0; i < recipe.semantic_passes.size(); ++i)
+        result.passes.push_back(pass(i, recipe.semantic_passes[i], Verdict::fail,
+                                     false, code));
+}
+
+std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
+    std::vector<std::uint8_t> bytes(values.size_bytes());
+    std::memcpy(bytes.data(), values.data(), values.size_bytes());
+    return bytes;
+}
+
+bool replace_once(std::string& value, std::string_view from, std::string_view to) {
+    const auto at = value.find(from);
+    if (at == std::string::npos || value.find(from, at + from.size()) != std::string::npos)
+        return false;
+    value.replace(at, from.size(), to);
+    return true;
+}
+
+#if defined(PULP_ENABLE_SCENE3D)
+struct ForegroundRegion {
+    std::uint32_t count = 0;
+    std::uint32_t min_x = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t min_y = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t max_x = 0;
+    std::uint32_t max_y = 0;
+};
+
+ForegroundRegion foreground_region(std::span<const std::uint8_t> rgba,
+                                   std::uint32_t width, std::uint32_t height) {
+    ForegroundRegion region;
+    if (rgba.size() != static_cast<std::size_t>(width) * height * 4u || rgba.size() < 4)
+        return region;
+    const int bg_r = rgba[0], bg_g = rgba[1], bg_b = rgba[2];
+    for (std::uint32_t y = 0; y < height; ++y) {
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const auto offset = (static_cast<std::size_t>(y) * width + x) * 4u;
+            const int delta = std::abs(static_cast<int>(rgba[offset]) - bg_r) +
+                              std::abs(static_cast<int>(rgba[offset + 1]) - bg_g) +
+                              std::abs(static_cast<int>(rgba[offset + 2]) - bg_b);
+            if (delta <= static_cast<int>(renderer3d_oracle::kForegroundDelta)) continue;
+            ++region.count;
+            region.min_x = std::min(region.min_x, x);
+            region.min_y = std::min(region.min_y, y);
+            region.max_x = std::max(region.max_x, x);
+            region.max_y = std::max(region.max_y, y);
+        }
+    }
+    return region;
+}
+
+std::uint64_t rgba_fingerprint(std::uint32_t width, std::uint32_t height,
+                               const std::vector<std::uint8_t>& pixels) {
+    render::HeadlessSurface::Rgba rgba;
+    rgba.width = width;
+    rgba.height = height;
+    rgba.pixels = pixels;
+    return render::HeadlessSurface::rgba_fingerprint(rgba);
+}
+#endif
+
+bool validation_fail(std::string* error, std::string message) {
+    if (error) *error = std::move(message);
+    return false;
+}
+
+} // namespace
+
+RecipeRun run_renderer3d_recipe(const RunOptions& options) {
+    const auto& recipe = *find_recipe(kRecipeIds[0]);
+    RecipeRun run;
+    run.result = base_result(recipe, options,
+                             renderer3d_oracle::kTranslationUnitSha256, true);
+
+#if !defined(PULP_ENABLE_SCENE3D)
+    unavailable_passes(run.result, recipe, "renderer3d_not_compiled");
+    run.result.recommendations.emplace_back(
+        "Reconfigure the SDK with PULP_ENABLE_SCENE3D=ON and rerun the recipe.");
+    return run;
+#else
+    render::HardcodedCubeRenderConfig config;
+    config.width = recipe.dimensions.width;
+    config.height = recipe.dimensions.height;
+    const auto rendered = render::Renderer3D::render_hardcoded_textured_cube(config);
+
+    run.result.adapter.status = rendered.adapter_info_available
+        ? IdentityStatus::unverified : IdentityStatus::unavailable;
+    run.result.adapter.classification = rendered.null_backend_requested
+        ? AdapterClass::null_adapter : AdapterClass::unknown;
+    run.result.adapter.backend = bounded(rendered.adapter_backend);
+    run.result.adapter.name = bounded(rendered.adapter_name);
+    run.result.adapter.vendor = bounded(rendered.adapter_vendor);
+    run.result.adapter.architecture = bounded(rendered.adapter_architecture);
+
+    if (!rendered.gpu_available) {
+        unavailable_passes(run.result, recipe, "renderer3d_adapter_unavailable");
+        run.result.recommendations.emplace_back(
+            "Run pulp doctor gpu to inspect adapter acquisition and render health.");
+        return run;
+    }
+
+    run.result.passes.push_back(pass(0, recipe.semantic_passes[0], Verdict::pass,
+                                     true, "adapter_acquired"));
+    run.result.passes.push_back(pass(1, recipe.semantic_passes[1],
+        rendered.command_submitted ? Verdict::pass : Verdict::fail,
+        rendered.command_submitted, rendered.command_submitted
+            ? "render_submitted" : "render_not_submitted"));
+    run.result.passes.push_back(pass(2, recipe.semantic_passes[2],
+        rendered.readback_completed ? Verdict::pass : Verdict::fail,
+        rendered.readback_completed, rendered.readback_completed
+            ? "readback_completed" : "readback_incomplete"));
+
+    auto observed = rendered.rgba;
+    if (options.apply_negative_mutation && observed.size() >= 4) {
+        const std::array background{observed[0], observed[1], observed[2]};
+        for (std::size_t i = 0; i + 3 < observed.size(); i += 4) {
+            observed[i] = background[0];
+            observed[i + 1] = background[1];
+            observed[i + 2] = background[2];
+        }
+    }
+    const auto region = foreground_region(observed, rendered.width, rendered.height);
+    const bool portable_structure = rendered.success &&
+        region.count > renderer3d_oracle::kMinForegroundPixels &&
+        region.min_x > 3 && region.min_y > 3 &&
+        region.max_x < rendered.width - 3 && region.max_y < rendered.height - 3;
+    const bool metal_scope = rendered.adapter_info_available &&
+                             rendered.adapter_backend_type == "Metal";
+    const auto fingerprint = observed.empty()
+        ? 0 : rgba_fingerprint(rendered.width, rendered.height, observed);
+    const bool fingerprint_match = metal_scope && portable_structure &&
+        rendered.distinct_color_count >= renderer3d_oracle::kMinDistinctColors &&
+        rendered.non_transparent_pixel_count >=
+            renderer3d_oracle::kMinNonTransparentPixels &&
+        fingerprint == renderer3d_oracle::kMacosDefaultMetalFingerprint;
+    const auto content_verdict = !portable_structure
+        ? Verdict::fail : (metal_scope ? (fingerprint_match ? Verdict::pass : Verdict::fail)
+                                          : Verdict::unverified);
+    run.result.passes.push_back(pass(3, recipe.semantic_passes[3],
+        content_verdict, rendered.readback_completed && !rendered.rgba.empty(),
+        !portable_structure ? "portable_structure_mismatch"
+        : (metal_scope ? (fingerprint_match ? "metal_fingerprint_match"
+                                            : "metal_fingerprint_mismatch")
+                       : "portable_structure_verified_exact_golden_unavailable")));
+    run.result.verdict = content_verdict;
+
+    std::ostringstream oracle_json;
+    oracle_json << "{\"adapter_scope\":\""
+                << (metal_scope ? "macos_default_metal" : "portable_structure")
+                << "\",\"expected_fingerprint\":\""
+                << renderer3d_oracle::kMacosDefaultMetalFingerprint
+                << "\",\"observed_fingerprint\":\"" << fingerprint
+                << "\",\"foreground_pixels\":" << region.count
+                << ",\"bounds\":[" << region.min_x << ',' << region.min_y << ','
+                << region.max_x << ',' << region.max_y << "]}";
+    const auto oracle_text = oracle_json.str();
+    attach(run, artifact("content-oracle.json", ArtifactKind::json,
+                         "application/json",
+                         std::vector<std::uint8_t>(oracle_text.begin(),
+                                                   oracle_text.end())));
+
+    if (!rendered.png.empty())
+        attach(run, artifact("final.png", ArtifactKind::image, "image/png", rendered.png));
+    if (!observed.empty())
+        attach(run, artifact("observed.rgba8", ArtifactKind::image,
+                             "application/octet-stream", std::move(observed)));
+    if (run.result.verdict == Verdict::unverified)
+        run.result.recommendations.emplace_back(
+            "Portable structure passed, but this adapter has no scoped exact golden.");
+    else if (run.result.verdict == Verdict::fail)
+        run.result.recommendations.emplace_back(
+            "Inspect the named render/readback/content pass before comparing screenshots.");
+    return run;
+#endif
+}
+
+RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options) {
+    const auto& recipe = *find_recipe(kRecipeIds[1]);
+    auto gpu = render::GpuCompute::create();
+    const char* builtin = gpu ? gpu->kernel_source("magnitude") : nullptr;
+    std::string actual_source = builtin ? std::string{builtin}
+                                        : std::string{recipe.source_identity};
+    bool mutation_installed = false;
+    if (gpu && builtin && options.apply_negative_mutation) {
+        mutation_installed = replace_once(actual_source, "re * re + im * im",
+                                                         "re * re + 0.25 * im * im") &&
+                             gpu->override_kernel_source("magnitude",
+                                                         actual_source.c_str());
+    }
+    RecipeRun run;
+    run.result = base_result(recipe, options, actual_source);
+    if (!gpu || !builtin) {
+        unavailable_passes(run.result, recipe, "gpu_compute_not_compiled");
+        run.result.recommendations.emplace_back(
+            "Use a GPU-enabled SDK and run pulp doctor gpu before retrying.");
+        return run;
+    }
+
+    if (options.apply_negative_mutation && !mutation_installed) {
+        failed_passes(run.result, recipe, "magnitude_mutation_source_drift");
+        return run;
+    }
+    if (!gpu->initialize_standalone()) {
+        unavailable_passes(run.result, recipe, "gpu_compute_adapter_unavailable");
+        run.result.recommendations.emplace_back(
+            "Run pulp doctor gpu to inspect standalone compute initialization.");
+        return run;
+    }
+
+    const auto capabilities = gpu->capabilities();
+    run.result.adapter.status = capabilities.adapter_info_authentic
+        ? IdentityStatus::authentic : IdentityStatus::unverified;
+    run.result.adapter.classification = capabilities.adapter_info_authentic
+        ? adapter_class(capabilities.adapter_type) : AdapterClass::unknown;
+    run.result.adapter.backend = bounded(capabilities.backend);
+    run.result.adapter.name = bounded(capabilities.name);
+    run.result.adapter.vendor = bounded(capabilities.vendor);
+    run.result.adapter.architecture = bounded(capabilities.architecture);
+    if (capabilities.vendor_id != 0 || capabilities.device_id != 0) {
+        std::ostringstream id;
+        id << "vendor=0x" << std::hex << capabilities.vendor_id
+           << ",device=0x" << capabilities.device_id;
+        run.result.adapter.device = id.str();
+    }
+
+    constexpr std::uint32_t count = 256;
+    std::array<float, count * 2> input{};
+    std::array<float, count> expected{};
+    std::array<float, count> observed{};
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const float x = static_cast<float>(i + 1);
+        input[i * 2] = std::sin(x * 0.173f) * 7.0f + 0.25f;
+        input[i * 2 + 1] = std::cos(x * 0.113f) * 5.0f - 0.5f;
+        expected[i] = std::sqrt(input[i * 2] * input[i * 2] +
+                                input[i * 2 + 1] * input[i * 2 + 1]);
+    }
+    const bool dispatched = gpu->compute_magnitude(input.data(), observed.data(), count);
+    double max_error = 0.0;
+    bool finite = dispatched;
+    bool within_tolerance = dispatched;
+    for (std::uint32_t i = 0; i < count && dispatched; ++i) {
+        finite = finite && std::isfinite(observed[i]);
+        const double error = std::abs(static_cast<double>(observed[i]) - expected[i]);
+        const double allowed = recipe.tolerance.absolute +
+                               recipe.tolerance.relative * std::abs(expected[i]);
+        max_error = std::max(max_error, error);
+        within_tolerance = within_tolerance && error <= allowed;
+    }
+    const bool oracle_match = finite && within_tolerance;
+    run.result.numeric_sample_count = count;
+    const bool eligible_hardware = capabilities.available &&
+        capabilities.adapter_info_authentic &&
+        adapter_class(capabilities.adapter_type) == AdapterClass::hardware;
+    run.result.passes.push_back(pass(0, recipe.semantic_passes[0],
+        eligible_hardware ? Verdict::pass : Verdict::unverified,
+        capabilities.available, eligible_hardware
+            ? "compute_hardware_adapter_verified" : "compute_adapter_unverified"));
+    run.result.passes.push_back(pass(1, recipe.semantic_passes[1],
+        dispatched ? Verdict::pass : Verdict::fail, dispatched,
+        dispatched ? "magnitude_dispatch_completed" : "magnitude_dispatch_failed"));
+    auto oracle = pass(2, recipe.semantic_passes[2],
+        oracle_match ? Verdict::pass : Verdict::fail, dispatched,
+        oracle_match ? "cpu_oracle_match" : "cpu_oracle_mismatch");
+    oracle.expected = 0.0;
+    oracle.observed = max_error;
+    oracle.absolute_error = max_error;
+    run.result.passes.push_back(std::move(oracle));
+    if (!dispatched || !oracle_match)
+        run.result.verdict = Verdict::fail;
+    else
+        run.result.verdict = eligible_hardware ? Verdict::pass : Verdict::unverified;
+
+    attach(run, artifact("input.complex-f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(input)));
+    attach(run, artifact("expected.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(expected)));
+    attach(run, artifact("observed.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(observed)));
+    if (!eligible_hardware)
+        run.result.recommendations.emplace_back(
+            "Repeat on a runtime that reports authentic hardware adapter identity.");
+    if (!oracle_match)
+        run.result.recommendations.emplace_back(
+            "Inspect the magnitude oracle pass and its bounded numeric artifacts.");
+    return run;
+}
+
+bool validate(const RecipeRun& run, std::string* error) {
+    if (!validate(run.result, error)) return false;
+    if (run.result.artifacts.size() != run.payloads.size())
+        return validation_fail(error, "artifact descriptors and payloads must be one-to-one");
+    for (std::size_t i = 0; i < run.payloads.size(); ++i) {
+        const auto& declared = run.result.artifacts[i];
+        const auto& payload = run.payloads[i];
+        const auto& embedded = payload.artifact;
+        if (declared.name != embedded.name || declared.kind != embedded.kind ||
+            declared.mime != embedded.mime || declared.bytes != embedded.bytes ||
+            declared.sha256 != embedded.sha256)
+            return validation_fail(error,
+                "artifact descriptor does not match its payload descriptor");
+        if (declared.bytes != payload.bytes.size())
+            return validation_fail(error, "artifact byte count does not match its payload");
+        if (declared.sha256 != digest(payload.bytes))
+            return validation_fail(error, "artifact sha256 does not match its payload");
+    }
+    return true;
+}
+
+} // namespace pulp::tooling::gpu_probe
