@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/gpu-recipes.schema.json",
+  "title": "Pulp GPU recipe catalog",
+  "description": "Discoverability projection for shipped GPU diagnosis recipes. Catalog bytes use JSON syntax, which is a YAML 1.2 subset; validators reject other YAML syntax. Runtime policy and generic rendering APIs are outside this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema", "catalog_revision", "recipes"],
+  "properties": {
+    "$schema": { "const": "gpu-recipes.schema.json" },
+    "schema": { "const": "pulp.gpu-recipes.v1" },
+    "catalog_revision": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "recipes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "title",
+          "summary",
+          "symptoms",
+          "kind",
+          "entrypoints",
+          "evidence_schema",
+          "docs",
+          "skills",
+          "scaffold_template"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+          },
+          "version": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "symptoms": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+            }
+          },
+          "kind": { "enum": ["offline", "live"] },
+          "entrypoints": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cli", "mcp", "control", "trace"],
+            "properties": {
+              "cli": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 24,
+                    "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+                  }
+                }
+              },
+              "mcp": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["tool", "recipe_id"],
+                    "properties": {
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^pulp_[a-z][a-z0-9_]*$"
+                      },
+                      "recipe_id": { "type": "string", "minLength": 1, "maxLength": 96 }
+                    }
+                  }
+                ]
+              },
+              "control": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["operation_id"],
+                    "properties": {
+                      "operation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^dev[.]pulp[.][a-z][a-z0-9.-]*/[a-z][a-z0-9.-]*@[1-9][0-9]*$"
+                      }
+                    }
+                  }
+                ]
+              },
+              "trace": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["question"],
+                    "properties": {
+                      "question": { "enum": ["gpu-health", "gpu-probe", "gpu-startup"] }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "evidence_schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+          },
+          "docs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+          },
+          "skills": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+            }
+          },
+          "scaffold_template": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
