@@ -26,7 +26,7 @@ if(PULP_ENABLE_GPU)
         PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
     target_link_libraries(pulp-tool-gpu-probe-recipes
         PUBLIC pulp::tool-gpu-probe-model
-        PRIVATE pulp::render pulp::runtime)
+        PRIVATE pulp::gpu-audio pulp::render pulp::runtime)
     if(PULP_ENABLE_SCENE3D)
         target_link_libraries(pulp-tool-gpu-probe-recipes PRIVATE pulp::scene)
     endif()
@@ -37,6 +37,11 @@ if(PULP_ENABLE_GPU)
         target_link_libraries(pulp-gpu-probe-native-acceptance PRIVATE
             pulp::tool-gpu-probe-recipes)
     endif()
+
+    add_executable(pulp-gpu-probe-stft-native-acceptance EXCLUDE_FROM_ALL
+        src/stft_native_acceptance.cpp)
+    target_link_libraries(pulp-gpu-probe-stft-native-acceptance PRIVATE
+        pulp::tool-gpu-probe-recipes)
 endif()
 
 if(PULP_BUILD_TESTS)

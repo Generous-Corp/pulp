@@ -30,4 +30,8 @@ bool validate(const RecipeRun& run, std::string* error = nullptr);
 RecipeRun run_renderer3d_recipe(const RunOptions& options = {});
 RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options = {});
 
+/// Runs one blocking GPU STFT frame and its CPU oracle. This diagnostic owns no
+/// audio device or Processor and must run from an offline tool/worker thread.
+RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options = {});
+
 } // namespace pulp::tooling::gpu_probe

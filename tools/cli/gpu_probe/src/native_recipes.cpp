@@ -1,8 +1,11 @@
 #include <pulp_tooling/gpu_probe/recipes.hpp>
 
+#include <pulp/gpu_audio/gpu_stft.hpp>
 #include <pulp/render/gpu_compute.hpp>
 #include <pulp/render/headless_surface.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/signal/fft.hpp>
+#include <pulp/signal/rng.hpp>
 #include "renderer3d_oracle.hpp"
 #if defined(PULP_ENABLE_SCENE3D)
 #include <pulp/render/renderer3d.hpp>
@@ -10,8 +13,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
-#include <cstring>
+#include <complex>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -54,11 +59,17 @@ ProbeResult base_result(const RecipeDefinition& recipe, const RunOptions& option
     result.recipe_id = std::string(recipe.id);
     result.source_digest = source_is_digest ? std::string(source) : digest(source);
     std::ostringstream signature;
-    signature << recipe.id << '\n' << result.source_digest << '\n'
+    signature << recipe.id << '\n' << recipe.source_identity << '\n'
+              << result.source_digest << '\n'
               << recipe.dimensions.width << 'x' << recipe.dimensions.height << ':'
               << recipe.dimensions.work_items << '\n' << recipe.seed << '\n'
               << recipe.clock << '\n' << recipe.input_format << '\n'
               << recipe.output_format << '\n' << recipe.encoding << '\n'
+              << recipe.tolerance.absolute << ':' << recipe.tolerance.relative << '\n'
+              << static_cast<int>(recipe.adapter_policy) << '\n'
+              << recipe.bounds.max_numeric_samples << ':' << recipe.bounds.max_artifacts
+              << ':' << recipe.bounds.max_artifact_bytes << ':'
+              << recipe.bounds.max_total_artifact_bytes << '\n'
               << (options.apply_negative_mutation ? recipe.negative_mutation
                                                    : recipe.positive_control);
     result.signature_digest = digest(signature.str());
@@ -121,8 +132,15 @@ void failed_passes(ProbeResult& result, const RecipeDefinition& recipe,
 }
 
 std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
-    std::vector<std::uint8_t> bytes(values.size_bytes());
-    std::memcpy(bytes.data(), values.data(), values.size_bytes());
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(values.size_bytes());
+    for (const float value : values) {
+        const auto bits = std::bit_cast<std::uint32_t>(value);
+        bytes.push_back(static_cast<std::uint8_t>(bits));
+        bytes.push_back(static_cast<std::uint8_t>(bits >> 8u));
+        bytes.push_back(static_cast<std::uint8_t>(bits >> 16u));
+        bytes.push_back(static_cast<std::uint8_t>(bits >> 24u));
+    }
     return bytes;
 }
 
@@ -131,6 +149,47 @@ bool replace_once(std::string& value, std::string_view from, std::string_view to
     if (at == std::string::npos || value.find(from, at + from.size()) != std::string::npos)
         return false;
     value.replace(at, from.size(), to);
+    return true;
+}
+
+void populate_adapter_identity(ProbeResult& result,
+                               const render::GpuCompute::CapabilityReport& capabilities) {
+    result.adapter.status = capabilities.adapter_info_authentic
+        ? IdentityStatus::authentic
+        : (capabilities.available ? IdentityStatus::unverified
+                                  : IdentityStatus::unavailable);
+    result.adapter.classification = capabilities.adapter_info_authentic
+        ? adapter_class(capabilities.adapter_type) : AdapterClass::unknown;
+    result.adapter.backend = bounded(capabilities.backend);
+    result.adapter.name = bounded(capabilities.name);
+    result.adapter.vendor = bounded(capabilities.vendor);
+    result.adapter.architecture = bounded(capabilities.architecture);
+    if (capabilities.vendor_id != 0 || capabilities.device_id != 0) {
+        std::ostringstream id;
+        id << "vendor=0x" << std::hex << capabilities.vendor_id
+           << ",device=0x" << capabilities.device_id;
+        result.adapter.device = id.str();
+    }
+}
+
+bool install_stft_mutation(render::GpuCompute& gpu, std::string& actual_source) {
+    std::string mutated = actual_source;
+    const bool complete =
+        replace_once(mutated,
+            "dst[2u * (base + idxD)]                   = y0_re;",
+            "dst[2u * (base + idxD)]                   = 0.5 * y0_re;") &&
+        replace_once(mutated,
+            "dst[2u * (base + idxD) + 1u]              = y0_im;",
+            "dst[2u * (base + idxD) + 1u]              = 0.5 * y0_im;") &&
+        replace_once(mutated,
+            "dst[2u * (base + idxD + params.ns)]       = y1_re;",
+            "dst[2u * (base + idxD + params.ns)]       = 0.5 * y1_re;") &&
+        replace_once(mutated,
+            "dst[2u * (base + idxD + params.ns) + 1u]  = y1_im;",
+            "dst[2u * (base + idxD + params.ns) + 1u]  = 0.5 * y1_im;");
+    if (!complete || !gpu.override_kernel_source("fft_stockham", mutated.c_str()))
+        return false;
+    actual_source = std::move(mutated);
     return true;
 }
 
@@ -325,20 +384,7 @@ RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options) {
     }
 
     const auto capabilities = gpu->capabilities();
-    run.result.adapter.status = capabilities.adapter_info_authentic
-        ? IdentityStatus::authentic : IdentityStatus::unverified;
-    run.result.adapter.classification = capabilities.adapter_info_authentic
-        ? adapter_class(capabilities.adapter_type) : AdapterClass::unknown;
-    run.result.adapter.backend = bounded(capabilities.backend);
-    run.result.adapter.name = bounded(capabilities.name);
-    run.result.adapter.vendor = bounded(capabilities.vendor);
-    run.result.adapter.architecture = bounded(capabilities.architecture);
-    if (capabilities.vendor_id != 0 || capabilities.device_id != 0) {
-        std::ostringstream id;
-        id << "vendor=0x" << std::hex << capabilities.vendor_id
-           << ",device=0x" << capabilities.device_id;
-        run.result.adapter.device = id.str();
-    }
+    populate_adapter_identity(run.result, capabilities);
 
     constexpr std::uint32_t count = 256;
     std::array<float, count * 2> input{};
@@ -399,6 +445,164 @@ RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options) {
     if (!oracle_match)
         run.result.recommendations.emplace_back(
             "Inspect the magnitude oracle pass and its bounded numeric artifacts.");
+    return run;
+}
+
+RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
+    constexpr std::uint32_t count = 1024;
+    constexpr std::uint64_t input_field = 0x53544654ULL;
+
+    const auto& recipe = *find_recipe(kRecipeIds[3]);
+    auto gpu = render::GpuCompute::create();
+    const char* builtin = gpu ? gpu->kernel_source("fft_stockham") : nullptr;
+    std::string actual_source = builtin ? std::string{builtin}
+                                        : std::string{recipe.source_identity};
+    bool mutation_installed = false;
+    if (gpu && builtin && options.apply_negative_mutation)
+        mutation_installed = install_stft_mutation(*gpu, actual_source);
+
+    RecipeRun run;
+    run.result = base_result(recipe, options, actual_source);
+    if (!gpu || !builtin) {
+        unavailable_passes(run.result, recipe, "gpu_stft_not_compiled");
+        run.result.recommendations.emplace_back(
+            "Use a GPU-enabled SDK and run pulp doctor gpu before retrying.");
+        return run;
+    }
+    if (options.apply_negative_mutation && !mutation_installed) {
+        failed_passes(run.result, recipe, "stft_mutation_source_drift");
+        return run;
+    }
+    if (!gpu->initialize_standalone()) {
+        unavailable_passes(run.result, recipe, "gpu_stft_adapter_unavailable");
+        run.result.recommendations.emplace_back(
+            "Run pulp doctor gpu to inspect standalone compute initialization.");
+        return run;
+    }
+
+    const auto capabilities = gpu->capabilities();
+    populate_adapter_identity(run.result, capabilities);
+    const bool eligible_hardware = capabilities.available &&
+        capabilities.adapter_info_authentic &&
+        adapter_class(capabilities.adapter_type) == AdapterClass::hardware;
+
+    std::array<float, count> input{};
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const float unit = signal::unit_from<float>(
+            signal::mix64(recipe.seed, i, input_field));
+        input[i] = 0.5f * (unit * 2.0f - 1.0f);
+    }
+
+    gpu_audio::GpuStft stft;
+    const bool prepared = stft.prepare(
+        count, signal::WindowFunction::Type::hann, 0.0f, gpu.get());
+    const auto expected_window = signal::WindowFunction::generate<float>(
+        static_cast<int>(count), signal::WindowFunction::Type::hann);
+    const bool window_matches = prepared && stft.gpu_available() &&
+        stft.fft_size() == count && stft.window() == expected_window;
+
+    signal::FftT<double> cpu_fft(static_cast<int>(count));
+    const bool cpu_ready = cpu_fft.ready();
+    std::array<std::complex<double>, count> cpu_spectrum{};
+    std::array<double, count> expected_exact{};
+    std::array<float, count> expected_magnitude{};
+    if (window_matches && cpu_ready) {
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const float windowed = input[i] * expected_window[i];
+            cpu_spectrum[i] = {static_cast<double>(windowed), 0.0};
+        }
+        cpu_fft.forward(cpu_spectrum.data());
+        for (std::uint32_t i = 0; i < count; ++i) {
+            expected_exact[i] = std::abs(cpu_spectrum[i]);
+            expected_magnitude[i] = static_cast<float>(expected_exact[i]);
+        }
+    }
+
+    std::array<float, count * 2> observed_spectrum{};
+    const bool analyzed = window_matches && cpu_ready &&
+        stft.analyze(input.data(), observed_spectrum.data());
+    std::array<float, count> observed_magnitude{};
+    std::array<float, count> absolute_error{};
+    bool finite = analyzed;
+    bool nonzero = false;
+    bool within_tolerance = analyzed;
+    double max_error = 0.0;
+    for (std::uint32_t i = 0; i < count && analyzed; ++i) {
+        const double real = observed_spectrum[i * 2u];
+        const double imaginary = observed_spectrum[i * 2u + 1u];
+        const double magnitude = std::hypot(real, imaginary);
+        observed_magnitude[i] = static_cast<float>(magnitude);
+        finite = finite && std::isfinite(real) && std::isfinite(imaginary) &&
+                 std::isfinite(magnitude);
+        nonzero = nonzero || magnitude > 1.0e-6;
+        const double error = std::abs(magnitude - expected_exact[i]);
+        absolute_error[i] = static_cast<float>(error);
+        max_error = std::max(max_error, error);
+        const double allowed = recipe.tolerance.absolute +
+            recipe.tolerance.relative * expected_exact[i];
+        within_tolerance = within_tolerance && error <= allowed;
+    }
+    const bool magnitude_valid = analyzed && finite && nonzero;
+    const bool oracle_match = magnitude_valid && within_tolerance;
+    run.result.numeric_sample_count = count;
+
+    const bool prepare_ok = window_matches && cpu_ready;
+    const Verdict prepare_verdict = !prepare_ok
+        ? Verdict::fail
+        : (eligible_hardware ? Verdict::pass : Verdict::unverified);
+    std::string prepare_code;
+    if (!prepared)
+        prepare_code = "stft_prepare_failed";
+    else if (!window_matches)
+        prepare_code = "stft_window_mismatch";
+    else if (!cpu_ready)
+        prepare_code = "cpu_fft_unavailable";
+    else
+        prepare_code = eligible_hardware ? "stft_hardware_adapter_prepared"
+                                         : "stft_adapter_unverified";
+    run.result.passes.push_back(pass(0, recipe.semantic_passes[0],
+                                     prepare_verdict, prepare_ok,
+                                     std::move(prepare_code)));
+    run.result.passes.push_back(pass(1, recipe.semantic_passes[1],
+        analyzed ? Verdict::pass : Verdict::fail, analyzed,
+        analyzed ? "stft_forward_completed" : "stft_forward_failed"));
+    run.result.passes.push_back(pass(2, recipe.semantic_passes[2],
+        magnitude_valid ? Verdict::pass : Verdict::fail, analyzed,
+        magnitude_valid ? "stft_magnitude_finite_nonzero"
+                        : "stft_magnitude_invalid"));
+    auto oracle = pass(3, recipe.semantic_passes[3],
+        oracle_match ? Verdict::pass : Verdict::fail, analyzed,
+        oracle_match ? "cpu_fft_oracle_match" : "cpu_fft_oracle_mismatch");
+    oracle.expected = 0.0;
+    oracle.observed = max_error;
+    oracle.absolute_error = max_error;
+    run.result.passes.push_back(std::move(oracle));
+
+    if (!prepare_ok || !analyzed || !magnitude_valid || !oracle_match)
+        run.result.verdict = Verdict::fail;
+    else
+        run.result.verdict = eligible_hardware ? Verdict::pass : Verdict::unverified;
+
+    attach(run, artifact("input.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(input)));
+    attach(run, artifact("window.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(expected_window)));
+    attach(run, artifact("expected-magnitude.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(expected_magnitude)));
+    attach(run, artifact("observed-spectrum.complex-f32",
+                         ArtifactKind::numeric_samples, "application/octet-stream",
+                         floats_as_bytes(observed_spectrum)));
+    attach(run, artifact("observed-magnitude.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(observed_magnitude)));
+    attach(run, artifact("absolute-error.f32", ArtifactKind::numeric_samples,
+                         "application/octet-stream", floats_as_bytes(absolute_error)));
+
+    if (!eligible_hardware)
+        run.result.recommendations.emplace_back(
+            "Repeat on a runtime that reports authentic hardware adapter identity.");
+    if (!oracle_match)
+        run.result.recommendations.emplace_back(
+            "Inspect the forward, magnitude, and CPU-oracle artifacts for the first divergence.");
     return run;
 }
 

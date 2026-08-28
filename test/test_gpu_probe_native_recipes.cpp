@@ -2,6 +2,10 @@
 
 #include <pulp_tooling/gpu_probe/recipes.hpp>
 
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstdint>
 #include <set>
 
 namespace probe = pulp::tooling::gpu_probe;
@@ -30,6 +34,26 @@ void require_work_or_skip(const probe::RecipeRun& run) {
 #else
     SKIP("real-adapter recipe unavailable; required acceptance target rejects this state");
 #endif
+}
+
+const probe::ArtifactPayload& payload_named(const probe::RecipeRun& run,
+                                            std::string_view name) {
+    const auto found = std::find_if(run.payloads.begin(), run.payloads.end(),
+                                    [&](const auto& payload) {
+                                        return payload.artifact.name == name;
+                                    });
+    REQUIRE(found != run.payloads.end());
+    return *found;
+}
+
+float little_endian_float(const probe::ArtifactPayload& payload, std::size_t index) {
+    REQUIRE((index + 1) * sizeof(float) <= payload.bytes.size());
+    const auto at = index * sizeof(float);
+    const std::uint32_t bits = static_cast<std::uint32_t>(payload.bytes[at]) |
+        (static_cast<std::uint32_t>(payload.bytes[at + 1]) << 8u) |
+        (static_cast<std::uint32_t>(payload.bytes[at + 2]) << 16u) |
+        (static_cast<std::uint32_t>(payload.bytes[at + 3]) << 24u);
+    return std::bit_cast<float>(bits);
 }
 
 } // namespace
@@ -77,6 +101,84 @@ TEST_CASE("GpuCompute WGSL mutation fails only the numeric oracle",
     REQUIRE(run.result.passes[1].verdict == probe::Verdict::pass);
     REQUIRE(run.result.passes[2].verdict == probe::Verdict::fail);
     REQUIRE(run.result.passes[2].code == "cpu_oracle_mismatch");
+}
+
+TEST_CASE("Offline GPU STFT agrees with the double-precision CPU oracle",
+          "[gpu][gpu-probe][gpu-audio]") {
+    const auto run = probe::run_gpu_audio_stft_recipe({false, kEvidenceId});
+    require_valid(run);
+    require_work_or_skip(run);
+    REQUIRE((run.result.verdict == probe::Verdict::pass ||
+             run.result.verdict == probe::Verdict::unverified));
+    REQUIRE(run.result.numeric_sample_count == 1024);
+    REQUIRE(run.payloads.size() == 6);
+    REQUIRE(run.result.passes.size() == 4);
+    REQUIRE((run.result.passes[0].verdict == probe::Verdict::pass ||
+             run.result.passes[0].verdict == probe::Verdict::unverified));
+    REQUIRE(run.result.passes[1].code == "stft_forward_completed");
+    REQUIRE(run.result.passes[2].code == "stft_magnitude_finite_nonzero");
+    REQUIRE(run.result.passes[3].code == "cpu_fft_oracle_match");
+}
+
+TEST_CASE("GPU STFT Stockham mutation fails only the CPU oracle",
+          "[gpu][gpu-probe][gpu-audio][mutation]") {
+    const auto baseline = probe::run_gpu_audio_stft_recipe({false, kEvidenceId});
+    require_work_or_skip(baseline);
+    require_valid(baseline);
+
+    const auto mutation = probe::run_gpu_audio_stft_recipe({true, kEvidenceId});
+    require_valid(mutation);
+    require_work_or_skip(mutation);
+    REQUIRE(mutation.result.verdict == probe::Verdict::fail);
+    REQUIRE((mutation.result.passes[0].verdict == probe::Verdict::pass ||
+             mutation.result.passes[0].verdict == probe::Verdict::unverified));
+    REQUIRE(mutation.result.passes[1].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[2].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[3].verdict == probe::Verdict::fail);
+    REQUIRE(mutation.result.passes[3].code == "cpu_fft_oracle_mismatch");
+    REQUIRE(mutation.result.mutation == "stockham-stage-output-half");
+    REQUIRE(mutation.result.source_digest != baseline.result.source_digest);
+    REQUIRE(mutation.result.signature_digest != baseline.result.signature_digest);
+
+    const auto& baseline_magnitude = payload_named(baseline, "observed-magnitude.f32");
+    const auto& mutation_magnitude = payload_named(mutation, "observed-magnitude.f32");
+    for (std::size_t i = 0; i < 1024; ++i) {
+        const float expected = little_endian_float(baseline_magnitude, i) / 1024.0f;
+        const float observed = little_endian_float(mutation_magnitude, i);
+        INFO("bin " << i);
+        REQUIRE(std::abs(observed - expected) <= 1.0e-5f * (1.0f + std::abs(expected)));
+    }
+}
+
+TEST_CASE("Offline GPU STFT evidence is deterministic on one adapter",
+          "[gpu][gpu-probe][gpu-audio][determinism]") {
+    const auto first = probe::run_gpu_audio_stft_recipe({false, kEvidenceId});
+    require_valid(first);
+    require_work_or_skip(first);
+    const auto second = probe::run_gpu_audio_stft_recipe({false, kEvidenceId});
+    require_valid(second);
+    require_work_or_skip(second);
+
+    REQUIRE(second.result.verdict == first.result.verdict);
+    REQUIRE(second.result.source_digest == first.result.source_digest);
+    REQUIRE(second.result.signature_digest == first.result.signature_digest);
+    REQUIRE(second.result.adapter.backend == first.result.adapter.backend);
+    REQUIRE(second.result.adapter.name == first.result.adapter.name);
+    REQUIRE(second.result.passes.size() == first.result.passes.size());
+    for (std::size_t i = 0; i < first.result.passes.size(); ++i) {
+        REQUIRE(second.result.passes[i].name == first.result.passes[i].name);
+        REQUIRE(second.result.passes[i].verdict == first.result.passes[i].verdict);
+        REQUIRE(second.result.passes[i].work_completed ==
+                first.result.passes[i].work_completed);
+        REQUIRE(second.result.passes[i].code == first.result.passes[i].code);
+        REQUIRE(second.result.passes[i].observed == first.result.passes[i].observed);
+    }
+    REQUIRE(second.payloads.size() == first.payloads.size());
+    for (std::size_t i = 0; i < first.payloads.size(); ++i) {
+        REQUIRE(second.payloads[i].artifact.name == first.payloads[i].artifact.name);
+        REQUIRE(second.payloads[i].artifact.sha256 == first.payloads[i].artifact.sha256);
+        REQUIRE(second.payloads[i].bytes == first.payloads[i].bytes);
+    }
 }
 
 TEST_CASE("RecipeRun validation binds artifact descriptors to exact payload bytes",
