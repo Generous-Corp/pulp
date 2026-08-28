@@ -1,5 +1,6 @@
 {
   "acceptance": {
+    "human_perfetto_ui_correlation": "pass",
     "offline_latency_budget": "unverified-no-ratified-budget",
     "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
     "same_installed_prefix": "pass",
@@ -24,9 +25,9 @@
       "verified_same_resolved_parent": true
     },
     "trace": {
-      "bytes": 1103,
-      "role": "repository/test/fixtures/perfetto-gpu/healthy.pftrace",
-      "sha256": "0b46f52d0e93512229627878696e55ea3abcf3405ada9296bc1663ba2f07aa00"
+      "bytes": 692,
+      "role": "repository/test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+      "sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334"
     },
     "trace_processor": {
       "bytes": 12704456,
@@ -37,144 +38,171 @@
   "fresh_start": {
     "cli": {
       "count": 20,
-      "mad_ms": 0.735854,
-      "max_ms": 25.970083,
-      "median_ms": 22.879604,
-      "min_ms": 20.4745,
-      "p95_ms": 25.406535
+      "mad_ms": 0.600541,
+      "max_ms": 30.449375,
+      "median_ms": 24.09625,
+      "min_ms": 21.655083,
+      "p95_ms": 25.738009
     },
     "mcp_process_initialize_request_shutdown": {
       "count": 20,
-      "mad_ms": 0.633125,
-      "max_ms": 34.198375,
-      "median_ms": 30.492458,
-      "min_ms": 28.299666,
-      "p95_ms": 33.711025
+      "mad_ms": 0.816395,
+      "max_ms": 33.043125,
+      "median_ms": 31.295583,
+      "min_ms": 29.528583,
+      "p95_ms": 32.933717
     },
     "raw_samples": [
       {
-        "cli_duration_ns": 23594834,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30278916,
+        "cli_duration_ns": 23486792,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30927917,
         "order": "cli-first",
         "trial": 1
       },
       {
-        "cli_duration_ns": 23735083,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29953250,
+        "cli_duration_ns": 24068500,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29759875,
         "order": "mcp-first",
         "trial": 2
       },
       {
-        "cli_duration_ns": 22884334,
-        "mcp_process_initialize_request_shutdown_duration_ns": 34198375,
+        "cli_duration_ns": 22777167,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31689084,
         "order": "cli-first",
         "trial": 3
       },
       {
-        "cli_duration_ns": 22113250,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30318334,
+        "cli_duration_ns": 21655083,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32600333,
         "order": "mcp-first",
         "trial": 4
       },
       {
-        "cli_duration_ns": 22874875,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30522125,
+        "cli_duration_ns": 24492166,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30147917,
         "order": "cli-first",
         "trial": 5
       },
       {
-        "cli_duration_ns": 23334209,
-        "mcp_process_initialize_request_shutdown_duration_ns": 28299666,
+        "cli_duration_ns": 24863875,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29528583,
         "order": "mcp-first",
         "trial": 6
       },
       {
-        "cli_duration_ns": 22124667,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30493958,
+        "cli_duration_ns": 24520125,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32177083,
         "order": "cli-first",
         "trial": 7
       },
       {
-        "cli_duration_ns": 22644667,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29765417,
+        "cli_duration_ns": 23286542,
+        "mcp_process_initialize_request_shutdown_duration_ns": 33043125,
         "order": "mcp-first",
         "trial": 8
       },
       {
-        "cli_duration_ns": 22822416,
-        "mcp_process_initialize_request_shutdown_duration_ns": 28715666,
+        "cli_duration_ns": 30449375,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30598875,
         "order": "cli-first",
         "trial": 9
       },
       {
-        "cli_duration_ns": 20474500,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31294791,
+        "cli_duration_ns": 24124000,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32927959,
         "order": "mcp-first",
         "trial": 10
       },
       {
-        "cli_duration_ns": 25376875,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30836000,
+        "cli_duration_ns": 23504625,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31530000,
         "order": "cli-first",
         "trial": 11
       },
       {
-        "cli_duration_ns": 25263166,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30180542,
+        "cli_duration_ns": 24418166,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31061167,
         "order": "mcp-first",
         "trial": 12
       },
       {
-        "cli_duration_ns": 22837625,
-        "mcp_process_initialize_request_shutdown_duration_ns": 29245917,
+        "cli_duration_ns": 24211292,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32103083,
         "order": "cli-first",
         "trial": 13
       },
       {
-        "cli_duration_ns": 22302500,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31561417,
+        "cli_duration_ns": 23327666,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31738083,
         "order": "mcp-first",
         "trial": 14
       },
       {
-        "cli_duration_ns": 22150125,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31379708,
+        "cli_duration_ns": 25490042,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30958708,
         "order": "cli-first",
         "trial": 15
       },
       {
-        "cli_duration_ns": 24716291,
-        "mcp_process_initialize_request_shutdown_duration_ns": 31530417,
+        "cli_duration_ns": 23413291,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30470292,
         "order": "mcp-first",
         "trial": 16
       },
       {
-        "cli_duration_ns": 23621833,
-        "mcp_process_initialize_request_shutdown_duration_ns": 33685375,
+        "cli_duration_ns": 23548833,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31711000,
         "order": "cli-first",
         "trial": 17
       },
       {
-        "cli_duration_ns": 25970083,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30304875,
+        "cli_duration_ns": 23908917,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30713000,
         "order": "mcp-first",
         "trial": 18
       },
       {
-        "cli_duration_ns": 23622000,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30908042,
+        "cli_duration_ns": 24229458,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32134083,
         "order": "cli-first",
         "trial": 19
       },
       {
-        "cli_duration_ns": 22451667,
-        "mcp_process_initialize_request_shutdown_duration_ns": 30490959,
+        "cli_duration_ns": 25210792,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29950667,
         "order": "mcp-first",
         "trial": 20
       }
     ]
   },
-  "generated_utc": "2026-08-28T09:25:14Z",
+  "generated_utc": "2026-08-28T09:36:11Z",
+  "human_perfetto_ui_correlation": {
+    "artifact_sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334",
+    "delivery": "official localhost embedding protocol; localOnly browser-memory trace",
+    "observed_spans": [
+      {
+        "category": "gpu",
+        "duration_ns": 1800000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_pipeline_prepare",
+        "sequence": 1
+      },
+      {
+        "category": "gpu",
+        "duration_ns": 900000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_resource_upload",
+        "sequence": 2
+      }
+    ],
+    "reviewed_utc": "2026-08-28T05:34:54Z",
+    "reviewer": "Codex visual acceptance agent",
+    "ui_revision": "v58.3-11fbaed836361258f23604daf67c837f3034e663"
+  },
   "machine": {
     "architecture": "arm64",
     "chip": "Apple M3 Ultra",
@@ -190,212 +218,212 @@
     "operating_system": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
     "python": "3.13.7"
   },
-  "mcp_source_revision": "7d04655ce4839cc2d1443e337f14c22f3f8a8675",
+  "mcp_source_revision": "e4170505b970b919f9cef9ac027338224872e7c4",
   "measured": {
     "cli": {
       "count": 30,
-      "mad_ms": 0.529188,
-      "max_ms": 26.181959,
-      "median_ms": 23.223146,
-      "min_ms": 22.593333,
-      "p95_ms": 24.659969
+      "mad_ms": 0.51723,
+      "max_ms": 28.276625,
+      "median_ms": 24.091146,
+      "min_ms": 22.29275,
+      "p95_ms": 25.597404
     },
     "confidence": {
-      "ci_high_ms": -0.23623,
-      "ci_low_ms": -1.340355,
+      "ci_high_ms": -0.43,
+      "ci_low_ms": -1.874562,
       "confidence_level": 0.95,
       "delta_interpretation": "measurable",
-      "mcp_minus_cli_median_ms": -0.954292,
+      "mcp_minus_cli_median_ms": -1.226771,
       "method": "paired bootstrap median delta, 10000 resamples, deterministic seed 0xA2",
       "noise_floor_method": "maximum within-surface median absolute deviation",
-      "noise_floor_ms": 0.560042
+      "noise_floor_ms": 0.870416
     },
     "persistent_mcp_request": {
       "count": 30,
-      "mad_ms": 0.560042,
-      "max_ms": 25.385333,
-      "median_ms": 22.585459,
-      "min_ms": 21.16125,
-      "p95_ms": 23.521059
+      "mad_ms": 0.870416,
+      "max_ms": 25.823667,
+      "median_ms": 22.643,
+      "min_ms": 20.600042,
+      "p95_ms": 25.158872
     },
     "raw_samples": [
       {
-        "cli_duration_ns": 22593333,
-        "mcp_duration_ns": 21507292,
+        "cli_duration_ns": 24211791,
+        "mcp_duration_ns": 21737959,
         "order": "cli-first",
         "trial": 1
       },
       {
-        "cli_duration_ns": 23585417,
-        "mcp_duration_ns": 22620750,
+        "cli_duration_ns": 28276625,
+        "mcp_duration_ns": 24784625,
         "order": "mcp-first",
         "trial": 2
       },
       {
-        "cli_duration_ns": 26181959,
-        "mcp_duration_ns": 23181791,
+        "cli_duration_ns": 24755083,
+        "mcp_duration_ns": 22304250,
         "order": "cli-first",
         "trial": 3
       },
       {
-        "cli_duration_ns": 24802750,
-        "mcp_duration_ns": 22283458,
+        "cli_duration_ns": 24928375,
+        "mcp_duration_ns": 23260500,
         "order": "mcp-first",
         "trial": 4
       },
       {
-        "cli_duration_ns": 23648875,
-        "mcp_duration_ns": 23323333,
+        "cli_duration_ns": 23144000,
+        "mcp_duration_ns": 21157916,
         "order": "cli-first",
         "trial": 5
       },
       {
-        "cli_duration_ns": 23262000,
-        "mcp_duration_ns": 22557667,
+        "cli_duration_ns": 26144792,
+        "mcp_duration_ns": 24345167,
         "order": "mcp-first",
         "trial": 6
       },
       {
-        "cli_duration_ns": 23941708,
-        "mcp_duration_ns": 21699041,
+        "cli_duration_ns": 24710125,
+        "mcp_duration_ns": 24275708,
         "order": "cli-first",
         "trial": 7
       },
       {
-        "cli_duration_ns": 23184292,
-        "mcp_duration_ns": 21871583,
+        "cli_duration_ns": 22651375,
+        "mcp_duration_ns": 22513500,
         "order": "mcp-first",
         "trial": 8
       },
       {
-        "cli_duration_ns": 23860000,
-        "mcp_duration_ns": 23083958,
+        "cli_duration_ns": 24011792,
+        "mcp_duration_ns": 23449875,
         "order": "cli-first",
         "trial": 9
       },
       {
-        "cli_duration_ns": 22714083,
-        "mcp_duration_ns": 21346083,
+        "cli_duration_ns": 23613667,
+        "mcp_duration_ns": 25059666,
         "order": "mcp-first",
         "trial": 10
       },
       {
-        "cli_duration_ns": 23053333,
-        "mcp_duration_ns": 21915833,
+        "cli_duration_ns": 24173875,
+        "mcp_duration_ns": 25240041,
         "order": "cli-first",
         "trial": 11
       },
       {
-        "cli_duration_ns": 23881333,
-        "mcp_duration_ns": 21533833,
+        "cli_duration_ns": 23549833,
+        "mcp_duration_ns": 23829208,
         "order": "mcp-first",
         "trial": 12
       },
       {
-        "cli_duration_ns": 23163583,
-        "mcp_duration_ns": 23175292,
+        "cli_duration_ns": 24148042,
+        "mcp_duration_ns": 21888958,
         "order": "cli-first",
         "trial": 13
       },
       {
-        "cli_duration_ns": 22613291,
-        "mcp_duration_ns": 22610167,
+        "cli_duration_ns": 23911916,
+        "mcp_duration_ns": 20854208,
         "order": "mcp-first",
         "trial": 14
       },
       {
-        "cli_duration_ns": 22804958,
-        "mcp_duration_ns": 22962750,
+        "cli_duration_ns": 24118833,
+        "mcp_duration_ns": 23693250,
         "order": "cli-first",
         "trial": 15
       },
       {
-        "cli_duration_ns": 22619500,
-        "mcp_duration_ns": 21161250,
+        "cli_duration_ns": 24584292,
+        "mcp_duration_ns": 23765959,
         "order": "mcp-first",
         "trial": 16
       },
       {
-        "cli_duration_ns": 22673833,
-        "mcp_duration_ns": 22390625,
+        "cli_duration_ns": 23704708,
+        "mcp_duration_ns": 21837750,
         "order": "cli-first",
         "trial": 17
       },
       {
-        "cli_duration_ns": 23522041,
-        "mcp_duration_ns": 22578125,
+        "cli_duration_ns": 24374250,
+        "mcp_duration_ns": 25823667,
         "order": "mcp-first",
         "trial": 18
       },
       {
-        "cli_duration_ns": 23574625,
-        "mcp_duration_ns": 22055208,
+        "cli_duration_ns": 24262791,
+        "mcp_duration_ns": 23911500,
         "order": "cli-first",
         "trial": 19
       },
       {
-        "cli_duration_ns": 23871625,
-        "mcp_duration_ns": 23682834,
+        "cli_duration_ns": 24105042,
+        "mcp_duration_ns": 22753958,
         "order": "mcp-first",
         "trial": 20
       },
       {
-        "cli_duration_ns": 23009333,
-        "mcp_duration_ns": 22873167,
+        "cli_duration_ns": 22403417,
+        "mcp_duration_ns": 22532042,
         "order": "cli-first",
         "trial": 21
       },
       {
-        "cli_duration_ns": 22664541,
-        "mcp_duration_ns": 22592792,
+        "cli_duration_ns": 22512458,
+        "mcp_duration_ns": 21410000,
         "order": "mcp-first",
         "trial": 22
       },
       {
-        "cli_duration_ns": 23265959,
-        "mcp_duration_ns": 23076708,
+        "cli_duration_ns": 22292750,
+        "mcp_duration_ns": 23478792,
         "order": "cli-first",
         "trial": 23
       },
       {
-        "cli_duration_ns": 23853500,
-        "mcp_duration_ns": 22638916,
+        "cli_duration_ns": 24781750,
+        "mcp_duration_ns": 22222417,
         "order": "mcp-first",
         "trial": 24
       },
       {
-        "cli_duration_ns": 22832208,
-        "mcp_duration_ns": 22670333,
+        "cli_duration_ns": 23867458,
+        "mcp_duration_ns": 22507667,
         "order": "cli-first",
         "trial": 25
       },
       {
-        "cli_duration_ns": 23316417,
-        "mcp_duration_ns": 21407625,
+        "cli_duration_ns": 22445541,
+        "mcp_duration_ns": 22798459,
         "order": "mcp-first",
         "trial": 26
       },
       {
-        "cli_duration_ns": 22951416,
-        "mcp_duration_ns": 21182916,
+        "cli_duration_ns": 24077250,
+        "mcp_duration_ns": 22195083,
         "order": "cli-first",
         "trial": 27
       },
       {
-        "cli_duration_ns": 24485458,
-        "mcp_duration_ns": 21394584,
+        "cli_duration_ns": 24005250,
+        "mcp_duration_ns": 20600042,
         "order": "mcp-first",
         "trial": 28
       },
       {
-        "cli_duration_ns": 22647750,
-        "mcp_duration_ns": 22737000,
+        "cli_duration_ns": 22994333,
+        "mcp_duration_ns": 21946875,
         "order": "cli-first",
         "trial": 29
       },
       {
-        "cli_duration_ns": 22670875,
-        "mcp_duration_ns": 25385333,
+        "cli_duration_ns": 24646042,
+        "mcp_duration_ns": 22452292,
         "order": "mcp-first",
         "trial": 30
       }
@@ -404,14 +432,14 @@
   "measurement_environment": {
     "interpretation": "shared-host contention is retained in raw samples; no latency budget is inferred",
     "load_average_end": [
-      28.8857421875,
-      27.21435546875,
-      27.96142578125
+      38.43017578125,
+      33.1640625,
+      29.99853515625
     ],
     "load_average_start": [
-      30.7041015625,
-      27.5390625,
-      28.0791015625
+      38.380859375,
+      33.06591796875,
+      29.94580078125
     ]
   },
   "producer_overhead_disposition": {
@@ -502,6 +530,28 @@
             "inspect/"
           ],
           "stable_patch_id": "1a63b4630a41c430edd89fc88a82ecef9ed5964a"
+        },
+        {
+          "added_or_changed_producer_paths": [],
+          "changed_path_count": 5,
+          "changed_paths": [
+            "docs/validation/gpu-trace-overhead/README.md",
+            "tools/scripts/gpu_first_visible_a3_acceptance.py",
+            "tools/scripts/gpu_trace_overhead_acceptance.py",
+            "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+            "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+          ],
+          "implementation_revision": "e4170505b970b919f9cef9ac027338224872e7c4",
+          "method": "git diff-tree --no-commit-id --name-only -r",
+          "no_added_producer_call_sites": true,
+          "producer_prefixes_checked": [
+            "core/runtime/",
+            "core/render/",
+            "core/view/",
+            "core/format/",
+            "inspect/"
+          ],
+          "stable_patch_id": "df0e59bdb08d3b86aa4b6cc0f8dbf707980ae4e0"
         }
       ],
       "method": "per-commit git diff-tree inventory",
@@ -736,7 +786,7 @@
     "mcp_lifecycle": "persistent trials exclude initialize; fresh trials include process launch, initialize, request, and graceful shutdown",
     "measured_paired_trials": 30,
     "order": "alternating cli-first/mcp-first",
-    "question": "gpu-health",
+    "question": "gpu-startup",
     "warmups": 5
   },
   "schema": "pulp.gpu-trace-overhead-acceptance.v1",
@@ -745,34 +795,55 @@
     "capture_complete": true,
     "contributors": [
       {
-        "duration_ns": 20000,
-        "evidence_id": "0123456789abcdef0123456789abcdef",
+        "duration_ns": 1800000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
         "health_state": "healthy",
         "rank": 1,
+        "sequence": 1,
+        "stage": "pipeline-prepare"
+      },
+      {
+        "duration_ns": 900000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
+        "health_state": "healthy",
+        "rank": 2,
+        "sequence": 2,
+        "stage": "resource-upload"
+      },
+      {
+        "duration_ns": 300000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
+        "health_state": "healthy",
+        "rank": 3,
         "sequence": 3,
-        "stage": "health-transition"
+        "stage": "frame"
       }
     ],
-    "dominant_stage": "health-transition",
+    "dominant_stage": "pipeline-prepare",
     "evidence_ids": [
-      "0123456789abcdef0123456789abcdef"
+      "44444444444444444444444444444444"
     ],
     "next_actions": [
       {
-        "code": "inspect-dominant-gpu-span",
-        "fix": "Open the identical trace and inspect the cited dominant span before changing GPU policy."
+        "code": "inspect-pipeline-signature",
+        "fix": "Correlate the cited pipeline-prepare span with its source/signature digest; do not add prewarm policy until A3 measures a product budget."
       }
     ],
-    "question": "gpu-health",
+    "question": "gpu-startup",
     "schema": "pulp.trace-gpu-analysis.v1",
     "ui_correlation": {
-      "open_command": "pulp trace open test/fixtures/perfetto-gpu/healthy.pftrace",
+      "open_command": "pulp trace open test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
       "search_terms": [
-        "health-transition",
-        "0123456789abcdef0123456789abcdef"
+        "pipeline-prepare",
+        "resource-upload",
+        "frame",
+        "44444444444444444444444444444444"
       ]
     },
-    "verdict": "pass"
+    "verdict": "unverified"
   },
-  "source_revision": "7d04655ce4839cc2d1443e337f14c22f3f8a8675"
+  "source_revision": "e4170505b970b919f9cef9ac027338224872e7c4"
 }

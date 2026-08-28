@@ -1,7 +1,7 @@
 {
   "schema": "pulp.gpu-probe-acceptance-receipt.v1",
   "recorded_at_utc": "2026-08-28T09:23:08Z",
-  "integration_head": "7d04655ce4839cc2d1443e337f14c22f3f8a8675",
+  "integration_head": "e4170505b970b919f9cef9ac027338224872e7c4",
   "source_blobs": {
     "core/render/include/pulp/render/gpu_compute.hpp": "d2977e840d7439e219b9b69fd66aa0a584c64ff9",
     "core/render/include/pulp/render/renderer3d.hpp": "b56ccebe6e1b955613b688dac35a1e999d958dbe",
