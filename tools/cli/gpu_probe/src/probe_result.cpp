@@ -38,10 +38,13 @@ constexpr std::array registry{
                      0x54485245454a5301ULL, "fixed-step-0", "threejs-scene", "rgba8-srgb",
                      "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
                      threejs_passes, {}, "named-pass-values-match", "lighting-pass-seed"},
-    RecipeDefinition{kRecipeIds[3], "pulp.gpu-audio.stft", {1024, 1, 1024},
-                     0x535446544f464601ULL, "offline-sample-clock", "f32-mono", "complex-f32",
-                     "little-endian-f32", {1.0e-4, 1.0e-4}, AdapterPolicy::hardware_required,
-                     stft_passes, {}, "cpu-dft-magnitude-match", "bin-index-offset"},
+    RecipeDefinition{kRecipeIds[3], "pulp.gpu-audio.GpuStft.analyze/fft_stockham",
+                     {1024, 1, 1024}, 0x535446544f464601ULL,
+                     "offline-sample-index@48000Hz", "f32-mono", "complex-f32",
+                     "little-endian-f32", {1.0e-2, 1.0e-2},
+                     AdapterPolicy::hardware_required, stft_passes,
+                     {1024, 6, 8192, 32 * 1024}, "cpu-fft-magnitude-match",
+                     "stockham-stage-output-half"},
 };
 
 bool is_lower_hex(std::string_view value, std::size_t size) {
