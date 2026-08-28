@@ -84,6 +84,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Diagnose environment issues",
     },
     Entry {
+        name: "gpu",
+        summary: "Run deterministic GPU evidence probes",
+    },
+    Entry {
         name: "ship",
         summary: "Sign, package, and distribute",
     },
