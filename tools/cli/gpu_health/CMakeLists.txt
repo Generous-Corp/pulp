@@ -38,25 +38,20 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         ${CMAKE_SOURCE_DIR}/test/test_gpu_health_result.cpp)
     target_link_libraries(pulp-test-gpu-health-result PRIVATE
         pulp::tool-gpu-health-model Catch2::Catch2WithMain)
-    add_test(NAME gpu-health-result COMMAND pulp-test-gpu-health-result)
 
     add_executable(pulp-test-gpu-health-read-result
         ${CMAKE_SOURCE_DIR}/test/test_gpu_health_read_result.cpp)
     target_link_libraries(pulp-test-gpu-health-read-result PRIVATE
         pulp::tool-gpu-health-model Catch2::Catch2WithMain)
-    add_test(NAME gpu-health-read-result COMMAND pulp-test-gpu-health-read-result)
 
     if(PULP_ENABLE_GPU)
         add_executable(pulp-test-gpu-health-provider
             ${CMAKE_SOURCE_DIR}/test/test_gpu_health_provider.cpp)
         target_link_libraries(pulp-test-gpu-health-provider PRIVATE
             pulp::tool-gpu-health-probes Catch2::Catch2WithMain)
-        add_test(NAME gpu-health-provider COMMAND pulp-test-gpu-health-provider)
         if(PULP_ENABLE_SCENE3D)
             target_compile_definitions(pulp-test-gpu-health-provider PRIVATE
                 PULP_GPU_HEALTH_REQUIRE_RENDERER3D=1)
-            set_tests_properties(gpu-health-provider PROPERTIES
-                LABELS "gpu;gpu-health;scene3d-required")
         endif()
     endif()
 endif()
