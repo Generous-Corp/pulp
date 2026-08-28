@@ -96,6 +96,9 @@ RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options) {
     if (recipe_id == "gpu-compute.magnitude.v1") {
         return pulp::tooling::gpu_probe::run_gpu_compute_magnitude_recipe(options);
     }
+    if (recipe_id == "gpu-audio.stft.v1") {
+        return pulp::tooling::gpu_probe::run_gpu_audio_stft_recipe(options);
+    }
     throw std::runtime_error("recipe is registered but not available in this build: " + recipe_id);
 }
 

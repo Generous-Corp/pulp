@@ -194,3 +194,31 @@ TEST_CASE("GPU probe JSON and human projections preserve typed evidence",
     failed.verdict = gp::Verdict::fail;
     CHECK(gp::exit_code(failed) == 1);
 }
+
+TEST_CASE("GPU probe JSON parser round-trips and rejects schema drift",
+          "[gpu][probe][contract]") {
+    const auto expected = passing_result();
+    std::string error;
+    const auto parsed = gp::from_json(gp::to_json(expected), &error);
+    REQUIRE(parsed.has_value());
+    CHECK(error.empty());
+    CHECK(parsed->gpu_evidence_id == expected.gpu_evidence_id);
+    CHECK(parsed->recipe_id == expected.recipe_id);
+    CHECK(parsed->adapter.backend == expected.adapter.backend);
+    CHECK(parsed->passes.size() == expected.passes.size());
+    CHECK(parsed->artifacts.size() == expected.artifacts.size());
+    CHECK(gp::to_json(*parsed) == gp::to_json(expected));
+
+    auto unknown = gp::to_json(expected);
+    unknown.insert(unknown.size() - 1, R"JSON(,"unexpected":true)JSON");
+    CHECK_FALSE(gp::from_json(unknown, &error).has_value());
+    CHECK(error.find("unknown member") != std::string::npos);
+
+    auto wrong_type = gp::to_json(expected);
+    const auto offset = wrong_type.find(R"JSON("version":1)JSON");
+    REQUIRE(offset != std::string::npos);
+    wrong_type.replace(offset, std::string(R"JSON("version":1)JSON").size(),
+                       R"JSON("version":"1")JSON");
+    CHECK_FALSE(gp::from_json(wrong_type, &error).has_value());
+    CHECK(error.find("non-negative integer") != std::string::npos);
+}

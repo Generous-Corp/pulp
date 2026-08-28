@@ -18,6 +18,16 @@ configure_file(
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json")
 
+file(READ
+    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json"
+    PULP_GPU_PROBE_RESULT_SCHEMA_JSON)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu_probe_result_schema.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/gpu_probe_result_schema.h"
+    @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json")
+
 if(PULP_ENABLE_PROJECT_PACKAGE)
     file(READ
         "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json"
@@ -88,7 +98,8 @@ target_link_libraries(pulp-mcp-core
         pulp::tool-audio
     PRIVATE
         pulp::platform
-        pulp::tool-gpu-health-model)
+        pulp::tool-gpu-health-model
+        pulp::tool-gpu-probe-model)
 
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-mcp-core PRIVATE

@@ -2488,6 +2488,42 @@ process, and publishing mutates public releases.
 tool; `sweep`, `update`, and `publish-runbook` are CLI-only because they clone,
 build, and (optionally) open PRs across many repositories.
 
+### gpu
+
+**Status**: usable
+
+Run a bounded numeric or image-content probe through Pulp's existing GPU seams:
+
+```bash
+pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/magnitude
+pulp gpu probe --recipe renderer3d.hardcoded-cube.v1 --artifacts artifacts/gpu/cube --json
+pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/mutated \
+  --negative-control --json
+```
+
+Every recipe declares deterministic inputs, dimensions, clock, source and
+signature digests, semantic pass names, tolerances, adapter policy, and strict
+artifact byte/count bounds. The result uses
+[`pulp.gpu-probe-result.v1`](../contracts/gpu-probe-result-v1.schema.json) and
+includes a random 128-bit `gpu_evidence_id` for later Perfetto and control
+correlation. Numeric recipes compare real GPU readback against an independent
+CPU oracle. The Renderer3D recipe uses an exact known fingerprint only on its
+declared backend and a portable structural content oracle elsewhere; it never
+claims cross-backend pixel identity.
+
+`--negative-control` changes real shader/output behavior without bypassing GPU
+submission or readback. Detection is deliberately reported as a typed `fail`
+with exit 1, proving that the oracle can catch the class of error. Exit 2 means
+the requested evidence is unavailable or unverified, never that skipped work
+passed. Artifact publication validates hashes and bounds before writing,
+refuses symlinked paths, and renames bounded temporary files atomically.
+
+Use `pulp doctor gpu` first for broad environment and adapter health. Use
+`pulp gpu probe` when you need to localize a wrong value, pass, or intermediate
+artifact. These commands remain Pulp tooling over Dawn/WebGPU; they do not add
+a second renderer or change Vellum's future authority over generic rendering
+primitives.
+
 ### clean
 
 **Status**: usable

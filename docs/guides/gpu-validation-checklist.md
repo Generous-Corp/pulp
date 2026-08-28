@@ -101,3 +101,8 @@ SkCanvas → View tree painting
 - Headless tests verify surface creation and texture lifecycle
 - `pulp doctor gpu` verifies bounded render/readback and compute/map work using
   the same public rendering primitives an installed consumer uses
+- `pulp gpu probe --recipe <id> --artifacts <dir>` localizes wrong values and
+  pixels with deterministic inputs, independent CPU/content oracles, authentic
+  adapter identity, and bounded hash-declared artifacts. Run the matching
+  `--negative-control` path to prove the oracle detects a real seeded mutation;
+  its expected exit status is 1 with typed failure evidence.
