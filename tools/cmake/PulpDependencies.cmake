@@ -812,24 +812,81 @@ unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 set(PULP_HAS_YAMLCPP TRUE)
 message(STATUS "Pulp: yaml-cpp 0.8.0 available (DESIGN.md import)")
 
-# three.js (MIT license) — native WebGPU bridge demos and tests. Examples-only
-# provider gates need the dependency without enabling Pulp's full test graph.
-if((PULP_BUILD_TESTS OR (PULP_BUILD_EXAMPLES
-                        AND NOT ANDROID AND NOT IOS AND NOT PULP_IOS
-                        AND NOT EMSCRIPTEN
-                        AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"
-                        AND NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"))
-   AND PULP_ENABLE_GPU)
-    pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
-    FetchContent_Declare(
-        threejs
-        GIT_REPOSITORY https://github.com/mrdoob/three.js.git
-        GIT_TAG 077dd13c0e869d9f3dbe55875686f920367de457
-    )
-    FetchContent_MakeAvailable(threejs)
-    set(PULP_HAS_THREEJS TRUE)
-    message(STATUS "Pulp: three.js native bridge dependency available")
+# three.js (MIT license) — native WebGPU bridge runtime, demos, and tests.
+# An explicit runtime directory lets release/install verification consume the
+# selected SDK payload without substituting a FetchContent source checkout.
+set(PULP_THREEJS_RUNTIME_MANIFEST
+    "${CMAKE_CURRENT_LIST_DIR}/threejs-runtime-manifest.json")
+if(NOT EXISTS "${PULP_THREEJS_RUNTIME_MANIFEST}")
+    message(FATAL_ERROR
+        "Pinned Three.js runtime manifest is missing: "
+        "${PULP_THREEJS_RUNTIME_MANIFEST}")
 endif()
+file(READ "${PULP_THREEJS_RUNTIME_MANIFEST}" _pulp_threejs_manifest_json)
+string(JSON PULP_THREEJS_REVISION GET
+    "${_pulp_threejs_manifest_json}" revision)
+set(PULP_THREEJS_RUNTIME_DIR "" CACHE PATH
+    "Path to a complete pinned Three.js runtime payload")
+if(PULP_ENABLE_THREEJS_RUNTIME)
+    if(PULP_THREEJS_RUNTIME_DIR)
+        get_filename_component(PULP_THREEJS_RUNTIME_DIR
+            "${PULP_THREEJS_RUNTIME_DIR}" ABSOLUTE)
+        set(threejs_SOURCE_DIR "${PULP_THREEJS_RUNTIME_DIR}")
+    else()
+        # Keep the literal registration visible to setup.sh's static cache-pin
+        # parity gate; the manifest comparison below remains the payload proof.
+        pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
+        if(NOT PULP_THREEJS_REVISION STREQUAL
+                "077dd13c0e869d9f3dbe55875686f920367de457")
+            message(FATAL_ERROR
+                "Three.js cache registration and runtime manifest revisions differ")
+        endif()
+        FetchContent_Declare(
+            threejs
+            GIT_REPOSITORY https://github.com/mrdoob/three.js.git
+            GIT_TAG ${PULP_THREEJS_REVISION}
+        )
+        FetchContent_MakeAvailable(threejs)
+        set(PULP_THREEJS_RUNTIME_DIR "${threejs_SOURCE_DIR}")
+    endif()
+
+    string(JSON _pulp_threejs_file_count LENGTH
+        "${_pulp_threejs_manifest_json}" files)
+    math(EXPR _pulp_threejs_last_file "${_pulp_threejs_file_count} - 1")
+    set(PULP_THREEJS_RUNTIME_FILES "")
+    foreach(_pulp_threejs_index RANGE 0 ${_pulp_threejs_last_file})
+        string(JSON _pulp_threejs_file MEMBER
+            "${_pulp_threejs_manifest_json}" files ${_pulp_threejs_index})
+        list(APPEND PULP_THREEJS_RUNTIME_FILES "${_pulp_threejs_file}")
+        string(JSON _pulp_threejs_expected_sha GET
+            "${_pulp_threejs_manifest_json}" files "${_pulp_threejs_file}")
+        if(NOT EXISTS "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_file}")
+            message(FATAL_ERROR
+                "PULP_ENABLE_THREEJS_RUNTIME requires ${_pulp_threejs_file} under "
+                "PULP_THREEJS_RUNTIME_DIR=${PULP_THREEJS_RUNTIME_DIR}")
+        endif()
+        file(SHA256 "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_file}"
+            _pulp_threejs_actual_sha)
+        if(NOT "${_pulp_threejs_actual_sha}" STREQUAL
+                "${_pulp_threejs_expected_sha}")
+            message(FATAL_ERROR
+                "Three.js runtime file does not match pinned revision "
+                "${PULP_THREEJS_REVISION}: ${_pulp_threejs_file}")
+        endif()
+    endforeach()
+    unset(_pulp_threejs_actual_sha)
+    unset(_pulp_threejs_expected_sha)
+    unset(_pulp_threejs_file)
+    unset(_pulp_threejs_file_count)
+    unset(_pulp_threejs_index)
+    unset(_pulp_threejs_last_file)
+
+    set(threejs_SOURCE_DIR "${PULP_THREEJS_RUNTIME_DIR}")
+    set(PULP_HAS_THREEJS TRUE)
+    message(STATUS
+        "Pulp: pinned Three.js runtime available at ${PULP_THREEJS_RUNTIME_DIR}")
+endif()
+unset(_pulp_threejs_manifest_json)
 
 # Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")

@@ -232,6 +232,78 @@ if(TARGET Pulp::render)
     set(PULP_ENABLE_GPU TRUE)
 endif()
 
+set(PULP_HAS_THREEJS_RUNTIME @PULP_HAS_THREEJS@)
+set(PULP_THREEJS_RUNTIME_REVISION "@PULP_THREEJS_REVISION@")
+set(PULP_THREEJS_RUNTIME_DIR "")
+if(PULP_HAS_THREEJS_RUNTIME)
+    set(PULP_THREEJS_RUNTIME_DIR
+        "${PACKAGE_PREFIX_DIR}/share/pulp/threejs")
+    set(_pulp_threejs_runtime_manifest_path
+        "${PULP_THREEJS_RUNTIME_DIR}/threejs-runtime-manifest.json")
+    if(NOT EXISTS "${_pulp_threejs_runtime_manifest_path}")
+        set(Pulp_FOUND FALSE)
+        set(Pulp_NOT_FOUND_MESSAGE
+            "Installed Three.js runtime manifest is missing: "
+            "${_pulp_threejs_runtime_manifest_path}")
+        return()
+    endif()
+    file(READ
+        "${_pulp_threejs_runtime_manifest_path}"
+        _pulp_threejs_runtime_manifest)
+    string(JSON _pulp_threejs_installed_revision GET
+        "${_pulp_threejs_runtime_manifest}" revision)
+    if(NOT "${_pulp_threejs_installed_revision}" STREQUAL
+            "${PULP_THREEJS_RUNTIME_REVISION}")
+        set(Pulp_FOUND FALSE)
+        set(Pulp_NOT_FOUND_MESSAGE
+            "Installed Three.js runtime manifest revision does not match "
+            "PulpConfig.cmake")
+        return()
+    endif()
+    string(JSON _pulp_threejs_runtime_file_count LENGTH
+        "${_pulp_threejs_runtime_manifest}" files)
+    math(EXPR _pulp_threejs_runtime_last_file
+        "${_pulp_threejs_runtime_file_count} - 1")
+    foreach(_pulp_threejs_runtime_index RANGE 0
+            ${_pulp_threejs_runtime_last_file})
+        string(JSON _pulp_threejs_runtime_file MEMBER
+            "${_pulp_threejs_runtime_manifest}" files
+            ${_pulp_threejs_runtime_index})
+        string(JSON _pulp_threejs_runtime_expected_sha GET
+            "${_pulp_threejs_runtime_manifest}" files
+            "${_pulp_threejs_runtime_file}")
+        set(_pulp_threejs_runtime_path
+            "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_runtime_file}")
+        if(NOT EXISTS "${_pulp_threejs_runtime_path}")
+            set(Pulp_FOUND FALSE)
+            set(Pulp_NOT_FOUND_MESSAGE
+                "Installed Three.js runtime is incomplete: "
+                "${_pulp_threejs_runtime_path}")
+            return()
+        endif()
+        file(SHA256 "${_pulp_threejs_runtime_path}"
+            _pulp_threejs_runtime_actual_sha)
+        if(NOT "${_pulp_threejs_runtime_actual_sha}" STREQUAL
+                "${_pulp_threejs_runtime_expected_sha}")
+            set(Pulp_FOUND FALSE)
+            set(Pulp_NOT_FOUND_MESSAGE
+                "Installed Three.js runtime digest mismatch: "
+                "${_pulp_threejs_runtime_path}")
+            return()
+        endif()
+    endforeach()
+    unset(_pulp_threejs_runtime_actual_sha)
+    unset(_pulp_threejs_runtime_expected_sha)
+    unset(_pulp_threejs_runtime_file)
+    unset(_pulp_threejs_runtime_file_count)
+    unset(_pulp_threejs_runtime_index)
+    unset(_pulp_threejs_runtime_last_file)
+    unset(_pulp_threejs_runtime_manifest_path)
+    unset(_pulp_threejs_runtime_path)
+    unset(_pulp_threejs_installed_revision)
+    unset(_pulp_threejs_runtime_manifest)
+endif()
+
 if(NOT DEFINED PULP_ENABLE_AAX)
     set(PULP_ENABLE_AAX FALSE)
 endif()

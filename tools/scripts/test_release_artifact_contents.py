@@ -670,6 +670,24 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
         )
 
+    def test_threejs_runtime_is_required_from_its_release_floor(self) -> None:
+        member = "pulp-sdk/share/pulp/threejs/build/three.webgpu.js"
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+        self.assertTrue(
+            rac.THREEJS_RUNTIME_SDK_MEMBERS.issubset(
+                rac.required_sdk_members(
+                    "linux-x64", rac.DEFAULT_MATRIX, "0.818.0"
+                )
+            )
+        )
+
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
         legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
         self.assertEqual(
@@ -1091,6 +1109,18 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 rac.ContentError, "gpu-health-result-v1.schema.json"
             ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_threejs_runtime_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/share/pulp/threejs/build/three.webgpu.js")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "three.webgpu.js"):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )

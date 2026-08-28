@@ -97,6 +97,20 @@ CONTROL_STANDALONE_HOST_MANIFEST_FIELDS = frozenset(
         "capabilities",
     }
 )
+THREEJS_RUNTIME_SDK_MEMBERS = frozenset(
+    {
+        "pulp-sdk/share/pulp/threejs/build/three.core.js",
+        "pulp-sdk/share/pulp/threejs/build/three.module.js",
+        "pulp-sdk/share/pulp/threejs/build/three.webgpu.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/controls/OrbitControls.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/loaders/GLTFLoader.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/utils/BufferGeometryUtils.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/utils/SkeletonUtils.js",
+        "pulp-sdk/share/pulp/threejs/LICENSE",
+        "pulp-sdk/share/pulp/threejs/package.json",
+        "pulp-sdk/share/pulp/threejs/threejs-runtime-manifest.json",
+    }
+)
 
 
 class ContentError(RuntimeError):
@@ -142,6 +156,7 @@ class ProductMatrix:
     control_standalone_host_floor: str
     node_runtime_floor: str
     gpu_health_contract_floor: str
+    threejs_runtime_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
     # `platforms` stays the full historical inventory (per-platform archive
@@ -204,6 +219,9 @@ class ProductMatrix:
                 ),
                 gpu_health_contract_floor=str(
                     doc.get("gpu_health_contract_floor", "999999.0.0")
+                ),
+                threejs_runtime_floor=str(
+                    doc.get("threejs_runtime_floor", "999999.0.0")
                 ),
                 platforms=tuple(doc["platforms"]),
                 active_platforms=tuple(
@@ -578,6 +596,11 @@ def required_sdk_members(
         required.add(
             "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
         )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.threejs_runtime_floor)
+    ):
+        required.update(THREEJS_RUNTIME_SDK_MEMBERS)
     return frozenset(required)
 
 

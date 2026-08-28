@@ -56,12 +56,20 @@ Not supported by this skill:
 
 2. **gpu_surface MUST be passed to WidgetBridge** — The native GPU bridge only initializes when WidgetBridge receives a non-null GpuSurface pointer. Without it, Three.js gets no WebGPU device and the 3D canvas renders black. This is the `attach_gpu_surface()` call in the demo.
 
-3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically
-   when GPU plus tests are enabled, or for an eligible native examples build
-   (`PULP_BUILD_EXAMPLES=ON`; not Android, iOS, Emscripten, or WASI). The latter
-   is the narrow release-path provider-identity cube lane.
+3. **Three.js defaults to the pinned FetchContent source** —
+   `PULP_ENABLE_THREEJS_RUNTIME` follows the GPU default and sets
+   `PULP_HAS_THREEJS` after validating the complete runtime payload.
 
-4. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
+4. **Release and installed-SDK work must select the shipped runtime** — GPU
+   SDKs publish the pinned resolver payload at `share/pulp/threejs` and expose
+   it through `PULP_THREEJS_RUNTIME_DIR` in `PulpConfig.cmake`. For an
+   installed-runtime proof, configure with
+   `-DPULP_THREEJS_RUNTIME_DIR=$PULP_SDK_DIR/share/pulp/threejs`; do not accept a
+   FetchContent cache or source-tree path as equivalent evidence. Configuration
+   fails when the WebGPU module, core modules, supported addons, license, or
+   package metadata is incomplete.
+
+5. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
    `__FILE__` to a cache-owned diagnostic path. Files such as
    `demo.js.template` must use a CMake-provided source-directory definition;
    never derive runtime asset paths from `__FILE__` or from the fetched
@@ -167,6 +175,16 @@ Catch2 does not leave a `NOT_BUILT` placeholder in the selected test set:
 ```bash
 cmake --build build --target pulp-test-threejs-resources pulp-test-threejs-bridge pulp-threejs-native-demo -j8
 ctest --test-dir build -R "threejs|Three.js|pulp_bundle_threejs_for_jsc_smoke" --output-on-failure
+```
+
+For release packaging work, also run the install-layout test from the configured
+build and the release-content negative controls. The install-layout test creates
+a separate `find_package(Pulp)` consumer and checks that the runtime resolves
+inside the selected install prefix:
+
+```bash
+ctest --test-dir build -R '^pulp_install_layout$' --output-on-failure
+python3 tools/scripts/test_release_artifact_contents.py
 ```
 
 Do not rerun broad unrelated suites when a focused bridge/demo tag is enough.
