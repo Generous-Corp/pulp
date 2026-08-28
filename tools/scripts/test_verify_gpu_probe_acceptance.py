@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -21,6 +22,15 @@ FIXTURE = ROOT / "docs/validation/gpu-probes/m3-a2-real-probes-20260828"
 
 
 class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
+    @staticmethod
+    def _rebind(copied: Path, name: str) -> None:
+        receipt_path = copied / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["raw_sha256"][name] = hashlib.sha256(
+            (copied / name).read_bytes()
+        ).hexdigest()
+        receipt_path.write_text(json.dumps(receipt))
+
     def test_checked_in_receipt_passes(self) -> None:
         self.assertEqual(MODULE.verify(FIXTURE), [])
 
@@ -35,6 +45,45 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
             errors = MODULE.verify(copied)
             self.assertTrue(any("digest mismatch" in error for error in errors))
             self.assertTrue(any("both positive runs must pass" in error for error in errors))
+
+    def test_digest_rebound_schema_violation_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            name = "compute-run1.json"
+            path = copied / name
+            result = json.loads(path.read_text())
+            result["passes"][0]["undeclared"] = True
+            path.write_text(json.dumps(result))
+            self._rebind(copied, name)
+            errors = MODULE.verify(copied)
+            self.assertTrue(any(f"{name}: schema:" in error for error in errors))
+
+    def test_digest_rebound_semantic_pass_failure_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            name = "compute-run1.json"
+            path = copied / name
+            result = json.loads(path.read_text())
+            result["passes"][0]["verdict"] = "fail"
+            path.write_text(json.dumps(result))
+            self._rebind(copied, name)
+            errors = MODULE.verify(copied)
+            self.assertTrue(any("non-passing semantic pass" in error for error in errors))
+
+    def test_digest_rebound_numeric_sample_drift_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            name = "compute-run1.json"
+            path = copied / name
+            result = json.loads(path.read_text())
+            result["numeric_sample_count"] = 0
+            path.write_text(json.dumps(result))
+            self._rebind(copied, name)
+            errors = MODULE.verify(copied)
+            self.assertTrue(any("numeric sample count changed" in error for error in errors))
 
     def test_mcp_failure_projection_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

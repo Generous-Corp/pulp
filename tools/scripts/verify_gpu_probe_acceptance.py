@@ -12,6 +12,8 @@ import re
 import sys
 from typing import Any
 
+import json_schema_lite
+
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -22,6 +24,16 @@ GROUPS = {
     "threejs": "threejs.multi-pass.v1",
 }
 HARDWARE_REQUIRED = {"compute", "stft", "threejs"}
+EXPECTED_SAMPLE_COUNTS = {
+    "compute": 256,
+    "stft": 1024,
+    "renderer": 0,
+    "threejs": 5,
+}
+RESULT_SCHEMA = (
+    Path(__file__).resolve().parents[2]
+    / "docs/contracts/gpu-probe-result-v1.schema.json"
+)
 
 
 def _load(path: Path) -> Any:
@@ -36,6 +48,10 @@ def _canonical_repeat(result: dict[str, Any]) -> dict[str, Any]:
 
 def verify(root: Path) -> list[str]:
     errors: list[str] = []
+    try:
+        result_schema = _load(RESULT_SCHEMA)
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"cannot read GPU probe result schema: {error}"]
     receipt_path = root / "receipt.json"
     try:
         receipt = _load(receipt_path)
@@ -87,8 +103,8 @@ def verify(root: Path) -> list[str]:
                 errors.append(f"cannot parse {path.name}: {error}")
                 continue
             runs[suffix] = result
-            if result.get("schema") != "pulp.gpu-probe-result.v1":
-                errors.append(f"{path.name}: result schema mismatch")
+            for problem in json_schema_lite.validate(result, result_schema):
+                errors.append(f"{path.name}: schema: {problem}")
             if result.get("recipe_id") != recipe:
                 errors.append(f"{path.name}: recipe mismatch")
             if not result.get("passes") or not all(p.get("work_completed") for p in result["passes"]):
@@ -99,6 +115,8 @@ def verify(root: Path) -> list[str]:
             for artifact in artifacts:
                 if not SHA256.fullmatch(str(artifact.get("sha256", ""))):
                     errors.append(f"{path.name}: artifact lacks SHA-256")
+            if result.get("numeric_sample_count") != EXPECTED_SAMPLE_COUNTS[group]:
+                errors.append(f"{path.name}: numeric sample count changed")
             adapter = result.get("adapter", {})
             if group in HARDWARE_REQUIRED and (
                 adapter.get("status") != "authentic"
@@ -117,6 +135,9 @@ def verify(root: Path) -> list[str]:
             continue
         if runs["run1"].get("verdict") != "pass" or runs["run2"].get("verdict") != "pass":
             errors.append(f"{group}: both positive runs must pass")
+        for label in ("run1", "run2"):
+            if not all(p.get("verdict") == "pass" for p in runs[label].get("passes", [])):
+                errors.append(f"{group}: {label} contains a non-passing semantic pass")
         if _canonical_repeat(runs["run1"]) != _canonical_repeat(runs["run2"]):
             errors.append(f"{group}: positive rerun is not deterministic")
         negative = runs["negative"]
@@ -135,6 +156,10 @@ def verify(root: Path) -> list[str]:
     elif transcript[1].get("result", {}).get("structuredContent", {}).get("exit_code") != 0:
         errors.append("MCP positive result did not preserve exit 0")
     else:
+        for label, row in (("positive", transcript[1]), ("negative", transcript[2])):
+            evidence = row.get("result", {}).get("structuredContent", {}).get("evidence")
+            for problem in json_schema_lite.validate(evidence, result_schema):
+                errors.append(f"MCP {label} evidence schema: {problem}")
         negative_result = transcript[2].get("result", {})
         if negative_result.get("isError") is not True:
             errors.append("MCP completed failure did not preserve isError=true")
