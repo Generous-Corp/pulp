@@ -66,13 +66,14 @@ trusted composition root and rejects absent or replayed decisions. Critical
 operations, including runtime evaluation, require an explicit broker-issued
 grant backed by a single-use broker-owned consent decision; the MCP adapter
 does not auto-grant them and has no argument that can claim approval.
-Grants created by an interactive trusted source—the Pulp CLI, host UI, or a
-broker-owned user prompt—are operation-one-shot: they may admit one fresh
-idempotency identity, then permit only durable receipt replay of that exact
-operation. A different operation requires new consent. Reusing the exact
-operation after reconnect does not execute it again and does not create a
-second receipt. Only an explicit existing-user policy can create a reusable
-grant.
+An interactive consent decision is single-use when the broker issues a grant,
+but capabilities on that grant retain their established reusable operation
+behavior except for GPU startup-health reads. An interactive
+`dev.pulp.gpu/health.read@1` approval may admit one fresh idempotency identity,
+then permits only durable receipt replay of that exact operation. A different
+GPU-health operation requires new consent. Reusing the exact operation after
+reconnect does not execute it again and does not create a second receipt. An
+explicit existing-user policy may authorize reusable GPU-health reads.
 Revocation, expiry, publication changes, and instance teardown remain effective
 during a call because the adapter sends the canonical grant and instance
 lineage and reports the broker's terminal receipt rather than assuming success.
