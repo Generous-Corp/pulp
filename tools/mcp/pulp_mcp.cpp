@@ -89,6 +89,7 @@ using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_build;
 using pulp_mcp::handle_gpu_doctor;
 using pulp_mcp::handle_gpu_probe;
+using pulp_mcp::handle_trace_analyze;
 using pulp_mcp::handle_content;
 using pulp_mcp::handle_content_install;
 using pulp_mcp::handle_content_list;
@@ -571,6 +572,11 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON(]})JSON";
     if (!pulp_mcp::decorate_inspector_mcp_tool_descriptions(out))
         return R"JSON({"tools":[],"error":"invalid inspector MCP registry"})JSON";
+    // This offline tool intentionally does not participate in Inspector's
+    // pulp_trace_* lifecycle registry: it reads a flushed artifact via the
+    // sibling installed CLI and has no live-selection authority.
+    out.insert(out.size() - 2,
+        R"JSON(,{"name":"pulp_trace_analyze","description":"Ask one closed GPU question over an already-flushed Perfetto trace. This offline operation does not use canonical capability-control or select a live target. It uses the same checked-in PerfettoSQL view and typed result as the CLI and accepts no free-form SQL.","inputSchema":{"type":"object","required":["question","trace"],"additionalProperties":false,"properties":{"question":{"type":"string","enum":["gpu-startup","gpu-health","gpu-probe"]},"trace":{"type":"string","description":"Path to an already-flushed .pftrace artifact"}}}})JSON");
     return out;
 }
 
@@ -793,6 +799,8 @@ static std::string handle_request_raw(const std::string& json) {
             result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")
             result = handle_audio_compare(args_json);
+        else if (name == "pulp_trace_analyze")
+            result = handle_trace_analyze(args_json);
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
         else if (auto timeline = handle_timeline_tool(name, args_json))
             result = std::move(*timeline);
@@ -934,6 +942,7 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
         const auto executable = pulp_mcp::current_process_executable_path(argv[0]);
         pulp_mcp::configure_control_mcp_executable(executable.string());
         pulp_mcp::configure_gpu_doctor_executable(executable.string());
+        pulp_mcp::configure_trace_analyze_executable(executable.string());
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
         g_trace_session_opener = std::shared_ptr<pulp::inspect::InspectorControlSessionOpener>(
             pulp::inspect::make_installed_inspector_control_session_opener({}));

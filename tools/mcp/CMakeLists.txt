@@ -86,6 +86,7 @@ add_library(pulp-mcp-core STATIC
     mcp_tools.cpp
     mcp_tools_internal.cpp
     mcp_gpu_tools.cpp
+    mcp_trace_tools.cpp
     mcp_kit_content_tools.cpp
     mcp_audio_tools.cpp
     mcp_inspect_tools.cpp)

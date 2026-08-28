@@ -1212,7 +1212,7 @@ commands:
 
   - name: trace
     status: experimental
-    summary: Experimental canonical capability-control client for `Trace.startSession` / `Trace.stopSession` capture plus wholly offline query, doctor, fetch, and open utilities. Rust exposes no alternate target-selection path and no legacy Inspector fallback.
+    summary: Experimental canonical capability-control client for `Trace.startSession` / `Trace.stopSession` capture plus wholly offline query, named GPU analysis, doctor, fetch, and open utilities. Rust exposes no alternate target-selection path and no legacy Inspector fallback.
     args:
       - name: --json
         kind: flag
@@ -1241,6 +1241,27 @@ commands:
             kind: option
             required: false
             description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
+      - name: gpu-startup
+        summary: Rank startup GPU/render contributors with checked-in PerfettoSQL. Returns unverified until A3 defines a measured budget.
+        args:
+          - name: --trace
+            kind: option
+            required: true
+            description: Analyze an already-flushed FILE.pftrace; missing or incomplete GPU categories return unavailable
+      - name: gpu-health
+        summary: Explain GPU health transitions and device loss with typed pass/fail/unavailable output.
+        args:
+          - name: --trace
+            kind: option
+            required: true
+            description: Analyze an already-flushed FILE.pftrace
+      - name: gpu-probe
+        summary: Correlate bounded GPU probe evidence and rank contributors with typed pass/fail/unavailable output.
+        args:
+          - name: --trace
+            kind: option
+            required: true
+            description: Analyze an already-flushed FILE.pftrace; invalid evidence correlation returns unavailable
       - name: query
         summary: Run SQL offline against a `.pftrace` with required `--trace`.
         args:

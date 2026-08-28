@@ -959,7 +959,7 @@ fn real_main() -> Result<(), ExitCode> {
             let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {
                 CliError::UnknownSubcommand => {
                     eprintln!("pulp trace: unknown subcommand");
-                    eprintln!("  supported: start, stop, query, doctor, fetch, open");
+                    eprintln!("  supported: start, stop, gpu-startup, gpu-health, gpu-probe, query, doctor, fetch, open");
                     ExitCode::from(2)
                 }
                 CliError::BadUsage(msg) => {
@@ -972,7 +972,12 @@ fn real_main() -> Result<(), ExitCode> {
                 }
             })?;
             let talker = cmd::trace::SystemInspector;
-            cmd::trace::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
+            match cmd::trace::dispatch(&sub, &flags, &talker, &mut out) {
+                Ok(cmd::trace::TraceCommandStatus::Success) => Ok(()),
+                Ok(cmd::trace::TraceCommandStatus::Failed) => Err(ExitCode::from(1)),
+                Ok(cmd::trace::TraceCommandStatus::Unavailable) => Err(ExitCode::from(2)),
+                Err(error) => Err(map_err(&error)),
+            }
         }
     }
 }

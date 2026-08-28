@@ -1437,12 +1437,16 @@ omitting it preserves fail-closed unambiguous selection. Rust exposes no
 alternate discovery, publication-selection, or raw host/port path.
 Production remains default-denied when no authorized control session can be
 opened. Offline
-`query --trace`, `fetch`, `doctor`, and `open` are wholly offline.
+`query --trace`, the three named GPU questions, `fetch`, `doctor`, and `open`
+are wholly offline.
 
 ```bash
 pulp trace start --instance INSTANCE_ID --categories dsp,render --ring-mb 128
 pulp trace stop --instance INSTANCE_ID               # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
+pulp trace gpu-startup --trace /tmp/x.pftrace --json  # ranked, unverified until A3 budget
+pulp trace gpu-health --trace /tmp/x.pftrace --json   # pass/fail/unavailable
+pulp trace gpu-probe --trace /tmp/x.pftrace --json    # bounded evidence correlation
 pulp trace doctor                                 # offline trace_processor readiness
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1463,9 +1467,18 @@ Subcommands:
 | `start [--instance ID] [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
 | `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
+| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank startup contributors. The verdict is `unverified` until A3 defines a measured budget. |
+| `gpu-health --trace FILE.pftrace` | checked-in `pulp_gpu_health_transitions` view | Return typed pass/fail health and device-loss evidence. |
+| `gpu-probe --trace FILE.pftrace` | checked-in `pulp_gpu_probe_correlation` view | Correlate bounded probe/readback evidence and return typed pass/fail. |
 | `doctor` | client-side | Report offline `trace_processor` readiness. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
+
+Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
+completeness, ranked contributors, stable evidence IDs, concrete next actions,
+and a Perfetto UI open command/search terms. Missing categories, unfinished
+slices, and invalid probe correlation return `unavailable` with exit 2; they do
+not silently pass. `gpu-health` and `gpu-probe` use exit 0/1 for pass/fail.
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
