@@ -110,3 +110,51 @@ fn incomplete_and_wrong_category_fixtures_are_unavailable() {
     assert_eq!(wrong["verdict"], "unavailable");
     assert_eq!(wrong["unavailable_reason"], "missing-question-category");
 }
+
+#[test]
+fn blank_readback_failure_names_the_bounded_oracle_fix() {
+    let result = run("gpu-probe", "blank-readback-failure.pftrace", 1);
+    assert_eq!(result["verdict"], "fail");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["dominant_stage"], "readback");
+    assert_eq!(result["next_actions"][0]["code"], "inspect-readback-oracle");
+    assert_eq!(result["evidence_ids"][0], "11111111111111111111111111111111");
+}
+
+#[test]
+fn device_loss_names_the_recreation_fix() {
+    let result = run("gpu-health", "device-loss.pftrace", 1);
+    assert_eq!(result["verdict"], "fail");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["dominant_stage"], "device-loss");
+    assert_eq!(result["next_actions"][0]["code"], "recreate-lost-device");
+    assert_eq!(result["evidence_ids"][0], "22222222222222222222222222222222");
+}
+
+#[test]
+fn acquire_present_blocking_names_surface_blocking() {
+    let result = run("gpu-startup", "acquire-present-blocking.pftrace", 2);
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["dominant_stage"], "acquire");
+    assert_eq!(result["next_actions"][0]["code"], "inspect-surface-blocking");
+    assert_eq!(result["evidence_ids"][0], "33333333333333333333333333333333");
+}
+
+#[test]
+fn first_frame_stall_ranks_pipeline_before_upload() {
+    let result = run(
+        "gpu-startup",
+        "first-frame-pipeline-upload-stall.pftrace",
+        2,
+    );
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["dominant_stage"], "pipeline-prepare");
+    assert_eq!(
+        result["next_actions"][0]["code"],
+        "inspect-pipeline-signature"
+    );
+    assert_eq!(result["contributors"][1]["stage"], "resource-upload");
+    assert_eq!(result["evidence_ids"][0], "44444444444444444444444444444444");
+}
