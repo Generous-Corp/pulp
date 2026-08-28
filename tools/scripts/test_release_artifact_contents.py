@@ -691,6 +691,17 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
         )
 
+    def test_gpu_dpr_contract_is_required_from_its_release_floor(self) -> None:
+        member = "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
         legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
         self.assertEqual(
@@ -1132,6 +1143,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_dpr_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-dpr-experiment-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_missing_gpu_health_read_contract_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1403,6 +1430,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["gpu_probe_contract_floor"]
             del document["threejs_runtime_floor"]
             del document["gpu_health_read_contract_floor"]
+            del document["gpu_dpr_experiment_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1415,6 +1443,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.threejs_runtime_floor, "999999.0.0")
             self.assertEqual(
                 historical.gpu_health_read_contract_floor, "999999.0.0"
+            )
+            self.assertEqual(
+                historical.gpu_dpr_experiment_contract_floor, "999999.0.0"
             )
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")

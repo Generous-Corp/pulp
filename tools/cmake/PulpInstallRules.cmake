@@ -503,6 +503,19 @@ if(PULP_HAS_THREEJS)
     unset(_pulp_threejs_install_root)
 endif()
 
+# Versioned DPR experiment evidence contract. This is an evidence envelope,
+# not a rendering policy: installed automation needs the exact contract to
+# validate trial records without a source checkout.
+set(_pulp_gpu_dpr_experiment_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_dpr_experiment_schema}")
+    message(FATAL_ERROR
+        "Required GPU DPR experiment schema is missing: ${_pulp_gpu_dpr_experiment_schema}")
+endif()
+install(FILES "${_pulp_gpu_dpr_experiment_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_dpr_experiment_schema)
+
 # DSP capability registry.
 #
 # Ships the committed snapshot so a downstream consumer can discover the SDK's
