@@ -688,8 +688,8 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("no_render":{"type":"boolean")JSON");
     require_contains(tools, R"JSON("outputSchema":{"type":"object")JSON");
     require_contains(tools, R"JSON("exit_code":{"type":"integer","enum":[0,1,2])JSON");
-    require_contains(tools, R"JSON("schema":{"const":"pulp.gpu-health-result.v1")JSON");
-    require_contains(tools, R"JSON("required":{"type":"boolean")JSON");
+    require_contains(tools, R"JSON("schema": { "const": "pulp.gpu-health-result.v1")JSON");
+    require_contains(tools, R"JSON("required": { "type": "boolean")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     REQUIRE(tools.find(R"JSON("name":"pulp_inspect_audio")JSON") == std::string::npos);
     require_contains(tools, R"JSON("name":"pulp_kit")JSON");
