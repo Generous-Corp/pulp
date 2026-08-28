@@ -484,6 +484,11 @@ Missing categories, unavailable real GPU timing where the question requires it,
 or a trace that cannot be bound to the trial artifact leaves the cell
 incomplete; it is not evidence that the cost was zero.
 
+`tools/scripts/gpu_dpr_runner.py` validates each cell's raw trace artifact,
+required categories, and named `gpu-startup`, `gpu-health`, and `gpu-probe`
+receipts before ingestion. It does not run substitute SQL or turn missing GPU
+timing into zero; missing or rejected trace evidence remains resumable.
+
 ## Correlating GPU-health startup snapshots
 
 `ControlGpuHealthProvider` may emit a GPU evidence ID from the observed frame,

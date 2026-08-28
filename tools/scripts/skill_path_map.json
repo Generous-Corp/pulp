@@ -233,7 +233,9 @@
         "docs/guides/daw-smoke.md",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "test/fixtures/gpu-ux/dpr/**",
-        "tools/scripts/gpu_dpr_experiment.py"
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/test_gpu_dpr_runner.py"
       ]
     },
     "decide": {
@@ -471,7 +473,9 @@
         "core/view/include/pulp/view/screenshot.hpp",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "test/fixtures/gpu-ux/dpr/**",
-        "tools/scripts/gpu_dpr_experiment.py"
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/test_gpu_dpr_runner.py"
       ]
     },
     "screenshot-sync": {
@@ -605,7 +609,9 @@
         "docs/guides/tracing.md",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "test/fixtures/gpu-ux/dpr/**",
-        "tools/scripts/gpu_dpr_experiment.py"
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/test_gpu_dpr_runner.py"
       ]
     },
     "trace-sql": {
@@ -788,7 +794,9 @@
         "tools/rack/fetch_sdk.py",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "test/fixtures/gpu-ux/dpr/**",
-        "tools/scripts/gpu_dpr_experiment.py"
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/test_gpu_dpr_runner.py"
       ]
     }
   }

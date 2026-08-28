@@ -378,6 +378,8 @@ if(Python3_Interpreter_FOUND)
     # A3 budget receipts; this test proves only the portable contract.
     add_test(NAME gpu-dpr-experiment-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_experiment.py")
+    add_test(NAME gpu-dpr-runner-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_runner.py")
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash
