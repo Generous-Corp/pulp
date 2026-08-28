@@ -130,5 +130,8 @@ const RecipeDefinition* find_recipe(std::string_view id);
 std::span<const RecipeDefinition> recipes();
 
 bool validate(const ProbeResult& result, std::string* error = nullptr);
+std::string to_json(const ProbeResult& result, bool pretty = false);
+std::string render_human(const ProbeResult& result);
+int exit_code(const ProbeResult& result);
 
 } // namespace pulp::tooling::gpu_probe

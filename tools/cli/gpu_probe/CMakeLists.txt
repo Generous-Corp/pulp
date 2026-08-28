@@ -1,9 +1,11 @@
 add_library(pulp-tool-gpu-probe-model STATIC
-    src/probe_result.cpp)
+    src/probe_result.cpp
+    src/probe_result_json.cpp)
 add_library(pulp::tool-gpu-probe-model ALIAS pulp-tool-gpu-probe-model)
 target_compile_features(pulp-tool-gpu-probe-model PUBLIC cxx_std_20)
 target_include_directories(pulp-tool-gpu-probe-model
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
 
 if(PULP_ENABLE_GPU)
     file(SHA256 "${CMAKE_SOURCE_DIR}/core/render/src/renderer3d.cpp"

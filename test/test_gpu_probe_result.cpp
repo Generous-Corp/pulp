@@ -170,3 +170,27 @@ TEST_CASE("GPU probe evidence identifiers and digests are closed",
     REQUIRE_FALSE(gp::validate(result, &error));
     CHECK(error.find("SHA-256") != std::string::npos);
 }
+
+TEST_CASE("GPU probe JSON and human projections preserve typed evidence",
+          "[gpu][probe][contract]") {
+    const auto result = passing_result();
+    const auto compact = gp::to_json(result);
+    CHECK(compact.find("\"schema\":\"pulp.gpu-probe-result.v1\"") !=
+          std::string::npos);
+    CHECK(compact.find("\"recipe_id\":\"gpu-compute.magnitude.v1\"") !=
+          std::string::npos);
+    CHECK(compact.find("\"work_completed\":true") != std::string::npos);
+    CHECK(compact.find('\n') == std::string::npos);
+
+    const auto pretty = gp::to_json(result, true);
+    CHECK(pretty.find('\n') != std::string::npos);
+    const auto human = gp::render_human(result);
+    CHECK(human.find("GPU probe: gpu-compute.magnitude.v1") != std::string::npos);
+    CHECK(human.find("artifact: values.json") != std::string::npos);
+    CHECK(gp::exit_code(result) == 0);
+
+    auto failed = result;
+    failed.passes.back().verdict = gp::Verdict::fail;
+    failed.verdict = gp::Verdict::fail;
+    CHECK(gp::exit_code(failed) == 1);
+}
