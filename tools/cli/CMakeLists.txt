@@ -77,6 +77,7 @@ add_executable(pulp-cli
     cmd_design_subcommands.cpp
     cmd_doctor.cpp
     cmd_doctor_gpu.cpp
+    cmd_gpu.cpp
     cmd_docs.cpp
     cmd_authority.cpp
     authority_navigation.cpp
@@ -163,7 +164,7 @@ target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host
-    pulp::tool-gpu-health-probes)
+    pulp::tool-gpu-health-probes pulp::tool-gpu-probe-recipes)
 target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
@@ -359,6 +360,17 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-doctor PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
+
+    if(PULP_ENABLE_GPU)
+        add_test(NAME cli-gpu-probe-contract
+            COMMAND ${CMAKE_COMMAND}
+                -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+                -DARTIFACT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/gpu-probe-contract-artifacts
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_probe_cli_tests.cmake)
+        set_tests_properties(cli-gpu-probe-contract PROPERTIES
+            LABELS "gpu;gpu-probe;cli"
+            RESOURCE_LOCK pulp_gpu)
+    endif()
 
     add_test(NAME cli-doctor-widgetbridge-generated-api
         COMMAND pulp-cli doctor --only WidgetBridge

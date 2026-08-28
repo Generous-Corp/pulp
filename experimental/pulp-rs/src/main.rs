@@ -44,6 +44,10 @@ enum Command {
     /// Environment diagnostics; Rust-native for `--versions --json`.
     Doctor(DoctorArgs),
 
+    /// Run deterministic GPU evidence probes. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Gpu(PkgTailArgs),
+
     /// Manage the `~/.pulp/projects.json` registry.
     Projects(ProjectsArgs),
 
@@ -828,6 +832,14 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(pulp_rs::fallthrough::delegate_or_stub(
                 &argv,
                 "pulp kit is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
+        Command::Gpu(args) => {
+            let mut argv = vec!["gpu".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp gpu is implemented by the C++ delegate. Build/install pulp-cpp to run GPU evidence probes.",
             ))
         }
         Command::Content(args) => {
