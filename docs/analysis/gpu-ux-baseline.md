@@ -94,7 +94,26 @@ release configuration remains Scene3D-off because Pulp does not currently
 export the scene library. These figures are a build-local regression sentinel,
 not a cross-platform package-size budget.
 
-The required Forge Modular exact-SHA canary remains the final downstream value
-gate. Record it against the immutable Pulp implementation commit after that
-commit exists; do not substitute this source-worktree proof for the Forge
-result.
+The required Forge Modular exact-SHA canary passed on the same M3 Ultra host at
+`2026-08-27T23:59:50Z`. A fresh, clean Forge worktree at
+`0750a88dea3af7fca927a8c02887e071109407ae` was temporarily repinned to an
+isolated Pulp install built from the immutable implementation commit
+`d6544372810d6c9235cbb21bbc3b8e31ac031098`; its installed build information
+reported `d6544372810`, and the Forge source was restored clean afterward.
+
+The resulting Forge Modular standalone shell was signed, contained
+`MacGpuWindowHost`, and rendered its 1280x800 logical UI through the GPU path in
+the headless screenshot smoke. From the unrelated Forge checkout, the installed
+`pulp doctor gpu --json` exited zero and returned the closed v1 schema with
+`verdict=pass`, `health_state=healthy`, no recommendations, real Renderer3D and
+HeadlessSurface pixel/readback evidence, and the deterministic GpuCompute
+3-4-5 oracle on an authenticated Apple M3 Ultra Metal adapter. The doctor JSON
+SHA-256 was
+`44ea0eb10d24e799cd7ad377d1f7b77c8c47d7e1e4789fd5c2906513ec501468`; the
+Forge screenshot SHA-256 was
+`eadf63ebbb02472d4b9de3a821c1cd86f0bb7241dbeb6b7269beab99a27d31b9`.
+
+This proves the A1 downstream integration and user-visible GPU route against
+the exact implementation commit. It remains a local development/unmarked SDK
+canary, not official distribution provenance; packaged-release verification is
+still owned by the normal release gates.

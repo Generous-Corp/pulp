@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260827-pr7865-gpu-health-doctor",
+  "created_at": "2026-08-28T00:37:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned GPU health diagnosis across the public C++ and Rust CLI, MCP provider, release packaging, and existing Renderer3D, HeadlessSurface, and GpuCompute consumption routes. The change reports typed evidence and recommendations for Pulp and Forge users; it does not alter generic rendering primitives, design import behavior, or Vellum source authority.",
+  "tests": [
+    "GPU health contract, CLI, provider, MCP, and Rust delegation tests",
+    "dedicated Scene3D GPU acceptance on Apple M3 Ultra Metal",
+    "Forge Modular exact-Pulp-SHA GPU canary",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
