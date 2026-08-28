@@ -1,0 +1,122 @@
+{
+  "schema": "pulp.gpu-probe-result.v1",
+  "version": 1,
+  "gpu_evidence_id": "fdd00b1152da7f780f230988f7ba1e4a",
+  "recipe_id": "gpu-audio.stft.v1",
+  "source_digest": "8275969f135a4024fb78bf0a9efe1795ac55b252803aaad7b3321b7aa0b35faa",
+  "signature_digest": "17ee578402b57a5cf4a2cf3b136761b6955c82569b2f5e2d9a994ea27a4c12ed",
+  "dimensions": {
+    "width": 1024,
+    "height": 1,
+    "work_items": 1024
+  },
+  "seed": 6004501531112916481,
+  "clock": "offline-sample-index@48000Hz",
+  "input_format": "f32-mono",
+  "output_format": "complex-f32",
+  "encoding": "little-endian-f32",
+  "tolerance": {
+    "absolute": 0.01,
+    "relative": 0.01
+  },
+  "adapter_policy": "hardware-required",
+  "adapter": {
+    "status": "authentic",
+    "class": "hardware",
+    "backend": "Metal",
+    "name": "Apple M3 Ultra",
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "vendor=0x106b,device=0x0"
+  },
+  "numeric_sample_count": 1024,
+  "mutation": null,
+  "verdict": "pass",
+  "passes": [
+    {
+      "sequence": 0,
+      "name": "prepare",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "stft_hardware_adapter_prepared"
+    },
+    {
+      "sequence": 1,
+      "name": "forward",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "stft_forward_completed"
+    },
+    {
+      "sequence": 2,
+      "name": "magnitude",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "stft_magnitude_finite_nonzero"
+    },
+    {
+      "sequence": 3,
+      "name": "oracle",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": 0.0,
+      "observed": 0.000002781621356362507,
+      "absolute_error": 0.000002781621356362507,
+      "code": "cpu_fft_oracle_match"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "input.f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "6ab07490126f2e538d2a714a0d1c089101bab16ce5be40695fafebde6c173fb3"
+    },
+    {
+      "name": "window.f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "551e504178982fd4ec9d2aa3ae4ff1bfdcf3c5bacf3c04ae106e810dc97b9261"
+    },
+    {
+      "name": "expected-magnitude.f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "32389de3d37a17b6d0adc1cc2dc41c97b56ad07c66ad18d04d70978660fa39a7"
+    },
+    {
+      "name": "observed-spectrum.complex-f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 8192,
+      "sha256": "81dd3541de9cae8b113becd1586957a585f29c72589d99f566eec289ba0ab421"
+    },
+    {
+      "name": "observed-magnitude.f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "63285c0c8a004b6ac5036a8653bff1708d888026b344801861f18c72130d8fe8"
+    },
+    {
+      "name": "absolute-error.f32",
+      "kind": "numeric-samples",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "2310864835c9d72f9a61850409ae99ae5dcea46190497422bae226402fc70a16"
+    }
+  ],
+  "recommendations": []
+}

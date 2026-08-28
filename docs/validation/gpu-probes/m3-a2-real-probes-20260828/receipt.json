@@ -1,0 +1,56 @@
+{
+  "schema": "pulp.gpu-probe-acceptance-receipt.v1",
+  "recorded_at_utc": "2026-08-28T06:00:05Z",
+  "integration_head": "be1745cffd263108afea686841455ba693d84851",
+  "source_heads": {
+    "native_recipes": "fc0290ee7b1223fa27cafb97f3dc91d3c4255bc3",
+    "threejs_recipe": "8bb899f366004c69d50f691223c7307a45e68d8e"
+  },
+  "machine": {
+    "model": "Mac15,14",
+    "chip": "Apple M3 Ultra",
+    "os": "macOS 26.6.2 (25G83)"
+  },
+  "execution_context": {
+    "cwd_role": "fresh-temporary-directory-outside-any-checkout",
+    "path": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "checkout_discovery": "not-used-by-installed-cli-or-mcp"
+  },
+  "binaries": {
+    "installed_rust_cli": "d21a37f6d43ade3a2776318866bd41c82861738e886f309f5b0a2c7b06e3b9d0",
+    "installed_cpp_delegate": "4697302c5d6b595509b33dc42906fa77401837312e528c0b08d76f84b8efbf11",
+    "installed_mcp": "5277d98ed7b7c9e1e42a2858c2637f5da182ebf28edbd56ae41c37451a2b7a28",
+    "scene3d_cpp_cli": "9605a4cf8af752b46e3897f8c4dd8e773f4e13bf59e408de604a3d2bef894def",
+    "v8_threejs_cpp_cli": "1cd4e5063c369e835792bf95fac62b77c104bea64978f9858efc42275a6823fd"
+  },
+  "run_groups": {
+    "compute": {"recipe": "gpu-compute.magnitude.v1", "binary_role": "installed_rust_cli"},
+    "stft": {"recipe": "gpu-audio.stft.v1", "binary_role": "installed_rust_cli"},
+    "renderer": {"recipe": "renderer3d.hardcoded-cube.v1", "binary_role": "scene3d_cpp_cli"},
+    "threejs": {"recipe": "threejs.multi-pass.v1", "binary_role": "v8_threejs_cpp_cli"}
+  },
+  "raw_sha256": {
+    "compute-negative.json": "ead360e1e6610aa6fec7756bb22128cf24624bfcd54be08eb840ca42abbf268b",
+    "compute-run1.json": "2175ce460f179f7f69f9c25a4fe3c28e78eca8b6696a2f87bb3da6489b2d478b",
+    "compute-run2.json": "b99f2e0e76d795110fc1d209f7536382c1107b66bf83177dae3bf197a0ccfc89",
+    "mcp-transcript.jsonl": "d4c8dbd197a0352889f14a12edbd6f40221b5e1901a28c7550cdbf97f2cccefa",
+    "renderer-negative.json": "8f3198c6409c79394e742dee5980116e5babbf455b5c044e62948d19c102ad8f",
+    "renderer-run1.json": "2a81a0a66cc3a1f36a4ea5bb243d47816077378be82c1dd3f8826f6dd25f3623",
+    "renderer-run2.json": "33ab96cf3ff12ce1d91c774d152dfb692a15646b21153300878b70f38bfc4c8b",
+    "stft-negative.json": "7b2a489195fde13c10b626e1a0056bbb81a36dc3a3809017d7e2ad7c13f4e65e",
+    "stft-run1.json": "58f4163f55e1debdd2ba1466e1acccad379fb1663ab642b87742cd35a310a08a",
+    "stft-run2.json": "355922bbd40de1c7acfb8697d142e3baaf6af5465b425dc343809f3cb0156f03",
+    "threejs-negative.json": "2263a715745f05157e0bbeda5800458d558ec83af51b56b53d5e01ed0653eadf",
+    "threejs-run1.json": "1fce1ad5ca2fd3e19f4ebdcc3824fd32d3ba37bf1f28a512ca26043f2d65c263",
+    "threejs-run2.json": "82d89c931f47aa734dcc42713326925509a2236b8649a8ed28fd556ec7e3d547"
+  },
+  "dispositions": {
+    "positive_repeat_negative": "pass",
+    "installed_cli_compute_and_stft": "pass",
+    "installed_mcp_positive_and_completed_failure": "pass",
+    "renderer_hardware_class": "unverified-by-current-adapter-contract",
+    "renderer_backend": "Dawn/WebGPU over Metal",
+    "threejs_compute_stft_hardware_class": "authentic-hardware",
+    "audio_thread_work": "not-applicable-offline-child-process-only"
+  }
+}

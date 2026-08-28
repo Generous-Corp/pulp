@@ -1,0 +1,130 @@
+{
+  "schema": "pulp.gpu-probe-result.v1",
+  "version": 1,
+  "gpu_evidence_id": "cc93ec9a292ba0fe2db4da1a0727c6d1",
+  "recipe_id": "threejs.multi-pass.v1",
+  "source_digest": "a5bd2376af3e4cb715ec4424180e68272b6c0e63a2c050a324107cf823d22932",
+  "signature_digest": "d202b926bbe5df98640cd76703b5e8ee032b842fc2d6b4041a2edf34f9e48a95",
+  "dimensions": {
+    "width": 96,
+    "height": 96,
+    "work_items": 9216
+  },
+  "seed": 6073194554977833729,
+  "clock": "fixed-step-0",
+  "input_format": "threejs-esm-scene",
+  "output_format": "rgba8-srgb",
+  "encoding": "row-major-rgba8",
+  "tolerance": {
+    "absolute": 0.12549019607843138,
+    "relative": 0.0
+  },
+  "adapter_policy": "hardware-required",
+  "adapter": {
+    "status": "authentic",
+    "class": "hardware",
+    "backend": "Metal",
+    "name": "Apple M3 Ultra",
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "Metal driver on macOS Version 26.6.2 (Build 25G83)"
+  },
+  "numeric_sample_count": 5,
+  "mutation": "seeded-final-swatch-channel",
+  "verdict": "fail",
+  "passes": [
+    {
+      "sequence": 0,
+      "name": "adapter",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "threejs_hardware_adapter_verified"
+    },
+    {
+      "sequence": 1,
+      "name": "threejs-init",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "threejs_module_initialized"
+    },
+    {
+      "sequence": 2,
+      "name": "background-pass",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "background_region_match"
+    },
+    {
+      "sequence": 3,
+      "name": "left-swatch-pass",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "left_swatch_region_match"
+    },
+    {
+      "sequence": 4,
+      "name": "final-swatch-pass",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "final_swatch_readback_completed"
+    },
+    {
+      "sequence": 5,
+      "name": "oracle",
+      "verdict": "fail",
+      "work_completed": true,
+      "expected": 5,
+      "observed": 4,
+      "absolute_error": 1,
+      "code": "cpu_region_color_oracle_mismatch"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "background.rgba8",
+      "kind": "image",
+      "mime": "application/octet-stream",
+      "bytes": 36864,
+      "sha256": "08a2eb4fe7d150cecef0a48998078df6eb2bc759393ee31f7a9c046699533a79"
+    },
+    {
+      "name": "left-swatch.rgba8",
+      "kind": "image",
+      "mime": "application/octet-stream",
+      "bytes": 36864,
+      "sha256": "1aa249eeab3d79539f7c0b5f908d30f288ffec2e978190370ae6694e7b33d750"
+    },
+    {
+      "name": "final.rgba8",
+      "kind": "image",
+      "mime": "application/octet-stream",
+      "bytes": 36864,
+      "sha256": "8fa61bc77d6e50c89a299abb88589588f1409cf90d4ddc2e838f58cd6be5f129"
+    },
+    {
+      "name": "content-oracle.json",
+      "kind": "json",
+      "mime": "application/json",
+      "bytes": 189,
+      "sha256": "3b369218251d81a61fd4243dcb12f88ef092d439351616f2c420214caa3e3ea2"
+    }
+  ],
+  "recommendations": [
+    "Inspect the named intermediate readbacks and independent color-region oracle."
+  ]
+}
