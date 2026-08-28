@@ -213,6 +213,11 @@ way and say plainly that this rung is unproven.
   believing any verdict. Until the key names are fixed, use `--format au`.
 - **SKIP is never PASS.** Exit codes: 0 PASS / 1 FAIL / 2 SKIP (REAPER absent) /
   3 INCONCLUSIVE. A gate must treat SKIP/INCONCLUSIVE as not-passed.
+- **A4 DPR evidence requires a real, format-qualified editor pass.** Bind the
+  result to the exact plugin binary and DPR matrix cell. SKIP/INCONCLUSIVE,
+  absence from the portable scan cache, or a different format being inserted
+  leaves that cell incomplete. Keep the file-handshake rule above; DPR evidence
+  does not authorize screen-driving.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
   personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
   Macs (m1/m3/m5) are already serialized; local is the primary lane.

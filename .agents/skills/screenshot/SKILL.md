@@ -391,3 +391,15 @@ where each backend is available.
 death-test child and macOS lldb has no follow-fork-mode, so `b trap_now` + `run`
 just hangs. Add `backtrace_symbols_fd` to `trap_now` in
 `rt_intercept_test_support.cpp` and read the stack off stderr instead.
+
+## DPR experiment captures are evidence, not policy
+
+For A4 DPR trials, start from `test/fixtures/gpu-ux/dpr/manifest.json` and use
+the exact requested scale for each capture. Keep logical size, fixture bytes,
+and logical input coordinates identical while the physical backing size changes
+with DPR. Record both sizes in the versioned result contract.
+
+`passes_content_floor` remains a required blank-frame guard, but it does not
+prove small-text legibility, thin-stroke fidelity, or input correctness. Record
+those oracles separately. A planned or synthetic capture is automation proof
+only and must not select a scale-policy candidate.

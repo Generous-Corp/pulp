@@ -230,7 +230,10 @@
       "paths": [
         ".agents/skills/daw-smoke/**",
         "tools/testing/daw-smoke/**",
-        "docs/guides/daw-smoke.md"
+        "docs/guides/daw-smoke.md",
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "test/fixtures/gpu-ux/dpr/**",
+        "tools/scripts/gpu_dpr_experiment.py"
       ]
     },
     "decide": {
@@ -462,9 +465,13 @@
     },
     "screenshot": {
       "paths": [
+        ".agents/skills/screenshot/**",
         "core/view/src/screenshot*.cpp",
         "core/view/platform/mac/screenshot_mac.mm",
-        "core/view/include/pulp/view/screenshot.hpp"
+        "core/view/include/pulp/view/screenshot.hpp",
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "test/fixtures/gpu-ux/dpr/**",
+        "tools/scripts/gpu_dpr_experiment.py"
       ]
     },
     "screenshot-sync": {
@@ -595,7 +602,10 @@
         "core/runtime/**/*trace*",
         "tools/cmake/PulpTracing.cmake",
         "experimental/pulp-rs/src/cmd/trace.rs",
-        "docs/guides/tracing.md"
+        "docs/guides/tracing.md",
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "test/fixtures/gpu-ux/dpr/**",
+        "tools/scripts/gpu_dpr_experiment.py"
       ]
     },
     "trace-sql": {
@@ -769,12 +779,16 @@
     },
     "forge-app-delivery": {
       "paths": [
+        ".agents/skills/forge-app-delivery/**",
         "examples/forge-modular/package.sh",
         "examples/forge-modular/uninstall.sh",
         "examples/forge-modular/LICENSE-INSTALLER.txt",
         "forge-seam/populate.sh",
         "forge-seam/sync.sh",
-        "tools/rack/fetch_sdk.py"
+        "tools/rack/fetch_sdk.py",
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "test/fixtures/gpu-ux/dpr/**",
+        "tools/scripts/gpu_dpr_experiment.py"
       ]
     }
   }

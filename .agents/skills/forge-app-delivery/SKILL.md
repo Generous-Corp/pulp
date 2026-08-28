@@ -385,3 +385,12 @@ apply to any Forge shell. What tends to differ per app is the generator's
 external toolchain (Forge Modular needs the Rack SDK and a C++ compiler) and what
 "the runtime" means for it — enumerate that first, because it is the thing most
 likely to be left out of the installer.
+
+## Forge evidence in DPR trials
+
+The A4 DPR matrix requires the exact Forge Modular native shell, not a Pulp
+example standing in for it. Use a fresh Forge worktree, record both Forge and
+Pulp SHAs, and preserve binary identity with the result artifacts. Exercise the
+same logical fixture at each requested DPR and mode; a rebuilt or substituted
+payload is a different trial. Do not publish a scale-policy conclusion from a
+planned/synthetic run or before the A2T trace and A3 budget dependencies exist.
