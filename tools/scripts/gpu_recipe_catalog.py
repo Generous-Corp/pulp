@@ -256,6 +256,7 @@ def validate_handoff(document: Any) -> list[str]:
         delete_after = entry["delete_after"]
         allowed = {
             "retain-pulp": ("Generous-Corp/pulp", None, False),
+            "retain-pulp-followup": ("Generous-Corp/pulp", None, False),
             "replace-pulp-adapter-consumption": ("Generous-Corp/vellum", "B1", True),
             "adopt-when-proven": ("Generous-Corp/vellum", "B2", True),
             "adopt-only-if-a3-evidence-queues": ("Generous-Corp/vellum", "B4", True),
