@@ -2502,6 +2502,12 @@ CPU oracle. The Renderer3D recipe uses an exact known fingerprint only on its
 declared backend and a portable structural content oracle elsewhere; it never
 claims cross-backend pixel identity.
 
+The callable catalog is currently `renderer3d.hardcoded-cube.v1`,
+`gpu-compute.magnitude.v1`, and `gpu-audio.stft.v1`. The SDK also ships a
+pinned Three.js WebGPU runtime to prepare a future numeric recipe, but no
+Three.js recipe is advertised until it has the same independent-oracle,
+artifact, and negative-control proof as the callable recipes.
+
 `--negative-control` changes real shader/output behavior without bypassing GPU
 submission or readback. Detection is deliberately reported as a typed `fail`
 with exit 1, proving that the oracle can catch the class of error. Exit 2 means

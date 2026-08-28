@@ -7,6 +7,7 @@
   "control_standalone_host_floor": "0.803.1",
   "node_runtime_floor": "0.813.1",
   "gpu_health_contract_floor": "0.817.0",
+  "gpu_probe_contract_floor": "0.819.0",
   "threejs_runtime_floor": "0.818.0",
   "platforms": [
     "darwin-arm64",

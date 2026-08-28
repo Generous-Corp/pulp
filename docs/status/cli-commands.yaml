@@ -762,7 +762,7 @@ commands:
 
   - name: gpu
     status: usable
-    summary: Run bounded deterministic GPU evidence recipes through Pulp's existing Dawn/WebGPU, Renderer3D, Three.js, GpuCompute, and offline GPU-audio seams. Each recipe has an independent oracle, declared tolerances and artifact bounds, authentic adapter identity, and a seeded negative control; unavailable work never becomes a pass.
+    summary: Run bounded deterministic GPU evidence recipes through Pulp's existing Dawn/WebGPU Renderer3D, GpuCompute, and offline GPU-audio seams. Each callable recipe has an independent oracle, declared tolerances and artifact bounds, authentic adapter identity, and a seeded negative control; unavailable work never becomes a pass. The pinned Three.js runtime is preparatory and is not callable until its numeric recipe lands.
     subcommands:
       - name: probe
         summary: Run one closed-catalog recipe and atomically publish its hash-declared artifacts.
@@ -778,7 +778,7 @@ commands:
             description: Apply the recipe's seeded mutation. The GPU work must complete and the independent oracle must detect the changed result; the command exits 1 with typed failure evidence.
           - name: --json
             kind: flag
-            description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass; every fail, unavailable, or unverified result remains nonzero with its typed evidence.
+            description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass, exit 1 is a completed measured failure, and exit 2 is unavailable or unverified.
     docs: reference/cli.md#gpu
 
   - name: clean

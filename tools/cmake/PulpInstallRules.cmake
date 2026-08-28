@@ -447,6 +447,19 @@ install(FILES "${_pulp_gpu_health_result_schema}"
     DESTINATION "share/pulp/contracts")
 unset(_pulp_gpu_health_result_schema)
 
+# Stable machine-readable numeric GPU probe result contract. Keep this next to
+# the health contract so installed CLI/MCP consumers can validate evidence
+# without a Pulp source checkout.
+set(_pulp_gpu_probe_result_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_probe_result_schema}")
+    message(FATAL_ERROR
+        "Required GPU probe result schema is missing: ${_pulp_gpu_probe_result_schema}")
+endif()
+install(FILES "${_pulp_gpu_probe_result_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_probe_result_schema)
+
 # Pinned native Three.js ESM runtime. Keep the upstream directory layout intact:
 # Pulp's V8 module resolver maps these exact specifiers and installed consumers
 # must not fall back to a test-only FetchContent checkout.

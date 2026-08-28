@@ -83,6 +83,36 @@ stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
 This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
 skills; adding a separate GPU-doctor skill would duplicate their ownership.
 
+### `pulp gpu probe` is a closed callable evidence catalog
+
+`pulp gpu probe --recipe <id> --artifacts <absolute-dir> [--negative-control]
+[--json]` localizes GPU correctness through the existing Dawn/WebGPU seams.
+Advertise a recipe only after the native CLI can run it end to end with an
+independent oracle, bounded hash-declared artifacts, authentic adapter
+identity, and a real seeded mutation. A pinned runtime or registry row alone is
+not callable capability. Exit 0 means verified pass, exit 1 means completed
+measured failure, and exit 2 means unavailable or unverified.
+
+The Rust front delegates to its matched `pulp-cpp` sibling. The
+`pulp_gpu_probe` MCP tool must spawn that sibling with an argv API rather than a
+shell string, preserve typed exit 0/1/2 evidence, bind a requested negative
+control to the recipe's exact mutation, and work outside a checkout. Keep these
+surfaces synchronized:
+
+- `tools/cli/gpu_probe/**`, native recipe implementations, C++/Rust help and
+  delegation tests
+- `tools/mcp/mcp_gpu_tools.cpp`, tools-list/dispatch/required-argument and
+  fake-sibling invocation coverage, and CLI/MCP parity
+- `docs/contracts/gpu-probe-result-v1.schema.json`, installed-SDK byte parity,
+  release-product floors and missing-member negative controls
+- `docs/status/cli-commands.yaml`, `docs/reference/cli.md`, the Claude plugin
+  MCP table, and the Pulp-Vellum tooling disposition
+
+The top-level `gpu` command intentionally has no slash command: its agentic
+surface is the typed `pulp_gpu_probe` MCP tool. This stays in the existing CLI,
+GPU build, Three.js, trace, and routing skills; do not add a duplicate generic
+GPU-probe skill.
+
 ### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
 
 These checks query live GitHub state, so a test asserting "the command succeeds"

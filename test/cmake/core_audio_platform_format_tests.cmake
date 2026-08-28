@@ -60,11 +60,14 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     # MCP server protocol tests
+    add_executable(pulp-test-mcp-gpu-probe-fake-cli
+        fixtures/mcp_gpu_probe_fake_cli.cpp)
     add_executable(pulp-test-mcp-server
         test_mcp_server.cpp
         test_mcp_control_adapter.cpp)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
+        pulp::tool-gpu-probe-model
         Catch2::Catch2WithMain)
     if(TARGET pulp::inspect-runtime)
         target_link_libraries(pulp-test-mcp-server PRIVATE pulp::inspect-runtime)
@@ -75,7 +78,9 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
             PULP_TEST_INSPECTOR_RUNTIME=0)
     endif()
     target_compile_definitions(pulp-test-mcp-server PRIVATE
-        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        PULP_TEST_GPU_PROBE_FAKE_CLI="$<TARGET_FILE:pulp-test-mcp-gpu-probe-fake-cli>")
+    add_dependencies(pulp-test-mcp-server pulp-test-mcp-gpu-probe-fake-cli)
     target_include_directories(pulp-test-mcp-server PRIVATE
         "${CMAKE_SOURCE_DIR}/inspect/include")
     catch_discover_tests(pulp-test-mcp-server
