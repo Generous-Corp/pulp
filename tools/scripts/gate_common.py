@@ -26,15 +26,191 @@ copies:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 
 
 # ── Git helpers ─────────────────────────────────────────────────────────
+
+
+GitComparisonStatus = Literal[
+    "available", "history_unavailable", "path_absent", "command_failed"
+]
+GitComparisonMode = Literal["base_tip", "merge_base", "exact_base", "unresolved"]
+
+
+@dataclass(frozen=True)
+class GitComparisonProvenance:
+    """Immutable receipt for a read-only comparison against Git history."""
+
+    requested_base: str
+    requested_head: str
+    source: str
+    resolved_base_tip: str | None = None
+    resolved_head: str | None = None
+    comparison_anchor: str | None = None
+    comparison_mode: GitComparisonMode = "unresolved"
+    status: GitComparisonStatus = "history_unavailable"
+    stderr: str = ""
+    path: str | None = None
+    content: str | None = None
+
+
+def _bounded_git_stderr(value: str, limit: int = 512) -> str:
+    compact = " ".join(value.strip().split())
+    return compact if len(compact) <= limit else compact[: limit - 3] + "..."
+
+
+def git_comparison_receipt(result: GitComparisonProvenance) -> str:
+    """Stable single-line receipt; content is deliberately excluded."""
+    material = {
+        "requested_base": result.requested_base,
+        "requested_head": result.requested_head,
+        "source": result.source,
+        "resolved_base_tip": result.resolved_base_tip,
+        "resolved_head": result.resolved_head,
+        "comparison_anchor": result.comparison_anchor,
+        "comparison_mode": result.comparison_mode,
+        "status": result.status,
+        "stderr": result.stderr,
+    }
+    if result.path is not None:
+        material["path"] = result.path
+    return json.dumps(material, sort_keys=True, separators=(",", ":"))
+
+
+def git_comparison_command_failed(
+    result: GitComparisonProvenance, stderr: str
+) -> GitComparisonProvenance:
+    """Return a consistent immutable failure receipt after resolution."""
+    return replace(
+        result,
+        status="command_failed",
+        stderr=_bounded_git_stderr(stderr),
+        content=None,
+    )
+
+
+def git_comparison_history_unavailable(
+    result: GitComparisonProvenance, stderr: str
+) -> GitComparisonProvenance:
+    """Return a bounded immutable receipt for an incomplete history graph."""
+    return replace(
+        result,
+        status="history_unavailable",
+        stderr=_bounded_git_stderr(stderr),
+        content=None,
+    )
+
+
+def git_comparison_authority_unavailable(
+    result: GitComparisonProvenance, stderr: str
+) -> GitComparisonProvenance:
+    """Invalidate the requested authority while retaining independently proven HEAD."""
+    return replace(
+        result,
+        resolved_base_tip=None,
+        comparison_anchor=None,
+        comparison_mode="unresolved",
+        status="history_unavailable",
+        stderr=_bounded_git_stderr(stderr),
+        content=None,
+    )
+
+
+def _git_probe(root: "str | Path", arguments: list[str]) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            ["git", *arguments], cwd=str(root), text=True, capture_output=True
+        )
+    except OSError:
+        return None
+
+
+def resolve_git_comparison(
+    root: "str | Path", requested_base: str, requested_head: str = "HEAD", *,
+    source: str = "local_ref",
+) -> GitComparisonProvenance:
+    """Resolve a reproducible base-to-head anchor without mutating the repo."""
+    receipt = GitComparisonProvenance(requested_base, requested_head, source)
+    head = _git_probe(root, ["rev-parse", "--verify", f"{requested_head}^{{commit}}"])
+    if head is None:
+        return replace(receipt, status="command_failed", stderr="could not execute git")
+    if head.returncode != 0:
+        return replace(
+            receipt, status="history_unavailable",
+            stderr=_bounded_git_stderr(head.stderr),
+        )
+    head_tip = head.stdout.strip()
+    receipt = replace(receipt, resolved_head=head_tip)
+
+    base = _git_probe(root, ["rev-parse", "--verify", f"{requested_base}^{{commit}}"])
+    if base is None:
+        return replace(receipt, status="command_failed", stderr="could not execute git")
+    if base.returncode != 0:
+        return replace(
+            receipt, status="history_unavailable",
+            stderr=_bounded_git_stderr(base.stderr),
+        )
+    base_tip = base.stdout.strip()
+    receipt = replace(receipt, resolved_base_tip=base_tip)
+
+    ancestry = _git_probe(root, ["merge-base", "--is-ancestor", base_tip, head_tip])
+    if ancestry is None:
+        return replace(receipt, status="command_failed", stderr="could not execute git")
+    if ancestry.returncode == 0:
+        return replace(
+            receipt, comparison_anchor=base_tip, comparison_mode="base_tip",
+            status="available", stderr=_bounded_git_stderr(ancestry.stderr),
+        )
+    if ancestry.returncode != 1:
+        return replace(
+            receipt, status="command_failed",
+            stderr=_bounded_git_stderr(ancestry.stderr),
+        )
+
+    merge_base = _git_probe(root, ["merge-base", head_tip, base_tip])
+    if merge_base is None:
+        return replace(receipt, status="command_failed", stderr="could not execute git")
+    anchor = merge_base.stdout.strip()
+    if merge_base.returncode != 0 or not anchor:
+        return replace(
+            receipt, status="history_unavailable",
+            stderr=_bounded_git_stderr(merge_base.stderr) or "merge-base unavailable",
+        )
+    return replace(
+        receipt, comparison_anchor=anchor, comparison_mode="merge_base",
+        status="available", stderr=_bounded_git_stderr(merge_base.stderr),
+    )
+
+
+def read_git_path(
+    root: "str | Path", comparison: GitComparisonProvenance, path: "str | Path"
+) -> GitComparisonProvenance:
+    """Read a path at a proven anchor, distinguishing absence from bad history."""
+    name = Path(path).as_posix()
+    result = replace(comparison, path=name, content=None)
+    if comparison.status != "available" or comparison.comparison_anchor is None:
+        return result
+    listed = _git_probe(root, ["ls-tree", "-z", comparison.comparison_anchor, "--", name])
+    if listed is None:
+        return replace(result, status="command_failed", stderr="could not execute git")
+    if listed.returncode != 0:
+        return replace(result, status="command_failed", stderr=_bounded_git_stderr(listed.stderr))
+    if not listed.stdout:
+        return replace(result, status="path_absent", stderr="")
+    shown = _git_probe(root, ["show", f"{comparison.comparison_anchor}:{name}"])
+    if shown is None:
+        return replace(result, status="command_failed", stderr="could not execute git")
+    if shown.returncode != 0:
+        return replace(result, status="command_failed", stderr=_bounded_git_stderr(shown.stderr))
+    return replace(result, status="available", stderr="", content=shown.stdout)
 
 
 def repo_root() -> Path:

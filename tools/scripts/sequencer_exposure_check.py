@@ -11,6 +11,13 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from gate_common import (
+    GitComparisonProvenance,
+    git_comparison_receipt,
+    read_git_path,
+    resolve_git_comparison,
+)
+
 
 CLASSIFICATIONS = {
     "ci_test_only",
@@ -61,6 +68,8 @@ ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 LEDGER_PATH = "docs/status/sequencer-exposure.json"
 E0_INFRASTRUCTURE_PATHS = {
     LEDGER_PATH,
+    "tools/scripts/sequencer_exposure_check.py",
+    "tools/scripts/test_sequencer_exposure_check.py",
 }
 
 
@@ -552,6 +561,15 @@ def _row_evidence_items(row: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]
     return items
 
 
+def _read_commit_path(
+    repo_root: Path, revision: str, path: str, source: str
+) -> GitComparisonProvenance:
+    comparison = resolve_git_comparison(
+        repo_root, revision, revision, source=source
+    )
+    return read_git_path(repo_root, comparison, path)
+
+
 def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
     """Bind every released evidence claim to the protected shipped snapshot."""
     errors: list[str] = []
@@ -570,14 +588,22 @@ def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
             if not isinstance(path, str) or not isinstance(needles, list):
                 continue
             where = f"ledger.rows[{row_index}].{suffix}"
-            snapshot = _git(repo_root, "show", f"{merge}:{path}")
-            if snapshot.returncode != 0:
+            snapshot = _read_commit_path(
+                repo_root, merge, path, "sequencer_release_evidence"
+            )
+            if snapshot.status == "path_absent":
                 errors.append(
                     f"{where}: evidence path was absent from released snapshot {merge}: {path}"
                 )
                 continue
+            if snapshot.status != "available":
+                errors.append(
+                    f"{where}: released evidence history unavailable; receipt="
+                    + git_comparison_receipt(snapshot)
+                )
+                continue
             for needle in needles:
-                if isinstance(needle, str) and needle not in snapshot.stdout:
+                if isinstance(needle, str) and needle not in (snapshot.content or ""):
                     errors.append(
                         f"{where}: historical evidence {needle!r} was absent from "
                         f"{path} at released snapshot {merge}"
@@ -585,7 +611,9 @@ def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
     return errors
 
 
-def validate_git_provenance(document: Any, repo_root: Path) -> list[str]:
+def validate_git_provenance(
+    document: Any, repo_root: Path, head: str = "HEAD"
+) -> list[str]:
     """Prove released coordinates are real protected merge commits in this checkout."""
     errors: list[str] = []
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
@@ -656,13 +684,20 @@ def validate_git_provenance(document: Any, repo_root: Path) -> list[str]:
                     errors.append(f"{where}: squash deletion/presence mismatch for {path}")
                 elif accepted_exists and accepted_blob.stdout.strip() != merge_blob.stdout.strip():
                     errors.append(f"{where}: squash blob differs from accepted head for {path}")
-        ancestry = _git(repo_root, "merge-base", "--is-ancestor", merge, "HEAD")
-        if ancestry.returncode != 0:
-            errors.append(f"{where}.merge_sha: merge is not an ancestor of HEAD")
+        ancestry = _git(repo_root, "merge-base", "--is-ancestor", merge, head)
+        problem = _ancestry_problem(
+            ancestry,
+            f"{where}.merge_sha: merge is not an ancestor of HEAD",
+            f"{where}.merge_sha: ancestry history unavailable",
+        )
+        if problem:
+            errors.append(problem)
     return errors
 
 
-def validate_tombstone_provenance(document: Any, repo_root: Path) -> list[str]:
+def validate_tombstone_provenance(
+    document: Any, repo_root: Path, head: str = "HEAD"
+) -> list[str]:
     """Prove released removals name a real commit in protected history."""
     errors: list[str] = []
     if not isinstance(document, dict) or not isinstance(document.get("tombstones"), list):
@@ -679,16 +714,31 @@ def validate_tombstone_provenance(document: Any, repo_root: Path) -> list[str]:
         if commit.returncode != 0:
             errors.append(f"{where}: commit object is unavailable: {merge}")
             continue
-        ancestry = _git(repo_root, "merge-base", "--is-ancestor", merge, "HEAD")
-        if ancestry.returncode != 0:
-            errors.append(f"{where}: removal commit is not an ancestor of HEAD")
+        ancestry = _git(repo_root, "merge-base", "--is-ancestor", merge, head)
+        problem = _ancestry_problem(
+            ancestry,
+            f"{where}: removal commit is not an ancestor of HEAD",
+            f"{where}: removal ancestry history unavailable",
+        )
+        if problem:
+            errors.append(problem)
             continue
-        snapshot = _git(repo_root, "show", f"{merge}:{LEDGER_PATH}")
-        if snapshot.returncode != 0:
-            errors.append(f"{where}: removal snapshot does not contain {LEDGER_PATH}")
+        snapshot = _read_commit_path(
+            repo_root, merge, LEDGER_PATH, "sequencer_tombstone_snapshot"
+        )
+        if snapshot.status == "path_absent":
+            errors.append(
+                f"{where}: removal snapshot does not contain {LEDGER_PATH}"
+            )
+            continue
+        if snapshot.status != "available":
+            errors.append(
+                f"{where}: removal snapshot history unavailable; receipt="
+                + git_comparison_receipt(snapshot)
+            )
             continue
         try:
-            snapshot_ledger = json.loads(snapshot.stdout)
+            snapshot_ledger = json.loads(snapshot.content or "")
         except json.JSONDecodeError as error:
             errors.append(f"{where}: removal snapshot ledger is invalid JSON: {error}")
             continue
@@ -937,8 +987,32 @@ def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _load_base_transition(repo_root: Path, base: str) -> tuple[Any | None, list[str], list[str]]:
+def _ancestry_problem(
+    result: subprocess.CompletedProcess[str], negative: str, unavailable: str
+) -> str | None:
+    if result.returncode == 0:
+        return None
+    if result.returncode == 1:
+        return negative
+    detail = " ".join(result.stderr.strip().split())[:512]
+    return f"{unavailable} (git exit {result.returncode}): {detail}"
+
+
+def _load_base_transition_with_receipt(
+    repo_root: Path,
+    base: str,
+    comparison: GitComparisonProvenance | None = None,
+) -> tuple[Any | None, list[str], list[str], GitComparisonProvenance]:
     errors: list[str] = []
+    comparison = comparison or resolve_git_comparison(
+        repo_root, base, source="sequencer_cli_base"
+    )
+    if comparison.status != "available" or comparison.comparison_anchor is None:
+        return None, [], [
+            "transition: git history unavailable; comparison receipt="
+            + git_comparison_receipt(comparison)
+        ], comparison
+    anchor = comparison.comparison_anchor
     # Disable rename coalescing so both the deleted and added endpoints are
     # governed, including a rename that crosses out of a watched subtree.
     diff = _git(
@@ -948,29 +1022,47 @@ def _load_base_transition(repo_root: Path, base: str) -> tuple[Any | None, list[
         "--no-renames",
         "-z",
         "--diff-filter=ACDMRTUXB",
-        f"{base}...HEAD",
+        anchor,
+        comparison.resolved_head or "HEAD",
     )
     if diff.returncode != 0:
-        return None, [], [f"transition: cannot diff base {base!r}: {diff.stderr.strip()}"]
+        return None, [], [
+            f"transition: cannot diff proven base {anchor!r}: "
+            f"{' '.join(diff.stderr.strip().split())[:512]}"
+        ], comparison
     changed_paths = [path for path in diff.stdout.split("\0") if path]
-    shown = _git(repo_root, "show", f"{base}:{LEDGER_PATH}")
-    if shown.returncode != 0:
+    shown = read_git_path(repo_root, comparison, LEDGER_PATH)
+    if shown.status == "path_absent":
         # Bootstrap is valid only because the current ledger itself is new in the diff.
         if LEDGER_PATH not in changed_paths:
             errors.append(
                 f"transition: base lacks {LEDGER_PATH} and this change does not add it"
             )
-        return None, changed_paths, errors
+        return None, changed_paths, errors, comparison
+    if shown.status != "available":
+        errors.append(
+            "transition: base ledger history unavailable; comparison receipt="
+            + git_comparison_receipt(shown)
+        )
+        return None, changed_paths, errors, shown
     try:
-        base_document = json.loads(shown.stdout)
+        base_document = json.loads(shown.content or "")
     except json.JSONDecodeError as error:
         errors.append(f"transition: base ledger is invalid JSON: {error}")
         base_document = None
-    return base_document, changed_paths, errors
+    return base_document, changed_paths, errors, shown
 
 
-def _load_sequencer_trailers(repo_root: Path, base: str) -> tuple[list[str], list[str]]:
-    log = _git(repo_root, "log", "--format=%B%x00", f"{base}..HEAD")
+def _load_base_transition(repo_root: Path, base: str) -> tuple[Any | None, list[str], list[str]]:
+    """Compatibility wrapper for focused unit tests and existing callers."""
+    document, paths, errors, _ = _load_base_transition_with_receipt(repo_root, base)
+    return document, paths, errors
+
+
+def _load_sequencer_trailers(
+    repo_root: Path, base: str, head: str = "HEAD"
+) -> tuple[list[str], list[str]]:
+    log = _git(repo_root, "log", "--format=%B%x00", f"{base}..{head}")
     if log.returncode != 0:
         return [], [f"transition: cannot inspect commit trailers: {log.stderr.strip()}"]
     trailer_ids: list[str] = []
@@ -987,7 +1079,7 @@ def _load_sequencer_trailers(repo_root: Path, base: str) -> tuple[list[str], lis
 
 
 def _semantic_added_paths(
-    repo_root: Path, base: str, changed_paths: list[str]
+    repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
 ) -> tuple[set[str], list[str]]:
     """Find new cross-module sequencer semantics in otherwise generic paths."""
     candidate_prefixes = ("core/state/", "core/view/", "core/midi/", "inspect/")
@@ -1006,7 +1098,7 @@ def _semantic_added_paths(
             "--no-renames",
             "--no-ext-diff",
             "--unified=0",
-            f"{base}...HEAD",
+            f"{base}...{head}",
             "--",
             path,
         )
@@ -1060,17 +1152,46 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     errors = validate_document(document, repo_root)
     errors.extend(validate_schema_contract(schema))
-    errors.extend(validate_git_provenance(document, repo_root))
-    errors.extend(validate_tombstone_provenance(document, repo_root))
+    comparison: GitComparisonProvenance | None = None
+    if args.base:
+        comparison = resolve_git_comparison(
+            repo_root, args.base, source="sequencer_cli_base"
+        )
+        frozen_head = comparison.resolved_head
+        if frozen_head is None:
+            errors.append(
+                "git history unavailable; comparison receipt="
+                + git_comparison_receipt(comparison)
+            )
+        else:
+            errors.extend(validate_git_provenance(document, repo_root, frozen_head))
+            errors.extend(
+                validate_tombstone_provenance(document, repo_root, frozen_head)
+            )
+    else:
+        errors.extend(validate_git_provenance(document, repo_root))
+        errors.extend(validate_tombstone_provenance(document, repo_root))
     errors.extend(validate_release_evidence(document, repo_root))
     if args.base:
-        base_document, changed_paths, transition_errors = _load_base_transition(
-            repo_root, args.base
-        )
-        trailer_ids, trailer_errors = _load_sequencer_trailers(repo_root, args.base)
-        semantic_paths, semantic_errors = _semantic_added_paths(
-            repo_root, args.base, changed_paths
-        )
+        assert comparison is not None
+        (
+            base_document,
+            changed_paths,
+            transition_errors,
+            comparison,
+        ) = _load_base_transition_with_receipt(repo_root, args.base, comparison)
+        if comparison.status == "available" and comparison.comparison_anchor:
+            comparison_base = comparison.comparison_anchor
+            trailer_ids, trailer_errors = _load_sequencer_trailers(
+                repo_root, comparison_base, comparison.resolved_head or "HEAD"
+            )
+            semantic_paths, semantic_errors = _semantic_added_paths(
+                repo_root, comparison_base, changed_paths,
+                comparison.resolved_head or "HEAD",
+            )
+        else:
+            trailer_ids, trailer_errors = [], []
+            semantic_paths, semantic_errors = set(), []
         errors.extend(transition_errors)
         errors.extend(trailer_errors)
         errors.extend(semantic_errors)
@@ -1083,6 +1204,8 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_paths,
             )
         )
+        print("sequencer exposure check: comparison receipt=" +
+              git_comparison_receipt(comparison))
     if errors:
         print("sequencer exposure check: FAILED", file=sys.stderr)
         for error in errors:

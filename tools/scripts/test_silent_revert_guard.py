@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -454,8 +455,67 @@ def test_e2e_blocks_silent_revert() -> None:
         check("names both paths", "a.txt" in r.stdout and "b.txt" in r.stdout)
 
 
-def test_e2e_hint_mode_never_fails() -> None:
-    print("\n[e2e] hint mode reports but never blocks")
+def test_e2e_blocks_revert_of_two_parent_merge() -> None:
+    print("\n[e2e] blocks a byte-exact revert of a two-parent PR merge")
+    with tempfile.TemporaryDirectory() as repo:
+        audio_path = "é.txt"
+        _git_in(repo, "init", "-q", "-b", "main")
+        _git_in(repo, "config", "user.email", "t@example.com")
+        _git_in(repo, "config", "user.name", "t")
+        _git_in(repo, "config", "commit.gpgsign", "false")
+        _git_in(repo, "config", "core.quotePath", "true")
+        _write(repo, audio_path, "original\n")
+        _git_in(repo, "add", audio_path)
+        _git_in(repo, "commit", "-q", "-m", "base")
+        root_sha = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+        _git_in(repo, "checkout", "-q", "-b", "topic")
+        _write(repo, audio_path, "improved\n")
+        _git_in(repo, "commit", "-qam", "improve a")
+        _git_in(repo, "checkout", "-q", "main")
+        _write(repo, "main.txt", "independent main work\n")
+        _git_in(repo, "add", "main.txt")
+        _git_in(repo, "commit", "-q", "-m", "advance main independently")
+        _git_in(repo, "merge", "-q", "--no-ff", "topic", "-m", "merge topic")
+        merge_sha = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+
+        legacy = _run(
+            [
+                "git", "diff-tree", "--root", "--no-commit-id", "--name-only",
+                "-r", merge_sha,
+            ],
+            repo,
+        )
+        check("legacy merge diff is blind", legacy.stdout.strip() == "")
+        landing = G.landing_record(repo, merge_sha)
+        check(
+            "first-parent merge diff records the changed path",
+            landing is not None and set(landing.changes) == {audio_path},
+        )
+        root_landing = G.landing_record(repo, root_sha)
+        check(
+            "root commit keeps explicit empty-tree behavior",
+            root_landing is not None
+            and root_landing.changes[audio_path]["pre"] is None,
+        )
+        quoted = _run(
+            [
+                "git", "diff", "--raw", "--no-abbrev", merge_sha + "^1",
+                merge_sha,
+            ],
+            repo,
+        )
+        check("legacy line format quotes the Unicode path", audio_path not in quoted.stdout)
+
+        _git_in(repo, "checkout", "-q", "-b", "feature")
+        _write(repo, audio_path, "original\n")
+        _git_in(repo, "commit", "-qam", "silently restore old bytes")
+        verdict = G.check_push(repo, "main", "feature")
+        check("two-parent landing is blocked", verdict.blocked)
+        check("verdict names the merge landing", verdict.merge_id == merge_sha)
+
+
+def test_e2e_hint_mode_downgrades_content_block() -> None:
+    print("\n[e2e] hint mode downgrades a content block after history resolves")
     with tempfile.TemporaryDirectory() as repo:
         _fixture(repo)
         _git_in(repo, "checkout", "-q", "-b", "feature")
@@ -542,15 +602,275 @@ def test_e2e_normal_work_is_clean() -> None:
         check("exit 0", r.returncode == 0, f"rc={r.returncode} out={r.stdout}")
 
 
-def test_e2e_degrades_on_bad_repo() -> None:
-    print("\n[e2e] degrades to a pass when git cannot answer")
+def test_e2e_fails_closed_on_bad_repo() -> None:
+    print("\n[e2e] fails closed when git cannot answer")
     with tempfile.TemporaryDirectory() as empty:
         r = _run(
             [sys.executable, os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
              "--repo", empty, "--base", "main", "--mode=report"],
             empty,
         )
-        check("exit 0 on a non-repo", r.returncode == 0, f"rc={r.returncode}")
+        check("exit 2 on a non-repo", r.returncode == 2, f"rc={r.returncode}")
+        check("never reports empty success", "HISTORY UNAVAILABLE" in r.stdout,
+              f"out={r.stdout}")
+        check("prints immutable receipt", '"status":"history_unavailable"' in r.stdout,
+              f"out={r.stdout}")
+        hint = _run(
+            [sys.executable, os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
+             "--repo", empty, "--base", "main", "--mode=hint"],
+            empty,
+        )
+        check("hint preserves its always-zero contract", hint.returncode == 0,
+              f"rc={hint.returncode}")
+        check("hint still reports unavailable history loudly",
+              "HISTORY UNAVAILABLE" in hint.stdout and
+              '"status":"history_unavailable"' in hint.stdout, hint.stdout)
+        direct = G.check_push(empty, "main")
+        check("direct API callers fail closed", direct.blocked,
+              f"verdict={direct}")
+        check("direct API retains unavailable classification",
+              direct.history_status == "history_unavailable",
+              f"verdict={direct}")
+
+
+def test_e2e_intent_cannot_bypass_unavailable_base() -> None:
+    print("\n[e2e] revert intent cannot bypass unavailable base history")
+    controls = (
+        ("explicit revert subject", 'Revert "landing"', "report", 2),
+        (
+            "skip trailer",
+            'rollback\n\nSilent-Revert: skip reason="deliberate"',
+            "hint",
+            0,
+        ),
+    )
+    for name, message, mode, expected_rc in controls:
+        with tempfile.TemporaryDirectory() as repo:
+            _fixture(repo)
+            _git_in(repo, "checkout", "-q", "-b", "feature")
+            _write(repo, "c.txt", name + "\n")
+            _git_in(repo, "add", "c.txt")
+            _git_in(repo, "commit", "-q", "-m", message)
+            r = _run(
+                [
+                    sys.executable,
+                    os.path.join(
+                        REPO_ROOT, "tools/scripts/silent_revert_guard.py"
+                    ),
+                    "--repo", repo, "--base", "missing-base", f"--mode={mode}",
+                ],
+                repo,
+            )
+            check(f"{name}: unavailable history preserves {mode} exit contract",
+                  r.returncode == expected_rc,
+                  f"rc={r.returncode} out={r.stdout}")
+            check(f"{name}: unavailable history remains loud",
+                  "HISTORY UNAVAILABLE" in r.stdout, r.stdout)
+            check(f"{name}: receipt resolves HEAD",
+                  '"resolved_head":null' not in r.stdout, r.stdout)
+
+
+def test_post_resolution_failure_receipt_is_consistent() -> None:
+    print("\n[e2e] post-resolution Git failure updates immutable receipt")
+    with tempfile.TemporaryDirectory() as repo:
+        _fixture(repo)
+        failure = "post-resolution failure " * 80
+        controls = []
+        with mock.patch.object(
+            G, "_has_revert_intent_checked", return_value=(False, failure)
+        ):
+            controls.append(("intent", G.check_push(repo, "main")))
+        with mock.patch.object(
+            G, "_proposed_from_comparison", return_value=({}, failure)
+        ):
+            controls.append(("proposed", G.check_push(repo, "main")))
+        with mock.patch.object(
+            G, "_proposed_from_comparison", return_value=({"a.txt": "x"}, "")
+        ), mock.patch.object(
+            G, "_recent_landings_checked",
+            return_value=([], failure, "command_failed"),
+        ):
+            controls.append(("recent-landings", G.check_push(repo, "main")))
+        for name, verdict in controls:
+            check(f"{name}: verdict reports command_failed",
+                  verdict.history_status == "command_failed")
+            check(f"{name}: receipt reports command_failed",
+                  verdict.provenance is not None and
+                  verdict.provenance.status == "command_failed")
+            check(f"{name}: receipt stderr is bounded and normalized",
+                  verdict.provenance is not None and
+                  len(verdict.provenance.stderr) <= 512 and
+                  "  " not in verdict.provenance.stderr)
+            check(f"{name}: receipt retains resolved HEAD",
+                  verdict.provenance is not None and
+                  verdict.provenance.resolved_head is not None)
+
+
+def test_e2e_shallow_history_fails_only_for_nonempty_diff() -> None:
+    print("\n[e2e] shallow history cannot clear a nonempty proposed diff")
+    with tempfile.TemporaryDirectory() as directory:
+        origin = os.path.join(directory, "origin")
+        shallow = os.path.join(directory, "shallow")
+        os.mkdir(origin)
+        _fixture(origin)
+        clone = subprocess.run(
+            ["git", "clone", "-q", "--depth=1", f"file://{origin}", shallow],
+            capture_output=True, text=True,
+        )
+        check("shallow fixture cloned", clone.returncode == 0, clone.stderr)
+        clean = _run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
+                "--repo", shallow, "--base", "main", "--mode=report",
+            ],
+            shallow,
+        )
+        check("empty shallow diff remains a valid success", clean.returncode == 0,
+              f"rc={clean.returncode} out={clean.stdout}")
+        _git_in(shallow, "config", "user.email", "t@example.com")
+        _git_in(shallow, "config", "user.name", "t")
+        _git_in(shallow, "config", "commit.gpgsign", "false")
+        _git_in(shallow, "checkout", "-q", "-b", "feature")
+        _write(shallow, "a.txt", "feature bytes\n")
+        _git_in(shallow, "add", "a.txt")
+        _git_in(shallow, "commit", "-q", "-m", "feature")
+        changed = _run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
+                "--repo", shallow, "--base", "main", "--mode=report",
+            ],
+            shallow,
+        )
+        check("nonempty shallow diff exits 2", changed.returncode == 2,
+              f"rc={changed.returncode} out={changed.stdout}")
+        check("shallow limitation is explicit",
+              "shallow history has missing hidden objects" in changed.stdout,
+              changed.stdout)
+        check("receipt classifies history unavailable",
+              '"status":"history_unavailable"' in changed.stdout,
+              changed.stdout)
+
+        old_origin = os.path.join(directory, "old-origin")
+        old_shallow = os.path.join(directory, "old-shallow")
+        os.mkdir(old_origin)
+        _git_in(old_origin, "init", "-q", "-b", "main")
+        _git_in(old_origin, "config", "user.email", "t@example.com")
+        _git_in(old_origin, "config", "user.name", "t")
+        _git_in(old_origin, "config", "commit.gpgsign", "false")
+
+        def dated_commit(repo: str, message: str, when: str) -> None:
+            env = dict(os.environ)
+            env["GIT_AUTHOR_DATE"] = when
+            env["GIT_COMMITTER_DATE"] = when
+            completed = subprocess.run(
+                ["git", "commit", "-q", "-m", message], cwd=repo,
+                capture_output=True, text=True, env=env,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(completed.stderr)
+
+        _write(old_origin, "seed.txt", "grandparent\n")
+        _git_in(old_origin, "add", ".")
+        dated_commit(
+            old_origin, "newer-dated grandparent", datetime.now(UTC).isoformat()
+        )
+        grandparent_sha = _run(
+            ["git", "rev-parse", "HEAD"], old_origin
+        ).stdout.strip()
+        _write(old_origin, "a.txt", "original a\n")
+        _write(old_origin, "b.txt", "original b\n")
+        _git_in(old_origin, "add", ".")
+        dated_commit(old_origin, "old boundary", "2020-01-01T00:00:00Z")
+        _write(old_origin, "a.txt", "improved a\n")
+        _write(old_origin, "b.txt", "improved b\n")
+        _git_in(old_origin, "add", ".")
+        dated_commit(
+            old_origin, "recent landing",
+            datetime.now(UTC).isoformat(),
+        )
+        recent_landing_sha = _run(
+            ["git", "rev-parse", "HEAD"], old_origin
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "clone", "-q", "--depth=2", f"file://{old_origin}", old_shallow],
+            check=True,
+        )
+        _git_in(old_shallow, "config", "user.email", "t@example.com")
+        _git_in(old_shallow, "config", "user.name", "t")
+        _git_in(old_shallow, "config", "commit.gpgsign", "false")
+        _git_in(old_shallow, "checkout", "-q", "-b", "feature")
+        _write(old_shallow, "a.txt", "original a\n")
+        _write(old_shallow, "b.txt", "original b\n")
+        _git_in(old_shallow, "add", "a.txt", "b.txt")
+        _git_in(old_shallow, "commit", "-q", "-m", "silent revert")
+        missing_newer_parent = _run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
+                "--repo", old_shallow, "--base", "main", "--mode=report",
+            ],
+            old_shallow,
+        )
+        check("old-dated boundary cannot hide newer missing parent",
+              missing_newer_parent.returncode == 2,
+              f"rc={missing_newer_parent.returncode} "
+              f"out={missing_newer_parent.stdout}")
+        check("non-monotonic missing ancestry is classified unavailable",
+              '"status":"history_unavailable"' in missing_newer_parent.stdout,
+              missing_newer_parent.stdout)
+        _git_in(
+            old_shallow, "fetch", "-q", "--depth=1", "origin", grandparent_sha
+        )
+        locally_complete = _run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "tools/scripts/silent_revert_guard.py"),
+                "--repo", old_shallow, "--base", "main", "--mode=report",
+            ],
+            old_shallow,
+        )
+        check("locally complete shallow graph blocks normally",
+              locally_complete.returncode == 1,
+              f"rc={locally_complete.returncode} out={locally_complete.stdout}")
+        check("old-dated middle commit does not hide the recent landing",
+              recent_landing_sha in locally_complete.stdout,
+              locally_complete.stdout)
+
+
+def test_prepush_blocks_unavailable_history() -> None:
+    print("\n[e2e] pre-push blocks an unavailable-history verdict")
+    hook_path = os.path.join(REPO_ROOT, ".githooks", "pre-push")
+    with open(hook_path, encoding="utf-8") as hook:
+        source = hook.read()
+    start = source.index('if [ -f "$SRG" ]; then', source.index("# Silent-revert guard"))
+    end = source.index("\nfi\n", start) + len("\nfi\n")
+    block = source[start:end]
+
+    def resulting_fail(case_block: str, status: int) -> int:
+        script = "\n".join(
+            (
+                "fail=0",
+                f"SRG={os.path.join(REPO_ROOT, 'tools/scripts/silent_revert_guard.py')!r}",
+                f"PYTHON={sys.executable!r}",
+                "BASE=origin/main",
+                f"run_gate_captured() {{ return {status}; }}",
+                case_block,
+                'printf "%s" "$fail"',
+            )
+        )
+        completed = subprocess.run(
+            ["bash", "-c", script], text=True, capture_output=True, check=True
+        )
+        return int(completed.stdout)
+
+    check("history-unavailable exit 2 blocks", resulting_fail(block, 2) == 1)
+    mutated = block.replace("2) fail=1 ;;", "2) ;;")
+    check(
+        "mutation without exit-2 wiring would allow the push",
+        mutated != block and resulting_fail(mutated, 2) == 0,
+    )
 
 
 def main() -> int:
@@ -567,12 +887,17 @@ def main() -> int:
     test_real_incident_end_to_end()
     test_real_branch_would_have_been_blocked_at_push()
     test_e2e_blocks_silent_revert()
-    test_e2e_hint_mode_never_fails()
+    test_e2e_blocks_revert_of_two_parent_merge()
+    test_e2e_hint_mode_downgrades_content_block()
     test_e2e_behind_base_is_clean()
     test_e2e_explicit_revert_is_clean()
     test_e2e_skip_trailer_is_clean()
     test_e2e_normal_work_is_clean()
-    test_e2e_degrades_on_bad_repo()
+    test_e2e_fails_closed_on_bad_repo()
+    test_e2e_intent_cannot_bypass_unavailable_base()
+    test_post_resolution_failure_receipt_is_consistent()
+    test_e2e_shallow_history_fails_only_for_nonempty_diff()
+    test_prepush_blocks_unavailable_history()
 
     print("")
     if _failures:
