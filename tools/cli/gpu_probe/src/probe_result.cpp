@@ -1,0 +1,223 @@
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <filesystem>
+#include <limits>
+#include <unordered_set>
+
+namespace pulp::tooling::gpu_probe {
+namespace {
+
+constexpr std::array renderer_passes{
+    std::string_view{"adapter"}, std::string_view{"render"},
+    std::string_view{"readback"}, std::string_view{"content"}};
+constexpr std::array compute_passes{
+    std::string_view{"adapter"}, std::string_view{"dispatch"},
+    std::string_view{"oracle"}};
+constexpr std::array threejs_passes{
+    std::string_view{"scene"}, std::string_view{"geometry"},
+    std::string_view{"lighting"}, std::string_view{"composite"},
+    std::string_view{"readback"}};
+constexpr std::array stft_passes{
+    std::string_view{"prepare"}, std::string_view{"forward"},
+    std::string_view{"magnitude"}, std::string_view{"oracle"}};
+
+constexpr std::array registry{
+    RecipeDefinition{kRecipeIds[0], "pulp.renderer3d.hardcoded-cube", {256, 256, 65'536},
+                     0x52454e4433440001ULL, "fixed-step-0", "rgba32float", "rgba8-srgb",
+                     "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
+                     renderer_passes, {}, "content-fingerprint-match",
+                     "post-readback-fingerprint-mismatch"},
+    RecipeDefinition{kRecipeIds[1], "pulp.gpu-compute.magnitude", {256, 1, 256},
+                     0x434f4d5055544501ULL, "fixed-step-0", "complex-f32", "f32",
+                     "little-endian-f32", {1.0e-5, 1.0e-5}, AdapterPolicy::hardware_required,
+                     compute_passes, {}, "cpu-sqrt-re2-im2-match", "wgsl-operand-swap"},
+    RecipeDefinition{kRecipeIds[2], "pulp.threejs.multi-pass", {320, 240, 76'800},
+                     0x54485245454a5301ULL, "fixed-step-0", "threejs-scene", "rgba8-srgb",
+                     "png", {1.0 / 255.0, 0.0}, AdapterPolicy::hardware_required,
+                     threejs_passes, {}, "named-pass-values-match", "lighting-pass-seed"},
+    RecipeDefinition{kRecipeIds[3], "pulp.gpu-audio.stft", {1024, 1, 1024},
+                     0x535446544f464601ULL, "offline-sample-clock", "f32-mono", "complex-f32",
+                     "little-endian-f32", {1.0e-4, 1.0e-4}, AdapterPolicy::hardware_required,
+                     stft_passes, {}, "cpu-dft-magnitude-match", "bin-index-offset"},
+};
+
+bool is_lower_hex(std::string_view value, std::size_t size) {
+    return value.size() == size && std::all_of(value.begin(), value.end(), [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+}
+
+bool finite_nonnegative(double value) {
+    return std::isfinite(value) && value >= 0.0;
+}
+
+bool safe_relative_name(std::string_view value) {
+    if (value.empty() || value.size() > 240) return false;
+    const std::filesystem::path path(value);
+    if (path.is_absolute() || path.has_root_name() || path.has_root_directory()) return false;
+    for (const auto& part : path)
+        if (part == ".." || part == ".") return false;
+    return path.lexically_normal().generic_string() == value;
+}
+
+bool fail(std::string* error, std::string message) {
+    if (error) *error = std::move(message);
+    return false;
+}
+
+} // namespace
+
+std::string_view to_string(Verdict value) {
+    switch (value) {
+        case Verdict::pass: return "pass";
+        case Verdict::fail: return "fail";
+        case Verdict::unavailable: return "unavailable";
+        case Verdict::unverified: return "unverified";
+    }
+    return "unverified";
+}
+
+std::string_view to_string(AdapterPolicy value) {
+    switch (value) {
+        case AdapterPolicy::hardware_required: return "hardware-required";
+        case AdapterPolicy::hardware_preferred: return "hardware-preferred";
+        case AdapterPolicy::any_supported: return "any-supported";
+    }
+    return "hardware-required";
+}
+
+std::string_view to_string(AdapterClass value) {
+    switch (value) {
+        case AdapterClass::hardware: return "hardware";
+        case AdapterClass::software: return "software";
+        case AdapterClass::null_adapter: return "null";
+        case AdapterClass::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+std::string_view to_string(IdentityStatus value) {
+    switch (value) {
+        case IdentityStatus::authentic: return "authentic";
+        case IdentityStatus::unverified: return "unverified";
+        case IdentityStatus::unavailable: return "unavailable";
+    }
+    return "unavailable";
+}
+
+std::string_view to_string(ArtifactKind value) {
+    switch (value) {
+        case ArtifactKind::json: return "json";
+        case ArtifactKind::image: return "image";
+        case ArtifactKind::numeric_samples: return "numeric-samples";
+        case ArtifactKind::trace: return "trace";
+    }
+    return "json";
+}
+
+const RecipeDefinition* find_recipe(std::string_view id) {
+    const auto found = std::find_if(registry.begin(), registry.end(),
+                                    [&](const auto& recipe) { return recipe.id == id; });
+    return found == registry.end() ? nullptr : &*found;
+}
+
+std::span<const RecipeDefinition> recipes() { return registry; }
+
+bool validate(const ProbeResult& result, std::string* error) {
+    if (error) error->clear();
+    if (result.schema != kSchema) return fail(error, "schema must be pulp.gpu-probe-result.v1");
+    if (result.version != kVersion) return fail(error, "version must be 1");
+    if (!is_lower_hex(result.gpu_evidence_id, 32))
+        return fail(error, "gpu_evidence_id must be 128-bit lowercase hex");
+    if (!is_lower_hex(result.source_digest, 64) || !is_lower_hex(result.signature_digest, 64))
+        return fail(error, "source and signature digests must be SHA-256 lowercase hex");
+
+    const auto* recipe = find_recipe(result.recipe_id);
+    if (!recipe) return fail(error, "recipe_id is not registered");
+    if (result.dimensions.width != recipe->dimensions.width ||
+        result.dimensions.height != recipe->dimensions.height ||
+        result.dimensions.work_items != recipe->dimensions.work_items ||
+        result.seed != recipe->seed || result.clock != recipe->clock ||
+        result.input_format != recipe->input_format || result.output_format != recipe->output_format ||
+        result.encoding != recipe->encoding || result.adapter_policy != recipe->adapter_policy)
+        return fail(error, "result execution identity does not match the registered recipe");
+    if (result.dimensions.width == 0 || result.dimensions.width > kMaxDimension ||
+        result.dimensions.height == 0 || result.dimensions.height > kMaxDimension ||
+        result.dimensions.work_items == 0 || result.dimensions.work_items > kMaxWorkItems)
+        return fail(error, "recipe dimensions exceed the global bound");
+    if (!finite_nonnegative(result.tolerance.absolute) ||
+        !finite_nonnegative(result.tolerance.relative) ||
+        result.tolerance.absolute != recipe->tolerance.absolute ||
+        result.tolerance.relative != recipe->tolerance.relative)
+        return fail(error, "tolerance must be finite, nonnegative, and recipe-bound");
+    if (result.adapter_policy == AdapterPolicy::hardware_required &&
+        result.verdict == Verdict::pass &&
+        (result.adapter.status != IdentityStatus::authentic ||
+         result.adapter.classification != AdapterClass::hardware))
+        return fail(error, "hardware-required pass needs authentic hardware adapter identity");
+    if (result.adapter.classification == AdapterClass::null_adapter &&
+        result.verdict == Verdict::pass)
+        return fail(error, "a null adapter cannot produce a passing probe result");
+    const auto check_identity_field = [&](const auto& field) {
+        return !field || (!field->empty() && field->size() <= 256);
+    };
+    if (!check_identity_field(result.adapter.backend) ||
+        !check_identity_field(result.adapter.name) ||
+        !check_identity_field(result.adapter.vendor) ||
+        !check_identity_field(result.adapter.architecture) ||
+        !check_identity_field(result.adapter.device))
+        return fail(error, "adapter identity fields must be bounded nonempty strings");
+    if (result.numeric_sample_count > recipe->bounds.max_numeric_samples)
+        return fail(error, "numeric sample count exceeds the recipe bound");
+    if (result.passes.size() != recipe->semantic_passes.size())
+        return fail(error, "semantic pass count does not match the recipe");
+
+    bool all_pass = true;
+    for (std::size_t i = 0; i < result.passes.size(); ++i) {
+        const auto& pass = result.passes[i];
+        if (pass.sequence != i || pass.name != recipe->semantic_passes[i])
+            return fail(error, "semantic passes must be contiguous and recipe-ordered");
+        if (pass.code.empty() || pass.code.size() > 128)
+            return fail(error, "semantic pass code is missing or too long");
+        if (pass.verdict == Verdict::pass && !pass.work_completed)
+            return fail(error, "a passing semantic pass must prove work completed");
+        if (pass.expected.has_value() != pass.observed.has_value())
+            return fail(error, "numeric expected and observed values must appear together");
+        if (pass.absolute_error && (!pass.expected || !finite_nonnegative(*pass.absolute_error)))
+            return fail(error, "absolute error requires finite numeric evidence");
+        all_pass = all_pass && pass.verdict == Verdict::pass;
+    }
+    if (result.verdict == Verdict::pass && !all_pass)
+        return fail(error, "top-level pass requires every semantic pass to pass");
+
+    if (result.artifacts.size() > recipe->bounds.max_artifacts)
+        return fail(error, "artifact count exceeds the recipe bound");
+    std::unordered_set<std::string> names;
+    std::uint64_t total = 0;
+    for (const auto& artifact : result.artifacts) {
+        if (!safe_relative_name(artifact.name))
+            return fail(error, "artifact name must be a confined normalized relative path");
+        if (!names.insert(artifact.name).second)
+            return fail(error, "artifact names must be unique");
+        if (artifact.mime.empty() || artifact.mime.size() > 128)
+            return fail(error, "artifact MIME is missing or too long");
+        if (artifact.bytes > recipe->bounds.max_artifact_bytes)
+            return fail(error, "artifact exceeds the per-artifact byte bound");
+        if (!is_lower_hex(artifact.sha256, 64))
+            return fail(error, "artifact sha256 must be lowercase hex");
+        if (total > recipe->bounds.max_total_artifact_bytes - artifact.bytes)
+            return fail(error, "artifacts exceed the total byte bound");
+        total += artifact.bytes;
+    }
+    if (result.recommendations.size() > 16)
+        return fail(error, "recommendation count exceeds the bound");
+    for (const auto& recommendation : result.recommendations)
+        if (recommendation.empty() || recommendation.size() > 512)
+            return fail(error, "recommendation is missing or too long");
+    return true;
+}
+
+} // namespace pulp::tooling::gpu_probe

@@ -1,0 +1,143 @@
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <string>
+
+namespace gp = pulp::tooling::gpu_probe;
+
+namespace {
+
+gp::ProbeResult passing_result(std::string_view id = gp::kRecipeIds[1]) {
+    const auto* recipe = gp::find_recipe(id);
+    REQUIRE(recipe != nullptr);
+
+    gp::ProbeResult result;
+    result.gpu_evidence_id = "0123456789abcdef0123456789abcdef";
+    result.recipe_id = std::string(recipe->id);
+    result.source_digest = std::string(64, 'a');
+    result.signature_digest = std::string(64, 'b');
+    result.dimensions = recipe->dimensions;
+    result.seed = recipe->seed;
+    result.clock = recipe->clock;
+    result.input_format = recipe->input_format;
+    result.output_format = recipe->output_format;
+    result.encoding = recipe->encoding;
+    result.tolerance = recipe->tolerance;
+    result.adapter_policy = recipe->adapter_policy;
+    result.adapter.status = gp::IdentityStatus::authentic;
+    result.adapter.classification = gp::AdapterClass::hardware;
+    result.adapter.backend = "Metal";
+    result.numeric_sample_count = 16;
+    result.verdict = gp::Verdict::pass;
+    for (std::size_t i = 0; i < recipe->semantic_passes.size(); ++i) {
+        result.passes.push_back({static_cast<std::uint32_t>(i),
+                                 std::string(recipe->semantic_passes[i]),
+                                 gp::Verdict::pass, true, {}, {}, {},
+                                 "gpu.probe.pass"});
+    }
+    result.artifacts.push_back({"values.json", gp::ArtifactKind::json,
+                                "application/json", 128, std::string(64, 'c')});
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("GPU probe registry freezes four versioned recipes", "[gpu][probe][contract]") {
+    const auto recipes = gp::recipes();
+    REQUIRE(recipes.size() == gp::kRecipeIds.size());
+    for (std::size_t i = 0; i < recipes.size(); ++i) {
+        CHECK(recipes[i].id == gp::kRecipeIds[i]);
+        CHECK_FALSE(recipes[i].semantic_passes.empty());
+        CHECK_FALSE(recipes[i].positive_control.empty());
+        CHECK_FALSE(recipes[i].negative_mutation.empty());
+        CHECK(recipes[i].dimensions.width <= gp::kMaxDimension);
+        CHECK(recipes[i].dimensions.height <= gp::kMaxDimension);
+        CHECK(recipes[i].dimensions.work_items <= gp::kMaxWorkItems);
+    }
+}
+
+TEST_CASE("GPU probe result binds execution identity and correctness to its recipe",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = passing_result();
+    REQUIRE(gp::validate(result, &error));
+
+    result.seed++;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("execution identity") != std::string::npos);
+
+    result = passing_result();
+    result.passes.back().work_completed = false;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("work completed") != std::string::npos);
+
+    result = passing_result();
+    result.passes.back().verdict = gp::Verdict::fail;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("top-level pass") != std::string::npos);
+
+    result = passing_result();
+    result.adapter.status = gp::IdentityStatus::unverified;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("authentic hardware") != std::string::npos);
+
+    result = passing_result();
+    result.adapter.classification = gp::AdapterClass::null_adapter;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("hardware") != std::string::npos);
+}
+
+TEST_CASE("GPU probe artifacts are confined, unique, and bounded",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = passing_result();
+
+    result.artifacts[0].name = "../escaped.json";
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("confined") != std::string::npos);
+
+    result = passing_result();
+    result.artifacts.push_back(result.artifacts.front());
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("unique") != std::string::npos);
+
+    result = passing_result();
+    result.artifacts[0].bytes = gp::kMaxArtifactBytes;
+    REQUIRE(gp::validate(result, &error));
+    result.artifacts[0].bytes++;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("per-artifact") != std::string::npos);
+
+    result = passing_result();
+    result.artifacts.clear();
+    for (int i = 0; i < 5; ++i) {
+        result.artifacts.push_back({"artifact-" + std::to_string(i) + ".bin",
+                                    gp::ArtifactKind::numeric_samples,
+                                    "application/octet-stream", gp::kMaxArtifactBytes,
+                                    std::string(64, static_cast<char>('a' + i))});
+    }
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("total byte") != std::string::npos);
+
+    result = passing_result();
+    result.numeric_sample_count = gp::kMaxNumericSamples;
+    REQUIRE(gp::validate(result, &error));
+    result.numeric_sample_count++;
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("numeric sample") != std::string::npos);
+}
+
+TEST_CASE("GPU probe evidence identifiers and digests are closed",
+          "[gpu][probe][contract]") {
+    std::string error;
+    auto result = passing_result();
+    result.gpu_evidence_id[0] = 'A';
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("lowercase hex") != std::string::npos);
+
+    result = passing_result();
+    result.source_digest.pop_back();
+    REQUIRE_FALSE(gp::validate(result, &error));
+    CHECK(error.find("SHA-256") != std::string::npos);
+}
