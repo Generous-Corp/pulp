@@ -13,13 +13,14 @@ before you touch it.
 
 ## Available analysis surface
 
-Capture and offline SQL are available today. Rust exposes no live query,
-snapshot, explain, raw-port, or publication-selection path. Named L0 presets
-remain planned rather than silently returning placeholder data.
+Capture, offline SQL, and three closed GPU analyses are available today. Rust
+exposes no live query, snapshot, explain, raw-port, or publication-selection
+path. Other named L0 presets remain planned rather than silently returning
+placeholder data.
 
 | Tier | Who | Entry point | What you get |
 |---|---|---|---|
-| **L0** | Novice, **no agent** | Planned named presets | Not available yet. |
+| **L0** | Novice, **no agent** | `pulp trace gpu-startup\|gpu-health\|gpu-probe --trace FILE` | A typed result from one checked-in PerfettoSQL view. |
 | **L1** | Novice, **one-shot** | Give an agent a `.pftrace` and load `trace-analysis` | A plain-English root cause, evidence chain, and fix built from real offline queries. |
 | **L2** | Expert, **iterative** | `pulp trace query "<sql>" --trace FILE.pftrace` with the `trace-analysis` + `trace-sql` skills loaded | The hypothesis→query→drill-down loop over the flushed trace. |
 
@@ -27,6 +28,13 @@ The planned L0 preset names map **1:1** onto the trace-stdlib SQL views shipped 
 `trace-sql` skill (`slowest-frames → pulp_slowest_frames`, `xruns →
 pulp_xruns`, `dsp-hotspots → pulp_dsp_node_cost`, `layout-vs-paint →
 pulp_layout_vs_paint`). They are not exposed as successful commands yet.
+
+GPU analysis is the first shipped L0 slice. Its three names map one-to-one to
+`pulp_gpu_startup_breakdown`, `pulp_gpu_health_transitions`, and
+`pulp_gpu_probe_correlation`. The CLI and `pulp_trace_analyze` MCP tool return
+the same `pulp.trace-gpu-analysis.v1` result and accept no raw SQL. Startup is
+`unverified` until A3 supplies a measured budget; missing categories,
+unfinished slices, and invalid evidence correlation are `unavailable`.
 
 ### The L1 "explain" flow, spelled out
 

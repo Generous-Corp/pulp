@@ -2,8 +2,11 @@
 
 use std::io::Write;
 
-use crate::cmd::trace::{io_err, print_help, to_control_call, GlobalFlags, InspectorTalker, Sub};
+use crate::cmd::trace::{
+    io_err, print_help, to_control_call, GlobalFlags, InspectorTalker, Sub, TraceCommandStatus,
+};
 use crate::cmd::trace_doctor::{resolve_trace_processor, run_doctor};
+use crate::cmd::trace_gpu_analysis::run_gpu_analysis_with_processor;
 use crate::cmd::trace_open::run_open;
 use crate::cmd::trace_query::run_offline_query;
 use crate::cmd::trace_response::TraceResponse;
@@ -19,21 +22,29 @@ pub fn dispatch<T: InspectorTalker>(
     flags: &GlobalFlags,
     talker: &T,
     out: &mut impl Write,
-) -> Result<()> {
+) -> Result<TraceCommandStatus> {
     if matches!(sub, Sub::Help) {
-        return print_help(out).map_err(io_err);
+        print_help(out).map_err(io_err)?;
+        return Ok(TraceCommandStatus::Success);
     }
     if let Sub::Open(args) = sub {
-        return run_open(args, flags.json, out);
+        run_open(args, flags.json, out)?;
+        return Ok(TraceCommandStatus::Success);
     }
     if matches!(sub, Sub::Fetch) {
-        return crate::cmd::trace_fetch::run_fetch(flags.json, out);
+        crate::cmd::trace_fetch::run_fetch(flags.json, out)?;
+        return Ok(TraceCommandStatus::Success);
     }
     if let Sub::Query(q) = sub {
-        return run_offline_query(q, &resolve_trace_processor(), flags.json, out);
+        run_offline_query(q, &resolve_trace_processor(), flags.json, out)?;
+        return Ok(TraceCommandStatus::Success);
+    }
+    if let Sub::GpuAnalysis(args) = sub {
+        return run_gpu_analysis_with_processor(args, &resolve_trace_processor(), flags.json, out);
     }
     if matches!(sub, Sub::Doctor) {
-        return run_doctor(flags.json, out);
+        run_doctor(flags.json, out)?;
+        return Ok(TraceCommandStatus::Success);
     }
     if matches!(sub, Sub::Start(_) | Sub::Stop(_)) {
         let Some((method, params, instance_id)) = to_control_call(sub) else {
@@ -45,7 +56,7 @@ pub fn dispatch<T: InspectorTalker>(
         } else {
             write_pretty(out, sub, &response).map_err(io_err)?;
         }
-        return Ok(());
+        return Ok(TraceCommandStatus::Success);
     }
     unreachable!("all trace subcommands return through canonical or offline paths")
 }
@@ -91,7 +102,7 @@ fn write_pretty(out: &mut impl Write, sub: &Sub, response: &str) -> std::io::Res
         Sub::Help => {
             writeln!(out, "{trimmed}")?;
         }
-        Sub::Doctor | Sub::Open(_) | Sub::Fetch => {
+        Sub::Doctor | Sub::Open(_) | Sub::Fetch | Sub::GpuAnalysis(_) => {
             writeln!(out, "{trimmed}")?;
         }
     }

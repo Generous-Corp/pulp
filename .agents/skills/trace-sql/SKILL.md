@@ -1,6 +1,6 @@
 ---
 name: trace-sql
-description: SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. Ships the Pulp trace-stdlib (pulp_slowest_frames, pulp_dsp_node_cost, pulp_frames_over_budget, pulp_xruns, pulp_layout_vs_paint, pulp_motion_join). TRIGGER when writing or debugging SQL over a .pftrace, when `pulp trace query` returns wrong/empty rows, or when the trace-analysis skill needs a query primitive.
+description: SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. Ships Pulp's CPU/UI trace stdlib plus closed GPU startup, health, and probe views. TRIGGER when writing or debugging SQL over a .pftrace, when `pulp trace query` returns wrong/empty rows, or when the trace-analysis skill needs a query primitive.
 requires:
   - .agents/skills/trace-sql/pulp_slowest_frames.sql
   - .agents/skills/trace-sql/pulp_dsp_node_cost.sql
@@ -8,6 +8,9 @@ requires:
   - .agents/skills/trace-sql/pulp_xruns.sql
   - .agents/skills/trace-sql/pulp_layout_vs_paint.sql
   - .agents/skills/trace-sql/pulp_motion_join.sql
+  - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
+  - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
+  - .agents/skills/trace-sql/pulp_gpu_probe_correlation.sql
 ---
 
 # trace-sql — querying Pulp traces with `trace_processor`
@@ -84,7 +87,7 @@ default; `--format table` is the only accepted explicit format. The global
 
 ## The Pulp trace-stdlib (query named primitives, not re-derived SQL)
 
-Six authored `CREATE OR REPLACE PERFETTO` definitions ship next to this skill.
+Nine authored `CREATE OR REPLACE PERFETTO` definitions ship next to this skill.
 Load the ones you need, then `SELECT` from them — do not re-derive the joins by
 hand each time. Each `.sql` file carries a header comment explaining its shape.
 
@@ -96,6 +99,9 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_xruns` | xrun / deadline-miss instant events | `pulp trace xruns` |
 | `pulp_layout_vs_paint` | frame-pipeline cost split, one row per stage | `pulp trace layout-vs-paint` |
 | `pulp_motion_join` | frames joined to their motion `trace_id` | `--preset motion-join` |
+| `pulp_gpu_startup_breakdown` | ranked startup GPU/render stages | `pulp trace gpu-startup` |
+| `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
+| `pulp_gpu_probe_correlation` | probe/readback evidence correlation | `pulp trace gpu-probe` |
 
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,
@@ -259,6 +265,9 @@ GROUP BY name ORDER BY avg_all_us DESC;
 - `.agents/skills/trace-sql/pulp_xruns.sql`
 - `.agents/skills/trace-sql/pulp_layout_vs_paint.sql`
 - `.agents/skills/trace-sql/pulp_motion_join.sql`
+- `.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql`
+- `.agents/skills/trace-sql/pulp_gpu_health_transitions.sql`
+- `.agents/skills/trace-sql/pulp_gpu_probe_correlation.sql`
 - `core/runtime/include/pulp/runtime/trace.hpp` — the macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers, and worked use cases
 

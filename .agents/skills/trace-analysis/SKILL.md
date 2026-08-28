@@ -1,6 +1,6 @@
 ---
 name: trace-analysis
-description: The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). Runs the hypothesis→query→drill-down chain-of-evidence loop autonomously and returns a plain-English root cause + evidence + a concrete fix. TRIGGER on "why is my plugin slow to open", "find the slowest frames", "why is the UI stuttering", "why is my plugin using so much CPU", "which DSP node is expensive", "the load meter looks calm but CPU is pinned", or any `pulp trace explain "<question>"` / `/trace "<question>"` / `pulp_trace_explain` invocation. Ships Pulp-specific hints for dsp, frame, js, gpu, and cross-platform symptoms.
+description: The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). Runs the hypothesis→query→drill-down chain-of-evidence loop autonomously and returns a plain-English root cause + evidence + a concrete fix. TRIGGER on "why is my plugin slow to open", "find the slowest frames", "why is the UI stuttering", "why is my plugin using so much CPU", "which DSP node is expensive", "the load meter looks calm but CPU is pinned", or a named `pulp trace gpu-startup|gpu-health|gpu-probe` analysis. Ships Pulp-specific hints for dsp, frame, js, gpu, and cross-platform symptoms.
 requires:
   - .agents/skills/trace-analysis/references/hints_dsp.md
   - .agents/skills/trace-analysis/references/hints_frame.md
@@ -43,13 +43,14 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 
 | Tier | Who | Entry | This skill's role |
 |---|---|---|---|
-| **L0** | novice, no agent | Planned named presets | not available yet |
+| **L0** | novice, no agent | `pulp trace gpu-startup\|gpu-health\|gpu-probe --trace FILE` | return the same bounded typed analysis used by MCP |
 | **L1** | novice, one-shot | A `.pftrace` plus a question | **run this protocol autonomously**, return narrated root cause + evidence + fix |
 | **L2** | expert, iterative | `pulp trace query "<sql>" --trace FILE` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
 
-The live `Trace.query` / `Trace.explain` methods and named preset verbs are
-reserved and currently return `capability_unavailable`; do not treat them as
-successful analysis. L1 runs this workflow over real offline queries.
+The three GPU questions are closed, checked-in PerfettoSQL analyses; they never
+accept raw SQL or select a live target. Other planned named presets and live
+`Trace.query` / `Trace.explain` remain unavailable. L1 runs the broader workflow
+over real offline queries.
 
 ---
 
@@ -110,6 +111,17 @@ To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
 the UI (browsers block `file://`, so this serves it over loopback and opens the
 UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the
 URL to paste; `--json` for agents).
+
+For the bounded GPU path, start with one named question. `gpu-startup` is
+deliberately `unverified` until A3 defines a measured budget; `gpu-health` and
+`gpu-probe` return pass/fail. Missing categories, unfinished slices, or invalid
+probe evidence return `unavailable` rather than a misleading pass.
+
+```bash
+pulp trace gpu-startup --trace /tmp/pulp.pftrace --json
+pulp trace gpu-health  --trace /tmp/pulp.pftrace --json
+pulp trace gpu-probe   --trace /tmp/pulp.pftrace --json
+```
 
 ---
 

@@ -956,6 +956,89 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence",
     require_contains(threejs, "recipe is not in the closed catalog");
 }
 
+TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",
+          "[mcp][tools][trace]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+#endif
+    const auto result_path = bin / "trace-result.json";
+    const auto argv_path = bin / "trace-argv.txt";
+    const auto write_cli = [&](int status, const std::string& question,
+                               const std::string& verdict) {
+        std::ofstream(result_path, std::ios::trunc)
+            << "{\"schema\":\"pulp.trace-gpu-analysis.v1\",\"question\":\""
+            << question << "\",\"verdict\":\"" << verdict
+            << "\",\"capture_complete\":true,\"contributors\":[],"
+               "\"evidence_ids\":[],\"next_actions\":[],\"ui_correlation\":{}}\n";
+        std::ofstream script(cli, std::ios::trunc);
+#if defined(_WIN32)
+        script << "@echo off\r\n"
+               << "echo %* > \"" << argv_path.string() << "\"\r\n"
+               << "type \"" << result_path.string() << "\"\r\n"
+               << "exit /b " << status << "\r\n";
+#else
+        script << "#!/bin/sh\n"
+               << "printf '%s' \"$*\" > " << shell_quote(argv_path.string()) << "\n"
+               << "cat " << shell_quote(result_path.string()) << "\n"
+               << "exit " << status << "\n";
+#endif
+        script.close();
+        std::filesystem::permissions(cli,
+                                     std::filesystem::perms::owner_exec |
+                                         std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::add);
+    };
+
+    configure_trace_analyze_executable(mcp.string());
+    const auto unrelated_cwd = install.path / "unrelated";
+    std::filesystem::create_directories(unrelated_cwd);
+    ScopedCurrentPath cwd(unrelated_cwd);
+    struct Outcome { int status; const char* question; const char* verdict; };
+    const std::array<Outcome, 3> outcomes = {
+        Outcome{0, "gpu-health", "pass"},
+        Outcome{1, "gpu-probe", "fail"},
+        Outcome{2, "gpu-startup", "unverified"},
+    };
+    for (const auto& outcome : outcomes) {
+        write_cli(outcome.status, outcome.question, outcome.verdict);
+        const auto response = handle_request(tool_call(
+            "58", "pulp_trace_analyze",
+            "{\"question\":\"" + std::string(outcome.question) +
+                "\",\"trace\":\"/tmp/input trace.pftrace\"}"));
+        require_contains(response, R"JSON("schema":"pulp.trace-gpu-analysis.v1")JSON");
+        require_contains(response,
+                         "\"verdict\":\"" + std::string(outcome.verdict) + "\"");
+        require_contains(response, R"JSON("structuredContent":)JSON");
+        if (outcome.status == 0)
+            REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        else
+            require_contains(response, R"JSON("isError":true)JSON");
+
+        std::ifstream argv(argv_path);
+        const std::string invoked{std::istreambuf_iterator<char>(argv),
+                                  std::istreambuf_iterator<char>()};
+        require_contains(invoked, "trace " + std::string(outcome.question));
+        require_contains(invoked, "--trace /tmp/input trace.pftrace --json");
+    }
+
+    require_contains(handle_request(tool_call(
+                         "59", "pulp_trace_analyze",
+                         R"JSON({"question":"startup","trace":"x.pftrace"})JSON")),
+                     "invalid-arguments");
+    require_contains(handle_request(tool_call(
+                         "60", "pulp_trace_analyze",
+                         R"JSON({"question":"gpu-health","trace":"x.pftrace","sql":"select 1"})JSON")),
+                     "invalid-arguments");
+}
+
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
     const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":41,"method":"tools/list"})JSON");

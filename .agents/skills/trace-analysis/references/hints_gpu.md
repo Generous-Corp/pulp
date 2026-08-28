@@ -4,6 +4,12 @@ Domain knowledge for investigating GPU-side cost in a Pulp trace. Pulp renders
 through Skia Graphite on a Dawn (WebGPU) backend; `gpu` spans cover the record
 → submit → present tail of the frame pipeline.
 
+Start agentic investigation with the closed named questions when applicable:
+`gpu-startup`, `gpu-health`, and `gpu-probe`. They rank the same checked-in
+views an expert can inspect in Perfetto and expose a bounded evidence ID for
+correlation. An `unavailable` result means the category/evidence is absent or
+incomplete; it is never evidence of a healthy GPU path.
+
 ## CPU submit time vs real GPU time — the distinction that matters
 
 Most plugin frameworks only see **CPU submit time** — how long the CPU spent
