@@ -762,7 +762,7 @@ commands:
 
   - name: gpu
     status: usable
-    summary: Run bounded deterministic GPU evidence recipes through Pulp's existing Dawn/WebGPU Renderer3D, GpuCompute, and offline GPU-audio seams. Each callable recipe has an independent oracle, declared tolerances and artifact bounds, authentic adapter identity, and a seeded negative control; unavailable work never becomes a pass. The pinned Three.js runtime is preparatory and is not callable until its numeric recipe lands.
+    summary: Run bounded deterministic GPU evidence recipes through Pulp's existing Dawn/WebGPU Renderer3D, GpuCompute, and offline GPU-audio seams; builds with both V8 and the pinned Three.js runtime add the Three.js multi-pass recipe. Each advertised recipe has an independent oracle, declared tolerances and artifact bounds, authentic adapter identity, and a seeded negative control; unavailable work never becomes a pass.
     subcommands:
       - name: probe
         summary: Run one closed-catalog recipe and atomically publish its hash-declared artifacts.

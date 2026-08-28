@@ -2510,6 +2510,7 @@ Run a bounded numeric or image-content probe through Pulp's existing GPU seams:
 ```bash
 pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/magnitude
 pulp gpu probe --recipe renderer3d.hardcoded-cube.v1 --artifacts artifacts/gpu/cube --json
+pulp gpu probe --recipe threejs.multi-pass.v1 --artifacts artifacts/gpu/threejs --json
 pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/mutated \
   --negative-control --json
 ```
@@ -2524,11 +2525,23 @@ CPU oracle. The Renderer3D recipe uses an exact known fingerprint only on its
 declared backend and a portable structural content oracle elsewhere; it never
 claims cross-backend pixel identity.
 
-The callable catalog is currently `renderer3d.hardcoded-cube.v1`,
-`gpu-compute.magnitude.v1`, and `gpu-audio.stft.v1`. The SDK also ships a
-pinned Three.js WebGPU runtime to prepare a future numeric recipe, but no
-Three.js recipe is advertised until it has the same independent-oracle,
-artifact, and negative-control proof as the callable recipes.
+Every build exposes `renderer3d.hardcoded-cube.v1`,
+`gpu-compute.magnitude.v1`, and `gpu-audio.stft.v1`. A build configured with
+both V8 and the pinned Three.js runtime also exposes `threejs.multi-pass.v1`;
+other builds omit that ID from CLI discovery and the MCP enum. The Three.js
+recipe evaluates the SDK's hash-verified
+pinned `three.webgpu.js` runtime through V8 and the native Dawn bridge. It
+captures background, intermediate swatch, and final swatch passes from one
+renderer, then applies an independent C++ color-region oracle. Its seeded
+negative control changes the final material channel while preserving Three.js
+initialization, GPU submission, and readback, so only the intended oracle pass
+fails. A CLI without V8 or authentic hardware identity returns exit 2 rather
+than treating unavailable work as a pass.
+
+The default standalone CLI release remains QuickJS-only and does not advertise
+the Three.js recipe. Publishing it there is follow-up work: the release must
+ship a sealed V8 provider and the Rust self-upgrader must preserve the nested
+Three.js runtime, rather than installing a new delegate without its runtime.
 
 `--negative-control` changes real shader/output behavior without bypassing GPU
 submission or readback. Detection is deliberately reported as a typed `fail`

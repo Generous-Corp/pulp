@@ -103,7 +103,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Category | Tools |
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
-| GPU diagnosis | `pulp_gpu_doctor` performs the same bounded render/readback and compute/map checks as `pulp doctor gpu`. `pulp_gpu_probe` runs one callable deterministic Renderer3D, compute, or offline STFT recipe and returns typed `pulp.gpu-probe-result.v1` evidence plus hash-declared artifacts. Both preserve pass, completed failure, unavailable, and unverified outcomes. |
+| GPU diagnosis | `pulp_gpu_doctor` performs the same bounded render/readback and compute/map checks as `pulp doctor gpu`. `pulp_gpu_probe` runs one callable deterministic Renderer3D, compute, or offline STFT recipe; builds carrying V8 plus the pinned Three.js runtime also advertise the Three.js multi-pass recipe. It returns typed `pulp.gpu-probe-result.v1` evidence plus hash-declared artifacts. Both preserve pass, completed failure, unavailable, and unverified outcomes. |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Development Inspector | `pulp_control_profiles` provides static in-process profile metadata. `pulp_inspect_profiles` is a compatibility alias until Pulp 0.800.0 on 2026-10-01. `pulp_trace_start` and `pulp_trace_stop` use canonical capability control. Legacy discovery/capability/doctor, raw inspect, and Motion wrappers are not exposed. |
 | Capability control | Generated `pulp_control_*` tools provide typed exact-instance operations, broker-owned grants/consent, progress, cancellation, subscriptions, resources, and ACL-checked artifact reads. See [Capability control over MCP](capability-control-mcp.md). |
@@ -131,8 +131,12 @@ closed callable recipe catalog, and requires an absolute artifact directory.
 Exit 0 is a verified pass, exit 1 is a completed measured failure, and exit 2
 is unavailable or unverified. A negative control must report the recipe's exact
 declared mutation; arbitrary child-process mutation labels are rejected. The
-pinned Three.js runtime prepares a later recipe, but is not advertised as
-callable until its numeric oracle and negative control exist end to end.
+`threejs.multi-pass.v1` enters the closed catalog only in a V8-backed build with
+the hash-verified pinned Three.js runtime and authentic hardware identity; its
+independent color-region oracle and seeded material mutation preserve the same
+typed exit contract. Default QuickJS standalone releases omit the ID. Their
+eventual exposure also requires sealed V8 delivery and Rust self-upgrades that
+preserve the nested runtime.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

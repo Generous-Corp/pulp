@@ -241,6 +241,29 @@ For native Three.js work, verify:
 - docs do not overclaim DOM/addon/runtime parity
 - screenshot output still matches the claimed visible result
 
+For agent-readable correctness evidence, run:
+
+```bash
+pulp gpu probe --recipe threejs.multi-pass.v1 \
+  --artifacts artifacts/gpu/threejs --json
+pulp gpu probe --recipe threejs.multi-pass.v1 \
+  --artifacts artifacts/gpu/threejs-mutated --negative-control --json
+```
+
+These commands require a build configured with V8 and the pinned Three.js
+runtime. Other builds omit `threejs.multi-pass.v1` from CLI discovery and the
+MCP enum. Default standalone releases remain QuickJS-only; exposing this recipe
+there is follow-up work that must ship sealed V8 and preserve the nested runtime
+through Rust self-upgrades.
+
+The recipe loads the SDK's hash-verified pinned `three.webgpu.js` runtime
+through V8 and the native Dawn bridge. It records background, intermediate,
+and final RGBA readbacks plus an independent C++ color-region oracle. A valid
+negative control keeps adapter acquisition, module initialization, rendering,
+and readback successful while the final oracle fails with exit 1. Exit 2 means
+V8, authentic hardware identity, or the pinned runtime was unavailable; it is
+not acceptable proof of rendering correctness.
+
 For the audio-reactive `spectrum` demo, `VisualizationBridge::process()` only
 captures audio and meters on the realtime thread. The UI-side spectrum source
 must call `bridge.poll()` before `read_spectrum()`; snapshot reads no longer run

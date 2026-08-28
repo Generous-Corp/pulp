@@ -57,7 +57,11 @@ TEST_CASE("GPU probe registry exposes only runnable versioned recipes",
         CHECK(recipes[i].dimensions.height <= gp::kMaxDimension);
         CHECK(recipes[i].dimensions.work_items <= gp::kMaxWorkItems);
     }
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+    CHECK(gp::find_recipe("threejs.multi-pass.v1") != nullptr);
+#else
     CHECK(gp::find_recipe("threejs.multi-pass.v1") == nullptr);
+#endif
 }
 
 TEST_CASE("GPU probe result binds execution identity and correctness to its recipe",

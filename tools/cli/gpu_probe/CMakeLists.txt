@@ -6,6 +6,14 @@ target_compile_features(pulp-tool-gpu-probe-model PUBLIC cxx_std_20)
 target_include_directories(pulp-tool-gpu-probe-model
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
+if(PULP_ENABLE_GPU AND PULP_ENABLE_JS AND PULP_HAS_THREEJS
+        AND PULP_JS_ENGINE STREQUAL "v8")
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_THREEJS_CALLABLE=1)
+else()
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_THREEJS_CALLABLE=0)
+endif()
 
 if(PULP_ENABLE_GPU)
     file(SHA256 "${CMAKE_SOURCE_DIR}/core/render/src/renderer3d.cpp"
@@ -27,6 +35,21 @@ if(PULP_ENABLE_GPU)
     target_link_libraries(pulp-tool-gpu-probe-recipes
         PUBLIC pulp::tool-gpu-probe-model
         PRIVATE pulp::gpu-audio pulp::render pulp::runtime)
+    if(PULP_HAS_THREEJS)
+        file(SHA256 "${threejs_SOURCE_DIR}/build/three.webgpu.js"
+            PULP_GPU_PROBE_THREEJS_WEBGPU_SHA256)
+        file(SHA256 "${threejs_SOURCE_DIR}/build/three.core.js"
+            PULP_GPU_PROBE_THREEJS_CORE_SHA256)
+        target_compile_definitions(pulp-tool-gpu-probe-recipes PRIVATE
+            PULP_GPU_PROBE_HAS_THREEJS=1
+            PULP_GPU_PROBE_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}"
+            PULP_GPU_PROBE_THREEJS_WEBGPU_SHA256="${PULP_GPU_PROBE_THREEJS_WEBGPU_SHA256}"
+            PULP_GPU_PROBE_THREEJS_CORE_SHA256="${PULP_GPU_PROBE_THREEJS_CORE_SHA256}")
+        target_link_libraries(pulp-tool-gpu-probe-recipes PRIVATE pulp::view pulp::state)
+    else()
+        target_compile_definitions(pulp-tool-gpu-probe-recipes PRIVATE
+            PULP_GPU_PROBE_HAS_THREEJS=0)
+    endif()
     if(PULP_ENABLE_SCENE3D)
         target_link_libraries(pulp-tool-gpu-probe-recipes PRIVATE pulp::scene)
     endif()
