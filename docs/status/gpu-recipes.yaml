@@ -6,6 +6,10 @@
     {
       "id": "gpu-audio.stft.v1",
       "native_registry_index": 2,
+      "availability": {
+        "required_features": [],
+        "unavailable_exit_code": 2
+      },
       "version": 1,
       "title": "Offline GPU STFT oracle",
       "summary": "Compare bounded Dawn STFT output with an independent CPU FFT oracle without touching the audio callback.",
@@ -53,6 +57,10 @@
     {
       "id": "gpu-compute.magnitude.v1",
       "native_registry_index": 1,
+      "availability": {
+        "required_features": [],
+        "unavailable_exit_code": 2
+      },
       "version": 1,
       "title": "GPU compute magnitude oracle",
       "summary": "Localize a WGSL compute or map/readback error with a bounded complex-magnitude kernel and independent CPU oracle.",
@@ -100,6 +108,10 @@
     {
       "id": "renderer3d.hardcoded-cube.v1",
       "native_registry_index": 0,
+      "availability": {
+        "required_features": [],
+        "unavailable_exit_code": 2
+      },
       "version": 1,
       "title": "Renderer3D hardcoded cube",
       "summary": "Prove native Dawn rendering, readback, and nonblank content with a deterministic cube fingerprint.",
@@ -139,6 +151,59 @@
       "skills": [
         "screenshot",
         "skia-gpu-build",
+        "trace-analysis"
+      ],
+      "scaffold_template": null
+    },
+    {
+      "id": "threejs.multi-pass.v1",
+      "native_registry_index": 3,
+      "availability": {
+        "required_features": [
+          "pinned-threejs-runtime",
+          "v8"
+        ],
+        "unavailable_exit_code": 2
+      },
+      "version": 1,
+      "title": "Three.js native WebGPU multi-pass oracle",
+      "summary": "Run the pinned Three.js WebGPU runtime through V8 and native Dawn, capture intermediate passes, and compare the final bounded regions with an independent C++ oracle.",
+      "symptoms": [
+        "threejs-intermediate-mismatch",
+        "threejs-multi-pass-output-mismatch",
+        "threejs-runtime-unavailable"
+      ],
+      "kind": "offline",
+      "entrypoints": {
+        "cli": {
+          "command": [
+            "pulp",
+            "gpu",
+            "probe",
+            "--recipe",
+            "threejs.multi-pass.v1",
+            "--artifacts",
+            "<absolute-artifact-dir>",
+            "--json"
+          ]
+        },
+        "mcp": {
+          "tool": "pulp_gpu_probe",
+          "recipe_id": "threejs.multi-pass.v1"
+        },
+        "control": null,
+        "trace": {
+          "question": "gpu-probe"
+        }
+      },
+      "evidence_schema": "pulp.gpu-probe-result.v1",
+      "docs": [
+        "docs/guides/claude-code-plugin.md",
+        "docs/guides/gpu-validation-checklist.md",
+        "docs/reference/cli.md"
+      ],
+      "skills": [
+        "threejs-bridge",
         "trace-analysis"
       ],
       "scaffold_template": null

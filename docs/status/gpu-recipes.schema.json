@@ -20,6 +20,7 @@
         "required": [
           "id",
           "native_registry_index",
+          "availability",
           "version",
           "title",
           "summary",
@@ -43,6 +44,22 @@
               { "type": "null" },
               { "type": "integer", "minimum": 0, "maximum": 63 }
             ]
+          },
+          "availability": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["required_features", "unavailable_exit_code"],
+            "properties": {
+              "required_features": {
+                "type": "array",
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "enum": ["pinned-threejs-runtime", "v8"]
+                }
+              },
+              "unavailable_exit_code": { "const": 2 }
+            }
           },
           "version": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
           "title": { "type": "string", "minLength": 1, "maxLength": 160 },
