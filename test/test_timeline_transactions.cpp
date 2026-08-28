@@ -474,6 +474,8 @@ TEST_CASE("ConflictCode ordinals are wire stable and TransactionError defaults t
     REQUIRE(static_cast<unsigned>(ConflictCode::CheckpointMismatch) == 21);
     REQUIRE(static_cast<unsigned>(ConflictCode::ReplayDivergence) == 22);
     REQUIRE(static_cast<unsigned>(ConflictCode::Unspecified) == 23);
+    REQUIRE(static_cast<unsigned>(ConflictCode::CapabilityDenied) == 24);
+    REQUIRE(static_cast<unsigned>(ConflictCode::WriterQuotaExhausted) == 25);
 
     // A producer that returns an error without assigning its cause must report
     // an obviously wrong value, not a plausible real one.
